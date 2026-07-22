@@ -4,9 +4,13 @@ import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 import {
   englishVoiceMediaElapsedMs,
+  englishVoiceProfileSupportsStreaming,
+  englishVoiceResponseSupportsChunkedStreaming,
+  enqueueChunkedEnglishVoice,
   enqueueEnglishVoice,
   elevenLabsEffectForEngine,
   readEnglishVoiceSynthesisClip,
+  parseEnglishVoiceWaveStreamChunk,
   resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
   scaleEnglishVoiceAlignmentForPlayback,
@@ -61,6 +65,53 @@ describe("English voice post processing", () => {
       lilt: 0,
     });
     assert.equal(processing.lowpassHz, 16000);
+  });
+
+  it("streams only profiles whose local identity survives media playback", () => {
+    assert.equal(
+      englishVoiceProfileSupportsStreaming(
+        {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+          elevenLabsEffect: "clean",
+          voiceEffectExplicit: true,
+        },
+        true,
+        "warm",
+      ),
+      true,
+    );
+    assert.equal(
+      englishVoiceProfileSupportsStreaming(
+        { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, pitch: 0.2 },
+        false,
+        "neutral",
+      ),
+      false,
+    );
+    assert.equal(
+      englishVoiceProfileSupportsStreaming(
+        {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+          elevenLabsEffect: "chorus",
+          voiceEffectExplicit: true,
+        },
+        true,
+        "neutral",
+      ),
+      false,
+    );
+    assert.equal(
+      englishVoiceProfileSupportsStreaming(
+        {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+          elevenLabsEffect: "chorus",
+          voiceEffectExplicit: true,
+        },
+        false,
+        "neutral",
+      ),
+      true,
+    );
   });
 
   it("keeps English pitch independent from Pace in every engine", () => {
@@ -183,9 +234,133 @@ describe("English voice post processing", () => {
       }
     }
   });
+
+  it("plays progressive local chunks in order with one reveal lifecycle", async () => {
+    const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    let playCount = 0;
+    class FakeAudio {
+      duration = Number.NaN;
+      currentTime = 0;
+      preload = "";
+      volume = 1;
+      preservesPitch = true;
+      playbackRate = 1;
+      src = "";
+      private listeners = new Map<string, () => void>();
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+      pause(): void {}
+      removeAttribute(): void {}
+      load(): void {}
+      play(): Promise<void> {
+        playCount += 1;
+        setTimeout(() => {
+          this.listeners.get("playing")?.();
+          this.listeners.get("ended")?.();
+        }, 0);
+        return Promise.resolve();
+      }
+    }
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      value: FakeAudio,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { clearInterval, clearTimeout, setInterval, setTimeout },
+    });
+    const streamBody = [
+      {
+        index: 0,
+        characterCount: 6,
+        text: "Hello.",
+        audioBase64: Buffer.from([1, 2, 3]).toString("base64"),
+      },
+      {
+        index: 1,
+        characterCount: 7,
+        text: "Again.",
+        audioBase64: Buffer.from([4, 5, 6]).toString("base64"),
+      },
+    ]
+      .map((chunk) => JSON.stringify(chunk))
+      .join("\n");
+    const response = new Response(`${streamBody}\n`, {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "x-prism-voice-stream": "wav-chunks-v1",
+        "x-prism-voice-characters": "13",
+        "x-prism-voice-engine": "builtin",
+      },
+    });
+    let startCount = 0;
+    let endCount = 0;
+    try {
+      await enqueueChunkedEnglishVoice(
+        response,
+        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        "chunk-order",
+        false,
+        1,
+        {
+          onStart: () => {
+            startCount += 1;
+          },
+          onEnd: () => {
+            endCount += 1;
+          },
+        },
+        "builtin",
+        "neutral",
+        1_000,
+      );
+      assert.equal(playCount, 2);
+      assert.equal(startCount, 1);
+      assert.equal(endCount, 1);
+    } finally {
+      stopEnglishVoice();
+      if (originalAudio) {
+        Object.defineProperty(globalThis, "Audio", originalAudio);
+      } else {
+        Reflect.deleteProperty(globalThis, "Audio");
+      }
+      if (originalWindow) {
+        Object.defineProperty(globalThis, "window", originalWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
+  });
 });
 
 describe("English voice synthesis responses", () => {
+  it("recognizes and validates streamed local WAV chunks", () => {
+    const response = new Response("", {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "x-prism-voice-stream": "wav-chunks-v1",
+      },
+    });
+    assert.equal(englishVoiceResponseSupportsChunkedStreaming(response), true);
+    const chunk = parseEnglishVoiceWaveStreamChunk(
+      JSON.stringify({
+        index: 0,
+        characterCount: 12,
+        audioBase64: Buffer.from([1, 2, 3]).toString("base64"),
+      }),
+    );
+    assert.equal(chunk.index, 0);
+    assert.equal(chunk.characterCount, 12);
+    assert.deepEqual([...new Uint8Array(chunk.bytes)], [1, 2, 3]);
+    assert.throws(
+      () => parseEnglishVoiceWaveStreamChunk('{"index":0}'),
+      /invalid audio chunk/,
+    );
+  });
+
   it("keeps legacy binary audio compatible", async () => {
     const response = new Response(new Uint8Array([1, 2, 3]), {
       headers: {

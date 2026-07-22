@@ -10,6 +10,8 @@ describe("mode tutorials", () => {
       assert.match(copy, /changes only how its holder names other bots/u);
       assert.match(copy, /holder keeps their own name/u);
       assert.match(copy, /other speakers do not copy/u);
+      assert.match(copy, /may comment once, show a small contextual mood, tone, or action reaction, or let it pass/u);
+      assert.match(copy, /personality and agency decide/u);
     }
   });
 
@@ -34,6 +36,8 @@ describe("mode tutorials", () => {
     assert.match(identityCopy, /LOCAL stays on the private deterministic default/u);
     assert.match(identityCopy, /without changing either image/u);
     assert.match(identityCopy, /never applies a stale map/u);
+    assert.match(identityCopy, /edit or regenerate the Sound identity/u);
+    assert.match(identityCopy, /applies its musical fingerprint.*immediately/u);
   });
 
   it("clamps restored progress to a valid step", () => {
@@ -44,7 +48,7 @@ describe("mode tutorials", () => {
     );
     assert.equal(
       modeTutorialStep("botcast", 99).heading,
-      "Watch the saved cut",
+      "Replay locally or produce Premium",
     );
     assert.equal(
       modeTutorialStep("slate", 99).heading,
@@ -52,18 +56,20 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("teaches deterministic replay video controls without implying another AI turn", () => {
+  it("teaches local replay and explicit retry-safe Premium production", () => {
     const coffeeCopy = MODE_TUTORIALS.coffee.steps.at(-1)?.body ?? "";
     const signalCopy = MODE_TUTORIALS.botcast.steps.at(-1)?.body ?? "";
     assert.match(coffeeCopy, /third-person video automatically/u);
     assert.match(coffeeCopy, /adds no AI conversation turn/u);
     assert.match(signalCopy, /never asks an AI to recreate/u);
-    assert.match(signalCopy, /without a finished video starts or resumes/u);
-    assert.match(signalCopy, /without opening anything/u);
-    assert.match(signalCopy, /Select it again after Video ready/u);
-    assert.match(signalCopy, /browser-playable video/u);
-    assert.match(signalCopy, /download the video or transcript/u);
-    assert.match(signalCopy, /Delete Recording without deleting the episode transcript/u);
+    assert.match(signalCopy, /opens its local replay immediately/u);
+    assert.match(signalCopy, /no ElevenLabs request/u);
+    assert.match(signalCopy, /pauses an active local replay at its current position/u);
+    assert.match(signalCopy, /transport stays paused while PRISM renders/u);
+    assert.match(signalCopy, /explicit ONLINE action/u);
+    assert.match(signalCopy, /may be sent to ElevenLabs and consume credits/u);
+    assert.match(signalCopy, /cached master without another paid voice generation/u);
+    assert.match(signalCopy, /delete only Premium media/u);
   });
 
   it("explains that Coffee cross-talk controls audible backchannels", () => {
@@ -296,6 +302,14 @@ describe("mode tutorials", () => {
       /replace either studio visual/u,
     );
     assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /illuminated microphone trim to match the cast/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /uploaded studio images stay untouched/u,
+    );
+    assert.match(
       MODE_TUTORIALS.botcast.steps[2]?.body ?? "",
       /begins with no audience/u,
     );
@@ -319,6 +333,14 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
       /host-persona-led Signal Synth identity/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
+      /emotional core and signature contradiction/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
+      /raw character, franchise, and show prose are never sent/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Play ident/u);
     assert.match(
@@ -385,6 +407,14 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /first opens a dedicated loading screen/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Only then does the short, skippable show-branded pre-roll begin/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /Randomize booking/u,
     );
     assert.match(
@@ -397,7 +427,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /one opening ellipsis, then the bot guest carries a self-directed solo broadcast/u,
+      /one opening ellipsis[\s\S]*bot guest carries a self-directed solo broadcast[\s\S]*host’s required silent final beat/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -590,7 +620,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /Animated or Instant/u,
+      /Instant for hard cuts, Animated for graceful moves to or from Wide, or Smart for a tactful mix/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      /always cuts instantly from one bot to the other/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -603,6 +637,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
       /brief listener cut/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      /Whenever either bot reaches for coffee, Auto takes the full studio for the complete lift, sip, and return/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -690,7 +728,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /asterisks in the saved transcript/u,
+      /stays out of captions and the saved transcript/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -1003,6 +1041,15 @@ describe("mode tutorials", () => {
     assert.match(booking?.body ?? "", /whether they have coffee at all/u);
     assert.match(booking?.body ?? "", /cups only for bots who drink coffee/u);
     assert.match(booking?.body ?? "", /drag the visible pieces/u);
+    assert.match(
+      booking?.body ?? "",
+      /Host and Guest floor glows vertically.*synthesized chair.*sideways.*original maximum/u,
+    );
+    assert.match(booking?.body ?? "", /lighting masks.*receiving surfaces/u);
+    assert.match(
+      booking?.body ?? "",
+      /Lighting lab starts both Light and Dark at 100% Overlay.*saves any adjustment only for this show/u,
+    );
   });
 
   it("teaches that Zen response, image, and voice routing are separate", () => {
@@ -1046,6 +1093,9 @@ describe("mode tutorials", () => {
     assert.match(coffeeVoice?.body ?? "", /neutral speech stays untagged/);
     assert.match(signalVoice?.body ?? "", /non-neutral speaker mood/);
     assert.match(signalVoice?.body ?? "", /saved vocal reaction takes precedence/);
+    assert.match(signalVoice?.body ?? "", /requests stay stateless/);
+    assert.match(signalVoice?.body ?? "", /own stable performance seed/);
+    assert.match(signalVoice?.body ?? "", /without displacing that bot’s saved identity directions/);
   });
 
   it("teaches Coffee dead-air asides, Signal quiet, and each ambient sip contract", () => {
@@ -1150,7 +1200,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /both cast members are echo-bound[\s\S]*host closes by repeating the guest's last line/u,
+      /every Signal closing remains host-owned[\s\S]*echo-bound host ends by repeating the guest's last line/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /host is muted[\s\S]*host’s required silent final beat[\s\S]*never inherits the sign-off/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /observable Power consequences through their own personality/u);
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /never exposes a cause they cannot perceive/u);

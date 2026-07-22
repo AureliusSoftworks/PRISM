@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { BotcastShow } from "@localai/shared";
+import { buildSignalMusicProfile, type BotcastShow } from "@localai/shared";
 
 import { signalShowMagicManifest } from "./signalShowIdentity.ts";
 
@@ -15,6 +15,15 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
     fallbackStudioAccentVariant: 0,
     atmosphere: {} as BotcastShow["atmosphere"],
     studioIdentity: "A precise studio.",
+    musicIdentity: {
+      version: 1,
+      direction: "Precise broadcast geometry with one revealing interruption.",
+      revision: 1,
+      profile: buildSignalMusicProfile({
+        temperament: "analytical",
+        seed: "show-1:music:1",
+      }),
+    },
     dashboardBlurbs: ["Already written."],
     dayAtmosphere: { imageUrl: "/day.png" } as BotcastShow["dayAtmosphere"],
     nightAtmosphere: {
@@ -22,6 +31,10 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
     } as BotcastShow["nightAtmosphere"],
     studioLighting: {} as BotcastShow["studioLighting"],
     studioLayout: {} as BotcastShow["studioLayout"],
+    studioGlowTuning: {
+      dark: { opacity: 1, blendMode: "overlay" },
+      light: { opacity: 1, blendMode: "overlay" },
+    },
     voiceLevelsByBotId: {},
     atmosphereMix: {} as BotcastShow["atmosphereMix"],
     logo: { imageUrl: "/logo.png" } as BotcastShow["logo"],

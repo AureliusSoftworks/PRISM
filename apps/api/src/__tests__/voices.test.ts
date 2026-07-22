@@ -6,6 +6,7 @@ import {
   VOICE_CAPABILITIES,
   applyPlayerNamePronunciation,
   cleanSpeakableAssistantProse,
+  elevenLabsVoiceIsolationSeed,
   elevenLabsVoiceSettings,
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
@@ -226,7 +227,7 @@ describe("voice Phase 1 boundary", () => {
         ...request,
         elevenLabsText: "[explosion] Welcome back.",
       }).elevenLabsText,
-      null,
+      "[explosion] Welcome back.",
     );
     assert.equal(
       validateVoiceSynthesisRequest({
@@ -244,7 +245,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(withLeakedStageDirection.text, "Welcome back.");
     assert.equal(
       withLeakedStageDirection.elevenLabsText,
-      "[sighs] Welcome back.",
+      "[sighs] [leans back] Welcome back.",
     );
   });
 
@@ -375,6 +376,7 @@ describe("voice Phase 1 boundary", () => {
       voiceId: "voice/provider id",
       model: "eleven_flash_v2_5",
       text: "hello",
+      seed: elevenLabsVoiceIsolationSeed("bot-morty"),
       profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
       fetchImpl: (async (url, init) => {
         request = { url: String(url), init };
@@ -390,6 +392,21 @@ describe("voice Phase 1 boundary", () => {
     const body = JSON.parse(String(request?.init?.body));
     assert.equal(body.model_id, "eleven_flash_v2_5");
     assert.equal(body.text, "hello");
+    assert.equal(body.seed, elevenLabsVoiceIsolationSeed("bot-morty"));
+    assert.equal(body.previous_text, undefined);
+    assert.equal(body.next_text, undefined);
+    assert.equal(body.previous_request_ids, undefined);
+    assert.equal(body.next_request_ids, undefined);
+  });
+
+  it("gives bots sharing one ElevenLabs actor stable isolated sampling lanes", () => {
+    const morty = elevenLabsVoiceIsolationSeed("bot-morty");
+    const rick = elevenLabsVoiceIsolationSeed("bot-rick");
+    assert.equal(morty, elevenLabsVoiceIsolationSeed("bot-morty"));
+    assert.notEqual(morty, rick);
+    assert.equal(elevenLabsVoiceIsolationSeed("  bot-morty  "), morty);
+    assert.equal(elevenLabsVoiceIsolationSeed(null), undefined);
+    assert.ok(morty !== undefined && morty >= 0 && morty <= 4_294_967_295);
   });
 
   it("turns a saved voice direction deck into Eleven v3 audio tags", async () => {
@@ -481,7 +498,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(requestBody?.text, "The door is already open.");
   });
 
-  it("reserves one direction slot for mood and deduplicates authored direction", async () => {
+  it("keeps all authored identity directions ahead of an ephemeral mood", async () => {
     let requestBody: Record<string, unknown> | null = null;
     await requestElevenLabsSpeech({
       apiKey: "secret-key",
@@ -519,6 +536,62 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(
       requestBody?.text,
       "[strained] [hushed] [with measured pauses] The door is already open.",
+    );
+  });
+
+  it("does not let a turn mood evict a bot's third authored direction", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "shared-actor",
+      model: "eleven_flash_v2_5",
+      text: "The door is already open.",
+      deliveryMood: "joyful",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        elevenLabsDirection: "anxious stammer, youthful pitch, quick cadence",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(
+      requestBody?.text,
+      "[anxious stammer] [youthful pitch] [quick cadence] The door is already open.",
+    );
+  });
+
+  it("appends a turn mood only when the bot has a free direction slot", async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    await requestElevenLabsSpeech({
+      apiKey: "secret-key",
+      voiceId: "shared-actor",
+      model: "eleven_flash_v2_5",
+      text: "The door is already open.",
+      deliveryMood: "joyful",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        elevenLabsDirection: "anxious stammer, quick cadence",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      fetchImpl: (async (_url, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        return new Response(new Uint8Array([1]), { status: 200 });
+      }) as typeof fetch,
+    });
+    assert.equal(
+      requestBody?.text,
+      "[anxious stammer] [quick cadence] [delighted] The door is already open.",
     );
   });
 
@@ -656,9 +729,12 @@ describe("voice Phase 1 boundary", () => {
       voiceId: "voice/provider id",
       model: "eleven_flash_v2_5",
       text: "Hi",
+      seed: elevenLabsVoiceIsolationSeed("bot-rick"),
       profile: { v: 1, baseVoiceId: "voice-1", pitch: 0, warmth: 0, pace: 0, lilt: 0 },
-      fetchImpl: (async (url) => {
+      fetchImpl: (async (url, init) => {
         requestUrl = String(url);
+        const body = JSON.parse(String(init?.body));
+        assert.equal(body.seed, elevenLabsVoiceIsolationSeed("bot-rick"));
         return new Response(JSON.stringify({
           audio_base64: "AQID",
           alignment: {

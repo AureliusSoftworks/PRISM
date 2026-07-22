@@ -9,6 +9,7 @@ import {
   dispatchBackendAvailableEvent,
   dispatchBackendUnavailableDetail,
   dispatchBackendUnavailableEvent,
+  isBackendUnavailableMessage,
   isBackendUnavailablePayload,
   isPrismBackendUnavailableError,
   type BackendUnavailableEventDetail,
@@ -41,6 +42,18 @@ describe("backend unavailable helpers", () => {
 
     assert.equal(isBackendUnavailablePayload(payload), true);
     assert.equal(isBackendUnavailablePayload({ ok: false, error: "Internal Server Error" }), false);
+  });
+
+  it("recognizes only connection-shaped messages for stale-error cleanup", () => {
+    assert.equal(
+      isBackendUnavailableMessage("Prism is waiting for its local API."),
+      true,
+    );
+    assert.equal(
+      isBackendUnavailableMessage("Trying to reconnect to Prism..."),
+      true,
+    );
+    assert.equal(isBackendUnavailableMessage("ElevenLabs quota exceeded."), false);
   });
 
   it("converts backend-down payloads into PrismBackendUnavailableError", () => {

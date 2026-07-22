@@ -67,13 +67,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.26",
+    version: "1.27",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.25",
+    version: "1.26",
     status: "active",
   },
   arena: {
@@ -91,13 +91,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.25",
+    version: "2.26",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.46",
+    version: "1.51",
     status: "active",
   },
   feed: {
@@ -115,7 +115,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.25",
+    version: "0.26",
     status: "preview",
   },
   gym: {
@@ -144,7 +144,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   },
 };
 
-/** The holder changes other bot names in their own speech; 1:1 lanes carry only the cue. */
+/** The holder changes other bot names; hearers may take one soft social reaction beat. */
 export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerDesignationModePolicy

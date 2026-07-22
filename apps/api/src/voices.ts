@@ -1,6 +1,4 @@
 import {
-  ASTERISK_HUMAN_SOUND_VOICE_TAGS,
-  BOTCAST_IMMERSIVE_VOICE_TAGS,
   applyVoiceDeliveryMoodToProfile,
   elevenLabsVoiceDirectionForMood,
   normalizeBotAudioVoiceProfileV1,
@@ -8,6 +6,7 @@ import {
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
+  voicePerformanceTextFromActionCues,
   voiceSpokenText,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
   applyPlayerNamePronunciation as applySharedPlayerNamePronunciation,
@@ -142,11 +141,31 @@ type ElevenLabsSpeechArgs = {
   text: string;
   profile: BotAudioVoiceProfileV1;
   deliveryMood?: VoiceDeliveryMood;
+  seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 };
 
-const ELEVENLABS_AUDIO_TAG_PATTERN = /\[([^\]\n]{1,48})\]/giu;
+/**
+ * Keep one provider sampling lane per performer even when several bots share
+ * the same ElevenLabs actor. Requests remain stateless; the seed only anchors
+ * ElevenLabs' otherwise nondeterministic sampling for this bot.
+ */
+export function elevenLabsVoiceIsolationSeed(
+  performerIdentity: string | null | undefined,
+): number | undefined {
+  const identity = performerIdentity?.trim();
+  if (!identity) return undefined;
+  let hash = 2_166_136_261;
+  for (let index = 0; index < identity.length; index += 1) {
+    hash ^= identity.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+const ELEVENLABS_AUDIO_TAG_PATTERN =
+  /(?<![\\[])\[([^\[\]\n]{1,48})\](?!\])(?!\s*\()/giu;
 
 function normalizeElevenLabsTaggedText(
   value: unknown,
@@ -155,41 +174,18 @@ function normalizeElevenLabsTaggedText(
   if (typeof value !== "string") return null;
   const taggedText = value.replace(/\s+/gu, " ").trim().slice(0, 4_200);
   if (!taggedText) return null;
-  const allowed = new Set<string>([
-    ...BOTCAST_IMMERSIVE_VOICE_TAGS,
-    ...ASTERISK_HUMAN_SOUND_VOICE_TAGS,
-  ]);
-  const inlineHumanSounds = new Set<string>(
-    ASTERISK_HUMAN_SOUND_VOICE_TAGS,
-  );
   const matches = [...taggedText.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)];
   if (
     matches.length === 0 ||
     matches.length > 8 ||
-    matches.some((match) => !allowed.has((match[1] ?? "").trim().toLowerCase()))
+    matches.some((match) => !(match[1] ?? "").trim())
   ) {
     return null;
   }
-  const withoutTags = taggedText
-    .replace(ELEVENLABS_AUDIO_TAG_PATTERN, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (withoutTags !== spokenText.replace(/\s+/gu, " ").trim()) return null;
-  const firstTag = matches[0];
-  const lastTag = matches.at(-1);
-  const firstTagAtStart = taggedText.slice(0, firstTag?.index ?? 0).trim() === "";
-  const lastTagEnd = (lastTag?.index ?? 0) + (lastTag?.[0]?.length ?? 0);
-  const lastTagAtEnd = taggedText.slice(lastTagEnd).trim() === "";
-  if (
-    !firstTagAtStart &&
-    !lastTagAtEnd &&
-    matches.some(
-      (match) =>
-        !inlineHumanSounds.has((match[1] ?? "").trim().toLowerCase()),
-    )
-  ) {
-    return null;
-  }
+  const withoutTags = cleanSpeakableAssistantProse(
+    taggedText.replace(ELEVENLABS_AUDIO_TAG_PATTERN, " "),
+  );
+  if (withoutTags !== cleanSpeakableAssistantProse(spokenText)) return null;
   return taggedText;
 }
 
@@ -201,20 +197,17 @@ function elevenLabsSpeechInput(args: ElevenLabsSpeechArgs): {
   const authoredDirection = normalizeElevenLabsVoiceDirection(
     normalizeBotAudioVoiceProfileV1(args.profile).elevenLabsDirection
   );
-  const hasAudioTags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)].some(
-    (match) =>
-      (BOTCAST_IMMERSIVE_VOICE_TAGS as readonly string[]).includes(
-        (match[1] ?? "").trim().toLowerCase(),
-      ),
-  );
+  const hasAudioTags = [...args.text.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)]
+    .length > 0;
   // Explicit vocal reactions are more specific than the broad mood state.
-  // Otherwise mood takes the first of the existing three direction slots and
-  // remains ephemeral: it never mutates the bot's saved voice profile.
+  // The saved bot identity keeps the existing three direction slots. A mood
+  // may use only a remaining slot and remains ephemeral: it never mutates the
+  // saved voice profile or displaces one of its defining performance cues.
   const moodDirection = hasAudioTags
     ? null
     : elevenLabsVoiceDirectionForMood(args.deliveryMood);
   const direction = normalizeElevenLabsVoiceDirection(
-    [moodDirection, authoredDirection].filter(Boolean).join(", ") || null,
+    [authoredDirection, moodDirection].filter(Boolean).join(", ") || null,
   );
   const model = direction || hasAudioTags
     ? "eleven_v3"
@@ -238,6 +231,7 @@ function elevenLabsSpeechRequestBody(args: ElevenLabsSpeechArgs): string {
     text: input.text,
     model_id: input.model,
     voice_settings: elevenLabsVoiceSettings(args.profile, input.model),
+    ...(args.seed === undefined ? {} : { seed: args.seed }),
   });
 }
 
@@ -299,13 +293,12 @@ function withoutEmbeddedAudioTagAlignment(
   const characters = Array.from(speechText);
   if (alignment.characters.join("") !== characters.join("")) return alignment;
   const remove = new Set<number>();
-  const allowed = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
   for (let index = 0; index < characters.length; index += 1) {
     if (characters[index] !== "[") continue;
     const end = characters.indexOf("]", index + 1);
     if (end < 0) continue;
-    const tag = characters.slice(index + 1, end).join("").trim().toLowerCase();
-    if (!allowed.has(tag)) continue;
+    const tag = characters.slice(index + 1, end).join("").trim();
+    if (!tag || Array.from(tag).length > 48) continue;
     for (let tagIndex = index; tagIndex <= end; tagIndex += 1) {
       remove.add(tagIndex);
     }
@@ -336,6 +329,7 @@ export async function requestElevenLabsSpeech(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   deliveryMood?: VoiceDeliveryMood;
+  seed?: number;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }): Promise<Response> {
@@ -708,7 +702,8 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
   return {
     text,
     elevenLabsText: normalizeElevenLabsTaggedText(
-      voiceSpokenText(body.elevenLabsText),
+      voicePerformanceTextFromActionCues(body.elevenLabsText) ??
+        body.elevenLabsText,
       text,
     ),
     mode: normalizeVoiceMode(body.mode),

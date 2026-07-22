@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import sharp from "sharp";
 
 import {
+  extractSignalStudioMicrophoneTint,
   normalizeSignalAssetUpload,
   normalizeSignalLogoImage,
   readSignalAssetSlot,
@@ -51,6 +52,47 @@ async function logoBytes(args: {
 }
 
 describe("Signal asset uploads", () => {
+  it("extracts only microphone-region magenta and neutralizes stray key color", async () => {
+    const source = await sharp({
+      create: {
+        width: 100,
+        height: 80,
+        channels: 4,
+        background: { r: 18, g: 24, b: 31, alpha: 1 },
+      },
+    })
+      .composite([
+        { input: Buffer.from('<svg width="8" height="8"><rect width="8" height="8" fill="#ff00ff"/></svg>'), left: 32, top: 40 },
+        { input: Buffer.from('<svg width="8" height="8"><rect width="8" height="8" fill="#ff00ff"/></svg>'), left: 60, top: 40 },
+        { input: Buffer.from('<svg width="8" height="8"><rect width="8" height="8" fill="#ff00ff"/></svg>'), left: 2, top: 2 },
+        { input: Buffer.from('<svg width="8" height="8"><rect width="8" height="8" fill="#00ffff"/></svg>'), left: 32, top: 52 },
+      ])
+      .png()
+      .toBuffer();
+
+    const extracted = await extractSignalStudioMicrophoneTint(source);
+
+    assert.ok(extracted.maskPngBytes);
+    assert.equal(extracted.keyedPixelCount, 128);
+    const [studio, mask] = await Promise.all([
+      sharp(extracted.studioBytes).ensureAlpha().raw().toBuffer(),
+      sharp(extracted.maskPngBytes!).ensureAlpha().raw().toBuffer(),
+    ]);
+    const offset = (x: number, y: number) => (y * 100 + x) * 4;
+    const host = offset(35, 43);
+    const guest = offset(63, 43);
+    const outside = offset(5, 5);
+    const cyan = offset(35, 55);
+    assert.ok(mask[host + 3]! > 240);
+    assert.ok(mask[guest + 3]! > 240);
+    assert.equal(mask[outside + 3], 0);
+    assert.equal(mask[cyan + 3], 0);
+    assert.equal(studio[host], studio[host + 1]);
+    assert.equal(studio[host + 1], studio[host + 2]);
+    assert.equal(studio[outside], studio[outside + 1]);
+    assert.equal(studio[outside + 1], studio[outside + 2]);
+  });
+
   it("accepts each replaceable show asset slot", () => {
     assert.equal(readSignalAssetSlot("day-studio"), "day-studio");
     assert.equal(readSignalAssetSlot("night-studio"), "night-studio");

@@ -20,6 +20,128 @@ export interface NormalizedSignalAssetUpload {
   height: number;
 }
 
+export interface SignalStudioMicrophoneTintExtraction {
+  studioBytes: Buffer;
+  maskPngBytes: Buffer | null;
+  keyedPixelCount: number;
+  width: number;
+  height: number;
+}
+
+const SIGNAL_STUDIO_MIC_KEY_MIN_CHANNEL = 128;
+const SIGNAL_STUDIO_MIC_KEY_MAX_GREEN = 118;
+const SIGNAL_STUDIO_MIC_KEY_MIN_CHROMA = 58;
+const SIGNAL_STUDIO_MIC_KEY_MAX_RED_BLUE_DISTANCE = 96;
+const SIGNAL_STUDIO_MIC_KEY_MIN_PIXELS = 24;
+const SIGNAL_STUDIO_STRAY_KEY_MIN_CHANNEL = 220;
+const SIGNAL_STUDIO_STRAY_KEY_MAX_GREEN = 45;
+const SIGNAL_STUDIO_STRAY_KEY_MAX_RED_BLUE_DISTANCE = 48;
+
+function signalStudioMicrophoneKeyRegion(xUnit: number, yUnit: number): boolean {
+  if (yUnit < 0.24 || yUnit > 0.88) return false;
+  const withinEllipse = (centerX: number): boolean => {
+    const dx = (xUnit - centerX) / 0.205;
+    const dy = (yUnit - 0.56) / 0.36;
+    return dx * dx + dy * dy <= 1;
+  };
+  return withinEllipse(0.36) || withinEllipse(0.64);
+}
+
+function signalStudioMicrophoneKeyStrength(
+  red: number,
+  green: number,
+  blue: number,
+): number {
+  const paired = Math.min(red, blue);
+  const chroma = paired - green;
+  if (
+    paired < SIGNAL_STUDIO_MIC_KEY_MIN_CHANNEL ||
+    green > SIGNAL_STUDIO_MIC_KEY_MAX_GREEN ||
+    chroma < SIGNAL_STUDIO_MIC_KEY_MIN_CHROMA ||
+    Math.abs(red - blue) > SIGNAL_STUDIO_MIC_KEY_MAX_RED_BLUE_DISTANCE
+  ) return 0;
+  return Math.max(0, Math.min(1, (chroma - 36) / 128));
+}
+
+/**
+ * Turns the generated-only magenta microphone key into a grayscale source plus
+ * an alpha mask. Spatial gating prevents unrelated purple set dressing from
+ * becoming cast-colored. Once a valid mic key exists, exact stray key pixels
+ * elsewhere are neutralized so generated magenta cannot leak into the set.
+ */
+export async function extractSignalStudioMicrophoneTint(
+  sourceBytes: Buffer,
+): Promise<SignalStudioMicrophoneTintExtraction> {
+  const prepared = await sharp(sourceBytes, {
+    failOn: "error",
+    limitInputPixels: SIGNAL_ASSET_UPLOAD_MAX_PIXELS,
+  })
+    .rotate()
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = prepared.info;
+  if (channels !== 4) {
+    throw new Error("Signal studio could not be normalized to RGBA.");
+  }
+  const studioPixels = Buffer.from(prepared.data);
+  const maskPixels = Buffer.alloc(studioPixels.length);
+  let keyedPixelCount = 0;
+  for (let y = 0; y < height; y += 1) {
+    const yUnit = height <= 1 ? 0 : y / (height - 1);
+    for (let x = 0; x < width; x += 1) {
+      const xUnit = width <= 1 ? 0 : x / (width - 1);
+      const offset = rgbaOffset(width, x, y);
+      const red = studioPixels[offset]!;
+      const green = studioPixels[offset + 1]!;
+      const blue = studioPixels[offset + 2]!;
+      const sourceAlpha = studioPixels[offset + 3]!;
+      const strength = signalStudioMicrophoneKeyStrength(red, green, blue);
+      if (strength <= 0 || sourceAlpha <= 0) continue;
+      const inMicrophoneRegion = signalStudioMicrophoneKeyRegion(xUnit, yUnit);
+      if (inMicrophoneRegion) {
+        const maskAlpha = Math.round(sourceAlpha * strength);
+        if (maskAlpha <= 0) continue;
+        keyedPixelCount += 1;
+        maskPixels[offset] = 255;
+        maskPixels[offset + 1] = 255;
+        maskPixels[offset + 2] = 255;
+        maskPixels[offset + 3] = maskAlpha;
+      }
+      const exactStrayKey =
+        Math.min(red, blue) >= SIGNAL_STUDIO_STRAY_KEY_MIN_CHANNEL &&
+        green <= SIGNAL_STUDIO_STRAY_KEY_MAX_GREEN &&
+        Math.abs(red - blue) <= SIGNAL_STUDIO_STRAY_KEY_MAX_RED_BLUE_DISTANCE;
+      if (!inMicrophoneRegion && !exactStrayKey) continue;
+      const neutral = Math.max(
+        12,
+        Math.min(255, Math.round(red * 0.2126 + green * 0.7152 + blue * 0.0722)),
+      );
+      studioPixels[offset] = neutral;
+      studioPixels[offset + 1] = neutral;
+      studioPixels[offset + 2] = neutral;
+    }
+  }
+  if (keyedPixelCount < SIGNAL_STUDIO_MIC_KEY_MIN_PIXELS) {
+    return {
+      studioBytes: sourceBytes,
+      maskPngBytes: null,
+      keyedPixelCount: 0,
+      width,
+      height,
+    };
+  }
+  const [studioBytes, maskPngBytes] = await Promise.all([
+    sharp(studioPixels, { raw: { width, height, channels: 4 } })
+      .png({ compressionLevel: 9 })
+      .toBuffer(),
+    sharp(maskPixels, { raw: { width, height, channels: 4 } })
+      .png({ compressionLevel: 9 })
+      .toBuffer(),
+  ]);
+  return { studioBytes, maskPngBytes, keyedPixelCount, width, height };
+}
+
 function rgbaOffset(width: number, x: number, y: number): number {
   return (y * width + x) * 4;
 }

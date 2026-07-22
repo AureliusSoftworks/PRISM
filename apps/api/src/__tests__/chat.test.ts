@@ -24,6 +24,7 @@ import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
+import { botPowerSourceHashV1 } from "@localai/shared";
 import {
   createZenSessionMemoryCheckpoint,
   listZenSessionMemories,
@@ -6996,6 +6997,8 @@ describe("processChatMessage Zen action prompt guidance", () => {
       .map((message) => `${message.role}: ${message.content}`)
       .join("\n");
     assert.match(promptText, /single-asterisk action beat/);
+    assert.match(promptText, /2-8 words/);
+    assert.match(promptText, /no chains of motions/);
     assert.match(promptText, /performed non-verbal action/);
   });
 
@@ -7088,6 +7091,93 @@ describe("processChatMessage bot mentions", () => {
     assert.match(result.contexts[0] ?? "", /observatory/u);
     assert.doesNotMatch(result.contexts.join("\n"), /The receiving persona/u);
     assert.deepEqual(result.overflowNames, ["Bot 6", "Bot 7"]);
+    assert.deepEqual(result.targetNames, [
+      "Bot 1",
+      "Bot 2",
+      "Bot 3",
+      "Bot 4",
+      "Bot 5",
+      "Bot 6",
+      "Bot 7",
+    ]);
+  });
+
+  it("enforces the holder's naming suffix for explicitly mentioned bots", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, color, glyph) VALUES (?, ?, ?, ?, ?)"
+    ).run("morty", "Morty", "An anxious young adventurer.", "#4f8cff", "spark");
+    const name = "Bot Designation";
+    const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
+    const powers = [{
+      version: 1,
+      id: "rick-designation",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "",
+        observerCue: "",
+        effects: [{ type: "designation", placement: "suffix", text: "Bot" }],
+        ruleLabels: [],
+      },
+    }];
+    type ProviderBody = {
+      prompt?: string;
+      messages?: Array<{ role: string; content: string }>;
+    };
+    const bodies: ProviderBody[] = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as ProviderBody;
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      bodies.push(body);
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "Morty was late, but Summer was on time. Rick Sanchez expected better.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What do you think about [Morty](prism-bot://morty) and the human Summer?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "rick",
+        incognito: false,
+        mode: "chat",
+        starterPromptLabel: "Rick Sanchez",
+        botSystemPrompt: "You are Rick Sanchez.",
+        botPowers: powers,
+      },
+    );
+
+    const prompt = bodies
+      .flatMap((body) => body.messages ?? [])
+      .map((message) => message.content)
+      .join("\n");
+    assert.match(prompt, /"Morty" becomes "Morty Bot"/u);
+    assert.match(prompt, /Hearers may comment once/u);
+    assert.equal(
+      result.conversation.messages.at(-1)?.content,
+      "Morty Bot was late, but Summer was on time. Rick Sanchez expected better.",
+    );
+    assert.doesNotMatch(result.conversation.messages.at(-1)?.content ?? "", /Summer Bot|Rick Sanchez Bot/u);
   });
 
   it("adds mentioned library bot profile context to the model prompt", async () => {

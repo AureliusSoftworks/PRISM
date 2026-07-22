@@ -5,6 +5,7 @@ import {
   botPowerBotNamingCueFromEffectsV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDesignationEffectFromIntentV1,
+  botPowerDesignationObserverCueFromEffectsV1,
   botPowerAddressedFandomCueFromEffectsV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
@@ -558,9 +559,10 @@ export function resolveCoffeePowersForSession(
       effects,
       orderedBots.filter((target) => target.id !== bot.id).map((target) => target.name),
     );
-    const namingObserverCue = namingCue
-      ? `${bot.name}'s naming Power changes only bot names spoken by ${bot.name}. Keep every bot's saved identity and do not copy that prefix or suffix into another speaker's words.`
-      : null;
+    const namingObserverCue = botPowerDesignationObserverCueFromEffectsV1(
+      bot.name,
+      effects,
+    );
     const resolved: ResolvedCoffeePowerBotV1 = {
       botId: bot.id,
       powerIds: powers.map((power) => power.id),

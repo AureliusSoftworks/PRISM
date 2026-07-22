@@ -48,6 +48,23 @@ export function replayVoiceTakeRelativePath(args: {
   return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/takes/${assertReplayPathSegment(args.takeId)}.${extension}`;
 }
 
+export function replayPremiumSegmentRelativePath(args: {
+  userId: string;
+  recordingId: string;
+  segmentId: string;
+}): string {
+  return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/premium/segments/${assertReplayPathSegment(args.segmentId)}.mp3`;
+}
+
+export function replayPremiumAudioRelativePath(args: {
+  userId: string;
+  recordingId: string;
+  contentType: string;
+}): string {
+  const extension = args.contentType.includes("wav") ? "wav" : "webm";
+  return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/premium/master.${extension}`;
+}
+
 export function replayUploadRelativePath(
   userId: string,
   recordingId: string,

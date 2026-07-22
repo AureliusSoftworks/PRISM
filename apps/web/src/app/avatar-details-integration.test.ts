@@ -85,6 +85,7 @@ describe("Avatar Details Studio integration", () => {
     for (const [label, tooltip] of [
       ["Brush tool", "Brush"],
       ["Eraser tool", "Eraser"],
+      ["Paint bucket tool", "Paint bucket"],
       ["Line tool", "Line"],
       ["Circle tool", "Circle"],
       ["Move ink tool", "Move ink"],
@@ -99,7 +100,7 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /aria-pressed=\{paintMode === "brush"\}/u);
     assert.match(
       editorCss,
-      /\.segmentedControl\s*\{[\s\S]*grid-template-columns:\s*repeat\(5, minmax\(32px, 1fr\)\)/,
+      /\.segmentedControl\s*\{[\s\S]*grid-template-columns:\s*repeat\(6, minmax\(32px, 1fr\)\)/,
     );
     assert.match(editorSource, /<Brush size=\{15\} aria-hidden="true" \/>\s*<\/button>/);
     assert.doesNotMatch(editorSource, /<Brush[^>]+\/>\s*Brush/u);
@@ -111,7 +112,10 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /label: "Blink ink"/);
     assert.match(editorSource, /label: "Speech ink"/);
     assert.match(editorSource, /label: "Effect ink"/);
-    assert.match(editorSource, /Hides while talking or sipping\./);
+    assert.match(
+      editorSource,
+      /Follows Mouth animation; Default hides while talking or sipping\./,
+    );
     assert.match(editorSource, /role="radiogroup"/);
     assert.match(editorSource, /role="radio"/);
     assert.match(
@@ -278,7 +282,8 @@ describe("Avatar Details Studio integration", () => {
     assert.match(pageCss, /\.botAvatarDeferredPreviewPrompt/);
   });
 
-  it("offers straight lines, circles, and whole-illustration dragging without hotkeys", () => {
+  it("offers bucket recoloring, shapes, and whole-illustration dragging without hotkeys", () => {
+    assert.match(editorSource, /aria-label="Paint bucket tool"/u);
     assert.match(editorSource, /aria-label="Line tool"/u);
     assert.match(editorSource, /aria-label="Circle tool"/u);
     assert.match(editorSource, /aria-label="Move ink tool"/u);
@@ -287,7 +292,9 @@ describe("Avatar Details Studio integration", () => {
       /interpolateAvatarDetailsGridLine\(stroke\.startPoint, edge\)/,
     );
     assert.match(editorSource, /avatarDetailsCirclePoints\(/);
+    assert.match(editorSource, /recolorAvatarDetailsPaintColorRegion\(/);
     assert.match(editorSource, /moveAvatarDetailsPaintColorMap\(/);
+    assert.match(editorSource, /setPaintMode\("bucket"\)/);
     assert.match(editorSource, /setPaintMode\("circle"\)/);
     assert.match(editorSource, /setPaintMode\("move"\)/);
     assert.match(editorSource, /data-tool=\{paintMode\}/);
@@ -406,7 +413,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /image-rendering: pixelated/);
     assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
     assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
-    assert.match(maskSource, /data-avatar-details-depth=\{depth\}/);
+    assert.match(maskSource, /"data-avatar-details-depth": depth/);
     assert.doesNotMatch(maskSource, /className=\{styles\.group\}/);
     assert.match(
       pageCss,
@@ -425,18 +432,27 @@ describe("Avatar Details shared mannequin rendering", () => {
       /\["--avatar-details-phosphor-glow-color" as string\]: normalizedColor/,
     );
     assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
-    assert.match(maskCss, /\.halo[\s\S]*opacity:\s*1/);
+    assert.match(
+      maskCss,
+      /\.halo[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)/,
+    );
     assert.match(
       maskCss,
       /\.halo[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
     );
-    assert.match(maskCss, /\.bloom[\s\S]*opacity:\s*1/);
+    assert.match(
+      maskCss,
+      /\.bloom[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)/,
+    );
     assert.match(
       maskCss,
       /\.bloom[\s\S]*0 0 0\.72px[\s\S]*0 0 1\.5px[\s\S]*0 0 3px[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
     );
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
-    assert.match(maskCss, /\.core[\s\S]*opacity:\s*1[\s\S]*drop-shadow/);
+    assert.match(
+      maskCss,
+      /\.core[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)[\s\S]*drop-shadow/,
+    );
     assert.match(
       maskCss,
       /\.halo[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*var\(--zen-live-bot-crt-flicker-base-filter\)/,
@@ -534,9 +550,12 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
   });
 
-  it("hides only the matching semantic ink for blink, talking, and sipping", () => {
+  it("keeps Default speech ink hidden and otherwise follows the selected mouth motion", () => {
     assert.match(pageSource, /blinkPhase=\{avatarDetailsBlinkPhase\}/);
     assert.match(pageSource, /talking=\{inkTalking \?\? isTalking\}/);
+    assert.match(pageSource, /speechMotionActive=\{isTalking\}/);
+    assert.match(pageSource, /mouthAnimation=\{faceStyle\.mouthAnimation\}/);
+    assert.match(pageSource, /mouthShape=\{displayedMouthShape\}/);
     assert.match(
       pageSource,
       /onBlinkPhaseChange=\{handleAvatarDetailsBlinkPhaseChange\}/,
@@ -551,7 +570,30 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(maskSource, /talking,\s*\},\s*depth,\s*\),/);
     assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
-    assert.doesNotMatch(maskSource, /data-avatar-details-ink-role/);
+    assert.match(
+      maskSource,
+      /talking && speechMotionActive && normalizedMouthAnimation !== "none"/,
+    );
+    assert.match(
+      maskSource,
+      /rasterizeAvatarDetailsRgba\([\s\S]*?"talking",[\s\S]*?depth/,
+    );
+    assert.match(maskSource, /data-avatar-details-ink-role/);
+    assert.match(maskSource, /data-avatar-details-ink-motion/);
+    assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="pulsate"\]/);
+    assert.match(maskCss, /--bot-face-mouth-pulse-scale-x/);
+    assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="flicker"\]/);
+    assert.match(maskCss, /--bot-face-mouth-speech-opacity/);
+    assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="wobble"\]/);
+    assert.match(maskCss, /--bot-face-mouth-speech-wobble/);
+    assert.match(
+      pageCss,
+      /\[data-avatar-details-emission\]\[data-avatar-details-ink-motion="spin"\][\s\S]*avatarDetailsSpeechInkSpin/,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask[\s\S]*\)\[data-talking="true"\][\s\S]*--bot-face-mouth-pulse-scale-x/,
+    );
     assert.match(
       pageSource,
       /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipPresentation\.active \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,

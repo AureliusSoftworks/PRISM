@@ -151,6 +151,8 @@ test("compiler deterministically recovers explicit prefix and suffix designation
   ]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Keep your own name "Rick Sanchez"/u);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /another bot/u);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /comment once/u);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /small bounded mood/u);
   assert.doesNotMatch(result.powers[0]?.compiled?.selfCue ?? "", /Rick Sanchez Bot/u);
 });
 
@@ -2154,6 +2156,7 @@ test("Coffee freezes the repaired holder naming rule rather than a malformed sto
   ]);
   assert.match(plan.bots.rick?.selfCue ?? "", /keep your own name exactly "Rick Sanchez"/iu);
   assert.match(plan.bots.rick?.selfCue ?? "", /suffix "Bot"/u);
+  assert.match(plan.bots.rick?.observerCue ?? "", /small bounded mood, tone, or action reaction/u);
   assert.doesNotMatch(plan.bots.rick?.selfCue ?? "", /Rick Sanchez Bot/u);
   assert.doesNotMatch(plan.bots.rick?.selfCue ?? "", /malformed suffix/u);
   assert.equal(resolveCoffeePowersForSession(db, "user", "designation-session").resolvedAt, plan.resolvedAt);

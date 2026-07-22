@@ -175,6 +175,26 @@ describe("resolveZenActionPresentation", () => {
     );
   });
 
+  it("uses one above-bot action timeline for bracket and asterisk cues", () => {
+    const presentation = resolveZenActionPresentation(
+      "[gasps] This is enough prose to separate the next cue clearly. *waves*",
+    );
+
+    assert.equal(
+      presentation.mainText,
+      "This is enough prose to separate the next cue clearly.",
+    );
+    assert.deepEqual(
+      presentation.cues.map((cue) => cue.action),
+      ["gasps", "waves"],
+    );
+    assert.equal(resolveCurrentZenActionCue(presentation.cues, 0)?.action, "gasps");
+    assert.equal(
+      resolveCurrentZenActionCue(presentation.cues, Number.POSITIVE_INFINITY)?.action,
+      "waves",
+    );
+  });
+
   it("keeps multiple actions ordered and reveals later cues before their prose point", () => {
     const presentation = resolveZenActionPresentation(
       "*takes a breath* This is a longer line with enough spoken prose that the second action should arrive before the final words. *sets the cup down*"

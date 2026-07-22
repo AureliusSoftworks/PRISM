@@ -3,6 +3,7 @@ import {
   BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   type SignalMusicProfile,
 } from "@localai/shared";
+import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
 
 export const SIGNAL_ELEVENLABS_MUSIC_MODEL = "music_v2";
 const SIGNAL_INTRO_AUDIO_MAX_BYTES = 4 * 1024 * 1024;
@@ -42,8 +43,12 @@ function signalMotifFingerprint(profile: SignalMusicProfile): string {
 export function buildSignalElevenLabsMusicCompositionPlan(args: {
   profile: SignalMusicProfile;
   seed: string;
+  keywords?: readonly string[];
 }): SignalElevenLabsMusicCompositionPlan {
   const recipe = args.profile;
+  const producerKeywordStyles = normalizeSignalGenerationKeywords(
+    args.keywords,
+  ).map((keyword) => `producer keyword influence: ${keyword}`);
   const temperamentNegativeStyles =
     recipe.temperament === "commanding" && recipe.palette === "cinematic"
     ? [
@@ -89,6 +94,9 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
         duration_ms: halfDurationMs,
         positive_styles: [
           "wholly original instrumental interview-podcast ident",
+          `emotional core: ${recipe.emotionalCore}`,
+          `signature contradiction: ${recipe.signatureContradiction}`,
+          recipe.sonicWorld,
           recipe.lead,
           recipe.support,
           recipe.pulse,
@@ -96,8 +104,11 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
           `${recipe.tempoBpm} BPM`,
           `${recipe.register} register`,
           recipe.motifDirection,
+          recipe.motifGesture,
+          `harmonic language: ${recipe.harmonicLanguage.replaceAll("-", " ")}`,
           signalMotifFingerprint(recipe),
           recipe.openingForm,
+          ...producerKeywordStyles,
           "compact genuinely melodic theme with a memorable original motif",
           "foreground melody begins immediately and dominates the clip",
         ],
@@ -115,10 +126,13 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
         duration_ms: halfDurationMs,
         positive_styles: [
           "instrumental continuation of the same podcast ident",
+          `preserve the emotional contradiction: ${recipe.signatureContradiction}`,
+          recipe.sonicWorld,
           recipe.developmentForm,
           recipe.motifDirection,
           signalMotifFingerprint(recipe),
           recipe.endingDirection,
+          ...producerKeywordStyles,
           "answering phrase clearly develops the opening motif",
           "foreground melody remains unmistakable through the final note",
           "complete cadence lands before the clip ends, followed by a brief natural release",
@@ -140,8 +154,12 @@ export function buildSignalElevenLabsMusicCompositionPlan(args: {
 export function buildSignalElevenLabsOutdentCompositionPlan(args: {
   profile: SignalMusicProfile;
   seed: string;
+  keywords?: readonly string[];
 }): SignalElevenLabsMusicCompositionPlan {
   const recipe = args.profile;
+  const producerKeywordStyles = normalizeSignalGenerationKeywords(
+    args.keywords,
+  ).map((keyword) => `producer keyword influence: ${keyword}`);
   const articulation = SIGNAL_IDENT_ARTICULATION_VARIANTS[recipe.variant];
   const sharedNegativeStyles = [
     "ambient",
@@ -171,6 +189,9 @@ export function buildSignalElevenLabsOutdentCompositionPlan(args: {
         duration_ms: BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
         positive_styles: [
           "wholly original instrumental interview-podcast closing outdent",
+          `emotional core: ${recipe.emotionalCore}`,
+          `signature contradiction: ${recipe.signatureContradiction}`,
+          recipe.sonicWorld,
           recipe.lead,
           recipe.support,
           recipe.pulse,
@@ -178,9 +199,12 @@ export function buildSignalElevenLabsOutdentCompositionPlan(args: {
           `${recipe.tempoBpm} BPM`,
           `${recipe.register} register`,
           recipe.motifDirection,
+          recipe.motifGesture,
+          `harmonic language: ${recipe.harmonicLanguage.replaceAll("-", " ")}`,
           signalMotifFingerprint(recipe),
           "begin immediately with a concise, clearly recognizable recall of the opening host signature",
           "same instrumental identity and production language as its paired opening ident",
+          ...producerKeywordStyles,
           recipe.endingDirection,
           "compress the host signature into a distinct final answer",
           "complete cadence lands before the clip ends, followed by a brief natural release",

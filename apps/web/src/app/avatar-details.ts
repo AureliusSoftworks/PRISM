@@ -67,7 +67,7 @@ export type AvatarDetailsBrushSize =
   (typeof AVATAR_DETAILS_BRUSH_SIZES)[number];
 export type AvatarDetailsPaintMode = "brush" | "eraser";
 export type AvatarDetailsTool =
-  AvatarDetailsPaintMode | "line" | "circle" | "move";
+  AvatarDetailsPaintMode | "bucket" | "line" | "circle" | "move";
 export type AvatarDetailsInkRole = (typeof AVATAR_DETAILS_INK_ROLES)[number];
 export type AvatarDetailsFaceDepth = "all" | "behind-face" | "above-face";
 
@@ -683,6 +683,75 @@ export interface PaintAvatarDetailsColorMapResult {
   colorMap: Uint8Array;
   changed: boolean;
   limitReached: boolean;
+}
+
+export interface RecolorAvatarDetailsPaintColorRegionResult {
+  colorMap: Uint8Array;
+  changed: boolean;
+  pixelCount: number;
+}
+
+/**
+ * Recolors the four-way-connected semantic ink region under the selected
+ * point. Empty canvas is deliberately a no-op: the bucket changes existing
+ * ink behavior instead of creating a new painted field.
+ */
+export function recolorAvatarDetailsPaintColorRegion(
+  source: Uint8Array,
+  point: AvatarDetailsGridPoint,
+  role: AvatarDetailsInkRole,
+): RecolorAvatarDetailsPaintColorRegionResult {
+  if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const startX = Math.round(point.x);
+  const startY = Math.round(point.y);
+  const sourceRole = avatarDetailsInkRoleAt(source, startX, startY);
+  const colorMap = source.slice();
+  if (!sourceRole || sourceRole === role) {
+    return { colorMap, changed: false, pixelCount: 0 };
+  }
+
+  const visited = new Uint8Array(
+    AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
+  );
+  const queue: number[] = [];
+  const enqueue = (x: number, y: number): void => {
+    if (
+      x < 0 ||
+      y < 0 ||
+      x >= AVATAR_DETAILS_CANVAS_SIZE ||
+      y >= AVATAR_DETAILS_CANVAS_SIZE
+    ) {
+      return;
+    }
+    const index = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+    if (
+      visited[index] ||
+      avatarDetailsInkRoleAt(source, x, y) !== sourceRole
+    ) {
+      return;
+    }
+    visited[index] = 1;
+    queue.push(index);
+  };
+
+  enqueue(startX, startY);
+  let pixelCount = 0;
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const index = queue[cursor]!;
+    const x = index % AVATAR_DETAILS_CANVAS_SIZE;
+    const y = Math.floor(index / AVATAR_DETAILS_CANVAS_SIZE);
+    if (setAvatarDetailsInkRole(colorMap, x, y, role)) pixelCount += 1;
+    enqueue(x - 1, y);
+    enqueue(x + 1, y);
+    enqueue(x, y - 1);
+    enqueue(x, y + 1);
+  }
+
+  return { colorMap, changed: pixelCount > 0, pixelCount };
 }
 
 export function paintAvatarDetailsColorMap(

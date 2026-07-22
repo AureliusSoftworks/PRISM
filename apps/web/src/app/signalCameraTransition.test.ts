@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   readSignalCameraTransitionMode,
   SIGNAL_CAMERA_TRANSITION_STORAGE_KEY,
+  signalCameraTransitionStyleForChange,
   signalCameraTransitionsShouldAnimate,
   signalLiveAutoCameraShot,
   writeSignalCameraTransitionMode,
@@ -24,6 +25,17 @@ describe("Signal camera transition preference", () => {
     assert.equal(readSignalCameraTransitionMode(storage), "instant");
   });
 
+  it("persists Smart and restores it in a later panel session", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+    writeSignalCameraTransitionMode(storage, "smart");
+    assert.equal(values.get(SIGNAL_CAMERA_TRANSITION_STORAGE_KEY), "smart");
+    assert.equal(readSignalCameraTransitionMode(storage), "smart");
+  });
+
   it("defaults corrupt or unavailable storage to Animated", () => {
     assert.equal(readSignalCameraTransitionMode(null), "animated");
     assert.equal(
@@ -35,7 +47,77 @@ describe("Signal camera transition preference", () => {
   it("gives reduced-motion precedence over the saved Animated preference", () => {
     assert.equal(signalCameraTransitionsShouldAnimate("animated", false), true);
     assert.equal(signalCameraTransitionsShouldAnimate("animated", true), false);
+    assert.equal(signalCameraTransitionsShouldAnimate("smart", false), true);
+    assert.equal(signalCameraTransitionsShouldAnimate("smart", true), false);
     assert.equal(signalCameraTransitionsShouldAnimate("instant", false), false);
+  });
+
+  it("always cuts instantly from one bot close-up to the other", () => {
+    for (const mode of ["animated", "smart"] as const) {
+      assert.equal(
+        signalCameraTransitionStyleForChange({
+          mode,
+          previousShot: "left",
+          nextShot: "right",
+          transitionOrdinal: 1,
+        }),
+        "instant",
+      );
+      assert.equal(
+        signalCameraTransitionStyleForChange({
+          mode,
+          previousShot: "right",
+          nextShot: "left",
+          transitionOrdinal: 2,
+        }),
+        "instant",
+      );
+    }
+  });
+
+  it("mixes animated and instant Wide transitions in a stable Smart cadence", () => {
+    const styles = Array.from({ length: 10 }, (_, index) =>
+      signalCameraTransitionStyleForChange({
+        mode: "smart",
+        previousShot: index % 2 === 0 ? "wide" : "left",
+        nextShot: index % 2 === 0 ? "left" : "wide",
+        transitionOrdinal: index + 1,
+      }),
+    );
+    assert.deepEqual(styles, [
+      "animated",
+      "instant",
+      "animated",
+      "animated",
+      "instant",
+      "animated",
+      "instant",
+      "animated",
+      "animated",
+      "instant",
+    ]);
+  });
+
+  it("keeps Instant fixed and gives reduced motion precedence over Smart", () => {
+    assert.equal(
+      signalCameraTransitionStyleForChange({
+        mode: "instant",
+        previousShot: "wide",
+        nextShot: "left",
+        transitionOrdinal: 1,
+      }),
+      "instant",
+    );
+    assert.equal(
+      signalCameraTransitionStyleForChange({
+        mode: "smart",
+        previousShot: "wide",
+        nextShot: "left",
+        transitionOrdinal: 1,
+        prefersReducedMotion: true,
+      }),
+      "instant",
+    );
   });
 
   it("holds the Producer guest, then uses Wide whenever a bot is thinking", () => {
@@ -113,6 +195,36 @@ describe("Signal camera transition preference", () => {
         producerGuestThinking: false,
       }),
       "right",
+    );
+  });
+
+  it("keeps episode bookend fades Wide even when a speaker or reaction is active", () => {
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        bookendWide: true,
+        listenerReactionShot: "right",
+        speakingShot: "left",
+        postSpeechHoldShot: "right",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "wide",
+    );
+  });
+
+  it("keeps the full cup beat on camera despite competing close shots", () => {
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "left",
+        cupActivityWide: true,
+        listenerReactionShot: "right",
+        speakingShot: "left",
+        postSpeechHoldShot: "right",
+        botThinking: false,
+        producerGuestThinking: false,
+      }),
+      "wide",
     );
   });
 });

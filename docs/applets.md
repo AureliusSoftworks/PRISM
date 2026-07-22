@@ -24,10 +24,10 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.26 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming cues. |
-| Zen | v1.25 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming cues. |
-| Coffee | v2.25 | Active | Multi-bot tables with frozen pairwise sight, hearing, and holder-scoped bot naming. |
-| Signal | v1.46 | Active | Bot-owned interviews with pairwise cast perception and holder-scoped bot naming in prompts, saved dialogue, voice, and replay. |
+| Chat | v1.27 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Zen | v1.26 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Coffee | v2.26 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and soft recipient reactions. |
+| Signal | v1.51 | Active | Synthesized studios tint only microphone lights by host and guest color, alongside Premium video and host-owned final beats. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -83,6 +83,47 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-07-22
+
+- Bumped `Signal` to `v1.51` so synthesized studios reserve only their
+  microphone lights for cast color: the left mic follows the host and the right
+  follows the guest across live playback, local replay, and Premium video.
+  Uploaded studios remain exactly as authored.
+
+- Bumped `Signal` to `v1.50` so every completed episode ends on a host-owned
+  beat, including normal wraps, producer cuts, guest departures, hard mute,
+  hard echo, and emergency sign-off recovery. The guest may give the final
+  response but never owns the saved sign-off. Align stage also lets each floor
+  glow move vertically and scale down from its original maximum, with the saved
+  Studio lighting receiver map masking the glow off implausible overlaps.
+
+- Bumped `Signal` to `v1.49` so completed episodes open immediately as local
+  replays from their captured takes and saved timeline, with built-in local
+  speech filling any legacy gaps. Premium video is now an explicit ONLINE,
+  credit-confirmed action: PRISM preserves the saved transcript, masters
+  Eleven v3 dialogue with shared-actor isolation, mixes the production cut,
+  and feeds its cached master into the repaired renderer. A failed video retry
+  resumes from mixing or rendering without regenerating provider audio, and
+  Premium media can be removed without deleting the canonical episode replay.
+
+- Bumped `Signal` to `v1.48` for persona-shaped Music Identity v2. Show creation
+  now translates each host's emotional core and signature contradiction into
+  instrumental texture, rhythm, harmony, motif, and ending behavior shared by
+  the local ident, paired outdent, and cached ElevenLabs package. Producers can
+  edit or regenerate that sound identity from the show gear, while music
+  providers receive only the derived provider-safe fingerprint—not raw persona,
+  franchise, character, or show prose.
+
+- Bumped `Chat` to `v1.27`, `Zen` to `v1.26`, `Coffee` to `v2.26`, `Signal`
+  to `v1.47`, and `Story` to `v0.26` so bot-name prefixes and suffixes land as
+  social beats instead of silent text substitutions. A bot who hears its own
+  altered name may comment once, show a bounded contextual mood, tone, or
+  action reaction, or let it pass according to its personality and
+  relationship with the speaker. The reaction is soft and immediate: it never
+  forces polarity, changes a saved identity, targets the player, becomes a
+  permanent nickname, or makes other speakers copy the affix. Coffee and
+  Signal carry the observer pressure into the next participant turn; Story
+  adapts it within cast scenes; Chat and Zen retain the future-safe cue when
+  another bot is present or mentioned.
 
 - Bumped `Chat` to `v1.26`, `Zen` to `v1.25`, `Coffee` to `v2.25`, `Signal`
   to `v1.46`, and `Story` to `v0.25` for holder-scoped bot naming. A Ready
@@ -355,8 +396,9 @@ stages do not block the standalone preview.
 
 - Bumped `Signal` to `v1.7` so a Producer cut stops the current turn, catches the
   host briefly off guard, and still gives them one short, tactful on-air sign-off
-  before the saved outro. Echo-bound hosts now remain exact mirrors while a bot
-  guest carries the opening and closing. A reusable interruption effect can cut
+  before the saved outro. At the time, echo-bound hosts remained exact mirrors
+  while a bot guest carried the opening and closing. A reusable interruption
+  effect can cut
   eligible bot guest speech while human Producer answers, boundaries, departures,
   wraps, closings, and hard speech rules stay protected; transcript, voice, and
   replay retain only what the audience heard.

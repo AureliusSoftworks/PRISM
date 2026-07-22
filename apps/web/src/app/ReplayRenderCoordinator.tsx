@@ -16,7 +16,9 @@ import {
   completeReplayRender,
   failReplayRender,
   replayAuthHeaders,
+  storeReplayPremiumTimeline,
   updateReplayRenderProgress,
+  uploadReplayPremiumAudio,
 } from "./replayClient";
 import { ReplayPixiScene } from "./replayScene";
 import { replayVideoBitrateForFilmGrain } from "./signalFilmGrain";
@@ -54,12 +56,58 @@ function interleavedReplayAudio(buffer: AudioBuffer): Float32Array {
   return interleaved;
 }
 
+function replayAudioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
+  const channels = Math.max(1, Math.min(2, buffer.numberOfChannels));
+  const frameCount = buffer.length;
+  const bytes = new ArrayBuffer(44 + frameCount * channels * 2);
+  const view = new DataView(bytes);
+  const write = (offset: number, value: string): void => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+  write(0, "RIFF");
+  view.setUint32(4, bytes.byteLength - 8, true);
+  write(8, "WAVE");
+  write(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, buffer.sampleRate, true);
+  view.setUint32(28, buffer.sampleRate * channels * 2, true);
+  view.setUint16(32, channels * 2, true);
+  view.setUint16(34, 16, true);
+  write(36, "data");
+  view.setUint32(40, frameCount * channels * 2, true);
+  const channelData = Array.from({ length: channels }, (_, channel) =>
+    buffer.getChannelData(channel),
+  );
+  let offset = 44;
+  for (let frame = 0; frame < frameCount; frame += 1) {
+    for (let channel = 0; channel < channels; channel += 1) {
+      const sample = Math.max(-1, Math.min(1, channelData[channel]?.[frame] ?? 0));
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += 2;
+    }
+  }
+  return bytes;
+}
+
 function waitForReplayWorker(
   worker: Worker,
   expectedType: "ready" | "frame-added" | "done",
   expectedFrame?: number,
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      const frameSuffix = expectedFrame === undefined ? "" : ` for frame ${expectedFrame}`;
+      reject(
+        new Error(
+          `Replay encoder stalled while waiting for ${expectedType}${frameSuffix}.`,
+        ),
+      );
+    }, 45_000);
     const onMessage = (event: MessageEvent<Record<string, unknown>>) => {
       if (event.data.type === "error") {
         cleanup();
@@ -80,6 +128,7 @@ function waitForReplayWorker(
       reject(new Error(event.message || "Replay worker crashed."));
     };
     const cleanup = () => {
+      window.clearTimeout(timeout);
       worker.removeEventListener("message", onMessage);
       worker.removeEventListener("error", onError);
     };
@@ -92,7 +141,7 @@ async function renderClaimedReplay(
   claim: NonNullable<Awaited<ReturnType<typeof claimReplayRecording>>>,
   frameRenderer?: ReplayFrameRenderer,
 ): Promise<void> {
-  const { recording, takes, renderToken } = claim;
+  const { recording, takes, premiumSegments, renderToken } = claim;
   if (!recording.manifest) throw new Error("Replay manifest is missing.");
   if (typeof Worker === "undefined" || typeof createImageBitmap === "undefined") {
     throw new Error("This PRISM client cannot encode replay video. Retry on a worker-capable client.");
@@ -103,7 +152,28 @@ async function renderClaimedReplay(
     status: "preparing_audio",
     progress: 0.04,
   });
-  const prepared = await prepareReplayAudio(recording, takes);
+  if (recording.surface === "signal" && premiumSegments.length === 0) {
+    throw new Error("Premium voice mastering must finish before studio rendering.");
+  }
+  const prepared = await prepareReplayAudio(recording, takes, {
+    premiumSegments:
+      recording.surface === "signal" ? premiumSegments : undefined,
+  });
+  if (
+    recording.surface === "signal" &&
+    (!recording.premiumProduction?.audioUrl ||
+      !recording.premiumProduction.timeline)
+  ) {
+    await uploadReplayPremiumAudio({
+      recordingId: recording.id,
+      bytes: replayAudioBufferToWav(prepared.audioBuffer),
+      contentType: "audio/wav",
+    });
+    await storeReplayPremiumTimeline({
+      recordingId: recording.id,
+      timeline: prepared.timeline,
+    });
+  }
   await updateReplayRenderProgress({
     recordingId: recording.id,
     renderToken,
@@ -203,6 +273,12 @@ async function renderClaimedReplay(
         await nextBrowserTurn();
       }
     }
+    await updateReplayRenderProgress({
+      recordingId: recording.id,
+      renderToken,
+      status: "rendering",
+      progress: 0.99,
+    });
     const done = waitForReplayWorker(worker, "done");
     worker.postMessage({ type: "finish" });
     const completed = await done;
@@ -214,6 +290,7 @@ async function renderClaimedReplay(
       codec: String(completed.codec ?? encoding.codec ?? "unknown"),
       durationMs: Math.round(durationSeconds * 1_000),
       warning: prepared.warnings.length > 0 ? prepared.warnings.join(" ") : null,
+      timeline: prepared.timeline,
     });
   } finally {
     worker?.terminate();

@@ -8,11 +8,8 @@ export function signalReplayRecordingHasVideo(
 ): boolean {
   return Boolean(
     recording &&
-      recording.manifest?.visual.metadata?.renderContract ===
-        "signal-studio-dom-v2" &&
-      (recording.status === "ready" ||
-        recording.status === "ready_with_warnings") &&
-      recording.videoUrl,
+      recording.premiumProduction?.phase === "ready" &&
+      recording.premiumProduction.videoUrl,
   );
 }
 
@@ -21,13 +18,7 @@ export function signalEpisodeArchiveActionLabel(
   recording: ReplayRecordingV1 | null,
 ): string {
   if (item.status === "live") return "Resume episode";
-  if (signalReplayRecordingHasVideo(recording)) return "Watch episode";
-  if (
-    recording?.status === "queued" ||
-    recording?.status === "preparing_audio" ||
-    recording?.status === "rendering"
-  ) {
-    return "Rendering episode video";
-  }
-  return "Render episode video";
+  return signalReplayRecordingHasVideo(recording)
+    ? "Open replay · Premium ready"
+    : "Open local replay";
 }

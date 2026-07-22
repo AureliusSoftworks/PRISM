@@ -27,6 +27,10 @@ describe("Coffee voice text", () => {
       ),
       "Plankton, Aye, it has!"
     );
+    assert.equal(
+      coffeeVoiceSpokenText("Look [gasps] at *waves* me."),
+      "Look at me.",
+    );
   });
 
   it("returns no synthesis source for action-only turns", () => {

@@ -134,4 +134,33 @@ describe("built-in English audio", () => {
     assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
     assert.ok(wave.length > 44);
   });
+
+  it("keeps API-side timers moving during a representative local reply", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    let timerTicks = 0;
+    const timer = setInterval(() => {
+      timerTicks += 1;
+    }, 10);
+    try {
+      const wave = await generateBuiltinEnglishWave({
+        text: "A local voice reply should never freeze chat, health checks, or the rest of Prism while its audio is being prepared. The dedicated speech process keeps the main API responsive even for a complete conversational paragraph with several sentences.",
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+      });
+      assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
+      assert.ok(
+        timerTicks >= 5,
+        `API timer advanced only ${timerTicks} times during local speech`,
+      );
+    } finally {
+      clearInterval(timer);
+    }
+  });
 });

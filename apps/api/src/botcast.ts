@@ -23,6 +23,7 @@ import type {
   BotcastMessage,
   BotcastMoodBoostEventV1,
   BotcastMoodDrainEventV1,
+  BotcastMusicIdentity,
   BotcastProducerCue,
   BotcastProducerCueDelivery,
   BotcastReplayEvent,
@@ -35,6 +36,7 @@ import type {
   BotcastShowHostChatMessage,
   BotcastShowHostChatRequest,
   BotcastShowPatchRequest,
+  BotcastStudioGlowTuning,
   BotcastStudioLayout,
   BotcastStudioLightingState,
   BotcastStudioAtmosphereMix,
@@ -65,12 +67,14 @@ import {
   BOTCAST_LOCAL_INTRO_DURATION_MS,
   BOTCAST_LOCAL_OUTDENT_DURATION_MS,
   BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS,
+  BOTCAST_PRODUCER_BRIEF_MAX_LENGTH,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   BOT_POWER_CANONICAL_SILENCE_V1,
@@ -88,6 +92,7 @@ import {
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
   normalizeBotcastIdentityMirrorResetV1,
+  normalizeBotcastStudioGlowTuning,
   parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
   applyBotPowerEternalIntroductionResponseV1,
@@ -136,6 +141,7 @@ import {
   botcastProducerGuestThinkingDiscountMs,
   botcastProducerGuestThinkingTimelineDurationMs,
   buildSignalListenerReactionPlanV1,
+  buildSignalMusicProfile,
   botcastReplayTimeline,
   botcastSoundboardCueFromEvent,
   botcastSoundboardCueLabel,
@@ -158,8 +164,10 @@ import {
   normalizeBotCrosstalkInterruptedSpeakerCue,
   parseStoredBotPowersV1,
   rankSignalPersonaTemperaments,
+  signalPersonaTemperamentFor,
   autoFallbackResolvedChain,
-  voicePerformanceTextFromAsteriskCues,
+  voicePerformanceTextFromActionCues,
+  voiceSpokenText,
 } from "@localai/shared";
 import {
   buildCloneFamilyIdentityPrompt,
@@ -190,6 +198,7 @@ import {
 } from "./bot-power-hearing-repeat.ts";
 import { randomId } from "./security.ts";
 import { runPrismReviewV1, type PrismReviewRubricV1 } from "./reviews.ts";
+import { signalGenerationKeywordPromptLine } from "./signal-generation-keywords.ts";
 
 const BOTCAST_SHOW_NAME_MAX = 80;
 const BOTCAST_TEXT_MAX = 2_000;
@@ -198,6 +207,7 @@ const BOTCAST_GENERATED_TOPIC_MAX = 60;
 const BOTCAST_GENERATED_TOPIC_WORDS_MIN = 3;
 const BOTCAST_GENERATED_TOPIC_WORDS_MAX = 8;
 const BOTCAST_STUDIO_IDENTITY_MAX = 2_400;
+const BOTCAST_MUSIC_IDENTITY_DIRECTION_MAX = 900;
 const BOTCAST_LOGO_THESIS_MAX = 700;
 const BOTCAST_DASHBOARD_BLURB_TARGET = 24;
 const BOTCAST_DASHBOARD_BLURB_MIN = 12;
@@ -211,9 +221,79 @@ const BOTCAST_SHOW_HOST_CHAT_INPUT_MAX = 6_000;
 const BOTCAST_SHOW_HOST_CHAT_RESPONSE_MAX = 12_000;
 const BOTCAST_SHOW_HOST_CHAT_EPISODE_LIMIT = 12;
 const BOTCAST_SHOW_HOST_CHAT_ARCHIVE_MAX = 48_000;
+export const SIGNAL_LOCAL_TURN_TIMEOUT_MS = 45_000;
 const SIGNAL_ONLINE_TURN_ATTEMPT_TIMEOUT_MS = 30_000;
 const SIGNAL_ONLINE_TURN_TOTAL_TIMEOUT_MS = 45_000;
 const SIGNAL_ONLINE_TURN_RETRY_DELAY_MS = 250;
+
+export interface SignalLocalTurnResult {
+  value: string;
+  totalDurationMs: number;
+}
+
+export class SignalLocalTurnTimeoutError extends Error {
+  public readonly timeoutMs: number;
+
+  public constructor(timeoutMs: number) {
+    super("Signal LOCAL model turn timed out.");
+    this.name = "SignalLocalTurnTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Keeps a LOCAL Signal turn private while bounding a single slow generation.
+ * The caller can then use Signal's deterministic, transcript-safe repair
+ * instead of leaving the live stage stalled indefinitely.
+ */
+export async function runSignalLocalTurn(args: {
+  provider: LlmProvider;
+  messages: ProviderMessage[];
+  options: GenerateOptions;
+  timeoutMs?: number;
+  now?: () => number;
+}): Promise<SignalLocalTurnResult> {
+  const now = args.now ?? Date.now;
+  const startedAt = now();
+  const timeoutMs = Math.max(
+    1,
+    Math.round(args.timeoutMs ?? SIGNAL_LOCAL_TURN_TIMEOUT_MS),
+  );
+  const timeoutController = new AbortController();
+  const timeoutError = new SignalLocalTurnTimeoutError(timeoutMs);
+  let timedOut = false;
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      timeoutController.abort(timeoutError);
+      reject(timeoutError);
+    }, timeoutMs);
+  });
+  const signal = args.options.signal
+    ? AbortSignal.any([args.options.signal, timeoutController.signal])
+    : timeoutController.signal;
+
+  try {
+    const value = await Promise.race([
+      args.provider.generateResponse(args.messages, {
+        ...args.options,
+        signal,
+      }),
+      timeout,
+    ]);
+    return {
+      value,
+      totalDurationMs: Math.max(0, Math.round(now() - startedAt)),
+    };
+  } catch (error) {
+    if (args.options.signal?.aborted) throw error;
+    if (timedOut) throw timeoutError;
+    throw error;
+  } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+  }
+}
 
 export interface SignalOnlineTurnAttemptV1 {
   provider: ProviderName;
@@ -463,6 +543,7 @@ type BotcastShowRow = {
   atmosphere_audio_duration_ms?: number | null;
   atmosphere_audio_revision?: number | null;
   host_powers_json?: string | null;
+  host_system_prompt?: string | null;
 };
 
 export type StoredBotcastShowIntroAudio = {
@@ -596,8 +677,14 @@ export interface BotcastGenerationOptions {
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
   providerFactory?: typeof selectProvider;
+  /** Cancels a live generation when its owning Signal request is abandoned. */
+  signal?: AbortSignal;
+  /** Test and host override; normal Signal turns use the bounded default. */
+  signalLocalTurnTimeoutMs?: number;
   /** Keep current image slots intact while completing only text identity. */
   preserveArtwork?: boolean;
+  /** Up to five short producer cues that influence this generation only. */
+  keywords?: readonly string[];
 }
 
 export type BotcastBookingSuggestionField =
@@ -846,12 +933,59 @@ function defaultHostingStyle(host: BotcastBotProfile): string {
   return styles[stableHash(`${host.id}:hosting-style`) % styles.length]!;
 }
 
+function buildBotcastMusicIdentity(args: {
+  persona: string | null | undefined;
+  seed: string;
+  premise: string;
+  hostingStyle: string;
+  studioIdentity: string;
+  direction?: unknown;
+  revision?: unknown;
+  profile?: unknown;
+}): BotcastMusicIdentity {
+  const direction = cleanText(
+    args.direction,
+    "",
+    BOTCAST_MUSIC_IDENTITY_DIRECTION_MAX,
+  );
+  const profile = buildSignalMusicProfile({
+    temperament: signalPersonaTemperamentFor(args.persona),
+    persona: args.persona,
+    seed: args.seed,
+    musicDirection: direction,
+    premise: args.premise,
+    hostingStyle: args.hostingStyle,
+    studioIdentity: args.studioIdentity,
+    identity: args.profile,
+  });
+  return {
+    version: 1,
+    direction:
+      direction ||
+      cleanText(
+        [
+          `Original ${profile.sonicWorld}.`,
+          `${profile.emotionalCore}.`,
+          `${profile.motifGesture}, ending with ${profile.endingDirection}.`,
+        ].join(" "),
+        "Original host-specific instrumental ident.",
+        BOTCAST_MUSIC_IDENTITY_DIRECTION_MAX,
+      ),
+    revision:
+      typeof args.revision === "number" && Number.isFinite(args.revision)
+        ? Math.max(1, Math.round(args.revision))
+        : 1,
+    profile,
+  };
+}
+
 type BotcastStudioLighting = "day" | "night";
 
 const BOTCAST_STUDIO_STAGE_COMPOSITION_PROMPT = [
   "Stage exactly two adult-scale interview chairs centered at 22.5% and 77.5% of the frame width, with their backs contained in the lower third; keep the furniture and surrounding architecture at believable human scale.",
   "Leave the full seated-bot silhouette in each chair zone unobstructed because Signal composites one live bot into each chair.",
   "Build exactly two compact, believable studio microphones into the scene, positioned just inward of the chairs around 38% and 62% of frame width and below the seated bots' face zones. No microphone, stand, boom arm, pop filter, or cable may cross either chair center or cover the seated-bot silhouettes.",
+  "On those microphones only, render the illuminated trim, LED rings, and status lights in the exact flat electric-magenta color key #FF00FF. Keep the microphone bodies, grilles, stands, arms, and cables in believable set materials. Keep #FF00FF out of every other object, reflection, practical light, surface, and pixel; this magenta is a runtime color key, not part of the studio palette.",
   "Add one low, broad shared table across the inner gap between the chairs, designed in the same persona-specific material language as the set. Its clear horizontal tabletop must visibly extend beneath both runtime cup bases centered at 36.25% and 63.75% of frame width, meeting those bases around 95% of frame height and showing enough depth and front edge to read as solid furniture; keep the table below both seated-bot silhouettes.",
   "Do not include coffee cups, mugs, tumblers, drinking glasses, or other drinkware; Signal adds any drinks separately at runtime.",
 ].join(" ");
@@ -905,6 +1039,8 @@ function atmosphereForHost(
     prompt,
     imageUrl: null,
     imageId: null,
+    microphoneTintMaskUrl: null,
+    microphoneTintMaskImageId: null,
     revision,
     status: "fallback",
   };
@@ -1491,6 +1627,8 @@ function fallbackAtmosphere(
       : "Neutral two-person podcast studio with warm nighttime practical lighting.",
     imageUrl: null,
     imageId: null,
+    microphoneTintMaskUrl: null,
+    microphoneTintMaskImageId: null,
     revision: 1,
     status: "fallback",
   };
@@ -1512,6 +1650,14 @@ function normalizeAtmosphere(
     prompt: parsed.prompt,
     imageUrl: typeof parsed.imageUrl === "string" ? parsed.imageUrl : null,
     imageId: typeof parsed.imageId === "string" ? parsed.imageId : null,
+    microphoneTintMaskUrl:
+      typeof parsed.microphoneTintMaskUrl === "string"
+        ? parsed.microphoneTintMaskUrl
+        : null,
+    microphoneTintMaskImageId:
+      typeof parsed.microphoneTintMaskImageId === "string"
+        ? parsed.microphoneTintMaskImageId
+        : null,
     revision: typeof parsed.revision === "number" ? parsed.revision : 1,
     status:
       parsed.status === "ready" || parsed.status === "failed"
@@ -1522,24 +1668,28 @@ function normalizeAtmosphere(
 
 function parseAtmospheres(raw: string): {
   studioIdentity: string;
+  musicIdentity: Partial<BotcastMusicIdentity> | null;
   dashboardBlurbs: string[];
   hostInterruptionLines: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
+  studioGlowTuning: BotcastStudioGlowTuning;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
 } {
   try {
     const container = JSON.parse(raw) as Partial<BotcastAtmosphereState> & {
       studioIdentity?: unknown;
+      musicIdentity?: unknown;
       dashboardBlurbs?: unknown;
       hostInterruptionLines?: unknown;
       dayAtmosphere?: Partial<BotcastAtmosphereState>;
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
       studioLighting?: Partial<BotcastStudioLightingState>;
       studioLayout?: unknown;
+      studioGlowTuning?: unknown;
       voiceLevelsByBotId?: unknown;
       atmosphereMix?: unknown;
     };
@@ -1576,6 +1726,12 @@ function parseAtmospheres(raw: string): {
         typeof container.studioIdentity === "string"
           ? cleanText(container.studioIdentity, "", BOTCAST_STUDIO_IDENTITY_MAX)
           : "",
+      musicIdentity:
+        container.musicIdentity &&
+        typeof container.musicIdentity === "object" &&
+        !Array.isArray(container.musicIdentity)
+          ? (container.musicIdentity as Partial<BotcastMusicIdentity>)
+          : null,
       dashboardBlurbs: normalizeDashboardBlurbs(container.dashboardBlurbs),
       hostInterruptionLines: normalizeBotcastHostInterruptionLines(
         container.hostInterruptionLines,
@@ -1586,6 +1742,9 @@ function parseAtmospheres(raw: string): {
       nightAtmosphere: normalizeAtmosphere(container.nightAtmosphere, legacy),
       studioLighting,
       studioLayout: normalizeBotcastStudioLayout(container.studioLayout),
+      studioGlowTuning: normalizeBotcastStudioGlowTuning(
+        container.studioGlowTuning,
+      ),
       voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
         container.voiceLevelsByBotId,
       ),
@@ -1596,6 +1755,7 @@ function parseAtmospheres(raw: string): {
   } catch {
     return {
       studioIdentity: "",
+      musicIdentity: null,
       dashboardBlurbs: [],
       hostInterruptionLines: [],
       dayAtmosphere: fallbackAtmosphere("day"),
@@ -1609,6 +1769,7 @@ function parseAtmospheres(raw: string): {
         status: "missing",
       },
       studioLayout: normalizeBotcastStudioLayout(undefined),
+      studioGlowTuning: normalizeBotcastStudioGlowTuning(undefined),
       voiceLevelsByBotId: {},
       atmosphereMix: normalizeBotcastStudioAtmosphereMix(undefined),
     };
@@ -1764,9 +1925,11 @@ function serializeShowVisuals(
   studioLighting: BotcastStudioLightingState,
   logo: BotcastLogoState,
   studioIdentity: string,
+  musicIdentity: BotcastMusicIdentity,
   dashboardBlurbs: readonly string[],
   hostInterruptionLines: readonly string[],
   studioLayout: BotcastStudioLayout,
+  studioGlowTuning: Readonly<BotcastStudioGlowTuning>,
   voiceLevelsByBotId: Readonly<BotcastVoiceLevelsByBotId>,
   atmosphereMix: Readonly<BotcastStudioAtmosphereMix>,
 ): string {
@@ -1775,6 +1938,7 @@ function serializeShowVisuals(
   return JSON.stringify({
     ...nightAtmosphere,
     studioIdentity,
+    musicIdentity,
     dashboardBlurbs: normalizeDashboardBlurbs(dashboardBlurbs),
     hostInterruptionLines: normalizeBotcastHostInterruptionLines(
       hostInterruptionLines,
@@ -1783,6 +1947,7 @@ function serializeShowVisuals(
     nightAtmosphere,
     studioLighting,
     studioLayout,
+    studioGlowTuning: normalizeBotcastStudioGlowTuning(studioGlowTuning),
     voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
       voiceLevelsByBotId,
     ),
@@ -1793,6 +1958,21 @@ function serializeShowVisuals(
 
 function mapShow(row: BotcastShowRow): BotcastShow {
   const atmospheres = parseAtmospheres(row.atmosphere_json);
+  const logo = parseLogo(row.atmosphere_json, row);
+  const musicIdentityRevision =
+    typeof atmospheres.musicIdentity?.revision === "number"
+      ? Math.max(1, Math.round(atmospheres.musicIdentity.revision))
+      : 1;
+  const musicIdentity = buildBotcastMusicIdentity({
+    persona: row.host_system_prompt,
+    seed: `${row.host_bot_id}:${row.id}:music:${musicIdentityRevision}`,
+    premise: row.premise,
+    hostingStyle: row.hosting_style,
+    studioIdentity: atmospheres.studioIdentity,
+    direction: atmospheres.musicIdentity?.direction,
+    revision: musicIdentityRevision,
+    profile: atmospheres.musicIdentity?.profile,
+  });
   const hostIsMuted = botPowerIsMutedV1(row.host_powers_json);
   const hostEchoesAddressedSpeech =
     !hostIsMuted && botPowerEchoesAddressedSpeechV1(row.host_powers_json);
@@ -1820,9 +2000,10 @@ function mapShow(row: BotcastShowRow): BotcastShow {
       : botcastFallbackStudioAccentVariantForSeed(row.id),
     atmosphere: atmospheres.nightAtmosphere,
     ...atmospheres,
+    musicIdentity,
     dashboardBlurbs,
     hostInterruptionLines,
-    logo: parseLogo(row.atmosphere_json, row),
+    logo,
     introAudio:
       row.intro_audio_provider === "elevenlabs"
         ? {
@@ -1891,6 +2072,11 @@ function repairBotcastShowHostAuthoredLines(
   const hostEchoesAddressedSpeech =
     !hostIsMuted && botPowerEchoesAddressedSpeechV1(row.host_powers_json);
   const needsInterruptionBackfill = stored.hostInterruptionLines.length === 0;
+  const needsMusicIdentityBackfill =
+    stored.musicIdentity?.version !== 1 ||
+    stored.musicIdentity.profile !== show.musicIdentity.profile ||
+    stored.musicIdentity.direction !== show.musicIdentity.direction ||
+    stored.musicIdentity.revision !== show.musicIdentity.revision;
   const needsSilentHostRepair =
     hostIsMuted &&
     (!botcastLinesAreCanonicalSilence(stored.dashboardBlurbs) ||
@@ -1900,6 +2086,7 @@ function repairBotcastShowHostAuthoredLines(
     !botcastLinesAreEchoOriginalityClaim(stored.dashboardBlurbs);
   if (
     !needsInterruptionBackfill &&
+    !needsMusicIdentityBackfill &&
     !needsSilentHostRepair &&
     !needsEchoHostRepair
   ) {
@@ -1914,9 +2101,11 @@ function repairBotcastShowHostAuthoredLines(
       show.studioLighting,
       show.logo,
       show.studioIdentity,
+      show.musicIdentity,
       show.dashboardBlurbs,
       show.hostInterruptionLines,
       show.studioLayout,
+      show.studioGlowTuning,
       show.voiceLevelsByBotId,
       show.atmosphereMix,
     ),
@@ -3000,6 +3189,8 @@ export function listBotcastShows(
               WHERE e.user_id = s.user_id AND e.show_id = s.id) AS episode_count,
             (SELECT b.powers_json FROM bots b
               WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_powers_json,
+            (SELECT b.system_prompt FROM bots b
+              WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_system_prompt,
             (SELECT i.provider FROM botcast_show_intro_audio i
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_provider,
             (SELECT i.model FROM botcast_show_intro_audio i
@@ -3076,9 +3267,20 @@ export function createBotcastShow(
     BOTCAST_SHOW_NAME_MAX,
   );
   const premise = cleanText(input.premise, defaultShowPremise(host));
+  const hostingStyle = cleanText(
+    input.hostingStyle,
+    defaultHostingStyle(host),
+  );
   const logo = logoForHost(host, 1, {
     identitySource: `${studioIdentity}\n${name}\n${premise}`,
     reservedDesigns: logoDesignsForUser(db, userId),
+  });
+  const musicIdentity = buildBotcastMusicIdentity({
+    persona: host.systemPrompt,
+    seed: `${host.id}:${id}:music:1`,
+    premise,
+    hostingStyle,
+    studioIdentity,
   });
   const hostIsMuted = botPowerIsMutedV1(host.powers);
   const hostEchoesAddressedSpeech =
@@ -3094,7 +3296,7 @@ export function createBotcastShow(
     host.id,
     name,
     premise,
-    cleanText(input.hostingStyle, defaultHostingStyle(host)),
+    hostingStyle,
     normalizeAccentColor(host.color),
     fallbackStudioAccentVariant,
     serializeShowVisuals(
@@ -3110,6 +3312,7 @@ export function createBotcastShow(
       },
       logo,
       studioIdentity,
+      musicIdentity,
       hostIsMuted
         ? botcastCanonicalSilentHostLines()
         : hostEchoesAddressedSpeech
@@ -3119,6 +3322,7 @@ export function createBotcastShow(
         ? botcastCanonicalSilentHostLines()
         : botcastHostInterruptionLinesForSeed(host.id),
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
+      BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
       {},
       BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
     ),
@@ -3140,6 +3344,8 @@ export function getBotcastShow(
               WHERE e.user_id = s.user_id AND e.show_id = s.id) AS episode_count,
             (SELECT b.powers_json FROM bots b
               WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_powers_json,
+            (SELECT b.system_prompt FROM bots b
+              WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_system_prompt,
             (SELECT i.provider FROM botcast_show_intro_audio i
               WHERE i.user_id = s.user_id AND i.show_id = s.id) AS intro_audio_provider,
             (SELECT i.model FROM botcast_show_intro_audio i
@@ -3452,6 +3658,10 @@ export function updateBotcastShow(
     patch.studioLayout,
     current.studioLayout,
   );
+  const studioGlowTuning = normalizeBotcastStudioGlowTuning(
+    patch.studioGlowTuning,
+    current.studioGlowTuning,
+  );
   const voiceLevelsByBotId = normalizeBotcastVoiceLevelsByBotId(
     patch.voiceLevelsByBotId,
     current.voiceLevelsByBotId,
@@ -3465,6 +3675,25 @@ export function updateBotcastShow(
     current.studioIdentity || defaultStudioIdentity(host),
     BOTCAST_STUDIO_IDENTITY_MAX,
   );
+  const requestedMusicDirection = cleanText(
+    patch.musicIdentityDirection,
+    current.musicIdentity.direction,
+    BOTCAST_MUSIC_IDENTITY_DIRECTION_MAX,
+  );
+  const musicIdentityChanged =
+    patch.musicIdentityDirection !== undefined &&
+    requestedMusicDirection !== current.musicIdentity.direction;
+  const musicIdentity = musicIdentityChanged
+    ? buildBotcastMusicIdentity({
+        persona: host.systemPrompt,
+        seed: `${host.id}:${showId}:music:${current.musicIdentity.revision + 1}`,
+        premise,
+        hostingStyle,
+        studioIdentity,
+        direction: requestedMusicDirection,
+        revision: current.musicIdentity.revision + 1,
+      })
+    : current.musicIdentity;
   const dashboardBlurbs = hostIsMuted
     ? botcastCanonicalSilentHostLines()
     : hostEchoesAddressedSpeech
@@ -3498,12 +3727,21 @@ export function updateBotcastShow(
       ...atmosphereForHost(host, "day", revision, studioIdentity),
       imageUrl: current.dayAtmosphere.imageUrl,
       imageId: current.dayAtmosphere.imageId,
+      microphoneTintMaskUrl:
+        current.dayAtmosphere.microphoneTintMaskUrl,
+      microphoneTintMaskImageId:
+        current.dayAtmosphere.microphoneTintMaskImageId,
       status: current.dayAtmosphere.status,
     };
   } else if (
     patch.dayAtmosphereImageUrl !== undefined ||
-    patch.dayAtmosphereImageId !== undefined
+    patch.dayAtmosphereImageId !== undefined ||
+    patch.dayAtmosphereMicrophoneTintMaskUrl !== undefined ||
+    patch.dayAtmosphereMicrophoneTintMaskImageId !== undefined
   ) {
+    const dayStudioImageChanged =
+      patch.dayAtmosphereImageUrl !== undefined ||
+      patch.dayAtmosphereImageId !== undefined;
     dayAtmosphere = {
       ...dayAtmosphere,
       imageUrl:
@@ -3514,6 +3752,26 @@ export function updateBotcastShow(
         patch.dayAtmosphereImageId === undefined
           ? dayAtmosphere.imageId
           : cleanText(patch.dayAtmosphereImageId, "", 256) || null,
+      microphoneTintMaskUrl:
+        patch.dayAtmosphereMicrophoneTintMaskUrl === undefined
+          ? dayStudioImageChanged
+            ? null
+            : dayAtmosphere.microphoneTintMaskUrl
+          : cleanText(
+              patch.dayAtmosphereMicrophoneTintMaskUrl,
+              "",
+              2_000,
+            ) || null,
+      microphoneTintMaskImageId:
+        patch.dayAtmosphereMicrophoneTintMaskImageId === undefined
+          ? dayStudioImageChanged
+            ? null
+            : dayAtmosphere.microphoneTintMaskImageId
+          : cleanText(
+              patch.dayAtmosphereMicrophoneTintMaskImageId,
+              "",
+              256,
+            ) || null,
       status:
         patch.dayAtmosphereImageUrl === undefined
           ? dayAtmosphere.status
@@ -3536,14 +3794,25 @@ export function updateBotcastShow(
       ...atmosphereForHost(host, "night", revision, studioIdentity),
       imageUrl: current.nightAtmosphere.imageUrl,
       imageId: current.nightAtmosphere.imageId,
+      microphoneTintMaskUrl:
+        current.nightAtmosphere.microphoneTintMaskUrl,
+      microphoneTintMaskImageId:
+        current.nightAtmosphere.microphoneTintMaskImageId,
       status: current.nightAtmosphere.status,
     };
   } else if (
     patch.nightAtmosphereImageUrl !== undefined ||
     patch.nightAtmosphereImageId !== undefined ||
     patch.atmosphereImageUrl !== undefined ||
-    patch.atmosphereImageId !== undefined
+    patch.atmosphereImageId !== undefined ||
+    patch.nightAtmosphereMicrophoneTintMaskUrl !== undefined ||
+    patch.nightAtmosphereMicrophoneTintMaskImageId !== undefined
   ) {
+    const nightStudioImageChanged =
+      patch.nightAtmosphereImageUrl !== undefined ||
+      patch.nightAtmosphereImageId !== undefined ||
+      patch.atmosphereImageUrl !== undefined ||
+      patch.atmosphereImageId !== undefined;
     nightAtmosphere = {
       ...nightAtmosphere,
       imageUrl:
@@ -3554,6 +3823,26 @@ export function updateBotcastShow(
         nightImageId === undefined
           ? nightAtmosphere.imageId
           : cleanText(nightImageId, "", 256) || null,
+      microphoneTintMaskUrl:
+        patch.nightAtmosphereMicrophoneTintMaskUrl === undefined
+          ? nightStudioImageChanged
+            ? null
+            : nightAtmosphere.microphoneTintMaskUrl
+          : cleanText(
+              patch.nightAtmosphereMicrophoneTintMaskUrl,
+              "",
+              2_000,
+            ) || null,
+      microphoneTintMaskImageId:
+        patch.nightAtmosphereMicrophoneTintMaskImageId === undefined
+          ? nightStudioImageChanged
+            ? null
+            : nightAtmosphere.microphoneTintMaskImageId
+          : cleanText(
+              patch.nightAtmosphereMicrophoneTintMaskImageId,
+              "",
+              256,
+            ) || null,
       status:
         nightImageUrl === undefined
           ? nightAtmosphere.status
@@ -3567,8 +3856,12 @@ export function updateBotcastShow(
     regenerateNightAtmosphere ||
     patch.dayAtmosphereImageUrl !== undefined ||
     patch.dayAtmosphereImageId !== undefined ||
+    patch.dayAtmosphereMicrophoneTintMaskUrl !== undefined ||
+    patch.dayAtmosphereMicrophoneTintMaskImageId !== undefined ||
     patch.nightAtmosphereImageUrl !== undefined ||
     patch.nightAtmosphereImageId !== undefined ||
+    patch.nightAtmosphereMicrophoneTintMaskUrl !== undefined ||
+    patch.nightAtmosphereMicrophoneTintMaskImageId !== undefined ||
     patch.atmosphereImageUrl !== undefined ||
     patch.atmosphereImageId !== undefined;
   if (studioArtworkChanged && patch.studioLighting === undefined) {
@@ -3630,11 +3923,13 @@ export function updateBotcastShow(
       studioLighting,
       logo,
       studioIdentity,
+      musicIdentity,
       dashboardBlurbs,
       hostInterruptionLines.length
         ? hostInterruptionLines
         : botcastHostInterruptionLinesForSeed(host.id),
       studioLayout,
+      studioGlowTuning,
       voiceLevelsByBotId,
       atmosphereMix,
     ),
@@ -3642,6 +3937,13 @@ export function updateBotcastShow(
     showId,
     userId,
   );
+  if (musicIdentityChanged) {
+    // The former bytes remain conceptually valid audio, but no longer belong to
+    // this show's saved sonic fingerprint. Fall back locally until refreshed.
+    db.prepare(
+      "DELETE FROM botcast_show_intro_audio WHERE show_id = ? AND user_id = ?",
+    ).run(showId, userId);
+  }
   return getBotcastShow(db, userId, showId);
 }
 
@@ -3702,6 +4004,42 @@ function safeGeneratedLogoThesis(
   return thesis;
 }
 
+function safeGeneratedMusicIdentityDirection(
+  raw: unknown,
+  forbiddenNames: readonly string[],
+): string {
+  const direction = cleanText(
+    raw,
+    "",
+    BOTCAST_MUSIC_IDENTITY_DIRECTION_MAX,
+  );
+  if (!direction) return "";
+  const normalized = direction.toLocaleLowerCase();
+  const directionTokens = new Set(
+    normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean),
+  );
+  const ignoredNameTokens = new Set(["the", "and", "with", "from", "show"]);
+  const forbiddenNameTokens = forbiddenNames.flatMap((name) =>
+    name
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(
+        (token) => token.length >= 3 && !ignoredNameTokens.has(token),
+      ),
+  );
+  if (forbiddenNameTokens.some((token) => directionTokens.has(token))) {
+    return "";
+  }
+  if (
+    /\b(?:in the style of|sounds? like|imitat(?:e|ing|ion)|copy(?:ing)?|existing theme|recognizable melody|signature song|franchise music)\b/iu.test(
+      direction,
+    )
+  ) {
+    return "";
+  }
+  return direction;
+}
+
 function parseGeneratedShowIdentity(
   raw: string,
   hostName = "",
@@ -3710,6 +4048,7 @@ function parseGeneratedShowIdentity(
   name: string;
   premise: string;
   studioIdentity?: string;
+  musicIdentityDirection?: string;
   logoThesis?: string;
   dashboardBlurbs?: string[];
 } | null {
@@ -3727,6 +4066,10 @@ function parseGeneratedShowIdentity(
       "",
       BOTCAST_STUDIO_IDENTITY_MAX,
     );
+    const musicIdentityDirection = safeGeneratedMusicIdentityDirection(
+      parsed.musicIdentity ?? parsed.music_identity,
+      [hostName, name],
+    );
     const logoThesis = safeGeneratedLogoThesis(
       parsed.logoThesis ?? parsed.logo_thesis,
       [hostName, name],
@@ -3740,11 +4083,12 @@ function parseGeneratedShowIdentity(
           BOTCAST_DASHBOARD_BLURB_FALLBACKS,
         );
     if (echoDashboardBlurb && !dashboardBlurbs) return null;
-    return name && premise
+    return name && premise && musicIdentityDirection
       ? {
           name,
           premise,
           ...(studioIdentity ? { studioIdentity } : {}),
+          ...(musicIdentityDirection ? { musicIdentityDirection } : {}),
           ...(logoThesis ? { logoThesis } : {}),
           ...(dashboardBlurbs ? { dashboardBlurbs } : {}),
         }
@@ -3793,6 +4137,24 @@ function parseGeneratedShowPremise(raw: string): string | null {
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>;
     return cleanText(parsed.premise, "", 360) || null;
+  } catch {
+    return null;
+  }
+}
+
+function parseGeneratedMusicIdentityDirection(
+  raw: string,
+  forbiddenNames: readonly string[],
+): string | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    return (
+      safeGeneratedMusicIdentityDirection(
+        parsed.musicIdentity ?? parsed.music_identity,
+        forbiddenNames,
+      ) || null
+    );
   } catch {
     return null;
   }
@@ -4523,6 +4885,7 @@ export async function generateBotcastShowIdentity(
   const hostIsMuted = botPowerIsMutedV1(host.powers);
   const hostEchoesAddressedSpeech =
     !hostIsMuted && botPowerEchoesAddressedSpeechV1(host.powers);
+  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
   let attempts = 0;
   let providerErrors = 0;
   try {
@@ -4532,13 +4895,16 @@ export async function generateBotcastShowIdentity(
         role: "system",
         content: [
           "You are naming a premium podcast show around its host's singular voice.",
-          "Return one JSON object with exactly five fields: string fields name, premise, studioIdentity, and logoThesis, plus a string array named dashboardBlurbs.",
+          "Return one JSON object with exactly six fields: string fields name, premise, studioIdentity, logoThesis, and musicIdentity, plus a string array named dashboardBlurbs.",
           ...BOTCAST_SHOW_NAME_DIRECTIONS,
           "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
           "Treat the supplied origin inspiration as editable creative direction: preserve its core idea while sharpening it into that promise. Never erase the player's authorship with an unrelated premise.",
           "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
           "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
           "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
+          "musicIdentity is a compact provider-safe instrumental direction for this host's opening ident and paired closing outdent. In one or two dense sentences, capture the host's emotional core and signature contradiction, then specify a sonic world, lead and support instruments, rhythmic behavior, harmonic gravity, motif gesture, production texture, and ending behavior.",
+          "Translate persona into original musical behavior rather than a generic genre label. The direction should feel wrong for another host even if the instrument names were swapped. Favor character-bearing tensions such as brilliant control threatened by instability, public command carrying buried tragedy, or innocent delight moving with unstoppable confidence.",
+          "musicIdentity must use no host or show name, artist, composer, song, franchise, character, recognizable melody, signature theme, quoted lyric, or imitation request. Describe only wholly original musical attributes.",
           "logoThesis is a compact, provider-safe persona design brief, not merely a logo concept. Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 350-650 characters total.",
           "Persona fingerprint names the host's distinctive worldview, obsessions, social energy, contradictions, and creative or intellectual posture. Emblem chooses one familiar, nameable subject or action rooted in that identity and transforms only one part of it with a subtle broadcast behavior. Art direction turns the persona into specific material character, shape behavior, balance, edge language, and emotional temperature.",
           "Make enough choices persona-specific that the mark would feel wrong for a different host even after a palette swap. The persona must control the symbol; broadcast language stays subordinate. State what a viewer sees first and what is happening to it. Keep the subject recognizable at thumbnail size, and avoid briefs made only from abstract cuts, intervals, planes, contours, voids, or geometry.",
@@ -4551,14 +4917,19 @@ export async function generateBotcastShowIdentity(
               : BOTCAST_DASHBOARD_BLURB_DIRECTIONS),
           ...(retrying
             ? [
-                "The previous response could not be used. Repair the contract now: return only the complete JSON object, with no prose or code fence, and do not omit name or premise.",
+                "The previous response could not be used. Repair the contract now: return only the complete JSON object, with no prose or code fence, and do not omit name, premise, or musicIdentity.",
               ]
             : []),
         ].join(" "),
       },
       {
         role: "user",
-        content: `Host: ${host.name}\nOrigin inspiration: ${current.premise}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+        content: [
+          `Host: ${host.name}`,
+          `Origin inspiration: ${current.premise}`,
+          ...(keywordLine ? [keywordLine] : []),
+          `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+        ].join("\n"),
       },
     ];
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -4573,7 +4944,7 @@ export async function generateBotcastShowIdentity(
             ...botcastBookingGenerationOptions(
               selected.providerName,
               selected.model ?? defaultModelIdForProvider(selected.providerName),
-              1_200,
+              1_400,
             ),
             jsonMode: true,
             usagePurpose: "botcast_brand",
@@ -4652,6 +5023,7 @@ export async function generateBotcastShowDashboardBlurbs(
 }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
+  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
   if (botPowerIsMutedV1(host.powers)) {
     return {
       show: updateBotcastShow(db, userId, showId, {
@@ -4688,6 +5060,7 @@ export async function generateBotcastShowDashboardBlurbs(
                   `Show: ${current.name}`,
                   `Premise: ${current.premise}`,
                   `Hosting style: ${current.hostingStyle}`,
+                  ...(keywordLine ? [keywordLine] : []),
                   `Host: ${host.name}`,
                   `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
                   `Rejected line:\n- ${current.dashboardBlurbs[0] ?? BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK}`,
@@ -4767,6 +5140,7 @@ export async function generateBotcastShowDashboardBlurbs(
                 `Premise: ${current.premise}`,
                 `Hosting style: ${current.hostingStyle}`,
                 `Completed episodes: ${current.episodeCount}`,
+                ...(keywordLine ? [keywordLine] : []),
                 `Host: ${host.name}`,
                 `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
                 `Rejected lines:\n${excluded
@@ -4844,6 +5218,7 @@ export async function generateBotcastShowName(
 ): Promise<{ show: BotcastShow; generated: boolean }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
+  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
   try {
     const selected = generationProvider(generation);
     const rejectedNames = [current.name];
@@ -4864,6 +5239,7 @@ export async function generateBotcastShowName(
             content: [
               `Host: ${host.name}`,
               `Rejected titles: ${rejectedNames.map((name) => JSON.stringify(name)).join(", ")}`,
+              ...(keywordLine ? [keywordLine] : []),
               `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
             ].join("\n"),
           },
@@ -4906,6 +5282,7 @@ export async function generateBotcastShowPremise(
 ): Promise<{ show: BotcastShow; generated: boolean }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
+  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
   const sourceInspiration = cleanText(inspiration, current.premise, 360);
   const rejectedPremises = Array.from(
     new Set(
@@ -4935,6 +5312,7 @@ export async function generateBotcastShowPremise(
               `Show: ${current.name}`,
               `Host: ${host.name}`,
               `Inspiration: ${sourceInspiration}`,
+              ...(keywordLine ? [keywordLine] : []),
               `Rejected premises:\n${rejectedPremises
                 .map((premise) => `- ${premise}`)
                 .join("\n")}`,
@@ -4966,6 +5344,85 @@ export async function generateBotcastShowPremise(
       }
       return {
         show: updateBotcastShow(db, userId, showId, { premise }),
+        generated: true,
+      };
+    }
+    return { show: current, generated: false };
+  } catch {
+    return { show: current, generated: false };
+  }
+}
+
+export async function generateBotcastShowMusicIdentity(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  try {
+    const selected = generationProvider(generation);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let raw: string;
+      try {
+        raw = await selected.provider.generateResponse(
+          [
+            {
+              role: "system",
+              content: [
+                "You compose the original musical identity brief for a premium podcast host.",
+                "Return one JSON object with exactly one string field named musicIdentity.",
+                "Write one or two dense sentences covering the host's emotional core, signature contradiction, sonic world, lead and support instruments, rhythmic behavior, harmonic gravity, motif gesture, production texture, and ending behavior.",
+                "Translate personality into musical behavior rather than returning a generic genre label. Make enough choices that the brief would feel wrong for another host even after an instrument swap.",
+                "The ident and outdent are instrumental, compact, melodic, and paired. The outdent recalls and compresses the opening motif rather than inventing a new theme.",
+                "Use no host or show name, artist, composer, song, franchise, character, recognizable melody, signature theme, quoted lyric, or imitation request. Describe only wholly original musical attributes.",
+                "Return a genuinely different direction from the rejected current direction while preserving the same host and show.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              content: [
+                `Show premise: ${current.premise}`,
+                `Hosting style: ${current.hostingStyle}`,
+                `Studio identity: ${current.studioIdentity}`,
+                ...(keywordLine ? [keywordLine] : []),
+                `Rejected current direction: ${current.musicIdentity.direction}`,
+                `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+              ].join("\n"),
+            },
+          ],
+          {
+            ...(selected.model ? { model: selected.model } : {}),
+            temperature: Math.min(1, 0.86 + attempt * 0.04),
+            ...botcastBookingGenerationOptions(
+              selected.providerName,
+              selected.model ?? defaultModelIdForProvider(selected.providerName),
+              520,
+            ),
+            jsonMode: true,
+            usagePurpose: "botcast_brand",
+          },
+        );
+      } catch {
+        continue;
+      }
+      const musicIdentityDirection = parseGeneratedMusicIdentityDirection(
+        raw,
+        [host.name, current.name],
+      );
+      if (
+        !musicIdentityDirection ||
+        musicIdentityDirection.toLocaleLowerCase() ===
+          current.musicIdentity.direction.toLocaleLowerCase()
+      ) {
+        continue;
+      }
+      return {
+        show: updateBotcastShow(db, userId, showId, {
+          musicIdentityDirection,
+        }),
         generated: true,
       };
     }
@@ -5563,6 +6020,15 @@ export function createBotcastEpisode(
         ];
   const topic = cleanText(input.topic, "", BOTCAST_TOPIC_MAX);
   if (!topic) throw new Error("Episode topic is required.");
+  const producerBrief =
+    typeof input.producerBrief === "string"
+      ? input.producerBrief.replace(/\s+/gu, " ").trim()
+      : "";
+  if (producerBrief.length > BOTCAST_PRODUCER_BRIEF_MAX_LENGTH) {
+    throw new Error(
+      `Private producer comments must be ${BOTCAST_PRODUCER_BRIEF_MAX_LENGTH.toLocaleString("en-US")} characters or fewer.`,
+    );
+  }
   const id = randomId(12);
   const now = new Date().toISOString();
   const provider = input.preferredProvider ?? "local";
@@ -5605,7 +6071,7 @@ export function createBotcastEpisode(
       guestContext,
       topic.slice(0, 96),
       topic,
-      cleanText(input.producerBrief, "", BOTCAST_TEXT_MAX),
+      producerBrief,
       provider,
       model,
       responseMode,
@@ -6762,6 +7228,12 @@ export function buildBotcastSpeakerPrompt(
   const producerCutRule = producerCut
     ? "The transmission now needs one prompt, natural closing beat. If the latest line was broken off or a short host bridge just cut in, continue naturally from that interruption without repeating the bridge or pretending the unfinished thought was completed. Otherwise treat this as a normal handoff. Close with tact in your own voice using one or two very short sentences. Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction."
     : null;
+  const closingOwnershipRule =
+    args.episode.segment === "closing"
+      ? args.speakerRole === "host"
+        ? "Binding show contract: this is the final host-owned beat, and the episode ends immediately after this turn. Never yield the sign-off, invite another response, or give the guest the last word."
+        : "Binding show contract: only the host may close Signal. Give a final response without presenting it as the sign-off; the host must speak last."
+      : null;
   const echoingPeerTurnRule =
     args.speakerRole === "host" && priorPeerEchoTurnCount > 0
       ? `The guest's hard echo constraint has produced ${priorPeerEchoTurnCount} verbatim ${priorPeerEchoTurnCount === 1 ? "repeat" : "repeats"}. A repeated line supplies no new claim, agreement, motive, experience, or answer. Acknowledge the constraint at most once, then stop asking the guest to explain it. Keep editorial control and advance the stated topic through concrete stakes, examples, decisions, or contradictions; never invent courage, honesty, intent, or insight for the guest from words they were forced to repeat.`
@@ -6877,11 +7349,7 @@ export function buildBotcastSpeakerPrompt(
         ]
       : [
           "You are the guest. Answer from your persona, with your own confidence, evasiveness, boundaries, and willingness to disagree.",
-          args.episode.segment === "closing" &&
-              (botPowerIsMutedV1(args.host.powers) ||
-                botPowerEchoesAddressedSpeechV1(args.host.powers))
-            ? `The host cannot originate a spoken closing. Close ${args.show.name} yourself now with one concise, earned topic takeaway, thank ${guestNamesHost}, and clearly end the broadcast. Do not ask a question or invite another turn.`
-          : wrappingUp
+          wrappingUp
             ? "The episode is wrapping up. Give your final response or closing thought now. Do not introduce a new topic, ask a return question, or extend the interview."
             : args.departureRequired
             ? "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
@@ -6975,6 +7443,7 @@ export function buildBotcastSpeakerPrompt(
         ...(refocusCueRule ? [refocusCueRule] : []),
         ...(powerInterruptionFollowUpRule ? [powerInterruptionFollowUpRule] : []),
         ...(producerCutRule ? [producerCutRule] : []),
+        ...(closingOwnershipRule ? [closingOwnershipRule] : []),
         ...(echoingPeerTurnRule ? [echoingPeerTurnRule] : []),
         ...(silentPeerTurnRule ? [silentPeerTurnRule] : []),
         ...roleRules,
@@ -7047,6 +7516,38 @@ export function buildBotcastSpeakerPrompt(
   ];
 }
 
+/**
+ * A first host opening is authored as its own creative pass, before Signal
+ * starts its ordinary interview cadence. Keep the usual speaker contract in
+ * place so Powers, participant perception, and opening identity checks still
+ * apply exactly as they do to every saved turn.
+ */
+export function buildBotcastOpeningIntroPrompt(
+  args: BotcastPromptBuildArgs,
+): ProviderMessage[] {
+  const ordinaryPrompt = buildBotcastSpeakerPrompt(args);
+  const hostNamesGuest = botPowerTargetNameV1(args.guest.name, args.host.powers);
+  const openingBrief = [
+    "Dedicated Signal opening-authoring pass: write only the initial host intro that puts this episode on air. This is not an ordinary follow-up turn and must not sound like reusable podcast copy.",
+    "Ground the intro in the persisted show premise, hosting style, and studio identity; let those details shape the host's angle and rhythm rather than listing or describing the set.",
+    `Let ${args.host.name}'s actual persona determine the degree and manner of anticipation. It may be delighted, wary, hungry, amused, precise, or quietly compelled, but it must feel earned by this host rather than uniformly enthusiastic. Whatever the register, convey a genuine personal desire to be on mic for this particular episode; never sound bored, procedural, or obligated.`,
+    `Treat ${hostNamesGuest}'s persona as a real source of friction, expertise, or intrigue when a guest is present. Use the episode topic and any private producer direction as the immediate reason this particular conversation needs to begin now.`,
+    "Choose a fresh opening architecture that fits this episode: for example, begin with a provocation, vivid image, contradiction, confession, urgent observation, or pointed guest-specific hook. The required show, host, and guest identities may land naturally after that hook instead of always leading the first sentence.",
+    "Naturally launch the conversation with a concrete invitation, proposition, or first question. Avoid stock welcome language, generic podcast boilerplate, routine Today-we-are-here phrasing, and all variants of asking for the meaning of the topic or the lesson behind the topic.",
+    "Return only the spoken on-air intro. Do not explain the creative choices, mention this authoring pass, or write the guest's response.",
+  ].join("\n\n");
+  return ordinaryPrompt.map((message) =>
+    message.role === "system"
+      ? { ...message, content: `${message.content}\n\n${openingBrief}` }
+      : message.role === "user"
+        ? {
+            ...message,
+            content: `${message.content}\n\nPersisted studio identity (creative grounding, never read aloud as set description): ${args.show.studioIdentity}`,
+          }
+        : message,
+  );
+}
+
 const BOTCAST_BRACKETED_DIRECTION_PATTERN = /\[([^\]\n]{1,48})\]/giu;
 const BOTCAST_PRODUCTION_META_LEAK_PATTERN =
   /\b(?:as\s+(?:an?\s+)?(?:ai|language model)|(?:system|developer)\s+prompt|(?:the|this)\s+(?:medium|format|simulation|role[- ]?play)(?:['’]s|\s+(?:convention|limitation|rule|requires?|expects?))|(?:voice|speech)\s+provider|text[- ]to[- ]speech|tts\s+(?:engine|voice)|(?:generated|synthetic)\s+voice)\b/iu;
@@ -7066,56 +7567,24 @@ function extractBotcastVoicePerformance(
   enabled: boolean,
   recentTags: readonly string[] = [],
 ): { content: string; voicePerformanceText: string | null } {
-  const allowedTags = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
-  const recentlyUsedTags = new Set(recentTags);
-  const matches = [...value.matchAll(BOTCAST_BRACKETED_DIRECTION_PATTERN)];
+  void enabled;
+  void recentTags;
   const content = value
     .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " ")
+    .trimStart()
+    .replace(BOTCAST_LEADING_STAGE_ACTION_PATTERN, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  const asteriskPerformanceText =
-    voicePerformanceTextFromAsteriskCues(content);
-  if (!content) {
-    return { content, voicePerformanceText: null };
-  }
-  if (!enabled) {
-    return { content, voicePerformanceText: asteriskPerformanceText };
-  }
-  const supported = matches
-    .filter((match) => {
-      const tag = (match[1] ?? "").trim().toLowerCase();
-      return allowedTags.has(tag) && !recentlyUsedTags.has(tag);
-    })
-    .slice(0, 2);
-  if (supported.length === 0) {
-    return { content, voicePerformanceText: asteriskPerformanceText };
-  }
-  const leading: string[] = [];
-  const trailing: string[] = [];
-  for (const match of supported) {
-    const tag = `[${(match[1] ?? "").trim().toLowerCase()}]`;
-    const before = value
-      .slice(0, match.index ?? 0)
-      .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, "")
-      .trim();
-    if (!before) leading.push(tag);
-    else trailing.push(tag);
-  }
-  const voicePerformanceText = [
-    leading.join(" "),
-    asteriskPerformanceText ?? content,
-    trailing.join(" "),
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return { content, voicePerformanceText };
+  return {
+    content,
+    voicePerformanceText: voicePerformanceTextFromActionCues(value),
+  };
 }
 
 function botcastUtteranceAppearsIncomplete(value: string): boolean {
-  const spokenContent = value
-    .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
+  const spokenContent = voiceSpokenText(
+    value.replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " "),
+  );
   const wordCount = spokenContent.split(/\s+/u).filter(Boolean).length;
   if (wordCount < 24) return false;
   const withoutClosingMarks = spokenContent.replace(/["'”’\)\]\}*_]+$/u, "");
@@ -7139,6 +7608,12 @@ const BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS = [
   /^(?:I\s+)?(?:reject|dispute|question) the premise(?: as stated)?[.;]?\s*(?:(?:but|however),?\s*)?I(?:'ll| will)\s+(?:answer|address|respond to|focus on)\b[^.!?…]*[.!?…]?$/iu,
 ] as const;
 
+const BOTCAST_POLICY_STYLE_REFUSAL_PATTERNS = [
+  /^(?:(?:i(?:['’]m| am)\s+)?sorry[,! ]*)?(?:but\s+)?i (?:cannot|can['’]t) (?:help|assist|comply) with (?:that|this)(?: request)?[.!…]?$/iu,
+  /^(?:(?:i(?:['’]m| am)\s+)?sorry[,! ]*)?(?:but\s+)?i(?:['’]m| am) unable to (?:help|assist|comply) with (?:that|this)(?: request)?[.!…]?$/iu,
+  /^(?:(?:i(?:['’]m| am)\s+)?sorry[,! ]*)?(?:but\s+)?i (?:must|have to) (?:decline|refuse)(?: that| this| the request)?[.!…]?$/iu,
+] as const;
+
 type BotcastUtteranceRepairReason =
   | "anthology_history"
   | "empty"
@@ -7146,6 +7621,7 @@ type BotcastUtteranceRepairReason =
   | "incomplete"
   | "non_answering_deferral"
   | "peer_label"
+  | "policy_refusal"
   | "production_meta";
 
 function sanitizeUtteranceWithRepair(
@@ -7213,7 +7689,11 @@ function sanitizeUtteranceWithRepair(
   const nonAnsweringDeferral = BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS.some(
     (pattern) => pattern.test(spokenContent),
   );
+  const policyStyleRefusal = BOTCAST_POLICY_STYLE_REFUSAL_PATTERNS.some(
+    (pattern) => pattern.test(spokenContent),
+  );
   if (!cleaned) return repaired("empty_after_cleanup");
+  if (policyStyleRefusal) return repaired("policy_refusal");
   if (nonAnsweringDeferral) return repaired("non_answering_deferral");
   if (botcastUtteranceAppearsIncomplete(cleaned)) {
     return repaired("incomplete");
@@ -7312,16 +7792,12 @@ function botcastOpeningIntroducesCast(input: {
     `your host ${hostName}`,
     `your host is ${hostName}`,
   ].some((phrase) => content.includes(phrase));
-  const introducesGuest = [
-    `joined by ${guestName}`,
-    `welcome ${guestName}`,
-    `guest is ${guestName}`,
-    `guest ${guestName}`,
-    `with me ${guestName}`,
-    `${guestName} joins me`,
-    `${guestName} was meant to join`,
-  ].some((phrase) => content.includes(phrase));
-  return content.includes(showName) && identifiesHost && introducesGuest;
+  // Requiring a small bank of introduction phrases made valid, more creative
+  // openings collapse into the deterministic fallback. The exact guest name
+  // is the identity contract; the surrounding introduction syntax belongs to
+  // the host persona and the episode-specific opening hook.
+  const identifiesGuest = content.includes(guestName);
+  return content.includes(showName) && identifiesHost && identifiesGuest;
 }
 
 function generationProvider(
@@ -7654,6 +8130,40 @@ function botcastProviderReturnedEmptyResponse(
   );
 }
 
+/** A deterministic, host-shaped recovery when the dedicated opening pass fails. */
+function botcastOpeningIntroFallback(args: {
+  episode: Pick<BotcastEpisode, "id" | "topic" | "guestPresenceMode">;
+  show: Pick<BotcastShow, "name" | "premise" | "hostingStyle">;
+  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">;
+  guestName: string;
+  guestMuted: boolean;
+}): string {
+  const persona = args.host.systemPrompt.toLocaleLowerCase();
+  const anticipation = /(?:wry|dry|sarcastic|comic|irreverent)/u.test(persona)
+    ? "There is a sharp edge in this subject, and I have no intention of sanding it down."
+    : /(?:calm|measured|gentle|patient|quiet)/u.test(persona)
+      ? "There is something worth taking slowly here, because the first easy answer is rarely the honest one."
+      : /(?:skeptic|skeptical|precise|analytical|logical|scientific)/u.test(persona)
+        ? "The claim is interesting only if it survives contact with a real decision."
+        : "This subject has been waiting for a serious conversation, and I am glad to start one now.";
+  const openings = [
+    `${args.show.name} is live. I'm ${args.host.name}, and ${args.guestName} is with me.`,
+    `This is ${args.show.name}. I'm ${args.host.name}, joined by ${args.guestName}.`,
+    `The microphones are open at ${args.show.name}. I'm ${args.host.name}, here with ${args.guestName}.`,
+  ] as const;
+  const opening = openings[
+    stableHash(`signal-opening-fallback:${args.episode.id}:${args.host.id}`) %
+      openings.length
+  ]!;
+  if (args.episode.guestPresenceMode === "audience_only") {
+    return `${opening} ${args.guestName} was booked, but the guest chair is empty. ${anticipation} I will begin with the pressure inside ${JSON.stringify(args.episode.topic)}: what changes when somebody has to act on it?`;
+  }
+  if (args.guestMuted) {
+    return `${opening} ${anticipation} ${args.guestName}, you are under no obligation to speak; I will begin with the pressure inside ${JSON.stringify(args.episode.topic)} and leave room for whatever response you choose to make.`;
+  }
+  return `${opening} ${anticipation} ${args.guestName}, before ${JSON.stringify(args.episode.topic)} becomes an abstraction, where does it become a choice somebody cannot avoid?`;
+}
+
 function botcastBookingGenerationOptions(
   providerName: ProviderName,
   model: string,
@@ -7693,6 +8203,55 @@ function lastCameraSuggestion(
   };
 }
 
+function ensureBotcastFinalHostBeat(
+  db: DatabaseSync,
+  userId: string,
+  episode: BotcastEpisode,
+  now: string,
+): BotcastEpisode {
+  episode = getBotcastEpisode(db, userId, episode.id);
+  if (episode.messages.at(-1)?.speakerRole === "host") return episode;
+
+  const hostPowers =
+    botcastEpisodePowerSnapshot(episode)?.hostPowers ??
+    loadBotProfile(db, userId, episode.hostBotId).powers;
+  const previousGuestLine = episode.messages
+    .slice()
+    .reverse()
+    .find((message) => message.speakerRole === "guest")?.content;
+  const content = botPowerIsMutedV1(hostPowers)
+    ? BOT_POWER_CANONICAL_SILENCE_V1
+    : botPowerEchoesAddressedSpeechV1(hostPowers)
+      ? applyBotPowerEchoResponseV1(previousGuestLine ?? "")
+      : "That is where we will leave it. Thank you for listening.";
+  const messageId = randomId(12);
+  db.prepare(
+    `INSERT INTO botcast_messages
+      (id, user_id, episode_id, speaker_role, bot_id, content, stage_action_text, voice_performance_text, created_at)
+     VALUES (?, ?, ?, 'host', ?, ?, NULL, NULL, ?)`,
+  ).run(messageId, userId, episode.id, episode.hostBotId, content, now);
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "utterance",
+    {
+      messageId,
+      speakerRole: "host",
+      botId: episode.hostBotId,
+      segment: "closing",
+      provider: "deterministic",
+      model: "emergency-host-signoff",
+      responseMode: episode.responseMode,
+      immersiveVoiceEffect: false,
+      moodKey: "neutral",
+      emergencyFallback: true,
+    },
+    now,
+  );
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
 function completeEpisode(
   db: DatabaseSync,
   userId: string,
@@ -7700,6 +8259,7 @@ function completeEpisode(
   outcome: BotcastEpisodeOutcome,
   now: string,
 ): void {
+  episode = ensureBotcastFinalHostBeat(db, userId, episode, now);
   closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
   const runtimeMs = botcastReplayTimeline(
     episode.messages,
@@ -8102,9 +8662,21 @@ export async function endBotcastEpisodeOnProducerCut(
         now,
       );
     }
+    const completedEpisode = getBotcastEpisode(db, userId, episodeId);
+    const emergencyHostMessageId = completedEpisode.events
+      .slice()
+      .reverse()
+      .find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.emergencyFallback === true,
+      )?.payload.messageId;
     return {
-      episode: getBotcastEpisode(db, userId, episodeId),
-      message: null,
+      episode: completedEpisode,
+      message:
+        completedEpisode.messages.find(
+          (message) => message.id === emergencyHostMessageId,
+        ) ?? null,
     };
   }
 }
@@ -8527,16 +9099,14 @@ export async function advanceBotcastEpisode(
       hostPowerSnapshot &&
       botPowerEchoesAddressedSpeechV1(hostPowerSnapshot),
   );
-  const mutedHostNeedsGuestLedClosing = Boolean(
-    episode.guestKind === "bot" &&
+  const wrappingUpMutedHost = Boolean(
+    wrapUpCue &&
+      episode.guestKind === "bot" &&
       episode.guestPresenceMode === "present" &&
       hostPowerSnapshot &&
       botPowerIsMutedV1(hostPowerSnapshot) &&
       guestPowerSnapshot &&
       !botPowerIsMutedV1(guestPowerSnapshot),
-  );
-  const wrappingUpMutedHost = Boolean(
-    wrapUpCue && mutedHostNeedsGuestLedClosing,
   );
   const nextSegment = departurePending
     ? episode.segment
@@ -8601,42 +9171,13 @@ export async function advanceBotcastEpisode(
   if (mutedHostNeedsGuestLedSoloContinuation) {
     scheduledSpeakerRole = "guest";
   }
-  const constrainedHostNeedsGuestLedClosing = Boolean(
-    !producerCut &&
-    episode.guestKind === "bot" &&
-    episode.guestPresenceMode === "present" &&
-    hostPowerSnapshot &&
-    guestPowerSnapshot &&
-    ((botPowerEchoesAddressedSpeechV1(hostPowerSnapshot) &&
-      !botPowerEchoesAddressedSpeechV1(guestPowerSnapshot)) ||
-      (botPowerIsMutedV1(hostPowerSnapshot) &&
-        !botPowerIsMutedV1(guestPowerSnapshot))),
-  );
-  if (constrainedHostNeedsGuestLedClosing && episode.segment === "closing") {
-    scheduledSpeakerRole = botcastHasUtteranceInSegment(
-      episode,
-      "guest",
-      "closing",
-    )
-      ? null
-      : "guest";
-  }
   const speakerRole =
     producerCut
-      ? episode.guestKind === "bot" &&
-        episode.guestPresenceMode === "present" &&
-        hostPowerSnapshot &&
-        guestPowerSnapshot &&
-        ((botPowerEchoesAddressedSpeechV1(hostPowerSnapshot) &&
-          !botPowerEchoesAddressedSpeechV1(guestPowerSnapshot)) ||
-          (botPowerIsMutedV1(hostPowerSnapshot) &&
-            !botPowerIsMutedV1(guestPowerSnapshot)))
-        ? "guest"
-        : "host"
-      : requestedCue &&
-    (cueDelivery === "interrupt_guest" || cueDelivery === "redirect_host")
       ? "host"
-      : scheduledSpeakerRole;
+      : requestedCue &&
+          (cueDelivery === "interrupt_guest" || cueDelivery === "redirect_host")
+        ? "host"
+        : scheduledSpeakerRole;
   if (episode.guestKind === "producer" && speakerRole === "guest") {
     return { episode, message: null };
   }
@@ -8748,7 +9289,7 @@ export async function advanceBotcastEpisode(
   );
   const turnMoodBoost = botcastMoodBoostForTurn(episode, speaker);
   const turnMoodDrain = botcastMoodDrainForTurn(episode, speaker);
-  const prompt = buildBotcastSpeakerPrompt({
+  const promptArgs: BotcastPromptBuildArgs = {
     show,
     episode,
     host,
@@ -8767,7 +9308,10 @@ export async function advanceBotcastEpisode(
       : {}),
     departureRequired,
     ...(producerCut ? { producerCut: true } : {}),
-  });
+  };
+  const prompt = firstHostOpening
+    ? buildBotcastOpeningIntroPrompt(promptArgs)
+    : buildBotcastSpeakerPrompt(promptArgs);
   const turnStartEventSequence = episode.events.at(-1)?.sequence ?? -1;
   const selected = generationProvider(
     generation,
@@ -8777,11 +9321,14 @@ export async function advanceBotcastEpisode(
   const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
     reasoningEffort: "minimal" as const,
+    ...(generation.signal ? { signal: generation.signal } : {}),
     ...(speaker.topP != null ? { topP: speaker.topP } : {}),
     ...(speaker.topK != null ? { topK: speaker.topK } : {}),
     ...(speaker.repetitionPenalty != null
       ? { repetitionPenalty: speaker.repetitionPenalty }
       : {}),
+    // The provider telemetry contract remains a normal Signal turn; the
+    // dedicated opening prompt above is the creative boundary.
     usagePurpose: "botcast_turn" as const,
   };
   const turnMaxTokens =
@@ -8806,6 +9353,10 @@ export async function advanceBotcastEpisode(
     modelUsed = "mute-power";
   } else if (hearingRepeatDirective) {
     raw = hearingRepeatDirective.repeatedContent;
+  } else if (speakerEchoesForTurn) {
+    raw = applyBotPowerEchoResponseV1(addressedSpeechForEcho);
+    providerUsed = "deterministic";
+    modelUsed = "speech-copy-power";
   } else if (episode.responseMode === "auto") {
     const resolvedChain = autoFallbackResolvedChain(
       { provider: episode.provider, model: modelUsed },
@@ -8817,58 +9368,67 @@ export async function advanceBotcastEpisode(
       );
     }
     const providerFactory = generation.providerFactory ?? selectProvider;
-    const result = await runAutoFallbackChain({
-      attempts: resolvedChain.map((attempt, index) => ({
-        ...attempt,
-        available:
-          index === 0 ||
-          generation.providerFactory !== undefined ||
-          attempt.provider === "local" ||
-          (attempt.provider === "openai"
-            ? Boolean(generation.openAiApiKey)
-            : Boolean(generation.anthropicApiKey)),
-        run: (signal) => {
-          const provider =
-            index === 0
-              ? selected.provider
-              : providerFactory(
-                  attempt.provider,
-                  generation.openAiApiKey,
-                  generation.secondaryOllamaHost,
-                  generation.anthropicApiKey,
-                );
-          return provider.generateResponse(prompt, {
-            ...generationOptions,
-            model: attempt.model,
-            maxTokens: botcastSpeakerMaxTokensForModel(
-              speaker.maxTokens,
-              attempt.provider,
-              attempt.model,
-              turnMaxTokens,
-            ),
-            usagePurpose: index === 0 ? "botcast_turn" : "chat_fallback",
-            signal,
-          });
-        },
-      })),
-      perAttemptTimeoutMs: 60_000,
-      totalTimeoutMs: resolvedChain.length * 60_000,
-      ...(speakerIsMutedForTurn
-        ? {}
-        : {
-            validate: (candidate: string) =>
-              validateBotcastAutoSpeakerUtterance({
-                raw: candidate,
-                speakerName: speaker.name,
-                peerName: peer.name,
-                speakerRole,
-              }),
-          }),
-    });
-    raw = result.value;
-    providerUsed = result.provider;
-    modelUsed = result.model;
-    autoRecovery = result.recovery;
+    try {
+      const result = await runAutoFallbackChain({
+        attempts: resolvedChain.map((attempt, index) => ({
+          ...attempt,
+          available:
+            index === 0 ||
+            generation.providerFactory !== undefined ||
+            attempt.provider === "local" ||
+            (attempt.provider === "openai"
+              ? Boolean(generation.openAiApiKey)
+              : Boolean(generation.anthropicApiKey)),
+          run: (signal) => {
+            const provider =
+              index === 0
+                ? selected.provider
+                : providerFactory(
+                    attempt.provider,
+                    generation.openAiApiKey,
+                    generation.secondaryOllamaHost,
+                    generation.anthropicApiKey,
+                  );
+            return provider.generateResponse(prompt, {
+              ...generationOptions,
+              model: attempt.model,
+              maxTokens: botcastSpeakerMaxTokensForModel(
+                speaker.maxTokens,
+                attempt.provider,
+                attempt.model,
+                turnMaxTokens,
+              ),
+              usagePurpose: index === 0 ? "botcast_turn" : "chat_fallback",
+              signal,
+            });
+          },
+        })),
+        perAttemptTimeoutMs: 60_000,
+        totalTimeoutMs: resolvedChain.length * 60_000,
+        ...(generation.signal ? { signal: generation.signal } : {}),
+        ...(speakerIsMutedForTurn
+          ? {}
+          : {
+              validate: (candidate: string) =>
+                validateBotcastAutoSpeakerUtterance({
+                  raw: candidate,
+                  speakerName: speaker.name,
+                  peerName: peer.name,
+                  speakerRole,
+                }),
+            }),
+      });
+      raw = result.value;
+      providerUsed = result.provider;
+      modelUsed = result.model;
+      autoRecovery = result.recovery;
+    } catch (error) {
+      if (!firstHostOpening) throw error;
+      console.warn(
+        `[botcast] opening authoring failed; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+      );
+      raw = "";
+    }
   } else if (episode.responseMode === "online") {
     try {
       onlineTurn = await runSignalOnlineTurn({
@@ -8889,68 +9449,92 @@ export async function advanceBotcastEpisode(
       });
       raw = onlineTurn.value;
     } catch (error) {
-      if (!(error instanceof SignalOnlineTurnError)) throw error;
-      const latestEpisode = getBotcastEpisode(db, userId, episode.id);
-      const producerCutStartedDuringTurn =
-        !producerCut &&
-        latestEpisode.events.some(
-          (event) =>
-            event.sequence > turnStartEventSequence &&
-            event.kind === "cut_away" &&
-            event.payload.reason === "producer_cut",
+      if (error instanceof SignalOnlineTurnError) {
+        const latestEpisode = getBotcastEpisode(db, userId, episode.id);
+        const producerCutStartedDuringTurn =
+          !producerCut &&
+          latestEpisode.events.some(
+            (event) =>
+              event.sequence > turnStartEventSequence &&
+              event.kind === "cut_away" &&
+              event.payload.reason === "producer_cut",
+          );
+        if (
+          latestEpisode.status === "completed" ||
+          producerCutStartedDuringTurn
+        ) {
+          return { episode: latestEpisode, message: null };
+        }
+        recordEvent(db, userId, episode.id, "provider_generation", {
+          v: 1,
+          speakerRole,
+          botId: speaker.id,
+          responseMode: episode.responseMode,
+          provider: selected.providerName,
+          model: modelUsed,
+          turnOrdinal: episode.messages.length,
+          outcome: "failed",
+          attempts: error.attempts,
+          totalDurationMs: error.attempts.reduce(
+            (total, attempt) => total + attempt.durationMs,
+            0,
+          ),
+        });
+        if (
+          !firstHostOpening &&
+          !botcastProviderReturnedEmptyResponse(
+            error.cause,
+            selected.providerName,
+          )
+        ) {
+          throw error;
+        }
+        console.warn(
+          `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
         );
-      if (
-        latestEpisode.status === "completed" ||
-        producerCutStartedDuringTurn
-      ) {
-        return { episode: latestEpisode, message: null };
+        raw = "";
+      } else {
+        if (!firstHostOpening) throw error;
+        console.warn(
+          `[botcast] opening authoring failed; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+        );
+        raw = "";
       }
-      recordEvent(db, userId, episode.id, "provider_generation", {
-        v: 1,
-        speakerRole,
-        botId: speaker.id,
-        responseMode: episode.responseMode,
-        provider: selected.providerName,
-        model: modelUsed,
-        turnOrdinal: episode.messages.length,
-        outcome: "failed",
-        attempts: error.attempts,
-        totalDurationMs: error.attempts.reduce(
-          (total, attempt) => total + attempt.durationMs,
-          0,
-        ),
-      });
-      if (
-        !botcastProviderReturnedEmptyResponse(
-          error.cause,
-          selected.providerName,
-        )
-      ) {
-        throw error;
-      }
-      console.warn(
-        `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
-      );
-      raw = "";
     }
   } else {
     try {
-      raw = await selected.provider.generateResponse(prompt, {
-        ...generationOptions,
-        ...(selected.model ? { model: selected.model } : {}),
-        maxTokens: botcastSpeakerMaxTokensForModel(
-          speaker.maxTokens,
-          selected.providerName,
-          modelUsed,
-          turnMaxTokens,
-        ),
+      const localTurn = await runSignalLocalTurn({
+        provider: selected.provider,
+        messages: prompt,
+        options: {
+          ...generationOptions,
+          ...(selected.model ? { model: selected.model } : {}),
+          maxTokens: botcastSpeakerMaxTokensForModel(
+            speaker.maxTokens,
+            selected.providerName,
+            modelUsed,
+            turnMaxTokens,
+          ),
+        },
+        ...(generation.signalLocalTurnTimeoutMs !== undefined
+          ? { timeoutMs: generation.signalLocalTurnTimeoutMs }
+          : {}),
       });
+      raw = localTurn.value;
     } catch (error) {
-      if (!botcastProviderReturnedEmptyResponse(error, selected.providerName)) {
+      if (generation.signal?.aborted) throw error;
+      const timedOut = error instanceof SignalLocalTurnTimeoutError;
+      if (
+        !firstHostOpening &&
+        !timedOut &&
+        !botcastProviderReturnedEmptyResponse(error, selected.providerName)
+      ) {
         throw error;
       }
       console.warn(
-        `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
+        timedOut
+          ? `[botcast] ${selected.providerName} speaker turn timed out; using safe fallback episode=${episode.id} speaker=${speaker.id}`
+          : `[botcast] speaker returned empty ${selected.providerName} response; using safe fallback episode=${episode.id} speaker=${speaker.id}`,
       );
       raw = "";
     }
@@ -9098,16 +9682,21 @@ export async function advanceBotcastEpisode(
             ? `No spoken answer yet. ${hostNamesGuest}, you can use one clear gesture, or leave the question unanswered.`
             : "I can see your reaction, but I will not put words to it.")
       : null;
+  const openingIntroFallback = firstHostOpening
+    ? botcastOpeningIntroFallback({
+        episode,
+        show,
+        host,
+        guestName: hostNamesGuest,
+        guestMuted: botPowerIsMutedV1(guest.powers),
+      })
+    : null;
   const fallback =
     speakerRole === "host"
       ? producerCutFallback ??
         silentGuestHostFallback ??
         (firstHostOpening
-          ? episode.guestPresenceMode === "audience_only"
-            ? `Welcome to ${show.name}. I'm ${host.name}. ${hostNamesGuest} was meant to join me, but the guest chair is empty. I’ll test the episode’s central premise myself: what claim survives once it meets a real consequence?`
-            : botPowerIsMutedV1(guest.powers)
-              ? `Welcome to ${show.name}. I'm ${host.name}, joined by ${hostNamesGuest}. The premise only matters once it meets a real consequence, so I’ll begin there; ${hostNamesGuest}, you are under no obligation to speak.`
-            : `Welcome to ${show.name}. I'm ${host.name}, joined by ${hostNamesGuest}. ${hostNamesGuest}, what is the real tension at the heart of this episode, and what consequence makes it matter?`
+          ? openingIntroFallback!
           : episode.guestPresenceMode === "audience_only"
             ? episode.segment === "closing" || wrapUpCue
               ? `We will close on the central question: ${topicWithPunctuation} The strongest answer is the one that survives consequence, contradiction, and scrutiny.`
@@ -9141,7 +9730,7 @@ export async function advanceBotcastEpisode(
     speaker.name,
     peerAddressName,
     speakerRole,
-    speakerIsMutedForTurn,
+    true,
   );
   const generatedContent = generatedUtterance.content;
   const performance = extractBotcastVoicePerformance(
@@ -9895,16 +10484,7 @@ export async function advanceBotcastEpisode(
     messageMoodKey,
   );
   episode = getBotcastEpisode(db, userId, episode.id);
-  const constrainedHostGuestLedClosing =
-    speakerRole === "guest" &&
-    episode.segment === "closing" &&
-    !botPowerIsMutedV1(guest.powers) &&
-    (botPowerEchoesAddressedSpeechV1(host.powers) ||
-      botPowerIsMutedV1(host.powers));
-  if (
-    episode.segment === "closing" &&
-    (speakerRole === "host" || constrainedHostGuestLedClosing)
-  ) {
+  if (episode.segment === "closing" && speakerRole === "host") {
     completeEpisode(
       db,
       userId,

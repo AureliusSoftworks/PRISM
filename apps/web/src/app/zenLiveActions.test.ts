@@ -15,14 +15,39 @@ describe("sanitizeZenLiveBotActionText", () => {
       sanitizeZenLiveBotActionText(
         'Smiles warmly, gestures to the dancing, and sings softly "You are a joy to see"'
       ),
-      "Smiles warmly, gestures to the dancing"
+      "Smiles warmly"
     );
   });
 
   it("strips dangling speech bridge words", () => {
     assert.equal(
       sanitizeZenLiveBotActionText("offers a warm smile and a gentle wave back, saying"),
-      "offers a warm smile and a gentle wave back"
+      "offers a warm smile"
+    );
+  });
+
+  it("reduces paragraph-like action prose to one physical beat", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText(
+        "Tilts head slightly, a small, nervous smile flickering across his face, eyes darting around as if expecting something"
+      ),
+      "Tilts head slightly"
+    );
+  });
+
+  it("drops chained gestures even without punctuation", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText("offers a warm smile and a gentle wave back"),
+      "offers a warm smile"
+    );
+  });
+
+  it("caps an unpunctuated action at a short readable beat", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText(
+        "keeps his gaze fixed on the doorway across the silent room"
+      ),
+      "keeps his gaze fixed on the doorway"
     );
   });
 });
@@ -32,12 +57,12 @@ describe("isZenLiveBotPresenceActionVerbose", () => {
     assert.equal(isZenLiveBotPresenceActionVerbose("smiles gently"), false);
   });
 
-  it("expands fuller or phrase-like action beats", () => {
+  it("keeps compacted legacy action beats out of the verbose layout", () => {
     assert.equal(
       isZenLiveBotPresenceActionVerbose(
         "rests one hand over his heart, then offers a small nod toward your courage"
       ),
-      true
+      false
     );
   });
 });

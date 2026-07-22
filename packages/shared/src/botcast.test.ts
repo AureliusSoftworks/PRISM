@@ -10,6 +10,7 @@ import {
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+  BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
@@ -56,6 +57,7 @@ import {
   isBotcastEchoDashboardBlurb,
   normalizeBotcastStudioLayout,
   normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastStudioGlowTuning,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
@@ -484,6 +486,7 @@ describe("Signal studio relighting", () => {
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /do not show a nighttime state/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /diptych|split screen|comparison/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Preserve[\s\S]*microphones/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /#FF00FF[\s\S]*every other object/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Do not add coffee cups, mugs/iu);
     assert.doesNotMatch(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /persona|set bible|host/iu);
   });
@@ -497,6 +500,8 @@ describe("Signal studio layout", () => {
       guestBot: { x: 81.5, y: 66 },
       hostCup: { x: 36.25, y: 86 },
       guestCup: { x: 63.75, y: 86 },
+      hostFloorGlow: { x: 18.5, y: 84, scale: 1 },
+      guestFloorGlow: { x: 81.5, y: 84, scale: 1 },
     });
     assert.deepEqual(
       normalizeBotcastStudioLayout({
@@ -506,6 +511,17 @@ describe("Signal studio layout", () => {
         guestCup: { x: 63.75, y: 90 },
       }),
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
+    );
+    assert.equal(
+      normalizeBotcastStudioLayout({
+        hostBot: { x: 22.5, y: 71.25 },
+        guestBot: { x: 77.5, y: 71.25 },
+        hostCup: { x: 36.25, y: 90 },
+        guestCup: { x: 63.75, y: 90 },
+        hostFloorGlow: { x: 22.5, y: 86, scale: 0.5 },
+        guestFloorGlow: { x: 77.5, y: 86, scale: 0.75 },
+      }).hostFloorGlow.scale,
+      0.5,
     );
     assert.deepEqual(
       normalizeBotcastStudioLayout({
@@ -524,18 +540,30 @@ describe("Signal studio layout", () => {
     };
     assert.deepEqual(
       normalizeBotcastStudioLayout(customizedPreviousLayout),
-      customizedPreviousLayout,
+      {
+        ...customizedPreviousLayout,
+        hostFloorGlow: { x: 20, y: 84, scale: 1 },
+        guestFloorGlow: { x: 77.5, y: 84, scale: 1 },
+      },
     );
     assert.deepEqual(
       normalizeBotcastStudioLayout({
         hostBot: { x: -40, y: 150 },
         guestCup: { x: 42.1234, y: 60.5678 },
+        hostFloorGlow: { x: 70, y: 120, scale: 0.1 },
       }),
       {
         ...BOTCAST_DEFAULT_STUDIO_LAYOUT,
         hostBot: { x: 10, y: 82 },
         guestCup: { x: 42.12, y: 60.57 },
+        hostFloorGlow: { x: 10, y: 96, scale: 0.35 },
       },
+    );
+    assert.equal(
+      normalizeBotcastStudioLayout({
+        guestFloorGlow: { x: 80, y: 84, scale: 8 },
+      }).guestFloorGlow.scale,
+      1,
     );
   });
 
@@ -552,12 +580,14 @@ describe("Signal studio layout", () => {
     assert.equal(botcastCameraOffsetYPercent("wide", layout), 0);
   });
 
-  it("swaps the two seats while keeping each bot paired with its cup", () => {
+  it("swaps the seats with each bot's cup and floor glow", () => {
     const layout = normalizeBotcastStudioLayout({
       hostBot: { x: 18, y: 62 },
       guestBot: { x: 74, y: 68 },
       hostCup: { x: 32, y: 86 },
       guestCup: { x: 67, y: 91 },
+      hostFloorGlow: { x: 18, y: 80, scale: 0.55 },
+      guestFloorGlow: { x: 74, y: 88, scale: 0.8 },
     });
     const swapped = swapBotcastStudioLayoutSeats(layout);
 
@@ -566,6 +596,8 @@ describe("Signal studio layout", () => {
       guestBot: layout.hostBot,
       hostCup: layout.guestCup,
       guestCup: layout.hostCup,
+      hostFloorGlow: layout.guestFloorGlow,
+      guestFloorGlow: layout.hostFloorGlow,
     });
     assert.deepEqual(swapBotcastStudioLayoutSeats(swapped), layout);
   });
@@ -612,6 +644,22 @@ describe("Signal studio atmosphere mix", () => {
   });
 });
 
+describe("Signal studio underglow", () => {
+  it("defaults both themes to full-strength Overlay and bounds saved show tuning", () => {
+    assert.deepEqual(
+      normalizeBotcastStudioGlowTuning(undefined),
+      BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
+    );
+    assert.deepEqual(normalizeBotcastStudioGlowTuning({
+      dark: { opacity: 4, blendMode: "multiply" },
+      light: { opacity: "0.37", blendMode: "screen" },
+    }), {
+      dark: { opacity: 1, blendMode: "overlay" },
+      light: { opacity: 0.37, blendMode: "screen" },
+    });
+  });
+});
+
 describe("Botcast episode state", () => {
   it("maps recorded tension into a stable voice-delivery mood", () => {
     assert.equal(botcastVoiceMoodForTension({ level: 0 }), "neutral");
@@ -622,7 +670,11 @@ describe("Botcast episode state", () => {
 
   it("moves through opening, interview, and closing with asymmetric turns", () => {
     assert.equal(
-      botcastNextSpeakerRole({ messages: [], segment: "opening", guestDeparted: false }),
+      botcastNextSpeakerRole({
+        messages: [],
+        segment: "opening",
+        guestDeparted: false,
+      }),
       "host",
     );
     assert.equal(
@@ -634,16 +686,36 @@ describe("Botcast episode state", () => {
       "guest",
     );
     assert.equal(
-      botcastSegmentForTurn({ current: "opening", utteranceCount: 2, guestDeparted: false }),
+      botcastSegmentForTurn({
+        current: "opening",
+        utteranceCount: 2,
+        guestDeparted: false,
+      }),
       "interview",
     );
     assert.equal(
-      botcastSegmentForTurn({ current: "interview", utteranceCount: 10, guestDeparted: false }),
+      botcastSegmentForTurn({
+        current: "interview",
+        utteranceCount: 10,
+        guestDeparted: false,
+      }),
       "interview",
     );
     assert.equal(
       botcastNextSpeakerRole({
-        messages: [{ speakerRole: "guest" }, { speakerRole: "host" }],
+        messages: [{ speakerRole: "host" }, { speakerRole: "guest" }],
+        segment: "closing",
+        guestDeparted: false,
+      }),
+      "host",
+    );
+    assert.equal(
+      botcastNextSpeakerRole({
+        messages: [
+          { speakerRole: "host" },
+          { speakerRole: "guest" },
+          { speakerRole: "host" },
+        ],
         segment: "closing",
         guestDeparted: false,
       }),

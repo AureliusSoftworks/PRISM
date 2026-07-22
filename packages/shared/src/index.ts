@@ -120,6 +120,8 @@ export {
   botPowerBotNamingCueFromEffectsV1,
   botPowerBotNamingCueV1,
   botPowerDesignationEffectFromIntentV1,
+  botPowerDesignationObserverCueFromEffectsV1,
+  botPowerDesignationObserverCueV1,
   botPowerTargetNameFromEffectsV1,
   botPowerTargetNameV1,
   botPowerDefinitionIsExplicitMuteV1,

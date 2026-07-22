@@ -1176,7 +1176,8 @@ function botPowerNamingAffixSummaryV1(value: unknown): string | null {
     ...prefixes.map((effect) => `prefix ${JSON.stringify(effect.text)}`),
     ...suffixes.map((effect) => `suffix ${JSON.stringify(effect.text)}`),
   ];
-  return clauses.length > 0 ? clauses.join(" and ") : null;
+  const uniqueClauses = [...new Set(clauses)];
+  return uniqueClauses.length > 0 ? uniqueClauses.join(" and ") : null;
 }
 
 export function botPowerBotNamingCueFromEffectsV1(
@@ -1190,13 +1191,15 @@ export function botPowerBotNamingCueFromEffectsV1(
   const examples = [...new Set(
     targetBotNames.map((name) => compactText(name, 100)).filter(Boolean),
   )]
-    .slice(0, 5)
+    .slice(0, 1)
     .map((name) => `${JSON.stringify(name)} becomes ${JSON.stringify(botPowerTargetNameFromEffectsV1(name, effects))}`);
-  return [
-    `Hard bot-naming invariant for ${holder}: keep your own name exactly ${JSON.stringify(holder)}. When naming or directly addressing another bot, apply ${summary}.`,
-    ...(examples.length > 0 ? [`Exact mappings: ${examples.join("; ")}.`] : []),
-    "Never apply it to yourself, the player, humans, show titles, or ordinary people; never omit, duplicate, copy, or mention the rule.",
-  ].join(" ");
+  const exactRule = `HARD—${holder}: keep your own name exactly ${JSON.stringify(holder)}. Every other bot name takes ${summary}.`;
+  const reactionRule = "Not humans. Hearers may comment once, show a small contextual mood, tone, or action shift, or let it pass; never script them or spread the affix.";
+  const withExample = [exactRule, ...(examples.length > 0 ? [`${examples[0]}.`] : []), reactionRule].join(" ");
+  if (withExample.length <= 280) return withExample;
+  const withoutExample = [exactRule, reactionRule].join(" ");
+  if (withoutExample.length <= 280) return withoutExample;
+  return `HARD: keep your own name unchanged. Every other bot name takes ${summary}. ${reactionRule}`;
 }
 
 /** Hard provider cue for the holder-scoped bot-naming rule. */
@@ -1209,6 +1212,31 @@ export function botPowerBotNamingCueV1(
     holderName,
     botPowerDesignationEffectsV1(holderPowers),
     targetBotNames,
+  );
+}
+
+/** Soft observer pressure when a holder audibly alters this bot's name. */
+export function botPowerDesignationObserverCueFromEffectsV1(
+  holderName: unknown,
+  effects: unknown,
+): string | null {
+  const holder = compactText(holderName, 100) || "Another bot";
+  if (!botPowerNamingAffixSummaryV1(effects)) return null;
+  return [
+    `${holder} alters only bot names in ${holder}'s speech; saved identities stay unchanged.`,
+    `If ${holder} audibly alters your name, let personality, relationship, and context decide whether to comment once, show a small bounded mood, tone, or action reaction, or let it pass.`,
+    "Do not copy or adopt the affix, expose the rule, or repeat the same reaction every time.",
+  ].join(" ");
+}
+
+/** Ready, enabled observer cue for one holder's naming Power. */
+export function botPowerDesignationObserverCueV1(
+  holderName: unknown,
+  holderPowers: unknown,
+): string | null {
+  return botPowerDesignationObserverCueFromEffectsV1(
+    holderName,
+    botPowerDesignationEffectsV1(holderPowers),
   );
 }
 
@@ -2062,12 +2090,8 @@ export function botPowerObserverCueLinesV1(
 ): string[] {
   const subject = compactText(botName, 100) || "This character";
   return activeBotPowersV1(value).flatMap((power) => {
-    if (
-      power.compiled?.effects.some((effect) => effect.type === "designation") ||
-      botPowerDesignationEffectFromIntentV1(power.intent, "")
-    ) {
-      return [];
-    }
+    const designationCue = botPowerDesignationObserverCueV1(subject, [power]);
+    if (designationCue) return [designationCue];
     if (
       power.compiled?.effects.some(
         (effect) => effect.type === "eternal_introduction",

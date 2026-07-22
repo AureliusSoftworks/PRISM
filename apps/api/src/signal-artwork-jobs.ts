@@ -65,6 +65,8 @@ export type SignalArtworkJobSnapshot = {
 export type SignalArtworkGeneratedAsset = {
   imageId: string;
   imageUrl: string;
+  microphoneTintMaskImageId?: string | null;
+  microphoneTintMaskUrl?: string | null;
   timings?: {
     downloadMs?: number;
     localPersistenceMs?: number;

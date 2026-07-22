@@ -5395,12 +5395,18 @@
 }
 
 .elevenLabsCreditsCard {
+  --settings-section-color: #2fd3e3;
+  --settings-section-quiet: color-mix(
+    in srgb,
+    var(--settings-section-color) 58%,
+    var(--fg-muted)
+  );
   display: grid;
   gap: 10px;
-  padding: 12px;
+  padding: 14px;
   border: 1px solid
     color-mix(in srgb, var(--settings-section-color) 24%, var(--line));
-  border-radius: 11px;
+  border-radius: 8px;
   background:
     radial-gradient(
       circle at 100% 0,
@@ -5423,13 +5429,13 @@
   gap: 12px;
 }
 
-.elevenLabsCreditsCardHeader > div {
+.elevenLabsCreditsCardTitle {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
-.elevenLabsCreditsCardHeader > div > span {
+.elevenLabsCreditsCardTitle > span {
   color: var(--settings-section-quiet);
   font-size: 9px;
   font-weight: 760;
@@ -5437,12 +5443,47 @@
   text-transform: uppercase;
 }
 
-.elevenLabsCreditsCardHeader > div > strong {
+.elevenLabsCreditsCardTitle > strong {
   color: var(--fg);
   font-size: 13px;
 }
 
-.form .elevenLabsCreditsCardHeader button {
+.elevenLabsCreditsCardActions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.elevenLabsKeyStatus {
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--fg) 9%, var(--line));
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--fg) 3%, var(--bg));
+  font-size: 9.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.elevenLabsKeyStatus[data-key-source="saved"] {
+  border-color: color-mix(in srgb, #36d399 34%, var(--line));
+  color: color-mix(in srgb, #36d399 48%, var(--fg));
+  background: color-mix(in srgb, #36d399 8%, var(--bg));
+}
+
+.elevenLabsKeyStatus[data-key-source="server"] {
+  border-color: color-mix(
+    in srgb,
+    var(--settings-section-color) 28%,
+    var(--line)
+  );
+  color: color-mix(in srgb, var(--settings-section-color) 32%, var(--fg));
+}
+
+.elevenLabsCreditsCardActions button {
   -webkit-appearance: none;
   appearance: none;
   width: auto;
@@ -5465,8 +5506,8 @@
   font-weight: 720;
 }
 
-.form .elevenLabsCreditsCardHeader button:hover:not(:disabled),
-.form .elevenLabsCreditsCardHeader button:focus-visible {
+.elevenLabsCreditsCardActions button:hover:not(:disabled),
+.elevenLabsCreditsCardActions button:focus-visible {
   border-color: color-mix(
     in srgb,
     var(--settings-section-color) 58%,
@@ -5479,6 +5520,11 @@
   );
   color: var(--fg);
   outline: none;
+}
+
+.elevenLabsCreditsCardActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .elevenLabsCreditsProgressHeader {
@@ -26446,37 +26492,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   91.2%,
   92%,
   100% {
-    opacity: 1;
+    opacity: var(--zen-live-bot-crt-flicker-opacity-scale, 1);
     filter: brightness(1.07) contrast(1.02)
       var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   48.2% {
-    opacity: 0.86;
+    opacity: calc(
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.86
+    );
     filter: brightness(0.92) contrast(1.06)
       var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   48.55% {
-    opacity: 0.96;
+    opacity: calc(
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.96
+    );
     filter: brightness(1.02) contrast(1.03)
       var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   74.9% {
-    opacity: 0.78;
+    opacity: calc(
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.78
+    );
     filter: brightness(0.84) contrast(1.08)
       var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   75.22% {
-    opacity: 0.93;
+    opacity: calc(
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.93
+    );
     filter: brightness(0.98) contrast(1.04)
       var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
 
   91.55% {
-    opacity: 0.9;
+    opacity: calc(
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.9
+    );
     filter: brightness(0.95) contrast(1.05)
       var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
   }
@@ -27030,6 +27086,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   [data-crt-glyph-layer="true"],
 .zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
   animation: zenLiveBotCrtFaceFlicker 11.7s linear infinite;
+}
+
+@property --avatar-details-speech-spin-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0turn;
+}
+
+@property --zen-live-bot-crt-flicker-opacity-scale {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+.zenLiveBotPresenceFaceEmissionMask
+  [data-avatar-details-emission][data-avatar-details-ink-motion="spin"] {
+  animation:
+    zenLiveBotCrtFaceFlicker 11.7s linear infinite,
+    avatarDetailsSpeechInkSpin
+      var(--avatar-details-speech-spin-turn-duration, 480ms) linear infinite;
+}
+
+@keyframes avatarDetailsSpeechInkSpin {
+  from {
+    --avatar-details-speech-spin-angle: 0turn;
+  }
+  to {
+    --avatar-details-speech-spin-angle: 1turn;
+  }
 }
 
 .zenLiveBotPresenceFaceGlyph[data-coffee-plate-emoji-eyes-open="false"]
@@ -28183,7 +28268,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     .coffeeSeatPlateEmoji
     [data-coffee-plate-emoji-part]
     [data-crt-glyph-layer="true"]::before,
-  .zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
+  .zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission],
+  .zenLiveBotPresenceFaceEmissionMask
+    [data-avatar-details-emission][data-avatar-details-ink-motion="spin"] {
     animation: none;
   }
 
@@ -65626,7 +65713,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
   .coffeeSeatPlateEmoji,
   .messageMoodCoffeeFace,
-  .zenLiveBotPresenceFaceGlyph
+  .zenLiveBotPresenceFaceGlyph,
+  .zenLiveBotPresenceFaceEmissionMask
 )[data-talking="true"] {
   --bot-face-mouth-speech-scale-x: 1;
   --bot-face-mouth-speech-scale-y: 1;
@@ -65645,13 +65733,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   > [data-crt-glyph-layer="true"] {
   transition:
     transform 70ms ease-out,
-    opacity 70ms linear;
+    opacity 70ms linear,
+    --zen-live-bot-crt-flicker-opacity-scale 70ms linear;
 }
 
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="closed"] {
   --bot-face-mouth-speech-scale-x: 0.96;
   --bot-face-mouth-speech-scale-y: 0.92;
@@ -65664,7 +65754,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="speech-closed"] {
   --bot-face-mouth-speech-scale-x: 0.98;
   --bot-face-mouth-speech-scale-y: 0.88;
@@ -65677,7 +65768,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="dot"] {
   --bot-face-mouth-speech-scale-x: 0.9;
   --bot-face-mouth-speech-scale-y: 0.9;
@@ -65690,7 +65782,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="narrow"] {
   --bot-face-mouth-speech-scale-x: 1.08;
   --bot-face-mouth-speech-scale-y: 0.9;
@@ -65703,7 +65796,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="open-small"] {
   --bot-face-mouth-speech-scale-x: 1.06;
   --bot-face-mouth-speech-scale-y: 1.06;
@@ -65716,7 +65810,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="open-wide"] {
   --bot-face-mouth-speech-scale-x: 1.14;
   --bot-face-mouth-speech-scale-y: 1.18;
@@ -65729,7 +65824,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="open-round"] {
   --bot-face-mouth-speech-scale-x: 1.08;
   --bot-face-mouth-speech-scale-y: 1.18;
@@ -65742,7 +65838,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
-    .zenLiveBotPresenceFaceGlyph
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
   )[data-talking="true"][data-coffee-plate-mouth-shape="at"] {
   --bot-face-mouth-speech-scale-x: 1.12;
   --bot-face-mouth-speech-scale-y: 1.12;
@@ -65771,7 +65868,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   )[data-talking="true"][data-face-mouth-animation="flicker"]
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
-  opacity: var(--bot-face-mouth-speech-opacity);
+  --zen-live-bot-crt-flicker-opacity-scale: var(
+    --bot-face-mouth-speech-opacity
+  );
   transform: rotate(var(--bot-face-custom-glyph-base-rotation));
 }
 
@@ -66436,6 +66535,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeCup.signalCoffeeCup,
 .coffeeCup.signalCoffeeCup[data-cup-side="left"],
 .coffeeCup.signalCoffeeCup[data-cup-side="right"] {
+  --coffee-cup-sip-x: 0px;
+  --coffee-cup-sip-y: 0px;
   position: relative;
   inset: auto;
   width: 100%;

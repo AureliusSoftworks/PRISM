@@ -1392,10 +1392,50 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(recording_id) REFERENCES replay_recordings(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS replay_premium_productions (
+      recording_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      phase TEXT NOT NULL DEFAULT 'idle'
+        CHECK (phase IN (
+          'idle', 'mastering_voices', 'mixing_episode', 'rendering_studio',
+          'finalizing', 'ready', 'failed'
+        )),
+      progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
+      input_hash TEXT,
+      master_ready INTEGER NOT NULL DEFAULT 0,
+      audio_rel_path TEXT,
+      timeline_json TEXT,
+      warning TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(recording_id) REFERENCES replay_recordings(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS replay_premium_segments (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      recording_id TEXT NOT NULL,
+      segment_index INTEGER NOT NULL,
+      strategy TEXT NOT NULL CHECK (strategy IN ('dialogue', 'isolated_tts')),
+      input_hash TEXT NOT NULL,
+      source_message_ids_json TEXT NOT NULL,
+      audio_rel_path TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      timings_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(recording_id, segment_index),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(recording_id) REFERENCES replay_recordings(id) ON DELETE CASCADE
+    );
     CREATE INDEX IF NOT EXISTS replay_recordings_queue_idx
       ON replay_recordings(user_id, status, updated_at);
     CREATE INDEX IF NOT EXISTS replay_voice_takes_message_idx
       ON replay_voice_takes(user_id, recording_id, source_message_id);
+    CREATE INDEX IF NOT EXISTS replay_premium_segments_recording_idx
+      ON replay_premium_segments(user_id, recording_id, segment_index);
     CREATE TRIGGER IF NOT EXISTS replay_recordings_delete_signal_source
       AFTER DELETE ON botcast_episodes
       BEGIN
@@ -1445,6 +1485,16 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const replayPremiumProductionColumns = new Set(
+    (db.prepare("PRAGMA table_info(replay_premium_productions)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!replayPremiumProductionColumns.has("timeline_json")) {
+    db.exec(
+      "ALTER TABLE replay_premium_productions ADD COLUMN timeline_json TEXT;",
+    );
+  }
   const botcastIntroAudioColumns = new Set(
     (db.prepare("PRAGMA table_info(botcast_show_intro_audio)").all() as Array<{
       name: string;

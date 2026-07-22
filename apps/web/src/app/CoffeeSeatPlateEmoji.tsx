@@ -44,7 +44,7 @@ import {
   type CoffeeSeatBlinkPhase,
 } from "./coffee-seat-plate-blink.ts";
 import {
-  ZEN_LIVE_MOUTH_PHASE_MS,
+  ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS,
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth.ts";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
@@ -259,10 +259,6 @@ type CoffeeSeatPlateBlinkState = {
 const COFFEE_SEAT_THINKING_SPINNER_FRAME_MS = 142;
 const COFFEE_SEAT_SIP_MOUTH_GLYPHS = new Set(["*", "⁎"]);
 const COFFEE_SEAT_TALKING_BLINK_GAP_MULTIPLIER = 1.35;
-const CUSTOM_MOUTH_SPIN_PHASES_PER_TURN = 4;
-const CUSTOM_MOUTH_SPIN_TURN_MS =
-  ZEN_LIVE_MOUTH_PHASE_MS * CUSTOM_MOUTH_SPIN_PHASES_PER_TURN;
-
 function coffeeSeatClosedBlinkHoldMs(): number {
   return randomBetween(112, 178);
 }
@@ -723,7 +719,7 @@ export function CoffeeSeatPlateEmoji({
             faceMouthRotationCssDeg === undefined
               ? undefined
               : `${faceMouthRotationCssDeg}deg`,
-          ["--bot-face-mouth-spin-turn-duration" as string]: `${CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
+          ["--bot-face-mouth-spin-turn-duration" as string]: `${ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
           transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
         } as CSSProperties
       }

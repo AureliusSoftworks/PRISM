@@ -19,7 +19,40 @@ export type ZenLiveBotActionState = {
 
 const TRAILING_SPEECH_BRIDGE_RE =
   /(?:[,:;]?\s*(?:and\s+)?(?:says?|saying|asks?|asking|replies?|replying|responds?|responding|tells?|telling|whispers?|whispering|murmurs?|murmuring|adds?|adding|speaks?|speaking|sings?|singing|croons?|crooning)\b\s*(?:softly|warmly|quietly|gently|candidly|brightly|kindly|slowly|under\s+.*)?[.!?\u2026;:,]*)+$/iu;
+const ZEN_LIVE_BOT_ACTION_MAX_WORDS = 8;
+const ZEN_LIVE_BOT_ACTION_CLAUSE_BREAK_RE =
+  /\s*(?:[,;:\u2014\u2013]|\b(?:and\s+then|and|then|while|as\s+if|but)\b)\s*/iu;
+const ZEN_LIVE_BOT_ACTION_DANGLING_WORD_RE =
+  /^(?:a|an|the|and|or|but|with|without|to|toward|towards|from|as|if|of|for|into|onto|over|under|across|around|through)$/iu;
 const ZEN_LIVE_ACTION_ANGRY_BRACKET_GLYPH = ":[";
+
+function compactZenLiveBotActionText(value: string): string {
+  const clauses = value
+    .split(ZEN_LIVE_BOT_ACTION_CLAUSE_BREAK_RE)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  if (clauses.length === 0) return "";
+  let primary = clauses[0] ?? value;
+  const primaryWords = primary.split(/\s+/u).filter(Boolean);
+  if (
+    primaryWords.length === 1 &&
+    /ly$/iu.test(primaryWords[0] ?? "") &&
+    clauses[1]
+  ) {
+    primary = `${primary} ${clauses[1]}`;
+  }
+  const words = primary
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, ZEN_LIVE_BOT_ACTION_MAX_WORDS);
+  while (
+    words.length > 1 &&
+    ZEN_LIVE_BOT_ACTION_DANGLING_WORD_RE.test(words.at(-1) ?? "")
+  ) {
+    words.pop();
+  }
+  return words.join(" ");
+}
 
 export function zenLiveActionMoodToBotMood(
   moodHint: ZenLiveActionMoodHint | undefined
@@ -136,6 +169,7 @@ export function sanitizeZenLiveBotActionText(value: unknown): string | null {
   ).trim();
   action = action.replace(TRAILING_SPEECH_BRIDGE_RE, "").trim();
   action = action.replace(/[.!?\u2026;:,]+$/u, "").trim();
+  action = compactZenLiveBotActionText(action);
   return action || null;
 }
 

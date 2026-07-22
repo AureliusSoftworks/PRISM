@@ -189,6 +189,7 @@ import {
   generateBotcastProducerGuestBooking,
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
+  generateBotcastShowMusicIdentity,
   generateBotcastShowName,
   generateBotcastShowPremise,
   getBotcastEpisode,
@@ -231,23 +232,35 @@ import {
   requestSignalElevenLabsAtmosphere,
 } from "./elevenlabs-sound.ts";
 import {
+  extractSignalStudioMicrophoneTint,
   normalizeSignalAssetUpload,
   normalizeSignalLogoImage,
   readSignalAssetSlot,
 } from "./signal-asset-upload.ts";
 import {
+  normalizeSignalGenerationKeywords,
+  withSignalGenerationKeywords,
+} from "./signal-generation-keywords.ts";
+import {
   REPLAY_RENDER_CHUNK_MAX_BYTES,
   claimNextReplayRecording,
   completeReplayRender,
+  deleteReplayPremiumMedia,
   deleteReplayRecordingMedia,
   failReplayRender,
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
+  replayPremiumAudioFile,
+  replayPremiumSegmentAudioFile,
   replayTranscript,
   replayVideoFile,
   replayVoiceTakeAudioFile,
   retryReplayRecording,
+  retryReplayPremiumProduction,
+  startReplayPremiumProduction,
+  storeReplayPremiumAudio,
+  storeReplayPremiumTimeline,
   storeReplayRenderChunk,
   storeReplayVoiceTakeAudio,
   updateReplayRenderProgress,
@@ -574,7 +587,7 @@ import {
   normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
-  voicePerformanceTextFromAsteriskCues,
+  voicePerformanceTextFromActionCues,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
@@ -739,6 +752,7 @@ import {
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
+  elevenLabsVoiceIsolationSeed,
   normalizeElevenLabsTtsModel,
   requestElevenLabsSpeech,
   requestElevenLabsSpeechWithTimestamps,
@@ -757,6 +771,7 @@ import {
   generateBuiltinEnglishWave,
 } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
+import { splitLocalVoiceStreamText } from "./local-voice-stream.ts";
 import { initializePremiumVoiceDefaults } from "./premium-voice-defaults.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
@@ -769,6 +784,7 @@ async function rebuildSignalStudioLighting(
   options: {
     preferredProvider?: ImageProviderName;
     signal?: AbortSignal;
+    keywords?: readonly string[];
   } = {},
 ): Promise<ReturnType<typeof getBotcastShow>> {
   const show = getBotcastShow(db, userId, showId);
@@ -849,8 +865,12 @@ async function rebuildSignalStudioLighting(
       botId: show.hostBotId,
     });
     try {
-      const result = await editImage(
+      const receiverPrompt = withSignalGenerationKeywords(
         SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT,
+        options.keywords,
+      );
+      const result = await editImage(
+        receiverPrompt,
         dayBytes,
         apiKey,
         {
@@ -875,7 +895,7 @@ async function rebuildSignalStudioLighting(
         nightBytes,
         receiverBytes,
       );
-      prompt = SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT;
+      prompt = receiverPrompt;
       revisedPrompt = result.revisedPrompt;
       quality = imageQuality;
       provider = "openai";
@@ -1222,6 +1242,60 @@ function sendVoiceWave(
   response.setHeader("content-type", "audio/wav");
   response.setHeader("content-length", String(wave.byteLength));
   response.end(wave);
+}
+
+async function sendLocalVoiceWaveStream(args: {
+  response: ServerResponse;
+  text: string;
+  profile: BotAudioVoiceProfileV1;
+  engineUsed:
+    | "builtin"
+    | "builtin-babble"
+    | "builtin-local-fallback"
+    | "builtin-provider-fallback";
+  allowOperatingSystemVoices: boolean;
+  signal: AbortSignal;
+}): Promise<void> {
+  const chunks = splitLocalVoiceStreamText(args.text);
+  if (chunks.length === 0) throw new Error("Speakable assistant text is required.");
+  const generate = (text: string) =>
+    builtinVoiceWaveGeneratorOverride({
+      text,
+      profile: args.profile,
+      allowOperatingSystemVoices: args.allowOperatingSystemVoices,
+      signal: args.signal,
+    });
+  // Prepare the first phrase before committing a 200 response so startup
+  // failures still retain the route's normal actionable 503 behavior.
+  const firstWave = await generate(chunks[0]!);
+  if (args.signal.aborted) throw new DOMException("Aborted", "AbortError");
+
+  args.response.statusCode = 200;
+  args.response.setHeader("cache-control", "no-store");
+  args.response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+  args.response.setHeader("x-prism-voice-stream", "wav-chunks-v1");
+  args.response.setHeader("x-prism-voice-engine", args.engineUsed);
+  args.response.setHeader("x-prism-voice-characters", String(args.text.length));
+  const writeChunk = (wave: Buffer, text: string, index: number) => {
+    args.response.write(
+      `${JSON.stringify({
+        index,
+        characterCount: text.length + (index > 0 ? 1 : 0),
+        text,
+        audioBase64: wave.toString("base64"),
+      })}\n`,
+    );
+  };
+  writeChunk(firstWave, chunks[0]!, 0);
+
+  for (let index = 1; index < chunks.length; index += 1) {
+    if (args.signal.aborted || args.response.destroyed) return;
+    const text = chunks[index]!;
+    const wave = await generate(text);
+    if (args.signal.aborted || args.response.destroyed) return;
+    writeChunk(wave, text, index);
+  }
+  args.response.end();
 }
 const LOCAL_OWNER_USERNAME = "prism-owner";
 const LOCAL_OWNER_DISPLAY_NAME = "Prism Owner";
@@ -3610,10 +3684,39 @@ async function generateAndPersistSignalArtworkAsset(args: {
       await normalizeSignalLogoImage(imageBytes, { generated: true })
     ).pngBytes;
   }
+  let microphoneTintMaskImageId: string | null = null;
+  let microphoneTintMaskUrl: string | null = null;
+  let microphoneTintMaskRelPath: string | null = null;
+  let microphoneTintMaskBytes: Buffer | null = null;
+  let microphoneTintMaskSize: string | null = null;
+  if (args.kind !== "logo") {
+    const extracted = await extractSignalStudioMicrophoneTint(imageBytes);
+    imageBytes = extracted.studioBytes;
+    if (extracted.maskPngBytes) {
+      microphoneTintMaskImageId = randomId(12);
+      microphoneTintMaskUrl = `/api/images/${encodeURIComponent(microphoneTintMaskImageId)}/file`;
+      microphoneTintMaskRelPath = buildGeneratedImageRelativePath(
+        args.userId,
+        microphoneTintMaskImageId,
+      );
+      microphoneTintMaskBytes = extracted.maskPngBytes;
+      microphoneTintMaskSize = `${extracted.width}x${extracted.height}`;
+    }
+  }
   const persistenceStartedAt = Date.now();
   try {
     writeGeneratedImageBytes(localRelPath, imageBytes);
+    if (microphoneTintMaskRelPath && microphoneTintMaskBytes) {
+      writeGeneratedImageBytes(
+        microphoneTintMaskRelPath,
+        microphoneTintMaskBytes,
+      );
+    }
   } catch (error) {
+    tryUnlinkGeneratedImageFile(localRelPath);
+    if (microphoneTintMaskRelPath) {
+      tryUnlinkGeneratedImageFile(microphoneTintMaskRelPath);
+    }
     const detail = error instanceof Error ? error.message : "write failed";
     throw new Error(`Could not save generated image (${detail}).`);
   }
@@ -3641,6 +3744,33 @@ async function generateAndPersistSignalArtworkAsset(args: {
       localRelPath,
       createdAt,
     );
+    if (
+      microphoneTintMaskImageId &&
+      microphoneTintMaskUrl &&
+      microphoneTintMaskRelPath &&
+      microphoneTintMaskSize
+    ) {
+      db.prepare(
+        `INSERT INTO images
+           (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+            revised_prompt, url, size, quality, provider, model, local_rel_path,
+            purpose, created_at)
+         VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'derived', 'local',
+                 'prism-signal-microphone-mask-v1', ?,
+                 'signal_microphone_tint_mask', ?)`,
+      ).run(
+        microphoneTintMaskImageId,
+        args.userId,
+        args.hostBotId,
+        serializeImageRelatedBotIds(relatedBotIds, args.hostBotId),
+        "Derived synthesized Signal microphone tint mask",
+        "Derived synthesized Signal microphone tint mask",
+        microphoneTintMaskUrl,
+        microphoneTintMaskSize,
+        microphoneTintMaskRelPath,
+        createdAt,
+      );
+    }
     recordImageUsage({
       provider,
       model,
@@ -3651,7 +3781,20 @@ async function generateAndPersistSignalArtworkAsset(args: {
       createdAt,
     });
   } catch (error) {
+    db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+      imageId,
+      args.userId,
+    );
+    if (microphoneTintMaskImageId) {
+      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+        microphoneTintMaskImageId,
+        args.userId,
+      );
+    }
     tryUnlinkGeneratedImageFile(localRelPath);
+    if (microphoneTintMaskRelPath) {
+      tryUnlinkGeneratedImageFile(microphoneTintMaskRelPath);
+    }
     throw error;
   }
   const localPersistenceMs = Date.now() - persistenceStartedAt;
@@ -3670,6 +3813,8 @@ async function generateAndPersistSignalArtworkAsset(args: {
   return {
     imageId,
     imageUrl: displayUrl,
+    microphoneTintMaskImageId,
+    microphoneTintMaskUrl,
     timings: { downloadMs, localPersistenceMs },
   };
 }
@@ -7676,6 +7821,7 @@ function buildRoutes(): RouteDefinition[] {
 
       let botSystemPrompt: string | undefined;
       let starterPromptLabel: string | undefined;
+      let runtimeBotPowers: string | null = null;
       let runtimeBotMuted = false;
       let runtimeBotEternalIntroduction = false;
       let runtimeBotQuietIgnored = false;
@@ -7706,6 +7852,7 @@ function buildRoutes(): RouteDefinition[] {
 	            }
           | undefined;
         if (bot) {
+          runtimeBotPowers = bot.powers_json ?? null;
           runtimeBotMuted = botPowerIsMutedV1(bot.powers_json);
           runtimeBotEternalIntroduction = botPowerEternallyIntroducesV1(
             bot.powers_json,
@@ -8000,6 +8147,7 @@ function buildRoutes(): RouteDefinition[] {
             incognito,
             ephemeralMessages,
             botSystemPrompt,
+            botPowers: runtimeBotPowers,
             botPowerMuted: runtimeBotMuted || runtimeBotQuietIgnored,
             botPowerEternalIntroduction: runtimeBotEternalIntroduction,
             botPowerQuietIgnored: runtimeBotQuietIgnored,
@@ -8210,6 +8358,7 @@ function buildRoutes(): RouteDefinition[] {
       const show = getBotcastShow(db, userId, ctx.params.id);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      const keywords = normalizeSignalGenerationKeywords(body.keywords);
       const preferredProvider: ImageProviderName =
         body.preferredProvider === "local" ||
         body.preferredProvider === "openai"
@@ -8294,7 +8443,10 @@ function buildRoutes(): RouteDefinition[] {
               userId,
               hostBotId: show.hostBotId,
               kind,
-              prompt: promptByKind[kind],
+              prompt: withSignalGenerationKeywords(
+                promptByKind[kind],
+                keywords,
+              ),
               size: kind === "logo" ? "1024x1024" : "1536x1024",
               preferredProvider,
               sourceNightImageId,
@@ -8312,11 +8464,19 @@ function buildRoutes(): RouteDefinition[] {
                     ? {
                         nightAtmosphereImageUrl: asset.imageUrl,
                         nightAtmosphereImageId: asset.imageId,
+                        nightAtmosphereMicrophoneTintMaskUrl:
+                          asset.microphoneTintMaskUrl ?? null,
+                        nightAtmosphereMicrophoneTintMaskImageId:
+                          asset.microphoneTintMaskImageId ?? null,
                       }
                     : kind === "day-studio"
                       ? {
                           dayAtmosphereImageUrl: asset.imageUrl,
                           dayAtmosphereImageId: asset.imageId,
+                          dayAtmosphereMicrophoneTintMaskUrl:
+                            asset.microphoneTintMaskUrl ?? null,
+                          dayAtmosphereMicrophoneTintMaskImageId:
+                            asset.microphoneTintMaskImageId ?? null,
                         }
                       : {
                           logoImageUrl: asset.imageUrl,
@@ -8339,6 +8499,7 @@ function buildRoutes(): RouteDefinition[] {
             rebuildSignalStudioLighting(userId, show.id, {
               preferredProvider: effectiveArtworkProvider,
               signal,
+              keywords,
             }).then(
               (refreshedShow) => ({
                 imageId: refreshedShow.studioLighting.imageId!,
@@ -8387,6 +8548,7 @@ function buildRoutes(): RouteDefinition[] {
         preferredOnlineModel: user.preferred_online_model,
         providerFactory: providerFactoryOverride,
         preserveArtwork: body.preserveArtwork === true,
+        keywords: normalizeSignalGenerationKeywords(body.keywords),
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8418,6 +8580,7 @@ function buildRoutes(): RouteDefinition[] {
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
           providerFactory: providerFactoryOverride,
+          keywords: normalizeSignalGenerationKeywords(body.keywords),
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8444,6 +8607,7 @@ function buildRoutes(): RouteDefinition[] {
         preferredLocalModel: user.preferred_local_model,
         preferredOnlineModel: user.preferred_online_model,
         providerFactory: providerFactoryOverride,
+        keywords: normalizeSignalGenerationKeywords(body.keywords),
       });
       json(ctx.res, 200, { ok: true, ...result });
     }),
@@ -8479,6 +8643,39 @@ function buildRoutes(): RouteDefinition[] {
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
           providerFactory: providerFactoryOverride,
+          keywords: normalizeSignalGenerationKeywords(body.keywords),
+        },
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/music-identity", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await generateBotcastShowMusicIdentity(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          providerFactory: providerFactoryOverride,
+          keywords: normalizeSignalGenerationKeywords(body.keywords),
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8644,11 +8841,15 @@ function buildRoutes(): RouteDefinition[] {
               ? {
                   dayAtmosphereImageUrl: displayUrl,
                   dayAtmosphereImageId: imageId,
+                  dayAtmosphereMicrophoneTintMaskUrl: null,
+                  dayAtmosphereMicrophoneTintMaskImageId: null,
                 }
               : slot === "night-studio"
                 ? {
                     nightAtmosphereImageUrl: displayUrl,
                     nightAtmosphereImageId: imageId,
+                    nightAtmosphereMicrophoneTintMaskUrl: null,
+                    nightAtmosphereMicrophoneTintMaskImageId: null,
                   }
                 : { logoImageUrl: displayUrl, logoImageId: imageId },
           );
@@ -8689,6 +8890,7 @@ function buildRoutes(): RouteDefinition[] {
       const show = getBotcastShow(db, userId, ctx.params.id);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      const keywords = normalizeSignalGenerationKeywords(body.keywords);
       const preferredProvider: ImageProviderName =
         body.preferredProvider === "local" ||
         body.preferredProvider === "openai"
@@ -8747,6 +8949,7 @@ function buildRoutes(): RouteDefinition[] {
           rebuildSignalStudioLighting(userId, show.id, {
             preferredProvider: effectiveProvider,
             signal,
+            keywords,
           }).then((refreshedShow) => ({
             imageId: refreshedShow.studioLighting.imageId!,
             imageUrl: refreshedShow.studioLighting.imageUrl!,
@@ -8771,6 +8974,8 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       const show = getBotcastShow(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const keywords = normalizeSignalGenerationKeywords(body.keywords);
       const userKey = decryptUserKey(userId);
       const apiKey =
         getElevenLabsApiKeyForUser(userId, userKey) ??
@@ -8787,10 +8992,11 @@ function buildRoutes(): RouteDefinition[] {
         )
         .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
       if (!host) throw new HttpError(404, "Signal host bot not found.");
-      const musicSeed = `${show.hostBotId}:${show.id}:${show.logo.seed}`;
+      const musicSeed = `${show.hostBotId}:${show.id}:music:${show.musicIdentity.revision}`;
       const musicProfile = buildSignalMusicProfile({
         temperament: signalPersonaTemperamentFor(host.system_prompt),
         seed: musicSeed,
+        identity: show.musicIdentity.profile,
         premise: show.premise,
         hostingStyle: show.hostingStyle,
         studioIdentity: show.studioIdentity,
@@ -8798,11 +9004,13 @@ function buildRoutes(): RouteDefinition[] {
       const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
         profile: musicProfile,
         seed: musicSeed,
+        keywords,
       });
       const outdentCompositionPlan =
         buildSignalElevenLabsOutdentCompositionPlan({
           profile: musicProfile,
           seed: musicSeed,
+          keywords,
         });
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -8811,6 +9019,7 @@ function buildRoutes(): RouteDefinition[] {
         const atmospherePrompt = buildSignalAtmospherePrompt({
           showName: show.name,
           studioIdentity: show.studioIdentity,
+          keywords,
         });
         const [music, outdent, atmosphere] = await Promise.all([
           requestSignalElevenLabsMusic({
@@ -8900,6 +9109,8 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       const show = getBotcastShow(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const keywords = normalizeSignalGenerationKeywords(body.keywords);
       const userKey = decryptUserKey(userId);
       const apiKey =
         getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
@@ -8912,6 +9123,7 @@ function buildRoutes(): RouteDefinition[] {
       const atmospherePrompt = buildSignalAtmospherePrompt({
         showName: show.name,
         studioIdentity: show.studioIdentity,
+        keywords,
       });
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -9042,6 +9254,9 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.hostingStyle !== undefined
           ? { hostingStyle: body.hostingStyle as string }
           : {}),
+        ...(body.musicIdentityDirection !== undefined
+          ? { musicIdentityDirection: body.musicIdentityDirection as string }
+          : {}),
         ...(body.hostInterruptionLines !== undefined
           ? {
               hostInterruptionLines:
@@ -9079,6 +9294,12 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.studioLayout !== undefined
           ? {
               studioLayout: body.studioLayout as BotcastShowPatchRequest["studioLayout"],
+            }
+          : {}),
+        ...(body.studioGlowTuning !== undefined
+          ? {
+              studioGlowTuning:
+                body.studioGlowTuning as BotcastShowPatchRequest["studioGlowTuning"],
             }
           : {}),
         ...(body.voiceLevelsByBotId !== undefined
@@ -9647,6 +9868,13 @@ function buildRoutes(): RouteDefinition[] {
         requestedProvider === "anthropic"
           ? requestedProvider
           : user.preferred_provider;
+      const signalAdvanceAbort = new AbortController();
+      const onSignalAdvanceClientClose = () => {
+        if (!ctx.res.writableEnded) signalAdvanceAbort.abort();
+      };
+      ctx.req.once("close", onSignalAdvanceClientClose);
+      ctx.req.once("aborted", onSignalAdvanceClientClose);
+      ctx.res.once("close", onSignalAdvanceClientClose);
       let result: Awaited<ReturnType<typeof advanceBotcastEpisode>>;
       try {
         result = await advanceBotcastEpisode(
@@ -9681,16 +9909,23 @@ function buildRoutes(): RouteDefinition[] {
             autoFallbackChain: parseStoredAutoFallbackChain(
               user.auto_fallback_chain,
             ),
+            signal: signalAdvanceAbort.signal,
             ...(powerTheme ? { theme: powerTheme } : {}),
             providerFactory: providerFactoryOverride,
           },
         );
       } catch (error) {
+        if (signalAdvanceAbort.signal.aborted) return;
         if (error instanceof SignalOnlineTurnError) {
           throw new HttpError(signalOnlineTurnHttpStatus(error), error.message);
         }
         throw error;
+      } finally {
+        ctx.req.off("close", onSignalAdvanceClientClose);
+        ctx.req.off("aborted", onSignalAdvanceClientClose);
+        ctx.res.off("close", onSignalAdvanceClientClose);
       }
+      if (signalAdvanceAbort.signal.aborted) return;
       json(ctx.res, 200, {
         ok: true,
         ...projectBotcastAdvanceResponseForAudienceV1(result),
@@ -12193,6 +12428,7 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         body.manifest as ReplayManifestV1,
+        { queueRender: body.render !== false },
       );
       json(ctx.res, 202, { ok: true, recording });
     }),
@@ -12281,6 +12517,148 @@ function buildRoutes(): RouteDefinition[] {
       if (!file) throw new HttpError(404, "Replay voice audio not found.");
       streamReplayFile(ctx, file);
     }),
+    route("POST", "/api/replays/:id/premium", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      if (
+        body.confirm !== "send-to-elevenlabs" ||
+        body.preferredProvider === "local" ||
+        user.preferred_provider === "local"
+      ) {
+        throw new HttpError(
+          409,
+          "Premium production requires ONLINE mode and confirmation before sending the transcript and voice IDs to ElevenLabs.",
+        );
+      }
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          503,
+          "ElevenLabs is not connected. Add or verify the key in Settings → Keys.",
+        );
+      }
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const result = await startReplayPremiumProduction({
+          db,
+          userId,
+          recordingId: ctx.params.id,
+          apiKey,
+          regenerate: body.regenerate === true,
+          signal: controller.signal,
+        });
+        json(ctx.res, 202, { ok: true, ...result });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsVoiceError) {
+          throw new HttpError(
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : 502,
+            error.message,
+          );
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("POST", "/api/replays/:id/premium/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const recording = retryReplayPremiumProduction(db, userId, ctx.params.id);
+      if (!recording) {
+        throw new HttpError(409, "The Premium voice master must finish before video retry.");
+      }
+      json(ctx.res, 202, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/premium/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!(ctx.body instanceof Uint8Array)) {
+        throw new HttpError(400, "Premium master audio must be binary.");
+      }
+      const contentType = String(ctx.req.headers["content-type"] ?? "")
+        .split(";", 1)[0]
+        .trim();
+      if (contentType !== "audio/wav" && contentType !== "audio/webm") {
+        throw new HttpError(400, "Premium master audio must be WAV or WebM.");
+      }
+      const recording = storeReplayPremiumAudio(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body,
+        contentType,
+      );
+      if (!recording) throw new HttpError(404, "Premium production not found.");
+      json(ctx.res, 201, { ok: true, recording });
+    }),
+    route("PATCH", "/api/replays/:id/premium/timeline", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (!body.timeline || typeof body.timeline !== "object") {
+        throw new HttpError(400, "Premium timeline is required.");
+      }
+      const recording = storeReplayPremiumTimeline(
+        db,
+        userId,
+        ctx.params.id,
+        body.timeline as import("@localai/shared").ReplayTimelineV1,
+      );
+      if (!recording) throw new HttpError(404, "Premium production not found.");
+      json(ctx.res, 200, { ok: true, recording });
+    }),
+    route("GET", "/api/replays/:id/premium/segments/:segmentId/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayPremiumSegmentAudioFile(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.segmentId,
+      );
+      if (!file) throw new HttpError(404, "Premium master segment not found.");
+      streamReplayFile(ctx, file);
+    }),
+    route("GET", "/api/replays/:id/premium/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayPremiumAudioFile(db, userId, ctx.params.id);
+      if (!file) throw new HttpError(404, "Premium audio master not found.");
+      streamReplayFile(ctx, file, {
+        range: true,
+        attachmentName:
+          ctx.query.get("download") === "1"
+            ? `prism-premium-master.${file.contentType === "audio/wav" ? "wav" : "webm"}`
+            : undefined,
+      });
+    }),
+    route("GET", "/api/replays/:id/premium/video", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayVideoFile(db, userId, ctx.params.id);
+      if (!file) throw new HttpError(404, "Premium video not found.");
+      streamReplayFile(ctx, file, {
+        range: true,
+        attachmentName:
+          ctx.query.get("download") === "1"
+            ? `prism-premium-video.${file.contentType === "video/webm" ? "webm" : "mp4"}`
+            : undefined,
+      });
+    }),
+    route("DELETE", "/api/replays/:id/premium", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (body.confirm !== "delete-premium-media") {
+        throw new HttpError(400, "Premium media deletion requires explicit confirmation.");
+      }
+      const recording = deleteReplayPremiumMedia(db, userId, ctx.params.id);
+      if (!recording) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 200, { ok: true, recording });
+    }),
     route("POST", "/api/replays/claim", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -12348,6 +12726,10 @@ function buildRoutes(): RouteDefinition[] {
           codec: String(body.codec ?? (contentType === "video/webm" ? "vp9/opus" : "avc/aac")),
           durationMs: Number(body.durationMs),
           warning: typeof body.warning === "string" ? body.warning : null,
+          timeline:
+            body.timeline && typeof body.timeline === "object"
+              ? (body.timeline as import("@localai/shared").ReplayTimelineV1)
+              : null,
         },
       );
       json(ctx.res, 201, { ok: true, recording });
@@ -12551,6 +12933,10 @@ function buildRoutes(): RouteDefinition[] {
         sourceText = Object.prototype.hasOwnProperty.call(raw, "spokenText")
           ? raw.spokenText
           : (message?.content ?? "");
+        sourceElevenLabsText =
+          voicePerformanceTextFromActionCues(
+            message?.content ?? raw.spokenText,
+          ) ?? sourceElevenLabsText;
         persistedMessageProvider = message?.provider ?? null;
         sourceBotMuted = botPowerIsMutedV1(message?.powers_json);
         if (!listenerReactionRequested || !requestedSpeakerBotId) {
@@ -12598,11 +12984,9 @@ function buildRoutes(): RouteDefinition[] {
         }
         sourceText = signalMessage.content;
         sourceElevenLabsText =
-          typeof raw.elevenLabsText === "string"
-            ? voicePerformanceTextFromAsteriskCues(
-                signalMessage.voice_performance_text ?? signalMessage.content,
-              ) ?? signalMessage.voice_performance_text
-            : null;
+          voicePerformanceTextFromActionCues(
+            signalMessage.voice_performance_text ?? signalMessage.content,
+          ) ?? signalMessage.voice_performance_text;
         persistedMessageProvider =
           signalMessage.response_mode === "local"
             ? "local"
@@ -12757,6 +13141,10 @@ function buildRoutes(): RouteDefinition[] {
         sourceText = interruptedSpeakerReaction;
         sourceElevenLabsText = interruptedSpeakerReaction;
       }
+      sourceElevenLabsText =
+        voicePerformanceTextFromActionCues(sourceElevenLabsText) ??
+        voicePerformanceTextFromActionCues(sourceText) ??
+        sourceElevenLabsText;
       const botNamePronunciations = db
         .prepare(
         `SELECT id, name, name_pronunciation, self_referral
@@ -12864,15 +13252,27 @@ function buildRoutes(): RouteDefinition[] {
           text: boundary.text,
           seed: request.seed ?? request.messageId ?? boundary.text,
         });
+        const babbleProfile = {
+          ...normalizeBotAudioVoiceProfileV1(boundary.profile),
+          warmth: 0,
+          lilt: 0,
+          bottishTone: 0.45,
+        };
         try {
+          if (raw.streamChunks === true && !request.includeAlignment) {
+            await sendLocalVoiceWaveStream({
+              response: ctx.res,
+              text: babbleText,
+              profile: babbleProfile,
+              engineUsed: "builtin-babble",
+              allowOperatingSystemVoices,
+              signal: controller.signal,
+            });
+            return;
+          }
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: babbleText,
-            profile: {
-              ...normalizeBotAudioVoiceProfileV1(boundary.profile),
-              warmth: 0,
-              lilt: 0,
-              bottishTone: 0.45,
-            },
+            profile: babbleProfile,
             allowOperatingSystemVoices,
             signal: controller.signal,
           });
@@ -12885,6 +13285,10 @@ function buildRoutes(): RouteDefinition[] {
           );
         } catch (error) {
           if (controller.signal.aborted) return;
+          if (ctx.res.headersSent) {
+            if (!ctx.res.writableEnded) ctx.res.destroy();
+            return;
+          }
           json(ctx.res, 503, {
             ok: false,
             code: "babble-system-unavailable",
@@ -12904,6 +13308,17 @@ function buildRoutes(): RouteDefinition[] {
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
         try {
+          if (raw.streamChunks === true && !request.includeAlignment) {
+            await sendLocalVoiceWaveStream({
+              response: ctx.res,
+              text: boundary.text,
+              profile: boundary.profile,
+              engineUsed: boundary.engineUsed,
+              allowOperatingSystemVoices,
+              signal: controller.signal,
+            });
+            return;
+          }
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
@@ -12919,6 +13334,10 @@ function buildRoutes(): RouteDefinition[] {
           );
         } catch (error) {
           if (controller.signal.aborted) return;
+          if (ctx.res.headersSent) {
+            if (!ctx.res.writableEnded) ctx.res.destroy();
+            return;
+          }
           throw new HttpError(
             503,
             error instanceof Error
@@ -12993,6 +13412,9 @@ function buildRoutes(): RouteDefinition[] {
       const controller = new AbortController();
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
+      const providerVoiceSeed = elevenLabsVoiceIsolationSeed(
+        sourceBotId ?? request.seed ?? request.messageId ?? voiceId,
+      );
       try {
         if (request.includeAlignment) {
           const timestamped = await requestElevenLabsSpeechWithTimestamps({
@@ -13002,6 +13424,7 @@ function buildRoutes(): RouteDefinition[] {
             text: boundary.elevenLabsText,
             profile: boundary.profile,
             deliveryMood: request.deliveryMood,
+            seed: providerVoiceSeed,
             signal: controller.signal,
           });
           const alignment =
@@ -13046,6 +13469,7 @@ function buildRoutes(): RouteDefinition[] {
           text: boundary.elevenLabsText,
           profile: boundary.profile,
           deliveryMood: request.deliveryMood,
+          seed: providerVoiceSeed,
           signal: controller.signal,
         });
         ctx.res.statusCode = 200;
@@ -17012,12 +17436,16 @@ async function dispatchRequest(
     const replayVoiceTakeUpload =
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/takes\/[^/]+\/audio$/u.test(pathname);
+    const replayPremiumAudioUpload =
+      method === "POST" &&
+      /^\/api\/replays\/[^/]+\/premium\/audio$/u.test(pathname);
     const body =
       method === "POST" || method === "PATCH" || method === "DELETE"
         ? slateArchiveUpload ||
           accountBackupArchiveUpload ||
           replayRenderChunkUpload ||
-          replayVoiceTakeUpload
+          replayVoiceTakeUpload ||
+          replayPremiumAudioUpload
           ? await readBinaryBody(
               req,
               slateArchiveUpload
@@ -17025,8 +17453,10 @@ async function dispatchRequest(
                 : accountBackupArchiveUpload
                   ? ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES
                   : replayRenderChunkUpload
-                    ? REPLAY_RENDER_CHUNK_MAX_BYTES
-                    : 24 * 1024 * 1024,
+                  ? REPLAY_RENDER_CHUNK_MAX_BYTES
+                    : replayPremiumAudioUpload
+                      ? 256 * 1024 * 1024
+                      : 24 * 1024 * 1024,
             )
           : await readJsonBody(req)
         : {};

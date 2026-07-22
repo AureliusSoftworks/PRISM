@@ -3,6 +3,7 @@ import {
   compileReplayTimelineV1,
   resolveVoicePlaybackTransform,
   type ReplayRecordingV1,
+  type ReplayPremiumSegmentV1,
   type ReplayTimelineV1,
   type ReplayVoiceTakeRecordV1,
 } from "@localai/shared";
@@ -29,6 +30,11 @@ export interface PreparedReplayAudio {
   timeline: ReplayTimelineV1;
   takes: ReplayVoiceTakeRecordV1[];
   warnings: string[];
+}
+
+export interface PrepareReplayAudioOptions {
+  premiumSegments?: readonly ReplayPremiumSegmentV1[];
+  includeProductionAssets?: boolean;
 }
 
 function stableHash(value: string): number {
@@ -94,31 +100,24 @@ function alignmentFromClip(
 }
 
 async function synthesizeMissingTake(args: {
-  recording: ReplayRecordingV1;
   take: ReplayVoiceTakeRecordV1;
 }): Promise<{ bytes: ArrayBuffer; contentType: string } | null> {
-  const { recording, take } = args;
+  const { take } = args;
   const snapshot = take.snapshot;
   if (snapshot.mode !== "english" && snapshot.mode !== "babble") return null;
-  const source = {
-    replayRecordingId: recording.id,
-    replayTakeId: take.id,
-  };
   const response = await replayFetch("/api/voices/synthesize", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      ...source,
       mode: snapshot.mode,
-      engine: snapshot.requestedEngine ?? "builtin",
-      explicitVoicePreview: snapshot.requestedEngine === "elevenlabs",
-      explicitOnlineContext:
-        snapshot.requestedEngine === "elevenlabs" &&
-        recording.manifest?.privacyMode !== "local",
+      engine: "builtin",
+      explicitVoicePreview: false,
+      explicitOnlineContext: false,
       includeAlignment: true,
       profile: snapshot.profile,
       moodKey: snapshot.moodKey,
       seed: snapshot.seed,
+      text: snapshot.spokenText,
       elevenLabsText: snapshot.performanceText ?? undefined,
     }),
   });
@@ -147,12 +146,37 @@ async function synthesizeMissingTake(args: {
   return { bytes: clip.bytes, contentType: clip.audioContentType };
 }
 
+async function synthesizeLegacyReplayUtterance(text: string): Promise<AudioBuffer | null> {
+  const response = await replayFetch("/api/voices/synthesize", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      mode: "english",
+      engine: "builtin",
+      text,
+      explicitVoicePreview: false,
+      explicitOnlineContext: false,
+      profile: {
+        v: 1,
+        baseVoiceId: "builtin-default",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+      },
+      moodKey: "neutral",
+    }),
+  });
+  if (!response.ok) return null;
+  const clip = await readEnglishVoiceSynthesisClip(response);
+  return decodeAudio(clip.bytes).catch(() => null);
+}
+
 async function audioForTake(args: {
-  recording: ReplayRecordingV1;
   take: ReplayVoiceTakeRecordV1;
   warnings: string[];
 }): Promise<AudioBuffer | null> {
-  const { recording, take, warnings } = args;
+  const { take, warnings } = args;
   if (!take.snapshot.audible || take.snapshot.mode === "mute") return null;
   if (take.snapshot.mode === "bottish") {
     return proceduralBottishBuffer({
@@ -170,7 +194,10 @@ async function audioForTake(args: {
     if (response.ok) bytes = await response.arrayBuffer();
   }
   if (!bytes) {
-    const regenerated = await synthesizeMissingTake({ recording, take });
+    warnings.push(
+      `${take.snapshot.speakerName}: captured voice was missing; local speech fallback used.`,
+    );
+    const regenerated = await synthesizeMissingTake({ take });
     bytes = regenerated?.bytes ?? null;
   }
   if (!bytes) {
@@ -232,14 +259,45 @@ function syntheticEventTimeMs(
 export async function prepareReplayAudio(
   recording: ReplayRecordingV1,
   initialTakes: readonly ReplayVoiceTakeRecordV1[],
+  options: PrepareReplayAudioOptions = {},
 ): Promise<PreparedReplayAudio> {
   if (!recording.manifest) throw new Error("Replay manifest is missing.");
   const warnings: string[] = [];
+  if (
+    options.premiumSegments?.length &&
+    recording.premiumProduction?.audioUrl &&
+    recording.premiumProduction.timeline
+  ) {
+    const response = await replayFetch(recording.premiumProduction.audioUrl);
+    if (response.ok) {
+      return {
+        audioBuffer: await decodeAudio(await response.arrayBuffer()),
+        timeline: recording.premiumProduction.timeline,
+        takes: initialTakes.map((take) => ({
+          ...take,
+          snapshot: { ...take.snapshot },
+        })),
+        warnings: recording.premiumProduction.warning
+          ? [recording.premiumProduction.warning]
+          : [],
+      };
+    }
+  }
   const takes = initialTakes.map((take) => ({
     ...take,
     snapshot: { ...take.snapshot },
   }));
+  const premiumMessageIds = new Set(
+    options.premiumSegments?.flatMap((segment) => segment.sourceMessageIds) ?? [],
+  );
   for (const take of takes) {
+    if (
+      take.snapshot.channel === "primary" &&
+      take.snapshot.sourceMessageId &&
+      premiumMessageIds.has(take.snapshot.sourceMessageId)
+    ) {
+      continue;
+    }
     if (take.snapshot.durationMs || take.snapshot.mode === "mute") continue;
     if (take.snapshot.mode === "bottish") {
       const updated = await updateCapturedReplayVoiceTake(Promise.resolve(take), {
@@ -250,7 +308,7 @@ export async function prepareReplayAudio(
   }
   const buffers = new Map<string, AudioBuffer | null>();
   for (const take of takes) {
-    const buffer = await audioForTake({ recording, take, warnings }).catch(() => {
+    const buffer = await audioForTake({ take, warnings }).catch(() => {
       warnings.push(`${take.snapshot.speakerName}: frozen voice unavailable; rendered silently.`);
       return null;
     });
@@ -272,14 +330,75 @@ export async function prepareReplayAudio(
       replaceTake(takes, updated);
     }
   }
-  const timeline = compileReplayTimelineV1(recording.manifest, takes);
+  const fallbackBuffersByMessageId = new Map<string, AudioBuffer>();
+  const capturedPrimaryMessageIds = new Set(
+    takes.flatMap((take) =>
+      take.snapshot.channel === "primary" && take.snapshot.sourceMessageId
+        ? [take.snapshot.sourceMessageId]
+        : [],
+    ),
+  );
+  for (const utterance of recording.manifest.utterances) {
+    if (
+      !utterance.audible ||
+      premiumMessageIds.has(utterance.sourceMessageId) ||
+      capturedPrimaryMessageIds.has(utterance.sourceMessageId)
+    ) continue;
+    const fallback = await synthesizeLegacyReplayUtterance(
+      utterance.spokenText || utterance.text,
+    ).catch(() => null);
+    if (fallback) {
+      fallbackBuffersByMessageId.set(utterance.sourceMessageId, fallback);
+      warnings.push(
+        `${recording.manifest.participants.find((participant) => participant.id === utterance.speakerId)?.name ?? utterance.speakerRole}: captured voice was missing; local speech fallback used.`,
+      );
+    }
+  }
+  let timeline = compileReplayTimelineV1(recording.manifest, takes);
+  const premiumBuffers: Array<{
+    segment: ReplayPremiumSegmentV1;
+    buffer: AudioBuffer;
+    startMs: number;
+  }> = [];
+  if (options.premiumSegments?.length) {
+    let cursorMs = 2_360;
+    const timingByMessageId = new Map<string, { startMs: number; endMs: number }>();
+    for (const segment of [...options.premiumSegments].sort((a, b) => a.index - b.index)) {
+      const response = await replayFetch(segment.audioUrl);
+      if (!response.ok) throw new Error("A cached Premium voice segment is unavailable.");
+      const buffer = await decodeAudio(await response.arrayBuffer());
+      premiumBuffers.push({ segment, buffer, startMs: cursorMs });
+      for (const timing of segment.timings) {
+        timingByMessageId.set(timing.sourceMessageId, {
+          startMs: cursorMs + timing.startMs,
+          endMs: cursorMs + Math.max(timing.startMs + 1, timing.endMs),
+        });
+      }
+      cursorMs += Math.max(segment.durationMs, Math.round(buffer.duration * 1_000)) + 420;
+    }
+    const beats = timeline.beats.map((beat) => {
+      if (beat.kind !== "utterance" || !beat.sourceMessageId) return beat;
+      const timing = timingByMessageId.get(beat.sourceMessageId);
+      return timing ? { ...beat, ...timing } : beat;
+    });
+    const end = beats.find((beat) => beat.kind === "end");
+    if (end) {
+      end.startMs = Math.max(cursorMs + 240, 3_100);
+      end.endMs = end.startMs + 2_000;
+    }
+    timeline = {
+      ...timeline,
+      beats: beats.sort((a, b) => a.startMs - b.startMs),
+      durationMs: Math.max(...beats.map((beat) => beat.endMs)),
+    };
+  }
   const scheduledAssets: Array<{
     buffer: AudioBuffer;
     startMs: number;
     gain: number;
     loop?: boolean;
   }> = [];
-  if (recording.surface === "signal") {
+  if (recording.surface === "signal" && options.includeProductionAssets !== false) {
     const metadata = recording.manifest.visual.metadata ?? {};
     const [intro, outdent, atmosphere] = await Promise.all([
       replayAssetBuffer(metadata.introAudioUrl),
@@ -347,7 +466,12 @@ export async function prepareReplayAudio(
       .map((take) => [take.snapshot.sourceMessageId as string, take]),
   );
   for (const utterance of recording.manifest.utterances) {
-    if (utterance.audible && !takeByMessageId.has(utterance.sourceMessageId)) {
+    if (
+      utterance.audible &&
+      !premiumMessageIds.has(utterance.sourceMessageId) &&
+      !takeByMessageId.has(utterance.sourceMessageId) &&
+      !fallbackBuffersByMessageId.has(utterance.sourceMessageId)
+    ) {
       const speaker = recording.manifest.participants.find(
         (participant) => participant.id === utterance.speakerId,
       );
@@ -359,28 +483,34 @@ export async function prepareReplayAudio(
   for (const beat of timeline.beats) {
     if (beat.kind !== "utterance" || !beat.sourceMessageId) continue;
     const take = takeByMessageId.get(beat.sourceMessageId);
-    if (!take) continue;
-    const buffer = buffers.get(take.id);
+    if (premiumMessageIds.has(beat.sourceMessageId)) continue;
+    const buffer = take
+      ? buffers.get(take.id)
+      : fallbackBuffersByMessageId.get(beat.sourceMessageId);
     if (!buffer) continue;
     const source = context.createBufferSource();
     source.buffer = buffer;
-    const adjustedProfile = applyVoiceDeliveryMoodToProfile(
-      take.snapshot.profile,
-      take.snapshot.moodKey,
-    );
-    const transform = resolveVoicePlaybackTransform(adjustedProfile);
+    const adjustedProfile = take
+      ? applyVoiceDeliveryMoodToProfile(
+          take.snapshot.profile,
+          take.snapshot.moodKey,
+        )
+      : null;
+    const transform = adjustedProfile
+      ? resolveVoicePlaybackTransform(adjustedProfile)
+      : { tempo: 1, pitchCents: 0 };
     source.playbackRate.value = transform.tempo;
     source.detune.value = transform.pitchCents;
     const gain = context.createGain();
     const profileVolume =
-      "volume" in take.snapshot.profile ? take.snapshot.profile.volume : 1;
+      take && "volume" in take.snapshot.profile ? take.snapshot.profile.volume : 1;
     gain.gain.value = Math.max(
       0,
-      Math.min(1.5, take.snapshot.gain * profileVolume),
+      Math.min(1.5, (take?.snapshot.gain ?? 1) * profileVolume),
     );
     const lowpass = context.createBiquadFilter();
     lowpass.type = "lowpass";
-    const warmth = Math.max(-1, Math.min(1, take.snapshot.profile.warmth));
+    const warmth = Math.max(-1, Math.min(1, take?.snapshot.profile.warmth ?? 0));
     lowpass.frequency.value = 16_000 - Math.max(0, warmth) * 5_000;
     source.connect(lowpass);
     lowpass.connect(gain);
@@ -389,12 +519,21 @@ export async function prepareReplayAudio(
       input: gain,
       destination: compressor,
       send:
-        recording.surface === "signal" && take.snapshot.effectsEnabled
+        recording.surface === "signal" && (take?.snapshot.effectsEnabled ?? true)
           ? SIGNAL_STUDIO_VOICE_ROOM_SEND
           : null,
-      stereoPan: take.snapshot.stereoPan,
+      stereoPan: take?.snapshot.stereoPan ?? 0,
     });
     source.start(beat.startMs / 1_000);
+  }
+  for (const premium of premiumBuffers) {
+    const source = context.createBufferSource();
+    source.buffer = premium.buffer;
+    const gain = context.createGain();
+    gain.gain.value = 1;
+    source.connect(gain);
+    gain.connect(compressor);
+    source.start(premium.startMs / 1_000);
   }
   for (const take of takes) {
     if (take.snapshot.channel === "primary" || !take.snapshot.sourceMessageId) {

@@ -5,13 +5,17 @@ import type { ReplayManifestV1, ReplayVoiceTakeV1 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
 import {
   claimNextReplayRecording,
+  deleteReplayPremiumMedia,
   deleteReplayRecordingMedia,
   failReplayRender,
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
+  replayPremiumSegmentsForRecording,
   replayVoiceTakesForRecording,
+  retryReplayPremiumProduction,
   retryReplayRecording,
+  storeReplayPremiumTimeline,
   upsertReplayVoiceTake,
 } from "../replay-recordings.ts";
 import { replayRecordingRelativeDirectory } from "../replay-storage.ts";
@@ -48,6 +52,16 @@ function fixture(): DatabaseSync {
      VALUES ('coffee-1', 'user-1', 'Coffee replay', 'coffee', ?, ?)`,
   ).run(now, now);
   return db;
+}
+
+function markPremiumMasterReady(db: DatabaseSync, recordingId: string): void {
+  const now = "2026-07-21T00:00:00.000Z";
+  db.prepare(
+    `INSERT INTO replay_premium_productions
+       (recording_id, user_id, phase, progress, input_hash, master_ready,
+        created_at, updated_at)
+     VALUES (?, 'user-1', 'mixing_episode', 0.48, 'test-master', 1, ?, ?)`,
+  ).run(recordingId, now, now);
 }
 
 const manifest: ReplayManifestV1 = {
@@ -124,6 +138,119 @@ const takeSnapshot: ReplayVoiceTakeV1 = {
 };
 
 describe("durable replay recordings", () => {
+  it("archives Signal locally without exposing it to the video render queue", () => {
+    const db = fixture();
+    const archived = queueReplayRecording(db, "user-1", manifest, {
+      queueRender: false,
+    });
+    assert.equal(archived.status, "collecting");
+    assert.ok(archived.manifest);
+    assert.equal(
+      claimNextReplayRecording(db, "user-1", { surface: "signal" }),
+      null,
+    );
+  });
+
+  it("retries a failed Premium render from its cached master without provider work", () => {
+    const db = fixture();
+    const archived = queueReplayRecording(db, "user-1", manifest, {
+      queueRender: false,
+    });
+    markPremiumMasterReady(db, archived.id);
+    const cached = storeReplayPremiumTimeline(
+      db,
+      "user-1",
+      archived.id,
+      archived.timeline!,
+    );
+    assert.deepEqual(cached?.premiumProduction?.timeline, archived.timeline);
+    db.prepare(
+      `UPDATE replay_premium_productions
+          SET phase = 'failed', progress = 0.7, error = 'encoder unavailable'
+        WHERE recording_id = ? AND user_id = 'user-1'`,
+    ).run(archived.id);
+    const retried = retryReplayPremiumProduction(db, "user-1", archived.id);
+
+    assert.equal(retried?.status, "queued");
+    assert.equal(retried?.premiumProduction?.phase, "mixing_episode");
+    assert.equal(retried?.premiumProduction?.masterReady, true);
+    assert.deepEqual(retried?.premiumProduction?.timeline, archived.timeline);
+    assert.equal(retried?.premiumProduction?.error, null);
+  });
+
+  it("deletes only Premium media and restores the canonical local timeline", () => {
+    const db = fixture();
+    const take = upsertReplayVoiceTake(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+      takeSnapshot,
+    );
+    const archived = queueReplayRecording(db, "user-1", manifest, {
+      queueRender: false,
+    });
+    assert.equal(take.recordingId, archived.id);
+    markPremiumMasterReady(db, archived.id);
+    db.prepare(
+      `UPDATE replay_recordings
+          SET timeline_json = '{"v":1,"durationMs":999999,"beats":[]}'
+        WHERE id = ? AND user_id = 'user-1'`,
+    ).run(archived.id);
+
+    const deleted = deleteReplayPremiumMedia(db, "user-1", archived.id);
+
+    assert.equal(deleted?.status, "collecting");
+    assert.equal(deleted?.premiumProduction, null);
+    assert.ok(deleted?.manifest);
+    assert.notEqual(deleted?.timeline?.durationMs, 999_999);
+    assert.equal(replayVoiceTakesForRecording(db, "user-1", archived.id).length, 1);
+  });
+
+  it("invalidates only derived Premium media when the saved replay changes", () => {
+    const db = fixture();
+    const archived = queueReplayRecording(db, "user-1", manifest, {
+      queueRender: false,
+    });
+    markPremiumMasterReady(db, archived.id);
+    db.prepare(
+      `UPDATE replay_premium_productions
+          SET phase = 'ready', progress = 1,
+              timeline_json = '{"v":1,"durationMs":999999,"beats":[]}'
+        WHERE recording_id = ? AND user_id = 'user-1'`,
+    ).run(archived.id);
+    db.prepare(
+      `INSERT INTO replay_premium_segments
+         (id, user_id, recording_id, segment_index, strategy, input_hash,
+          source_message_ids_json, audio_rel_path, content_type, duration_ms,
+          timings_json, created_at, updated_at)
+       VALUES ('segment-1', 'user-1', ?, 0, 'isolated_tts', 'old-segment',
+               '["message-1"]', 'replays/user-1/recording/segment.mp3',
+               'audio/mpeg', 1000, '[]', ?, ?)`,
+    ).run(archived.id, archived.createdAt, archived.updatedAt);
+
+    const changed = queueReplayRecording(
+      db,
+      "user-1",
+      {
+        ...manifest,
+        utterances: manifest.utterances.map((utterance) => ({
+          ...utterance,
+          text: "A corrected transcript.",
+          spokenText: "A corrected transcript.",
+        })),
+      },
+      { queueRender: false },
+    );
+
+    assert.equal(changed.status, "collecting");
+    assert.equal(changed.premiumProduction?.phase, "idle");
+    assert.equal(changed.premiumProduction?.masterReady, false);
+    assert.equal(changed.premiumProduction?.timeline, null);
+    assert.match(changed.premiumProduction?.warning ?? "", /produce a new Premium cut/u);
+    assert.equal(replayPremiumSegmentsForRecording(db, "user-1", archived.id).length, 1);
+  });
+
   it("freezes a take, queues deterministically, and leases without any provider work", () => {
     const db = fixture();
     const firstTake = upsertReplayVoiceTake(
@@ -146,6 +273,7 @@ describe("durable replay recordings", () => {
     const queued = queueReplayRecording(db, "user-1", manifest);
     assert.equal(queued.status, "queued");
     assert.match(queued.transcriptVttUrl ?? "", /transcript\.vtt/u);
+    markPremiumMasterReady(db, queued.id);
     const claimed = claimNextReplayRecording(db, "user-1");
     assert.ok(claimed);
     assert.equal(claimed.recording.status, "preparing_audio");
@@ -166,6 +294,7 @@ describe("durable replay recordings", () => {
   it("keeps recordings tenant-scoped and cascades metadata with the source", () => {
     const db = fixture();
     const queued = queueReplayRecording(db, "user-1", manifest);
+    markPremiumMasterReady(db, queued.id);
     assert.equal(getReplayRecording(db, "other-user", queued.id), null);
     assert.equal(listReplayRecordings(db, "user-1").length, 1);
     db.prepare("DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?").run(
@@ -178,6 +307,7 @@ describe("durable replay recordings", () => {
   it("recovers stale client leases and keeps the transcript after recording deletion", () => {
     const db = fixture();
     const queued = queueReplayRecording(db, "user-1", manifest);
+    markPremiumMasterReady(db, queued.id);
     const firstClaim = claimNextReplayRecording(db, "user-1");
     assert.ok(firstClaim);
     db.prepare(
@@ -203,7 +333,8 @@ describe("durable replay recordings", () => {
       sourceId: "coffee-1",
       title: "Coffee replay",
     });
-    queueReplayRecording(db, "user-1", manifest);
+    const signalQueued = queueReplayRecording(db, "user-1", manifest);
+    markPremiumMasterReady(db, signalQueued.id);
 
     const signal = claimNextReplayRecording(db, "user-1", {
       surface: "signal",

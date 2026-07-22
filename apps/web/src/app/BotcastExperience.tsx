@@ -1,13 +1,16 @@
 "use client";
 
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type AnimationEvent as ReactAnimationEvent,
+  type ChangeEvent as ReactChangeEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -20,13 +23,17 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   BOTCAST_DEFAULT_STUDIO_FILM_GRAIN,
+  BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE,
+  BOTCAST_PRODUCER_BRIEF_MAX_LENGTH,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_STUDIO_FILM_GRAIN_MAX,
+  BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+  BOTCAST_STUDIO_FLOOR_GLOW_SCALE_STEP,
   BOTCAST_VOICE_LEVEL_MAX,
   BOTCAST_VOICE_LEVEL_STEP,
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
@@ -68,6 +75,7 @@ import {
   buildSignalMusicProfile,
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastStudioGlowTuning,
   normalizeBotcastStudioLayout,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
@@ -76,6 +84,7 @@ import {
   listenerReactionHasCrosstalkAudio,
   resolveListenerReactionAtMs,
   type BotcastCameraShot,
+  type BotcastAtmosphereState,
   type BotcastEpisode,
   type BotcastEpisodeAdvanceResponse,
   type BotcastEpisodeResponseMode,
@@ -91,6 +100,8 @@ import {
   type BotcastShowHostChatResponse,
   type BotcastSessionDurationMinutes,
   type BotcastStudioAtmosphereMix,
+  type BotcastStudioGlowThemeTuning,
+  type BotcastStudioGlowTuning,
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
   type BotcastVoiceLevelsByBotId,
@@ -184,9 +195,11 @@ import {
 } from "./replayManifest";
 import {
   queueReplayManifest,
+  replayRecordingDetail,
   replayRecordingForSource,
-  retryReplayRecording,
+  startReplayPremiumProduction,
 } from "./replayClient";
+import { prepareReplayAudio, type PreparedReplayAudio } from "./replayAudio";
 import {
   REPLAY_RECORDING_CHANGED_EVENT,
   ReplayRenderCoordinator,
@@ -197,7 +210,12 @@ import {
   type SignalReplayVideoFrameState,
 } from "./signalReplayVideoFrame";
 import {
+  waitForSignalReplayRenderStage,
+  withSignalReplayCaptureTimeout,
+} from "./signalReplayRenderStage";
+import {
   readSignalCameraTransitionMode,
+  signalCameraTransitionStyleForChange,
   signalLiveAutoCameraShot,
   writeSignalCameraTransitionMode,
   type SignalCameraTransitionMode,
@@ -230,6 +248,8 @@ import { signalShowCardBlurbs } from "./signalShowCardQuips";
 import { signalStageSoundcheckMessages } from "./signalStageSoundcheck";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import {
+  signalStudioFloorGlowHandleStyle,
+  signalStudioMaskedFloorGlowStyle,
   signalStudioOverscanCoordinate,
   signalStudioPlacementStyle,
   signalStudioVoicePan,
@@ -401,6 +421,11 @@ export interface BotcastApiRequest {
 const SIGNAL_NATURAL_HANDOFF_MS = 260;
 const SIGNAL_NOTICE_TOAST_MS = 7_000;
 const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 4_200;
+
+function signalProducerBriefSavedLength(value: string): number {
+  return value.replace(/\s+/gu, " ").trim().length;
+}
+
 const SIGNAL_ATMOSPHERE_BUSES = [
   {
     key: "background",
@@ -416,6 +441,7 @@ const SIGNAL_ATMOSPHERE_BUSES = [
 // escape hatch for a genuinely stuck voice request without aborting healthy
 // provider speech before it reaches the studio.
 const SIGNAL_VOICE_START_TIMEOUT_MS = 30_000;
+const SIGNAL_OPENING_VOICE_START_TIMEOUT_MS = 45_000;
 // Once playback starts, a missing provider completion signal must not strand
 // the episode in a busy state and block the next on-air turn indefinitely.
 const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000;
@@ -469,10 +495,20 @@ function signalHostChatDisplayMarkdown(content: string): string {
 export interface BotcastUtterancePlaybackOptions {
   channel: "primary" | "crosstalk";
   mixGain: number;
+  /** Lets the opening stay behind pre-roll while Premium speech finishes preparing. */
+  episodeBookend?: "opening" | "closing";
   /** Ephemeral speech is never captured as a replay take or resolved as a saved Signal row. */
   ephemeral?: boolean;
   /** Allows an ephemeral voice to leave the local network only when its chat lane is ONLINE. */
   explicitOnlineContext?: boolean;
+}
+
+function signalEpisodeBookendForMessage(
+  episode: Pick<BotcastEpisode, "messages" | "segment">,
+  message: Pick<BotcastMessage, "id">,
+): "opening" | "closing" | undefined {
+  if (episode.messages[0]?.id === message.id) return "opening";
+  return episode.segment === "closing" ? "closing" : undefined;
 }
 
 type PreparedBotcastAdvanceResult =
@@ -561,6 +597,7 @@ export interface BotcastExperienceProps {
   onPrefetchUtterance?: (
     message: BotcastMessage,
     bot: BotcastBotSummary,
+    playback?: BotcastUtterancePlaybackOptions,
   ) => void;
   onPrefetchListenerReaction?: (
     plan: ListenerReactionPlanV1,
@@ -609,6 +646,22 @@ type SignalEpisodePreRoll = {
   phase: "preparing" | "landing";
   source: "local" | "elevenlabs";
 };
+
+type SignalEpisodeLaunch = {
+  showId: string;
+  showName: string;
+  guestName: string;
+  phase: "booking" | "studio" | "model" | "opening";
+};
+
+function signalEpisodeLaunchStep(
+  phase: SignalEpisodeLaunch["phase"],
+): string {
+  if (phase === "booking") return "Shaping the episode";
+  if (phase === "model") return "Bringing the cast online";
+  if (phase === "opening") return "Getting the opening on mic";
+  return "Opening the studio";
+}
 
 type SignalEpisodeOutro = {
   episodeId: string;
@@ -665,36 +718,33 @@ type SignalAssetSlot =
   | "night-studio"
   | "logo";
 type SignalArtworkKind = SignalAssetSlot;
-type SignalStudioGlowBlendMode = "screen" | "overlay";
-type SignalStudioGlowThemeTuning = {
-  opacity: number;
-  blendMode: SignalStudioGlowBlendMode;
-};
-type SignalStudioGlowTuning = Record<
-  "light" | "dark",
-  SignalStudioGlowThemeTuning
->;
 
 const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
-const SIGNAL_STUDIO_GLOW_TUNING_DEFAULTS: SignalStudioGlowTuning = {
-  dark: { opacity: 0.62, blendMode: "screen" },
-  light: { opacity: 0.44, blendMode: "overlay" },
-};
-
-function defaultSignalStudioGlowTuning(): SignalStudioGlowTuning {
-  return {
-    dark: { ...SIGNAL_STUDIO_GLOW_TUNING_DEFAULTS.dark },
-    light: { ...SIGNAL_STUDIO_GLOW_TUNING_DEFAULTS.light },
-  };
-}
 
 const SIGNAL_STUDIO_LAYOUT_LABELS: Record<BotcastStudioLayoutItem, string> = {
   hostBot: "host bot",
   guestBot: "guest bot",
   hostCup: "host cup",
   guestCup: "guest cup",
+  hostFloorGlow: "host floor glow",
+  guestFloorGlow: "guest floor glow",
 };
+const SIGNAL_STUDIO_FLOOR_GLOW_DRAG_SCALE_PER_STAGE = 2;
+
+function signalStudioLayoutItemIsFloorGlow(
+  item: BotcastStudioLayoutItem,
+): item is "hostFloorGlow" | "guestFloorGlow" {
+  return item === "hostFloorGlow" || item === "guestFloorGlow";
+}
+
+function signalStudioFloorGlowRole(
+  item: BotcastStudioLayoutItem,
+): "host" | "guest" | null {
+  if (item === "hostFloorGlow") return "host";
+  if (item === "guestFloorGlow") return "guest";
+  return null;
+}
 
 function signalStudioFacingForRole(
   layout: BotcastStudioLayout,
@@ -989,17 +1039,54 @@ function activeShowAtmosphere(
   return theme === "light" ? show.dayAtmosphere : show.nightAtmosphere;
 }
 
+function SignalStudioMicrophoneTint({
+  atmosphere,
+  hostColor,
+  guestColor,
+  theme,
+  surface = "stage",
+}: {
+  atmosphere: BotcastAtmosphereState;
+  hostColor: string;
+  guestColor: string;
+  theme: "light" | "dark";
+  surface?: "stage" | "dashboard";
+}): React.JSX.Element | null {
+  if (!atmosphere.microphoneTintMaskUrl) return null;
+  return (
+    <div
+      className={styles.signalMicrophoneTintLayer}
+      data-surface={surface}
+      style={
+        {
+          ["--signal-microphone-tint-mask" as string]:
+            `url("${atmosphere.microphoneTintMaskUrl}")`,
+          ["--signal-microphone-host-color" as string]:
+            normalizeAccentForTheme(hostColor, theme),
+          ["--signal-microphone-guest-color" as string]:
+            normalizeAccentForTheme(guestColor, theme),
+        } as CSSProperties
+      }
+      aria-hidden="true"
+    >
+      <span data-role="host" />
+      <span data-role="guest" />
+    </div>
+  );
+}
+
 function signalStudioLightingStyle(args: {
   show: BotcastShow;
   layout: BotcastStudioLayout;
   hostColor: string;
   guestColor: string;
   theme: "light" | "dark";
-  tuning: SignalStudioGlowTuning;
 }): CSSProperties | null {
   const lighting = args.show.studioLighting;
   if (lighting?.status !== "ready" || !lighting.imageUrl) return null;
-  const tuning = args.tuning[args.theme];
+  const tuning = normalizeBotcastStudioGlowTuning(
+    args.show.studioGlowTuning,
+  )[args.theme];
   return {
     ["--signal-studio-lighting-map" as string]: `url("${lighting.imageUrl}")`,
     ["--signal-studio-glow-opacity" as string]: tuning.opacity,
@@ -1027,11 +1114,12 @@ function signalIntroIdentityForShow(
   show: BotcastShow,
   hostBot: BotcastBotSummary | null,
 ) {
-  const seed = `${show.hostBotId}:${show.id}:${show.logo.seed}`;
+  const seed = `${show.hostBotId}:${show.id}:music:${show.musicIdentity.revision}`;
   return {
     profile: buildSignalMusicProfile({
       temperament: hostBot?.personaTemperament ?? "neutral",
       seed,
+      identity: show.musicIdentity.profile,
       premise: show.premise,
       hostingStyle: show.hostingStyle,
       studioIdentity: show.studioIdentity,
@@ -1233,6 +1321,267 @@ function SignalFallbackStudio({
   );
 }
 
+type SignalCameraStageViewportProps = Omit<
+  React.JSX.IntrinsicElements["section"],
+  "ref"
+> & {
+  shot: SignalDirectedCameraShot;
+  transitionMode: SignalCameraTransitionMode;
+};
+
+const SignalCameraStageViewport = forwardRef<
+  HTMLElement,
+  SignalCameraStageViewportProps
+>(function SignalCameraStageViewport(
+  { shot, transitionMode, children, ...sectionProps },
+  forwardedRef,
+): React.JSX.Element {
+  const viewportRef = useRef<HTMLElement | null>(null);
+  const previousShotRef = useRef<SignalDirectedCameraShot>(shot);
+  const transitionOrdinalRef = useRef(0);
+  useImperativeHandle(
+    forwardedRef,
+    () => viewportRef.current as HTMLElement,
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const previousShot = previousShotRef.current;
+    const shotChanged = previousShot !== shot;
+    const nextOrdinal = shotChanged
+      ? transitionOrdinalRef.current + 1
+      : transitionOrdinalRef.current;
+    const effectiveTransitionStyle = shotChanged
+      ? signalCameraTransitionStyleForChange({
+          mode: transitionMode,
+          previousShot,
+          nextShot: shot,
+          transitionOrdinal: nextOrdinal,
+        })
+      : transitionMode === "instant"
+        ? "instant"
+        : "animated";
+    viewport.dataset.cameraTransitions = effectiveTransitionStyle;
+    if (shotChanged) {
+      previousShotRef.current = shot;
+      transitionOrdinalRef.current = nextOrdinal;
+    }
+    if (
+      effectiveTransitionStyle !== "instant" ||
+      transitionMode === "instant"
+    ) {
+      return;
+    }
+    let restoreFrame = 0;
+    const settleFrame = window.requestAnimationFrame(() => {
+      restoreFrame = window.requestAnimationFrame(() => {
+        if (viewportRef.current === viewport) {
+          viewport.dataset.cameraTransitions = "animated";
+        }
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(settleFrame);
+      if (restoreFrame) window.cancelAnimationFrame(restoreFrame);
+    };
+  }, [shot, transitionMode]);
+
+  return (
+    <section
+      {...sectionProps}
+      ref={viewportRef}
+      data-shot={shot}
+      data-camera-transition-mode={transitionMode}
+      data-camera-transitions={
+        transitionMode === "instant" ? "instant" : "animated"
+      }
+    >
+      {children}
+    </section>
+  );
+});
+
+const SIGNAL_GENERATION_KEYWORD_LIMIT = 5;
+const SIGNAL_GENERATION_KEYWORD_MAX_CHARACTERS = 40;
+
+type SignalGenerationKeywordAspect =
+  | "name"
+  | "premise"
+  | "music"
+  | "blurbs"
+  | "studio"
+  | "logo"
+  | "audio";
+
+type SignalGenerationKeywordValues = Partial<
+  Record<SignalGenerationKeywordAspect, string[]>
+>;
+
+function normalizeSignalGenerationKeywordList(
+  values: readonly string[],
+): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const keyword = value
+      .replace(/[^\p{L}\p{N}\s&+'-]/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, SIGNAL_GENERATION_KEYWORD_MAX_CHARACTERS)
+      .trim();
+    if (!keyword) continue;
+    const key = keyword.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(keyword);
+    if (normalized.length >= SIGNAL_GENERATION_KEYWORD_LIMIT) break;
+  }
+  return normalized;
+}
+
+function SignalGenerationKeywordControl({
+  id,
+  label,
+  values,
+  expanded,
+  disabled,
+  secondaryAction,
+  onToggle,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  values: readonly string[];
+  expanded: boolean;
+  disabled: boolean;
+  secondaryAction?: ReactNode;
+  onToggle: () => void;
+  onChange: (values: string[]) => void;
+}): React.JSX.Element {
+  const [draft, setDraft] = useState("");
+  const atLimit = values.length >= SIGNAL_GENERATION_KEYWORD_LIMIT;
+  const commitDraft = (rawDraft = draft): void => {
+    const nextValues = normalizeSignalGenerationKeywordList([
+      ...values,
+      ...rawDraft.split(/[,;\n]+/u),
+    ]);
+    setDraft("");
+    if (nextValues.join("\u0000") !== values.join("\u0000")) {
+      onChange(nextValues);
+    }
+  };
+  const handleChange = (event: ReactChangeEvent<HTMLInputElement>): void => {
+    const next = event.currentTarget.value;
+    if (!/[,;\n]/u.test(next)) {
+      setDraft(next);
+      return;
+    }
+    const parts = next.split(/[,;\n]+/u);
+    const endsWithDelimiter = /[,;\n]\s*$/u.test(next);
+    const trailingDraft = endsWithDelimiter ? "" : (parts.pop() ?? "");
+    const nextValues = normalizeSignalGenerationKeywordList([
+      ...values,
+      ...parts,
+    ]);
+    setDraft(
+      nextValues.length >= SIGNAL_GENERATION_KEYWORD_LIMIT
+        ? ""
+        : trailingDraft,
+    );
+    if (nextValues.join("\u0000") !== values.join("\u0000")) {
+      onChange(nextValues);
+    }
+  };
+  const handleKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ): void => {
+    if (event.key === "Enter" || event.key === "," || event.key === ";") {
+      event.preventDefault();
+      commitDraft();
+      return;
+    }
+    if (
+      event.key === "Backspace" &&
+      draft.length === 0 &&
+      values.length > 0
+    ) {
+      event.preventDefault();
+      onChange(values.slice(0, -1));
+    }
+  };
+  return (
+    <>
+      <div className={styles.showLookControlHeading}>
+        <span>{label}</span>
+        <span className={styles.showLookControlHeadingActions}>
+          {secondaryAction}
+          <button
+            type="button"
+            className={styles.showLookKeywordToggle}
+            data-expanded={expanded ? "true" : undefined}
+            aria-label={`${expanded ? "Hide" : "Add"} ${label.toLocaleLowerCase()} generation keywords`}
+            aria-expanded={expanded}
+            aria-controls={id}
+            title="Guide the next generation with up to five keywords"
+            onClick={onToggle}
+          >
+            <span aria-hidden="true">+</span>
+          </button>
+        </span>
+      </div>
+      {expanded ? (
+        <div
+          id={id}
+          className={styles.showLookKeywordField}
+          role="group"
+          aria-label={`${label} generation keywords`}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              event.currentTarget.querySelector("input")?.focus();
+            }
+          }}
+        >
+          {values.map((keyword, index) => (
+            <button
+              key={`${keyword}-${index}`}
+              type="button"
+              className={styles.showLookKeywordChip}
+              aria-label={`Remove keyword ${keyword}`}
+              title="Remove keyword"
+              disabled={disabled}
+              onClick={() =>
+                onChange(values.filter((_, valueIndex) => valueIndex !== index))
+              }
+            >
+              <span>{keyword}</span>
+              <span aria-hidden="true">×</span>
+            </button>
+          ))}
+          <input
+            type="text"
+            value={draft}
+            maxLength={SIGNAL_GENERATION_KEYWORD_MAX_CHARACTERS}
+            disabled={disabled || atLimit}
+            aria-label={`Add ${label.toLocaleLowerCase()} generation keyword`}
+            placeholder={
+              values.length > 0 ? "Another keyword" : "e.g. tactile, nocturnal"
+            }
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={true}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onBlur={() => commitDraft()}
+          />
+          <small>{values.length}/{SIGNAL_GENERATION_KEYWORD_LIMIT}</small>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 export function BotcastExperience({
   bots,
   request,
@@ -1307,6 +1656,11 @@ export function BotcastExperience({
   const [guestDraftId, setGuestDraftId] = useState("");
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
+  const producerBriefSavedLength = signalProducerBriefSavedLength(
+    producerBriefDraft,
+  );
+  const producerBriefTooLong =
+    producerBriefSavedLength > BOTCAST_PRODUCER_BRIEF_MAX_LENGTH;
   const [producerGuestContextDraft, setProducerGuestContextDraft] =
     useState("");
   const [producerGuestAnswerDraft, setProducerGuestAnswerDraft] = useState("");
@@ -1323,6 +1677,16 @@ export function BotcastExperience({
     useState<BotcastProducerCue | null>(null);
   const [showNameDraft, setShowNameDraft] = useState("");
   const [showPremiseDraft, setShowPremiseDraft] = useState("");
+  const [showMusicIdentityDraft, setShowMusicIdentityDraft] = useState("");
+  const [showMusicIdentityEditorShowId, setShowMusicIdentityEditorShowId] =
+    useState<string | null>(null);
+  const [showGenerationKeywordValuesById, setShowGenerationKeywordValuesById] =
+    useState<Record<string, SignalGenerationKeywordValues>>({});
+  const [showGenerationKeywordEditor, setShowGenerationKeywordEditor] =
+    useState<{
+      showId: string;
+      aspect: SignalGenerationKeywordAspect;
+    } | null>(null);
   const [showIdentityControlsShowId, setShowIdentityControlsShowId] = useState<
     string | null
   >(null);
@@ -1362,6 +1726,8 @@ export function BotcastExperience({
     start: startSignalAmbientBotVocalization,
     mouthShapeForTarget: signalAmbientBotVocalizationMouthShape,
   } = useAmbientBotVocalization();
+  const [episodeLaunch, setEpisodeLaunch] =
+    useState<SignalEpisodeLaunch | null>(null);
   const [episodePreRoll, setEpisodePreRoll] =
     useState<SignalEpisodePreRoll | null>(null);
   const [signalModelWarmup, setSignalModelWarmup] =
@@ -1385,6 +1751,11 @@ export function BotcastExperience({
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayVoicePending, setReplayVoicePending] = useState(false);
   const [replaySpeechActive, setReplaySpeechActive] = useState(false);
+  const [localReplayAudio, setLocalReplayAudio] =
+    useState<PreparedReplayAudio | null>(null);
+  const [localReplayWarning, setLocalReplayWarning] = useState<string | null>(
+    null,
+  );
   const [replayRenderCapture, setReplayRenderCapture] =
     useState<SignalReplayRenderCaptureState | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SignalDeleteTarget | null>(
@@ -1399,11 +1770,10 @@ export function BotcastExperience({
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
   const [studioLayoutPreviewTheme, setStudioLayoutPreviewTheme] =
     useState<"light" | "dark">(theme);
-  const [studioGlowTuning, setStudioGlowTuning] =
-    useState<SignalStudioGlowTuning>(defaultSignalStudioGlowTuning);
   const [studioLayoutPreviewGuestId, setStudioLayoutPreviewGuestId] =
     useState("");
   const [studioLayoutSaving, setStudioLayoutSaving] = useState(false);
+  const [studioGlowTuningSaving, setStudioGlowTuningSaving] = useState(false);
   const [studioVoiceLevelsSaving, setStudioVoiceLevelsSaving] =
     useState(false);
   const [studioAtmosphereMixSaving, setStudioAtmosphereMixSaving] =
@@ -1468,6 +1838,10 @@ export function BotcastExperience({
   const cutExecutionRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const replayVoiceRunIdRef = useRef(0);
+  const localReplayAudioContextRef = useRef<AudioContext | null>(null);
+  const localReplayAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const localReplayAudioStartedAtRef = useRef(0);
+  const localReplayAudioOffsetMsRef = useRef(0);
   const replaySoundboardPreviousElapsedMsRef = useRef(-1);
   const replaySoundboardFiredEventIdsRef = useRef(new Set<string>());
   const listenerReactionPlanByMessageIdRef = useRef(
@@ -1491,6 +1865,12 @@ export function BotcastExperience({
   } | null>(null);
   const studioLayoutSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const studioLayoutSavePendingRef = useRef(0);
+  const studioGlowTuningDraftRef = useRef<{
+    showId: string;
+    tuning: BotcastStudioGlowTuning;
+    revision: number;
+  } | null>(null);
+  const studioGlowTuningSaveInFlightRef = useRef(false);
   const studioVoiceLevelsDraftRef = useRef<{
     showId: string;
     levels: BotcastVoiceLevelsByBotId;
@@ -1636,13 +2016,11 @@ export function BotcastExperience({
       if (!mouth || !mug) continue;
 
       const target = signalCupSipTargetFromMouth({
-        role,
         sceneBounds,
         sceneLocalWidth: scene.offsetWidth,
         sceneLocalHeight: scene.offsetHeight,
         mouthBounds: mouth.getBoundingClientRect(),
         mugLocalHeight: mug.offsetHeight,
-        viewportWidth: window.innerWidth,
       });
       if (!target) continue;
       mug.style.setProperty("--signal-cup-mouth-x", `${target.x}px`);
@@ -2035,6 +2413,7 @@ export function BotcastExperience({
     advanceInFlightRef.current = false;
     setAutoRun(false);
     setBusy(false);
+    setEpisodeLaunch(null);
     setEpisodePreRoll(null);
     assignSignalModelWarmup(null);
     signalModelWarmupVisibleRef.current = false;
@@ -2151,7 +2530,13 @@ export function BotcastExperience({
           previous?.id === recording?.id &&
           previous?.status === recording?.status &&
           previous?.progress === recording?.progress &&
-          previous?.videoUrl === recording?.videoUrl
+          previous?.videoUrl === recording?.videoUrl &&
+          previous?.premiumProduction?.phase ===
+            recording?.premiumProduction?.phase &&
+          previous?.premiumProduction?.progress ===
+            recording?.premiumProduction?.progress &&
+          previous?.premiumProduction?.videoUrl ===
+            recording?.premiumProduction?.videoUrl
         ) {
           return current;
         }
@@ -2172,7 +2557,7 @@ export function BotcastExperience({
       producerName,
       theme,
     });
-    void queueReplayManifest(manifest)
+    void queueReplayManifest(manifest, { render: false })
       .then(() =>
         window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT)),
       )
@@ -2213,6 +2598,9 @@ export function BotcastExperience({
   useEffect(() => {
     setShowPremiseDraft(selectedShow?.premise ?? "");
   }, [selectedShow?.id, selectedShow?.premise]);
+  useEffect(() => {
+    setShowMusicIdentityDraft(selectedShow?.musicIdentity.direction ?? "");
+  }, [selectedShow?.id, selectedShow?.musicIdentity.direction]);
   const audiencePulseOpen = Boolean(
     selectedShow && audiencePulseShowId === selectedShow.id,
   );
@@ -2245,6 +2633,47 @@ export function BotcastExperience({
   const showIdentityControlsExpanded = Boolean(
     selectedShow && showIdentityControlsShowId === selectedShow.id,
   );
+  const showMusicIdentityEditorExpanded = Boolean(
+    selectedShow && showMusicIdentityEditorShowId === selectedShow.id,
+  );
+  const selectedShowGenerationKeywordValues = selectedShow
+    ? (showGenerationKeywordValuesById[selectedShow.id] ?? {})
+    : {};
+  const showGenerationKeywordsFor = (
+    aspect: SignalGenerationKeywordAspect,
+  ): string[] => selectedShowGenerationKeywordValues[aspect] ?? [];
+  const showGenerationKeywordEditorExpanded = (
+    aspect: SignalGenerationKeywordAspect,
+  ): boolean =>
+    Boolean(
+      selectedShow &&
+        showGenerationKeywordEditor?.showId === selectedShow.id &&
+        showGenerationKeywordEditor.aspect === aspect,
+    );
+  const toggleShowGenerationKeywordEditor = (
+    aspect: SignalGenerationKeywordAspect,
+  ): void => {
+    if (!selectedShow) return;
+    setShowGenerationKeywordEditor((current) =>
+      current?.showId === selectedShow.id && current.aspect === aspect
+        ? null
+        : { showId: selectedShow.id, aspect },
+    );
+  };
+  const updateShowGenerationKeywords = (
+    aspect: SignalGenerationKeywordAspect,
+    values: string[],
+  ): void => {
+    if (!selectedShow) return;
+    const showId = selectedShow.id;
+    setShowGenerationKeywordValuesById((current) => ({
+      ...current,
+      [showId]: {
+        ...(current[showId] ?? {}),
+        [aspect]: normalizeSignalGenerationKeywordList(values),
+      },
+    }));
+  };
   const selectedShowArtworkBusy = Boolean(
     selectedShow &&
       artworkJob?.showId === selectedShow.id &&
@@ -2742,10 +3171,6 @@ export function BotcastExperience({
     const episodeForRender = replayRenderTarget.episode;
     let activeRecording: ReplayRecordingV1 | null = null;
     let activeTimeline: ReplayTimelineV1 | null = null;
-    const settleStage = async (): Promise<void> => {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    };
     return {
       captureFps: 10,
       prepare: async (recording, timeline) => {
@@ -2767,13 +3192,14 @@ export function BotcastExperience({
           });
         });
         await document.fonts?.ready;
-        await settleStage();
-        const stage = signalReplayRenderStageRef.current;
-        if (!stage) throw new Error("Signal studio capture did not mount.");
-        const { getFontEmbedCSS } = await import("html-to-image");
-        signalReplayRenderFontCssRef.current = await getFontEmbedCSS(stage).catch(
-          () => null,
+        const stage = await waitForSignalReplayRenderStage(
+          () => signalReplayRenderStageRef.current,
         );
+        const { getFontEmbedCSS } = await import("html-to-image");
+        signalReplayRenderFontCssRef.current = await withSignalReplayCaptureTimeout(
+          "Signal studio font embedding",
+          getFontEmbedCSS(stage),
+        ).catch(() => null);
       },
       renderAt: async (timeMs) => {
         if (!activeRecording || !activeTimeline) {
@@ -2790,20 +3216,25 @@ export function BotcastExperience({
             }),
           });
         });
-        await settleStage();
-        const stage = signalReplayRenderStageRef.current;
-        if (!stage) throw new Error("Signal studio capture was interrupted.");
-        const { toCanvas } = await import("html-to-image");
-        return toCanvas(stage, {
-          width: REPLAY_VIDEO_WIDTH,
-          height: REPLAY_VIDEO_HEIGHT,
-          canvasWidth: REPLAY_VIDEO_WIDTH,
-          canvasHeight: REPLAY_VIDEO_HEIGHT,
-          pixelRatio: 1,
-          skipAutoScale: true,
-          cacheBust: false,
-          fontEmbedCSS: signalReplayRenderFontCssRef.current ?? undefined,
+        const stage = await waitForSignalReplayRenderStage(
+          () => signalReplayRenderStageRef.current,
+        ).catch(() => {
+          throw new Error("Signal studio capture was interrupted.");
         });
+        const { toCanvas } = await import("html-to-image");
+        return withSignalReplayCaptureTimeout(
+          "Signal studio frame capture",
+          toCanvas(stage, {
+            width: REPLAY_VIDEO_WIDTH,
+            height: REPLAY_VIDEO_HEIGHT,
+            canvasWidth: REPLAY_VIDEO_WIDTH,
+            canvasHeight: REPLAY_VIDEO_HEIGHT,
+            pixelRatio: 1,
+            skipAutoScale: true,
+            cacheBust: false,
+            fontEmbedCSS: signalReplayRenderFontCssRef.current ?? undefined,
+          }),
+        );
       },
       finish: () => {
         activeRecording = null;
@@ -2822,6 +3253,11 @@ export function BotcastExperience({
     const capturedAtmosphere = {
       ...activeShowAtmosphere(renderShow, manifest.visual.theme),
       imageUrl: atmosphereImageUrl,
+      microphoneTintMaskUrl:
+        typeof metadata.microphoneTintMaskUrl === "string"
+          ? metadata.microphoneTintMaskUrl
+          : null,
+      microphoneTintMaskImageId: null,
     };
     return {
       ...renderShow,
@@ -2840,6 +3276,10 @@ export function BotcastExperience({
         metadata.studioLayout && typeof metadata.studioLayout === "object"
           ? (metadata.studioLayout as BotcastStudioLayout)
           : renderShow.studioLayout,
+      studioGlowTuning: normalizeBotcastStudioGlowTuning(
+        metadata.studioGlowTuning,
+        normalizeBotcastStudioGlowTuning(renderShow.studioGlowTuning),
+      ),
       studioLighting:
         metadata.studioLighting && typeof metadata.studioLighting === "object"
           ? (metadata.studioLighting as BotcastShow["studioLighting"])
@@ -3463,6 +3903,7 @@ export function BotcastExperience({
       stopStudioSoundcheck();
       setSelectedShowId(show.id);
       setShowIdentityControlsShowId(null);
+      setShowMusicIdentityEditorShowId(null);
       setShowNameDraft(show.name);
       setEpisode(null);
       setReplayEpisode(null);
@@ -3550,6 +3991,79 @@ export function BotcastExperience({
         }
       });
     studioLayoutSaveQueueRef.current = queuedSave;
+  };
+
+  const flushStudioGlowTuningSave = async (): Promise<void> => {
+    if (studioGlowTuningSaveInFlightRef.current) return;
+    studioGlowTuningSaveInFlightRef.current = true;
+    setStudioGlowTuningSaving(true);
+    try {
+      while (studioGlowTuningDraftRef.current) {
+        const draft = studioGlowTuningDraftRef.current;
+        const response = await request<{ show: BotcastShow }>(
+          `/api/botcast/shows/${encodeURIComponent(draft.showId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ studioGlowTuning: draft.tuning }),
+          },
+        );
+        const latestDraft = studioGlowTuningDraftRef.current;
+        setShows((current) =>
+          current.map((show) => {
+            if (show.id !== draft.showId) return show;
+            return latestDraft?.showId === draft.showId
+              ? { ...response.show, studioGlowTuning: latestDraft.tuning }
+              : response.show;
+          }),
+        );
+        if (!latestDraft) break;
+        if (
+          latestDraft.showId === draft.showId &&
+          latestDraft.revision === draft.revision
+        ) {
+          studioGlowTuningDraftRef.current = null;
+          break;
+        }
+      }
+    } catch (saveError) {
+      studioGlowTuningDraftRef.current = null;
+      setError(signalErrorToast("Save studio underglow", saveError));
+    } finally {
+      studioGlowTuningSaveInFlightRef.current = false;
+      setStudioGlowTuningSaving(false);
+      if (studioGlowTuningDraftRef.current) {
+        void flushStudioGlowTuningSave();
+      }
+    }
+  };
+
+  const updateStudioGlowTuning = (
+    show: BotcastShow,
+    nextTuning: BotcastStudioGlowTuning,
+  ): void => {
+    const previousDraft = studioGlowTuningDraftRef.current;
+    const fallbackTuning =
+      previousDraft?.showId === show.id
+        ? previousDraft.tuning
+        : show.studioGlowTuning;
+    const tuning = normalizeBotcastStudioGlowTuning(
+      nextTuning,
+      normalizeBotcastStudioGlowTuning(fallbackTuning),
+    );
+    studioGlowTuningDraftRef.current = {
+      showId: show.id,
+      tuning,
+      revision:
+        previousDraft?.showId === show.id ? previousDraft.revision + 1 : 1,
+    };
+    setShows((current) =>
+      current.map((candidate) =>
+        candidate.id === show.id
+          ? { ...candidate, studioGlowTuning: tuning }
+          : candidate,
+      ),
+    );
+    void flushStudioGlowTuningSave();
   };
 
   const flushStudioVoiceLevelsSave = async (): Promise<void> => {
@@ -3739,17 +4253,28 @@ export function BotcastExperience({
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     const startPoint = drag.startLayout[drag.item];
+    const floorGlow = signalStudioLayoutItemIsFloorGlow(drag.item);
     const layout = normalizeBotcastStudioLayout(
       {
-      ...drag.startLayout,
-      [drag.item]: {
+        ...drag.startLayout,
+        [drag.item]: {
           ...startPoint,
-          x:
-            startPoint.x +
-            ((event.clientX - drag.startClientX) / drag.stageWidth) * 100,
+          x: floorGlow
+            ? startPoint.x
+            : startPoint.x +
+              ((event.clientX - drag.startClientX) / drag.stageWidth) * 100,
           y:
             startPoint.y +
             ((event.clientY - drag.startClientY) / drag.stageHeight) * 100,
+          ...(floorGlow
+            ? {
+                scale:
+                  (startPoint.scale ??
+                    BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX) +
+                  ((event.clientX - drag.startClientX) / drag.stageWidth) *
+                    SIGNAL_STUDIO_FLOOR_GLOW_DRAG_SCALE_PER_STAGE,
+              }
+            : {}),
         },
       },
       drag.startLayout,
@@ -3785,17 +4310,27 @@ export function BotcastExperience({
     if (!direction) return;
     event.preventDefault();
     if (event.repeat) return;
-    const step = event.shiftKey ? 2 : 0.5;
+    const positionStep = event.shiftKey ? 2 : 0.5;
+    const scaleStep =
+      BOTCAST_STUDIO_FLOOR_GLOW_SCALE_STEP * (event.shiftKey ? 2 : 1);
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
     const point = layout[item];
+    const floorGlow = signalStudioLayoutItemIsFloorGlow(item);
     const nextLayout = normalizeBotcastStudioLayout(
       {
-      ...layout,
-      [item]: {
-        ...point,
-        x: point.x + direction[0]! * step,
-        y: point.y + direction[1]! * step,
-      },
+        ...layout,
+        [item]: {
+          ...point,
+          x: floorGlow ? point.x : point.x + direction[0]! * positionStep,
+          y: point.y + direction[1]! * positionStep,
+          ...(floorGlow
+            ? {
+                scale:
+                  (point.scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX) +
+                  direction[0]! * scaleStep,
+              }
+            : {}),
+        },
       },
       layout,
     );
@@ -4058,6 +4593,7 @@ export function BotcastExperience({
           body: JSON.stringify({
             inspiration,
             preferredProvider: accountDefaultProvider,
+            keywords: showGenerationKeywordsFor("premise"),
           }),
         },
       );
@@ -4072,6 +4608,80 @@ export function BotcastExperience({
       setNotice("The refreshed premise is saved as this show’s creative direction.");
     } catch (premiseError) {
       setError(signalErrorToast("Refresh show premise", premiseError));
+    } finally {
+      setBlockingOperation(null);
+      setBusy(false);
+    }
+  };
+
+  const saveShowMusicIdentity = async (
+    nextDirection?: string,
+  ): Promise<void> => {
+    if (!selectedShow) return;
+    const direction = (nextDirection ?? showMusicIdentityDraft).trim();
+    if (!direction || direction === selectedShow.musicIdentity.direction) {
+      setShowMusicIdentityDraft(selectedShow.musicIdentity.direction);
+      return;
+    }
+    setShowMusicIdentityDraft(direction);
+    try {
+      const response = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ musicIdentityDirection: direction }),
+        },
+      );
+      replaceShow(response.show);
+      setShowMusicIdentityDraft(response.show.musicIdentity.direction);
+      setNotice(
+        "The new sound identity is saved. Signal Synth uses it now; refresh the ElevenLabs audio package when you want a matching cached ident and outdent.",
+      );
+    } catch (musicIdentityError) {
+      setShowMusicIdentityDraft(selectedShow.musicIdentity.direction);
+      setError(
+        signalErrorToast("Save Signal sound identity", musicIdentityError),
+      );
+    }
+  };
+
+  const regenerateShowMusicIdentity = async (): Promise<void> => {
+    if (!selectedShow) return;
+    setBusy(true);
+    setError(null);
+    setBlockingOperation({
+      title: "Composing the host’s sound identity",
+      detail: `Signal is translating ${hostBot?.name ?? "this host"} into an original musical fingerprint for ${selectedShow.name}.`,
+      stepLabel: "Finding the emotional contradiction and sonic world",
+      progress: null,
+      cancellable: false,
+    });
+    try {
+      const response = await request<{ show: BotcastShow; generated: boolean }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/music-identity`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            preferredProvider: accountDefaultProvider,
+            keywords: showGenerationKeywordsFor("music"),
+          }),
+        },
+      );
+      if (!response.generated) {
+        setNotice(
+          "Signal couldn’t find a different sound identity. Refine the current direction or try another pass.",
+        );
+        return;
+      }
+      replaceShow(response.show);
+      setShowMusicIdentityDraft(response.show.musicIdentity.direction);
+      setNotice(
+        "The host’s new sound identity is saved. Signal Synth uses it immediately; refresh the cached audio package when ready.",
+      );
+    } catch (musicIdentityError) {
+      setError(
+        signalErrorToast("Refresh Signal sound identity", musicIdentityError),
+      );
     } finally {
       setBlockingOperation(null);
       setBusy(false);
@@ -4096,6 +4706,7 @@ export function BotcastExperience({
           method: "POST",
           body: JSON.stringify({
             preferredProvider: accountDefaultProvider,
+            keywords: showGenerationKeywordsFor("name"),
           }),
         },
       );
@@ -4142,6 +4753,7 @@ export function BotcastExperience({
           method: "POST",
           body: JSON.stringify({
             preferredProvider: accountDefaultProvider,
+            keywords: showGenerationKeywordsFor("blurbs"),
           }),
         },
       );
@@ -4174,6 +4786,7 @@ export function BotcastExperience({
   const startSignalArtworkJob = async (
     sourceShow: BotcastShow,
     kinds: readonly SignalArtworkKind[],
+    keywords: readonly string[] = [],
     identityMs: number | null = null,
     signal?: AbortSignal,
   ): Promise<SignalArtworkJobSnapshot> => {
@@ -4184,6 +4797,7 @@ export function BotcastExperience({
         body: JSON.stringify({
           preferredProvider: preferredImageProvider,
           kinds,
+          keywords,
           ...(identityMs === null ? {} : { identityMs }),
         }),
         signal,
@@ -4280,6 +4894,7 @@ export function BotcastExperience({
           const job = await startSignalArtworkJob(
             showForPass,
             manifest.missingArtwork,
+            [],
             identityMs,
             controller.signal,
           );
@@ -4371,7 +4986,11 @@ export function BotcastExperience({
         },
       );
       replaceShow(reset.show);
-      await startSignalArtworkJob(reset.show, ["night-studio", "day-studio"]);
+      await startSignalArtworkJob(
+        reset.show,
+        ["night-studio", "day-studio"],
+        showGenerationKeywordsFor("studio"),
+      );
       if (preferredProvider === "local") {
         setNotice(
           "The refreshed Dark studio and source-linked Light studio are rendering in the background. Signal will keep the built-in room atmosphere while you are Local. You can keep using PRISM.",
@@ -4380,7 +4999,12 @@ export function BotcastExperience({
         try {
           const response = await request<{ show: BotcastShow }>(
             `/api/botcast/shows/${encodeURIComponent(reset.show.id)}/atmosphere-audio/generate`,
-            { method: "POST", body: JSON.stringify({}) },
+            {
+              method: "POST",
+              body: JSON.stringify({
+                keywords: showGenerationKeywordsFor("studio"),
+              }),
+            },
           );
           replaceShow(response.show);
           setNotice(
@@ -4418,7 +5042,11 @@ export function BotcastExperience({
     setError(null);
     setNotice("Refreshing the Light studio from the current Dark studio…");
     try {
-      await startSignalArtworkJob(selectedShow, ["day-studio"]);
+      await startSignalArtworkJob(
+        selectedShow,
+        ["day-studio"],
+        showGenerationKeywordsFor("studio"),
+      );
       setNotice(
         "The new Light studio is rendering from the current Dark studio in the background. The Dark studio stays unchanged, and you can keep using PRISM.",
       );
@@ -4453,7 +5081,10 @@ export function BotcastExperience({
         `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/studio-lighting/refresh`,
         {
           method: "POST",
-          body: JSON.stringify({ preferredProvider: preferredImageProvider }),
+          body: JSON.stringify({
+            preferredProvider: preferredImageProvider,
+            keywords: showGenerationKeywordsFor("studio"),
+          }),
         },
       );
       setArtworkJob(response.job);
@@ -4484,7 +5115,11 @@ export function BotcastExperience({
         },
       );
       replaceShow(reset.show);
-      await startSignalArtworkJob(reset.show, ["logo"]);
+      await startSignalArtworkJob(
+        reset.show,
+        ["logo"],
+        showGenerationKeywordsFor("logo"),
+      );
       setNotice(
         "The refreshed logo is rendering in the background. You can keep using PRISM.",
       );
@@ -4527,7 +5162,9 @@ export function BotcastExperience({
         `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/intro-audio/generate`,
         {
           method: "POST",
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            keywords: showGenerationKeywordsFor("audio"),
+          }),
           signal: controller.signal,
         },
       );
@@ -4651,6 +5288,18 @@ export function BotcastExperience({
     const startTopic = botBooking?.topic ?? topicDraft;
     const startProducerBrief =
       botBooking?.producerBrief ?? producerBriefDraft;
+    const startProducerBriefSavedLength =
+      signalProducerBriefSavedLength(startProducerBrief);
+    if (startProducerBriefSavedLength > BOTCAST_PRODUCER_BRIEF_MAX_LENGTH) {
+      setError(
+        signalErrorToast(
+          "Start Signal episode",
+          `Private producer comments are ${startProducerBriefSavedLength.toLocaleString()} characters after whitespace cleanup. Shorten them to ${BOTCAST_PRODUCER_BRIEF_MAX_LENGTH.toLocaleString()} or fewer before going live.`,
+          "producer comments length",
+        ),
+      );
+      return;
+    }
     const producerGuest = startGuestId === BOTCAST_PRODUCER_GUEST_ID;
     const producerGuestWantsSurprise =
       producerGuest && !producerGuestContextDraft.trim();
@@ -4686,6 +5335,13 @@ export function BotcastExperience({
     stopIntroPreview();
     onPrepareUtterance?.();
     const { controller, runId } = beginEpisodeOperation();
+    const launch: SignalEpisodeLaunch = {
+      showId: selectedShow.id,
+      showName: selectedShow.name,
+      guestName: producerGuest ? producerName : guest!.name,
+      phase: "studio",
+    };
+    setEpisodeLaunch(launch);
     const selectedModelOption =
       responseMode !== "auto" && episodeModelDraft
         ? (modelOptions.find((option) => option.id === episodeModelDraft) ??
@@ -4696,7 +5352,6 @@ export function BotcastExperience({
       accountDefaultModelOption?.provider ??
       preferredProvider;
     let warmupWasNeeded = false;
-    let preparationPending = true;
     const preparation = waitForModelPreparation({
       request,
       provider: episodeProvider,
@@ -4706,6 +5361,11 @@ export function BotcastExperience({
       onStatus: (status) => {
         if (status.state === "warming") {
           warmupWasNeeded = true;
+          setEpisodeLaunch((current) =>
+            current?.showId === selectedShow.id
+              ? { ...current, phase: "model" }
+              : current,
+          );
           const current = signalModelWarmupRef.current;
           assignSignalModelWarmup({
             phase: current?.phase === "held" ? "held" : "entering",
@@ -4727,59 +5387,8 @@ export function BotcastExperience({
         }
       },
     });
-    const preRoll: SignalEpisodePreRoll = {
-      showId: selectedShow.id,
-      showName: selectedShow.name,
-      guestName: producerGuest ? producerName : guest!.name,
-      topic: producerGuest
-        ? producerGuestWantsSurprise
-          ? "Host’s choice"
-          : "Synthesizing your interview"
-        : startTopic.trim(),
-      phase: "preparing",
-      source: selectedShow.introAudio.source,
-    };
-    preRollSkipRequestedRef.current = false;
-    setEpisodePreRoll(preRoll);
-    const introPlayback = playSignalIntroAudio({
-      ...signalIntroIdentityForShow(selectedShow, hostBot),
-      introAudio: selectedShow.introAudio,
-      enabled: introAudioEnabled,
-      volume: introAudioVolume,
-      startDelayMs: SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
-    });
     const reducedMotion =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-    const visualMinimum = new Promise<void>((resolve) => {
-      let settled = false;
-      const timer = window.setTimeout(
-        finish,
-        reducedMotion ? 1_100 : SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
-      );
-      function finish(): void {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        if (preRollGateResolveRef.current === finish) {
-          preRollGateResolveRef.current = null;
-        }
-        resolve();
-      }
-      preRollGateResolveRef.current = finish;
-    });
-    void visualMinimum.then(() => {
-      if (!episodeOperationIsCurrent(controller, runId)) return;
-      if (!preparationPending) return;
-      const current = signalModelWarmupRef.current;
-      if (!current || current.phase === "releasing") return;
-      signalModelWarmupVisibleRef.current = true;
-      assignSignalModelWarmup({
-        ...current,
-        phase: current.phase === "failed" ? "failed" : "held",
-      });
-      setEpisodePreRoll(null);
-      stopSignalIntroAudio();
-    });
     setBusy(true);
     setError(null);
     let unstartedEpisodeId: string | null = null;
@@ -4812,15 +5421,12 @@ export function BotcastExperience({
       if (!episodeOperationIsCurrent(controller, runId)) return;
       unstartedEpisodeId = response.episode.id;
       if (producerGuest) {
-        setEpisodePreRoll((current) =>
+        setEpisodeLaunch((current) =>
           current
             ? {
                 ...current,
                 guestName:
                   response.episode.guestName ?? BOTCAST_PRODUCER_GUEST_NAME,
-                topic: producerGuestWantsSurprise
-                  ? current.topic
-                  : response.episode.topic,
               }
             : current,
         );
@@ -4836,7 +5442,6 @@ export function BotcastExperience({
         await setPersistedSignalModelWarmupHold(response.episode.id, true);
       }
       const preparationStatus = await preparation;
-      preparationPending = false;
       if (!episodeOperationIsCurrent(controller, runId)) return;
       if (preparationStatus.state === "unavailable") {
         signalModelWarmupVisibleRef.current = true;
@@ -4848,6 +5453,7 @@ export function BotcastExperience({
           initial: true,
           episodeId: response.episode.id,
         });
+        setEpisodeLaunch(null);
         setEpisodePreRoll(null);
         stopSignalIntroAudio();
         return;
@@ -4855,6 +5461,11 @@ export function BotcastExperience({
       if (!signalModelWarmupVisibleRef.current) {
         assignSignalModelWarmup(null);
       }
+      setEpisodeLaunch((current) =>
+        current?.showId === selectedShow.id
+          ? { ...current, phase: "opening" }
+          : current,
+      );
       let opening: BotcastEpisodeAdvanceResponse | null = null;
       for (
         let attempt = 0;
@@ -4888,6 +5499,45 @@ export function BotcastExperience({
       setAutoRun(true);
       prepareEpisodeMessage(opening.message, opening.episode);
       await releaseSignalModelWarmup(opening.episode.id);
+      const preRoll: SignalEpisodePreRoll = {
+        showId: selectedShow.id,
+        showName: selectedShow.name,
+        guestName:
+          opening.episode.guestName ??
+          (producerGuest ? producerName : guest!.name),
+        topic: producerGuestWantsSurprise
+          ? "Host’s choice"
+          : opening.episode.topic,
+        phase: "preparing",
+        source: selectedShow.introAudio.source,
+      };
+      preRollSkipRequestedRef.current = false;
+      setEpisodeLaunch(null);
+      setEpisodePreRoll(preRoll);
+      const introPlayback = playSignalIntroAudio({
+        ...signalIntroIdentityForShow(selectedShow, hostBot),
+        introAudio: selectedShow.introAudio,
+        enabled: introAudioEnabled,
+        volume: introAudioVolume,
+        startDelayMs: SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
+      });
+      const visualMinimum = new Promise<void>((resolve) => {
+        let settled = false;
+        const timer = window.setTimeout(
+          finish,
+          reducedMotion ? 1_100 : SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
+        );
+        function finish(): void {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          if (preRollGateResolveRef.current === finish) {
+            preRollGateResolveRef.current = null;
+          }
+          resolve();
+        }
+        preRollGateResolveRef.current = finish;
+      });
       await Promise.all([introPlayback.finished, visualMinimum]);
       if (!episodeOperationIsCurrent(controller, runId)) return;
       await playPreparedEpisodeMessage(
@@ -4916,6 +5566,7 @@ export function BotcastExperience({
         preRollGateResolveRef.current?.();
         preRollGateResolveRef.current = null;
         stopSignalIntroAudio();
+        setEpisodeLaunch(null);
         setEpisodePreRoll(null);
         setAutoRun(false);
         if (unstartedEpisodeId && signalModelWarmupRef.current) {
@@ -5057,6 +5708,7 @@ export function BotcastExperience({
       onProgress?: (elapsedMs: number, durationMs: number) => void,
     ): Promise<void> => {
       const messageId = message.id;
+      const transcriptText = signalVoicePerformanceTranscriptText(message);
       const pacingText = botPowerResponseIsSilentV1(message.content)
         ? message.content
         : (message.stageActionText ?? message.content);
@@ -5068,7 +5720,7 @@ export function BotcastExperience({
       setLiveSpeech({
         messageId,
         reveal: startBotcastSpeechReveal({
-          text: message.content,
+          text: transcriptText,
           durationMs,
         }),
       });
@@ -5102,6 +5754,10 @@ export function BotcastExperience({
     (message: BotcastMessage, currentEpisode: BotcastEpisode): void => {
       activeSpeechMessageIdRef.current = message.id;
       cacheListenerReactionPlan(currentEpisode, message);
+      const episodeBookend = signalEpisodeBookendForMessage(
+        currentEpisode,
+        message,
+      );
       let bot = botsById.get(message.botId);
       if (bot) {
         bot = botWithIdentityBeforeMessage(bot, currentEpisode, message);
@@ -5112,11 +5768,17 @@ export function BotcastExperience({
         botcastMessageIsAudibleToAudienceV1(message) &&
         !botPowerResponseIsSilentV1(message.content)
       ) {
-        onPrefetchUtterance?.(message, bot);
+        onPrefetchUtterance?.(message, bot, {
+          channel: "primary",
+          mixGain: 1,
+          episodeBookend,
+        });
       }
       setLiveSpeech({
         messageId: message.id,
-        reveal: prepareBotcastSpeechReveal(message.content),
+        reveal: prepareBotcastSpeechReveal(
+          signalVoicePerformanceTranscriptText(message),
+        ),
       });
       setSpeakingMessageId(message.id);
     },
@@ -5148,6 +5810,11 @@ export function BotcastExperience({
       const playbackMessage = primarySpokenContent === message.content
         ? message
         : { ...message, content: primarySpokenContent };
+      const episodeBookend = signalEpisodeBookendForMessage(
+        currentEpisode,
+        message,
+      );
+      const transcriptText = signalVoicePerformanceTranscriptText(message);
       let playbackStarted = false;
       let playbackStartNotified = false;
       let voicePreparationTimer: number | null = null;
@@ -5192,7 +5859,7 @@ export function BotcastExperience({
           notifyPlaybackStart();
           clearLiveCameraPostSpeechHold();
           const resolvedDurationMs =
-            durationMs ?? Math.max(720, message.content.length * 34);
+            durationMs ?? Math.max(720, transcriptText.length * 34);
           if (voiceCompletionTimer !== null) {
             window.clearTimeout(voiceCompletionTimer);
           }
@@ -5204,7 +5871,7 @@ export function BotcastExperience({
           setLiveSpeech({
             messageId: message.id,
             reveal: startBotcastSpeechReveal({
-              text: message.content,
+              text: transcriptText,
               durationMs: resolvedDurationMs,
               alignment,
             }),
@@ -5278,7 +5945,9 @@ export function BotcastExperience({
             voicePreparationTimer = window.setTimeout(() => {
               onStopUtterance?.();
               settle(false);
-            }, SIGNAL_VOICE_START_TIMEOUT_MS);
+            }, episodeBookend === "opening"
+              ? SIGNAL_OPENING_VOICE_START_TIMEOUT_MS
+              : SIGNAL_VOICE_START_TIMEOUT_MS);
             void Promise.resolve(
               onUtterance(
                 playbackMessage,
@@ -5292,6 +5961,11 @@ export function BotcastExperience({
                   selectedShow?.studioLayout,
                   message.speakerRole,
                 ),
+                {
+                  channel: "primary",
+                  mixGain: 1,
+                  episodeBookend,
+                },
               ),
             ).then(settle, () => settle(false));
           })
@@ -6082,15 +6756,16 @@ export function BotcastExperience({
     );
   };
 
-  const prepareSignalEpisodeVideo = async (
+  const prepareSignalPremiumVideo = async (
     detail: BotcastEpisode,
     show: BotcastShow,
     existing: ReplayRecordingV1 | null,
+    regenerate: boolean,
   ): Promise<void> => {
     let recording = existing;
     const currentRenderContract =
       recording?.manifest?.visual.metadata?.renderContract ===
-      "signal-studio-dom-v2";
+      "signal-studio-dom-v3";
     if (!recording || !currentRenderContract) {
       recording = await queueReplayManifest(
         buildSignalReplayManifestV1({
@@ -6100,25 +6775,22 @@ export function BotcastExperience({
           producerName,
           theme,
         }),
+        { render: false },
       );
-    } else if (
-      recording.status === "failed" ||
-      recording.status === "collecting" ||
-      ((recording.status === "ready" ||
-        recording.status === "ready_with_warnings") &&
-        !recording.videoUrl)
-    ) {
-      recording = await retryReplayRecording(recording.id);
     }
-    handleReplayRecordingChange(detail.id, recording);
-    setEpisode(null);
-    setReplayEpisode(null);
+    if (preferredProvider === "local") {
+      throw new Error("Switch Signal to ONLINE before starting Premium production.");
+    }
+    const premium = await startReplayPremiumProduction({
+      recordingId: recording.id,
+      preferredProvider,
+      regenerate,
+    });
+    recording = premium.recording;
+    handleReplayRecordingChange(detail.id, premium.recording);
     setReplayRenderTarget({ episode: detail, show });
     setNotice(
-      recording.status === "rendering" ||
-        recording.status === "preparing_audio"
-        ? `“${detail.title}” is rendering. Select it when the video is ready.`
-        : `Rendering “${detail.title}”. Select it again when the video is ready.`,
+      `The Eleven v3 master for “${detail.title}” is cached. PRISM is rendering the studio now.`,
     );
     window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
   };
@@ -6134,7 +6806,7 @@ export function BotcastExperience({
     setLoading(true);
     setError(null);
     try {
-      const existingRecording =
+      let existingRecording =
         summary.status === "completed"
           ? await replayRecordingForSource("signal", summary.id)
           : null;
@@ -6185,16 +6857,40 @@ export function BotcastExperience({
         }
         return;
       }
-      if (
-        !archiveShow ||
-        !signalReplayRecordingHasVideo(existingRecording)
-      ) {
-        if (!archiveShow) {
-          throw new Error("The episode's Signal show is not available.");
-        }
-        await prepareSignalEpisodeVideo(detail, archiveShow, existingRecording);
-        return;
+      if (!archiveShow) {
+        throw new Error("The episode's Signal show is not available.");
       }
+      if (
+        !existingRecording ||
+        existingRecording.manifest?.visual.metadata?.renderContract !==
+          "signal-studio-dom-v3"
+      ) {
+        existingRecording = await queueReplayManifest(
+          buildSignalReplayManifestV1({
+            episode: detail,
+            show: archiveShow,
+            bots: eligibleBots,
+            producerName,
+            theme,
+          }),
+          { render: false },
+        );
+        handleReplayRecordingChange(summary.id, existingRecording);
+      }
+      const replayDetail = await replayRecordingDetail(existingRecording.id);
+      const prepared = await prepareReplayAudio(
+        replayDetail.recording,
+        replayDetail.takes,
+        { includeProductionAssets: false },
+      ).catch(() => null);
+      setLocalReplayAudio(prepared);
+      setLocalReplayWarning(
+        prepared?.warnings.length
+          ? prepared.warnings.join(" ")
+          : prepared
+            ? null
+            : "Captured audio could not be prepared. Visual replay remains available.",
+      );
       setReplayEpisode(detail);
       setReplayRenderTarget(null);
       setEpisode(null);
@@ -6280,18 +6976,90 @@ export function BotcastExperience({
   };
 
   const replayTimeline = useMemo(
-    () =>
-      replayEpisode
+    () => {
+      const fallback = replayEpisode
         ? botcastReplayTimeline(replayEpisode.messages, replayEpisode.events)
         : {
             durationMs: 8_000,
             messageStartMs: [],
             messageEndMs: [],
             thinkingRanges: [],
-          },
-    [replayEpisode],
+          };
+      if (!replayEpisode || !localReplayAudio) return fallback;
+      const beatByMessageId = new Map(
+        localReplayAudio.timeline.beats.flatMap((beat) =>
+          beat.kind === "utterance" && beat.sourceMessageId
+            ? [[beat.sourceMessageId, beat] as const]
+            : [],
+        ),
+      );
+      return {
+        ...fallback,
+        durationMs: localReplayAudio.timeline.durationMs,
+        messageStartMs: replayEpisode.messages.map(
+          (message, index) =>
+            beatByMessageId.get(message.id)?.startMs ??
+            fallback.messageStartMs[index] ??
+            0,
+        ),
+        messageEndMs: replayEpisode.messages.map(
+          (message, index) =>
+            beatByMessageId.get(message.id)?.endMs ??
+            fallback.messageEndMs[index] ??
+            0,
+        ),
+      };
+    },
+    [localReplayAudio, replayEpisode],
   );
   const replayDurationMs = replayTimeline.durationMs;
+  const stopLocalReplayAudio = useCallback((): void => {
+    localReplayAudioSourceRef.current?.stop();
+    localReplayAudioSourceRef.current = null;
+    void localReplayAudioContextRef.current?.close();
+    localReplayAudioContextRef.current = null;
+  }, []);
+  const startLocalReplayPlayback = useCallback((): void => {
+    if (!localReplayAudio) {
+      setReplayPlaying(true);
+      return;
+    }
+    stopLocalReplayAudio();
+    const context = new AudioContext({ sampleRate: localReplayAudio.audioBuffer.sampleRate });
+    const source = context.createBufferSource();
+    source.buffer = localReplayAudio.audioBuffer;
+    source.connect(context.destination);
+    const offsetMs = Math.min(
+      replayElapsedMs >= replayDurationMs ? 0 : replayElapsedMs,
+      Math.max(0, localReplayAudio.audioBuffer.duration * 1_000 - 1),
+    );
+    if (replayElapsedMs >= replayDurationMs) setReplayElapsedMs(0);
+    localReplayAudioContextRef.current = context;
+    localReplayAudioSourceRef.current = source;
+    localReplayAudioOffsetMsRef.current = offsetMs;
+    localReplayAudioStartedAtRef.current = context.currentTime;
+    source.onended = () => {
+      if (localReplayAudioSourceRef.current !== source) return;
+      localReplayAudioSourceRef.current = null;
+      setReplayElapsedMs(replayDurationMs);
+      setReplayPlaying(false);
+    };
+    source.start(0, offsetMs / 1_000);
+    setReplayPlaying(true);
+  }, [
+    localReplayAudio,
+    replayDurationMs,
+    replayElapsedMs,
+    stopLocalReplayAudio,
+  ]);
+  const pauseLocalReplayPlayback = useCallback((): void => {
+    stopLocalReplayAudio();
+    setReplayPlaying(false);
+  }, [stopLocalReplayAudio]);
+  useEffect(() => {
+    if (!replayEpisode) stopLocalReplayAudio();
+    return () => stopLocalReplayAudio();
+  }, [replayEpisode, stopLocalReplayAudio]);
   const replayPerceptionOverlaps = useMemo(
     () => botcastPerceptionOverlapEventsV1(replayEpisode?.events ?? []),
     [replayEpisode?.events],
@@ -6299,6 +7067,17 @@ export function BotcastExperience({
   useEffect(() => {
     if (!replayEpisode || !replayPlaying || replayVoicePending) return;
     const timer = window.setInterval(() => {
+      const context = localReplayAudioContextRef.current;
+      if (localReplayAudio && context) {
+        const next = Math.min(
+          replayDurationMs,
+          localReplayAudioOffsetMsRef.current +
+            (context.currentTime - localReplayAudioStartedAtRef.current) * 1_000,
+        );
+        setReplayElapsedMs(next);
+        if (next >= replayDurationMs) setReplayPlaying(false);
+        return;
+      }
       setReplayElapsedMs((current) => {
         const next = Math.min(replayDurationMs, current + 100);
         if (next >= replayDurationMs) setReplayPlaying(false);
@@ -6306,7 +7085,13 @@ export function BotcastExperience({
       });
     }, 100);
     return () => window.clearInterval(timer);
-  }, [replayDurationMs, replayEpisode, replayPlaying, replayVoicePending]);
+  }, [
+    localReplayAudio,
+    replayDurationMs,
+    replayEpisode,
+    replayPlaying,
+    replayVoicePending,
+  ]);
   useEffect(() => {
     if (!replayEpisode) return;
     if (!replayPlaying) {
@@ -6385,7 +7170,7 @@ export function BotcastExperience({
     ) {
       armListenerReactionTiming(replayActiveMessage, durationMs);
     }
-    if (replayPlaying) {
+    if (replayPlaying && !localReplayAudio) {
       fireReplayListenerReaction(replayActiveMessage, elapsedMs, durationMs);
     }
   }, [
@@ -6398,11 +7183,12 @@ export function BotcastExperience({
     replayEpisode,
     replayMessageIndex,
     replayPlaying,
+    localReplayAudio,
     replayTimeline.messageStartMs,
     replayTimeline.messageEndMs,
   ]);
   useEffect(() => {
-    if (!replayPlaying || !replayActiveMessage) return;
+    if (!replayPlaying || !replayActiveMessage || localReplayAudio) return;
     if (replayVoiceMessageIdRef.current === replayActiveMessage.id) return;
     replayVoiceMessageIdRef.current = replayActiveMessage.id;
     if (
@@ -6542,6 +7328,7 @@ export function BotcastExperience({
     replayDurationMs,
     replayMessageIndex,
     replayPlaying,
+    localReplayAudio,
     replayEpisode,
     replayActiveMessageIsOverlap,
     replayActiveMessageWillBeOverlapped,
@@ -6562,6 +7349,7 @@ export function BotcastExperience({
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
     onStopUtterance?.();
+    stopLocalReplayAudio();
   };
 
   const renderAtmosphereMixer = (show: BotcastShow): React.JSX.Element => {
@@ -6732,6 +7520,7 @@ export function BotcastExperience({
     host: BotcastBotSummary | null;
     guest: BotcastBotSummary | null;
     shot: "left" | "right" | "wide";
+    cameraMode: BotcastCameraShot;
     activeMessage: BotcastMessage | null;
     replay: boolean;
     guestDeparted?: boolean;
@@ -6869,11 +7658,21 @@ export function BotcastExperience({
     const speechIsPlaying = args.replay
       ? stageReplayPlaying && stageReplaySpeechActive
       : speechReveal?.phase === "playing";
+    const speechTranscriptProgress = speechReveal
+      ? Math.max(
+          0,
+          Math.min(
+            1,
+            Array.from(botcastSpeechRevealVisibleText(speechReveal)).length /
+              Math.max(1, Array.from(speechReveal.text).length),
+          ),
+        )
+      : speechProgress;
     const activeVoiceAction =
-      args.activeMessage && (args.replay || speechReveal)
+      args.activeMessage && speechIsPlaying
         ? signalVoicePerformanceActionPresentationAtProgress(
             args.activeMessage,
-            speechProgress,
+            speechTranscriptProgress,
           )
         : null;
     const listenerReactionPlan = args.activeMessage
@@ -7073,6 +7872,19 @@ export function BotcastExperience({
       guestCupVisual?.sipping === true && !roleIsSpeaking("guest");
     const hostCupTravel = signalCupTravelByRole.host;
     const guestCupTravel = signalCupTravelByRole.guest;
+    const stageCupActivityWide = Boolean(
+      args.cameraMode === "auto" &&
+        (hostSipping ||
+          guestSipping ||
+          hostCupTravel.mode !== "idle" ||
+          guestCupTravel.mode !== "idle"),
+    );
+    const stageShot = signalLiveAutoCameraShot({
+      baseShot: args.shot,
+      cupActivityWide: stageCupActivityWide,
+      botThinking: false,
+      producerGuestThinking: false,
+    });
     const atmosphereStyle = {
       ["--botcast-accent" as string]: args.show.accentColor,
       ["--signal-film-grain-level" as string]: studioMix.filmGrain,
@@ -7089,11 +7901,11 @@ export function BotcastExperience({
           }
         : {}),
       ["--botcast-camera-offset-x" as string]: `${botcastCameraOffsetXPercent(
-        args.shot,
+        stageShot,
         studioLayout,
       )}%`,
       ["--botcast-camera-offset-y" as string]: `${botcastCameraOffsetYPercent(
-        args.shot,
+        stageShot,
         studioLayout,
       )}%`,
       ...(stageAtmosphere.imageUrl
@@ -7107,9 +7919,28 @@ export function BotcastExperience({
         hostColor: args.host?.color ?? args.show.accentColor,
         guestColor: args.guest?.color ?? args.show.accentColor,
         theme: stageTheme,
-        tuning: studioGlowTuning,
       }) ?? {}),
     } as CSSProperties;
+    const floorGlow = (
+      role: "host" | "guest",
+      color: string | null | undefined,
+    ): ReactNode => (
+      <div
+        className={styles.signalFloorGlow}
+        data-role={role}
+        data-talking={roleMouthIsActive(role) ? "true" : undefined}
+        style={{
+          ...signalStudioMaskedFloorGlowStyle(
+            studioLayout,
+            role === "host" ? "hostFloorGlow" : "guestFloorGlow",
+          ),
+          ["--signal-floor-glow-color" as string]: normalizeAccentForTheme(
+            color ?? args.show.accentColor,
+            stageTheme,
+          ),
+        }}
+      />
+    );
     const avatar = (
       bot: BotcastBotSummary,
       role: "host" | "guest",
@@ -7186,13 +8017,11 @@ export function BotcastExperience({
       return avatarFallback(bot);
     };
     return (
-      <section
+      <SignalCameraStageViewport
         ref={args.stageRef ?? signalStageRef}
+        shot={stageShot}
+        transitionMode={args.cameraTransitions ?? cameraTransitionMode}
         className={styles.stageViewport}
-        data-shot={args.shot}
-        data-camera-transitions={
-          args.cameraTransitions ?? cameraTransitionMode
-        }
         data-replay={args.replay ? "true" : undefined}
         data-guest-presence={args.currentEpisode.guestPresenceMode}
         data-audience-guest-visible={guestVisibleToAudience ? "true" : "false"}
@@ -7205,7 +8034,7 @@ export function BotcastExperience({
         }
         data-studio-source={stageAtmosphere.imageUrl ? "image" : "fallback"}
         style={atmosphereStyle}
-        aria-label={`Signal studio, ${args.shot} camera`}
+        aria-label={`Signal studio, ${stageShot} camera`}
       >
         <div className={styles.stageScene} data-signal-stage-scene="true">
           <div className={styles.atmosphere} aria-hidden="true">
@@ -7216,6 +8045,12 @@ export function BotcastExperience({
               />
             ) : null}
           </div>
+          <SignalStudioMicrophoneTint
+            atmosphere={stageAtmosphere}
+            hostColor={args.host?.color ?? args.show.accentColor}
+            guestColor={args.guest?.color ?? args.show.accentColor}
+            theme={stageTheme}
+          />
           <div
             className={styles.wordmark}
             data-signal-cast-credit="true"
@@ -7241,7 +8076,6 @@ export function BotcastExperience({
             hostColor: args.host?.color ?? args.show.accentColor,
             guestColor: args.guest?.color ?? args.show.accentColor,
             theme: stageTheme,
-            tuning: studioGlowTuning,
           }) ? (
             <div
               className={styles.studioGlow}
@@ -7259,6 +8093,14 @@ export function BotcastExperience({
               aria-hidden="true"
             />
           ) : null}
+          <div className={styles.signalFloorGlowLayer} aria-hidden="true">
+            {hostVisibleToAudience
+              ? floorGlow("host", args.host?.color)
+              : null}
+            {guestVisibleToAudience && args.guest
+              ? floorGlow("guest", args.guest.color)
+              : null}
+          </div>
           {socialPressure ? (
             <div
               className={styles.powerPressure}
@@ -7641,7 +8483,7 @@ export function BotcastExperience({
             exitLabel={signalModelWarmup.initial ? "Back to setup" : "Cut show"}
           />
         ) : null}
-      </section>
+      </SignalCameraStageViewport>
     );
   };
 
@@ -7742,28 +8584,31 @@ export function BotcastExperience({
     const stageAtmosphere = activeShowAtmosphere(show, previewTheme);
     const studioMix = normalizeBotcastStudioAtmosphereMix(show.atmosphereMix);
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
+    const studioGlowTuning = normalizeBotcastStudioGlowTuning(
+      show.studioGlowTuning,
+    );
     const hostHasCoffeeCup = botHasCoffeeCup(host);
     const guestHasCoffeeCup = guest ? botHasCoffeeCup(guest) : false;
     const studioHasCoffeeCup = hostHasCoffeeCup || guestHasCoffeeCup;
     const studioGlowTuningIsDefault = (["dark", "light"] as const).every(
       (glowTheme) =>
         studioGlowTuning[glowTheme].opacity ===
-          SIGNAL_STUDIO_GLOW_TUNING_DEFAULTS[glowTheme].opacity &&
+          BOTCAST_DEFAULT_STUDIO_GLOW_TUNING[glowTheme].opacity &&
         studioGlowTuning[glowTheme].blendMode ===
-          SIGNAL_STUDIO_GLOW_TUNING_DEFAULTS[glowTheme].blendMode,
+          BOTCAST_DEFAULT_STUDIO_GLOW_TUNING[glowTheme].blendMode,
     );
     const previewStudioGlowTuning = (
       glowTheme: "light" | "dark",
-      update: Partial<SignalStudioGlowThemeTuning>,
+      update: Partial<BotcastStudioGlowThemeTuning>,
     ) => {
       setStudioLayoutPreviewTheme(glowTheme);
-      setStudioGlowTuning((current) => ({
-        ...current,
+      updateStudioGlowTuning(show, {
+        ...studioGlowTuning,
         [glowTheme]: {
-          ...current[glowTheme],
+          ...studioGlowTuning[glowTheme],
           ...update,
         },
-      }));
+      });
     };
     const voiceLevelControl = (
       bot: BotcastBotSummary,
@@ -7811,28 +8656,63 @@ export function BotcastExperience({
         hostColor: host.color ?? show.accentColor,
         guestColor: guest?.color ?? show.accentColor,
         theme: previewTheme,
-        tuning: studioGlowTuning,
       }) ?? {}),
     } as CSSProperties;
+    const floorGlowPreview = (
+      role: "host" | "guest",
+      color: string | null | undefined,
+    ): ReactNode => (
+      <div
+        className={styles.signalFloorGlow}
+        data-role={role}
+        style={{
+          ...signalStudioMaskedFloorGlowStyle(
+            layout,
+            role === "host" ? "hostFloorGlow" : "guestFloorGlow",
+          ),
+          ["--signal-floor-glow-color" as string]: normalizeAccentForTheme(
+            color ?? show.accentColor,
+            previewTheme,
+          ),
+        }}
+      />
+    );
     const layoutHandle = (
       item: BotcastStudioLayoutItem,
       child: ReactNode,
     ): React.JSX.Element => {
       const label = SIGNAL_STUDIO_LAYOUT_LABELS[item];
+      const floorGlowRole = signalStudioFloorGlowRole(item);
+      const floorGlowScalePercent = floorGlowRole
+        ? Math.round(
+            (layout[item].scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX) * 100,
+          )
+        : null;
       return (
         <div
           key={item}
           className={styles.stageLayoutHandle}
           data-kind={
-            item.endsWith("Bot")
+            floorGlowRole
+              ? "floor-glow"
+              : item.endsWith("Bot")
               ? "bot"
               : "cup"
           }
+          data-role={floorGlowRole ?? undefined}
           data-dragging={studioLayoutDraggingItem === item ? "true" : undefined}
-          style={signalStudioPlacementStyle(layout, item)}
+          style={
+            signalStudioLayoutItemIsFloorGlow(item)
+              ? signalStudioFloorGlowHandleStyle(layout, item)
+              : signalStudioPlacementStyle(layout, item)
+          }
           role="button"
           tabIndex={0}
-          aria-label={`Move ${label}. Use arrow keys to nudge.`}
+          aria-label={
+            floorGlowRole
+              ? `Move ${label} vertically and resize it horizontally. Current size ${floorGlowScalePercent}%. Use up and down arrow keys to move; left and right resize.`
+              : `Move ${label}. Use arrow keys to nudge.`
+          }
           onPointerDown={(event) => beginStudioLayoutDrag(event, show, item)}
           onPointerMove={moveStudioLayoutDrag}
           onPointerUp={finishStudioLayoutDrag}
@@ -7840,7 +8720,12 @@ export function BotcastExperience({
           onKeyDown={(event) => nudgeStudioLayoutItem(event, show, item)}
         >
           {child}
-          <span className={styles.stageLayoutHandleLabel}>{label}</span>
+          <span className={styles.stageLayoutHandleLabel}>
+            {label}
+            {floorGlowScalePercent === null
+              ? ""
+              : ` ${floorGlowScalePercent}%`}
+          </span>
         </div>
       );
     };
@@ -7947,7 +8832,9 @@ export function BotcastExperience({
               <div className={styles.stageLayoutEditorHeader}>
                 <p>
                   Drag each bot{studioHasCoffeeCup ? " and cup" : ""} onto this
-                  show’s furniture. Arrow keys make fine adjustments.
+                  show’s furniture, then drag each floor glow vertically to meet
+                  the chair or sideways to resize it. Today’s glow size is the
+                  maximum. Arrow keys make fine adjustments.
                 </p>
                 <div>
                   <div
@@ -7972,6 +8859,7 @@ export function BotcastExperience({
                   </div>
                   <span aria-live="polite">
                     {studioLayoutSaving ||
+                    studioGlowTuningSaving ||
                     studioVoiceLevelsSaving ||
                     studioAtmosphereMixSaving
                       ? "Saving studio…"
@@ -8065,6 +8953,12 @@ export function BotcastExperience({
                       />
                     ) : null}
                   </div>
+                  <SignalStudioMicrophoneTint
+                    atmosphere={stageAtmosphere}
+                    hostColor={host.color ?? show.accentColor}
+                    guestColor={guest?.color ?? show.accentColor}
+                    theme={previewTheme}
+                  />
                   <div className={styles.wordmark}>
                     <SignalShowLogo show={show} />
                     <strong>{show.name}</strong>
@@ -8075,7 +8969,6 @@ export function BotcastExperience({
                     hostColor: host.color ?? show.accentColor,
                     guestColor: guest?.color ?? show.accentColor,
                     theme: previewTheme,
-                    tuning: studioGlowTuning,
                   }) ? (
                     <div
                       className={styles.studioGlow}
@@ -8093,6 +8986,15 @@ export function BotcastExperience({
                       aria-hidden="true"
                     />
                   ) : null}
+                  <div
+                    className={styles.signalFloorGlowLayer}
+                    aria-hidden="true"
+                  >
+                    {floorGlowPreview("host", host.color)}
+                    {floorGlowPreview("guest", guest?.color)}
+                  </div>
+                  {layoutHandle("hostFloorGlow", null)}
+                  {layoutHandle("guestFloorGlow", null)}
                   {layoutHandle("hostBot", avatarPreview(host, "host"))}
                   {hostHasCoffeeCup
                     ? layoutHandle("hostCup", cupPreview(host, "host"))
@@ -8162,7 +9064,10 @@ export function BotcastExperience({
                     <button
                       type="button"
                       onClick={() =>
-                        setStudioGlowTuning(defaultSignalStudioGlowTuning())
+                        updateStudioGlowTuning(show, {
+                          dark: { ...BOTCAST_DEFAULT_STUDIO_GLOW_TUNING.dark },
+                          light: { ...BOTCAST_DEFAULT_STUDIO_GLOW_TUNING.light },
+                        })
                       }
                       disabled={studioGlowTuningIsDefault}
                     >
@@ -8234,7 +9139,7 @@ export function BotcastExperience({
                     })}
                   </div>
                   <small>
-                    Session preview only. Tell Codex which pair to lock in.
+                    Saved for this show. New shows start at 100% Overlay.
                   </small>
                 </div>
               </section>
@@ -8462,10 +9367,18 @@ export function BotcastExperience({
 
       const guestId = guestDraftId;
       if (!guestId) return;
+      const bookingGuest = botsById.get(guestId);
+      if (!bookingGuest) return;
 
       setBookingSuggestionBusy("launch");
       setError(null);
       setNotice(null);
+      setEpisodeLaunch({
+        showId: selectedShow.id,
+        showName: selectedShow.name,
+        guestName: bookingGuest.name,
+        phase: "booking",
+      });
       try {
         const booking = await synthesizeBookingForGuest(guestId);
         setGuestDraftId(booking.guestId);
@@ -8473,6 +9386,7 @@ export function BotcastExperience({
         setProducerBriefDraft(booking.producerBrief);
         await startEpisode(booking);
       } catch (bookingError) {
+        setEpisodeLaunch(null);
         setError(
           signalErrorToast(
             "Start Signal episode",
@@ -8482,6 +9396,9 @@ export function BotcastExperience({
           ),
         );
       } finally {
+        setEpisodeLaunch((current) =>
+          current?.phase === "booking" ? null : current,
+        );
         setBookingSuggestionBusy(null);
       }
     };
@@ -8674,15 +9591,21 @@ export function BotcastExperience({
           </div>
           <div className={`${styles.setupField} ${styles.producerBrief}`}>
             <label htmlFor="signal-producer-brief">
-            Private producer comments <span>optional</span>
+              Private producer comments{" "}
+              <span>
+                optional · {producerBriefSavedLength.toLocaleString()} /{" "}
+                {BOTCAST_PRODUCER_BRIEF_MAX_LENGTH.toLocaleString()}
+              </span>
             </label>
             <div className={styles.contextualTextField} data-multiline="true">
-            <textarea
+              <textarea
                 id="signal-producer-brief"
-              value={producerBriefDraft}
-              onChange={(event) => setProducerBriefDraft(event.target.value)}
-              placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
-            />
+                value={producerBriefDraft}
+                onChange={(event) => setProducerBriefDraft(event.target.value)}
+                aria-describedby="signal-producer-brief-limit"
+                aria-invalid={producerBriefTooLong || undefined}
+                placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
+              />
               <button
                 type="button"
                 className={styles.contextualDiceButton}
@@ -8705,6 +9628,15 @@ export function BotcastExperience({
                 )}
               </button>
             </div>
+            <small
+              id="signal-producer-brief-limit"
+              className={styles.producerBriefLimit}
+              data-over-limit={producerBriefTooLong ? "true" : undefined}
+            >
+              {producerBriefTooLong
+                ? "Shorten these comments before beginning the episode; PRISM will not clip them."
+                : "Concise direction works best. These comments stay off-mic."}
+            </small>
           </div>
           </>
           )}
@@ -8748,7 +9680,10 @@ export function BotcastExperience({
             className={styles.goLiveButton}
             onClick={() => void startEpisodeFromSetup()}
             disabled={
-              busy || Boolean(bookingSuggestionBusy) || !guestDraftId
+              busy ||
+              Boolean(bookingSuggestionBusy) ||
+              !guestDraftId ||
+              producerBriefTooLong
             }
             aria-busy={bookingSuggestionBusy === "launch"}
           >
@@ -8943,8 +9878,24 @@ export function BotcastExperience({
         ? "left"
         : "right"
       : null;
+  const liveBookendWide = Boolean(
+    episode &&
+      (episodePreRoll ||
+        episodeOutro ||
+        (liveCameraMode === "auto" &&
+          liveBaseShot === "wide" &&
+          (liveActiveMessage?.id === episode.messages[0]?.id ||
+            episode.segment === "closing"))),
+  );
+  const liveCupActivityWide = Boolean(
+    liveCameraMode === "auto" &&
+      (signalHostCupTravelMode !== "idle" ||
+        signalGuestCupTravelMode !== "idle"),
+  );
   const liveShot = signalLiveAutoCameraShot({
     baseShot: liveBaseShot,
+    bookendWide: liveBookendWide,
+    cupActivityWide: liveCupActivityWide,
     listenerReactionShot: liveReactionShot,
     speakingShot: liveSpeakingShot,
     postSpeechHoldShot:
@@ -9225,6 +10176,10 @@ export function BotcastExperience({
             host: signalReplayCaptureHost,
             guest: signalReplayCaptureGuest,
             shot: replayRenderCapture.frame.shot,
+            cameraMode: botcastCameraModeAt({
+              events: replayRenderTarget.episode.events,
+              elapsedMs: replayRenderCapture.frame.eventElapsedMs,
+            }),
             activeMessage:
               replayRenderTarget.episode.messages[
                 replayRenderCapture.frame.messageIndex
@@ -9488,6 +10443,40 @@ export function BotcastExperience({
           </div>
         </div>
       ) : null}
+      {episodeLaunch && selectedShow ? (
+        <section
+          className={`${styles.episodePreRoll} ${styles.episodeLaunch}`}
+          data-phase={episodeLaunch.phase}
+          data-kind="loading"
+          style={
+            { "--botcast-accent": selectedShow.accentColor } as CSSProperties
+          }
+          role="status"
+          aria-label={`${episodeLaunch.showName} episode loading`}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <div className={styles.episodeLaunchLockup}>
+            <span className={styles.episodeLaunchEyebrow}>
+              Signal control room
+            </span>
+            <div className={styles.episodeLaunchLogo} aria-hidden="true">
+              <SignalShowLogo show={selectedShow} />
+              <span className={styles.episodeLaunchBeacon} />
+            </div>
+            <h1>Preparing the broadcast</h1>
+            <p>{signalEpisodeLaunchStep(episodeLaunch.phase)}</p>
+            <div className={styles.episodeLaunchProgress} aria-hidden="true">
+              {Array.from({ length: 7 }, (_, index) => (
+                <i key={index} />
+              ))}
+            </div>
+            <small>
+              {episodeLaunch.showName} · {episodeLaunch.guestName} standing by
+            </small>
+          </div>
+        </section>
+      ) : null}
       {episodePreRoll && selectedShow ? (
         <section
           className={styles.episodePreRoll}
@@ -9735,6 +10724,7 @@ export function BotcastExperience({
               host: hostBot,
               guest: liveGuestBot,
               shot: liveShot,
+              cameraMode: liveCameraMode,
               activeMessage: liveActiveMessage,
               replay: false,
             })}
@@ -9761,27 +10751,33 @@ export function BotcastExperience({
                   </button>
                     ),
                 )}
-                <button
-                  type="button"
-                  data-camera-motion-toggle="true"
-                  data-selected={
-                    cameraTransitionMode === "animated" ? "true" : undefined
-                  }
-                  aria-label="Use animated camera transitions"
-                  aria-pressed={cameraTransitionMode === "animated"}
-                  onClick={() => {
-                    const nextMode =
-                      cameraTransitionMode === "animated"
-                        ? "instant"
-                        : "animated";
-                    setCameraTransitionMode(nextMode);
-                    writeSignalCameraTransitionMode(window.localStorage, nextMode);
-                  }}
-                >
-                  {cameraTransitionMode === "animated"
-                    ? "Animated"
-                    : "Instant"}
-                </button>
+                <span>Cuts</span>
+                {(["instant", "smart", "animated"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    data-camera-motion-toggle="true"
+                    data-camera-motion-mode={mode}
+                    data-selected={
+                      cameraTransitionMode === mode ? "true" : undefined
+                    }
+                    aria-label={`Use ${mode} camera transitions`}
+                    aria-pressed={cameraTransitionMode === mode}
+                    title={
+                      mode === "smart"
+                        ? "Mix instant cuts and animated moves; bot-to-bot always cuts"
+                        : mode === "animated"
+                          ? "Animate Wide moves; bot-to-bot always cuts"
+                          : "Cut every shot instantly"
+                    }
+                    onClick={() => {
+                      setCameraTransitionMode(mode);
+                      writeSignalCameraTransitionMode(window.localStorage, mode);
+                    }}
+                  >
+                    {mode[0]!.toUpperCase() + mode.slice(1)}
+                  </button>
+                ))}
               </div>
             ) : null}
             {episode.guestKind !== "producer" ? (
@@ -10137,15 +11133,94 @@ export function BotcastExperience({
                   onClick={() => {
                     stopReplayPlayback();
                     setReplayEpisode(null);
+                    setLocalReplayAudio(null);
+                    setLocalReplayWarning(null);
                   }}
                 >
                   Close replay
                 </button>
               </div>
             </div>
+            <div className={styles.localReplayStage} data-local-replay="true">
+              {renderStage({
+                show: selectedShow,
+                currentEpisode: replayEpisode,
+                host: replayHostBot,
+                guest: replayGuestBot,
+                shot: botcastCameraShotAt({
+                  events: replayEpisode.events,
+                  elapsedMs: replayElapsedMs,
+                }),
+                cameraMode: botcastCameraModeAt({
+                  events: replayEpisode.events,
+                  elapsedMs: replayElapsedMs,
+                }),
+                activeMessage: replayActiveMessage,
+                replay: true,
+              })}
+              <div className={styles.localReplayTransport}>
+                <button
+                  type="button"
+                  disabled={Boolean(replayRenderTarget)}
+                  title={
+                    replayRenderTarget
+                      ? "Local replay is paused while PRISM renders the Premium studio video."
+                      : undefined
+                  }
+                  onClick={() =>
+                    replayPlaying
+                      ? pauseLocalReplayPlayback()
+                      : startLocalReplayPlayback()
+                  }
+                >
+                  {replayRenderTarget
+                    ? "Premium rendering…"
+                    : replayPlaying
+                      ? "Pause local replay"
+                      : "Play local replay"}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(1, replayDurationMs)}
+                  step={100}
+                  value={Math.min(replayElapsedMs, replayDurationMs)}
+                  aria-label="Local replay position"
+                  disabled={Boolean(replayRenderTarget)}
+                  onChange={(event) => {
+                    pauseLocalReplayPlayback();
+                    setReplayElapsedMs(Number(event.currentTarget.value));
+                  }}
+                />
+                <span>
+                  {runtimeLabel(replayElapsedMs)} / {runtimeLabel(replayDurationMs)}
+                </span>
+              </div>
+              {localReplayWarning ? (
+                <p className={styles.localReplayWarning} role="status">
+                  {localReplayWarning}
+                </p>
+              ) : null}
+            </div>
             <ReplayRecordingPanel
               surface="signal"
               sourceId={replayEpisode.id}
+              preferredProvider={preferredProvider}
+              onProducePremium={async (regenerate) => {
+                stopReplayPlayback();
+                const existing =
+                  replayRecordingsByEpisodeId[replayEpisode.id] ??
+                  (await replayRecordingForSource("signal", replayEpisode.id));
+                await prepareSignalPremiumVideo(
+                  replayEpisode,
+                  selectedShow,
+                  existing,
+                  regenerate,
+                );
+                // Mastering is remote and may take long enough for the player to
+                // resume. Stop it again before the browser-heavy render mounts.
+                stopReplayPlayback();
+              }}
             />
           </div>
         ) : selectedShow && dashboardAtmosphere ? (
@@ -10157,6 +11232,9 @@ export function BotcastExperience({
                 }
                 data-identity-settings-open={
                   showIdentityControlsExpanded ? "true" : undefined
+                }
+                data-sound-identity-editor-open={
+                  showMusicIdentityEditorExpanded ? "true" : undefined
                 }
               data-tutorial-target="botcast-brand-controls"
               style={
@@ -10179,7 +11257,6 @@ export function BotcastExperience({
                     hostColor: hostShowAccent ?? selectedShow.accentColor,
                     guestColor: hostShowAccent ?? selectedShow.accentColor,
                     theme,
-                    tuning: studioGlowTuning,
                   }) ?? {}),
                 } as CSSProperties
               }
@@ -10196,13 +11273,19 @@ export function BotcastExperience({
                   accentVariant={selectedShow.fallbackStudioAccentVariant}
                 />
               )}
+              <SignalStudioMicrophoneTint
+                atmosphere={dashboardAtmosphere}
+                hostColor={hostShowAccent ?? selectedShow.accentColor}
+                guestColor={hostShowAccent ?? selectedShow.accentColor}
+                theme={theme}
+                surface="dashboard"
+              />
               {signalStudioLightingStyle({
                 show: selectedShow,
                 layout: selectedShow.studioLayout,
                 hostColor: hostShowAccent ?? selectedShow.accentColor,
                 guestColor: hostShowAccent ?? selectedShow.accentColor,
                 theme,
-                tuning: studioGlowTuning,
               }) ? (
                 <div className={styles.studioGlow} aria-hidden="true" />
               ) : null}
@@ -10387,11 +11470,17 @@ export function BotcastExperience({
                       </small>
                     <div className={styles.showLookControlGrid}>
                       <div className={styles.showLookControlGroup}>
-                          <label
-                            htmlFor={`signal-show-name-${selectedShow.id}`}
-                          >
-                            Name
-                          </label>
+                        <SignalGenerationKeywordControl
+                          id={`signal-show-name-keywords-${selectedShow.id}`}
+                          label="Name"
+                          values={showGenerationKeywordsFor("name")}
+                          expanded={showGenerationKeywordEditorExpanded("name")}
+                          disabled={busy}
+                          onToggle={() => toggleShowGenerationKeywordEditor("name")}
+                          onChange={(values) =>
+                            updateShowGenerationKeywords("name", values)
+                          }
+                        />
                         <input
                           id={`signal-show-name-${selectedShow.id}`}
                           className={styles.showLookNameInput}
@@ -10438,11 +11527,17 @@ export function BotcastExperience({
                         </button>
                       </div>
                       <div className={styles.showLookControlGroup}>
-                        <label
-                          htmlFor={`signal-show-premise-${selectedShow.id}`}
-                        >
-                          Premise
-                        </label>
+                        <SignalGenerationKeywordControl
+                          id={`signal-show-premise-keywords-${selectedShow.id}`}
+                          label="Premise"
+                          values={showGenerationKeywordsFor("premise")}
+                          expanded={showGenerationKeywordEditorExpanded("premise")}
+                          disabled={busy}
+                          onToggle={() => toggleShowGenerationKeywordEditor("premise")}
+                          onChange={(values) =>
+                            updateShowGenerationKeywords("premise", values)
+                          }
+                        />
                         <textarea
                           id={`signal-show-premise-${selectedShow.id}`}
                           className={styles.showLookPremiseInput}
@@ -10488,8 +11583,122 @@ export function BotcastExperience({
                           Refresh premise
                         </button>
                       </div>
+                      <div className={styles.showLookControlGroup}>
+                        <SignalGenerationKeywordControl
+                          id={`signal-show-music-keywords-${selectedShow.id}`}
+                          label="Sound identity"
+                          values={showGenerationKeywordsFor("music")}
+                          expanded={showGenerationKeywordEditorExpanded("music")}
+                          disabled={busy}
+                          onToggle={() => toggleShowGenerationKeywordEditor("music")}
+                          onChange={(values) =>
+                            updateShowGenerationKeywords("music", values)
+                          }
+                          secondaryAction={
+                            <button
+                              type="button"
+                              className={styles.showLookInlineGear}
+                              data-expanded={
+                                showMusicIdentityEditorExpanded
+                                  ? "true"
+                                  : undefined
+                              }
+                              aria-label={
+                                showMusicIdentityEditorExpanded
+                                  ? "Hide show sound identity prompt"
+                                  : "Edit show sound identity prompt"
+                              }
+                              aria-expanded={showMusicIdentityEditorExpanded}
+                              aria-controls={`signal-show-music-identity-${selectedShow.id}`}
+                              title={
+                                showMusicIdentityEditorExpanded
+                                  ? "Hide the sound identity prompt"
+                                  : "Edit the sound identity prompt"
+                              }
+                              onClick={() =>
+                                setShowMusicIdentityEditorShowId((current) =>
+                                  current === selectedShow.id
+                                    ? null
+                                    : selectedShow.id,
+                                )
+                              }
+                            >
+                              <span aria-hidden="true">⚙</span>
+                            </button>
+                          }
+                        />
+                        {showMusicIdentityEditorExpanded ? (
+                          <>
+                            <textarea
+                              id={`signal-show-music-identity-${selectedShow.id}`}
+                              className={styles.showLookPremiseInput}
+                              value={showMusicIdentityDraft}
+                              maxLength={900}
+                              rows={4}
+                              disabled={busy}
+                              aria-label="Edit show sound identity"
+                              autoFocus
+                              onChange={(event) =>
+                                setShowMusicIdentityDraft(event.target.value)
+                              }
+                              onBlur={(event) => {
+                                if (!busy) {
+                                  void saveShowMusicIdentity(
+                                    event.currentTarget.value,
+                                  );
+                                }
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                  setShowMusicIdentityDraft(
+                                    selectedShow.musicIdentity.direction,
+                                  );
+                                  setShowMusicIdentityEditorShowId(null);
+                                }
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onPointerDown={(event) => event.preventDefault()}
+                              onClick={() => void saveShowMusicIdentity()}
+                              disabled={
+                                busy ||
+                                !showMusicIdentityDraft.trim() ||
+                                showMusicIdentityDraft.trim() ===
+                                  selectedShow.musicIdentity.direction
+                              }
+                            >
+                              Save sound identity
+                            </button>
+                          </>
+                        ) : (
+                          <div className={styles.showMusicIdentitySummary}>
+                            {selectedShow.musicIdentity.profile.emotionalCore}.{" "}
+                            {selectedShow.musicIdentity.profile.signatureContradiction}.
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          data-signal-identity-action="music"
+                          onPointerDown={(event) => event.preventDefault()}
+                          onClick={() => void regenerateShowMusicIdentity()}
+                          disabled={busy}
+                        >
+                          Regenerate sound identity
+                        </button>
+                      </div>
                         <div className={styles.showLookControlGroup}>
-                          <span>Dashboard blurbs</span>
+                          <SignalGenerationKeywordControl
+                            id={`signal-show-blurbs-keywords-${selectedShow.id}`}
+                            label="Dashboard blurbs"
+                            values={showGenerationKeywordsFor("blurbs")}
+                            expanded={showGenerationKeywordEditorExpanded("blurbs")}
+                            disabled={busy}
+                            onToggle={() => toggleShowGenerationKeywordEditor("blurbs")}
+                            onChange={(values) =>
+                              updateShowGenerationKeywords("blurbs", values)
+                            }
+                          />
                           <button
                             type="button"
                             data-signal-identity-action="blurbs"
@@ -10506,7 +11715,17 @@ export function BotcastExperience({
                           </button>
                         </div>
                       <div className={styles.showLookControlGroup}>
-                        <span>Studio pair</span>
+                        <SignalGenerationKeywordControl
+                          id={`signal-show-studio-keywords-${selectedShow.id}`}
+                          label="Studio pair"
+                          values={showGenerationKeywordsFor("studio")}
+                          expanded={showGenerationKeywordEditorExpanded("studio")}
+                          disabled={busy || selectedShowArtworkBusy}
+                          onToggle={() => toggleShowGenerationKeywordEditor("studio")}
+                          onChange={(values) =>
+                            updateShowGenerationKeywords("studio", values)
+                          }
+                        />
                         <button
                           type="button"
                           data-signal-artwork-action="studio"
@@ -10577,7 +11796,17 @@ export function BotcastExperience({
                         </button>
                       </div>
                       <div className={styles.showLookControlGroup}>
-                        <span>Logo</span>
+                        <SignalGenerationKeywordControl
+                          id={`signal-show-logo-keywords-${selectedShow.id}`}
+                          label="Logo"
+                          values={showGenerationKeywordsFor("logo")}
+                          expanded={showGenerationKeywordEditorExpanded("logo")}
+                          disabled={busy || selectedShowArtworkBusy}
+                          onToggle={() => toggleShowGenerationKeywordEditor("logo")}
+                          onChange={(values) =>
+                            updateShowGenerationKeywords("logo", values)
+                          }
+                        />
                         <button
                           type="button"
                           data-signal-artwork-action="logo"
@@ -10597,7 +11826,17 @@ export function BotcastExperience({
                         </button>
                       </div>
                       <div className={styles.showLookControlGroup}>
-                          <span>Atmosphere audio</span>
+                          <SignalGenerationKeywordControl
+                            id={`signal-show-audio-keywords-${selectedShow.id}`}
+                            label="Atmosphere audio"
+                            values={showGenerationKeywordsFor("audio")}
+                            expanded={showGenerationKeywordEditorExpanded("audio")}
+                            disabled={busy}
+                            onToggle={() => toggleShowGenerationKeywordEditor("audio")}
+                            onChange={(values) =>
+                              updateShowGenerationKeywords("audio", values)
+                            }
+                          />
                         <button
                           type="button"
                           onClick={() => void generateShowIntroAudio()}
@@ -10703,11 +11942,15 @@ export function BotcastExperience({
                     ? "Hide show identity settings"
                         : "Tune this show’s identity"
                     }
-                    onClick={() =>
+                    onClick={() => {
+                      if (showIdentityControlsExpanded) {
+                        setShowMusicIdentityEditorShowId(null);
+                        setShowGenerationKeywordEditor(null);
+                      }
                       setShowIdentityControlsShowId((current) =>
                         current === selectedShow.id ? null : selectedShow.id,
-                      )
-                    }
+                      );
+                    }}
                 >
                   <span aria-hidden="true">⚙</span>
                 </button>

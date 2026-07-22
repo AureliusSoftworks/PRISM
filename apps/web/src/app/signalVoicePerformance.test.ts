@@ -8,7 +8,7 @@ import {
 } from "./signalVoicePerformance.ts";
 
 describe("Signal voice performance presentation", () => {
-  it("shows saved vocal reactions as literal transcript actions", () => {
+  it("keeps saved vocal reactions above the bot and out of the transcript", () => {
     const message = {
       content: "Welcome to the difficult part.",
       voicePerformanceText:
@@ -18,19 +18,53 @@ describe("Signal voice performance presentation", () => {
       actions: ["sighs", "laughs"],
       leadingActions: ["sighs"],
       trailingActions: ["laughs"],
-      transcriptText: "*sighs* Welcome to the difficult part. *laughs*",
+      cues: [
+        { action: "sighs", revealAtProgress: 0 },
+        { action: "laughs", revealAtProgress: 1 },
+      ],
+      transcriptText: "Welcome to the difficult part.",
     });
     assert.equal(signalVoicePerformanceActionAtProgress(message, 0.1), "sighs");
-    assert.equal(signalVoicePerformanceActionAtProgress(message, 0.9), "laughs");
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 0.99), "sighs");
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 1), "laughs");
   });
 
-  it("does not surface unsupported or transcript-changing tags", () => {
+  it("replaces inline actions when the cleaned transcript reaches each cue", () => {
+    const message = {
+      content: "Look [gasp] at *scream* me! [dance]",
+      voicePerformanceText: "Look [gasp] at [screams] me! [dance]",
+    };
+    assert.deepEqual(signalVoicePerformancePresentation(message), {
+      actions: ["gasp", "scream", "dance"],
+      leadingActions: [],
+      trailingActions: ["dance"],
+      cues: [
+        { action: "gasp", revealAtProgress: 4 / 11 },
+        { action: "scream", revealAtProgress: 7 / 11 },
+        { action: "dance", revealAtProgress: 1 },
+      ],
+      transcriptText: "Look at me!",
+    });
+    assert.equal(signalVoicePerformanceTranscriptText(message), "Look at me!");
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 0.35), null);
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 4 / 11), "gasp");
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 0.6), "gasp");
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 7 / 11), "scream");
+    assert.equal(signalVoicePerformanceActionAtProgress(message, 1), "dance");
+  });
+
+  it("surfaces arbitrary bracketed actions but rejects transcript-changing tags", () => {
+    const actionMessage = {
+      content: "Keep the transcript trustworthy.",
+      voicePerformanceText: "[explosion] Keep the transcript trustworthy.",
+    };
     assert.equal(
-      signalVoicePerformanceTranscriptText({
-        content: "Keep the transcript trustworthy.",
-        voicePerformanceText: "[explosion] Keep the transcript trustworthy.",
-      }),
+      signalVoicePerformanceTranscriptText(actionMessage),
       "Keep the transcript trustworthy.",
+    );
+    assert.equal(
+      signalVoicePerformanceActionAtProgress(actionMessage, 0),
+      "explosion",
     );
     assert.equal(
       signalVoicePerformancePresentation({
@@ -51,6 +85,7 @@ describe("Signal voice performance presentation", () => {
       actions: ["leans back, slight smile"],
       leadingActions: ["leans back, slight smile"],
       trailingActions: [],
+      cues: [{ action: "leans back, slight smile", revealAtProgress: 0 }],
       transcriptText: "...",
     });
     assert.equal(
@@ -63,42 +98,22 @@ describe("Signal voice performance presentation", () => {
     );
   });
 
-  it("keeps action text mounted through a gradual entrance, hold, and exit", () => {
+  it("keeps the latest reached action mounted until it is replaced", () => {
     const message = {
-      content: "A line with one performed reaction.",
-      voicePerformanceText: "[sighs] A line with one performed reaction.",
+      content: "One *gasp* two *scream* three.",
+      voicePerformanceText: "One [gasps] two [screams] three.",
     };
-    assert.deepEqual(
-      signalVoicePerformanceActionPresentationAtProgress(message, 0),
-      { action: "sighs", opacity: 0, phase: "entering" },
+    assert.equal(
+      signalVoicePerformanceActionPresentationAtProgress(message, 0.1),
+      null,
     );
     assert.deepEqual(
       signalVoicePerformanceActionPresentationAtProgress(message, 0.4),
-      { action: "sighs", opacity: 1, phase: "holding" },
+      { action: "gasp", opacity: 1, phase: "holding" },
     );
     assert.deepEqual(
-      signalVoicePerformanceActionPresentationAtProgress(message, 1),
-      { action: "sighs", opacity: 0, phase: "exiting" },
-    );
-  });
-
-  it("gives every saved action its own full fade envelope", () => {
-    const message = {
-      content: "Two beats live on the same line.",
-      voicePerformanceText: "[sighs] Two beats live on the same line. [laughs]",
-    };
-    assert.deepEqual(
-      signalVoicePerformanceActionPresentationAtProgress(message, 0.25),
-      { action: "sighs", opacity: 1, phase: "holding" },
-    );
-    assert.deepEqual(
-      signalVoicePerformanceActionPresentationAtProgress(message, 0.5),
-      { action: "laughs", opacity: 0, phase: "entering" },
-    );
-    assert.equal(
-      signalVoicePerformanceActionPresentationAtProgress(message, 0.75)
-        ?.opacity,
-      1,
+      signalVoicePerformanceActionPresentationAtProgress(message, 0.75),
+      { action: "scream", opacity: 1, phase: "holding" },
     );
   });
 });

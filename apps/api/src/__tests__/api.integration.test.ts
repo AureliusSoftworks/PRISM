@@ -18,6 +18,7 @@ import {
   createTestDatabase,
   withTestRegistrationAcceptance,
 } from "../test-support.ts";
+import { elevenLabsVoiceIsolationSeed } from "../voices.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-api-integration-"));
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -2228,6 +2229,71 @@ describe("API request integration", () => {
     assert.equal(response.headers.get("x-prism-voice-characters"), String(spokenText.length));
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
 
+    const streamedText =
+      "This local reply begins speaking from its first prepared phrase while the remaining sentences continue through one isolated local voice worker.";
+    const callsBeforeStream = builtinVoiceCalls.length;
+    const streamedResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId: "voice-local-message",
+        spokenText: streamedText,
+        mode: "english",
+        engine: "elevenlabs",
+        explicitOnlineContext: true,
+        streamChunks: true,
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-3",
+          elevenLabsVoiceId: "configured-provider-voice",
+          pitch: 0.1,
+          warmth: 0.2,
+          pace: 0,
+          lilt: 0,
+        },
+      }),
+    );
+    assert.equal(streamedResponse.status, 200);
+    assert.match(
+      streamedResponse.headers.get("content-type") ?? "",
+      /application\/x-ndjson/,
+    );
+    assert.equal(
+      streamedResponse.headers.get("x-prism-voice-stream"),
+      "wav-chunks-v1",
+    );
+    assert.equal(
+      streamedResponse.headers.get("x-prism-voice-engine"),
+      "builtin-local-fallback",
+    );
+    const streamLines = (await streamedResponse.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as {
+        index: number;
+        characterCount: number;
+        audioBase64: string;
+      });
+    assert.ok(streamLines.length >= 2);
+    assert.deepEqual(
+      builtinVoiceCalls
+        .slice(callsBeforeStream)
+        .map((call) => call.text)
+        .join(" "),
+      streamedText,
+    );
+    assert.equal(
+      streamLines.reduce((total, line) => total + line.characterCount, 0),
+      streamedText.length,
+    );
+    assert.ok(
+      streamLines.every(
+        (line) =>
+          Buffer.from(line.audioBase64, "base64")
+            .subarray(0, 4)
+            .toString() === "RIFF",
+      ),
+    );
+
     const alignedResponse = await client.request(
       "/api/voices/synthesize",
       jsonInit({
@@ -2271,6 +2337,135 @@ describe("API request integration", () => {
     );
     assert.equal(localFoley.status, 409);
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+  });
+
+  it("isolates Coffee bots that share one ElevenLabs actor", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "coffee-shared-voice@example.com",
+        password: "voice-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      "UPDATE users SET preferred_provider = 'openai', voice_mode = 'english', english_voice_engine = 'elevenlabs' WHERE id = ?",
+    ).run(userId);
+    const now = "2026-07-22T18:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      "coffee-morty",
+      userId,
+      "Morty",
+      "An anxious, quick-talking teenager.",
+      now,
+      now,
+    );
+    insertBot.run(
+      "coffee-rick",
+      userId,
+      "Rick",
+      "A caustic, impatient scientist.",
+      now,
+      now,
+    );
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'chat', ?, ?)",
+    ).run("coffee-shared-voice", userId, "Shared actor", now, now);
+    const insertMessage = db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, bot_id, created_at)
+       VALUES (?, 'coffee-shared-voice', ?, 'assistant', ?, 'openai', ?, ?)`,
+    );
+    insertMessage.run(
+      "coffee-morty-line-1",
+      userId,
+      "First [gasps] Morty line. *waves*",
+      "coffee-morty",
+      now,
+    );
+    insertMessage.run(
+      "coffee-rick-line-1",
+      userId,
+      "First Rick line.",
+      "coffee-rick",
+      now,
+    );
+    insertMessage.run(
+      "coffee-morty-line-2",
+      userId,
+      "Second Morty line.",
+      "coffee-morty",
+      now,
+    );
+    const profile = {
+      ...normalizeBotAudioVoiceProfileV1(undefined),
+      elevenLabsVoiceId: "shared-justin-actor",
+    };
+    const synthesize = (messageId: string, spokenText: string) =>
+      client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          messageId,
+          spokenText,
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          profile,
+        }),
+      );
+
+    const beforeCalls = fetchRecorder.calls.length;
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    try {
+      assert.equal(
+        (await synthesize("coffee-morty-line-1", "First Morty line."))
+          .status,
+        200,
+      );
+      assert.equal(
+        (await synthesize("coffee-rick-line-1", "First Rick line.")).status,
+        200,
+      );
+      assert.equal(
+        (await synthesize("coffee-morty-line-2", "Second Morty line."))
+          .status,
+        200,
+      );
+      const providerBodies = fetchRecorder.calls
+        .slice(beforeCalls)
+        .map((call) => JSON.parse(String(call.init?.body)));
+      assert.equal(providerBodies.length, 3);
+      assert.equal(
+        providerBodies[0]?.text,
+        "First [gasps] Morty line. [waves]",
+      );
+      assert.equal(providerBodies[0]?.model_id, "eleven_v3");
+      assert.equal(
+        providerBodies[0]?.seed,
+        elevenLabsVoiceIsolationSeed("coffee-morty"),
+      );
+      assert.equal(
+        providerBodies[1]?.seed,
+        elevenLabsVoiceIsolationSeed("coffee-rick"),
+      );
+      assert.equal(providerBodies[2]?.seed, providerBodies[0]?.seed);
+      assert.notEqual(providerBodies[1]?.seed, providerBodies[0]?.seed);
+      for (const body of providerBodies) {
+        assert.equal(body.previous_text, undefined);
+        assert.equal(body.next_text, undefined);
+        assert.equal(body.previous_request_ids, undefined);
+        assert.equal(body.next_request_ids, undefined);
+      }
+    } finally {
+      config.elevenLabsApiKey = "";
+    }
   });
 
   it("synthesizes listener vocal Foley only through an online ElevenLabs voice", async () => {
@@ -2426,13 +2621,14 @@ describe("API request integration", () => {
     db.prepare(
       `INSERT INTO botcast_messages
          (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
-       VALUES (?, ?, ?, 'host', ?, ?, NULL, ?)`,
+       VALUES (?, ?, ?, 'host', ?, ?, ?, ?)`,
     ).run(
       "signal-starred-voice-message",
       userId,
       onlineEpisodeId,
       "signal-voice-host",
       "That part surprised me. *burp* Excuse me.",
+      "That [gasps] part surprised me. *burp* Excuse me.",
       now,
     );
     db.prepare(
@@ -2522,11 +2718,13 @@ describe("API request integration", () => {
         interruptionBridgeVoice.headers.get("x-prism-voice-engine"),
         "elevenlabs",
       );
+      const bridgeProviderBody = JSON.parse(
+        String(fetchRecorder.calls[beforeBridgeCalls]?.init?.body),
+      );
+      assert.equal(bridgeProviderBody.text, interruptionBridgeLine);
       assert.equal(
-        JSON.parse(
-          String(fetchRecorder.calls[beforeBridgeCalls]?.init?.body),
-        ).text,
-        interruptionBridgeLine,
+        bridgeProviderBody.seed,
+        elevenLabsVoiceIsolationSeed("signal-voice-host"),
       );
       const invalidBridgeVoice = await client.request(
         "/api/voices/synthesize",
@@ -2567,6 +2765,10 @@ describe("API request integration", () => {
         providerBody.text,
         "[sighs] Welcome to the difficult part.",
       );
+      assert.equal(
+        providerBody.seed,
+        elevenLabsVoiceIsolationSeed("signal-voice-host"),
+      );
       const beforeStarredCalls = fetchRecorder.calls.length;
       const starredVoice = await client.request(
         "/api/voices/synthesize",
@@ -2586,7 +2788,7 @@ describe("API request integration", () => {
         JSON.parse(
           String(fetchRecorder.calls[beforeStarredCalls]?.init?.body),
         ).text,
-        "That part surprised me. [burps] Excuse me.",
+        "That [gasps] part surprised me. [burps] Excuse me.",
       );
       const beforeInterruptedPrimaryCalls = fetchRecorder.calls.length;
       const interruptedPrimaryVoice = await client.request(
@@ -2656,10 +2858,15 @@ describe("API request integration", () => {
         beforeOnlineReactionCalls,
       );
       assert.equal(reactionCalls.length, 1);
-      assert.equal(
-        JSON.parse(String(reactionCalls[0]?.init?.body)).text,
-        "mm-hm",
+      const reactionProviderBody = JSON.parse(
+        String(reactionCalls[0]?.init?.body),
       );
+      assert.equal(reactionProviderBody.text, "mm-hm");
+      assert.equal(
+        reactionProviderBody.seed,
+        elevenLabsVoiceIsolationSeed("signal-voice-guest"),
+      );
+      assert.notEqual(reactionProviderBody.seed, providerBody.seed);
       const beforeInterruptedSpeakerCalls = fetchRecorder.calls.length;
       const interruptedSpeakerVoice = await client.request(
         "/api/voices/synthesize",
@@ -3505,6 +3712,39 @@ describe("API request integration", () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-babble");
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
+    assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
+    const streamedBabble = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Hello, curious robot. This longer local Babble line should begin with one short generated phrase while the remaining robot language continues preparing safely in the speech worker.",
+        mode: "babble",
+        engine: "builtin",
+        seed: "babble-stream-integration",
+        streamChunks: true,
+      }),
+    );
+    assert.equal(streamedBabble.status, 200);
+    assert.equal(
+      streamedBabble.headers.get("x-prism-voice-stream"),
+      "wav-chunks-v1",
+    );
+    assert.equal(
+      streamedBabble.headers.get("x-prism-voice-engine"),
+      "builtin-babble",
+    );
+    const babbleLines = (await streamedBabble.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { audioBase64: string });
+    assert.ok(babbleLines.length >= 2);
+    assert.ok(
+      babbleLines.every(
+        (line) =>
+          Buffer.from(line.audioBase64, "base64")
+            .subarray(0, 4)
+            .toString() === "RIFF",
+      ),
+    );
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
     const bottishResponse = await client.request(
       "/api/voices/synthesize",

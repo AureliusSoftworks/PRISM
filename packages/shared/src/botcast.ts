@@ -1,4 +1,5 @@
 import type { VoiceDeliveryMood } from "./audioVoice.js";
+import type { SignalMusicProfile } from "./signalMusicProfile.js";
 import {
   normalizeBotIdentityMirrorStateV1,
   type BotIdentityMirrorStateV1,
@@ -29,6 +30,7 @@ export type BotcastGuestKind = "bot" | "producer";
 export const BOTCAST_PRODUCER_GUEST_ID = "__signal_producer_guest__";
 export const BOTCAST_PRODUCER_GUEST_NAME = "the Producer";
 export const BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE = 0.5;
+export const BOTCAST_PRODUCER_BRIEF_MAX_LENGTH = 2_000;
 export const BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS = 4 * 60 * 60 * 1_000;
 /** `audience_only` is the legacy internal name for a guest isolated from the host. */
 export type BotcastGuestPresenceMode = "present" | "audience_only";
@@ -220,6 +222,9 @@ export interface BotcastAtmosphereState {
   prompt: string;
   imageUrl: string | null;
   imageId: string | null;
+  /** Derived only for synthesized studios; uploaded artwork never receives this mask. */
+  microphoneTintMaskUrl: string | null;
+  microphoneTintMaskImageId: string | null;
   revision: number;
   status: "fallback" | "ready" | "failed";
 }
@@ -237,20 +242,91 @@ export interface BotcastStudioLightingState {
 export interface BotcastStudioPoint {
   x: number;
   y: number;
+  /** Floor-glow footprint relative to the authored maximum. */
+  scale?: number;
 }
 
 export type BotcastStudioLayoutItem =
   | "hostBot"
   | "guestBot"
   | "hostCup"
-  | "guestCup";
+  | "guestCup"
+  | "hostFloorGlow"
+  | "guestFloorGlow";
 
 export type BotcastStudioLayout = Record<
   BotcastStudioLayoutItem,
   BotcastStudioPoint
 >;
 
+export const BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MIN = 0.35;
+export const BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX = 1;
+export const BOTCAST_STUDIO_FLOOR_GLOW_SCALE_STEP = 0.05;
+
 export type BotcastVoiceLevelsByBotId = Record<string, number>;
+
+export type BotcastStudioGlowBlendMode = "screen" | "overlay";
+
+export interface BotcastStudioGlowThemeTuning {
+  opacity: number;
+  blendMode: BotcastStudioGlowBlendMode;
+}
+
+export interface BotcastStudioGlowTuning {
+  dark: BotcastStudioGlowThemeTuning;
+  light: BotcastStudioGlowThemeTuning;
+}
+
+export const BOTCAST_DEFAULT_STUDIO_GLOW_TUNING: Readonly<BotcastStudioGlowTuning> = {
+  dark: { opacity: 1, blendMode: "overlay" },
+  light: { opacity: 1, blendMode: "overlay" },
+};
+
+function normalizeBotcastStudioGlowThemeTuning(
+  value: unknown,
+  fallback: Readonly<BotcastStudioGlowThemeTuning>,
+): BotcastStudioGlowThemeTuning {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastStudioGlowThemeTuning>)
+      : {};
+  const parsedOpacity =
+    typeof container.opacity === "number"
+      ? container.opacity
+      : typeof container.opacity === "string"
+        ? Number(container.opacity)
+        : Number.NaN;
+  return {
+    opacity: Number(
+      Math.max(
+        0,
+        Math.min(1, Number.isFinite(parsedOpacity) ? parsedOpacity : fallback.opacity),
+      ).toFixed(2),
+    ),
+    blendMode:
+      container.blendMode === "screen" || container.blendMode === "overlay"
+        ? container.blendMode
+        : fallback.blendMode,
+  };
+}
+
+export function normalizeBotcastStudioGlowTuning(
+  value: unknown,
+  fallback: Readonly<BotcastStudioGlowTuning> =
+    BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
+): BotcastStudioGlowTuning {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastStudioGlowTuning>)
+      : {};
+  return {
+    dark: normalizeBotcastStudioGlowThemeTuning(container.dark, fallback.dark),
+    light: normalizeBotcastStudioGlowThemeTuning(
+      container.light,
+      fallback.light,
+    ),
+  };
+}
 
 export interface BotcastStudioAtmosphereMix {
   background: number;
@@ -386,6 +462,16 @@ export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
   guestBot: { x: 81.5, y: 66 },
   hostCup: { x: 36.25, y: 86 },
   guestCup: { x: 63.75, y: 86 },
+  hostFloorGlow: {
+    x: 18.5,
+    y: 84,
+    scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+  },
+  guestFloorGlow: {
+    x: 81.5,
+    y: 84,
+    scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+  },
 };
 
 const BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS = [
@@ -401,7 +487,10 @@ const BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS = [
     hostCup: { x: 36.25, y: 80 },
     guestCup: { x: 63.75, y: 80 },
   },
-] as const satisfies readonly BotcastStudioLayout[];
+] as const satisfies readonly Pick<
+  BotcastStudioLayout,
+  "hostBot" | "guestBot" | "hostCup" | "guestCup"
+>[];
 
 export const BOTCAST_CLOSEUP_CAMERA_SCALE = 1.42;
 
@@ -458,6 +547,8 @@ const BOTCAST_STUDIO_LAYOUT_BOUNDS: Record<
   guestBot: { minX: 10, maxX: 90, minY: 19, maxY: 82 },
   hostCup: { minX: 4, maxX: 96, minY: 12, maxY: 94 },
   guestCup: { minX: 4, maxX: 96, minY: 12, maxY: 94 },
+  hostFloorGlow: { minX: 10, maxX: 90, minY: 45, maxY: 96 },
+  guestFloorGlow: { minX: 10, maxX: 90, minY: 45, maxY: 96 },
 };
 
 function botcastStudioCoordinate(
@@ -478,9 +569,13 @@ export function normalizeBotcastStudioLayout(
   const rawContainer =
     value && typeof value === "object" && !Array.isArray(value)
       ? (value as Partial<Record<BotcastStudioLayoutItem, unknown>>)
-    : {};
-  const isPreviousDefault = BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS.some(
-    (previousDefault) =>
+      : {};
+  const hasSavedFloorGlow =
+    rawContainer.hostFloorGlow !== undefined ||
+    rawContainer.guestFloorGlow !== undefined;
+  const isPreviousDefault =
+    !hasSavedFloorGlow &&
+    BOTCAST_PREVIOUS_DEFAULT_STUDIO_LAYOUTS.some((previousDefault) =>
       (
         Object.keys(previousDefault) as Array<keyof typeof previousDefault>
       ).every((item) => {
@@ -494,12 +589,12 @@ export function normalizeBotcastStudioLayout(
           (point as Partial<BotcastStudioPoint>).y === previousDefault[item].y,
         );
       }),
-  );
+    );
   const container = isPreviousDefault ? {} : rawContainer;
-  return (
+  const layout = (
     Object.keys(BOTCAST_DEFAULT_STUDIO_LAYOUT) as BotcastStudioLayoutItem[]
   ).reduce<BotcastStudioLayout>((layout, item) => {
-      const rawPoint = container[item];
+    const rawPoint = container[item];
     const point =
       rawPoint && typeof rawPoint === "object" && !Array.isArray(rawPoint)
         ? (rawPoint as Partial<BotcastStudioPoint>)
@@ -518,12 +613,27 @@ export function normalizeBotcastStudioLayout(
           bounds.minY,
           bounds.maxY,
         ),
+        ...(item === "hostFloorGlow" || item === "guestFloorGlow"
+          ? {
+              scale: botcastStudioCoordinate(
+                point.scale,
+                fallback[item].scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+                BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MIN,
+                BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+              ),
+            }
+          : {}),
       };
       return layout;
     }, {} as BotcastStudioLayout);
+  // Floor light position is a vertical stage adjustment while scale is saved
+  // separately. Its horizontal anchor always follows the paired performer.
+  layout.hostFloorGlow.x = layout.hostBot.x;
+  layout.guestFloorGlow.x = layout.guestBot.x;
+  return layout;
 }
 
-/** Exchanges the host and guest seats while keeping each bot with its cup. */
+/** Exchanges seats while keeping each performer with their cup and floor light. */
 export function swapBotcastStudioLayoutSeats(
   value: unknown,
 ): BotcastStudioLayout {
@@ -533,6 +643,8 @@ export function swapBotcastStudioLayoutSeats(
     guestBot: { ...layout.hostBot },
     hostCup: { ...layout.guestCup },
     guestCup: { ...layout.hostCup },
+    hostFloorGlow: { ...layout.guestFloorGlow },
+    guestFloorGlow: { ...layout.hostFloorGlow },
   };
 }
 
@@ -546,6 +658,7 @@ export const BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT = [
   "The attached image is the sole canonical source frame.",
   "Produce one finished replacement image of that exact studio in natural daytime lighting.",
   "Preserve the identical camera position, lens, crop, perspective, room geometry, windows and view, furniture, microphones, props, artwork, materials, object placement, scale, and negative space.",
+  "On both microphones, keep the exact flat electric-magenta #FF00FF color key confined to the illuminated trim, LED rings, and status lights. Keep #FF00FF out of every other object, reflection, light, surface, and pixel.",
   "Do not add coffee cups, mugs, tumblers, drinking glasses, or other drinkware.",
   "Do not redesign, restage, add, remove, substitute, duplicate, relocate, crop, zoom, or recompose anything.",
   "Change only the illumination and exterior sky: daylight through the existing windows, open-sky fill, subtle sunlit bounce, practical lamps off, clean midtones, and restrained shadows.",
@@ -606,6 +719,14 @@ export interface BotcastAtmosphereAudioState {
   model: string | null;
 }
 
+/** Saved, editable direction plus the provider-safe fingerprint derived from it. */
+export interface BotcastMusicIdentity {
+  version: 1;
+  direction: string;
+  revision: number;
+  profile: SignalMusicProfile;
+}
+
 export interface BotcastShow {
   id: string;
   hostBotId: string;
@@ -617,6 +738,7 @@ export interface BotcastShow {
   /** Compatibility alias for the original single-studio contract. Mirrors nightAtmosphere. */
   atmosphere: BotcastAtmosphereState;
   studioIdentity: string;
+  musicIdentity: BotcastMusicIdentity;
   dashboardBlurbs: string[];
   /** Prewritten host bridges available before a live redirect model returns. */
   hostInterruptionLines: string[];
@@ -624,6 +746,7 @@ export interface BotcastShow {
   nightAtmosphere: BotcastAtmosphereState;
   studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
+  studioGlowTuning: BotcastStudioGlowTuning;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
   logo: BotcastLogoState;
@@ -1512,17 +1635,26 @@ export interface BotcastShowPatchRequest {
   premise?: string;
   hostingStyle?: string;
   studioIdentity?: string;
+  /** Human-editable source direction; the server derives and saves the safe fingerprint. */
+  musicIdentityDirection?: string;
   dashboardBlurbs?: string[];
   hostInterruptionLines?: string[];
   atmosphereImageUrl?: string | null;
   atmosphereImageId?: string | null;
   dayAtmosphereImageUrl?: string | null;
   dayAtmosphereImageId?: string | null;
+  /** Server-owned mask derived from a synthesized Light studio. */
+  dayAtmosphereMicrophoneTintMaskUrl?: string | null;
+  dayAtmosphereMicrophoneTintMaskImageId?: string | null;
   nightAtmosphereImageUrl?: string | null;
   nightAtmosphereImageId?: string | null;
+  /** Server-owned mask derived from a synthesized Dark studio. */
+  nightAtmosphereMicrophoneTintMaskUrl?: string | null;
+  nightAtmosphereMicrophoneTintMaskImageId?: string | null;
   /** Server-owned derived state; omitted by the public show PATCH route. */
   studioLighting?: BotcastStudioLightingState;
   studioLayout?: BotcastStudioLayout;
+  studioGlowTuning?: BotcastStudioGlowTuning;
   voiceLevelsByBotId?: BotcastVoiceLevelsByBotId;
   atmosphereMix?: BotcastStudioAtmosphereMix;
   regenerateAtmosphere?: boolean;
@@ -1936,16 +2068,15 @@ export function botcastNextSpeakerRole(args: {
   segment: BotcastEpisodeSegment;
   guestDeparted: boolean;
 }): BotcastSpeakerRole | null {
+  // The closing segment belongs to the host. Guests may have supplied the
+  // preceding final response, but they can never become the saved sign-off.
+  if (args.segment === "closing") {
+    return args.messages.at(-1)?.speakerRole === "host" ? null : "host";
+  }
   if (args.guestDeparted) {
     return args.messages.at(-1)?.speakerRole === "host" ? null : "host";
   }
   if (args.messages.length === 0) return "host";
-  if (
-    args.segment === "closing" &&
-    args.messages.at(-1)?.speakerRole === "host"
-  ) {
-    return null;
-  }
   return args.messages.at(-1)?.speakerRole === "host" ? "guest" : "host";
 }
 

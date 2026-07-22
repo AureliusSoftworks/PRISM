@@ -1,7 +1,9 @@
 const MARKED_SPEECH_BLOCK_PATTERN = /(\*{1,3})([^*\r\n]{1,240})\1/gu;
+const BRACKETED_ACTION_PATTERN =
+  /(?<![\\[])\[([^\[\]\r\n]{1,240})\](?!\])(?!\s*\()/gu;
 
 const PHYSICAL_ACTION_START_PATTERN =
-  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|hesitantly)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|watches?|watching|straightens?|straightening|releases?|releasing|nudges?|nudging|pulls?|pulling|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|rubs?|rubbing|scratches?|scratching|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|squints?|squinting)\b/iu;
+  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|hesitantly)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|watches?|watching|straightens?|straightening|releases?|releasing|nudges?|nudging|pulls?|pulling|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|rubs?|rubbing|scratches?|scratching|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|squints?|squinting)\b/iu;
 
 const BODY_ACTION_START_PATTERN =
   /^(?:(?:his|her|their|its)\s+)?(?:antennae?|eyes?|gaze|jaw|mouth|shoulders?|hands?|fingers?|head|tail|ears?)\s+(?:twitch(?:es|ing)?|narrow(?:s|ing)?|widen(?:s|ing)?|shift(?:s|ing)?|drop(?:s|ping)?|rise(?:s|rising)?|turn(?:s|ing)?|tilt(?:s|ing)?|curl(?:s|ing)?|clench(?:es|ing)?|relax(?:es|ing)?|flick(?:s|ing)?|fold(?:s|ing)?|cross(?:es|ing)?|tap(?:s|ping)?|drum(?:s|ming)?|shake(?:s|shaking)?|nod(?:s|ding)?)\b/iu;
@@ -75,6 +77,9 @@ function looksLikeMarkedStageDirection(
   const hasSpokenBefore = /[\p{L}\p{N}]/u.test(spokenBoundaryBefore);
   const hasSpokenAfter = /[\p{L}\p{N}]/u.test(spokenBoundaryAfter);
   if (!hasSpokenBefore || !hasSpokenAfter) return true;
+  if (/^\s*\[[^\]\r\n]+\]\(prism-bot:\/\/[^)\r\n]+\),?\s*$/u.test(before)) {
+    return true;
+  }
   if (/\n\s*$/u.test(before) && /^\s*\n/u.test(after)) return true;
 
   return (
@@ -84,12 +89,15 @@ function looksLikeMarkedStageDirection(
 }
 
 /**
- * Removes visually authored physical actions from synthesized speech while
- * retaining the words inside ordinary Markdown emphasis.
+ * Removes visually authored actions from base synthesized speech while
+ * retaining bot-mention links and words inside ordinary Markdown emphasis.
+ * ElevenLabs receives the corresponding actor-facing form from
+ * `voicePerformanceTextFromActionCues` instead.
  */
 export function voiceSpokenText(value: unknown): string {
   if (typeof value !== "string") return "";
   return value
+    .replace(BRACKETED_ACTION_PATTERN, " ")
     .replace(
       MARKED_SPEECH_BLOCK_PATTERN,
       (match, _marker: string, inner: string, offset: number, source: string) => {
@@ -106,23 +114,38 @@ export function voiceSpokenText(value: unknown): string {
 }
 
 /**
- * Turns explicit human-performed sound beats in asterisks into actor-facing
- * performance tags while leaving ordinary emphasis and physical action rules
- * to `voiceSpokenText`. Returns null when no vocal cue was authored.
+ * Gives bracketed actions and asterisk-authored stage actions one ElevenLabs
+ * representation. Existing bracket tags stay in place; recognized asterisk
+ * actions become bracket tags; ordinary Markdown emphasis remains spoken.
  */
-export function voicePerformanceTextFromAsteriskCues(
+export function voicePerformanceTextFromActionCues(
   value: unknown,
 ): string | null {
   if (typeof value !== "string") return null;
-  let foundVocalCue = false;
+  let foundActionCue = [...value.matchAll(BRACKETED_ACTION_PATTERN)].length > 0;
   const performanceText = value.replace(
     MARKED_SPEECH_BLOCK_PATTERN,
-    (match, _marker: string, inner: string) => {
+    (match, _marker: string, inner: string, offset: number, source: string) => {
       const tag = asteriskHumanSoundVoiceTag(inner);
-      if (!tag) return match;
-      foundVocalCue = true;
-      return `[${tag}]`;
+      if (tag) {
+        foundActionCue = true;
+        return `[${tag}]`;
+      }
+      const before = source.slice(0, offset);
+      const after = source.slice(offset + match.length);
+      if (!looksLikeMarkedStageDirection(inner, before, after)) return inner;
+      foundActionCue = true;
+      return `[${inner.replace(/\s+/gu, " ").trim()}]`;
     },
   );
-  return foundVocalCue ? voiceSpokenText(performanceText) : null;
+  return foundActionCue
+    ? performanceText.replace(/\s+/gu, " ").trim()
+    : null;
+}
+
+/** @deprecated Use `voicePerformanceTextFromActionCues`. */
+export function voicePerformanceTextFromAsteriskCues(
+  value: unknown,
+): string | null {
+  return voicePerformanceTextFromActionCues(value);
 }

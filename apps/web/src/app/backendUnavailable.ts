@@ -61,6 +61,17 @@ export function isBackendUnavailablePayload(
   );
 }
 
+export function isBackendUnavailableMessage(message: unknown): boolean {
+  if (typeof message !== "string") return false;
+  const normalized = message.trim().toLowerCase();
+  return (
+    normalized === "prism is waiting for its local api." ||
+    normalized === "trying to reconnect to prism..." ||
+    normalized.includes("prism api unreachable") ||
+    normalized.includes("backend_unavailable")
+  );
+}
+
 export function isPrismBackendUnavailableError(
   error: unknown
 ): error is PrismBackendUnavailableError {

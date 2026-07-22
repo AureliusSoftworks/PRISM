@@ -1,6 +1,8 @@
 import type {
   ReplayManifestV1,
+  ReplayPremiumSegmentV1,
   ReplayRecordingV1,
+  ReplayTimelineV1,
   ReplayVoiceTakeRecordV1,
   ReplayVoiceTakeV1,
 } from "@localai/shared";
@@ -144,10 +146,14 @@ export async function storeCapturedReplayVoiceAudio(args: {
 
 export async function queueReplayManifest(
   manifest: ReplayManifestV1,
+  options: { render?: boolean } = {},
 ): Promise<ReplayRecordingV1> {
   const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
     "/api/replays/queue",
-    { method: "POST", body: JSON.stringify({ manifest }) },
+    {
+      method: "POST",
+      body: JSON.stringify({ manifest, render: options.render !== false }),
+    },
   );
   return result.recording;
 }
@@ -168,13 +174,106 @@ export async function replayRecordingForSource(
 export async function replayRecordingDetail(recordingId: string): Promise<{
   recording: ReplayRecordingV1;
   takes: ReplayVoiceTakeRecordV1[];
+  premiumSegments: ReplayPremiumSegmentV1[];
 }> {
   const result = await replayJson<{
     ok: true;
     recording: ReplayRecordingV1;
     takes: ReplayVoiceTakeRecordV1[];
+    premiumSegments: ReplayPremiumSegmentV1[];
   }>(`/api/replays/${encodeURIComponent(recordingId)}`);
-  return { recording: result.recording, takes: result.takes };
+  return {
+    recording: result.recording,
+    takes: result.takes,
+    premiumSegments: result.premiumSegments,
+  };
+}
+
+export async function startReplayPremiumProduction(args: {
+  recordingId: string;
+  preferredProvider: "openai" | "anthropic";
+  regenerate?: boolean;
+}): Promise<{
+  recording: ReplayRecordingV1;
+  premiumSegments: ReplayPremiumSegmentV1[];
+}> {
+  const result = await replayJson<{
+    ok: true;
+    recording: ReplayRecordingV1;
+    premiumSegments: ReplayPremiumSegmentV1[];
+  }>(`/api/replays/${encodeURIComponent(args.recordingId)}/premium`, {
+    method: "POST",
+    body: JSON.stringify({
+      confirm: "send-to-elevenlabs",
+      preferredProvider: args.preferredProvider,
+      regenerate: args.regenerate === true,
+    }),
+  });
+  return {
+    recording: result.recording,
+    premiumSegments: result.premiumSegments,
+  };
+}
+
+export async function retryReplayPremiumProduction(
+  recordingId: string,
+): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(recordingId)}/premium/retry`,
+    { method: "POST", body: "{}" },
+  );
+  return result.recording;
+}
+
+export async function uploadReplayPremiumAudio(args: {
+  recordingId: string;
+  bytes: ArrayBuffer;
+  contentType: "audio/wav" | "audio/webm";
+}): Promise<ReplayRecordingV1> {
+  const response = await replayFetch(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/premium/audio`,
+    {
+      method: "POST",
+      headers: { "content-type": args.contentType },
+      body: args.bytes,
+    },
+  );
+  const payload = (await response.json().catch(() => null)) as
+    | { ok: true; recording: ReplayRecordingV1; error?: string }
+    | null;
+  if (!response.ok || !payload) {
+    throw new Error(
+      payload?.error ?? `Premium audio upload failed (${response.status}).`,
+    );
+  }
+  return payload.recording;
+}
+
+export async function storeReplayPremiumTimeline(args: {
+  recordingId: string;
+  timeline: ReplayTimelineV1;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/premium/timeline`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ timeline: args.timeline }),
+    },
+  );
+  return result.recording;
+}
+
+export async function deleteReplayPremiumMedia(
+  recordingId: string,
+): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(recordingId)}/premium`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: "delete-premium-media" }),
+    },
+  );
+  return result.recording;
 }
 
 export async function claimReplayRecording(
@@ -185,6 +284,7 @@ export async function claimReplayRecording(
 ): Promise<{
   recording: ReplayRecordingV1;
   takes: ReplayVoiceTakeRecordV1[];
+  premiumSegments: ReplayPremiumSegmentV1[];
   renderToken: string;
 } | null> {
   const result = await replayJson<{
@@ -192,6 +292,7 @@ export async function claimReplayRecording(
     claimed: {
       recording: ReplayRecordingV1;
       takes: ReplayVoiceTakeRecordV1[];
+      premiumSegments: ReplayPremiumSegmentV1[];
       renderToken: string;
     } | null;
   }>("/api/replays/claim", {
@@ -252,6 +353,7 @@ export async function completeReplayRender(args: {
   codec: string;
   durationMs: number;
   warning?: string | null;
+  timeline?: ReplayTimelineV1 | null;
 }): Promise<ReplayRecordingV1> {
   const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
     `/api/replays/${encodeURIComponent(args.recordingId)}/complete`,

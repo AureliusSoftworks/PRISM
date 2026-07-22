@@ -19,8 +19,40 @@
     translateY(var(--zen-live-bot-ink-offset-y, 0%))
     translateY(var(--avatar-details-facing-offset-y, 0%))
     scaleX(var(--avatar-details-scale-x, 1))
-    scaleX(var(--avatar-details-facing-scale-x, 1));
+    scaleX(var(--avatar-details-facing-scale-x, 1))
+    rotate(
+      calc(
+        var(--avatar-details-speech-rotation, 0deg) +
+          var(--avatar-details-speech-spin-angle, 0turn)
+      )
+    )
+    scaleX(var(--avatar-details-speech-scale-x, 1))
+    scaleY(var(--avatar-details-speech-scale-y, 1));
   transform-origin: center;
+}
+
+.speechMotion {
+  transition:
+    transform 70ms ease-out,
+    opacity 70ms linear,
+    --zen-live-bot-crt-flicker-opacity-scale 70ms linear;
+  will-change: transform, opacity;
+}
+
+.speechMotion[data-avatar-details-ink-motion="pulsate"] {
+  --avatar-details-speech-scale-x: var(--bot-face-mouth-pulse-scale-x, 1);
+  --avatar-details-speech-scale-y: var(--bot-face-mouth-pulse-scale-y, 1);
+}
+
+.speechMotion[data-avatar-details-ink-motion="flicker"] {
+  --zen-live-bot-crt-flicker-opacity-scale: var(
+    --bot-face-mouth-speech-opacity,
+    1
+  );
+}
+
+.speechMotion[data-avatar-details-ink-motion="wobble"] {
+  --avatar-details-speech-rotation: var(--bot-face-mouth-speech-wobble, 0deg);
 }
 
 .behindFace {
@@ -32,7 +64,7 @@
 }
 
 .halo {
-  opacity: 1;
+  opacity: var(--avatar-details-speech-opacity, 1);
   mix-blend-mode: screen;
   --zen-live-bot-crt-flicker-base-filter: blur(1.35px) saturate(1.28)
     drop-shadow(
@@ -63,7 +95,7 @@
 }
 
 .bloom {
-  opacity: 1;
+  opacity: var(--avatar-details-speech-opacity, 1);
   mix-blend-mode: screen;
   --zen-live-bot-crt-flicker-base-filter: blur(0.32px) saturate(1.18)
     drop-shadow(0 0 0.72px var(--avatar-details-phosphor-glow-color))
@@ -104,7 +136,7 @@
 }
 
 .core {
-  opacity: 1;
+  opacity: var(--avatar-details-speech-opacity, 1);
   mix-blend-mode: screen;
   --zen-live-bot-crt-flicker-base-filter: drop-shadow(
     0 0 0.45px rgba(255, 255, 255, 0.82)

@@ -1,5 +1,3 @@
-export type SignalCupSipRole = "host" | "guest";
-
 export interface SignalCupSipRect {
   left: number;
   top: number;
@@ -14,12 +12,6 @@ export interface SignalCupShadowProfile {
   opacity: number;
 }
 
-const SIGNAL_CUP_SIP_X_MIN_PX = 28;
-const SIGNAL_CUP_SIP_X_MAX_PX = 40;
-const SIGNAL_CUP_SIP_X_VIEWPORT_RATIO = 0.031;
-const SIGNAL_CUP_SIP_Y_MIN_PX = 6;
-const SIGNAL_CUP_SIP_Y_MAX_PX = 10;
-const SIGNAL_CUP_SIP_Y_VIEWPORT_RATIO = 0.0075;
 // Signal relaxes before the cup's 76% return beat so the expression reads
 // as a quick sip instead of lingering after the rim has left the mouth.
 export const SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS = 0.6;
@@ -98,13 +90,11 @@ export function signalStageLocalPointFromViewport(args: {
 }
 
 export function signalCupSipTargetFromMouth(args: {
-  role: SignalCupSipRole;
   sceneBounds: SignalCupSipRect;
   sceneLocalWidth: number;
   sceneLocalHeight: number;
   mouthBounds: SignalCupSipRect;
   mugLocalHeight: number;
-  viewportWidth: number;
 }): { x: number; y: number } | null {
   const mouthCenterX = args.mouthBounds.left + args.mouthBounds.width / 2;
   const mouthCenterY = args.mouthBounds.top + args.mouthBounds.height / 2;
@@ -116,27 +106,16 @@ export function signalCupSipTargetFromMouth(args: {
     viewportY: mouthCenterY,
   });
   if (!mouthLocal) return null;
-  const sipDistanceX = clamp(
-    args.viewportWidth * SIGNAL_CUP_SIP_X_VIEWPORT_RATIO,
-    SIGNAL_CUP_SIP_X_MIN_PX,
-    SIGNAL_CUP_SIP_X_MAX_PX,
-  );
-  const sipDistanceY = clamp(
-    args.viewportWidth * SIGNAL_CUP_SIP_Y_VIEWPORT_RATIO,
-    SIGNAL_CUP_SIP_Y_MIN_PX,
-    SIGNAL_CUP_SIP_Y_MAX_PX,
-  );
   const rimOffsetY =
     args.mugLocalHeight * SIGNAL_CUP_SIP_RIM_OFFSET_HEIGHT_RATIO;
 
   return {
-    // Cancel the inner Coffee sprite's role-facing X translation so its rim,
-    // rather than the mug wrapper, lands on the measured mouth glyph.
-    x:
-      mouthLocal.x +
-      (args.role === "host" ? sipDistanceX : -sipDistanceX),
-    // The tilted sprite translates upward and its rim is above frame center.
-    // Move the wrapper down by both amounts to put that rim on the glyph.
-    y: mouthLocal.y + sipDistanceY + rimOffsetY,
+    // Signal moves the mug wrapper itself, while its inner sip sprite stays
+    // centered. This keeps Coffee's independent seat-relative travel from
+    // becoming a second offset here.
+    x: mouthLocal.x,
+    // The authored tilted sprite's rim is above frame center, so move the
+    // wrapper down by that amount to put the rim on the measured mouth glyph.
+    y: mouthLocal.y + rimOffsetY,
   };
 }

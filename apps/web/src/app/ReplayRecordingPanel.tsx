@@ -10,14 +10,35 @@ import {
 } from "react";
 import type { ReplayRecordingV1 } from "@localai/shared";
 import {
+  deleteReplayPremiumMedia,
   deleteReplayRecording,
   replayRecordingForSource,
   retryReplayRecording,
+  retryReplayPremiumProduction,
 } from "./replayClient";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import styles from "./replayRecording.module.css";
 
 function statusLabel(recording: ReplayRecordingV1): string {
+  const premium = recording.premiumProduction;
+  if (recording.surface === "signal") {
+    switch (premium?.phase) {
+      case "mastering_voices":
+        return "Mastering voices";
+      case "mixing_episode":
+        return "Mixing episode";
+      case "rendering_studio":
+        return "Rendering studio";
+      case "finalizing":
+        return "Finalizing";
+      case "ready":
+        return "Premium video ready";
+      case "failed":
+        return "Premium needs attention";
+      default:
+        return recording.manifest ? "Local replay ready" : "Capturing episode";
+    }
+  }
   switch (recording.status) {
     case "collecting":
       return recording.manifest ? "Video deleted" : "Capturing episode";
@@ -85,13 +106,18 @@ export function ReplayRecordingPanel({
   surface,
   sourceId,
   preview,
+  preferredProvider,
+  onProducePremium,
 }: {
   surface: "signal" | "coffee";
   sourceId: string;
   preview?: ReactNode;
+  preferredProvider?: "local" | "openai" | "anthropic";
+  onProducePremium?: (regenerate: boolean) => Promise<void>;
 }): React.JSX.Element | null {
   const [recording, setRecording] = useState<ReplayRecordingV1 | null>(null);
   const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const refresh = useCallback(async () => {
@@ -137,15 +163,153 @@ export function ReplayRecordingPanel({
       </section>
     ) : null;
   }
-  const legacySignalVideo =
-    surface === "signal" &&
-    recording.manifest?.visual.metadata?.renderContract !==
-      "signal-studio-dom-v2";
+  if (surface === "signal") {
+    const premium = recording.premiumProduction;
+    const ready = premium?.phase === "ready" && premium.videoUrl;
+    const producing =
+      premium?.phase === "mastering_voices" ||
+      premium?.phase === "mixing_episode" ||
+      premium?.phase === "rendering_studio" ||
+      premium?.phase === "finalizing";
+    const produce = async (regenerate: boolean): Promise<void> => {
+      if (!onProducePremium) return;
+      const confirmed = window.confirm(
+        `${regenerate ? "Regenerate" : "Produce"} this Premium cut? The exact spoken transcript and selected voice IDs will be sent to ElevenLabs and may consume credits.`,
+      );
+      if (!confirmed) return;
+      setBusy(true);
+      setActionError(null);
+      try {
+        await onProducePremium(regenerate);
+        await refresh();
+      } catch (error) {
+        setActionError(
+          error instanceof Error ? error.message : "Premium production failed.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    };
+    const retryPremium = async (): Promise<void> => {
+      setBusy(true);
+      try {
+        setRecording(await retryReplayPremiumProduction(recording.id));
+        window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
+      } finally {
+        setBusy(false);
+      }
+    };
+    const removePremium = async (): Promise<void> => {
+      if (
+        !window.confirm(
+          "Delete the Premium audio and video? The episode and local replay will remain.",
+        )
+      ) return;
+      setBusy(true);
+      try {
+        setRecording(await deleteReplayPremiumMedia(recording.id));
+      } finally {
+        setBusy(false);
+      }
+    };
+    return (
+      <section className={styles.panel} data-replay-status={premium?.phase ?? "local"}>
+        <header className={styles.header}>
+          <div>
+            <p className={styles.eyebrow}>Premium production</p>
+            <h3>{recording.manifest?.title ?? "Signal episode"}</h3>
+          </div>
+          <span className={styles.status} aria-live="polite">
+            {busy && !producing
+              ? "Starting Premium production"
+              : statusLabel(recording)}
+          </span>
+        </header>
+        {producing ? (
+          <div className={styles.progress} aria-label={statusLabel(recording)}>
+            <span style={{ width: `${Math.max(4, (premium?.progress ?? 0) * 100)}%` }} />
+          </div>
+        ) : null}
+        {ready ? (
+          <>
+            <div className={styles.screen}>
+              <video
+                ref={videoRef}
+                className={styles.video}
+                controls
+                playsInline
+                preload="metadata"
+                src={premium.videoUrl ?? undefined}
+              />
+            </div>
+            <div className={styles.actions}>
+              <a href={premium.videoUrl ?? undefined}>Watch Premium video</a>
+              <a href={`${premium.videoUrl}?download=1`} download>
+                Download video
+              </a>
+              <button
+                type="button"
+                disabled={busy || preferredProvider === "local"}
+                title={
+                  preferredProvider === "local"
+                    ? "Switch to ONLINE mode to regenerate with ElevenLabs."
+                    : undefined
+                }
+                onClick={() => void produce(true)}
+              >
+                Regenerate Premium cut
+              </button>
+              <button type="button" disabled={busy} onClick={() => void removePremium()}>
+                Delete Premium media
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className={styles.pending}>
+            <p>
+              {actionError ??
+                premium?.error ??
+                premium?.warning ??
+                (busy && !producing
+                  ? "Starting the Eleven v3 dialogue master. Local replay is paused at its current position."
+                  : producing
+                  ? "Local replay stays available while PRISM produces the Premium cut."
+                  : "Create a polished Eleven v3 dialogue master and studio video when you want one.")}
+            </p>
+            {premium?.phase === "failed" && premium.masterReady ? (
+              <button type="button" disabled={busy} onClick={() => void retryPremium()}>
+                Retry video from cached master
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy || producing || preferredProvider === "local"}
+                title={
+                  preferredProvider === "local"
+                    ? "Switch to ONLINE mode to use ElevenLabs Premium production."
+                    : undefined
+                }
+                onClick={() => void produce(false)}
+                aria-busy={busy}
+              >
+                {busy
+                  ? "Starting Premium production…"
+                  : premium
+                    ? "Resume Premium production"
+                    : "Produce Premium video"}
+              </button>
+            )}
+            {preferredProvider === "local" ? (
+              <small>Switch to ONLINE to produce with your ElevenLabs key.</small>
+            ) : null}
+          </div>
+        )}
+      </section>
+    );
+  }
   const ready =
-    !legacySignalVideo &&
     (recording.status === "ready" || recording.status === "ready_with_warnings") &&
     recording.videoUrl;
-  if (surface === "signal" && !ready) return null;
   const retry = async () => {
     setBusy(true);
     try {
@@ -172,7 +336,7 @@ export function ReplayRecordingPanel({
           <h3>{recording.manifest?.title ?? "Replay video"}</h3>
         </div>
         <span className={styles.status}>
-          {legacySignalVideo ? "Updating video" : statusLabel(recording)}
+          {statusLabel(recording)}
         </span>
       </header>
       {(recording.status === "rendering" || recording.status === "preparing_audio") && (

@@ -1710,7 +1710,9 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
         ...botPowerSelfCueLinesV1(bot.powers),
         ...(fandomCue ? [fandomCue] : []),
         ...(themeMoodCue ? [themeMoodCue] : []),
-        ...botPowerObserverCueLinesV1(bot.name, bot.powers),
+        ...args.bots
+          .filter((peer) => peer.id !== bot.id)
+          .flatMap((peer) => botPowerObserverCueLinesV1(peer.name, peer.powers)),
       ]).replace(/\s+/gu, " ").trim();
       const cloneIdentity = buildCloneFamilyIdentityPrompt(bot, args.bots);
       return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;

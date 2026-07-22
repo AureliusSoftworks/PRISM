@@ -22,9 +22,9 @@ test("Signal presents immersive voice performance as automatic", () => {
   assert.match(pageSource, /data-settings-section="botcast"/u);
   assert.match(pageSource, /Automatic ElevenLabs immersion/u);
   assert.match(pageSource, /Always on with ElevenLabs v3/u);
-  assert.match(pageSource, /automatically adds sparse/u);
-  assert.match(pageSource, /action floats above/u);
-  assert.match(pageSource, /appears between/u);
+  assert.match(pageSource, /bracketed items and asterisk-authored/u);
+  assert.match(pageSource, /current\s+action floats above/u);
+  assert.match(pageSource, /Captions, transcripts, and local voice fallbacks keep\s+only the spoken/u);
   assert.doesNotMatch(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
   assert.doesNotMatch(pageSource, /Save Signal settings/u);
   assert.match(pageSource, /activeSettingsScope !== "botcast"/u);
@@ -50,20 +50,20 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
   );
   assert.match(
     tutorialsSource,
-    /Asterisk-wrapped human-made sounds such as sighs, burps, coughs, and laughs are performed/u,
+    /bracketed items and asterisk-authored actions are performed/u,
   );
 });
 
-test("Signal sends saved and starred vocal performance only through the ElevenLabs request lane", () => {
+test("Signal sends bracketed and starred performance only through the ElevenLabs request lane", () => {
   assert.match(
     pageSource,
-    /voicePerformanceTextFromAsteriskCues\([\s\S]{0,100}message\.voicePerformanceText \?\? message\.content/u,
+    /voicePerformanceTextFromActionCues\([\s\S]{0,100}message\.voicePerformanceText \?\? message\.content/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
   assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && performanceText[\s\S]{0,100}elevenLabsText: voiceSpokenText\(performanceText\)/u,
+    /signalOnlineVoiceEnabled && performanceText[\s\S]{0,100}elevenLabsText: performanceText/u,
   );
   assert.match(
     pageSource,

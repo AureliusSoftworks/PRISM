@@ -18,7 +18,7 @@ describe("Zen voice reveal fallback", () => {
     assert.notEqual(effectStart, -1);
     assert.notEqual(effectEnd, -1);
     const voiceEffect = pageSource.slice(effectStart, effectEnd);
-    assert.match(voiceEffect, /settings\?\.preferredProvider,/);
+    assert.doesNotMatch(voiceEffect, /settings\?\.preferredProvider,/);
     assert.doesNotMatch(voiceEffect, /\n    settings,\n/);
   });
 
@@ -43,14 +43,14 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("releases visual text when synthesized speech stays in preparation", () => {
+  it("cancels late speech before releasing visual text", () => {
     assert.match(
       pageSource,
-      /const ZEN_VOICE_REVEAL_PREPARATION_TIMEOUT_MS = 4000;/
+      /const ZEN_VOICE_REVEAL_PREPARATION_TIMEOUT_MS = 12000;/
     );
     assert.match(
       pageSource,
-      /speechRevealTimelineWaitingForAudio\([\s\S]*?chatSpeechRevealVisualFallbackKeysRef\.current\.add\(revealKey\);[\s\S]*?handoffChatSpeechRevealToCanvasClock\(revealKey\);[\s\S]*?late clip from reclaiming transcript reveal ownership/
+      /speechRevealTimelineWaitingForAudio\([\s\S]*?chatSpeechRevealVisualFallbackKeysRef\.current\.add\(revealKey\);[\s\S]*?voiceSynthesisAbortRef\.current\?\.abort\(\);[\s\S]*?stopBottishVoice\(\);[\s\S]*?stopEnglishVoice\(\);[\s\S]*?handoffChatSpeechRevealToCanvasClock\(revealKey\);/
     );
     const timeoutStart = pageSource.indexOf(
       "const revealKey = activeAssistantRevealKey",
@@ -60,11 +60,62 @@ describe("Zen voice reveal fallback", () => {
       timeoutStart,
     );
     const timeoutSource = pageSource.slice(timeoutStart, timeoutEnd);
-    assert.doesNotMatch(timeoutSource, /voiceSynthesisAbortRef\.current\?\.abort/);
-    assert.doesNotMatch(timeoutSource, /stopEnglishVoice\(\)/);
+    assert.match(timeoutSource, /voiceSynthesisAbortRef\.current\?\.abort/);
+    assert.match(timeoutSource, /stopEnglishVoice\(\)/);
   });
 
-  it("keeps robot voices on the canvas reveal clock", () => {
+  it("starts stream-safe Zen Premium speech before the full clip is buffered", () => {
+    const effectStart = pageSource.indexOf(
+      "const assistantMessages = detail.messages.filter",
+    );
+    const effectEnd = pageSource.indexOf(
+      "\n  useEffect(\n    () => () => {",
+      effectStart,
+    );
+    const voiceEffect = pageSource.slice(effectStart, effectEnd);
+    assert.match(
+      voiceEffect,
+      /const requestStreamingEnglishVoice =[\s\S]*?detail\.mode === "zen"[\s\S]*?effectiveEnglishEngine === "elevenlabs"/,
+    );
+    assert.match(
+      voiceEffect,
+      /const playEnglishVoiceWhileStreaming =[\s\S]*?requestStreamingEnglishVoice &&[\s\S]*?englishVoiceProfileSupportsStreaming/,
+    );
+    assert.match(
+      voiceEffect,
+      /includeAlignment: !requestStreamingEnglishVoice/,
+    );
+    assert.match(
+      voiceEffect,
+      /englishVoiceResponseSupportsStreaming\(response\)[\s\S]*?enqueueStreamingEnglishVoice\(/,
+    );
+    assert.match(
+      voiceEffect,
+      /else \{[\s\S]*?readEnglishVoiceSynthesisClip\(response\)[\s\S]*?enqueueEnglishVoice\(/,
+    );
+  });
+
+  it("requests and plays local Zen English as progressive WAV chunks", () => {
+    const effectStart = pageSource.indexOf(
+      "const assistantMessages = detail.messages.filter",
+    );
+    const effectEnd = pageSource.indexOf(
+      "\n  useEffect(\n    () => () => {",
+      effectStart,
+    );
+    const voiceEffect = pageSource.slice(effectStart, effectEnd);
+    assert.match(
+      voiceEffect,
+      /const requestLocalEnglishChunks =[\s\S]*?effectiveEnglishEngine === "builtin"/,
+    );
+    assert.match(voiceEffect, /streamChunks:[\s\S]*?requestLocalEnglishChunks/);
+    assert.match(
+      voiceEffect,
+      /englishVoiceResponseSupportsChunkedStreaming\(response\)[\s\S]*?enqueueChunkedEnglishVoice\(/,
+    );
+  });
+
+  it("keeps Bottish immediate while generated Babble owns reveal timing", () => {
     const eligibilityStart = pageSource.indexOf(
       "const markLatestAssistantRevealEligible",
     );
@@ -98,9 +149,38 @@ describe("Zen voice reveal fallback", () => {
       /else if \(!audioDrivesReveal\) \{[\s\S]*?releaseChatSpeechReveal\(revealKey\);/,
     );
     assert.match(effectSource, /lifecycle: audioDrivesReveal/);
+    assert.match(effectSource, /streamChunks: audioDrivesReveal/);
     assert.match(
       effectSource,
       /if \(audioDrivesReveal\) \{[\s\S]*?releaseChatSpeechReveal\(revealKey\);[\s\S]*?chatRevealPaceByKeyRef\.current\.delete\(revealKey\);/,
+    );
+  });
+
+  it("never blocks real speech behind a throwaway synthesis warmup", () => {
+    assert.doesNotMatch(pageSource, /prepareBuiltinVoiceSynthesis/);
+    assert.doesNotMatch(pageSource, /text:\s*"Ready\."/);
+    assert.match(
+      pageSource,
+      /const outgoingVoiceMode = settings\?\.voiceMode;[\s\S]*?primeVoiceModePlaybackFromUserGesture\(outgoingVoiceMode\);/,
+    );
+  });
+
+  it("does not let the account default downgrade an online Premium reply", () => {
+    const effectStart = pageSource.indexOf(
+      "const assistantMessages = detail.messages.filter",
+    );
+    const effectEnd = pageSource.indexOf(
+      "\n  useEffect(\n    () => () => {",
+      effectStart,
+    );
+    const voiceEffect = pageSource.slice(effectStart, effectEnd);
+    assert.match(
+      voiceEffect,
+      /conversationEnglishVoiceEngine\([\s\S]*?voiceSelection\.englishVoiceEngine,[\s\S]*?message\.provider,/,
+    );
+    assert.doesNotMatch(
+      voiceEffect,
+      /message\.provider === "local" \|\|[\s\S]*?settings\.preferredProvider === "local"/,
     );
   });
 

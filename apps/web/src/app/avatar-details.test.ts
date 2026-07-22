@@ -32,6 +32,7 @@ import {
   normalizeAvatarDetails,
   paintAvatarDetailsMask,
   paintAvatarDetailsColorMap,
+  recolorAvatarDetailsPaintColorRegion,
   rasterizeAvatarDetailsAlpha,
   rasterizeVisibleAvatarDetailsRgba,
   resolveAvatarDetailStampAnchor,
@@ -134,6 +135,91 @@ describe("avatar details semantic ink", () => {
     const moved = moveAvatarDetailsPaintColorMap(colorMap, { x: 3, y: 2 });
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 63, 62), "blink");
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 65, 62), "talking");
+  });
+
+  it("uses the paint bucket to recolor only the connected ink selection", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [
+        { x: 60, y: 60 },
+        { x: 61, y: 60 },
+        { x: 61, y: 61 },
+        { x: 62, y: 61 },
+      ],
+      1,
+      "brush",
+      "blink",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "brush",
+      "talking",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [
+        { x: 64, y: 60 },
+        { x: 63, y: 62 },
+      ],
+      1,
+      "brush",
+      "blink",
+    ).colorMap;
+
+    const recolored = recolorAvatarDetailsPaintColorRegion(
+      colorMap,
+      { x: 60, y: 60 },
+      "effect",
+    );
+
+    assert.equal(recolored.changed, true);
+    assert.equal(recolored.pixelCount, 4);
+    assert.equal(avatarDetailsInkRoleAt(recolored.colorMap, 60, 60), "effect");
+    assert.equal(avatarDetailsInkRoleAt(recolored.colorMap, 61, 61), "effect");
+    assert.equal(avatarDetailsInkRoleAt(recolored.colorMap, 62, 60), "talking");
+    assert.equal(avatarDetailsInkRoleAt(recolored.colorMap, 64, 60), "blink");
+    assert.equal(avatarDetailsInkRoleAt(recolored.colorMap, 63, 62), "blink");
+    assert.equal(
+      avatarDetailsPaintColorPixelCount(recolored.colorMap),
+      avatarDetailsPaintColorPixelCount(colorMap),
+    );
+  });
+
+  it("keeps paint bucket clicks on blank or matching ink as no-ops", () => {
+    const colorMap = paintAvatarDetailsColorMap(
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
+      [{ x: 60, y: 60 }],
+      1,
+      "brush",
+      "effect",
+    ).colorMap;
+
+    const blank = recolorAvatarDetailsPaintColorRegion(
+      colorMap,
+      { x: 61, y: 60 },
+      "blink",
+    );
+    const matching = recolorAvatarDetailsPaintColorRegion(
+      colorMap,
+      { x: 60, y: 60 },
+      "effect",
+    );
+
+    assert.deepEqual(blank, {
+      colorMap,
+      changed: false,
+      pixelCount: 0,
+    });
+    assert.deepEqual(matching, {
+      colorMap,
+      changed: false,
+      pixelCount: 0,
+    });
   });
 
   it("merges every visible role into one runtime phosphor emission plane", () => {

@@ -239,7 +239,7 @@ function looksLikeStageDirectionAction(inner: string): boolean {
   }
   // Keep this conservative: only treat common physical/social action verbs
   // as stage directions when the token is embedded in prose.
-  return /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|meets?|meeting|watches?|watching|traces?|tracing|straightens?|straightening|releases?|releasing|lets?|letting|mutters?|muttering|nudges?|nudging|pulls?|pulling|grabs?|grabbing|seizes?|seizing|snatches?|snatching|scoffs?|scoffing|slides?|sliding|strokes?|stroking|rubs?|rubbing|scratches?|scratching|takes?|taking|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|hacks?|hacking|ahems?|aheming|farts?|farting|flatulates?|flatulating|toots?|tooting|burps?|burping|belches?|belching|eructates?|eructating|passes?|passing|breaks?|breaking|brings?|bringing|drums?|drumming|twirls?|twirling|pats?|patting|pushes?|pushing|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting)\b/u.test(
+  return /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|meets?|meeting|watches?|watching|traces?|tracing|straightens?|straightening|releases?|releasing|lets?|letting|mutters?|muttering|nudges?|nudging|pulls?|pulling|grabs?|grabbing|seizes?|seizing|snatches?|snatching|scoffs?|scoffing|slides?|sliding|strokes?|stroking|rubs?|rubbing|scratches?|scratching|takes?|taking|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|hacks?|hacking|ahems?|aheming|farts?|farting|flatulates?|flatulating|toots?|tooting|burps?|burping|belches?|belching|eructates?|eructating|passes?|passing|breaks?|breaking|brings?|bringing|drums?|drumming|twirls?|twirling|pats?|patting|pushes?|pushing|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|plucks?|plucking|ponders?|pondering|sets?|setting|squints?|squinting)\b/u.test(
     normalized
   );
 }
@@ -406,8 +406,10 @@ function parseStageDirectionsDetailed(text: string): {
   if (!text) return { mainText: "", actions: [], cues: [] };
   // Stage-direction tokens:
   // - `*action*` / `**action**` (canonical roleplay notation)
+  // - `[action]` (ElevenLabs / actor-performance notation)
   // - `(action)` (fallback style some models emit)
-  const re = /(\*+([^*\n]+?)\*+)|(\(([^()\n]+?)\))/g;
+  // Markdown links and bot mentions keep their bracketed labels.
+  const re = /(\*+([^*\n]+?)\*+)|(\(([^()\n]+?)\))|(\[([^\[\]\n]+?)\](?!\s*\())/g;
   const cues: StageDirectionCue[] = [];
   let spokenRaw = "";
   let cursor = 0;
@@ -415,7 +417,11 @@ function parseStageDirectionsDetailed(text: string): {
     const start = match.index ?? 0;
     const token = match[0] ?? "";
     const isAsteriskToken = typeof match[2] === "string";
-    const trimmed = String(isAsteriskToken ? match[2] : match[4] ?? "").trim();
+    const isParentheticalToken = typeof match[4] === "string";
+    const isBracketToken = typeof match[6] === "string";
+    const trimmed = String(
+      isAsteriskToken ? match[2] : isParentheticalToken ? match[4] : match[6] ?? "",
+    ).trim();
     if (start > cursor) {
       spokenRaw += text.slice(cursor, start);
     }
@@ -445,7 +451,10 @@ function parseStageDirectionsDetailed(text: string): {
         );
         cues.push({ action: trimmed, revealAtDisplayLength });
       }
-    } else if (looksLikeParentheticalStageDirection(trimmed, before, after)) {
+    } else if (
+      isBracketToken ||
+      looksLikeParentheticalStageDirection(trimmed, before, after)
+    ) {
       const revealAtDisplayLength = getBotMentionDisplayLength(
         normalizeStageDirectionMainText(spokenRaw)
       );
@@ -480,7 +489,7 @@ function parseStageDirectionsDetailed(text: string): {
 }
 
 /**
- * Splits a string at asterisk-delimited stage directions and returns the
+ * Splits a string at bracketed or asterisk-delimited stage directions and returns the
  * spoken `mainText` plus the actions in order of appearance. The renderer
  * surfaces actions above the speaker's avatar instead of cluttering the
  * table line.

@@ -38,7 +38,15 @@ export interface EnglishVoiceSynthesisClip {
   engineUsed: string | null;
 }
 
+export interface EnglishVoiceWaveStreamChunk {
+  index: number;
+  characterCount: number;
+  text: string | null;
+  bytes: ArrayBuffer;
+}
+
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
+const STREAM_MEDIA_PLAY_START_TIMEOUT_MS = 5000;
 
 function decodedBase64Bytes(value: string): ArrayBuffer {
   if (typeof atob === "function") {
@@ -55,6 +63,31 @@ function decodedBase64Bytes(value: string): ArrayBuffer {
   if (!bufferConstructor) throw new Error("Voice audio could not be decoded.");
   const bytes = bufferConstructor.from(value, "base64");
   return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+}
+
+export function parseEnglishVoiceWaveStreamChunk(
+  line: string,
+): EnglishVoiceWaveStreamChunk {
+  const payload = JSON.parse(line) as Record<string, unknown>;
+  const index = Number(payload.index);
+  const characterCount = Number(payload.characterCount);
+  const audioBase64 =
+    typeof payload.audioBase64 === "string" ? payload.audioBase64.trim() : "";
+  if (
+    !Number.isInteger(index) ||
+    index < 0 ||
+    !Number.isFinite(characterCount) ||
+    characterCount <= 0 ||
+    !audioBase64
+  ) {
+    throw new Error("Local voice stream returned an invalid audio chunk.");
+  }
+  return {
+    index,
+    characterCount,
+    text: typeof payload.text === "string" ? payload.text : null,
+    bytes: decodedBase64Bytes(audioBase64),
+  };
 }
 
 function normalizedAlignment(value: unknown): EnglishVoiceCharacterAlignment | null {
@@ -154,6 +187,25 @@ export function englishVoiceMediaElapsedMs(
   const safeTempo =
     Number.isFinite(playbackTempo) && playbackTempo > 0 ? playbackTempo : 1;
   return (currentTimeSeconds * 1_000) / safeTempo;
+}
+
+/** Streaming keeps conversational Premium speech responsive, but the media
+ * element path cannot reproduce Prism's local pitch/texture graph. Restrict it
+ * to profiles whose authored identity is preserved by playbackRate + volume. */
+export function englishVoiceProfileSupportsStreaming(
+  rawProfile: BotAudioVoiceProfileV1,
+  effectsEnabled = true,
+  deliveryMood?: VoiceDeliveryMood | null,
+): boolean {
+  const profile = applyVoiceDeliveryMoodToProfile(rawProfile, deliveryMood);
+  if (profile.pitch !== 0 || profile.warmth !== 0 || profile.lilt !== 0) {
+    return false;
+  }
+  if (!effectsEnabled) return true;
+  return (
+    voiceEffectForPlayback(profile) === "clean" &&
+    profile.texture.preset === "clean"
+  );
 }
 
 /** Provider/native character timings describe the neutral-tempo source clip.
@@ -374,6 +426,246 @@ async function playBytesWithMedia(
   });
 }
 
+function mediaSourceForEnglishStream(): typeof MediaSource | null {
+  if (typeof window === "undefined") return null;
+  const constructor = window.MediaSource;
+  if (typeof constructor !== "function") return null;
+  return constructor.isTypeSupported("audio/mpeg") ? constructor : null;
+}
+
+export function englishVoiceResponseSupportsStreaming(
+  response: Pick<Response, "body" | "headers">,
+): boolean {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  return (
+    response.body !== null &&
+    contentType.includes("audio/mpeg") &&
+    mediaSourceForEnglishStream() !== null &&
+    typeof URL.createObjectURL === "function"
+  );
+}
+
+export function englishVoiceResponseSupportsChunkedStreaming(
+  response: Pick<Response, "body" | "headers">,
+): boolean {
+  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+  return (
+    response.body !== null &&
+    contentType.includes("application/x-ndjson") &&
+    response.headers.get("x-prism-voice-stream") === "wav-chunks-v1"
+  );
+}
+
+export async function* readEnglishVoiceWaveStream(
+  response: Response,
+): AsyncGenerator<EnglishVoiceWaveStreamChunk> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Local voice stream returned no audio.");
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      buffered += decoder.decode(next.value, { stream: true });
+      let newline = buffered.indexOf("\n");
+      while (newline >= 0) {
+        const line = buffered.slice(0, newline).trim();
+        buffered = buffered.slice(newline + 1);
+        if (line) yield parseEnglishVoiceWaveStreamChunk(line);
+        newline = buffered.indexOf("\n");
+      }
+    }
+    buffered += decoder.decode();
+    const finalLine = buffered.trim();
+    if (finalLine) yield parseEnglishVoiceWaveStreamChunk(finalLine);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function appendEnglishStreamChunk(
+  sourceBuffer: SourceBuffer,
+  bytes: Uint8Array,
+): Promise<void> {
+  if (bytes.byteLength === 0) return;
+  await new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      sourceBuffer.removeEventListener("updateend", finish);
+      sourceBuffer.removeEventListener("error", fail);
+      resolve();
+    };
+    const fail = () => {
+      sourceBuffer.removeEventListener("updateend", finish);
+      sourceBuffer.removeEventListener("error", fail);
+      reject(new Error("English audio stream could not be buffered."));
+    };
+    sourceBuffer.addEventListener("updateend", finish, { once: true });
+    sourceBuffer.addEventListener("error", fail, { once: true });
+    try {
+      sourceBuffer.appendBuffer(bytes.slice());
+    } catch {
+      fail();
+    }
+  });
+}
+
+async function playStreamingResponseWithMedia(
+  response: Response,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  estimatedDurationMs: number,
+  lifecycle?: VoicePlaybackLifecycle,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+): Promise<void> {
+  const MediaSourceConstructor = mediaSourceForEnglishStream();
+  const body = response.body;
+  if (!MediaSourceConstructor || !body || expectedGeneration !== generation) {
+    throw new Error("Streaming English audio is unavailable.");
+  }
+  const mediaSource = new MediaSourceConstructor();
+  const url = URL.createObjectURL(mediaSource);
+  const audio = preparedMedia ?? new Audio();
+  if (preparedMediaUrl) URL.revokeObjectURL(preparedMediaUrl);
+  preparedMedia = null;
+  preparedMediaUrl = null;
+  audio.pause();
+  audio.src = url;
+  audio.load();
+  audio.preload = "auto";
+  audio.volume = Math.min(1, normalizeBotAudioVoiceProfileV1(profile).volume);
+  audio.preservesPitch = true;
+  activeMedia = audio;
+  activeMediaUrl = url;
+
+  const reader = body.getReader();
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let started = false;
+    let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
+    let sourceBuffer: SourceBuffer | null = null;
+    const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
+    const safeEstimatedDurationMs = Math.max(1, Math.round(estimatedDurationMs));
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (activeMediaResolve === cancel) activeMediaResolve = null;
+      if (activeMediaStartTimer !== null) {
+        window.clearTimeout(activeMediaStartTimer);
+        activeMediaStartTimer = null;
+      }
+      void reader.cancel().catch(() => undefined);
+      if (error) progress?.cancel();
+      else progress?.finish();
+      progress = null;
+      releaseActiveMedia(!error);
+      lifecycle?.onEnd?.();
+      if (error) reject(error);
+      else resolve();
+    };
+    const cancel = () => finish();
+    activeMediaResolve = cancel;
+    audio.addEventListener("ended", () => finish(), { once: true });
+    audio.addEventListener(
+      "error",
+      () => finish(new Error("English audio stream could not play.")),
+      { once: true },
+    );
+    audio.addEventListener(
+      "playing",
+      () => {
+        if (started) return;
+        started = true;
+        progress = beginVoicePlaybackProgress(
+          lifecycle,
+          safeEstimatedDurationMs,
+          () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
+        );
+        if (activeMediaStartTimer !== null) {
+          window.clearTimeout(activeMediaStartTimer);
+          activeMediaStartTimer = null;
+        }
+      },
+      { once: true },
+    );
+
+    mediaSource.addEventListener(
+      "sourceopen",
+      () => {
+        if (settled || expectedGeneration !== generation) {
+          finish();
+          return;
+        }
+        try {
+          sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+        } catch {
+          finish(new Error("Streaming English audio is unavailable."));
+          return;
+        }
+        void (async () => {
+          let firstChunkAppended = false;
+          try {
+            while (!settled && expectedGeneration === generation) {
+              const next = await reader.read();
+              if (next.done) break;
+              if (!next.value || next.value.byteLength === 0) continue;
+              await appendEnglishStreamChunk(sourceBuffer!, next.value);
+              if (!firstChunkAppended) {
+                firstChunkAppended = true;
+                await playPreSpeechBreath({
+                  plan: preSpeechBreath,
+                  profile,
+                  isCurrent: () => expectedGeneration === generation,
+                });
+                if (settled || expectedGeneration !== generation) {
+                  finish();
+                  return;
+                }
+                audio.playbackRate = playbackTempo;
+                activeMediaStartTimer = window.setTimeout(() => {
+                  if (!started) {
+                    finish(
+                      new Error(
+                        "Audio playback did not start. Check the browser tab's sound setting.",
+                      ),
+                    );
+                  }
+                }, STREAM_MEDIA_PLAY_START_TIMEOUT_MS);
+                void audio.play().catch((error: unknown) =>
+                  finish(
+                    error instanceof Error
+                      ? error
+                      : new Error("English audio stream could not play."),
+                  ),
+                );
+              }
+            }
+            if (!firstChunkAppended) {
+              finish(new Error("Voice synthesis returned no audio."));
+              return;
+            }
+            if (
+              !settled &&
+              mediaSource.readyState === "open" &&
+              sourceBuffer &&
+              !sourceBuffer.updating
+            ) {
+              mediaSource.endOfStream();
+            }
+          } catch (error) {
+            finish(
+              error instanceof Error
+                ? error
+                : new Error("English audio stream failed."),
+            );
+          }
+        })();
+      },
+      { once: true },
+    );
+  });
+}
+
 async function playAudio(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
@@ -435,6 +727,82 @@ async function playAudio(
   }
 }
 
+async function playChunkedEnglishResponse(
+  response: Response,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  seed: string,
+  effectsEnabled: boolean,
+  estimatedDurationMs: number,
+  lifecycle?: VoicePlaybackLifecycle,
+  engineUsed: string | null = null,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan = 0,
+): Promise<void> {
+  const totalCharacters = Math.max(
+    1,
+    Number(response.headers.get("x-prism-voice-characters")) || 1,
+  );
+  const safeEstimatedDurationMs = Math.max(1, estimatedDurationMs);
+  let consumedCharacters = 0;
+  let playedChunks = 0;
+  let playbackStarted = false;
+
+  for await (const chunk of readEnglishVoiceWaveStream(response)) {
+    if (expectedGeneration !== generation) return;
+    const segmentStartMs =
+      safeEstimatedDurationMs * (consumedCharacters / totalCharacters);
+    const segmentEndMs =
+      safeEstimatedDurationMs *
+      (Math.min(totalCharacters, consumedCharacters + chunk.characterCount) /
+        totalCharacters);
+    const segmentDurationMs = Math.max(1, segmentEndMs - segmentStartMs);
+    let actualChunkDurationMs: number | null = null;
+    await playAudio(
+      chunk.bytes,
+      profile,
+      expectedGeneration,
+      `${seed}:chunk:${chunk.index}`,
+      effectsEnabled,
+      engineUsed,
+      {
+        onStart: (durationMs) => {
+          actualChunkDurationMs = durationMs;
+          if (!playbackStarted) {
+            playbackStarted = true;
+            lifecycle?.onStart?.(safeEstimatedDurationMs);
+          }
+        },
+        onProgress: (elapsedMs) => {
+          const progress = actualChunkDurationMs
+            ? Math.min(1, elapsedMs / actualChunkDurationMs)
+            : Math.min(1, elapsedMs / segmentDurationMs);
+          lifecycle?.onProgress?.(
+            segmentStartMs + segmentDurationMs * progress,
+            safeEstimatedDurationMs,
+          );
+        },
+        // The outer stream owns the single lifecycle end event.
+        onEnd: () => undefined,
+      },
+      roomAcoustics,
+      playedChunks === 0 ? preSpeechBreath : null,
+      stereoPan,
+    );
+    playedChunks += 1;
+    consumedCharacters += chunk.characterCount;
+    lifecycle?.onProgress?.(segmentEndMs, safeEstimatedDurationMs);
+  }
+
+  if (expectedGeneration !== generation) return;
+  if (playedChunks === 0 || !playbackStarted) {
+    throw new Error("Local voice stream returned no playable audio.");
+  }
+  lifecycle?.onProgress?.(safeEstimatedDurationMs, safeEstimatedDurationMs);
+  lifecycle?.onEnd?.();
+}
+
 export function enqueueEnglishVoice(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
@@ -464,6 +832,88 @@ export function enqueueEnglishVoice(
         effectsEnabled,
         engineUsed,
         lifecycle,
+        roomAcoustics,
+        preSpeechBreath,
+        stereoPan,
+      ),
+    );
+  return queue;
+}
+
+export function enqueueStreamingEnglishVoice(
+  response: Response,
+  profile: BotAudioVoiceProfileV1,
+  seed = "english-stream",
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle,
+  deliveryMood?: VoiceDeliveryMood | null,
+  estimatedDurationMs = 1,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+): Promise<void> {
+  void seed;
+  const expectedGeneration = generation;
+  const playbackProfile = {
+    ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
+    volume: normalizeBotVoiceVolume(globalVolume),
+  };
+  if (
+    !englishVoiceProfileSupportsStreaming(
+      profile,
+      effectsEnabled,
+      deliveryMood,
+    )
+  ) {
+    return Promise.reject(
+      new Error("This English voice profile requires buffered playback."),
+    );
+  }
+  queue = queue
+    .catch(() => undefined)
+    .then(() =>
+      playStreamingResponseWithMedia(
+        response,
+        playbackProfile,
+        expectedGeneration,
+        estimatedDurationMs,
+        lifecycle,
+        preSpeechBreath,
+      ),
+    );
+  return queue;
+}
+
+export function enqueueChunkedEnglishVoice(
+  response: Response,
+  profile: BotAudioVoiceProfileV1,
+  seed = "english-local-stream",
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle,
+  engineUsed: string | null = null,
+  deliveryMood?: VoiceDeliveryMood | null,
+  estimatedDurationMs = 1,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+  stereoPan = 0,
+): Promise<void> {
+  const expectedGeneration = generation;
+  const playbackProfile = {
+    ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
+    volume: normalizeBotVoiceVolume(globalVolume),
+  };
+  queue = queue
+    .catch(() => undefined)
+    .then(() =>
+      playChunkedEnglishResponse(
+        response,
+        playbackProfile,
+        expectedGeneration,
+        seed,
+        effectsEnabled,
+        estimatedDurationMs,
+        lifecycle,
+        engineUsed,
         roomAcoustics,
         preSpeechBreath,
         stereoPan,

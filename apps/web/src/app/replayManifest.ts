@@ -147,7 +147,10 @@ export function buildSignalReplayManifestV1(args: {
       atmosphereImageUrl: atmosphere?.imageUrl ?? null,
       metadata: {
         showName: args.show.name,
+        microphoneTintMaskUrl:
+          atmosphere?.microphoneTintMaskUrl ?? null,
         studioLayout: args.show.studioLayout,
+        studioGlowTuning: args.show.studioGlowTuning,
         logoImageUrl: args.show.logo?.imageUrl ?? null,
         runtimeMs: args.episode.runtimeMs,
         introAudioUrl: args.show.introAudio?.audioUrl ?? null,
@@ -159,7 +162,7 @@ export function buildSignalReplayManifestV1(args: {
         atmosphereMix: args.show.atmosphereMix,
         studioLighting: args.show.studioLighting,
         fallbackStudioAccentVariant: args.show.fallbackStudioAccentVariant,
-        renderContract: "signal-studio-dom-v2",
+        renderContract: "signal-studio-dom-v3",
       },
     },
   };

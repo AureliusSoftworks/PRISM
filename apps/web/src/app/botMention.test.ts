@@ -562,6 +562,30 @@ describe("extractStageDirections", () => {
     assert.deepEqual(out.actions, ["flatulates discreetly", "clears her throat"]);
   });
 
+  it("treats streamed vocal and movement beats as inline actions", () => {
+    const out = extractStageDirections(
+      "Look *gasp* at *scream* me! *dance*",
+    );
+    assert.equal(out.mainText, "Look at me!");
+    assert.deepEqual(out.actions, ["gasp", "scream", "dance"]);
+  });
+
+  it("treats bracketed and asterisked items as the same action stream", () => {
+    const out = extractStageDirections(
+      "Look [gasp] at *scream* me! [dance]",
+    );
+    assert.equal(out.mainText, "Look at me!");
+    assert.deepEqual(out.actions, ["gasp", "scream", "dance"]);
+  });
+
+  it("preserves bot mentions while lifting ordinary bracketed actions", () => {
+    const out = extractStageDirections(
+      "[Ada](prism-bot://bot-ada), [waves] hello.",
+    );
+    assert.equal(out.mainText, "[Ada](prism-bot://bot-ada), hello.");
+    assert.deepEqual(out.actions, ["waves"]);
+  });
+
   it("unwraps double-asterisk inline emphasis inside prose", () => {
     const out = extractStageDirections("The **idea** is still terrible.");
     assert.equal(out.mainText, "The idea is still terrible.");
@@ -874,6 +898,18 @@ describe("extractStageDirectionCues", () => {
       "laughs",
     ]);
     assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [0, 27, 45]);
+  });
+
+  it("emits one progressive cue timeline across bracket and asterisk syntax", () => {
+    const cues = extractStageDirectionCues(
+      "Look [gasp] at *scream* me! [dance]",
+    );
+    assert.deepEqual(cues.map((cue) => cue.action), [
+      "gasp",
+      "scream",
+      "dance",
+    ]);
+    assert.deepEqual(cues.map((cue) => cue.revealAtDisplayLength), [4, 7, 11]);
   });
 
   it("does not treat inline emphasis as an action cue", () => {

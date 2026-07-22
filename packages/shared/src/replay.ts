@@ -137,6 +137,50 @@ export interface ReplayTimelineV1 {
   beats: ReplayTimelineBeatV1[];
 }
 
+export type ReplayPremiumProductionPhaseV1 =
+  | "idle"
+  | "mastering_voices"
+  | "mixing_episode"
+  | "rendering_studio"
+  | "finalizing"
+  | "ready"
+  | "failed";
+
+export interface ReplayPremiumProductionV1 {
+  phase: ReplayPremiumProductionPhaseV1;
+  progress: number;
+  inputHash: string | null;
+  masterReady: boolean;
+  audioUrl: string | null;
+  videoUrl: string | null;
+  timeline: ReplayTimelineV1 | null;
+  warning: string | null;
+  error: string | null;
+  updatedAt: string | null;
+}
+
+export interface ReplayPremiumVoiceTimingV1 {
+  sourceMessageId: string;
+  startMs: number;
+  endMs: number;
+  alignment: ReplaySpeechAlignmentV1 | null;
+}
+
+export interface ReplayPremiumSegmentV1 {
+  id: string;
+  recordingId: string;
+  index: number;
+  strategy: "dialogue" | "isolated_tts";
+  inputHash: string;
+  sourceMessageIds: string[];
+  audioUrl: string;
+  audioContentType: string;
+  durationMs: number;
+  timings: ReplayPremiumVoiceTimingV1[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ReplayRecordingV1 {
   id: string;
   surface: ReplaySurfaceV1;
@@ -157,6 +201,7 @@ export interface ReplayRecordingV1 {
   transcriptMarkdownUrl: string | null;
   warning: string | null;
   error: string | null;
+  premiumProduction?: ReplayPremiumProductionV1 | null;
   createdAt: string;
   updatedAt: string;
 }

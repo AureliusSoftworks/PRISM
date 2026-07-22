@@ -41,15 +41,36 @@ export function voiceSettingsForPlaybackChoice(
   };
 }
 
-export function voiceModeDisplayName(choice: VoicePlaybackChoice): string {
+export function voiceModeDisplayName(
+  choice: VoicePlaybackChoice,
+  options: { localPremiumFallback?: boolean } = {},
+): string {
   if (choice === "bottish") return "Bottish";
   if (choice === "babble") return "Babble";
-  if (choice === "premium") return "Premium";
+  if (choice === "premium") {
+    return options.localPremiumFallback ? "English · LOCAL" : "Premium";
+  }
   if (choice === "english") return "English";
   return "Mute";
 }
 
-/** Robot voices follow the canvas reveal clock instead of owning transcript text. */
+export function conversationEnglishVoiceEngine(
+  requestedEngine: EnglishVoiceEngine,
+  persistedMessageProvider?: string | null,
+): EnglishVoiceEngine {
+  return persistedMessageProvider === "local" ? "builtin" : requestedEngine;
+}
+
+export function effectiveVoicePlaybackChoice(
+  configuredChoice: VoicePlaybackChoice,
+  localResponse: boolean,
+): VoicePlaybackChoice {
+  return configuredChoice === "premium" && localResponse
+    ? "english"
+    : configuredChoice;
+}
+
+/** Generated speech owns text timing; procedural Bottish is already immediate. */
 export function voiceModeDrivesCanvasReveal(mode: VoiceMode): boolean {
-  return mode === "english";
+  return mode === "english" || mode === "babble";
 }

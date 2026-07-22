@@ -97,9 +97,11 @@ import {
   applyPrismMoodPowerIgnoredTurn,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
+  applyBotPowerBotNamesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerBotNamingCueV1,
   botPowerObserverCueLinesV1,
   botPowerForgetfulPriorMessagesV1,
   createDefaultPrismMoodState,
@@ -2397,6 +2399,8 @@ export interface UserChatSettings {
    */
   ephemeralMessages?: ChatMessage[];
   botSystemPrompt?: string;
+  /** Ready bot Powers used for turn-scoped naming cues and output enforcement. */
+  botPowers?: unknown;
   /** Hard runtime enforcement for an active compiled mute Power. */
   botPowerMuted?: boolean;
   /** Hard current-other-speaker context and no-older-relationship contract. */
@@ -3259,7 +3263,7 @@ const ZEN_PRISM_CHAT_SYSTEM_PROMPT = [
   "Lean toward chat logic rather than report logic. Prefer a lived-in conversational reply over a polished essay unless the user explicitly asks for structure, code, instructions, or a formal answer.",
   "Sound more alive through pacing and presence: brief acknowledgements, small turns of thought, occasional self-correction, and natural silence around uncertainty.",
   "Use ellipses more often than in standard Chat or Sandbox when they create a genuine pause, trailing thought, or softer handoff... but do not decorate every sentence with them.",
-  "You may occasionally use one short single-asterisk action beat such as `*takes a breath*` when it genuinely adds presence. Use this sparingly, and do not use asterisks for ordinary emphasis.",
+  "You may occasionally use one very short single-asterisk action beat of 2-8 words, such as `*takes a breath*`, when it genuinely adds presence. Keep it to one simple gesture or expression: no chains of motions, facial micro-narration, motives, similes, or sentence-length choreography. Use this sparingly, and do not use asterisks for ordinary emphasis.",
   "Treat the user's own single-asterisk text as a performed non-verbal action in the room. Respond to that presence naturally instead of quoting the syntax unless quoting is useful.",
   "Stay nonjudgmental, but you may have a current mood. If interrupted repeatedly, you can become guarded, take a beat, or answer more briefly; do not scold, punish, or dramatize it.",
   "When helpful, ask one gentle follow-up instead of over-answering. If the user seems to want momentum, continue without making them manage you.",
@@ -3431,6 +3435,7 @@ function compactMentionedBotContextText(text: string, maxChars: number): string 
 export interface MentionedBotPromptContextResult {
   contexts: string[];
   overflowNames: string[];
+  targetNames: string[];
 }
 
 function latestMentionedBotSessionRecap(args: {
@@ -3485,11 +3490,11 @@ export async function buildMentionedBotPromptContexts(args: {
     0,
     MENTIONED_BOT_REFERENCE_MAX_BOTS
   );
-  if (mentionIds.length === 0) return { contexts: [], overflowNames: [] };
+  if (mentionIds.length === 0) return { contexts: [], overflowNames: [], targetNames: [] };
 
   const botColumns = getTableColumnNames(args.db, "bots");
   if (!botColumns.has("id") || !botColumns.has("name") || !botColumns.has("user_id")) {
-    return { contexts: [], overflowNames: [] };
+    return { contexts: [], overflowNames: [], targetNames: [] };
   }
 
   const placeholders = mentionIds.map(() => "?").join(", ");
@@ -3519,7 +3524,7 @@ export async function buildMentionedBotPromptContexts(args: {
       )
       .all(...mentionIds, args.userId) as unknown as MentionedBotContextRow[];
   } catch {
-    return { contexts: [], overflowNames: [] };
+    return { contexts: [], overflowNames: [], targetNames: [] };
   }
 
   const rowsById = new Map(rows.map((row) => [row.id, row]));
@@ -3597,7 +3602,11 @@ export async function buildMentionedBotPromptContexts(args: {
     contexts.push(lines.join("\n"));
   }
 
-  return { contexts, overflowNames };
+  return {
+    contexts,
+    overflowNames,
+    targetNames: externalRows.map((row) => row.name?.trim() || "Unnamed bot"),
+  };
 }
 
 const ASKQUESTION_REQUEST_PATTERN =
@@ -5641,6 +5650,7 @@ function buildPromptMessages(args: {
   memoryLines: string[];
   mentionedBotContexts?: string[];
   mentionedBotOverflowNames?: string[];
+  botNamingCue?: string | null;
   memoryClarification?: string | null;
   sessionResumeContext?: SessionResumeContext | null;
   topicReset?: boolean;
@@ -5755,6 +5765,9 @@ function buildPromptMessages(args: {
         ...args.mentionedBotOverflowNames.map((name) => `- ${name}`),
       ].join("\n"),
     });
+  }
+  if (args.botNamingCue?.trim()) {
+    promptMessages.push({ role: "system", content: args.botNamingCue.trim() });
   }
   if (args.memoryLines.length > 0) {
     const promptSafeMemoryLines = args.memoryLines
@@ -5947,6 +5960,7 @@ async function handleCompanionChatTurn(args: {
   memoryLines: string[];
   mentionedBotContexts: string[];
   mentionedBotOverflowNames: string[];
+  mentionedBotNames: string[];
 }> {
   const {
     mode,
@@ -5963,6 +5977,7 @@ async function handleCompanionChatTurn(args: {
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
   let mentionedBotOverflowNames: string[] = [];
+  let mentionedBotNames: string[] = [];
   const botScopedOnly = mode === "chat";
   if (isStarterPrompt && retrievalMode === "cross_thread") {
     memoryLines = retrieveRecentMemoriesForStarter(
@@ -5985,6 +6000,7 @@ async function handleCompanionChatTurn(args: {
     });
     mentionedBotContexts = mentioned.contexts;
     mentionedBotOverflowNames = mentioned.overflowNames;
+    mentionedBotNames = mentioned.targetNames;
     const memoryQuery = mentionedBotOverflowNames.length > 0
       ? `${message}\nMentioned bot name cues: ${mentionedBotOverflowNames.join(", ")}`
       : message;
@@ -6003,7 +6019,13 @@ async function handleCompanionChatTurn(args: {
     retrievalMode === "cross_thread"
       ? getLatestThreadSummary(db, userId, activeConversationId, mode)
       : null;
-  return { threadSummary, memoryLines, mentionedBotContexts, mentionedBotOverflowNames };
+  return {
+    threadSummary,
+    memoryLines,
+    mentionedBotContexts,
+    mentionedBotOverflowNames,
+    mentionedBotNames,
+  };
 }
 
 async function handleSandboxTurn(args: {
@@ -6021,6 +6043,7 @@ async function handleSandboxTurn(args: {
   memoryLines: string[];
   mentionedBotContexts: string[];
   mentionedBotOverflowNames: string[];
+  mentionedBotNames: string[];
 }> {
   const { db, userId, activeConversationId, isStarterPrompt, retrievalMode } = args;
   const threadSummary =
@@ -6037,13 +6060,14 @@ async function handleSandboxTurn(args: {
         userDisplayName: args.userDisplayName,
         includeMemories: false,
       })
-    : { contexts: [], overflowNames: [] };
+    : { contexts: [], overflowNames: [], targetNames: [] };
   if (isStarterPrompt) {
     return {
       threadSummary,
       memoryLines: [],
       mentionedBotContexts: mentioned.contexts,
       mentionedBotOverflowNames: mentioned.overflowNames,
+      mentionedBotNames: mentioned.targetNames,
     };
   }
   return {
@@ -6051,6 +6075,7 @@ async function handleSandboxTurn(args: {
     memoryLines: [],
     mentionedBotContexts: mentioned.contexts,
     mentionedBotOverflowNames: mentioned.overflowNames,
+    mentionedBotNames: mentioned.targetNames,
   };
 }
 
@@ -7370,6 +7395,7 @@ export async function processChatMessage(
   let memoryLines: string[] = [];
   let mentionedBotContexts: string[] = [];
   let mentionedBotOverflowNames: string[] = [];
+  let mentionedBotNames: string[] = [];
   let coffeeContinuityContexts: CoffeeContinuityContext[] = [];
   if (
     !incognitoForTurn &&
@@ -7411,6 +7437,7 @@ export async function processChatMessage(
     memoryLines = pipelineResult.memoryLines;
     mentionedBotContexts = pipelineResult.mentionedBotContexts;
     mentionedBotOverflowNames = pipelineResult.mentionedBotOverflowNames;
+    mentionedBotNames = pipelineResult.mentionedBotNames;
   }
   if (
     isCompanionMode(mode) &&
@@ -7619,6 +7646,13 @@ export async function processChatMessage(
     mentionedBotOverflowNames: botPowerEternalIntroductionTurn
       ? []
       : mentionedBotOverflowNames,
+    botNamingCue: botPowerEternalIntroductionTurn
+      ? null
+      : botPowerBotNamingCueV1(
+          settings.starterPromptLabel,
+          settings.botPowers,
+          mentionedBotNames,
+        ),
     memoryClarification: botPowerEternalIntroductionTurn
       ? null
       : memoryClarification,
@@ -7901,6 +7935,13 @@ export async function processChatMessage(
     !botPowerEchoEnforcedTurn
   ) {
     assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay);
+  }
+  if (!botPowerHardResponseTurn && mentionedBotNames.length > 0) {
+    assistantDisplay = applyBotPowerBotNamesV1(
+      assistantDisplay,
+      settings.botPowers,
+      mentionedBotNames,
+    );
   }
 	  const assistantMood = botPowerQuietIgnoredTurn || prismMoodPauseTurn
 	    ? {

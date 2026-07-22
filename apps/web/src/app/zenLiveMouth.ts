@@ -1,4 +1,6 @@
 export const ZEN_LIVE_MOUTH_PHASE_MS = 120;
+export const ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS =
+  ZEN_LIVE_MOUTH_PHASE_MS * 4;
 /** Bottish notes can arrive much faster than a readable CRT mouth pose. */
 export const BOTTISH_MOUTH_PHASE_MS = 240;
 

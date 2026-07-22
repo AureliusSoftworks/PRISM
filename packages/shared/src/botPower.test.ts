@@ -25,6 +25,7 @@ import {
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
   botPowerBotNamingCueV1,
+  botPowerDesignationObserverCueV1,
   botPowerTargetNameV1,
   normalizeBotPowerEffectV1,
   botPowerEchoesAddressedSpeechV1,
@@ -119,7 +120,12 @@ test("ready naming effects transform only target bot names and collapse duplicat
     ),
     "What's up Dumb ole' Very Sigmund Freud Bot? Rick Sanchez is ready. Dumb ole' Very Sigmund Freud Bot already knows.",
   );
-  assert.match(botPowerBotNamingCueV1("Rick Sanchez", powers, ["Sigmund Freud"]) ?? "", /keep your own name exactly "Rick Sanchez"/u);
+  const holderCue = botPowerBotNamingCueV1("Rick Sanchez", powers, ["Sigmund Freud"]) ?? "";
+  assert.match(holderCue, /keep your own name (?:exactly "Rick Sanchez"|unchanged)/u);
+  assert.match(holderCue, /comment once, show a small contextual mood, tone, or action shift, or let it pass/u);
+  const observerCue = botPowerDesignationObserverCueV1("Rick Sanchez", powers) ?? "";
+  assert.match(observerCue, /comment once, show a small bounded mood, tone, or action reaction, or let it pass/u);
+  assert.match(observerCue, /Do not copy or adopt the affix/u);
   assert.equal(
     parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects[0]?.type,
     "designation",
@@ -128,6 +134,7 @@ test("ready naming effects transform only target bot names and collapse duplicat
 
 test("designation normalization rejects an unknown placement instead of silently changing identity", () => {
   assert.equal(normalizeBotPowerEffectV1({ type: "designation", placement: "middle", text: "Bot" }), null);
+  assert.equal(botPowerDesignationObserverCueV1("Rick Sanchez", []), null);
 });
 
 test("target-name recovery repairs the previously miscompiled suffix wording", () => {

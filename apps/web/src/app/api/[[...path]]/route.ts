@@ -59,6 +59,20 @@ function backendUnavailableResponse(detail: string): Response {
   return NextResponse.json(payload, { status: 503 });
 }
 
+function clientClosedResponse(): Response {
+  return new Response(null, {
+    status: 499,
+    statusText: "Client Closed Request",
+  });
+}
+
+function requestWasAborted(request: NextRequest, error: unknown): boolean {
+  return (
+    request.signal.aborted ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
 async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response> {
   try {
     const { path: segments } = await ctx.params;
@@ -110,6 +124,7 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
   try {
     upstream = await fetch(url, init);
   } catch (err) {
+    if (requestWasAborted(request, err)) return clientClosedResponse();
     const message =
       err instanceof Error ? err.message : typeof err === "string" ? err : "fetch failed";
     return backendUnavailableResponse(message);
@@ -139,6 +154,7 @@ async function proxy(request: NextRequest, ctx: RouteContext): Promise<Response>
     headers: outHeaders,
   });
   } catch (err) {
+    if (requestWasAborted(request, err)) return clientClosedResponse();
     const message =
       err instanceof Error ? err.message : typeof err === "string" ? err : "proxy failed";
     return backendUnavailableResponse(message);

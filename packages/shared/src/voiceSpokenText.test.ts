@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  voicePerformanceTextFromAsteriskCues,
+  voicePerformanceTextFromActionCues,
   voiceSpokenText,
 } from "./voiceSpokenText.ts";
 
@@ -23,7 +23,7 @@ describe("voice spoken text", () => {
     assert.equal(voiceSpokenText("*antennae twitching*"), "");
     assert.equal(
       voiceSpokenText("[sighs] *leans back* Welcome back."),
-      "[sighs] Welcome back.",
+      "Welcome back.",
     );
   });
 
@@ -44,25 +44,47 @@ describe("voice spoken text", () => {
       "I have a point. Excuse me.",
     );
     assert.equal(
-      voicePerformanceTextFromAsteriskCues(
+      voicePerformanceTextFromActionCues(
         "I have a point. *sighs heavily* Fine. *burp* Excuse me. *farts*",
       ),
       "I have a point. [sighs] Fine. [burps] Excuse me. [farts]",
     );
     assert.equal(
-      voicePerformanceTextFromAsteriskCues(
+      voicePerformanceTextFromActionCues(
         "*clears his throat* Listen. *laughs nervously*",
       ),
       "[clears throat] Listen. [laughs]",
     );
+    assert.equal(
+      voiceSpokenText("Look *gasp* at *scream* me! *dance*"),
+      "Look at me!",
+    );
   });
 
-  it("does not perform physical actions or Markdown emphasis", () => {
+  it("performs physical actions without treating Markdown emphasis as a cue", () => {
     assert.equal(
-      voicePerformanceTextFromAsteriskCues(
+      voicePerformanceTextFromActionCues(
         "*leans back* The *important* point remains.",
       ),
-      null,
+      "[leans back] The important point remains.",
+    );
+  });
+
+  it("treats bracketed and asterisked actions as one actor-performance stream", () => {
+    const text = "Look [gasp] at *scream* me! [dance]";
+    assert.equal(voiceSpokenText(text), "Look at me!");
+    assert.equal(
+      voicePerformanceTextFromActionCues(text),
+      "Look [gasp] at [screams] me! [dance]",
+    );
+  });
+
+  it("keeps bot-mention markdown out of the action syntax", () => {
+    const text = "[Ada](prism-bot://bot-ada), *waves* hello.";
+    assert.equal(voiceSpokenText(text), "[Ada](prism-bot://bot-ada), hello.");
+    assert.equal(
+      voicePerformanceTextFromActionCues(text),
+      "[Ada](prism-bot://bot-ada), [waves] hello.",
     );
   });
 });

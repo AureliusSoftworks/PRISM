@@ -1,3 +1,5 @@
+import { normalizeSignalGenerationKeywords } from "./signal-generation-keywords.ts";
+
 export const SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL = "eleven_text_to_sound_v2";
 export const SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS = 30_000;
 export const SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS = 450;
@@ -63,14 +65,25 @@ export class ElevenLabsSoundError extends Error {
 export function buildSignalAtmospherePrompt(args: {
   showName: string;
   studioIdentity: string;
+  keywords?: readonly string[];
 }): string {
   const silentRoomQuestion =
     "What would it sound like in this room if one were completely silent?";
-  const directions =
-    "Seamless non-musical room-and-Foley loop unique to this studio. Build a distinctive backing bed from warm low resonance, damped low mids, and several sparse sounds implied by its materials, objects, mechanisms, and setting. Keep highs faint, leave speech space, and smooth the loop boundary.";
+  const keywords = normalizeSignalGenerationKeywords(args.keywords);
+  const keywordDirection = keywords.length
+    ? ` Producer cues: ${keywords.join(", ")}.`
+    : "";
+  const directions = keywords.length
+    ? "Seamless non-musical room-and-Foley loop unique to this studio. Let the producer cues shape its sparse material sounds while speech stays clear and the loop boundary stays smooth."
+    : "Seamless non-musical room-and-Foley loop unique to this studio. Build a distinctive backing bed from warm low resonance, damped low mids, and several sparse sounds implied by its materials, objects, mechanisms, and setting. Keep highs faint, leave speech space, and smooth the loop boundary.";
   const studioPrefix = "Studio: ";
   const promptEnvelopeLength =
-    silentRoomQuestion.length + 1 + studioPrefix.length + 2 + directions.length;
+    silentRoomQuestion.length +
+    1 +
+    studioPrefix.length +
+    2 +
+    keywordDirection.length +
+    directions.length;
   const studioIdentity = boundSignalAtmosphereText(
     cleanSignalAtmosphereStudioIdentity(
       args.studioIdentity.trim() ||
@@ -80,7 +93,7 @@ export function buildSignalAtmospherePrompt(args: {
     SIGNAL_ELEVENLABS_SOUND_PROMPT_MAX_CHARACTERS - promptEnvelopeLength,
   );
   return boundSignalAtmospherePrompt(
-    `${silentRoomQuestion} ${studioPrefix}${studioIdentity}. ${directions}`,
+    `${silentRoomQuestion} ${studioPrefix}${studioIdentity}.${keywordDirection} ${directions}`,
   );
 }
 

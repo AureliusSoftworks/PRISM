@@ -428,6 +428,8 @@ describe("Story API helpers", () => {
     assert.match(prompt, /- bot-a: Alice\./u);
     assert.match(prompt, /"Bert" becomes "Bert Bot"/u);
     assert.match(prompt, /keep your own name exactly "Alice"/u);
+    assert.match(prompt, /comment once, show a small contextual mood, tone, or action shift, or let it pass/u);
+    assert.match(prompt, /small bounded mood, tone, or action reaction/u);
     assert.doesNotMatch(prompt, /- bot-a: Alice Bot\./u);
     assert.equal(
       generated.episode?.scenes[1]?.narration,

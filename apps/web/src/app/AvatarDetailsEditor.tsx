@@ -21,6 +21,7 @@ import {
   EyeOff,
   Minus,
   Move,
+  PaintBucket,
   Redo2,
   Trash2,
   Undo2,
@@ -52,6 +53,7 @@ import {
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
   paintAvatarDetailsColorMap,
+  recolorAvatarDetailsPaintColorRegion,
   removeAvatarDetailStamp,
   toggleAvatarDetailStamp,
   updateAvatarDetailStamp,
@@ -95,7 +97,8 @@ const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
   {
     role: "talking",
     label: "Speech ink",
-    description: "Hides while talking or sipping.",
+    description:
+      "Follows Mouth animation; Default hides while talking or sipping.",
   },
   {
     role: "effect",
@@ -557,6 +560,27 @@ const AvatarDetailsEditorSession = forwardRef<
     [updateWorking],
   );
 
+  const applyBucket = useCallback(
+    (
+      stroke: AvatarDetailsPointerStroke,
+      point: AvatarDetailsGridPoint,
+    ): boolean => {
+      const result = recolorAvatarDetailsPaintColorRegion(
+        stroke.beforeColorMap,
+        point,
+        inkRole,
+      );
+      setLimitReached(false);
+      if (!result.changed) return false;
+      updateWorking(
+        avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+        { publishPreview: false, deferRender: true },
+      );
+      return true;
+    },
+    [inkRole, updateWorking],
+  );
+
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     if (
       (event.button !== 0 && (event.buttons & 1) === 0) ||
@@ -589,6 +613,8 @@ const AvatarDetailsEditorSession = forwardRef<
     setPointerActive(true);
     if (stroke.tool === "brush" || stroke.tool === "eraser") {
       stroke.changed = paintPoints([point]);
+    } else if (stroke.tool === "bucket") {
+      stroke.changed = applyBucket(stroke, point);
     } else if (stroke.tool === "line") {
       stroke.changed = previewLineStroke(stroke, point);
     } else if (stroke.tool === "circle") {
@@ -626,7 +652,7 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke.changed = previewLineStroke(stroke, finalPoint);
     } else if (stroke.tool === "circle") {
       stroke.changed = previewCircleStroke(stroke, finalPoint);
-    } else {
+    } else if (stroke.tool === "move") {
       stroke.changed = previewMoveStroke(stroke, finalPoint);
     }
     stroke.lastPoint = finalPoint;
@@ -731,6 +757,8 @@ const AvatarDetailsEditorSession = forwardRef<
   const canvasInstruction =
     paintMode === "move"
       ? "Drag to move the illustration."
+      : paintMode === "bucket"
+        ? "Click a painted region to change its ink behavior."
       : paintMode === "line"
         ? "Drag between two points to draw a straight line."
         : paintMode === "circle"
@@ -832,6 +860,17 @@ const AvatarDetailsEditorSession = forwardRef<
             </button>
             <button
               type="button"
+              aria-label="Paint bucket tool"
+              aria-pressed={paintMode === "bucket"}
+              data-selected={paintMode === "bucket" ? "true" : undefined}
+              data-glyph-tooltip="Paint bucket"
+              title="Paint bucket"
+              onClick={() => setPaintMode("bucket")}
+            >
+              <PaintBucket size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
               aria-label="Line tool"
               aria-pressed={paintMode === "line"}
               data-selected={paintMode === "line" ? "true" : undefined}
@@ -876,7 +915,7 @@ const AvatarDetailsEditorSession = forwardRef<
                 aria-label={`${size} pixel stroke`}
                 aria-pressed={brushSize === size}
                 data-selected={brushSize === size ? "true" : undefined}
-                disabled={paintMode === "move"}
+                disabled={paintMode === "move" || paintMode === "bucket"}
                 onClick={() => setBrushSize(size)}
               >
                 {size}

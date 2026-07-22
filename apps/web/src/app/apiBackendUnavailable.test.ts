@@ -69,4 +69,22 @@ describe("Prism API proxy backend-down behavior", () => {
       error: "ElevenLabs does not have enough voice credits.",
     });
   });
+
+  it("does not report a cancelled browser request as an API outage", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    globalThis.fetch = async () => {
+      throw new DOMException("Aborted", "AbortError");
+    };
+
+    const response = await GET(
+      new NextRequest("http://127.0.0.1:18788/api/voices/synthesize", {
+        signal: controller.signal,
+      }),
+      { params: Promise.resolve({ path: ["voices", "synthesize"] }) },
+    );
+
+    assert.equal(response.status, 499);
+    assert.equal(await response.text(), "");
+  });
 });

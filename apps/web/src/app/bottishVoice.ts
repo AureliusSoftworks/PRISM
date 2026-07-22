@@ -20,6 +20,7 @@ import {
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
+  readEnglishVoiceWaveStream,
   readEnglishVoiceSynthesisClip,
   type EnglishVoiceSynthesisClip,
 } from "./englishVoice.ts";
@@ -1004,6 +1005,92 @@ async function playBabble(
   }
 }
 
+async function playChunkedBabbleResponse(
+  response: Response,
+  sourceText: string,
+  profile: BotAudioVoiceProfileV1,
+  expectedGeneration: number,
+  seed: string,
+  effectsEnabled: boolean,
+  globalVolume: number,
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+  timing?: BottishPlaybackTiming,
+  stereoPan = 0,
+): Promise<void> {
+  const totalCharacters = Math.max(
+    1,
+    Number(response.headers.get("x-prism-voice-characters")) || 1,
+  );
+  const estimatedDurationMs = Math.max(
+    1,
+    timing?.targetDurationMs ?? botcastSignalStandardCadenceDurationMs(sourceText),
+  );
+  let consumedCharacters = 0;
+  let playedChunks = 0;
+  let playbackStarted = false;
+
+  for await (const chunk of readEnglishVoiceWaveStream(response)) {
+    if (expectedGeneration !== generation) return;
+    const segmentStartMs =
+      estimatedDurationMs * (consumedCharacters / totalCharacters);
+    const segmentEndMs =
+      estimatedDurationMs *
+      (Math.min(totalCharacters, consumedCharacters + chunk.characterCount) /
+        totalCharacters);
+    const segmentDurationMs = Math.max(1, segmentEndMs - segmentStartMs);
+    const playbackProfile = {
+      ...resolveBabblePlaybackProfile(profile, chunk.bytes, {
+        deliveryRate: timing?.deliveryRate,
+        maximumCompressionRate: timing?.maximumCompressionRate,
+      }),
+      volume: normalizeBotVoiceVolume(globalVolume),
+    };
+    let actualChunkDurationMs: number | null = null;
+    await playBabble(
+      chunk.bytes,
+      chunk.text ?? sourceText,
+      playbackProfile,
+      expectedGeneration,
+      `${seed}:chunk:${chunk.index}`,
+      effectsEnabled,
+      {
+        onStart: (durationMs) => {
+          actualChunkDurationMs = durationMs;
+          if (!playbackStarted) {
+            playbackStarted = true;
+            lifecycle?.onStart?.(estimatedDurationMs);
+          }
+        },
+        onProgress: (elapsedMs) => {
+          const progress = actualChunkDurationMs
+            ? Math.min(1, elapsedMs / actualChunkDurationMs)
+            : Math.min(1, elapsedMs / segmentDurationMs);
+          lifecycle?.onProgress?.(
+            segmentStartMs + segmentDurationMs * progress,
+            estimatedDurationMs,
+          );
+        },
+        onEnd: () => undefined,
+      },
+      roomAcoustics,
+      playedChunks === 0 ? preSpeechBreath : null,
+      stereoPan,
+    );
+    playedChunks += 1;
+    consumedCharacters += chunk.characterCount;
+    lifecycle?.onProgress?.(segmentEndMs, estimatedDurationMs);
+  }
+
+  if (expectedGeneration !== generation) return;
+  if (playedChunks === 0 || !playbackStarted) {
+    throw new Error("Babble voice stream returned no playable audio.");
+  }
+  lifecycle?.onProgress?.(estimatedDurationMs, estimatedDurationMs);
+  lifecycle?.onEnd?.();
+}
+
 export function enqueueBabbleVoice(
   bytes: ArrayBuffer,
   sourceText: string,
@@ -1035,6 +1122,41 @@ export function enqueueBabbleVoice(
         lifecycle,
         roomAcoustics,
         preSpeechBreath,
+        stereoPan,
+      ),
+    );
+  return queue;
+}
+
+export function enqueueChunkedBabbleVoice(
+  response: Response,
+  sourceText: string,
+  profile: BotAudioVoiceProfileV1,
+  seed: string,
+  effectsEnabled = true,
+  globalVolume = 1,
+  lifecycle?: VoicePlaybackLifecycle,
+  roomAcoustics?: RoomAcousticsSend,
+  preSpeechBreath?: PreSpeechBreathPlan | null,
+  timing?: BottishPlaybackTiming,
+  stereoPan = 0,
+): Promise<void> {
+  const expectedGeneration = generation;
+  queue = queue
+    .catch(() => undefined)
+    .then(() =>
+      playChunkedBabbleResponse(
+        response,
+        sourceText,
+        profile,
+        expectedGeneration,
+        seed,
+        effectsEnabled,
+        globalVolume,
+        lifecycle,
+        roomAcoustics,
+        preSpeechBreath,
+        timing,
         stereoPan,
       ),
     );

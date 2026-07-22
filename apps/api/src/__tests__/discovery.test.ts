@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import type { ChildProcess, spawn } from "node:child_process";
 import type { AppConfig } from "@localai/config";
 import {
   buildDiscoveryServiceDescriptor,
@@ -95,5 +97,53 @@ describe("startPrismDiscovery", () => {
     assert.ok(stop);
     await stop();
     assert.equal(stopped, true);
+  });
+
+  it("uses macOS native DNS-SD in Desktop instead of processing multicast on the API event loop", async () => {
+    let jsAdvertised = false;
+    let command = "";
+    let parameters: readonly string[] = [];
+    const child = new EventEmitter() as ChildProcess;
+    Object.defineProperty(child, "exitCode", {
+      configurable: true,
+      get: () => null,
+    });
+    child.kill = (() => {
+      queueMicrotask(() => child.emit("exit", 0, "SIGTERM"));
+      return true;
+    }) as ChildProcess["kill"];
+    const spawnNative = ((nextCommand: string, nextParameters: readonly string[]) => {
+      command = nextCommand;
+      parameters = nextParameters;
+      return child;
+    }) as typeof spawn;
+
+    const stop = startPrismDiscovery(
+      createConfig(),
+      () => {
+        jsAdvertised = true;
+        return async () => {};
+      },
+      {
+        platform: "darwin",
+        desktopMode: true,
+        nativeDnsSdAvailable: true,
+        spawnNative,
+      },
+    );
+
+    assert.equal(jsAdvertised, false);
+    assert.equal(command, "/usr/bin/dns-sd");
+    assert.deepEqual(parameters.slice(0, 5), [
+      "-R",
+      "Test Prism",
+      "_prism._tcp",
+      "local.",
+      "18787",
+    ]);
+    assert.ok(parameters.includes(`api=${PRISM_API_VERSION}`));
+    assert.ok(parameters.includes(`version=${PRISM_SERVER_VERSION}`));
+    assert.ok(stop);
+    await stop();
   });
 });

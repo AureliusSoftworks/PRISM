@@ -64,7 +64,7 @@ describe("parseZenLiveActionReactionResponse", () => {
     );
 
     assert.equal(response.kind, "show_action");
-    assert.equal(response.botAction, "Smiles warmly, gestures to the dancing");
+    assert.equal(response.botAction, "Smiles warmly");
   });
 
   it("strips dangling speech bridge words from visible action text", () => {
@@ -79,10 +79,10 @@ describe("parseZenLiveActionReactionResponse", () => {
     );
 
     assert.equal(response.kind, "show_action");
-    assert.equal(response.botAction, "offers a warm smile and a gentle wave back");
+    assert.equal(response.botAction, "offers a warm smile");
   });
 
-  it("keeps fuller stage directions for the action plate", () => {
+  it("keeps only the first physical beat from a multi-clause action", () => {
     const action =
       "rests one hand over his heart, then offers a small, careful nod toward your courage";
     const response = parseZenLiveActionReactionResponse(
@@ -96,7 +96,22 @@ describe("parseZenLiveActionReactionResponse", () => {
     );
 
     assert.equal(response.kind, "show_action");
-    assert.equal(response.botAction, action);
+    assert.equal(response.botAction, "rests one hand over his heart");
+  });
+
+  it("caps an unpunctuated action at a short readable beat", () => {
+    const response = parseZenLiveActionReactionResponse(
+      JSON.stringify({
+        kind: "show_action",
+        botAction: "keeps his gaze fixed on the doorway across the silent room",
+        moodHint: "attentive",
+        confidence: 0.77,
+      }),
+      request()
+    );
+
+    assert.equal(response.kind, "show_action");
+    assert.equal(response.botAction, "keeps his gaze fixed on the doorway");
   });
 
   it("requires stricter confidence for interrupt candidates", () => {
@@ -159,5 +174,7 @@ describe("generateZenLiveActionReaction", () => {
     assert.equal(response.kind, "show_action");
     assert.equal(response.botAction, "waves back warmly");
     assert.ok(capturedMessages.some((message) => message.content.includes("Latest visible user action")));
+    assert.ok(capturedMessages.some((message) => message.content.includes("2-8 words")));
+    assert.ok(capturedMessages.some((message) => message.content.includes("No chains of motions")));
   });
 });

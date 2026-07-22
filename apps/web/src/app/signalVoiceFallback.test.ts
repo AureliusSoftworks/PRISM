@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { requestSignalVoiceWithFallback } from "./signalVoiceFallback.ts";
+import {
+  requestSignalVoiceWithFallback,
+  SIGNAL_ONLINE_VOICE_TIMEOUT_MS,
+  SIGNAL_OPENING_ONLINE_VOICE_TIMEOUT_MS,
+  signalOnlineVoiceTimeoutMs,
+} from "./signalVoiceFallback.ts";
+
+test("Signal gives a Premium episode opening more time before local fallback", () => {
+  assert.equal(
+    signalOnlineVoiceTimeoutMs("opening"),
+    SIGNAL_OPENING_ONLINE_VOICE_TIMEOUT_MS,
+  );
+  assert.equal(
+    signalOnlineVoiceTimeoutMs("closing"),
+    SIGNAL_ONLINE_VOICE_TIMEOUT_MS,
+  );
+  assert.equal(signalOnlineVoiceTimeoutMs(), SIGNAL_ONLINE_VOICE_TIMEOUT_MS);
+});
 
 test("Signal keeps a healthy preferred voice without invoking fallback", async () => {
   let fallbackCalls = 0;

@@ -74,9 +74,16 @@ describe("replay manifests", () => {
         filmGrain: 0.65,
       },
       studioLayout: {},
+      studioGlowTuning: {
+        dark: { opacity: 0.78, blendMode: "screen" },
+        light: { opacity: 0.52, blendMode: "overlay" },
+      },
       logo: { imageUrl: null },
       dayAtmosphere: { imageUrl: null },
-      nightAtmosphere: { imageUrl: null },
+      nightAtmosphere: {
+        imageUrl: "/night.png",
+        microphoneTintMaskUrl: "/night-microphones.png",
+      },
     } as unknown as BotcastShow;
     const manifest = buildSignalReplayManifestV1({
       episode,
@@ -112,13 +119,21 @@ describe("replay manifests", () => {
     );
     assert.equal(
       manifest.visual.metadata?.renderContract,
-      "signal-studio-dom-v2",
+      "signal-studio-dom-v3",
+    );
+    assert.equal(
+      manifest.visual.metadata?.microphoneTintMaskUrl,
+      "/night-microphones.png",
     );
     assert.deepEqual(manifest.visual.metadata?.atmosphereMix, {
       background: 0.16,
       grain: 0,
       foley: 1,
       filmGrain: 0.65,
+    });
+    assert.deepEqual(manifest.visual.metadata?.studioGlowTuning, {
+      dark: { opacity: 0.78, blendMode: "screen" },
+      light: { opacity: 0.52, blendMode: "overlay" },
     });
   });
 });
@@ -169,7 +184,10 @@ describe("replay implementation contracts", () => {
     assert.match(source, /original session and transcript will remain/u);
     assert.match(source, /playsInline/u);
     assert.match(source, /preview\?: ReactNode/u);
-    assert.match(source, /surface === "signal" && !ready/u);
+    assert.match(source, /if \(surface === "signal"\)/u);
+    assert.match(source, /Produce Premium video/u);
+    assert.match(source, /Retry video from cached master/u);
+    assert.match(source, /Delete Premium media/u);
     assert.match(source, /surface === "coffee" && transcriptBeats\.length > 0/u);
     assert.doesNotMatch(source, /interactive episode/u);
     assert.doesNotMatch(source, /<track/u);

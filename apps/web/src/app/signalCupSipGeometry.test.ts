@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   SIGNAL_CUP_SIP_FACE_ACTIVE_PROGRESS,
@@ -7,50 +8,38 @@ import {
   signalCupSipTargetFromMouth,
 } from "./signalCupSipGeometry.ts";
 
+const pageCss = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
+
 describe("Signal cup sip geometry", () => {
   const sceneBounds = { left: 100, top: 50, width: 1_340, height: 737 };
   const mouthBounds = { left: 756, top: 304.6, width: 28, height: 26.8 };
 
   it("maps the rendered mouth through a transformed camera scene", () => {
-    const host = signalCupSipTargetFromMouth({
-      role: "host",
+    const target = signalCupSipTargetFromMouth({
       sceneBounds,
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
       mouthBounds,
       mugLocalHeight: 72,
-      viewportWidth: 1_000,
-    });
-    const guest = signalCupSipTargetFromMouth({
-      role: "guest",
-      sceneBounds,
-      sceneLocalWidth: 1_000,
-      sceneLocalHeight: 550,
-      mouthBounds,
-      mugLocalHeight: 72,
-      viewportWidth: 1_000,
     });
 
-    assert.ok(host);
-    assert.ok(guest);
-    assert.ok(Math.abs(host.x - 531) < 0.000_001);
-    assert.ok(Math.abs(guest.x - 469) < 0.000_001);
-    assert.equal(host.y, 224.78);
-    assert.equal(guest.y, 224.78);
+    assert.ok(target);
+    assert.ok(Math.abs(target.x - 500) < 0.000_001);
+    assert.equal(target.y, 217.28);
   });
 
   it("follows authored mouth offsets instead of a saved bot-center proxy", () => {
     const base = signalCupSipTargetFromMouth({
-      role: "host",
       sceneBounds,
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
       mouthBounds,
       mugLocalHeight: 72,
-      viewportWidth: 1_000,
     });
     const shifted = signalCupSipTargetFromMouth({
-      role: "host",
       sceneBounds,
       sceneLocalWidth: 1_000,
       sceneLocalHeight: 550,
@@ -60,13 +49,19 @@ describe("Signal cup sip geometry", () => {
         top: mouthBounds.top + 26.8,
       },
       mugLocalHeight: 72,
-      viewportWidth: 1_000,
     });
 
     assert.ok(base);
     assert.ok(shifted);
     assert.equal(shifted.x - base.x, 10);
     assert.equal(shifted.y - base.y, 20);
+  });
+
+  it("keeps Coffee's seat-relative sip travel out of Signal", () => {
+    assert.match(
+      pageCss,
+      /\.coffeeCup\.signalCoffeeCup[\s\S]*?--coffee-cup-sip-x:\s*0px;[\s\S]*?--coffee-cup-sip-y:\s*0px;/u,
+    );
   });
 
   it("relaxes the Signal sip face before the cup starts returning", () => {

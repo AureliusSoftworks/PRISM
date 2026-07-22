@@ -6,6 +6,7 @@ import {
   type BotcastReplayEvent,
   type BotcastShow,
 } from "@localai/shared";
+import { signalVoicePerformanceTranscriptText } from "./signalVoicePerformance.ts";
 
 export type SignalReviewParticipant = {
   id: string;
@@ -199,7 +200,7 @@ export function buildSignalReviewTranscript(
         "- Stage action (avatar only):",
         indentBlock(message.stageActionText),
         "- Visible transcript:",
-        indentBlock(message.content),
+        indentBlock(signalVoicePerformanceTranscriptText(message)),
         "- Voice performance text:",
         indentBlock(message.voicePerformanceText),
         "",

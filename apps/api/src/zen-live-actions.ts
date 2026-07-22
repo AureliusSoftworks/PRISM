@@ -10,12 +10,40 @@ import type { LlmProvider, ProviderMessage } from "./providers.ts";
 
 const MAX_ACTION_CHARS = 180;
 const MAX_CONTEXT_ACTION_CHARS = 120;
+const MAX_VISIBLE_BOT_ACTION_WORDS = 8;
 const SHOW_ACTION_MIN_CONFIDENCE = 0.46;
 const INTERRUPT_MIN_CONFIDENCE = 0.88;
 
 const OUT_OF_PERSONA_ACTION_RE = /\b(?:twerk(?:s|ing)?|striptease|porn|sexual|horny|meme\s+lord|yeet|skibidi|rizz|fortnite|dab(?:s|bing)?|floss(?:es|ing)?|cartwheel(?:s|ing)?\s+uncontrollably)\b/iu;
 const TRAILING_SPEECH_BRIDGE_RE =
   /(?:[,:;]?\s*(?:and\s+)?(?:says?|saying|asks?|asking|replies?|replying|responds?|responding|tells?|telling|whispers?|whispering|murmurs?|murmuring|adds?|adding|speaks?|speaking|sings?|singing|croons?|crooning)\b\s*(?:softly|warmly|quietly|gently|candidly|brightly|kindly|slowly|under\s+.*)?[.!?\u2026;:,]*)+$/iu;
+const BOT_ACTION_CLAUSE_BREAK_RE =
+  /\s*(?:[,;:\u2014\u2013]|\b(?:and\s+then|and|then|while|as\s+if|but)\b)\s*/iu;
+const DANGLING_BOT_ACTION_WORD_RE =
+  /^(?:a|an|the|and|or|but|with|without|to|toward|towards|from|as|if|of|for|into|onto|over|under|across|around|through)$/iu;
+
+function compactZenLiveBotActionText(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const clauses = value
+    .split(BOT_ACTION_CLAUSE_BREAK_RE)
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+  if (clauses.length === 0) return undefined;
+  let primary = clauses[0] ?? value;
+  const primaryWords = primary.split(/\s+/u).filter(Boolean);
+  if (
+    primaryWords.length === 1 &&
+    /ly$/iu.test(primaryWords[0] ?? "") &&
+    clauses[1]
+  ) {
+    primary = `${primary} ${clauses[1]}`;
+  }
+  const words = primary.split(/\s+/u).filter(Boolean).slice(0, MAX_VISIBLE_BOT_ACTION_WORDS);
+  while (words.length > 1 && DANGLING_BOT_ACTION_WORD_RE.test(words.at(-1) ?? "")) {
+    words.pop();
+  }
+  return words.join(" ") || undefined;
+}
 
 export function normalizeZenLiveActionText(
   value: unknown,
@@ -204,7 +232,9 @@ export function parseZenLiveActionReactionResponse(
     : record.kind === "show_action"
       ? "show_action"
       : "silent";
-  const botAction = normalizeZenLiveActionText(record.botAction ?? record.action);
+  const botAction = compactZenLiveBotActionText(
+    normalizeZenLiveActionText(record.botAction ?? record.action)
+  );
   const confidence = clampConfidence(record.confidence);
   const moodHint = normalizeZenLiveActionMoodHint(record.moodHint ?? record.mood);
   const interruptReason = normalizeZenLiveActionText(record.interruptReason ?? record.reason, 180);
@@ -214,7 +244,10 @@ export function parseZenLiveActionReactionResponse(
   if (!botAction) {
     return silentReaction(request, moodHint, confidence);
   }
-  if (actionKey(botAction) === actionKey(request.previousBotAction)) {
+  if (
+    actionKey(botAction) ===
+    actionKey(compactZenLiveBotActionText(request.previousBotAction))
+  ) {
     return silentReaction(request, moodHint, confidence);
   }
   if (OUT_OF_PERSONA_ACTION_RE.test(botAction)) {
@@ -276,7 +309,8 @@ function buildZenLiveActionReactionMessages(args: {
         "Never invent random memes, sexual behavior, slapstick that breaks the persona, or actions that contradict the persona.",
         "Use interrupt_candidate only for rare, high-confidence, persona-significant moments where the assistant should speak before the user sends. Otherwise use show_action or silent.",
         "For idle beats, never interrupt. Use only subtle believable waiting actions.",
-        "Use one readable stage direction, usually 8-24 words, without surrounding asterisks.",
+        "Use one simple physical gesture or expression of 2-8 words, without surrounding asterisks.",
+        "No chains of motions, facial micro-narration, motives, similes, or sentence-length choreography.",
         "Do not include dialogue, quote marks, or speech bridge words such as saying, asking, replying, or telling.",
       ].join("\n"),
     },

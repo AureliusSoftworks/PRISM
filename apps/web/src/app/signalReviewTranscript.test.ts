@@ -279,6 +279,31 @@ describe("Signal review transcript", () => {
     assert.match(transcript, /No production events were recorded\./u);
   });
 
+  it("keeps action markers out of the visible review transcript", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        messages: [{
+          ...episode.messages[0]!,
+          content: "Look *gasp* at *scream* me! *dance*",
+          voicePerformanceText: "Look [gasps] at [screams] me! *dance*",
+        }],
+        events: [],
+        segments: [],
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+    });
+
+    assert.match(transcript, /- Visible transcript:\n    Look at me!/u);
+    assert.doesNotMatch(transcript, /- Visible transcript:\n    .*\*gasp\*/u);
+    assert.match(
+      transcript,
+      /- Voice performance text:\n    Look \[gasps\] at \[screams\] me! \*dance\*/u,
+    );
+  });
+
   it("identifies Producer guest composer turns as human-authored", () => {
     const transcript = buildSignalReviewTranscript({
       episode: {

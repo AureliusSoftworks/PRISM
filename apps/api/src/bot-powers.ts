@@ -1126,8 +1126,8 @@ function deterministicDesignationPower(
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue: `Keep your own name ${JSON.stringify(subject)}. Whenever you name or address another bot, apply ${affix} to that bot's name. Never apply it to the player or humans.`,
-    observerCue: `${subject} applies ${affix} whenever naming another bot. Other speakers keep their own naming habits and do not copy this rule.`,
+    selfCue: `Keep your own name ${JSON.stringify(subject)}. Apply ${affix} whenever naming another bot. Hearers may react through comment, mood, tone, action, or not at all; never script that reaction or apply the affix to the player or humans.`,
+    observerCue: `${subject} applies ${affix} when naming bots. If ${subject} alters your name, let personality and context decide whether to comment once, show a small bounded mood, tone, or action reaction, or let it pass. Do not copy or adopt the affix.`,
     effects: [{ type: "designation", placement, text }],
     ruleLabels: [`Bot-name ${placement}`],
   };

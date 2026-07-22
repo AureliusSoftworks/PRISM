@@ -22,7 +22,11 @@ describe("Signal Synth ident", () => {
     identity: Partial<
       Pick<
         Parameters<typeof buildSignalMusicProfile>[0],
-        "premise" | "hostingStyle" | "studioIdentity"
+        | "persona"
+        | "musicDirection"
+        | "premise"
+        | "hostingStyle"
+        | "studioIdentity"
       >
     > = {},
   ) => buildSignalMusicProfile({ temperament, seed, ...identity });
@@ -205,6 +209,99 @@ describe("Signal Synth ident", () => {
       magical.notes.map((note) => note.startMs),
       nautical.notes.map((note) => note.startMs),
     );
+  });
+
+  it("makes volatile, monumental, and buoyant personas sound structurally different locally", () => {
+    const volatileProfile = profile("inventive", "volatile-local", {
+      persona:
+        "A reckless chaotic scientist with dangerous genius and sardonic protective instincts.",
+      musicDirection:
+        "Volatile alien science with theremin, electrical crackle, lurching asymmetry, chromatic instability, and a short-circuit ending.",
+    });
+    const monumentalProfile = profile("commanding", "monumental-local", {
+      persona:
+        "A severe authoritarian commander whose disciplined public control hides tragic conflict.",
+      musicDirection:
+        "Monumental orchestra with low brass, contrabass, martial timpani, minor gravity, and an inevitable hard cadence.",
+    });
+    const buoyantProfile = profile("playful", "buoyant-local", {
+      persona:
+        "A cheerful carefree optimist with innocent delight and unstoppable comic confidence.",
+      musicDirection:
+        "Sunny ukulele and wooden marimba, buoyant syncopation, bright modal harmony, and a lifted smile ending.",
+    });
+    const volatile = buildSignalSynthIdentPlan({
+      profile: volatileProfile,
+      seed: "volatile-local",
+    });
+    const monumental = buildSignalSynthIdentPlan({
+      profile: monumentalProfile,
+      seed: "monumental-local",
+    });
+    const buoyant = buildSignalSynthIdentPlan({
+      profile: buoyantProfile,
+      seed: "buoyant-local",
+    });
+
+    assert.deepEqual(
+      [
+        volatile.energyShape,
+        volatile.rhythmicCharacter,
+        volatile.harmonicLanguage,
+        volatile.productionTexture,
+        volatile.endingBehavior,
+      ],
+      [
+        "volatile",
+        "lurching-asymmetric",
+        "chromatic-unstable",
+        "electrical-analog",
+        "short-circuit",
+      ],
+    );
+    assert.equal(monumental.productionTexture, "monumental-orchestral");
+    assert.equal(monumental.rhythmicCharacter, "martial-deliberate");
+    assert.equal(buoyant.productionTexture, "wooden-acoustic");
+    assert.equal(buoyant.rhythmicCharacter, "buoyant-syncopated");
+    assert.notDeepEqual(
+      volatile.notes.map(({ startMs, midi, waveform }) => ({
+        startMs,
+        midi,
+        waveform,
+      })),
+      monumental.notes.map(({ startMs, midi, waveform }) => ({
+        startMs,
+        midi,
+        waveform,
+      })),
+    );
+    assert.notDeepEqual(
+      monumental.notes.map(({ startMs, midi, waveform }) => ({
+        startMs,
+        midi,
+        waveform,
+      })),
+      buoyant.notes.map(({ startMs, midi, waveform }) => ({
+        startMs,
+        midi,
+        waveform,
+      })),
+    );
+    assert.notDeepEqual(
+      volatile.notes.map((note) => note.startMs),
+      monumental.notes.map((note) => note.startMs),
+    );
+    assert.ok(
+      Math.max(...monumental.notes.map((note) => note.midi)) <
+        Math.max(...buoyant.notes.map((note) => note.midi)),
+    );
+
+    const volatileOutdent = buildSignalSynthOutdentPlan({
+      profile: volatileProfile,
+      seed: "volatile-local",
+    });
+    assert.equal(volatileOutdent.endingBehavior, "short-circuit");
+    assert.equal(volatileOutdent.productionTexture, volatile.productionTexture);
   });
 
   it("renders an ordinary mono PCM wave without a live AudioContext", () => {

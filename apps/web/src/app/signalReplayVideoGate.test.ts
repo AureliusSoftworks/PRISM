@@ -15,26 +15,19 @@ function episode(status: "live" | "completed"): BotcastEpisodeSummary {
 
 function recording(
   status: ReplayRecordingV1["status"],
-  options: { currentContract?: boolean; videoUrl?: string | null } = {},
+  options: { premiumPhase?: "rendering_studio" | "ready"; videoUrl?: string | null } = {},
 ): ReplayRecordingV1 {
   return {
     status,
-    videoUrl: options.videoUrl ?? null,
-    manifest: {
-      visual: {
-        metadata: {
-          renderContract:
-            options.currentContract === false
-              ? "signal-studio-dom-v1"
-              : "signal-studio-dom-v2",
-        },
-      },
+    premiumProduction: {
+      phase: options.premiumPhase ?? "rendering_studio",
+      videoUrl: options.videoUrl ?? null,
     },
   } as unknown as ReplayRecordingV1;
 }
 
 describe("Signal episode video gate", () => {
-  it("treats only a current, ready video as watchable", () => {
+  it("treats only a ready Premium video as watchable", () => {
     assert.equal(signalReplayRecordingHasVideo(null), false);
     assert.equal(
       signalReplayRecordingHasVideo(
@@ -45,42 +38,37 @@ describe("Signal episode video gate", () => {
     assert.equal(signalReplayRecordingHasVideo(recording("ready")), false);
     assert.equal(
       signalReplayRecordingHasVideo(
-        recording("ready", {
-          currentContract: false,
-          videoUrl: "/api/replays/video",
-        }),
-      ),
-      false,
-    );
-    assert.equal(
-      signalReplayRecordingHasVideo(
         recording("ready_with_warnings", {
-          videoUrl: "/api/replays/video",
+          premiumPhase: "ready",
+          videoUrl: "/api/replays/premium/video",
         }),
       ),
       true,
     );
   });
 
-  it("never calls an unfinished episode video a replay", () => {
+  it("always opens completed episodes as local replay", () => {
     assert.equal(signalEpisodeArchiveActionLabel(episode("live"), null), "Resume episode");
     assert.equal(
       signalEpisodeArchiveActionLabel(episode("completed"), null),
-      "Render episode video",
+      "Open local replay",
     );
     assert.equal(
       signalEpisodeArchiveActionLabel(
         episode("completed"),
         recording("rendering"),
       ),
-      "Rendering episode video",
+      "Open local replay",
     );
     assert.equal(
       signalEpisodeArchiveActionLabel(
         episode("completed"),
-        recording("ready", { videoUrl: "/api/replays/video" }),
+        recording("ready", {
+          premiumPhase: "ready",
+          videoUrl: "/api/replays/premium/video",
+        }),
       ),
-      "Watch episode",
+      "Open replay · Premium ready",
     );
   });
 });
