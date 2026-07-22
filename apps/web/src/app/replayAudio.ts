@@ -16,7 +16,10 @@ import {
   SIGNAL_STUDIO_VOICE_ROOM_SEND,
   connectRoomAcoustics,
 } from "./roomAcoustics";
-import { SIGNAL_SOUNDBOARD_CUES } from "./signalSoundboard";
+import {
+  SIGNAL_SOUNDBOARD_CUES,
+  signalSoundboardPlaybackPlan,
+} from "./signalSoundboard";
 
 const REPLAY_AUDIO_SAMPLE_RATE = 48_000;
 const REPLAY_AUDIO_TAIL_MS = 650;
@@ -297,13 +300,21 @@ export async function prepareReplayAudio(
         loop: true,
       });
     }
+    const soundboardCueCountByKind = new Map<
+      (typeof SIGNAL_SOUNDBOARD_CUES)[number]["kind"],
+      number
+    >();
     for (const event of recording.manifest.events) {
       if (event.kind !== "soundboard_cue") continue;
       const cue = SIGNAL_SOUNDBOARD_CUES.find(
         (candidate) => candidate.kind === event.payload.kind,
       );
       if (!cue) continue;
-      const buffer = await replayAssetBuffer(cue.src);
+      const variantIndex = soundboardCueCountByKind.get(cue.kind) ?? 0;
+      soundboardCueCountByKind.set(cue.kind, variantIndex + 1);
+      const plan = signalSoundboardPlaybackPlan(cue.kind, variantIndex);
+      if (!plan) continue;
+      const buffer = await replayAssetBuffer(plan.src);
       if (!buffer) {
         warnings.push(`Signal ${cue.label.toLowerCase()} cue was unavailable.`);
         continue;
@@ -311,7 +322,7 @@ export async function prepareReplayAudio(
       scheduledAssets.push({
         buffer,
         startMs: syntheticEventTimeMs(recording, timeline, event),
-        gain: cue.volume,
+        gain: plan.trim,
       });
     }
   }

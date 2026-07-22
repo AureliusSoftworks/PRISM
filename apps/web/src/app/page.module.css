@@ -43874,6 +43874,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     inset 0 1px 0 color-mix(in srgb, #ffffff 9%, transparent);
 }
 
+.botGeneratorDialog[data-creating="true"] {
+  width: min(900px, 100%);
+  grid-template-rows: minmax(0, 1fr);
+  overflow: hidden;
+  border-color: color-mix(in srgb, #a88cff 26%, var(--line-strong));
+  background: #05060a;
+  transition: width 360ms cubic-bezier(0.2, 0.72, 0.2, 1);
+}
+
 .botGeneratorHeader {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -44106,6 +44115,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .botGeneratorDialog {
     max-height: calc(100dvh - 24px);
     border-radius: 16px;
+  }
+
+  .botGeneratorDialog[data-creating="true"] {
+    height: calc(100dvh - 24px);
   }
 
   .botGeneratorHeader,

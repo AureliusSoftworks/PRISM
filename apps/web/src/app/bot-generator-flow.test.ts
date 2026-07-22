@@ -7,6 +7,14 @@ const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const ritualSource = readFileSync(
+  new URL("./BotCreationRitual.tsx", import.meta.url),
+  "utf8",
+);
+const ritualCssSource = readFileSync(
+  new URL("./BotCreationRitual.module.css", import.meta.url),
+  "utf8",
+);
 
 function functionSource(name: string, nextName: string): string {
   const start = pageSource.indexOf(`function ${name}`);
@@ -108,4 +116,34 @@ test("the generator overlays Avatar Studio and has a responsive review surface",
   assert.match(cssSource, /\.botGeneratorDialog\s*\{/u);
   assert.match(cssSource, /\.botGeneratedBriefCard\s+p\s*\{/u);
   assert.match(cssSource, /@media \(max-width: 640px\)/u);
+});
+
+test("prompt generation becomes an accessible PRISM assembly ritual", () => {
+  const generateDraft = functionSource(
+    "generateBotDraftFromPrompt",
+    "openFreshBotCustomizer",
+  );
+
+  assert.match(pageSource, /botGeneratorBusy \? \(\s*<BotCreationRitual/u);
+  assert.match(pageSource, /completedDraft=\{botGeneratorCompletedDraft\}/u);
+  assert.match(generateDraft, /setBotGeneratorCompletedDraft\(result\.draft\)/u);
+  assert.match(generateDraft, /prefers-reduced-motion: reduce/u);
+  assert.match(ritualSource, /role="status"/u);
+  assert.match(ritualSource, /aria-live="polite"/u);
+  assert.match(ritualSource, /aria-busy=\{!completed\}/u);
+  assert.match(ritualSource, /Nothing is saved until you choose Create bot\./u);
+  assert.doesNotMatch(ritualSource, /\bpercent(?:age)?\b|% complete/iu);
+});
+
+test("the creation ritual refracts prompt words and reveals the generated identity", () => {
+  assert.match(ritualSource, /creationWords\(prompt\)/u);
+  assert.match(ritualSource, /completedDraft\.name/u);
+  assert.match(ritualSource, /completedDraft\?\.color/u);
+  assert.match(ritualSource, /completedDraft\?\.face\.eyeCharacter/u);
+  assert.match(ritualSource, /completedDraft\?\.face\.mouthCharacter/u);
+  assert.match(ritualCssSource, /\.prism\s*\{/u);
+  assert.match(ritualCssSource, /\.colorBeam\[data-color="cyan"\]/u);
+  assert.match(ritualCssSource, /\.botForm\s*\{/u);
+  assert.match(ritualCssSource, /@media \(prefers-reduced-motion: reduce\)/u);
+  assert.match(ritualCssSource, /@media \(max-width: 480px\)/u);
 });
