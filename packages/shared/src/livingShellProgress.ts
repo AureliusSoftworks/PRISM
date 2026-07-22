@@ -45,6 +45,35 @@ export type PrismTutorialProgress = Record<
   PrismTutorialState
 >;
 
+export const PRISM_CAPABILITY_IDS = [
+  "slate",
+  "zen",
+  "marketplace",
+  "signal",
+  "coffee",
+] as const;
+
+export type PrismCapabilityId = (typeof PRISM_CAPABILITY_IDS)[number];
+export type PrismCapabilityRevelationReason =
+  | "available"
+  | "existing_account"
+  | "bot_saved"
+  | "zen_reply_milestone"
+  | "group_saved"
+  | "prism_requested"
+  | "restored";
+
+export interface PrismCapabilityRevelation {
+  revealed: boolean;
+  revealedAt: string | null;
+  reason: PrismCapabilityRevelationReason | null;
+}
+
+export type PrismCapabilityRevelations = Record<
+  PrismCapabilityId,
+  PrismCapabilityRevelation
+>;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -106,6 +135,93 @@ export function createPrismTutorialProgress(
       { status, step: 0, remindAfter: null },
     ]),
   ) as PrismTutorialProgress;
+}
+
+export function createPrismCapabilityRevelations(
+  options: { completed?: boolean; now?: string } = {},
+): PrismCapabilityRevelations {
+  const now = options.now ?? new Date().toISOString();
+  return Object.fromEntries(
+    PRISM_CAPABILITY_IDS.map((id) => {
+      const revealed =
+        options.completed === true || id === "slate" || id === "zen";
+      return [
+        id,
+        {
+          revealed,
+          revealedAt: revealed ? now : null,
+          reason: revealed
+            ? options.completed
+              ? "existing_account"
+              : "available"
+            : null,
+        },
+      ];
+    }),
+  ) as PrismCapabilityRevelations;
+}
+
+export function normalizePrismCapabilityRevelations(
+  value: unknown,
+  options: { completedFallback?: boolean; now?: string } = {},
+): PrismCapabilityRevelations {
+  const parsed = parseStoredJson(value);
+  const record = isRecord(parsed) ? parsed : {};
+  const fallback = createPrismCapabilityRevelations({
+    completed: options.completedFallback,
+    now: options.now,
+  });
+  const explicitPending = createPrismCapabilityRevelations({
+    now: options.now,
+  });
+  return Object.fromEntries(
+    PRISM_CAPABILITY_IDS.map((id) => {
+      const raw = record[id];
+      if (typeof raw === "boolean") {
+        return [
+          id,
+          raw
+            ? {
+                revealed: true,
+                revealedAt: options.now ?? new Date().toISOString(),
+                reason: "restored" as const,
+              }
+            : explicitPending[id],
+        ];
+      }
+      if (!isRecord(raw)) return [id, fallback[id]];
+      if (raw.revealed !== true) return [id, explicitPending[id]];
+      const revealedAt =
+        typeof raw.revealedAt === "string" &&
+        Number.isFinite(Date.parse(raw.revealedAt))
+          ? new Date(raw.revealedAt).toISOString()
+          : options.now ?? new Date().toISOString();
+      const reason =
+        raw.reason === "available" ||
+        raw.reason === "existing_account" ||
+        raw.reason === "bot_saved" ||
+        raw.reason === "zen_reply_milestone" ||
+        raw.reason === "group_saved" ||
+        raw.reason === "prism_requested" ||
+        raw.reason === "restored"
+          ? raw.reason
+          : "restored";
+      return [id, { revealed: true, revealedAt, reason }];
+    }),
+  ) as PrismCapabilityRevelations;
+}
+
+export function revealPrismCapability(
+  current: PrismCapabilityRevelations,
+  capability: PrismCapabilityId,
+  reason: PrismCapabilityRevelationReason,
+  now = new Date().toISOString(),
+): PrismCapabilityRevelations {
+  if (current[capability].revealed) return current;
+  return {
+    ...current,
+    [capability]: { revealed: true, revealedAt: now, reason },
+  };
 }
 
 export function normalizePrismTutorialProgress(

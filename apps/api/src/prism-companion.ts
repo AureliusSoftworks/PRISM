@@ -4,6 +4,7 @@ import {
   resolveEphemeralChatProvider,
   type EphemeralChatModeId,
   type EphemeralChatProviderPreferences,
+  type PrismCapabilityId,
   type PrismCompanionActionIntent,
   type PrismCompanionMessage,
   type PrismCompanionSurfaceReference,
@@ -329,6 +330,17 @@ export function prismCompanionDirectActionIntents(
     return [{ type: "begin_handoff", direction: "zen-to-slate" }];
   }
   return [];
+}
+
+export function prismCompanionRequestedCapabilities(
+  message: string,
+): PrismCapabilityId[] {
+  const normalized = message.trim().toLocaleLowerCase();
+  const requested: PrismCapabilityId[] = [];
+  if (/\bmarket(?:place)?\b/u.test(normalized)) requested.push("marketplace");
+  if (/\bsignal\b/u.test(normalized)) requested.push("signal");
+  if (/\bcoffee\b/u.test(normalized)) requested.push("coffee");
+  return requested;
 }
 
 function mergeCompanionActions(

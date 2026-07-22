@@ -360,11 +360,14 @@ import {
 import {
   chatWithPrismCompanion,
   prismCompanionEphemeralMode,
+  prismCompanionRequestedCapabilities,
   resolvePrismCompanionProvider,
 } from "./prism-companion.ts";
 import {
   createPendingLivingShellAccountProgress,
   getLivingShellAccountProgress,
+  revealLivingShellCapability,
+  revealSignalAfterZenReplyMilestone,
   updateLivingShellAccountProgress,
 } from "./living-shell-progress.ts";
 import { resolveSlateDeliberationModelOverride } from "./slate-deliberation-routing.ts";
@@ -676,6 +679,7 @@ import {
   type ZenPersonaTransitionInput,
   type GraphicsQuality,
   type ImageProviderName,
+  type PrismCapabilityId,
   type PrismStartupPreference,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
@@ -8207,6 +8211,10 @@ function buildRoutes(): RouteDefinition[] {
         psychicDebug,
         zenAutonomyDecision: resultZenAutonomyDecision,
       } = result;
+      const livingShellProgressAfterReply =
+        mode === "zen" && effectiveBotId
+          ? revealSignalAfterZenReplyMilestone(db, userId)
+          : null;
       json(ctx.res, 200, {
         ok: true,
         conversation,
@@ -8221,6 +8229,12 @@ function buildRoutes(): RouteDefinition[] {
         ...(toolCalls ? { toolCalls } : {}),
         ...(backendEvents ? { backendEvents } : {}),
         ...(psychicDebug ? { psychicDebug } : {}),
+        ...(livingShellProgressAfterReply
+          ? {
+              capabilityRevelations:
+                livingShellProgressAfterReply.capabilityRevelations,
+            }
+          : {}),
         ...((resultZenAutonomyDecision ?? zenAutonomyDecision)
           ? {
               zenAutonomyDecision:
@@ -13626,6 +13640,17 @@ function buildRoutes(): RouteDefinition[] {
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
       try {
+        const revealedCapabilities = prismCompanionRequestedCapabilities(
+          request.message,
+        );
+        for (const capability of revealedCapabilities) {
+          revealLivingShellCapability(
+            db,
+            userId,
+            capability,
+            "prism_requested",
+          );
+        }
         const result = await runWithUsageSession(
           {
             db,
@@ -13660,6 +13685,7 @@ function buildRoutes(): RouteDefinition[] {
           actions: result.actions,
           provider: providerName,
           model,
+          revealedCapabilities,
         });
       } catch (error) {
         if (controller.signal.aborted) throw error;
@@ -13843,6 +13869,29 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         ...updateLivingShellAccountProgress(db, userId, ctx.body),
+      });
+    }),
+    route("POST", "/api/living-shell/reveal", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const capability = body.capability;
+      const reason = body.reason;
+      if (
+        (capability !== "marketplace" && capability !== "coffee") ||
+        (reason !== "bot_saved" && reason !== "group_saved") ||
+        (capability === "marketplace" && reason !== "bot_saved") ||
+        (capability === "coffee" && reason !== "group_saved")
+      ) {
+        throw new HttpError(400, "A valid capability milestone is required.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        ...revealLivingShellCapability(
+          db,
+          userId,
+          capability as PrismCapabilityId,
+          reason,
+        ),
       });
     }),
     route("POST", "/api/models/prepare", async (ctx) => {
@@ -16263,6 +16312,12 @@ function buildRoutes(): RouteDefinition[] {
           dualOllamaWorkloadOptions(user),
         ),
       });
+      revealLivingShellCapability(
+        db,
+        userId,
+        "marketplace",
+        "bot_saved",
+      );
       json(ctx.res, 201, {
         ok: true,
         bot: {
@@ -16404,6 +16459,21 @@ function buildRoutes(): RouteDefinition[] {
       }
       const body = ctx.body as Record<string, unknown>;
       rejectUnsupportedBotAvatarPayload(body);
+      const meaningfulIdentityOrPresentationSave = Object.keys(body).some(
+        (key) =>
+          key === "name" ||
+          key === "namePronunciation" ||
+          key === "selfReferral" ||
+          key === "systemPrompt" ||
+          key === "voicePreviewLine" ||
+          key === "color" ||
+          key === "glyph" ||
+          key === "avatarDetails" ||
+          key === "profilePictureImageId" ||
+          key === "authoredAudioVoiceProfile" ||
+          key === "audioVoiceProfileOverride" ||
+          key.startsWith("face"),
+      );
       const fields: string[] = [];
       const values: Array<string | number | null> = [];
       let shouldRefreshFacets = false;
@@ -16862,6 +16932,14 @@ function buildRoutes(): RouteDefinition[] {
             dualOllamaWorkloadOptions(user),
           ),
         });
+      }
+      if (fields.length > 0 && meaningfulIdentityOrPresentationSave) {
+        revealLivingShellCapability(
+          db,
+          userId,
+          "marketplace",
+          "bot_saved",
+        );
       }
       const updatedBot = db
         .prepare(

@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import { createPortal } from "react-dom";
 import type {
   EphemeralChatResolvedProvider,
+  PrismCapabilityId,
   PrismCompanionActionIntent,
   PrismCompanionMessage,
   PrismCompanionResponse,
@@ -43,6 +44,7 @@ interface PrismCompanionProps {
     provider: EphemeralChatResolvedProvider,
   ) => void | Promise<void>;
   onError?: (message: string) => void;
+  onCapabilitiesRevealed?: (capabilities: PrismCapabilityId[]) => void;
 }
 
 function readPosition(accountKey: string): PrismCompanionPosition {
@@ -87,6 +89,7 @@ export default function PrismCompanion({
   onAction,
   onSpeak,
   onError,
+  onCapabilitiesRevealed,
 }: PrismCompanionProps): React.JSX.Element | null {
   const surfaceScope = prismCompanionSurfaceScope(surface);
   const recoveryKey = useMemo(
@@ -210,6 +213,9 @@ export default function PrismCompanion({
         persistRecovery([...priorMessages, userMessage, payload.message]),
       );
       setActions(payload.actions);
+      if (payload.revealedCapabilities.length > 0) {
+        onCapabilitiesRevealed?.(payload.revealedCapabilities);
+      }
       if (onSpeak) void onSpeak(payload.message.content, payload.provider);
     } catch (error) {
       setDraft(content);

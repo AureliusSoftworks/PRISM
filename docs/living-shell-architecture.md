@@ -87,3 +87,19 @@ context-specific steps, such as group Atmosphere while visiting a single bot
 Home, are skipped without trapping the player. All movement and scrolling
 honor reduced-motion preferences, and highlighted controls receive the active
 caption through `aria-describedby`.
+
+## Guided revelation
+
+Capability revelations are permanent, account-owned presentation state. They
+never grant or revoke permission: direct links, restored checkpoints, and an
+explicit request to Prism remain valid before a capability is introduced.
+Slate and Zen are visible immediately, while migrated accounts begin with every
+current capability revealed.
+
+Marketplace is revealed after a new bot or a meaningful identity, profile,
+appearance, or voice save. Signal is revealed after completed Zen replies from
+two distinct non-Prism bots. Coffee is revealed after a saved group contains at
+least two available bots. Mentioning Marketplace, Signal, or Coffee to the
+global companion reveals it immediately. Revelation writes are monotonic, so
+deleting the source bot, conversation, or group cannot reverse them, and the
+state travels in account backup and restore.

@@ -52,6 +52,8 @@ import {
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
   normalizePrismStartupPreference,
+  normalizePrismCapabilityRevelations,
+  PRISM_CAPABILITY_IDS,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
@@ -76,6 +78,7 @@ import {
   type ImageProviderName,
   type GraphicsQuality,
   type PrismStartupPreference,
+  type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
@@ -108,6 +111,7 @@ export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
   startupPreference?: PrismStartupPreference;
+  capabilityRevelations?: PrismCapabilityRevelations;
   preferredProvider: ProviderName;
   ephemeralChatProviderPreferences?: EphemeralChatProviderPreferences;
   preferredImageProvider?: ImageProviderName;
@@ -1317,6 +1321,11 @@ export function exportUserSnapshot(
   userId: string,
   userKey: Buffer,
 ): BackupSnapshot {
+  const livingShellState = db
+    .prepare(
+      "SELECT capability_revelations FROM living_shell_account_state WHERE user_id = ?",
+    )
+    .get(userId) as { capability_revelations?: string } | undefined;
   const user = db
     .prepare(
       `SELECT
@@ -1454,6 +1463,10 @@ export function exportUserSnapshot(
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
         startupPreference: normalizePrismStartupPreference(
           user.startup_preference,
+        ),
+        capabilityRevelations: normalizePrismCapabilityRevelations(
+          livingShellState?.capability_revelations,
+          { completedFallback: true },
         ),
         preferredProvider: user.preferred_provider,
         ephemeralChatProviderPreferences:
@@ -2569,6 +2582,37 @@ function importUserSnapshotWithinTransaction(
     const storedAutoFallbackChain = settings.autoFallbackChain
       ? serializeAutoFallbackChain(settings.autoFallbackChain)
       : null;
+    const currentLivingShellRow = db
+      .prepare(
+        "SELECT capability_revelations FROM living_shell_account_state WHERE user_id = ?",
+      )
+      .get(userId) as { capability_revelations?: string } | undefined;
+    const currentCapabilityRevelations = normalizePrismCapabilityRevelations(
+      currentLivingShellRow?.capability_revelations,
+    );
+    const importedCapabilityRevelations = normalizePrismCapabilityRevelations(
+      settings.capabilityRevelations,
+      { completedFallback: settings.capabilityRevelations === undefined },
+    );
+    const mergedCapabilityRevelations = Object.fromEntries(
+      PRISM_CAPABILITY_IDS.map((capability) => [
+        capability,
+        currentCapabilityRevelations[capability].revealed
+          ? currentCapabilityRevelations[capability]
+          : importedCapabilityRevelations[capability],
+      ]),
+    ) as PrismCapabilityRevelations;
+    db.prepare(
+      `UPDATE living_shell_account_state
+          SET capability_revelations = ?, updated_at = ?
+        WHERE user_id = ?`,
+    ).run(
+      JSON.stringify(
+        mergedCapabilityRevelations,
+      ),
+      new Date().toISOString(),
+      userId,
+    );
     db.prepare(
       `
       UPDATE users

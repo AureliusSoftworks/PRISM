@@ -21,6 +21,7 @@ import {
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   PRISM_ONBOARDING_VERSION,
   createCompletedPrismOnboardingState,
+  createPrismCapabilityRevelations,
   createPrismTutorialProgress,
   sanitizePrismMoodState,
   type CoffeeSessionDurationMinutes,
@@ -297,6 +298,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       onboarding_version INTEGER NOT NULL DEFAULT 0,
       onboarding_state TEXT NOT NULL DEFAULT '{}',
       tutorial_progress TEXT NOT NULL DEFAULT '{}',
+      capability_revelations TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -2192,16 +2194,37 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     SET last_active_at = COALESCE(last_active_at, created_at)
     WHERE last_active_at IS NULL OR last_active_at = '';
   `);
+  const livingShellColumns = db
+    .prepare("PRAGMA table_info(living_shell_account_state)")
+    .all() as Array<{ name: string }>;
+  const addedCapabilityRevelations = !livingShellColumns.some(
+    (column) => column.name === "capability_revelations",
+  );
+  if (addedCapabilityRevelations) {
+    db.exec(
+      "ALTER TABLE living_shell_account_state ADD COLUMN capability_revelations TEXT NOT NULL DEFAULT '{}';",
+    );
+    db.prepare(
+      `UPDATE living_shell_account_state
+          SET capability_revelations = ?`,
+    ).run(
+      JSON.stringify(
+        createPrismCapabilityRevelations({ completed: true }),
+      ),
+    );
+  }
   db.prepare(
     `INSERT OR IGNORE INTO living_shell_account_state (
-       user_id, onboarding_version, onboarding_state, tutorial_progress, updated_at
+       user_id, onboarding_version, onboarding_state, tutorial_progress,
+       capability_revelations, updated_at
      )
-     SELECT id, ?, ?, ?, COALESCE(last_active_at, created_at)
+     SELECT id, ?, ?, ?, ?, COALESCE(last_active_at, created_at)
        FROM users`,
   ).run(
     PRISM_ONBOARDING_VERSION,
     JSON.stringify(createCompletedPrismOnboardingState()),
     JSON.stringify(createPrismTutorialProgress("completed")),
+    JSON.stringify(createPrismCapabilityRevelations({ completed: true })),
   );
 
   // Migrate existing DBs that predate the per-message provider / bot columns.

@@ -6,6 +6,7 @@ import {
   chatWithPrismCompanion,
   parsePrismCompanionModelOutput,
   prismCompanionDirectActionIntents,
+  prismCompanionRequestedCapabilities,
   prismCompanionSystemPrompt,
   resolvePrismCompanionProvider,
 } from "../prism-companion.ts";
@@ -84,6 +85,16 @@ test("recognizes explicit safe commands without executing them", () => {
     prismCompanionDirectActionIntents("Delete this bot.", context),
     [],
   );
+});
+
+test("mentions request early capability revelations", () => {
+  assert.deepEqual(
+    prismCompanionRequestedCapabilities(
+      "What are Coffee and Signal, and can you show me the Marketplace?",
+    ),
+    ["marketplace", "signal", "coffee"],
+  );
+  assert.deepEqual(prismCompanionRequestedCapabilities("Open Settings"), []);
 });
 
 test("keeps every companion surface local when the account is in LOCAL mode", () => {

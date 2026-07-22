@@ -4,9 +4,12 @@ import { describe, it } from "node:test";
 import {
   PRISM_ONBOARDING_VERSION,
   createPrismTutorialProgress,
+  createPrismCapabilityRevelations,
   normalizePrismOnboardingState,
+  normalizePrismCapabilityRevelations,
   normalizePrismTutorialProgress,
   prismTutorialShouldRun,
+  revealPrismCapability,
 } from "./livingShellProgress.ts";
 
 describe("living-shell account progress", () => {
@@ -42,5 +45,43 @@ describe("living-shell account progress", () => {
     remind.remindAfter = new Date(Date.now() + 60_000).toISOString();
     assert.equal(prismTutorialShouldRun(remind), false);
     assert.equal(prismTutorialShouldRun(remind, Date.now() + 120_000), true);
+  });
+});
+
+describe("capability revelations", () => {
+  it("starts with Slate and Zen visible and reveals milestones permanently", () => {
+    const initial = createPrismCapabilityRevelations({
+      now: "2026-07-22T00:00:00.000Z",
+    });
+    assert.equal(initial.slate.revealed, true);
+    assert.equal(initial.zen.revealed, true);
+    assert.equal(initial.marketplace.revealed, false);
+    const revealed = revealPrismCapability(
+      initial,
+      "marketplace",
+      "bot_saved",
+      "2026-07-22T01:00:00.000Z",
+    );
+    const attemptedReplacement = revealPrismCapability(
+      revealed,
+      "marketplace",
+      "prism_requested",
+      "2026-07-22T02:00:00.000Z",
+    );
+    assert.equal(attemptedReplacement, revealed);
+    assert.equal(revealed.marketplace.reason, "bot_saved");
+  });
+
+  it("normalizes legacy and existing-account revelation state", () => {
+    const restored = normalizePrismCapabilityRevelations(
+      { marketplace: true },
+      { now: "2026-07-22T00:00:00.000Z" },
+    );
+    assert.equal(restored.marketplace.reason, "restored");
+    const existing = normalizePrismCapabilityRevelations(null, {
+      completedFallback: true,
+      now: "2026-07-22T00:00:00.000Z",
+    });
+    assert.equal(existing.coffee.revealed, true);
   });
 });

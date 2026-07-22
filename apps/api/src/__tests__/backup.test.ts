@@ -10,6 +10,11 @@ import {
   type BackupSnapshot,
 } from "../backup.ts";
 import {
+  createPendingLivingShellAccountProgress,
+  getLivingShellAccountProgress,
+  revealLivingShellCapability,
+} from "../living-shell-progress.ts";
+import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
@@ -337,6 +342,35 @@ describe("backup living shell startup preference", () => {
         ).startup_preference,
         "home",
       );
+    });
+  });
+});
+
+describe("backup living shell revelations", () => {
+  it("round-trips permanent capability state without importing progress patches", () => {
+    withBackupDatabase((db, userKey) => {
+      createPendingLivingShellAccountProgress(db, "user-1");
+      revealLivingShellCapability(
+        db,
+        "user-1",
+        "marketplace",
+        "bot_saved",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.settings?.capabilityRevelations?.marketplace.revealed,
+        true,
+      );
+      assert.equal(
+        snapshot.settings?.capabilityRevelations?.coffee.revealed,
+        false,
+      );
+
+      revealLivingShellCapability(db, "user-1", "coffee", "group_saved");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = getLivingShellAccountProgress(db, "user-1");
+      assert.equal(restored.capabilityRevelations.marketplace.revealed, true);
+      assert.equal(restored.capabilityRevelations.coffee.revealed, true);
     });
   });
 });
