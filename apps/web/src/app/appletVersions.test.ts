@@ -6,6 +6,7 @@ import {
   BOT_POWER_AVATAR_SCALE_MODE_POLICY,
   BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY,
   BOT_POWER_CANDOR_MODE_POLICY,
+  BOT_POWER_DESIGNATION_MODE_POLICY,
   BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY,
   BOT_POWER_HEARING_REPEAT_MODE_POLICY,
   BOT_POWER_IDENTITY_MIRROR_MODE_POLICY,
@@ -57,20 +58,39 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.24");
-    assert.equal(PRISM_APPLETS.zen.version, "1.23");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.23");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.44");
+    assert.equal(PRISM_APPLETS.chat.version, "1.25");
+    assert.equal(PRISM_APPLETS.zen.version, "1.24");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.24");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.45");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.23");
+    assert.equal(PRISM_APPLETS.story.version, "0.24");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.24");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.23");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.23");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.44");
-    assert.equal(prismAppletVersionLabel("story"), "v0.23");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.25");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.24");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.24");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.45");
+    assert.equal(prismAppletVersionLabel("story"), "v0.24");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
+  });
+
+  it("declares holder-only public designation support for every applet", () => {
+    assert.deepEqual(Object.keys(BOT_POWER_DESIGNATION_MODE_POLICY), Object.keys(PRISM_APPLETS));
+    assert.deepEqual(BOT_POWER_DESIGNATION_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
   });
 
   it("declares participant and observer perception for every applet", () => {

@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   botPowerAddressedFandomCueV1,
+  botPowerDesignationCueV1,
+  botPowerDisplayNameV1,
   botPowerSelfCueLinesV1,
   buildBotPowersPromptBlock,
   stripBotProfileMetaSuffix,
@@ -107,7 +109,9 @@ export function composeBotSystemPrompt(
   flirtEnabled?: boolean,
   powers?: unknown,
 ): string | undefined {
-  const trimmedName = typeof name === "string" ? name.trim() : "";
+  const savedName = typeof name === "string" ? name.trim() : "";
+  const designationCue = botPowerDesignationCueV1(savedName, powers);
+  const trimmedName = designationCue ? botPowerDisplayNameV1(savedName, powers) : savedName;
   const trimmedPrompt =
     typeof systemPrompt === "string"
       ? stripBotProfileMetaSuffix(systemPrompt).trim()
@@ -119,6 +123,7 @@ export function composeBotSystemPrompt(
     "Direct conversation",
   );
   const powersPrompt = buildBotPowersPromptBlock([
+    ...(designationCue ? [designationCue] : []),
     ...botPowerSelfCueLinesV1(powers),
     ...(directFandomCue ? [directFandomCue] : []),
   ]);

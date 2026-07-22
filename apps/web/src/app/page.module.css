@@ -26094,7 +26094,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresenceFaceRig {
   position: absolute;
   left: var(--zen-live-bot-face-x, 50%);
-  top: var(--zen-live-bot-face-y, 50%);
+  top: calc(
+    var(--zen-live-bot-face-y, 50%) +
+      var(--zen-live-bot-ink-offset-y, 0%)
+  );
   z-index: 6;
   transform: translate(-50%, -50%) scale(var(--zen-live-bot-face-scale, 1))
     scaleX(var(--zen-live-bot-face-layer-scale-x, 1));
@@ -45661,18 +45664,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: radial-gradient(circle at 50% 36%, color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, transparent), transparent 62%);
 }
 
-.botPowerSigilButton > span {
-  display: grid;
-  place-items: center;
-  width: 54px;
-  height: 54px;
-  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 55%, var(--line));
-  border-radius: 50%;
-  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 78%, white);
-  font-family: ui-serif, Georgia, serif;
-  font-size: 28px;
-  line-height: 1;
-  box-shadow: 0 0 22px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent);
+.botPowerSigilButton > [data-power-rune] {
+  margin-bottom: 2px;
 }
 
 .botPowerSigilButton strong {

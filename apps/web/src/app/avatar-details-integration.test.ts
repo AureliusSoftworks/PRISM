@@ -475,7 +475,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /translateX\(var\(--avatar-details-offset-x, 0px\)\)[\s\S]*translateY\(var\(--avatar-details-facing-offset-y, 0%\)\)[\s\S]*scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+      /translateX\(var\(--avatar-details-offset-x, 0px\)\)[\s\S]*translateY\(var\(--zen-live-bot-ink-offset-y, 0%\)\)[\s\S]*translateY\(var\(--avatar-details-facing-offset-y, 0%\)\)[\s\S]*scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
     );
     assert.match(
       pageCss,
@@ -521,7 +521,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,220}style=\{avatarDetailsFaceRegistrationStyle\}/,
+      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,220}style=\{presenceBodyStyle\}/,
+    );
+    assert.match(
+      pageSource,
+      /inkOffsetY=\{ZEN_LIVE_BOT_FACE_INK_OFFSET_Y\}/,
     );
     assert.match(
       pageSource,

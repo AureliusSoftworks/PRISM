@@ -119,6 +119,7 @@ import {
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
   botPowerObserverProjectionFromEffectsV1,
+  botPowerDisplayNameV1,
   botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botNaturalAddressAliasesV1,
@@ -360,6 +361,8 @@ export interface CoffeeBotProfile {
   semanticFacetsRaw?: string | null;
   semanticFacetsSourceHash?: string | null;
   semanticFacetsUpdatedAt?: string | null;
+  /** Stored raw contract; session planning still freezes only ready effects. */
+  powers?: unknown;
 }
 
 export interface CoffeeStarterMemoryContextEntry {
@@ -6122,12 +6125,16 @@ type CoffeeBotProfileRow = {
   semantic_facets: string | null;
   semantic_facets_source_hash: string | null;
   semantic_facets_updated_at: string | null;
+  powers_json: string | null;
 };
 
 function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
+  const savedName = typeof row.name === "string" && row.name.trim().length > 0
+    ? row.name.trim()
+    : "Unnamed bot";
   return {
     id: row.id,
-    name: typeof row.name === "string" && row.name.trim().length > 0 ? row.name.trim() : "Unnamed bot",
+    name: botPowerDisplayNameV1(savedName, row.powers_json),
     systemPrompt: typeof row.system_prompt === "string" ? row.system_prompt : "",
     cloneFamilyId: row.clone_family_id ?? null,
     color: row.color ?? null,
@@ -6183,6 +6190,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     semanticFacetsRaw: row.semantic_facets ?? null,
     semanticFacetsSourceHash: row.semantic_facets_source_hash ?? null,
     semanticFacetsUpdatedAt: row.semantic_facets_updated_at ?? null,
+    powers: row.powers_json,
   };
 }
 
@@ -6234,7 +6242,8 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("top_p")},
               ${selectOptionalBotColumn("top_k")},
               ${selectOptionalBotColumn("repetition_penalty")},
-              semantic_facets, semantic_facets_source_hash, semantic_facets_updated_at
+              semantic_facets, semantic_facets_source_hash, semantic_facets_updated_at,
+              powers_json
          FROM bots
         WHERE id IN (${placeholders})
           AND (user_id = ? OR visibility = 'public')`
@@ -10509,13 +10518,15 @@ export function buildSpeakerPrompt(args: {
   const promptHistory = coffeeBotPromptHistory(history);
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
   const speakerSystemPrompt = composeBotSystemPrompt(
-    identityMirrorState?.targetBotName ?? speaker.name,
+    speaker.name,
     identityMirrorState?.targetPersonaPrompt ?? speaker.systemPrompt,
     speaker.flirtEnabled === true,
+    speaker.powers,
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
   const peers = group.filter((bot) => bot.id !== speaker.id);
-  const peerLines = peers.map((bot) => `- ${bot.name}`);
+  const peerLines = peers.map((bot) => `- ${botPowerDisplayNameV1(bot.name, bot.powers)}`);
+  const speakerDesignation = botPowerDisplayNameV1(speaker.name, speaker.powers);
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
   const latestTableMessage = promptHistory.at(-1) ?? null;
   const latestTableMessageIsSpeaker =
@@ -10865,7 +10876,7 @@ export function buildSpeakerPrompt(args: {
       "Other bots at the table right now:",
       ...group
         .filter((bot) => bot.id !== speaker.id)
-        .map((bot) => `- ${bot.name}`),
+        .map((bot) => `- ${botPowerDisplayNameV1(bot.name, bot.powers)}`),
     ].join("\n"),
   });
   messages.push(
@@ -10880,14 +10891,14 @@ export function buildSpeakerPrompt(args: {
                 ...(moodDrainTurnActive
                   ? ["Required current-state beat: open by showing your own reduced momentum in first person or one visible *stage action*, not the other bot's mood."]
                   : []),
-                `${speaker.name}, say your next short table line now.`,
+                `${speakerDesignation}, say your next short table line now.`,
               ].join("\n")
             : [
                 `Latest table moment: ${userMessage}`,
                 ...(moodDrainTurnActive
                   ? ["Required current-state beat: open by showing your own reduced momentum in first person or one visible *stage action*, not another character's mood."]
                   : []),
-                `${speaker.name}, say your next short table line now.`,
+                `${speakerDesignation}, say your next short table line now.`,
               ].join("\n"),
         }
       : userActionOnly
@@ -10895,14 +10906,14 @@ export function buildSpeakerPrompt(args: {
             role: "user",
             content: [
               `The user performs a non-verbal table action: ${userMessage}`,
-              `${speaker.name}, respond with a brief table action unless a spoken line is clearly needed.`,
+              `${speakerDesignation}, respond with a brief table action unless a spoken line is clearly needed.`,
             ].join("\n"),
           }
       : {
           role: "user",
           content: [
             `The user says: ${userMessage}`,
-            `${speaker.name}, answer with your next short table line now.`,
+            `${speakerDesignation}, answer with your next short table line now.`,
           ].join("\n"),
         }
   );

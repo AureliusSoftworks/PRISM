@@ -22,6 +22,27 @@ describe("Zen voice reveal fallback", () => {
     assert.doesNotMatch(voiceEffect, /\n    settings,\n/);
   });
 
+  it("keeps in-flight Premium speech alive through harmless Zen refreshes", () => {
+    const effectStart = pageSource.indexOf(
+      "const assistantMessages = detail.messages.filter",
+    );
+    const effectEnd = pageSource.indexOf(
+      "\n  useEffect(\n    () => () => {",
+      effectStart,
+    );
+    assert.notEqual(effectStart, -1);
+    assert.notEqual(effectEnd, -1);
+    const voiceEffect = pageSource.slice(effectStart, effectEnd);
+    assert.match(
+      voiceEffect,
+      /voiceSynthesisAbortRef\.current\?\.abort\(\);[\s\S]*voiceSynthesisAbortRef\.current = controller;/,
+    );
+    assert.doesNotMatch(
+      voiceEffect,
+      /return \(\) => controller\.abort\(\);/,
+    );
+  });
+
   it("releases visual text when synthesized speech stays in preparation", () => {
     assert.match(
       pageSource,

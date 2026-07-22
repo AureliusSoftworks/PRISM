@@ -1,11 +1,11 @@
 # Prism Applets
 
-Prism applets are experience modules: Chat, Zen, Coffee, Signal, Story, Slate, and
+Prism applets are experience modules: Chat, Zen, Coffee, Signal, Slate, and
 future mode surfaces. Their versions track felt product behavior, not internal
 implementation churn.
 
 Applet versions are independent from the Prism app release version. Prism can
-ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
+ship as `0.5.2` while Coffee is `v0.7`.
 
 ## Ethos
 
@@ -24,11 +24,10 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.24 | Active | Full playground with direct human access to a companion and half-translucent targeted-Invisible presentation. |
-| Zen | v1.23 | Active | Calm one-to-one continuity with direct human access to a companion and half-translucent targeted-Invisible presentation. |
-| Coffee | v2.23 | Active | Multi-bot tables with frozen pairwise sight and hearing, allowed-minus-excluded targeting, hidden spectral turns, cast-dependent live reveal, full spectral replay, and deterministic Power-driven overlap. |
-| Signal | v1.44 | Active | Bot-owned interviews with pairwise cast perception, allowed-minus-excluded targeting, unrestricted spectral booking, full spectral replay, dual captions, spatial overlap audio, and audience-projected reviews. |
-| Story | v0.23 | Preview | Generated visual-novel episodes with an omniscient reader, excluded-target-aware character knowledge, half-translucent spectral actors, accidental prose overlap, choices, maps, inventory, and transcripts. |
+| Chat | v1.25 | Active | Full playground with direct human access to a companion and half-translucent targeted-Invisible presentation. |
+| Zen | v1.24 | Active | Calm one-to-one continuity with direct human access to a companion and half-translucent targeted-Invisible presentation. |
+| Coffee | v2.24 | Active | Multi-bot tables with frozen pairwise sight and hearing, allowed-minus-excluded targeting, hidden spectral turns, cast-dependent live reveal, full spectral replay, and deterministic Power-driven overlap. |
+| Signal | v1.45 | Active | Bot-owned interviews with pairwise cast perception, allowed-minus-excluded targeting, unrestricted spectral booking, full spectral replay, dual captions, spatial overlap audio, and audience-projected reviews. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -49,16 +48,11 @@ Delivery is staged:
 
 1. Standalone Slate foundation for persistent projects, structure, drafting,
    direct edits, revision previews, locks, and version safety.
-2. Story -> Slate through an explicit `Develop in Slate` narrative source
-   snapshot.
-3. Slate -> Story through an explicit `Rehearse in Story` scene or outline
-   snapshot.
-4. Selective, provenance-aware incorporation of rehearsal discoveries back into
-   Slate.
+2. Explicit immutable source imports with selective, provenance-aware
+   incorporation into Slate.
 
-Story remains a separate preview applet. It is the procedural "discover what
-happens" experience; Slate is the editorial "turn this into something good"
-workspace. Cross-applet stages never silently synchronize or rewrite content.
+Slate remains the editorial "turn this into something good" workspace. Imports
+never silently synchronize or rewrite source content.
 See [Slate V1 Product and UX Contract](./slate-v1-product-ux-contract.md).
 The phased Continuity, Review Circle, Atmosphere, safety, export, and publishing
 contracts are indexed in [Slate Master Plan](./slate-master-plan.md).
@@ -80,22 +74,28 @@ stages do not block the standalone preview.
   without retroactively informing unaware participants. Mute, fully hidden or
   Microscopic presentation, canonical silence, and speech obfuscation retain
   precedence. Ordinary private channels remain private in replay.
-- Signal and Coffee enforce this directly. Story keeps the reader omniscient
-  while constraining character reactions and representing accidental overlap
-  in prose. Chat and Zen preserve direct human access to the selected
-  companion. Slate has no participant-observer contract, so the policy is
-  irrelevant there. Arena, Polling, Feed, Games, Gym, Pseudo, Surf, and other
-  unimplemented applets remain deferred until they define both perspectives.
+- Signal and Coffee enforce this directly. Chat and Zen preserve direct human
+  access to the selected companion. Slate has no participant-observer contract,
+  so the policy is irrelevant there. Arena, Polling, Feed, Games, Gym, Pseudo,
+  Surf, and other unimplemented applets remain deferred until they define both
+  perspectives.
 
 ## Changelog
 
 ### 2026-07-21
 
+- Bumped `Chat` to `v1.25`, `Zen` to `v1.24`, `Coffee` to `v2.24`, and `Signal`
+  to `v1.45` for holder-scoped persistent public
+  designations. Ready Powers compose one bounded prefix or suffix into
+  participant-facing identity without changing the saved bot name; Signal
+  openings treat public episode titles as editorial labels rather than a line
+  to repeat.
+
 - Bumped `Signal` to `v1.44` so an Identity Crisis host restores its authored
   default persona, CRT face, Avatar Details ink, and voice before the closing
   sign-off. The saved reset keeps live playback and replay in sync.
 
-- Bumped `Coffee` to `v2.23`, `Signal` to `v1.43`, and `Story` to `v0.23`
+- Bumped `Coffee` to `v2.23` and `Signal` to `v1.43`
   for prompt-authored compound Powers. Sight and hearing can now each allow a
   cast and exclude exceptions, with exclusion winning and legacy audience
   projections recomputed as allowed-minus-excluded. Avatar Studio authors one
@@ -113,13 +113,12 @@ stages do not block the standalone preview.
   generated Studio now finishes by rebuilding and installing its local ambient
   receiver map automatically.
 
-- Bumped `Chat` to `v1.24`, `Zen` to `v1.23`, `Coffee` to `v2.21`, `Signal`
-  to `v1.40`, and `Story` to `v0.22` for shared spectral perception. Targeted
+- Bumped `Chat` to `v1.24`, `Zen` to `v1.23`, `Coffee` to `v2.21`, and `Signal`
+  to `v1.40` for shared spectral perception. Targeted
   Invisible Powers now separate bot knowledge from live observer projection
   and replay truth. Signal and Coffee persist complete hidden turns and stable
   overlapping handoffs; replay restores half-translucent bodies, captions, and
-  independently stoppable voice channels. Story keeps its reader omniscient
-  while unaware characters cannot react to what they neither see nor hear.
+  independently stoppable voice channels.
 
 - Bumped `Signal` to `v1.39` for show-scoped film grain across the composited
   studio screen. Align stage now previews and saves its strength from zero to
@@ -160,8 +159,8 @@ stages do not block the standalone preview.
   audio now reveals at the same measured baseline instead of a separate fast
   text clock, while a Power-silenced `...` holds one complete studio beat.
 
-- Bumped `Chat` to `v1.21`, `Zen` to `v1.20`, `Coffee` to `v2.18`, `Signal`
-  to `v1.29`, and `Story` to `v0.19` so Lazy Cameron's legacy `Lazy` Power
+- Bumped `Chat` to `v1.21`, `Zen` to `v1.20`, `Coffee` to `v2.18`, and `Signal`
+  to `v1.29` so Lazy Cameron's legacy `Lazy` Power
   means the fewest possible words everywhere. Existing Library copies migrate
   to a hard minimal response budget, and the refreshed Marketplace bot carries
   that deterministic rule.
@@ -180,8 +179,8 @@ stages do not block the standalone preview.
   identifies Producer-guest turns as human-authored rather than unknown model
   traffic. Producer typing pauses persist and replay at half wall duration.
 
-- Bumped `Chat` to `v1.20`, `Zen` to `v1.19`, `Coffee` to `v2.16`, `Signal`
-  to `v1.26`, and `Story` to `v0.18` to separate physical presentation
+- Bumped `Chat` to `v1.20`, `Zen` to `v1.19`, `Coffee` to `v2.16`, and `Signal`
+  to `v1.26` to separate physical presentation
   Powers. Small changes only avatar scale, Microscopic remains fully unseen
   even while speaking, Invisible remains continuously half-translucent, and
   Ghost alone uses the speaking-only reveal. Loud no longer cancels size or
@@ -202,7 +201,7 @@ stages do not block the standalone preview.
   remain protected. Interrupting Tom's Marketplace Power now carries this
   exact contract instead of relying on a legacy Library snapshot.
 
-- Bumped `Coffee` to `v2.15`, `Signal` to `v1.23`, and `Story` to `v0.17`
+- Bumped `Coffee` to `v2.15` and `Signal` to `v1.23`
   for unconditional interruption Powers. A Power explicitly authored to
   interrupt every eligible bot turn now does so without a random roll or the
   ordinary interruption cooldown, with a replay-stable cutoff distributed
@@ -210,8 +209,7 @@ stages do not block the standalone preview.
   Interrupting Tom recover the hard rule from “whenever possible.” Direct
   Coffee engagement always creates that opening; otherwise Coffee first makes
   its normal organic cut-in choice, then guarantees the cutoff during the
-  active turn. Signal and
-  Story adapt the same contract while human Producer speech, departures,
+  active turn. Signal applies the same contract while human Producer speech, departures,
   wraps, closings, and hard speech rules remain protected.
 
 - Bumped `Signal` to `v1.22` so Identity Crisis Ian works as the host. A
@@ -226,16 +224,16 @@ stages do not block the standalone preview.
   now reported as unusable model output instead of a false availability
   failure.
 
-- Bumped `Chat` to `v1.23`, `Zen` to `v1.22`, `Coffee` to `v2.20`, `Signal`
-  to `v1.35`, and `Story` to `v0.21` so short-term-amnesia holders no
+- Bumped `Chat` to `v1.23`, `Zen` to `v1.22`, `Coffee` to `v2.20`, and `Signal`
+  to `v1.35` so short-term-amnesia holders no
   longer receive a standing conversation, table, episode, or story topic.
   Their hard context remains the current other-speaker message plus immutable
   persona, safety, and mode-role instructions; a topic becomes available only
   when that current message states it. Coffee kickoff no longer leaks its saved
   topic, and Signal no longer supplies episode-topic metadata to the holder.
 
-- Bumped `Chat` to `v1.22`, `Zen` to `v1.21`, `Coffee` to `v2.19`, `Signal`
-  to `v1.30`, and `Story` to `v0.20` for the refined short-term-amnesia
+- Bumped `Chat` to `v1.22`, `Zen` to `v1.21`, `Coffee` to `v2.19`, and `Signal`
+  to `v1.30` for the refined short-term-amnesia
   contract. Each holder receives and understands only the current other-speaker
   message, has no memory of prior turns or their own earlier messages, and
   responds directly to that concrete content as fresh contact. A self-
@@ -253,94 +251,88 @@ stages do not block the standalone preview.
   cues no longer tell observers that identity theft happened before a real
   event exists.
 
-- Bumped `Chat` to `v1.18`, `Zen` to `v1.17`, `Coffee` to `v2.12`, `Signal`
-  to `v1.18`, and `Story` to `v0.15` for the eternal-introduction Power. The
+- Bumped `Chat` to `v1.18`, `Zen` to `v1.17`, `Coffee` to `v2.12`, and `Signal`
+  to `v1.18` for the eternal-introduction Power. The
   holder receives no earlier conversational context and every persisted spoken
   turn is engine-bounded to a sincere first introduction. Coffee and Signal
   preserve everyone else's transcript and apply one small replay-safe negative
   social step after each introduction, so peers can become increasingly
   agitated while the holder experiences only the present reaction as confusing
-  first contact. Story rewrites each holder scene as an isolated introduction;
-  Slate is irrelevant, and planned participant applets remain deferred.
+  first contact. Slate is irrelevant, and planned participant applets remain
+  deferred.
 
-- Bumped `Chat` to `v1.17`, `Zen` to `v1.16`, `Coffee` to `v2.11`, `Signal`
-  to `v1.17`, and `Story` to `v0.14` for resolved-theme compound Powers.
+- Bumped `Chat` to `v1.17`, `Zen` to `v1.16`, `Coffee` to `v2.11`, and `Signal`
+  to `v1.17` for resolved-theme compound Powers.
   Nocturnal activates the existing Sad contract in Light Mode and Radiant Joy
   in Dark Mode; Diurnal is the exact inverse. Theme changes affect later turns,
   while Coffee and Signal persist the effect branch that actually fired. Chat
-  and Zen keep player mood experiential only, Story captures the active branch
-  when generating an episode, Slate is irrelevant, and planned applets defer
-  runtime support.
+  and Zen keep player mood experiential only, Slate is irrelevant, and planned
+  applets defer runtime support.
 
-- Bumped `Chat` to `v1.16`, `Zen` to `v1.15`, `Coffee` to `v2.10`, `Signal`
-  to `v1.16`, and `Story` to `v0.13` for the direct-addresser mood-drain
+- Bumped `Chat` to `v1.16`, `Zen` to `v1.15`, `Coffee` to `v2.10`, and `Signal`
+  to `v1.16` for the direct-addresser mood-drain
   contract. Only a bot that completes a turn directly to the ready holder loses
   one bounded mood or motivation step; the player and bystanders are never
   mutable recipients. Coffee and Signal persist explicit events and carry the
   drag into the addresser's subsequent behavior without replacing personality,
   agency, facts, disagreement, or serious stakes. Chat and Zen keep the effect
-  experiential, Story adapts through supported scene prompting, and planned
-  applets remain deferred.
+  experiential, and planned applets remain deferred.
 
 - Added the addressed-recipient mood-boost contract across every applet policy.
   Chat and Zen express radiant joy through the holder's production persona
   without creating player mood state. Coffee and Signal apply one clamped,
   recipient-scoped lift per completed source turn, persist explicit replay
-  events, and feed the saved result into subsequent bot behavior. Story adapts
-  the cue through its existing generated-scene contract; Slate is irrelevant,
-  and planned applets remain deferred until they own compatible participant
-  state. Hard mute always wins because no spoken turn occurred.
+  events, and feed the saved result into subsequent bot behavior. Slate is
+  irrelevant, and planned applets remain deferred until they own compatible
+  participant state. Hard mute always wins because no spoken turn occurred.
 
 - Bumped `Coffee` to `v2.9` and `Signal` to `v1.15` for bounded identity
   mirroring. The latest bot to directly address a ready holder supplies only its
   public persona, normalized face, and resolved voice; the holder keeps its own
   glyph, color, role, Powers, private state, routing, and hard restrictions.
   Coffee and Signal persist and replay the CRT face/voice handoff. The player is
-  never a target. Story remains cue-only because its current scene contract has
-  speakers but no authoritative bot-to-bot addressee; Chat, Zen, and Slate are
-  irrelevant, and planned participant applets must implement the contract
-  explicitly before activation.
+  never a target. Chat, Zen, and Slate are irrelevant, and planned participant
+  applets must implement the contract explicitly before activation.
 
-- Bumped `Chat` to `v1.15`, `Zen` to `v1.14`, `Coffee` to `v2.8`, `Signal`
-  to `v1.14`, and `Story` to `v0.12` for bounded current-addressee fandom.
+- Bumped `Chat` to `v1.15`, `Zen` to `v1.14`, `Coffee` to `v2.8`, and `Signal`
+  to `v1.14` for bounded current-addressee fandom.
   The ready holder treats the player, live peer, or scene audience they address
   as a personal star and reveals fresh fanlike delight in every reply. The
   pressure remains soft: personality, agency, safety, privacy, and mode rules
   win, and draft, stale, failed, disabled, or absent Powers contribute no cue.
 
-- Bumped `Chat` to `v1.14`, `Zen` to `v1.13`, `Coffee` to `v2.7`, `Signal`
-  to `v1.13`, and `Story` to `v0.11` for hard normal-volume speech
+- Bumped `Chat` to `v1.14`, `Zen` to `v1.13`, `Coffee` to `v2.7`, and `Signal`
+  to `v1.13` for hard normal-volume speech
   obfuscation. A holder still reasons and responds coherently in private, but
   only deterministic gibberish reaches transcripts, replay, voice, memory, or
   another bot's context. Physical stage actions remain visible; no listener can
   recover the holder's intended words.
 
-- Bumped `Chat` to `v1.13`, `Zen` to `v1.12`, `Coffee` to `v2.6`, `Signal`
-  to `v1.12`, and `Story` to `v0.10` so Copycat/Echo bots can originate one
+- Bumped `Chat` to `v1.13`, `Zen` to `v1.12`, `Coffee` to `v2.6`, and `Signal`
+  to `v1.12` so Copycat/Echo bots can originate one
   opening before exact-copy enforcement begins. Interrupting bots now carry
   their target-aware cutoff behavior into every bot-to-bot lane: real live
-  cut-ins in Coffee and either Signal cast role, plus replay-stable Story cuts.
+  cut-ins in Coffee and either Signal cast role.
   Typed human Chat/Zen speech and the Signal Producer-guest lane remain
   protected from synthetic truncation.
 
-- Bumped `Chat` to `v1.12`, `Zen` to `v1.11`, `Coffee` to `v2.5`, `Signal`
-  to `v1.11`, and `Story` to `v0.9` for the global five-choice voice control.
+- Bumped `Chat` to `v1.12`, `Zen` to `v1.11`, `Coffee` to `v2.5`, and `Signal`
+  to `v1.11` for the global five-choice voice control.
   English always uses the bot's local identity; Premium uses its stable
   ElevenLabs identity and falls back locally. Live and replay switches begin
   with the next utterance without cutting off speech already playing.
 
-- Bumped `Chat` to `v1.11`, `Zen` to `v1.10`, `Coffee` to `v2.4`, `Signal`
-  to `v1.10`, and `Story` to `v0.8` for reusable loud/quiet voice presence.
+- Bumped `Chat` to `v1.11`, `Zen` to `v1.10`, `Coffee` to `v2.4`, and `Signal`
+  to `v1.10` for reusable loud/quiet voice presence.
   Loud lines receive a fixed 1.18x playback trim and 1.12x text scale, annoy
   present bots after audible speech, and override small, Microscopic, and
   speaking-only invisibility. Quiet lines receive a fixed 0.72x playback trim
   and 0.88x text scale; a stable half of eligible turns are treated exactly like
   mute, with one small holder-mood loss each time the bot goes unheard. Coffee
-  and Signal freeze these outcomes and presentation rules for replay. Story
-  adapts an ignored turn into a silent, visibly deflated beat.
+  and Signal freeze these outcomes and presentation rules for replay.
 
-- Bumped `Chat` to `v1.10`, `Zen` to `v1.9`, `Coffee` to `v2.3`, `Signal`
-  to `v1.9`, and `Story` to `v0.7` for bounded physical-size Powers. Ready
+- Bumped `Chat` to `v1.10`, `Zen` to `v1.9`, `Coffee` to `v2.3`, and `Signal`
+  to `v1.9` for bounded physical-size Powers. Ready
   larger or giant holders render 12% larger; small, tiny, or microscopic holders
   render 14% smaller without changing layout. `Microscopic` also carries the
   speaking-only invisibility contract. Coffee freezes the size in its session
@@ -379,12 +371,12 @@ stages do not block the standalone preview.
   claims of prior investigations, confrontations, or secret knowledge before they
   reach the saved transcript or replay audio.
 
-- Bumped `Chat` to `v1.9`, `Zen` to `v1.8`, `Coffee` to `v2.2`, `Signal` to
-  `v1.3`, and `Story` to `v0.6` for reusable response-budget Powers. Plain-language
+- Bumped `Chat` to `v1.9`, `Zen` to `v1.8`, `Coffee` to `v2.2`, and `Signal` to
+  `v1.3` for reusable response-budget Powers. Plain-language
   traits such as "never elaborates" and "says the bare minimum" compile into a
   structured budget: hard minimal and brief modes are bounded by the engine,
-  while expansive behavior remains model-guided to avoid forced filler. Coffee,
-  Signal, and Story preserve required table, show, and scene beats. Avatar Studio
+  while expansive behavior remains model-guided to avoid forced filler. Coffee
+  and Signal preserve required table and show beats. Avatar Studio
   now distinguishes structured runtime effects from model guidance.
 
 - Bumped `Signal` to `v1.2` for personality-shaped Power encounters. Hosts and
@@ -397,33 +389,32 @@ stages do not block the standalone preview.
 - Bumped `Chat` to `v1.8`, `Zen` to `v1.7`, `Coffee` to `v2.1`, and `Signal`
   to `v1.1` for ghostly Ready Powers: a holder is invisible while idle, fades
   in only to speak, and gives present non-player bots a strong, agency-preserving
-  terror cue. Story carries the same semantic cue as prose rather than inventing
-  a live-avatar visual.
+  terror cue.
 
-- Bumped `Chat` to `v1.7`, `Zen` to `v1.6`, `Coffee` to `v2.0`, `Signal` to
-  `v1.0`, and `Story` to `v0.5` for the trust-based candor Power. A holder's
+- Bumped `Chat` to `v1.7`, `Zen` to `v1.6`, `Coffee` to `v2.0`, and `Signal` to
+  `v1.0` for the trust-based candor Power. A holder's
   relevant direct question or honesty invitation can make the targeted bot's
   next response more candid without compelling the player, inventing knowledge,
   exposing private instructions, or overriding character, safety, and privacy
   boundaries. Signal freezes Powers with the episode; Coffee uses its frozen
-  session plan; Story adapts the rule during scene generation.
+  session plan.
 
 - The same applet-version pass adds the hard-of-hearing Power contract. In an
   uninterrupted bot-to-bot exchange, a recognized request such as “What did you
   say?” makes the prior speaker repeat its saved line exactly. Coffee applies
   one stacking social-mood loss to that speaker per repeat and persists it in
   replay state; Signal saves a one-rung delivery-mood drop with every repeated
-  utterance. Chat, Zen, and Story receive persona cues only because they do not
+  utterance. Chat and Zen receive persona cues only because they do not
   own the same live bot-to-bot mood state. Direct player or producer direction,
   closing safety, and mute take precedence, and planned conversational applets
   must choose a compatible mood model before activation.
 
-- Bumped `Chat` to `v1.6`, `Zen` to `v1.5`, `Coffee` to `v1.9`, `Signal` to
-  `v0.9`, and `Story` to `v0.4` for cross-mode hard response Powers. Muted bots
+- Bumped `Chat` to `v1.6`, `Zen` to `v1.5`, `Coffee` to `v1.9`, and `Signal` to
+  `v0.9` for cross-mode hard response Powers. Muted bots
   may act but only display `...`; echo-bound bots repeat the latest directly
   addressed speech exactly and add nothing. Signal never leaks private producer
-  direction into an echo, while Story deterministically echoes the prior visible
-  scene. Planned bot modes must enforce both contracts before activation.
+  direction into an echo. Planned bot modes must enforce both contracts before
+  activation.
 
 ### 2026-07-18
 
@@ -438,14 +429,14 @@ stages do not block the standalone preview.
 
 ### 2026-07-17
 
-- Bumped `Chat` to `v1.5`, `Zen` to `v1.4`, `Coffee` to `v1.7`, `Signal` to
-  `v0.7`, and `Story` to `v0.3` for the shared deterministic pre-speech breath
+- Bumped `Chat` to `v1.5`, `Zen` to `v1.4`, `Coffee` to `v1.7`, and `Signal` to
+  `v0.7` for the shared deterministic pre-speech breath
   layer across substantial voiced bot lines and replay.
 - Bumped `Signal` to `v0.6` and `Coffee` to `v1.6` for the shared quiet foley
   layer, cup-synchronized Coffee sounds, bundled Signal studio room tone, and
   one-click ElevenLabs ident plus custom ambience generation. Coffee also
   exposes the intentionally inactive Jazz atmosphere control for its next pass.
-- Bumped `Chat` to `v1.4`, `Zen` to `v1.3`, and `Story` to `v0.2` for the
+- Bumped `Chat` to `v1.4` and `Zen` to `v1.3` for the
   unified PRISM menu system, refined CRT face glyphs, and shared voice and
   avatar behavior.
 - Bumped `Coffee` to `v1.5` for local-model warmup intermissions that pause the
@@ -550,5 +541,4 @@ stages do not block the standalone preview.
 - `Chat v0.5` - Baseline for the current full playground experience.
 - `Zen v0.3` - Baseline for the current focused companion experience.
 - `Coffee v0.6` - Baseline for the current Coffee Group/session experience.
-- `Story v0.1` - Baseline for the current Story preview.
 - `v0.0` applets - Planned concepts without a shipped applet surface yet.

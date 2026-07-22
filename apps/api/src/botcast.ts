@@ -96,6 +96,8 @@ import {
   botPowerAddressedFandomCueV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
+  botPowerDesignationCueV1,
+  botPowerDisplayNameV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
@@ -5267,6 +5269,7 @@ export async function chatWithBotcastShowHost(
   const request = normalizeBotcastShowHostChatRequest(rawRequest);
   const show = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, show.hostBotId);
+  const hostDesignation = botPowerDisplayNameV1(host.name, host.powers);
   if (botcastShowHostIsIgnoringProducerChat(db, userId, show.id)) {
     return ignoredBotcastShowHostChatMessage();
   }
@@ -5280,10 +5283,15 @@ export async function chatWithBotcastShowHost(
     show.hostBotId,
   );
   const powerPrompt = buildBotPowersPromptBlock(
-    botPowerSelfCueLinesV1(host.powers),
+    [
+      ...(botPowerDesignationCueV1(host.name, host.powers)
+        ? [botPowerDesignationCueV1(host.name, host.powers)!]
+        : []),
+      ...botPowerSelfCueLinesV1(host.powers),
+    ],
   );
   const systemPrompt = [
-    `You are ${host.name}, speaking off-air with the producer as the host of ${show.name}.`,
+    `You are ${hostDesignation}, speaking off-air with the producer as the host of ${show.name}.`,
     host.systemPrompt,
     powerPrompt,
     `Show premise: ${show.premise}`,
@@ -6496,6 +6504,10 @@ export function buildBotcastSpeakerPrompt(
 ): ProviderMessage[] {
   const speaker = args.speakerRole === "host" ? args.host : args.guest;
   const peer = args.speakerRole === "host" ? args.guest : args.host;
+  const hostDesignation = botPowerDisplayNameV1(args.host.name, args.host.powers);
+  const guestDesignation = botPowerDisplayNameV1(args.guest.name, args.guest.powers);
+  const speakerDesignation = botPowerDisplayNameV1(speaker.name, speaker.powers);
+  const peerDesignation = botPowerDisplayNameV1(peer.name, peer.powers);
   const speakerEternallyIntroduces = botPowerEternallyIntroducesV1(
     speaker.powers,
   );
@@ -6579,7 +6591,10 @@ export function buildBotcastSpeakerPrompt(
     ...(themeMoodCue ? [themeMoodCue] : []),
     ...(peerTotallyAbsent
       ? []
-      : botPowerObserverCueLinesV1(peer.name, genericPeerCuePowers)),
+      : botPowerObserverCueLinesV1(peerDesignation, genericPeerCuePowers)),
+    ...(botPowerDesignationCueV1(speaker.name, speaker.powers)
+      ? [botPowerDesignationCueV1(speaker.name, speaker.powers)!]
+      : []),
   ]);
   const identityMirrorPrompt = speakerEternallyIntroduces
     ? null
@@ -6596,8 +6611,7 @@ export function buildBotcastSpeakerPrompt(
       activeIdentityMirrorState.sourceMessageId ===
         args.episode.messages.at(-1)?.id,
   );
-  const effectivePersonaName =
-    activeIdentityMirrorState?.targetBotName ?? speaker.name;
+  const effectivePersonaName = speakerDesignation;
   const effectivePersonaPrompt =
     activeIdentityMirrorState?.targetPersonaPrompt ?? speaker.systemPrompt;
   const powerEncounterRule = speakerEternallyIntroduces
@@ -6673,11 +6687,11 @@ export function buildBotcastSpeakerPrompt(
   const openingIntroductionRule =
     firstHostOpening
     ? botPowerIsMutedV1(args.guest.powers)
-      ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions, but do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
-      : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+      ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${hostDesignation}", introduces the booked guest by exact name as "${guestDesignation}", and bridges into the subject. Complete all three introductions, but do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+      : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${hostDesignation}", introduces the booked guest by exact name as "${guestDesignation}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
     : null;
   const openingTopicFramingRule = firstHostOpening
-    ? "Treat the public Topic field as a raw editorial title, not a line of dialogue. Introduce its idea organically: expand or grammatically reframe it as needed, preserve its meaning, and let the host persona flavor the framing. The exact title does not need to appear verbatim. Do not treat verbatim wording as a requirement or fall back to a fixed topic-announcement template."
+    ? "Treat the public Topic field as a raw editorial title, not a line of dialogue: it is a label, not a sentence topic to parrot. Build the opening around one meaningful premise, tension, tradeoff, event, or question that the title suggests; expand or grammatically reframe it as needed, preserve its meaning, and let the host persona flavor the framing. The exact title does not need to appear verbatim. Do not treat verbatim wording as a requirement or fall back to a fixed topic-announcement template. Never announce the title with a canned Today-plus-talk-about template, and never merely restate the title as the subject of the first question."
     : null;
   const producerBriefRule =
     args.speakerRole === "host" &&
@@ -6962,11 +6976,11 @@ export function buildBotcastSpeakerPrompt(
         ? [
             `Show: ${args.show.name}`,
             `Your assigned on-air role: ${args.speakerRole}.`,
-            `${peer.name} is the person in front of you now.`,
+            `${peerDesignation} is the person in front of you now.`,
             transcript
               ? `Only this current other-speaker on-air message is available to you:\n${transcript}`
               : "No other-speaker on-air message is available yet; this may be the opening.",
-            `Respond directly to the available message as ${speaker.name} without inventing older familiarity or repeating a canned introduction.`,
+            `Respond directly to the available message as ${speakerDesignation} without inventing older familiarity or repeating a canned introduction.`,
           ]
         : [
         `Show: ${args.show.name}`,
@@ -7011,8 +7025,8 @@ export function buildBotcastSpeakerPrompt(
           : activeIdentityMirrorState
             ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Do not repeat that you are ${activeIdentityMirrorState.targetBotName} or that the original is an impostor; demonstrate the copied persona by advancing the substantive conversation.`
             : args.episode.segment === "closing"
-              ? `Close the show now as ${speaker.name}. This is the final sign-off, not another substantive answer or question.`
-              : `Continue as ${speaker.name}.`,
+              ? `Close the show now as ${speakerDesignation}. This is the final sign-off, not another substantive answer or question.`
+              : `Continue as ${speakerDesignation}.`,
           ]).join("\n\n"),
     },
   ];

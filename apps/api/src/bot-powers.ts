@@ -1112,6 +1112,61 @@ function deterministicResponseBudgetPower(
   };
 }
 
+function designationAffix(value: string, botName: string, placement: "prefix" | "suffix"): string {
+  const authored = compact(value, 100)
+    .replace(/^[\s"“”'‘’]+|[\s"“”'‘’.,!?;:]+$/gu, "");
+  const base = compact(botName, 100);
+  if (!authored || !base) return authored;
+  const authoredWords = authored.split(/\s+/u);
+  const baseWords = base.split(/\s+/u);
+  const startsWithBase = baseWords.every(
+    (word, index) => authoredWords[index]?.toLowerCase() === word.toLowerCase(),
+  );
+  const endsWithBase = baseWords.every(
+    (word, index) => authoredWords[authoredWords.length - baseWords.length + index]?.toLowerCase() === word.toLowerCase(),
+  );
+  if (placement === "suffix" && startsWithBase && authoredWords.length > baseWords.length) {
+    return authoredWords.slice(baseWords.length).join(" ");
+  }
+  if (placement === "prefix" && endsWithBase && authoredWords.length > baseWords.length) {
+    return authoredWords.slice(0, -baseWords.length).join(" ");
+  }
+  return authored;
+}
+
+/**
+ * Hard authored-name language must not wait on a compiler model. The direct
+ * prefix/suffix form also accepts a complete desired designation (for example
+ * "suffix Santa Claus Bot" for a bot saved as "Santa Claus").
+ */
+function deterministicDesignationPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const intent = compact(source.intent, 600);
+  const direct = intent.match(
+    /\b(prefix|suffix)\s*(?:designation|name|title)?\s*(?:with|as|to|:|=)?\s*["“']?([^"”'\n.!?]+)["”']?/iu,
+  );
+  const quoted = intent.match(
+    /\b(?:always\s+)?(?:called|known\s+as|referred\s+to\s+as|displayed\s+as|designated\s+as)\s+["“']([^"”']+)["”']/iu,
+  );
+  const fullDesignation = quoted?.[1] ?? direct?.[2];
+  if (!fullDesignation) return null;
+  const placement = direct?.[1]?.toLowerCase() === "prefix" ? "prefix" as const : "suffix" as const;
+  const text = designationAffix(fullDesignation, botName, placement);
+  if (!text) return null;
+  const subject = compact(botName, 100) || "This bot";
+  const visible = placement === "prefix" ? `${text} ${subject}` : `${subject} ${text}`;
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: `Use ${JSON.stringify(visible)} as your public and spoken designation without changing your saved base name.`,
+    observerCue: `${subject}'s current public designation is ${JSON.stringify(visible)}; use it whenever the holder is named.`,
+    effects: [{ type: "designation", placement, text }],
+    ruleLabels: [`${placement === "prefix" ? "Prefix" : "Suffix"} designation`],
+  };
+}
+
 function mergeDeterministicPowerParts(
   primary: CompiledBotPowerV1 | null,
   responseBudget: CompiledBotPowerV1 | null,
@@ -1138,6 +1193,7 @@ function deterministicPower(
   botName: string,
 ): CompiledBotPowerV1 | null {
   const primary =
+    deterministicDesignationPower(source, botName) ??
     deterministicEternalIntroductionPower(source, botName) ??
     deterministicIdentityMirrorPower(source, botName) ??
     deterministicMumblingPower(source, botName) ??
@@ -1654,6 +1710,7 @@ export async function compileBotPowers(args: {
         "Return {\"powers\":[{\"id\":string,\"name\":string,\"sigil\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
+        '- {"type":"designation","placement":"prefix|suffix","text":string up to 80 characters},',
         '- {"type":"eternal_introduction","memory":"current_other_speaker_message"},',
         '- {"type":"speech_copy","trigger":"direct_address"},',
         '- {"type":"identity_mirror","trigger":"direct_bot_address"},',
@@ -1725,7 +1782,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every current-other-speaker short-term-amnesia rule, addressed-speech copy, direct-addresser identity mirror, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
+          "Every current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {
@@ -1734,7 +1791,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, eternal_introduction, speech_copy, identity_mirror, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, designation, eternal_introduction, speech_copy, identity_mirror, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

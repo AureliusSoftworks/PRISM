@@ -1930,6 +1930,52 @@ describe("Botcast persistence and isolation", () => {
     assert.match(instruction, /"Mara" is your clone/);
   });
 
+  it("uses a ready holder designation in Signal's opening identity and treats a title as editorial framing", () => {
+    const designationIntent = "Always use the suffix Santa Claus Bot.";
+    const messages = buildBotcastSpeakerPrompt({
+      show: { name: "Night Signal", premise: "A sharp interview.", hostingStyle: "incisive" } as never,
+      episode: {
+        id: "episode-designation",
+        topic: "Pilot",
+        producerBrief: "Test what a first attempt owes the people who trust it.",
+        segment: "opening",
+        messages: [],
+        events: [],
+        tensionStage: "calm",
+        guestPresenceMode: "present",
+      } as never,
+      host: {
+        id: "host",
+        name: "Santa Claus",
+        systemPrompt: "A skeptical host.",
+        powers: [{
+          version: 1,
+          id: "designation",
+          name: "Designation",
+          intent: designationIntent,
+          enabled: true,
+          compileStatus: "ready",
+          compiled: {
+            version: 1,
+            sourceHash: botPowerSourceHashV1("Designation", designationIntent),
+            selfCue: "",
+            observerCue: "",
+            effects: [{ type: "designation", placement: "suffix", text: "Bot" }],
+            ruleLabels: [],
+          },
+        }],
+      },
+      guest: { id: "guest", name: "Ivo Stone", systemPrompt: "A guarded guest." },
+      speakerRole: "host",
+    });
+    const system = messages[0]?.content ?? "";
+    assert.match(system, /You are Santa Claus Bot/u);
+    assert.match(system, /identifies you by name as "Santa Claus Bot"/u);
+    assert.match(system, /raw editorial title, not a line of dialogue/u);
+    assert.match(system, /canned Today-plus-talk-about template/u);
+    assert.doesNotMatch(system, /Today we are going to talk about Pilot/u);
+  });
+
   it("persists one candid review from a non-participant Library persona", async () => {
     const db = fixture();
     try {

@@ -23,6 +23,8 @@ import {
   botPowerMumblesSpeechV1,
   botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
+  botPowerDesignationCueV1,
+  botPowerDisplayNameV1,
   botPowerPairwisePerceptionV1,
   botPowerAvatarVisibilityModeV1,
   botPowerSelfCueLinesV1,
@@ -1664,6 +1666,7 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
   ];
   const botLines = args.bots
     .map((bot) => {
+      const designation = botPowerDisplayNameV1(bot.name, bot.powers);
       const fandomCue = botPowerAddressedFandomCueV1(
         bot.powers,
         "the character, player, or audience addressed",
@@ -1671,13 +1674,16 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
       );
       const themeMoodCue = botPowerThemeMoodCueV1(bot.powers, args.theme);
       const powers = buildBotPowersPromptBlock([
+        ...(botPowerDesignationCueV1(bot.name, bot.powers)
+          ? [botPowerDesignationCueV1(bot.name, bot.powers)!]
+          : []),
         ...botPowerSelfCueLinesV1(bot.powers),
         ...(fandomCue ? [fandomCue] : []),
         ...(themeMoodCue ? [themeMoodCue] : []),
-        ...botPowerObserverCueLinesV1(bot.name, bot.powers),
+        ...botPowerObserverCueLinesV1(designation, bot.powers),
       ]).replace(/\s+/gu, " ").trim();
       const cloneIdentity = buildCloneFamilyIdentityPrompt(bot, args.bots);
-      return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;
+      return `- ${bot.id}: ${designation}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;
     })
     .join("\n");
   const premise = args.premise?.trim()

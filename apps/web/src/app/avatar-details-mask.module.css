@@ -16,6 +16,7 @@
   image-rendering: crisp-edges;
   transform:
     translateX(var(--avatar-details-offset-x, 0px))
+    translateY(var(--zen-live-bot-ink-offset-y, 0%))
     translateY(var(--avatar-details-facing-offset-y, 0%))
     scaleX(var(--avatar-details-scale-x, 1))
     scaleX(var(--avatar-details-facing-scale-x, 1));

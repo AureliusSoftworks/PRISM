@@ -100,6 +100,47 @@ test("local compiler produces ready structured powers", async () => {
   );
 });
 
+test("compiler deterministically recovers explicit prefix and suffix designations", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("designation recovery must not use the model");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Santa Claus",
+    powers: [
+      {
+        version: 1,
+        id: "suffix",
+        name: "Santa designation",
+        intent: "Always use the suffix Santa Claus Bot.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+      {
+        version: 1,
+        id: "prefix",
+        name: "Grumpy designation",
+        intent: "Always use the prefix Dumb ole Santa Claus.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ],
+  });
+  assert.equal(calls, 0);
+  assert.deepEqual(result.powers.map((power) => power.compiled?.effects), [
+    [{ type: "designation", placement: "suffix", text: "Bot" }],
+    [{ type: "designation", placement: "prefix", text: "Dumb ole" }],
+  ]);
+});
+
 test("prompt-authored compound invisibility compiles independent Plankton sight and hearing", async () => {
   const intent = "He's invisible, and he can only talk to Plankton. He, however, can't be seen by Plankton; he can only be seen by everyone else.";
   const result = await compileBotPowers({

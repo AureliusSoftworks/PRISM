@@ -23,6 +23,7 @@ import {
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDisplayNameV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
   botPowerForgetfulContextMessageCountV1,
@@ -78,6 +79,36 @@ test("bot powers normalize to three bounded entries", () => {
   );
   assert.equal(powers.length, BOT_POWER_MAX_COUNT);
   assert.equal(powers[0]?.intent.length, 640);
+});
+
+test("ready designation effects preserve the saved name and collapse duplicate tokens in source order", () => {
+  const intent = "Always use the suffix Santa Claus Bot.";
+  const powers = [{
+    version: 1 as const,
+    id: "designation",
+    name: "Designation",
+    intent,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1("Designation", intent),
+      selfCue: "",
+      observerCue: "",
+      effects: [
+        { type: "designation" as const, placement: "suffix" as const, text: "Santa Claus Bot" },
+        { type: "designation" as const, placement: "prefix" as const, text: "Dumb ole Santa Claus" },
+        { type: "designation" as const, placement: "suffix" as const, text: "Bot" },
+      ],
+      ruleLabels: [],
+    },
+  }];
+  assert.equal(botPowerDisplayNameV1("Santa Claus", powers), "Dumb ole Santa Claus Bot");
+  assert.equal(botPowerDisplayNameV1("Santa Claus", []), "Santa Claus");
+  assert.equal(
+    parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects[0]?.type,
+    "designation",
+  );
 });
 
 test("prompt-authored Power hashes ignore generated names and sigils while legacy hashes stay stable", () => {

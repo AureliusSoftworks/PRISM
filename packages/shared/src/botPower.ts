@@ -7,6 +7,7 @@ export const BOT_POWER_PROMPT_MAX_CHARS = 640;
 export const BOT_POWER_PROMPT_MAX_TOKENS = 160;
 export const COFFEE_POWER_PROMPT_MAX_CHARS = 640;
 export const COFFEE_POWER_PROMPT_MAX_TOKENS = 160;
+export const BOT_POWER_DESIGNATION_MAX_LENGTH = 80;
 
 export type BotPowerCompileStatus = "draft" | "compiling" | "ready" | "error";
 export type BotPowerAuthoringModeV1 = "prompt";
@@ -48,6 +49,7 @@ export type BotPowerObserverVisibilityV1 =
   | "translucent"
   | "visible";
 export type BotPowerVoicePresenceMode = "loud" | "quiet";
+export type BotPowerDesignationPlacement = "prefix" | "suffix";
 /** Resolved rendered app theme used by conditional Power branches. */
 export type BotPowerResolvedThemeV1 = "light" | "dark";
 
@@ -64,6 +66,12 @@ export type BotPowerTargetV1 =
 
 export type BotPowerEffectV1 =
   | { type: "mute" }
+  /** A ready holder-only public identity trim. The saved bot name never changes. */
+  | {
+      type: "designation";
+      placement: BotPowerDesignationPlacement;
+      text: string;
+    }
   /** Give the holder only the current other-speaker message, never a standing topic or older continuity. */
   | { type: "eternal_introduction"; memory: "current_other_speaker_message" }
   /** Repeat the latest speech addressed to the holder verbatim. */
@@ -354,6 +362,16 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const effect = value as Record<string, unknown>;
   if (effect.type === "mute") return { type: "mute" };
+  if (effect.type === "designation") {
+    const text = compactText(effect.text, BOT_POWER_DESIGNATION_MAX_LENGTH)
+      .replace(/^[\s"“”'‘’]+|[\s"“”'‘’.,!?;:]+$/gu, "");
+    if (!text) return null;
+    return {
+      type: "designation",
+      placement: effect.placement === "prefix" ? "prefix" : "suffix",
+      text,
+    };
+  }
   if (effect.type === "eternal_introduction") {
     // Upgrade legacy archives at the shared boundary. Older ready cues sometimes
     // forced a canned introduction, so never preserve their broader history model.
@@ -962,6 +980,64 @@ export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
       ? [{ type: "mute" as const }, ...effects]
       : effects;
   });
+}
+
+function designationWordsV1(value: string): string[] {
+  return compactText(value, BOT_POWER_DESIGNATION_MAX_LENGTH)
+    .split(/\s+/u)
+    .filter(Boolean);
+}
+
+function sameDesignationWordsV1(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every(
+    (word, index) => word.localeCompare(right[index] ?? "", undefined, { sensitivity: "accent" }) === 0,
+  );
+}
+
+/**
+ * Resolves one ready holder's public name without changing its saved base name.
+ * Prefixes and suffixes retain authored source order; repeated designation
+ * tokens are ignored and overlapping full-name examples collapse at the join.
+ */
+export function botPowerDisplayNameV1(baseName: unknown, value: unknown): string {
+  const base = compactText(baseName, 100) || "Unnamed bot";
+  const prefixes: string[][] = [];
+  const suffixes: string[][] = [];
+  const seen = new Set<string>();
+  for (const effect of activeBotPowerEffectsV1(value)) {
+    if (effect.type !== "designation") continue;
+    const words = designationWordsV1(effect.text);
+    if (words.length === 0) continue;
+    const key = words.join(" ").toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    (effect.placement === "prefix" ? prefixes : suffixes).push(words);
+  }
+  let resolved = designationWordsV1(base);
+  for (const prefix of prefixes) {
+    let overlap = Math.min(prefix.length, resolved.length);
+    while (overlap > 0 && !sameDesignationWordsV1(prefix.slice(-overlap), resolved.slice(0, overlap))) {
+      overlap -= 1;
+    }
+    resolved = [...prefix, ...resolved.slice(overlap)];
+  }
+  for (const suffix of suffixes) {
+    let overlap = Math.min(resolved.length, suffix.length);
+    while (overlap > 0 && !sameDesignationWordsV1(resolved.slice(-overlap), suffix.slice(0, overlap))) {
+      overlap -= 1;
+    }
+    resolved = [...resolved, ...suffix.slice(overlap)];
+  }
+  return resolved.join(" ").slice(0, 100) || "Unnamed bot";
+}
+
+/** The hard provider cue paired with the deterministic display-name projection. */
+export function botPowerDesignationCueV1(baseName: unknown, value: unknown): string | null {
+  const base = compactText(baseName, 100) || "Unnamed bot";
+  const display = botPowerDisplayNameV1(base, value);
+  return display === base
+    ? null
+    : `Hard designation invariant: your saved base name is ${JSON.stringify(base)}, but your current public, spoken, and on-air designation is ${JSON.stringify(display)}. Use only that designation whenever identity is supplied or said; do not rename the saved character, mention this rule, or duplicate its tokens.`;
 }
 
 /** Ready, enabled holder contract for direct bot-to-bot identity mirroring. */

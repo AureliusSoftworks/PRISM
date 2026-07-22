@@ -54,6 +54,7 @@ export type BotPowerMoodBoostModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodDrainModePolicy = BotPowerGhostModePolicy;
 export type BotPowerThemeCompoundModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpectralPerceptionModePolicy = BotPowerGhostModePolicy;
+export type BotPowerDesignationModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
   id: PrismAppletId;
@@ -66,13 +67,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.24",
+    version: "1.25",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.23",
+    version: "1.24",
     status: "active",
   },
   arena: {
@@ -90,13 +91,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.23",
+    version: "2.24",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.44",
+    version: "1.45",
     status: "active",
   },
   feed: {
@@ -114,7 +115,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.23",
+    version: "0.24",
     status: "preview",
   },
   gym: {
@@ -141,6 +142,26 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     version: "0.0",
     status: "planned",
   },
+};
+
+/** A designation is direct wherever a bot can be seen or heard; Slate has no live bot embodiment. */
+export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerDesignationModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
 };
 
 /** Participant perception stays separate from the human live/replay projection. */

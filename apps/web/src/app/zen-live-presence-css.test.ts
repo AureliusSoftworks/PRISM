@@ -802,7 +802,10 @@ describe("Zen live presence CSS", () => {
 
     const faceRigRule = ruleForExactSelector(".zenLiveBotPresenceFaceRig");
     assert.match(faceRigRule, /left:\s*var\(--zen-live-bot-face-x,\s*50%\)/);
-    assert.match(faceRigRule, /top:\s*var\(--zen-live-bot-face-y,\s*50%\)/);
+    assert.match(
+      faceRigRule,
+      /top:\s*calc\([\s\S]*var\(--zen-live-bot-face-y,\s*50%\)[\s\S]*var\(--zen-live-bot-ink-offset-y,\s*0%\)[\s\S]*\)/,
+    );
     assert.match(faceRigRule, /z-index:\s*6\s*;/);
     assert.match(faceRigRule, /scale\(var\(--zen-live-bot-face-scale,\s*1\)\)/);
     assert.match(faceRigRule, /pointer-events:\s*none\s*;/);
@@ -821,6 +824,10 @@ describe("Zen live presence CSS", () => {
     assert.match(
       pageSource,
       /data-zen-live-bot-presence-plate="true"[\s\S]*<BotAmbientPresenceRig[\s\S]*scheduleKey=\{`zen-live-/,
+    );
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_FACE_INK_OFFSET_Y = "2\.4%";[\s\S]*scheduleKey=\{`zen-live-[\s\S]*inkOffsetY=\{ZEN_LIVE_BOT_FACE_INK_OFFSET_Y\}/,
     );
     const emissionMaskStart = pageSource.indexOf("className={styles.zenLiveBotPresenceFaceEmissionMask}", bodyStart);
     assert.notEqual(emissionMaskStart, -1);
