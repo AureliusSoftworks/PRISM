@@ -546,6 +546,7 @@ type SignalErrorToast = {
 
 export interface BotcastExperienceProps {
   bots: BotcastBotSummary[];
+  initialCastBotIds?: string[];
   request: BotcastApiRequest;
   preferredProvider: "local" | "openai" | "anthropic";
   hostChatProvider: "local" | "openai" | "anthropic";
@@ -1584,6 +1585,7 @@ function SignalGenerationKeywordControl({
 
 export function BotcastExperience({
   bots,
+  initialCastBotIds = [],
   request,
   preferredProvider,
   hostChatProvider,
@@ -1617,6 +1619,13 @@ export function BotcastExperience({
     () => [...bots].sort((a, b) => a.name.localeCompare(b.name)),
     [bots],
   );
+  const initialCast = useMemo(() => {
+    const availableIds = new Set(bots.map((bot) => bot.id));
+    return Array.from(new Set(initialCastBotIds)).filter((botId) =>
+      availableIds.has(botId),
+    );
+  }, [bots, initialCastBotIds]);
+  const initialHostBotId = initialCast[0] ?? "";
   const botsById = useMemo(
     () => new Map(eligibleBots.map((bot) => [bot.id, bot])),
     [eligibleBots],
@@ -1650,10 +1659,10 @@ export function BotcastExperience({
     useState<SignalReplayRenderTarget | null>(null);
   const [replayRecordingsByEpisodeId, setReplayRecordingsByEpisodeId] =
     useState<Record<string, ReplayRecordingV1 | null>>({});
-  const [hostDraftId, setHostDraftId] = useState("");
+  const [hostDraftId, setHostDraftId] = useState(initialHostBotId);
   const [showPremiseInspirationDraft, setShowPremiseInspirationDraft] =
     useState("");
-  const [guestDraftId, setGuestDraftId] = useState("");
+  const [guestDraftId, setGuestDraftId] = useState(initialCast[1] ?? "");
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const producerBriefSavedLength = signalProducerBriefSavedLength(
@@ -3871,7 +3880,10 @@ export function BotcastExperience({
       try {
         const nextShows = await loadShows();
         if (!active) return;
-        const first = nextShows[0] ?? null;
+        const first =
+          nextShows.find((show) => show.hostBotId === initialHostBotId) ??
+          nextShows[0] ??
+          null;
         if (first) {
           setSelectedShowId(first.id);
           setShowNameDraft(first.name);
@@ -3886,7 +3898,7 @@ export function BotcastExperience({
     return () => {
       active = false;
     };
-  }, [loadEpisodes, loadShows]);
+  }, [initialHostBotId, loadEpisodes, loadShows]);
 
   const selectShow = useCallback(
     async (show: BotcastShow): Promise<void> => {

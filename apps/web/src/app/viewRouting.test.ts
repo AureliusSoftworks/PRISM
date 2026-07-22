@@ -18,12 +18,13 @@ describe("view routing helpers", () => {
     assert.equal(prismSurfaceViewForRouteParam("unknown"), "chat");
   });
 
-  it("keeps deprecated hub, zen, and sandbox aliases without emitting old URLs", () => {
+  it("keeps deprecated aliases while routing through the living-shell registry", () => {
     assert.equal(prismSurfaceViewForRouteParam("sandbox"), "chat");
     assert.equal(prismHrefForSurfaceView("sandbox"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("chat"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("hub"), "/?view=chat");
     assert.equal(prismHrefForSurfaceView("botcast"), "/?view=botcast");
     assert.equal(prismHrefForSurfaceView("slate"), "/?view=slate");
+    assert.equal(prismHrefForSurfaceView("story"), "/?view=story");
   });
 });

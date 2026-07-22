@@ -92,6 +92,7 @@ export function restoreFactoryDefaultsInDatabase(
         SET
           theme = 'system',
           graphics_quality = 'high',
+          startup_preference = 'home',
           preferred_provider = 'local',
           ephemeral_chat_provider_preferences = '{}',
           preferred_image_provider = 'local',

@@ -170,6 +170,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
       graphics_quality TEXT NOT NULL DEFAULT 'high',
+      startup_preference TEXT NOT NULL DEFAULT 'home',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
       ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}',
       preferred_image_provider TEXT NOT NULL DEFAULT 'local',
@@ -1621,6 +1622,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasGraphicsQuality) {
     db.exec(
       "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
+    );
+  }
+  const hasStartupPreference = userColumns.some(
+    (column) => column.name === "startup_preference",
+  );
+  if (!hasStartupPreference) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN startup_preference TEXT NOT NULL DEFAULT 'home';",
     );
   }
   const hasVoiceMode = userColumns.some(

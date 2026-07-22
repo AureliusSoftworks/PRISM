@@ -2841,3 +2841,4 @@ export * from "./graphicsQuality.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";
 export * from "./replay.js";
+export * from "./livingShell.js";

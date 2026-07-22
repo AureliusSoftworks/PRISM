@@ -7,6 +7,7 @@ import {
   Coffee,
   FlaskConical,
   Info,
+  House,
   KeyRound,
   MessageCircle,
   Monitor,
@@ -20,6 +21,7 @@ import {
 import styles from "./page.module.css";
 
 export type SettingsScope =
+  | "startup"
   | "chat"
   | "zen"
   | "coffee"
@@ -58,6 +60,7 @@ const SETTINGS_NAV_GROUPS: readonly {
   {
     label: "General",
     items: [
+      { scope: "startup", title: "Startup", icon: <House size={16} strokeWidth={2} /> },
       { scope: "connections", title: "Connections", icon: <KeyRound size={16} strokeWidth={2} /> },
       { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
       { scope: "appearance", title: "Appearance", icon: <Monitor size={16} strokeWidth={2} /> },

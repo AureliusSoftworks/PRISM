@@ -23,6 +23,8 @@ import {
   isImageProviderName,
   normalizeEphemeralChatProviderPreferences,
   normalizeGraphicsQuality,
+  normalizePrismStartupPreference,
+  type PrismStartupPreference,
 } from "@localai/shared";
 import { sanitizeHiddenModelIds } from "./model-routing.ts";
 import { requirePrivateNetworkHttpUrl } from "./local-network-host.ts";
@@ -162,6 +164,7 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality | string | null;
+  startupPreference: string | null;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: string | null;
   preferredImageProvider: ImageProviderName;
@@ -229,6 +232,7 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
+  startupPreference: PrismStartupPreference;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: EphemeralChatProviderPreferences;
   preferredImageProvider: ImageProviderName;
@@ -859,6 +863,10 @@ export function resolveNextSettings(
     body.graphicsQuality,
     normalizeGraphicsQuality(current.graphicsQuality),
   );
+  const startupPreference = normalizePrismStartupPreference(
+    body.startupPreference,
+    normalizePrismStartupPreference(current.startupPreference),
+  );
   const preferredProvider: Provider = isProvider(body.preferredProvider)
     ? body.preferredProvider
     : current.preferredProvider;
@@ -1250,6 +1258,7 @@ export function resolveNextSettings(
     displayName,
     theme,
     graphicsQuality,
+    startupPreference,
     preferredProvider,
     ephemeralChatProviderPreferences,
     preferredImageProvider,

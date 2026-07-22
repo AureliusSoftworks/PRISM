@@ -51,6 +51,7 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
+  normalizePrismStartupPreference,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
@@ -74,6 +75,7 @@ import {
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
   type GraphicsQuality,
+  type PrismStartupPreference,
   parseStoredAutoFallbackChain,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
@@ -105,6 +107,7 @@ import {
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
+  startupPreference?: PrismStartupPreference;
   preferredProvider: ProviderName;
   ephemeralChatProviderPreferences?: EphemeralChatProviderPreferences;
   preferredImageProvider?: ImageProviderName;
@@ -1319,6 +1322,7 @@ export function exportUserSnapshot(
       `SELECT
          theme,
          graphics_quality,
+         startup_preference,
          preferred_provider,
          ephemeral_chat_provider_preferences,
          preferred_image_provider,
@@ -1380,6 +1384,7 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
+        startup_preference: string | null;
         preferred_provider: ProviderName;
         ephemeral_chat_provider_preferences: string | null;
         preferred_image_provider: ImageProviderName;
@@ -1447,6 +1452,9 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+        startupPreference: normalizePrismStartupPreference(
+          user.startup_preference,
+        ),
         preferredProvider: user.preferred_provider,
         ephemeralChatProviderPreferences:
           normalizeEphemeralChatProviderPreferences(
@@ -2567,6 +2575,7 @@ function importUserSnapshotWithinTransaction(
       SET
         theme = ?,
         graphics_quality = ?,
+        startup_preference = ?,
         preferred_provider = ?,
         ephemeral_chat_provider_preferences = ?,
         preferred_image_provider = ?,
@@ -2635,6 +2644,7 @@ function importUserSnapshotWithinTransaction(
         ? settings.theme
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
+      normalizePrismStartupPreference(settings.startupPreference),
       settings.preferredProvider === "openai" ||
         settings.preferredProvider === "anthropic"
         ? settings.preferredProvider

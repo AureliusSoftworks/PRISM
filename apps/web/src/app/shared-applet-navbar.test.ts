@@ -42,7 +42,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(navbarHelper, /liveSessionChromePolicy\("Signal"\)/);
   assert.match(
     navbarHelper,
-    /renderAppSwitcher\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
+    /renderLocationStrip\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
   );
   assert.match(
     navbarHelper,
@@ -71,6 +71,26 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(
     pageSource,
     /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
+  );
+});
+
+test("contextual Signal entry preserves the chosen cast", () => {
+  assert.match(signalSource, /initialCastBotIds\?: string\[\]/u);
+  assert.match(
+    pageSource,
+    /setSignalInitialCastBotIds\(botIds\.slice\(0, 2\)\)[\s\S]*navigateToView\("botcast"\)/u,
+  );
+  assert.match(
+    pageSource,
+    /<BotcastExperience[\s\S]*initialCastBotIds=\{signalInitialCastBotIds\}/u,
+  );
+  assert.match(
+    signalSource,
+    /nextShows\.find\(\(show\) => show\.hostBotId === initialHostBotId\)/u,
+  );
+  assert.match(
+    signalSource,
+    /useState\(initialCast\[1\] \?\? ""\)/u,
   );
 });
 

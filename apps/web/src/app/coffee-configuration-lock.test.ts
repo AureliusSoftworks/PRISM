@@ -46,7 +46,7 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /shellPolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderAppSwitcher\(\)/u,
+    /shellPolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderLocationStrip\(\)/u,
   );
   assert.match(pageSource, />\s*End session\s*</iu);
   assert.match(

@@ -299,6 +299,48 @@ describe("backup graphics quality", () => {
   });
 });
 
+describe("backup living shell startup preference", () => {
+  it("round-trips saved choices and defaults legacy snapshots to Home", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET startup_preference = 'last_workspace' WHERE id = ?",
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.startupPreference, "last_workspace");
+
+      db.prepare(
+        "UPDATE users SET startup_preference = 'slate' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("user-1") as { startup_preference: string }
+        ).startup_preference,
+        "last_workspace",
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.startupPreference;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("user-1") as { startup_preference: string }
+        ).startup_preference,
+        "home",
+      );
+    });
+  });
+});
+
 describe("backup Zen Atmosphere style notes", () => {
   it("exports and restores normalized style notes", () => {
     withBackupDatabase((db, userKey) => {

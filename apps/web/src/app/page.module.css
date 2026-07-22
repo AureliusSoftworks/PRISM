@@ -5988,6 +5988,112 @@
   flex: 0 1 auto;
 }
 
+.locationStrip {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+}
+
+.locationStripBack,
+.locationStripHome {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.locationStripBack:hover:not(:disabled),
+.locationStripBack:focus-visible:not(:disabled),
+.locationStripHome:hover:not(:disabled),
+.locationStripHome:focus-visible:not(:disabled) {
+  outline: none;
+  color: var(--fg);
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--bg-hover) 78%, transparent);
+}
+
+.locationStripBack:disabled,
+.locationStripHome:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.locationStripCopy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  padding: 0 5px 0 2px;
+  line-height: 1.05;
+}
+
+.locationStripCopy > small {
+  color: var(--fg-muted);
+  font-size: 0.58rem;
+  font-weight: 720;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.locationStripCopy > strong {
+  overflow: hidden;
+  max-width: 180px;
+  font-size: 0.78rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.locationStripStatus {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 2px;
+  color: var(--fg-muted);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+}
+
+.locationStripStatus > em,
+.locationStripStatus > span {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 78%, transparent);
+  font-style: normal;
+}
+
+.locationStripStatus > em {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--line));
+}
+
+@media (max-width: 720px) {
+  .locationStripStatus {
+    display: none;
+  }
+
+  .locationStripCopy > strong {
+    max-width: 112px;
+  }
+}
+
 .appSwitcher {
   position: relative;
   display: inline-flex;
