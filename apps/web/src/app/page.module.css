@@ -60052,8 +60052,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeStage[data-autoplay-dock="true"] {
-  grid-template-rows: minmax(0, 1fr) auto;
-  row-gap: clamp(12px, 2vw, 18px);
+  grid-template-rows: minmax(0, 1fr);
+  row-gap: 0;
 }
 
 .coffeeStage[data-picker-visible="true"] {
@@ -60133,17 +60133,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeAutoplayDock {
-  position: relative;
+  position: absolute;
+  top: clamp(14px, 2vw, 24px);
+  left: clamp(14px, 2vw, 24px);
   z-index: 10;
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  justify-self: center;
+  justify-self: start;
   gap: 5px 10px;
   width: fit-content;
-  max-width: min(560px, calc(100% - 28px));
+  max-width: min(480px, calc(100% - 156px));
   min-width: 0;
   min-height: 44px;
   padding: 6px 14px;
@@ -61153,7 +61155,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"],
 .coffeeStage[data-phase="live"][data-autoplay-dock="true"] {
-  --coffee-live-table-y: clamp(28px, 4vh, 44px);
+  --coffee-live-table-y: 0px;
 }
 
 .coffeeStage[data-phase="arriving"][data-autoplay-dock="true"] .coffeeTableGlow,
@@ -61274,6 +61276,68 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeSeat[data-replay-departing="true"]
   .coffeeCup {
   display: none;
+}
+
+.coffeeStage[data-phase="live"] .coffeeSeat[data-live-departing="true"] {
+  --coffee-walk-away-x: 0px;
+  --coffee-walk-away-y: -72vh;
+  pointer-events: none;
+  animation: coffeeSeatWalkAway 2600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: 0ms;
+  will-change: opacity, transform;
+}
+
+.coffeeStage[data-phase="live"]
+  .coffeeSeat[data-live-departing="true"]
+  .coffeeCup {
+  display: none;
+}
+
+.coffeeStage[data-phase="live"]
+  .coffeeSeat[data-live-departing="true"]:is([data-seat="1"], [data-seat="3"]) {
+  --coffee-walk-away-x: -72vw;
+  --coffee-walk-away-y: 0px;
+}
+
+.coffeeStage[data-phase="live"]
+  .coffeeSeat[data-live-departing="true"]:is([data-seat="2"], [data-seat="4"]) {
+  --coffee-walk-away-x: 72vw;
+  --coffee-walk-away-y: 0px;
+}
+
+.coffeeStage[data-phase="live"]
+  .coffeeSeat[data-live-departing="true"]:is(
+    [data-seat-count="2"][data-layout-seat="0"],
+    [data-seat-count="3"][data-layout-seat="1"],
+    [data-seat-count="4"][data-layout-seat="0"],
+    [data-seat-count="4"][data-layout-seat="3"],
+    [data-seat-count="5"][data-layout-seat="1"],
+    [data-seat-count="5"][data-layout-seat="3"]
+  ) {
+  --coffee-walk-away-x: -72vw;
+  --coffee-walk-away-y: 0px;
+}
+
+.coffeeStage[data-phase="live"]
+  .coffeeSeat[data-live-departing="true"]:is(
+    [data-seat-count="2"][data-layout-seat="1"],
+    [data-seat-count="3"][data-layout-seat="2"],
+    [data-seat-count="4"][data-layout-seat="1"],
+    [data-seat-count="4"][data-layout-seat="2"],
+    [data-seat-count="5"][data-layout-seat="2"],
+    [data-seat-count="5"][data-layout-seat="4"]
+  ) {
+  --coffee-walk-away-x: 72vw;
+  --coffee-walk-away-y: 0px;
+}
+
+.coffeeStage[data-phase="live"]
+  .coffeeSeat[data-live-departing="true"]:is(
+    [data-seat-count="3"][data-layout-seat="0"],
+    [data-seat-count="5"][data-layout-seat="0"]
+  ) {
+  --coffee-walk-away-x: 0px;
+  --coffee-walk-away-y: -72vh;
 }
 
 .coffeeStage[data-phase="arriving"]
@@ -61524,6 +61588,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeSeat[data-arrival-state="walking-in"],
   .coffeeStage[data-replay-active="true"]
     .coffeeSeat[data-arrival-state="walking-in"] {
+    animation-duration: 1ms;
+  }
+
+  .coffeeStage[data-phase="live"] .coffeeSeat[data-live-departing="true"] {
     animation-duration: 1ms;
   }
 
@@ -61791,17 +61859,59 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   right: clamp(18px, 3cqw, 44px);
   z-index: 14;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: clamp(112px, 9cqw, 148px) minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 8px;
-  max-width: min(420px, calc(100% - 36px));
-  padding: 8px 10px;
+  gap: 10px;
+  width: max-content;
+  max-width: min(620px, calc(100% - 36px));
+  min-height: 116px;
+  padding: 8px 12px 8px 6px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 14px;
+  border-radius: 18px;
   background: rgba(8, 8, 11, 0.9);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.48);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.5),
+    0 0 32px color-mix(in srgb, var(--coffee-bot-color, #ffffff) 12%, transparent);
   backdrop-filter: blur(14px);
   color: rgba(255, 255, 255, 0.9);
+}
+
+.coffeeWaiterAvatar {
+  --zen-live-bot-avatar-size: clamp(112px, 9cqw, 148px);
+  --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
+  --zen-live-bot-body-x: 50%;
+  --zen-live-bot-body-y: 50%;
+  --zen-live-bot-face-x: 50%;
+  --zen-live-bot-face-y: 43.8%;
+  --zen-live-bot-face-scale: 1.68;
+  --zen-live-bot-glyph-x-anchor: 0px;
+  --zen-live-bot-glyph-y-anchor: calc(
+    var(--zen-live-bot-avatar-body-size) * 0.37
+  );
+  --zen-live-bot-face-phosphor-ink: #ffffff;
+  --zen-live-bot-face-ink: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 88%,
+    #ffffff 12%
+  );
+  --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
+  --bot-face-crt-screen-texture-blend-mode: luminosity;
+  --bot-ambient-hover-amplitude: 1px;
+  position: relative;
+  display: block;
+  width: var(--zen-live-bot-avatar-size);
+  aspect-ratio: 1;
+  margin: -24px 0 -20px;
+  filter: drop-shadow(0 16px 20px rgba(0, 0, 0, 0.44));
+  pointer-events: none;
+}
+
+.coffeeWaiterAvatar .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-color: var(--coffee-bot-color);
+  --bot-face-ambient-glow-size: 86%;
+  --bot-face-ambient-glow-opacity: 0.34;
+  --bot-face-ambient-glow-blur: clamp(16px, 13%, 34px);
+  --bot-face-ambient-glow-spread: clamp(8px, 7%, 20px);
 }
 
 .coffeeWaiterVisit p {
@@ -61810,18 +61920,40 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-align: left;
 }
 
+.coffeeWaiterVisit strong {
+  font-size: clamp(0.9rem, 1.2cqw, 1.05rem);
+}
+
 .coffeeWaiterVisit small {
   color: rgba(255, 255, 255, 0.6);
 }
 
 .coffeeWaiterVisit button {
-  min-height: 30px;
-  padding: 0 9px;
+  min-height: 38px;
+  padding: 0 13px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   cursor: pointer;
+}
+
+.themeLight.coffeeShell .coffeeWaiterVisit {
+  color: rgba(19, 23, 26, 0.92);
+  border-color: rgba(30, 35, 39, 0.18);
+  background: rgba(247, 246, 242, 0.92);
+  box-shadow:
+    0 18px 46px rgba(45, 49, 52, 0.18),
+    0 0 28px color-mix(in srgb, var(--coffee-bot-color, #111111) 10%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeWaiterVisit small {
+  color: rgba(25, 30, 34, 0.58);
+}
+
+.themeLight.coffeeShell .coffeeWaiterVisit button {
+  border-color: rgba(29, 34, 38, 0.16);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .coffeeReplayPlayerName {
@@ -62693,15 +62825,242 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: none;
 }
 
+.coffeeBarSceneBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  min-width: 0;
+  min-height: 0;
+  color: rgba(255, 255, 255, 0.94);
+  background: #050607;
+  isolation: isolate;
+}
+
+.coffeeBarScene {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: 100%;
+  height: 100dvh;
+  min-height: 100%;
+  overflow: hidden;
+}
+
+.coffeeBarScene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: url("/coffee-bar/coffee-bar-dark.webp") center / cover no-repeat;
+  clip-path: inset(64.5% 0 0);
+  transform: scale(1.002);
+  pointer-events: none;
+}
+
+.coffeeBarSceneEnvironment,
+.coffeeBarSceneScrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.coffeeBarSceneEnvironment {
+  z-index: 0;
+  background: url("/coffee-bar/coffee-bar-dark.webp") center / cover no-repeat;
+  transform: scale(1.002);
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] {
+  color: rgba(18, 21, 24, 0.94);
+  background: #e7e4dd;
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSceneEnvironment {
+  background-image: url("/coffee-bar/coffee-bar-light.webp");
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarScene::after {
+  background-image: url("/coffee-bar/coffee-bar-light.webp");
+}
+
+.coffeeBarSceneScrim {
+  z-index: 1;
+  background:
+    linear-gradient(180deg, rgba(2, 3, 4, 0.74) 0%, transparent 24%),
+    linear-gradient(0deg, rgba(2, 3, 4, 0.74) 0%, transparent 46%),
+    radial-gradient(circle at 31% 58%, transparent 0 18%, rgba(0, 0, 0, 0.22) 62%),
+    linear-gradient(90deg, rgba(2, 3, 4, 0.24), transparent 46%, rgba(2, 3, 4, 0.18));
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSceneScrim {
+  background:
+    linear-gradient(180deg, rgba(246, 244, 239, 0.68) 0%, transparent 24%),
+    linear-gradient(0deg, rgba(214, 211, 204, 0.6) 0%, transparent 46%),
+    radial-gradient(circle at 31% 58%, transparent 0 18%, rgba(73, 76, 80, 0.08) 64%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.15), transparent 50%, rgba(80, 84, 88, 0.08));
+}
+
+.coffeeBarSceneHeader {
+  position: relative;
+  z-index: 6;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: clamp(20px, 3.2vw, 48px) clamp(24px, 5vw, 76px) 0;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.72);
+}
+
+.coffeeBarSceneHeader .coffeeEyebrow {
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.coffeeBarSceneHeader h2 {
+  margin: 0;
+  font-size: clamp(1.25rem, 2.2vw, 2rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.coffeeBarSceneHeader p {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.66);
+  font-size: clamp(0.78rem, 1.1vw, 0.94rem);
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSceneHeader {
+  text-shadow: 0 2px 20px rgba(255, 255, 255, 0.72);
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"]
+  .coffeeBarSceneHeader
+  .coffeeEyebrow,
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSceneHeader p {
+  color: rgba(25, 29, 32, 0.58);
+}
+
+.coffeeBarSceneBody {
+  position: relative;
+  z-index: auto;
+  display: grid;
+  grid-template-columns: minmax(250px, 0.8fr) minmax(380px, 1.2fr);
+  align-items: end;
+  gap: clamp(28px, 6vw, 96px);
+  width: min(1280px, 100%);
+  min-height: 0;
+  margin: 0 auto;
+  padding: clamp(20px, 4vh, 52px) clamp(28px, 6vw, 92px)
+    clamp(34px, 7vh, 84px);
+}
+
+.coffeeBarServicePresence {
+  position: relative;
+  bottom: clamp(70px, 10vh, 112px);
+  display: grid;
+  justify-items: center;
+  align-content: end;
+  gap: clamp(6px, 1vh, 12px);
+  min-width: 0;
+}
+
+.coffeeBarServiceAvatar {
+  --zen-live-bot-avatar-size: clamp(224px, 31vmin, 360px);
+  --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
+  --zen-live-bot-body-x: 50%;
+  --zen-live-bot-body-y: 50%;
+  --zen-live-bot-face-x: 50%;
+  --zen-live-bot-face-y: 43.8%;
+  --zen-live-bot-face-scale: 1.68;
+  --zen-live-bot-glyph-x-anchor: 0px;
+  --zen-live-bot-glyph-y-anchor: calc(
+    var(--zen-live-bot-avatar-body-size) * 0.37
+  );
+  --zen-live-bot-face-phosphor-ink: #ffffff;
+  --zen-live-bot-face-ink: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 88%,
+    #ffffff 12%
+  );
+  --zen-live-bot-glyph-ink: var(--zen-live-bot-face-phosphor-ink);
+  --bot-face-crt-screen-texture-blend-mode: luminosity;
+  --bot-ambient-hover-amplitude: 2px;
+  --bot-ambient-underglow-rest-opacity: 0.3;
+  --bot-ambient-underglow-rise-opacity: 0.38;
+  --bot-ambient-underglow-contact-opacity: 0.48;
+  position: relative;
+  z-index: 3;
+  display: block;
+  width: var(--zen-live-bot-avatar-size);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 28px 36px rgba(0, 0, 0, 0.48));
+  pointer-events: none;
+}
+
+.coffeeBarServiceAvatar .zenLiveBotPresenceFace {
+  --bot-face-ambient-glow-color: var(--coffee-bot-color);
+  --bot-face-ambient-glow-size: 88%;
+  --bot-face-ambient-glow-opacity: 0.38;
+  --bot-face-ambient-glow-blur: clamp(22px, 15%, 48px);
+  --bot-face-ambient-glow-spread: clamp(10px, 8%, 28px);
+}
+
+.coffeeBarIdentity {
+  position: relative;
+  z-index: 5;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 170px;
+  padding: 10px 22px 11px;
+  border: 1px solid
+    color-mix(in srgb, var(--coffee-bot-color) 50%, rgba(255, 255, 255, 0.2));
+  border-radius: 14px;
+  color: color-mix(in srgb, var(--coffee-bot-color) 84%, #ffffff 16%);
+  background: color-mix(in srgb, #07080a 82%, var(--coffee-bot-color) 18%);
+  box-shadow:
+    0 0 34px color-mix(in srgb, var(--coffee-bot-color) 34%, transparent),
+    0 16px 38px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(18px) saturate(1.2);
+  text-align: center;
+}
+
+.coffeeBarIdentity strong {
+  font-size: clamp(0.92rem, 1.25vw, 1.08rem);
+  line-height: 1.2;
+}
+
+.coffeeBarRole {
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 0.72rem;
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarIdentity {
+  color: color-mix(in srgb, var(--coffee-bot-color) 70%, #111820 30%);
+  background: color-mix(in srgb, rgba(247, 246, 242, 0.88) 84%, var(--coffee-bot-color) 16%);
+  border-color: color-mix(in srgb, var(--coffee-bot-color) 42%, rgba(39, 44, 48, 0.22));
+  box-shadow:
+    0 0 30px color-mix(in srgb, var(--coffee-bot-color) 18%, transparent),
+    0 16px 34px rgba(55, 58, 61, 0.16);
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarRole {
+  color: rgba(26, 31, 35, 0.58);
+}
+
 .coffeeBarRitual {
+  position: relative;
+  z-index: 5;
   display: grid;
   gap: 14px;
-  width: 100%;
-  padding: clamp(16px, 2.2cqw, 24px);
+  justify-self: end;
+  width: min(660px, 100%);
+  max-height: min(42dvh, 390px);
+  padding: clamp(18px, 2.4vw, 28px);
+  overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 20px;
   background:
-    linear-gradient(145deg, rgba(29, 29, 34, 0.95), rgba(7, 7, 10, 0.92)),
+    linear-gradient(145deg, rgba(29, 29, 34, 0.9), rgba(7, 7, 10, 0.86)),
     radial-gradient(circle at 18% 0%, rgba(96, 230, 255, 0.2), transparent 40%);
   box-shadow:
     0 24px 70px rgba(0, 0, 0, 0.58),
@@ -62711,41 +63070,25 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   backdrop-filter: blur(18px) saturate(1.15);
 }
 
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarRitual {
+  color: rgba(20, 24, 27, 0.92);
+  border-color: rgba(50, 55, 59, 0.18);
+  background:
+    linear-gradient(145deg, rgba(250, 249, 246, 0.9), rgba(225, 223, 217, 0.86)),
+    radial-gradient(circle at 18% 0%, rgba(64, 160, 180, 0.12), transparent 40%);
+  box-shadow:
+    0 24px 70px rgba(55, 58, 60, 0.2),
+    0 0 0 1px rgba(255, 255, 255, 0.64) inset;
+}
+
 .coffeeBarRitual > p {
   margin: 0;
   color: rgba(255, 255, 255, 0.72);
   text-align: center;
 }
 
-.coffeeBarIdentity {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
-
-.coffeeBarIdentity > div {
-  display: grid;
-}
-
-.coffeeBarIdentity strong {
-  font-size: 1rem;
-}
-
-.coffeeBarIdentity span:not(.coffeeBarGlyph) {
-  color: rgba(255, 255, 255, 0.54);
-  font-size: 0.76rem;
-}
-
-.coffeeBarGlyph {
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.07);
-  font-size: 1.2rem;
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarRitual > p {
+  color: rgba(25, 29, 32, 0.7);
 }
 
 .coffeeBarPrimaryActions {
@@ -62757,6 +63100,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeBarPrimaryActions button {
   min-width: 152px;
+  margin-top: 0;
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"]
+  .coffeeBarPrimaryActions
+  .coffeeSend {
+  color: #ffffff;
+  background: #15191d;
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"]
+  .coffeeBarPrimaryActions
+  .coffeeJoinSessionButton {
+  color: #161a1d;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(25, 29, 32, 0.14);
 }
 
 .coffeeBarSpecialOrder {
@@ -62792,6 +63151,24 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-size: 0.7rem;
 }
 
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSpecialOrder label,
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSpecialOrder small {
+  color: rgba(25, 29, 32, 0.62);
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"] .coffeeBarSpecialOrder input {
+  color: rgba(18, 21, 24, 0.94);
+  border-color: rgba(36, 41, 45, 0.18);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.coffeeBarSceneBackdrop[data-theme="light"]
+  .coffeeBarSpecialOrder
+  .coffeeSend {
+  color: #ffffff;
+  background: #15191d;
+}
+
 .coffeeBarDrinkReveal {
   display: grid;
   justify-items: center;
@@ -62823,9 +63200,45 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 @media (max-width: 680px) {
-  .coffeeStage[data-phase="barista"] .coffeeCenterMessage {
-    width: min(92cqw, 520px);
-    max-width: 94%;
+  .coffeeBarScene {
+    overflow-y: auto;
+  }
+
+  .coffeeBarSceneHeader {
+    padding: 18px 18px 0;
+  }
+
+  .coffeeBarSceneHeader p {
+    margin-top: 5px;
+  }
+
+  .coffeeBarSceneBody {
+    grid-template-columns: 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px 24px;
+  }
+
+  .coffeeBarServiceAvatar {
+    --zen-live-bot-avatar-size: clamp(160px, 25dvh, 230px);
+  }
+
+  .coffeeBarServicePresence {
+    bottom: 0;
+  }
+
+  .coffeeBarScene::after {
+    display: none;
+  }
+
+  .coffeeBarIdentity {
+    padding: 7px 18px 8px;
+  }
+
+  .coffeeBarRitual {
+    justify-self: center;
+    max-height: none;
+    padding: 16px;
   }
 
   .coffeeBarSpecialOrder > div {
@@ -62833,11 +63246,32 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 
   .coffeeWaiterVisit {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    top: 68px;
+    right: 10px;
+    grid-template-columns: 74px minmax(0, 1fr) auto;
+    width: min(480px, calc(100% - 20px));
+    min-height: 88px;
+    padding: 7px 9px 7px 5px;
   }
 
-  .coffeeWaiterVisit button:last-child {
+  .coffeeWaiterAvatar {
+    --zen-live-bot-avatar-size: 78px;
+    margin: -8px 0;
+  }
+
+  .coffeeWaiterVisit p {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .coffeeWaiterVisit button:first-of-type {
     grid-column: 3;
+    grid-row: 1;
+  }
+
+  .coffeeWaiterVisit button:last-of-type {
+    grid-column: 3;
+    grid-row: 2;
   }
 }
 
@@ -65939,8 +66373,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-cup-frame-y: 0%;
   --coffee-cup-side-offset: clamp(-16px, -1.35vw, -8px);
   --coffee-cup-facing-scale-x: 1;
-  --coffee-cup-sip-x: clamp(-36px, -2.7vw, -24px);
-  --coffee-cup-sip-y: clamp(-10px, -0.75vw, -6px);
+  --coffee-cup-sip-x: clamp(-54px, -4.2vw, -40px);
+  --coffee-cup-sip-y: clamp(-82px, -6vw, -60px);
   --coffee-cup-sip-duration-ms: 1400ms;
   --coffee-cup-sip-hold-ms: 500ms;
   --coffee-cup-empty-attempt-duration-ms: 3200ms;
@@ -65988,7 +66422,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeCup[data-cup-side="left"] {
-  --coffee-cup-sip-x: clamp(24px, 2.7vw, 36px);
+  --coffee-cup-sip-x: clamp(40px, 4.2vw, 54px);
   --coffee-cup-empty-attempt-x: clamp(12px, 1.35vw, 18px);
   right: auto;
   left: var(--coffee-cup-side-offset);

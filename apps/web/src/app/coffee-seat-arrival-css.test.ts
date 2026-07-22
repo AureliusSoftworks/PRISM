@@ -1533,7 +1533,12 @@ describe("Coffee seat arrival CSS", () => {
     const liveTableOffsetRule = ruleForExactSelector(
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]'
     );
-    assert.match(liveTableOffsetRule, /--coffee-live-table-y:\s*clamp\(28px,\s*4vh,\s*44px\)\s*;/);
+    assert.match(liveTableOffsetRule, /--coffee-live-table-y:\s*0px\s*;/);
+
+    const autoplayDockRule = ruleForExactSelector(".coffeeAutoplayDock");
+    assert.match(autoplayDockRule, /position:\s*absolute\s*;/);
+    assert.match(autoplayDockRule, /top:\s*clamp\(14px,\s*2vw,\s*24px\)\s*;/);
+    assert.match(autoplayDockRule, /left:\s*clamp\(14px,\s*2vw,\s*24px\)\s*;/);
 
     const liveTopSeatRule = ruleForSelectorNeedles(
       '.coffeeStage[data-phase="arriving"][data-autoplay-dock="true"]',
@@ -1667,13 +1672,13 @@ describe("Coffee seat arrival CSS", () => {
 
     const mugRule = ruleForExactSelector(".coffeeCup");
     assert.match(mugRule, /--coffee-cup-side-offset:\s*clamp\(-16px,\s*-1\.35vw,\s*-8px\)\s*;/);
-    assert.match(mugRule, /--coffee-cup-sip-x:\s*clamp\(-36px,\s*-2\.7vw,\s*-24px\)\s*;/);
-    assert.match(mugRule, /--coffee-cup-sip-y:\s*clamp\(-10px,\s*-0\.75vw,\s*-6px\)\s*;/);
+    assert.match(mugRule, /--coffee-cup-sip-x:\s*clamp\(-54px,\s*-4\.2vw,\s*-40px\)\s*;/);
+    assert.match(mugRule, /--coffee-cup-sip-y:\s*clamp\(-82px,\s*-6vw,\s*-60px\)\s*;/);
     assert.match(mugRule, /width:\s*clamp\(52px,\s*6vw,\s*70px\)\s*;/);
     assert.match(mugRule, /height:\s*clamp\(60px,\s*6\.9vw,\s*82px\)\s*;/);
 
     const leftMugRule = ruleForExactSelector('.coffeeCup[data-cup-side="left"]');
-    assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(24px,\s*2\.7vw,\s*36px\)\s*;/);
+    assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(40px,\s*4\.2vw,\s*54px\)\s*;/);
   });
 
   it("selects first-person Coffee automatically while keeping current Coffee settings discoverable", () => {
