@@ -2865,3 +2865,4 @@ export * from "./review.js";
 export * from "./ephemeralChat.js";
 export * from "./replay.js";
 export * from "./livingShell.js";
+export * from "./livingShellProgress.js";

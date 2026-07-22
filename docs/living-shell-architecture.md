@@ -66,3 +66,24 @@ handoff. Actions appear as buttons and run only after the player selects one.
 Destructive actions are intentionally absent. Slate's former manuscript-aware
 project chat endpoint returns `410 Gone`; the global companion receives only
 project and section identity until a later explicit, previewed handoff.
+
+## First run and living guidance
+
+First run is owned by the account instead of browser storage. A new account
+passes through the cinematic, Prism awakening, guided native setup, and three
+canvas-formed choices. Skipping the poem still resolves into the shorter
+awakening and authored welcome. Existing accounts are migrated as complete so
+an update never replays onboarding unexpectedly.
+
+Setup keeps connection secrets in native password controls and sends only
+normalized stage and tutorial progress to the living-shell progress endpoint.
+Progress is additive, resumable across restarts, and scoped to the account.
+
+Contextual tutorials use one moving Prism orb, a diffused spotlight, compact
+captions, and the existing visible control as the advancement action. There is
+no generic Next button. Players can go back, skip permanently, or ask to be
+reminded later; reminders and exact steps survive restart. Missing
+context-specific steps, such as group Atmosphere while visiting a single bot
+Home, are skipped without trapping the player. All movement and scrolling
+honor reduced-motion preferences, and highlighted controls receive the active
+caption through `aria-describedby`.

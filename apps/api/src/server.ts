@@ -362,6 +362,11 @@ import {
   prismCompanionEphemeralMode,
   resolvePrismCompanionProvider,
 } from "./prism-companion.ts";
+import {
+  createPendingLivingShellAccountProgress,
+  getLivingShellAccountProgress,
+  updateLivingShellAccountProgress,
+} from "./living-shell-progress.ts";
 import { resolveSlateDeliberationModelOverride } from "./slate-deliberation-routing.ts";
 import {
   SlateSectionAiWriteConflictError,
@@ -1844,6 +1849,7 @@ function getOrCreateLocalOwnerUser(): string {
     createdAt,
     createdAt,
   );
+  createPendingLivingShellAccountProgress(db, userId, createdAt);
 
   return userId;
 }
@@ -4214,6 +4220,7 @@ function buildRoutes(): RouteDefinition[] {
           PRISM_EULA_ACCEPTANCE_SNAPSHOT,
           createdAt,
         );
+        createPendingLivingShellAccountProgress(db, userId, createdAt);
         db.exec("COMMIT");
       } catch (error) {
         db.exec("ROLLBACK");
@@ -13669,6 +13676,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
+      const livingShellProgress = getLivingShellAccountProgress(db, userId);
       const zenMessageFontMinPx = normalizeZenMessageFontMinPx(
         user.zen_message_font_min_px,
       );
@@ -13681,6 +13689,7 @@ function buildRoutes(): RouteDefinition[] {
           startupPreference: normalizePrismStartupPreference(
             user.startup_preference,
           ),
+          ...livingShellProgress,
           preferredProvider: user.preferred_provider,
           ephemeralChatProviderPreferences:
             normalizeEphemeralChatProviderPreferences(
@@ -13827,6 +13836,13 @@ function buildRoutes(): RouteDefinition[] {
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
         },
+      });
+    }),
+    route("PATCH", "/api/living-shell/progress", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...updateLivingShellAccountProgress(db, userId, ctx.body),
       });
     }),
     route("POST", "/api/models/prepare", async (ctx) => {

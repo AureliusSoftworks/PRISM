@@ -19,6 +19,9 @@ import type {
 import {
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
+  PRISM_ONBOARDING_VERSION,
+  createCompletedPrismOnboardingState,
+  createPrismTutorialProgress,
   sanitizePrismMoodState,
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
@@ -289,6 +292,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user_accepted
       ON legal_acceptances(user_id, accepted_at DESC);
+    CREATE TABLE IF NOT EXISTS living_shell_account_state (
+      user_id TEXT PRIMARY KEY,
+      onboarding_version INTEGER NOT NULL DEFAULT 0,
+      onboarding_state TEXT NOT NULL DEFAULT '{}',
+      tutorial_progress TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -2181,6 +2192,17 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     SET last_active_at = COALESCE(last_active_at, created_at)
     WHERE last_active_at IS NULL OR last_active_at = '';
   `);
+  db.prepare(
+    `INSERT OR IGNORE INTO living_shell_account_state (
+       user_id, onboarding_version, onboarding_state, tutorial_progress, updated_at
+     )
+     SELECT id, ?, ?, ?, COALESCE(last_active_at, created_at)
+       FROM users`,
+  ).run(
+    PRISM_ONBOARDING_VERSION,
+    JSON.stringify(createCompletedPrismOnboardingState()),
+    JSON.stringify(createPrismTutorialProgress("completed")),
+  );
 
   // Migrate existing DBs that predate the per-message provider / bot columns.
   const messageColumns = db
