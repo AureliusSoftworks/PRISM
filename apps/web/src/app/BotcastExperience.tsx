@@ -3313,16 +3313,17 @@ export function BotcastExperience({
           interruptedContent !== activeMessage.content &&
           (!spokenContent || interruptedContent),
       );
+      const hostPowerSnapshot = botcastSnapshotPowersForRoleV1(episode, "host");
+      const hostEchoesAddressedSpeech = hostPowerSnapshot
+        ? botPowerEchoesAddressedSpeechV1(hostPowerSnapshot)
+        : Boolean(hostBot?.echoesAddressedSpeech);
       const guestBridge =
         activeLineCanBeInterrupted &&
         activeMessage?.speakerRole === "guest" &&
         Boolean(spokenContent.trim()) &&
         nextHostInterruptionBridge &&
         !hostBot?.muted &&
-        !botPowerEchoesAddressedSpeechV1(
-          botcastSnapshotPowersForRoleV1(episode, "host") ??
-            hostBot?.powers,
-        ) &&
+        !hostEchoesAddressedSpeech &&
         !botPowerResponseIsSilentV1(nextHostInterruptionBridge.content)
           ? nextHostInterruptionBridge
           : null;

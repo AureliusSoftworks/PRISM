@@ -670,7 +670,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /session-changing navbar tools, and episode deletion stay locked/u,
+      /entire utility strip, and episode deletion stay locked/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -979,11 +979,11 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /voice preference/);
     assert.match(routing?.body ?? "", /Voice remains available/);
     assert.match(routing?.body ?? "", /next utterance without cutting off/);
-    assert.match(routing?.body ?? "", /locked until you choose End session/);
     assert.match(
       routing?.body ?? "",
-      /Usage and Memories plus the Theme control remain available/,
+      /entire utility strip stay locked until you choose End session/,
     );
+    assert.doesNotMatch(routing?.body ?? "", /remain available/u);
   });
 
   it("explains that ready Powers can change a bot's lived Coffee context", () => {

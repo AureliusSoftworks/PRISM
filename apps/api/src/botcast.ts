@@ -93,6 +93,7 @@ import {
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
+  anthropicModelSupportsReasoningEffort,
   activeBotPowersV1,
   botPowerAddressedFandomCueV1,
   botPowerCandorResponseRuleV1,
@@ -204,7 +205,7 @@ const BOTCAST_DASHBOARD_BLURB_MAX_LENGTH = 140;
 const BOTCAST_SPEAKER_MAX_TOKENS = 160;
 const BOTCAST_CONVERSATIONAL_MAX_TOKENS = 112;
 const BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS = 384;
-const BOTCAST_OPENAI_REASONING_BOOKING_COMPLETION_TOKENS = 768;
+const BOTCAST_REASONING_BOOKING_COMPLETION_TOKENS = 768;
 const BOTCAST_SHOW_HOST_CHAT_HISTORY_LIMIT = 3;
 const BOTCAST_SHOW_HOST_CHAT_INPUT_MAX = 6_000;
 const BOTCAST_SHOW_HOST_CHAT_RESPONSE_MAX = 12_000;
@@ -7658,11 +7659,15 @@ function botcastBookingGenerationOptions(
   model: string,
   visibleReplyCap = 320,
 ): Pick<GenerateOptions, "maxTokens" | "reasoningEffort"> {
-  return providerName === "openai" && openAiModelUsesMaxCompletionTokens(model)
+  const usesNativeReasoning =
+    (providerName === "openai" && openAiModelUsesMaxCompletionTokens(model)) ||
+    (providerName === "anthropic" &&
+      anthropicModelSupportsReasoningEffort(model));
+  return usesNativeReasoning
     ? {
         maxTokens: Math.max(
           visibleReplyCap,
-          BOTCAST_OPENAI_REASONING_BOOKING_COMPLETION_TOKENS,
+          BOTCAST_REASONING_BOOKING_COMPLETION_TOKENS,
         ),
         reasoningEffort: "low",
       }

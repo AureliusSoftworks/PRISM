@@ -7206,6 +7206,82 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("gives adaptive Anthropic models enough low-effort budget for Signal metadata", async () => {
+    const db = fixture();
+    const optionCaptures: GenerateOptions[] = [];
+    const responses = [
+      '{"topic":"The Cost of Easy Copies"}',
+      '{"producerBrief":"Open with what effortless copying costs, then follow the concrete limit the guest is willing to defend."}',
+      '{"premise":"A mischievous interview show about originality under pressure."}',
+    ];
+    const provider: LlmProvider = {
+      name: "anthropic",
+      async generateResponse(_messages, options) {
+        optionCaptures.push(options);
+        return responses.shift() ?? "{}";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const adaptiveGeneration = {
+      preferredProvider: "anthropic" as const,
+      preferredOnlineModel: "claude-fable-5",
+      providerFactory: (() => provider) as typeof selectProvider,
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const title = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        { guestBotId: "guest-1", field: "topic" },
+        adaptiveGeneration,
+      );
+      const producerBrief = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        { guestBotId: "guest-1", field: "producerBrief" },
+        adaptiveGeneration,
+      );
+      const premise = await generateBotcastShowPremise(
+        db,
+        "user-1",
+        show.id,
+        "Interviews about imitation and annoyance.",
+        adaptiveGeneration,
+      );
+
+      assert.deepEqual(title, {
+        value: "The Cost of Easy Copies",
+        generated: true,
+      });
+      assert.equal(
+        "value" in producerBrief ? producerBrief.value : "",
+        "Open with what effortless copying costs, then follow the concrete limit the guest is willing to defend.",
+      );
+      assert.equal(premise.generated, true);
+      assert.equal(
+        premise.show.premise,
+        "A mischievous interview show about originality under pressure.",
+      );
+      assert.equal(optionCaptures.length, 3);
+      assert.equal(
+        optionCaptures.every(
+          (options) =>
+            options.model === "claude-fable-5" &&
+            options.maxTokens === 768 &&
+            options.reasoningEffort === "low" &&
+            options.jsonMode === true,
+        ),
+        true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses AUTO fallbacks for ordinary guest bookings after invalid primary output", async () => {
     const db = fixture();
     const attempts: Array<{ provider: string; model: string | undefined }> = [];

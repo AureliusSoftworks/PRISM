@@ -43,15 +43,21 @@ export function liveSessionChromePolicy(
       promptCenter: true,
       refresh: true,
       settings: true,
+      usage: true,
+      memories: true,
       images: true,
       bots: true,
+      theme: true,
     },
     disabledNavbarActionTooltips: {
       promptCenter: `${exitInstruction} before opening Prompt Center.`,
       refresh: `${exitInstruction} before refreshing Prism.`,
       settings: `${exitInstruction} before opening Settings.`,
+      usage: `${exitInstruction} before opening Usage.`,
+      memories: `${exitInstruction} before opening Memories.`,
       images: `${exitInstruction} before opening Images.`,
       bots: `${exitInstruction} before changing bots.`,
+      theme: `${exitInstruction} before changing Theme.`,
     },
   };
 }

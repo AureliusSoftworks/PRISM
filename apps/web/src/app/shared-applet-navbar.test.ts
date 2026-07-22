@@ -66,7 +66,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   }
   assert.match(
     pageSource,
-    /navigationHeader=\{\(\{ liveSessionActive \}\) =>[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,/,
+    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,/,
   );
   assert.match(
     pageSource,
@@ -82,7 +82,7 @@ test("Signal gives shared navigation its own aligned shell row", () => {
   );
   assert.match(
     signalSource,
-    /typeof navigationHeader === "function"[\s\S]*navigationHeader\(\{ liveSessionActive \}\)/u,
+    /typeof navigationHeader === "function"[\s\S]*navigationHeader\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl:/u,
   );
   assert.match(
     signalSource,
