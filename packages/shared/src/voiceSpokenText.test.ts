@@ -40,6 +40,10 @@ describe("voice spoken text", () => {
 
   it("turns starred human vocal sounds into actor performance tags", () => {
     assert.equal(
+      voiceSpokenText("I have a point. *burp* Excuse me."),
+      "I have a point. Excuse me.",
+    );
+    assert.equal(
       voicePerformanceTextFromAsteriskCues(
         "I have a point. *sighs heavily* Fine. *burp* Excuse me. *farts*",
       ),

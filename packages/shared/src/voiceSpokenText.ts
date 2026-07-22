@@ -44,6 +44,18 @@ const ASTERISK_VOCAL_CUE_TAGS = [
   [/^(?:inhales?|inhaling|breathes?\s+in|takes?\s+(?:a\s+)?breath)\b/iu, "breathes deeply"],
 ] as const satisfies readonly (readonly [RegExp, string])[];
 
+export const ASTERISK_HUMAN_SOUND_VOICE_TAGS = [
+  ...new Set(ASTERISK_VOCAL_CUE_TAGS.map(([, tag]) => tag)),
+] as readonly string[];
+
+function asteriskHumanSoundVoiceTag(inner: string): string | null {
+  const normalized = inner.replace(/\s+/gu, " ").trim();
+  return (
+    ASTERISK_VOCAL_CUE_TAGS.find(([pattern]) => pattern.test(normalized))?.[1] ??
+    null
+  );
+}
+
 function looksLikeMarkedStageDirection(
   inner: string,
   before: string,
@@ -81,6 +93,7 @@ export function voiceSpokenText(value: unknown): string {
     .replace(
       MARKED_SPEECH_BLOCK_PATTERN,
       (match, _marker: string, inner: string, offset: number, source: string) => {
+        if (asteriskHumanSoundVoiceTag(inner)) return " ";
         const before = source.slice(0, offset);
         const after = source.slice(offset + match.length);
         return looksLikeMarkedStageDirection(inner, before, after)
@@ -105,13 +118,10 @@ export function voicePerformanceTextFromAsteriskCues(
   const performanceText = value.replace(
     MARKED_SPEECH_BLOCK_PATTERN,
     (match, _marker: string, inner: string) => {
-      const normalized = inner.replace(/\s+/gu, " ").trim();
-      const mapping = ASTERISK_VOCAL_CUE_TAGS.find(([pattern]) =>
-        pattern.test(normalized),
-      );
-      if (!mapping) return match;
+      const tag = asteriskHumanSoundVoiceTag(inner);
+      if (!tag) return match;
       foundVocalCue = true;
-      return `[${mapping[1]}]`;
+      return `[${tag}]`;
     },
   );
   return foundVocalCue ? voiceSpokenText(performanceText) : null;

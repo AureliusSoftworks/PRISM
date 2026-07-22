@@ -1,4 +1,5 @@
 import {
+  ASTERISK_HUMAN_SOUND_VOICE_TAGS,
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   applyVoiceDeliveryMoodToProfile,
   elevenLabsVoiceDirectionForMood,
@@ -154,11 +155,17 @@ function normalizeElevenLabsTaggedText(
   if (typeof value !== "string") return null;
   const taggedText = value.replace(/\s+/gu, " ").trim().slice(0, 4_200);
   if (!taggedText) return null;
-  const allowed = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
+  const allowed = new Set<string>([
+    ...BOTCAST_IMMERSIVE_VOICE_TAGS,
+    ...ASTERISK_HUMAN_SOUND_VOICE_TAGS,
+  ]);
+  const inlineHumanSounds = new Set<string>(
+    ASTERISK_HUMAN_SOUND_VOICE_TAGS,
+  );
   const matches = [...taggedText.matchAll(ELEVENLABS_AUDIO_TAG_PATTERN)];
   if (
     matches.length === 0 ||
-    matches.length > 2 ||
+    matches.length > 8 ||
     matches.some((match) => !allowed.has((match[1] ?? "").trim().toLowerCase()))
   ) {
     return null;
@@ -173,7 +180,16 @@ function normalizeElevenLabsTaggedText(
   const firstTagAtStart = taggedText.slice(0, firstTag?.index ?? 0).trim() === "";
   const lastTagEnd = (lastTag?.index ?? 0) + (lastTag?.[0]?.length ?? 0);
   const lastTagAtEnd = taggedText.slice(lastTagEnd).trim() === "";
-  if (!firstTagAtStart && !lastTagAtEnd) return null;
+  if (
+    !firstTagAtStart &&
+    !lastTagAtEnd &&
+    matches.some(
+      (match) =>
+        !inlineHumanSounds.has((match[1] ?? "").trim().toLowerCase()),
+    )
+  ) {
+    return null;
+  }
   return taggedText;
 }
 
