@@ -41,3 +41,28 @@ for the player, alter comprehension, or mutate manuscripts and memories.
 
 The living shell is being introduced incrementally so existing routes remain
 compatible while each consumer moves to the shared surface registry.
+
+## Global Prism companion
+
+The same Prism identity follows the player through every authenticated surface.
+Full Prism contracts into the movable rainbow orb; the orb opens an ephemeral
+conversation in place. Players can click it or press **Option Space** on macOS
+and **Control Space** on Windows or Linux.
+
+Companion recovery is scoped to the account and exact surface. At most the
+latest three messages survive in the current app session. This is short crash
+recovery, not conversation history: exchanges are not written to the message,
+memory, Continuity, or Slate document stores.
+
+The client sends identifiers only. The server builds authoritative,
+tenant-scoped context from those identifiers and may expose names and session
+metadata, but never manuscript prose, transcripts, memories, secrets, system
+prompts, or Continuity. LOCAL mode always uses the local provider, including
+when the current Studio has an online preference.
+
+Prism can propose only allowlisted actions: navigate to Home or Slate, open an
+approved Tool, begin bot creation, export an owned bot, or begin an explicit
+handoff. Actions appear as buttons and run only after the player selects one.
+Destructive actions are intentionally absent. Slate's former manuscript-aware
+project chat endpoint returns `410 Gone`; the global companion receives only
+project and section identity until a later explicit, previewed handoff.

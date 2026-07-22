@@ -351,14 +351,17 @@ import {
 import { composeSlateProjectCoverPrompt } from "./slate-cover.ts";
 import {
   advanceSlateDeliberation,
-  chatWithSlateProject,
   generateSlateProjectTitle,
-  listSlateProjectChatMessages,
   refreshSlateLivingSummary,
   resolveSlateProjectTitleSuggestion,
   slateDeliberationSpeakerForRequest,
   suggestSlateProjectTitle,
 } from "./slate-project-companion.ts";
+import {
+  chatWithPrismCompanion,
+  prismCompanionEphemeralMode,
+  resolvePrismCompanionProvider,
+} from "./prism-companion.ts";
 import { resolveSlateDeliberationModelOverride } from "./slate-deliberation-routing.ts";
 import {
   SlateSectionAiWriteConflictError,
@@ -592,6 +595,7 @@ import {
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
   normalizeEphemeralChatProviderPreferences,
+  normalizePrismCompanionRequest,
   normalizeGraphicsQuality,
   normalizeListenerReactionVocalFoley,
   normalizeBotCrosstalkInterruptedSpeakerCue,
@@ -4673,37 +4677,19 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/slate/projects/:id/chat", async (ctx) => {
       const userId = requireAuth(ctx);
-      json(ctx.res, 200, {
-        ok: true,
-        messages: listSlateProjectChatMessages(
-          db,
-          userId,
-          ctx.params.id,
-        ),
-      });
+      getSlateProject(db, userId, ctx.params.id);
+      throw new HttpError(
+        410,
+        "Slate project chat has moved to the global Prism companion.",
+      );
     }),
     route("POST", "/api/slate/projects/:id/chat", async (ctx) => {
       const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const ai = slateAiForUser(userId, ctx.params.id);
-      const messages = await runWithUsageSession(
-        {
-          db,
-          userId,
-          privacyScope: "normal",
-          mode: "slate",
-          surface: "slate",
-        },
-        () =>
-          chatWithSlateProject(
-            db,
-            userId,
-            ctx.params.id,
-            body.content,
-            ai,
-          ),
+      getSlateProject(db, userId, ctx.params.id);
+      throw new HttpError(
+        410,
+        "Slate project chat has moved to the global Prism companion.",
       );
-      json(ctx.res, 200, { ok: true, messages });
     }),
     route("POST", "/api/slate/projects/:id/deliberation/turn", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -13571,6 +13557,111 @@ function buildRoutes(): RouteDefinition[] {
           }
         }
         throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
+    route("POST", "/api/prism-companion", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      let request;
+      try {
+        request = normalizePrismCompanionRequest(ctx.body);
+      } catch (error) {
+        throw new HttpError(
+          400,
+          error instanceof Error ? error.message : "Prism needs a valid message.",
+        );
+      }
+      const ephemeralMode = prismCompanionEphemeralMode(
+        request.surface.surfaceId,
+      );
+      const preferences = normalizeEphemeralChatProviderPreferences(
+        user.ephemeral_chat_provider_preferences,
+      );
+      const preferredOnlineModel = user.preferred_online_model?.trim() || null;
+      const onlineProvider: Exclude<ProviderName, "local"> =
+        user.preferred_provider === "anthropic" ||
+        preferredOnlineModel?.toLocaleLowerCase().startsWith("claude")
+          ? "anthropic"
+          : "openai";
+      const providerName = resolvePrismCompanionProvider({
+        surfaceId: request.surface.surfaceId,
+        preferences,
+        globalProvider: user.preferred_provider,
+        onlineProvider,
+      });
+      const model =
+        providerName === "local"
+          ? user.preferred_local_model?.trim() ||
+            defaultModelIdForProvider("local")
+          : preferredOnlineModel || defaultModelIdForProvider(providerName);
+      let openAiApiKey: string | undefined;
+      let anthropicApiKey: string | undefined;
+      if (providerName !== "local") {
+        const userKey = decryptUserKey(userId);
+        if (providerName === "openai") {
+          openAiApiKey =
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+        } else {
+          anthropicApiKey =
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey;
+        }
+      }
+      const provider = providerFactoryOverride(
+        providerName,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const result = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "private",
+            mode: ephemeralMode,
+            surface: "prism-companion",
+            conversationId: request.surface.conversationId ?? null,
+          },
+          () =>
+            chatWithPrismCompanion({
+              db,
+              userId,
+              displayName: user.display_name,
+              surface: request.surface,
+              recoveryMessages: request.recoveryMessages,
+              message: request.message,
+              provider,
+              providerName,
+              model,
+              signal: controller.signal,
+            }),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          message: {
+            id: randomId(),
+            role: "assistant",
+            content: result.content,
+            createdAt: new Date().toISOString(),
+          },
+          actions: result.actions,
+          provider: providerName,
+          model,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) throw error;
+        throw new HttpError(
+          502,
+          error instanceof Error
+            ? error.message
+            : "Prism could not reach the selected model.",
+        );
       } finally {
         ctx.req.off("close", onClose);
       }

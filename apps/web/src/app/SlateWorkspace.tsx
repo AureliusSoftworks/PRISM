@@ -91,6 +91,14 @@ interface SlateWorkspaceProps {
     snapshot: SlateHemisphereSettingsSnapshot | null,
   ) => void;
   hemisphereSettingsUpdate?: SlateHemisphereSettingsUpdate | null;
+  globalCompanionEnabled: boolean;
+  onCompanionContextChange?: (
+    context: {
+      projectId: string;
+      projectTitle: string;
+      sectionId: string | null;
+    } | null,
+  ) => void;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -391,6 +399,8 @@ export default function SlateWorkspace({
   theme,
   onHemisphereSettingsSnapshot,
   hemisphereSettingsUpdate,
+  globalCompanionEnabled,
+  onCompanionContextChange,
 }: SlateWorkspaceProps): React.JSX.Element {
   const { activeMenu, openMenu, closeMenu } = usePrismMenu();
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
@@ -590,6 +600,25 @@ export default function SlateWorkspace({
   useEffect(() => {
     activeSectionRef.current = activeSection;
   }, [activeSection]);
+
+  useEffect(() => {
+    onCompanionContextChange?.(
+      project
+        ? {
+            projectId: project.id,
+            projectTitle: project.title,
+            sectionId: activeSection?.id ?? null,
+          }
+        : null,
+    );
+  }, [activeSection?.id, onCompanionContextChange, project]);
+
+  useEffect(
+    () => () => {
+      onCompanionContextChange?.(null);
+    },
+    [onCompanionContextChange],
+  );
 
   useEffect(() => {
     try {
@@ -902,7 +931,9 @@ export default function SlateWorkspace({
         await Promise.allSettled([
           openReturnSession(projectId),
           loadLivingSummary(projectId),
-          loadCompanionMessages(projectId),
+          ...(globalCompanionEnabled
+            ? []
+            : [loadCompanionMessages(projectId)]),
           loadContinuityConcern(projectId),
           loadRecoveryStatus(projectId),
         ]);
@@ -917,6 +948,7 @@ export default function SlateWorkspace({
       adoptProject,
       clearCompanionBubbles,
       flushPendingManuscriptSave,
+      globalCompanionEnabled,
       loadContinuityConcern,
       loadCompanionMessages,
       loadLivingSummary,
@@ -3735,7 +3767,7 @@ export default function SlateWorkspace({
           </section>
         </div>
       ) : null}
-      {project ? (
+      {project && !globalCompanionEnabled ? (
         <div
           className={styles.companionAnchor}
           data-dock={companionPosition.x < 0.5 ? "left" : "right"}

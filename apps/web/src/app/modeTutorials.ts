@@ -230,9 +230,9 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Talk beside the document",
-        body: "Click the movable rainbow Prism bubble to catch an idea beside the document. Messages render with Markdown, float for a moment, then fade; only the last three can reappear after an accidental close. This is an ephemeral creative exchange, not remembered history: Prism never brings up an earlier message unless you explicitly ask about one still in that tiny recovery buffer. It can advise and brainstorm, but it never edits prose, changes Continuity, or renames the project for you.",
-        clickLabel: "the Prism project companion",
-        targetSelector: '[data-tutorial-target="slate-project-chat"]',
+        body: "Click the movable rainbow Prism orb—or press Option Space on macOS and Control Space on Windows or Linux—to catch an idea without leaving Slate. Messages fade from the canvas, and only the last three can recover in this app session on this surface. That is short recovery, not remembered history. Prism can see the project and section names, not manuscript prose, Continuity, or memories; it never edits prose, and sharing source material always begins with an explicit preview.",
+        clickLabel: "the global Prism companion",
+        targetSelector: '[data-tutorial-target="prism-companion"]',
       },
       {
         heading: "Think in two hemispheres",

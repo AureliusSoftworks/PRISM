@@ -632,6 +632,13 @@ export interface BotcastExperienceProps {
   renderProducerGuestComposer?: (
     state: BotcastProducerGuestComposerState,
   ) => ReactNode;
+  onCompanionContextChange?: (
+    context: {
+      showId: string;
+      episodeId: string | null;
+      botIds: string[];
+    } | null,
+  ) => void;
 }
 
 type BotcastLiveSpeech = {
@@ -1613,6 +1620,7 @@ export function BotcastExperience({
   navigationHeader,
   producerName = "You",
   renderProducerGuestComposer,
+  onCompanionContextChange,
 }: BotcastExperienceProps): React.JSX.Element {
   const { closeMenu, openMenu } = usePrismMenu();
   const eligibleBots = useMemo(
@@ -2531,6 +2539,26 @@ export function BotcastExperience({
   }, [episodeModelDraft, modelOptions]);
 
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
+  useEffect(() => {
+    const visibleEpisode = episode ?? replayEpisode;
+    onCompanionContextChange?.(
+      selectedShow
+        ? {
+            showId: selectedShow.id,
+            episodeId: visibleEpisode?.id ?? null,
+            botIds: Array.from(
+              new Set([
+                selectedShow.hostBotId,
+                ...(visibleEpisode?.guestBotId
+                  ? [visibleEpisode.guestBotId]
+                  : []),
+              ]),
+            ),
+          }
+        : null,
+    );
+    return () => onCompanionContextChange?.(null);
+  }, [episode, onCompanionContextChange, replayEpisode, selectedShow]);
   const handleReplayRecordingChange = useCallback(
     (sourceId: string, recording: ReplayRecordingV1 | null): void => {
       setReplayRecordingsByEpisodeId((current) => {
