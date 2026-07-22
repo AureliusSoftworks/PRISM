@@ -1,8 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   BOT_BATCH_MIXED_LABEL,
@@ -13,9 +10,6 @@ import {
   resolveBotBatchEditState,
   type BotBatchEditValues,
 } from "./botBatchEdit.ts";
-
-const appDir = dirname(fileURLToPath(import.meta.url));
-const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(/\s+/gu, " ");
 
 const botValues = (
   overrides: Partial<BotBatchEditValues> = {}
@@ -72,21 +66,5 @@ describe("bot batch edit helpers", () => {
     assert.deepEqual(buildBotBatchEditPatch(state, { color: "#112233" }), {
       color: "#112233",
     });
-  });
-
-  it("falls back to single-bot patching when the selected-bots route reports bot not found", () => {
-    assert.match(pageSource, /function isBotNotFoundError\(err: unknown\): boolean/);
-    assert.match(
-      pageSource,
-      /async function patchSelectedBotsIndividuallyForBatchEdit/
-    );
-    assert.match(
-      pageSource,
-      /api<\{ bot\?: Bot \}>\(\s*`\/api\/bots\/\$\{encodeURIComponent\(id\)\}`/
-    );
-    assert.match(
-      pageSource,
-      /if \(!isBotNotFoundError\(err\)\) throw err;[\s\S]*result = await patchSelectedBotsIndividuallyForBatchEdit\(ids, patch\);/
-    );
   });
 });

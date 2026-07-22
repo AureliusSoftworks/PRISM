@@ -5,7 +5,7 @@ export const PROJECT_OWNED_ASSET_MANIFEST_PATH =
 export const PROJECT_OWNED_ASSET_BLOB_PREFIX =
   "project-assets/blobs/sha256/" as const;
 
-export type ProjectOwnedAssetOwnerTypeV1 = "signal-show";
+export type ProjectOwnedAssetOwnerTypeV1 = "signal-show" | "coffee-session";
 export type ProjectOwnedAssetMediaTypeV1 = "image" | "audio";
 export type SignalProjectOwnedAssetSlotV1 =
   | "light-studio"
@@ -14,6 +14,10 @@ export type SignalProjectOwnedAssetSlotV1 =
   | "intro-audio"
   | "outdent-audio"
   | "atmosphere-audio";
+export type CoffeeProjectOwnedAssetSlotV1 = "drink-surface";
+export type ProjectOwnedAssetSlotV1 =
+  | SignalProjectOwnedAssetSlotV1
+  | CoffeeProjectOwnedAssetSlotV1;
 
 export interface SignalProjectImageRestoreMetadataV1 {
   schema: "prism-signal-image-restore-v1";
@@ -38,9 +42,22 @@ export interface SignalProjectAudioRestoreMetadataV1 {
   updatedAt: string;
 }
 
+export interface CoffeeProjectImageRestoreMetadataV1 {
+  schema: "prism-coffee-image-restore-v1";
+  sourceImageId: string;
+  prompt: string;
+  revisedPrompt: string | null;
+  size: string;
+  quality: string;
+  provider: string;
+  model: string;
+  createdAt: string;
+}
+
 export type ProjectOwnedAssetRestoreMetadataV1 =
   | SignalProjectImageRestoreMetadataV1
-  | SignalProjectAudioRestoreMetadataV1;
+  | SignalProjectAudioRestoreMetadataV1
+  | CoffeeProjectImageRestoreMetadataV1;
 
 /**
  * Common, owner-addressed contract for durable applet files. Owner-specific
@@ -51,7 +68,7 @@ export type ProjectOwnedAssetRestoreMetadataV1 =
 export interface ProjectOwnedAssetManifestEntryV1 {
   ownerType: ProjectOwnedAssetOwnerTypeV1;
   ownerId: string;
-  logicalSlot: SignalProjectOwnedAssetSlotV1;
+  logicalSlot: ProjectOwnedAssetSlotV1;
   mediaType: ProjectOwnedAssetMediaTypeV1;
   contentType: string;
   checksum: string;

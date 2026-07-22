@@ -322,7 +322,7 @@ describe("coffee cup sprites", () => {
   it("ships every rest and sip sprite as a 500x576 seven-frame sheet", () => {
     const expectedSize = { width: 500, height: 576 };
 
-    for (const color of COFFEE_CUP_SPRITE_COLORS) {
+    for (const color of [...COFFEE_CUP_SPRITE_COLORS, "prism"]) {
       for (const themePrefix of ["", "light_"]) {
         for (const stateSuffix of ["", "_sip"]) {
           const assetName = `coffee_${themePrefix}${color}${stateSuffix}.png`;

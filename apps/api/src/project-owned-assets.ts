@@ -2,10 +2,13 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   PROJECT_OWNED_ASSET_MANIFEST_SCHEMA,
+  normalizeCoffeeSessionSettings,
   projectOwnedAssetBlobArchivePathForChecksum,
+  type CoffeeProjectImageRestoreMetadataV1,
   type ProjectOwnedAssetExportPayloadV1,
   type ProjectOwnedAssetManifestEntryV1,
   type ProjectOwnedAssetManifestV1,
+  type ProjectOwnedAssetSlotV1,
   type SignalProjectAudioRestoreMetadataV1,
   type SignalProjectImageRestoreMetadataV1,
   type SignalProjectOwnedAssetSlotV1,
@@ -79,13 +82,23 @@ interface PreparedProjectImage {
   restoredImageId: string;
   localRelPath: string;
   bytes: Buffer;
-  hostBotId: string;
-  restore: SignalProjectImageRestoreMetadataV1;
+  ownerType: "signal-show" | "coffee-session";
+  ownerId: string;
+  hostBotId: string | null;
+  restore:
+    | SignalProjectImageRestoreMetadataV1
+    | CoffeeProjectImageRestoreMetadataV1;
 }
 
 interface PreparedProjectImageReference {
   showId: string;
   slot: (typeof SIGNAL_IMAGE_SLOTS)[number];
+  sourceImageId: string;
+  restoredImageId: string;
+}
+
+interface PreparedCoffeeImageReference {
+  conversationId: string;
   sourceImageId: string;
   restoredImageId: string;
 }
@@ -101,6 +114,7 @@ interface PreparedProjectAudio {
 export interface PreparedProjectOwnedAssetImport {
   images: PreparedProjectImage[];
   imageReferences: PreparedProjectImageReference[];
+  coffeeImageReferences: PreparedCoffeeImageReference[];
   audio: PreparedProjectAudio[];
   stagedLocalRelPaths: string[];
 }
@@ -111,6 +125,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function optionalTrimmedString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function coffeeDrinkSurfaceImageId(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const settings = normalizeCoffeeSessionSettings(JSON.parse(raw) as unknown);
+    return settings.barRitual?.specialImageId?.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function signalVisualReference(value: unknown): SignalVisualReference | null {
@@ -322,6 +346,76 @@ function exportSignalImageEntry(args: {
   };
 }
 
+function exportCoffeeImageEntry(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  imageId: string;
+  files: Record<string, Uint8Array>;
+}): ProjectOwnedAssetManifestEntryV1 {
+  const row = args.db
+    .prepare(
+      `SELECT id, prompt, revised_prompt, size, quality, provider, model,
+              local_rel_path, created_at
+         FROM images
+        WHERE id = ? AND user_id = ? AND conversation_id = ?
+          AND origin = 'coffee_bar' AND purpose = 'coffee_drink_surface'`,
+    )
+    .get(args.imageId, args.userId, args.conversationId) as
+      | ExportImageRow
+      | undefined;
+  if (!row) {
+    throw new Error(
+      "Account backup cannot include a Coffee drink because its owned image record is unavailable.",
+    );
+  }
+  const localRelPath = row.local_rel_path?.trim();
+  if (!localRelPath) {
+    throw new Error(
+      "Account backup cannot include a Coffee drink because its local file is unavailable.",
+    );
+  }
+  let bytes: Buffer;
+  try {
+    bytes = readGeneratedImageBytes(localRelPath);
+  } catch {
+    throw new Error(
+      "Account backup cannot include a Coffee drink because its local file is missing.",
+    );
+  }
+  if (
+    bytes.byteLength === 0 ||
+    bytes.byteLength > PROJECT_OWNED_IMAGE_MAX_BYTES ||
+    !isPng(bytes)
+  ) {
+    throw new Error(
+      "Account backup cannot include a Coffee drink because its PNG is invalid.",
+    );
+  }
+  const addressed = addDeduplicatedFile(args.files, bytes);
+  return {
+    ownerType: "coffee-session",
+    ownerId: args.conversationId,
+    logicalSlot: "drink-surface",
+    mediaType: "image",
+    contentType: "image/png",
+    checksum: addressed.checksum,
+    byteLength: bytes.byteLength,
+    archivePath: addressed.archivePath,
+    restore: {
+      schema: "prism-coffee-image-restore-v1",
+      sourceImageId: row.id,
+      prompt: row.prompt,
+      revisedPrompt: row.revised_prompt,
+      size: row.size,
+      quality: row.quality,
+      provider: row.provider,
+      model: row.model,
+      createdAt: row.created_at,
+    },
+  };
+}
+
 function exportSignalAudioEntry(args: {
   showId: string;
   showName: string;
@@ -417,6 +511,14 @@ export function exportProjectOwnedAssets(
   const atmosphereAudioByShowId = new Map(
     atmosphereAudioRows.map((row) => [row.show_id, row] as const),
   );
+  const coffeeSessions = db
+    .prepare(
+      `SELECT id, coffee_settings
+         FROM conversations
+        WHERE user_id = ? AND conversation_mode = 'coffee'
+        ORDER BY id`,
+    )
+    .all(userId) as Array<{ id: string; coffee_settings: string | null }>;
   const files: Record<string, Uint8Array> = {};
   const entries: ProjectOwnedAssetManifestEntryV1[] = [];
 
@@ -474,6 +576,20 @@ export function exportProjectOwnedAssets(
         }),
       );
     }
+  }
+
+  for (const session of coffeeSessions) {
+    const imageId = coffeeDrinkSurfaceImageId(session.coffee_settings);
+    if (!imageId) continue;
+    entries.push(
+      exportCoffeeImageEntry({
+        db,
+        userId,
+        conversationId: session.id,
+        imageId,
+        files,
+      }),
+    );
   }
 
   if (entries.length > PROJECT_OWNED_ASSET_MAX_ENTRIES) {
@@ -601,6 +717,25 @@ function normalizeImageRestore(value: unknown): SignalProjectImageRestoreMetadat
   };
 }
 
+function normalizeCoffeeImageRestore(
+  value: unknown,
+): CoffeeProjectImageRestoreMetadataV1 {
+  if (!isRecord(value) || value.schema !== "prism-coffee-image-restore-v1") {
+    throw new Error("Project asset manifest contains invalid Coffee image metadata.");
+  }
+  return {
+    schema: "prism-coffee-image-restore-v1",
+    sourceImageId: requiredString(value.sourceImageId, "source image id", 256, SAFE_ID_PATTERN),
+    prompt: requiredString(value.prompt, "image prompt", 100_000),
+    revisedPrompt: nullableString(value.revisedPrompt, "revised image prompt", 100_000),
+    size: requiredString(value.size, "image size", 40, /^\d{1,6}x\d{1,6}$/u),
+    quality: requiredString(value.quality, "image quality", 120),
+    provider: requiredString(value.provider, "image provider", 120),
+    model: requiredString(value.model, "image model", 500),
+    createdAt: requiredString(value.createdAt, "image timestamp", 100),
+  };
+}
+
 function normalizeAudioRestore(value: unknown): SignalProjectAudioRestoreMetadataV1 {
   if (
     !isRecord(value) ||
@@ -634,22 +769,30 @@ export function normalizeProjectOwnedAssetManifest(
   }
   const seenSlots = new Set<string>();
   const entries = value.entries.map((raw): ProjectOwnedAssetManifestEntryV1 => {
-    if (!isRecord(raw) || raw.ownerType !== "signal-show") {
+    if (
+      !isRecord(raw) ||
+      (raw.ownerType !== "signal-show" && raw.ownerType !== "coffee-session")
+    ) {
       throw new Error("Project asset manifest contains an unsupported owner.");
     }
+    const ownerType = raw.ownerType;
     const ownerId = requiredString(raw.ownerId, "owner id", 256, SAFE_ID_PATTERN);
     const logicalSlot = raw.logicalSlot;
+    const validSignalSlot =
+      logicalSlot === "light-studio" ||
+      logicalSlot === "dark-studio" ||
+      logicalSlot === "logo" ||
+      logicalSlot === "intro-audio" ||
+      logicalSlot === "outdent-audio" ||
+      logicalSlot === "atmosphere-audio";
+    const validCoffeeSlot = logicalSlot === "drink-surface";
     if (
-      logicalSlot !== "light-studio" &&
-      logicalSlot !== "dark-studio" &&
-      logicalSlot !== "logo" &&
-      logicalSlot !== "intro-audio" &&
-      logicalSlot !== "outdent-audio" &&
-      logicalSlot !== "atmosphere-audio"
+      (ownerType === "signal-show" && !validSignalSlot) ||
+      (ownerType === "coffee-session" && !validCoffeeSlot)
     ) {
       throw new Error("Project asset manifest contains an invalid logical slot.");
     }
-    const slotKey = `signal-show\u0000${ownerId}\u0000${logicalSlot}`;
+    const slotKey = `${ownerType}\u0000${ownerId}\u0000${logicalSlot}`;
     if (seenSlots.has(slotKey)) {
       throw new Error("Project asset manifest repeats an owner slot.");
     }
@@ -665,7 +808,7 @@ export function normalizeProjectOwnedAssetManifest(
     if (!expectedPath || archivePath !== expectedPath) {
       throw new Error("Project asset manifest contains an unsafe archive path.");
     }
-    const imageSlot =
+    const imageSlot = ownerType === "coffee-session" ||
       logicalSlot !== "intro-audio" &&
       logicalSlot !== "outdent-audio" &&
       logicalSlot !== "atmosphere-audio";
@@ -681,30 +824,35 @@ export function normalizeProjectOwnedAssetManifest(
       imageSlot ? PROJECT_OWNED_IMAGE_MAX_BYTES : PROJECT_OWNED_AUDIO_MAX_BYTES,
     );
     return {
-      ownerType: "signal-show",
+      ownerType,
       ownerId,
-      logicalSlot,
+      logicalSlot: logicalSlot as ProjectOwnedAssetSlotV1,
       mediaType: imageSlot ? "image" : "audio",
       contentType: imageSlot ? "image/png" : "audio/mpeg",
       checksum,
       byteLength,
       archivePath,
       restore: imageSlot
-        ? normalizeImageRestore(raw.restore)
+        ? ownerType === "coffee-session"
+          ? normalizeCoffeeImageRestore(raw.restore)
+          : normalizeImageRestore(raw.restore)
         : normalizeAudioRestore(raw.restore),
     };
   });
   return { schema: PROJECT_OWNED_ASSET_MANIFEST_SCHEMA, entries };
 }
 
-function entryKey(showId: string, slot: SignalProjectOwnedAssetSlotV1): string {
-  return `${showId}\u0000${slot}`;
+function entryKey(ownerType: string, ownerId: string, slot: string): string {
+  return `${ownerType}\u0000${ownerId}\u0000${slot}`;
 }
 
 function assertBundleMatchesSnapshot(
   snapshot: BackupSnapshot,
   manifest: ProjectOwnedAssetManifestV1,
-): Map<string, { showId: string; hostBotId: string; atmosphereJson: string }> {
+): {
+  showsById: Map<string, { showId: string; hostBotId: string; atmosphereJson: string }>;
+  coffeeById: Map<string, { conversationId: string; sourceImageId: string }>;
+} {
   const shows = snapshot.botcast?.shows ?? [];
   const showsById = new Map(
     shows.map((show) => [
@@ -713,7 +861,10 @@ function assertBundleMatchesSnapshot(
     ] as const),
   );
   const entriesBySlot = new Map(
-    manifest.entries.map((entry) => [entryKey(entry.ownerId, entry.logicalSlot), entry] as const),
+    manifest.entries.map((entry) => [
+      entryKey(entry.ownerType, entry.ownerId, entry.logicalSlot),
+      entry,
+    ] as const),
   );
   const expected = new Set<string>();
 
@@ -723,7 +874,7 @@ function assertBundleMatchesSnapshot(
       const reference = references[slot];
       assertPortableSignalReference(show.name, slot, reference);
       if (!reference.imageId) continue;
-      const key = entryKey(show.id, slot);
+      const key = entryKey("signal-show", show.id, slot);
       expected.add(key);
       const entry = entriesBySlot.get(key);
       if (
@@ -737,14 +888,14 @@ function assertBundleMatchesSnapshot(
       }
     }
     if (show.introAudio) {
-      const key = entryKey(show.id, "intro-audio");
+      const key = entryKey("signal-show", show.id, "intro-audio");
       expected.add(key);
       if (!entriesBySlot.has(key)) {
         throw new Error(`Project asset backup is missing Signal intro audio for “${show.name}”.`);
       }
     }
     if (show.introAudio?.outdent) {
-      const key = entryKey(show.id, "outdent-audio");
+      const key = entryKey("signal-show", show.id, "outdent-audio");
       expected.add(key);
       if (!entriesBySlot.has(key)) {
         throw new Error(
@@ -753,7 +904,7 @@ function assertBundleMatchesSnapshot(
       }
     }
     if (show.atmosphereAudio) {
-      const key = entryKey(show.id, "atmosphere-audio");
+      const key = entryKey("signal-show", show.id, "atmosphere-audio");
       expected.add(key);
       if (!entriesBySlot.has(key)) {
         throw new Error(
@@ -762,13 +913,39 @@ function assertBundleMatchesSnapshot(
       }
     }
   }
-  for (const entry of manifest.entries) {
-    const key = entryKey(entry.ownerId, entry.logicalSlot);
-    if (!showsById.has(entry.ownerId) || !expected.has(key)) {
-      throw new Error("Project asset manifest contains an unreferenced Signal asset.");
+
+  const coffeeById = new Map<string, {
+    conversationId: string;
+    sourceImageId: string;
+  }>();
+  for (const conversation of snapshot.conversations) {
+    const sourceImageId = conversation.coffee?.settings.barRitual?.specialImageId?.trim();
+    if (!sourceImageId) continue;
+    const key = entryKey("coffee-session", conversation.id, "drink-surface");
+    expected.add(key);
+    coffeeById.set(conversation.id, {
+      conversationId: conversation.id,
+      sourceImageId,
+    });
+    const entry = entriesBySlot.get(key);
+    if (
+      !entry ||
+      entry.restore.schema !== "prism-coffee-image-restore-v1" ||
+      entry.restore.sourceImageId !== sourceImageId
+    ) {
+      throw new Error("Project asset backup is missing a Coffee drink surface.");
     }
   }
-  return showsById;
+  for (const entry of manifest.entries) {
+    const key = entryKey(entry.ownerType, entry.ownerId, entry.logicalSlot);
+    const ownerExists = entry.ownerType === "signal-show"
+      ? showsById.has(entry.ownerId)
+      : coffeeById.has(entry.ownerId);
+    if (!ownerExists || !expected.has(key)) {
+      throw new Error("Project asset manifest contains an unreferenced project asset.");
+    }
+  }
+  return { showsById, coffeeById };
 }
 
 export function prepareProjectOwnedAssetImport(
@@ -781,7 +958,7 @@ export function prepareProjectOwnedAssetImport(
   } = {},
 ): PreparedProjectOwnedAssetImport {
   const manifest = normalizeProjectOwnedAssetManifest(bundle.manifest);
-  const showsById = assertBundleMatchesSnapshot(snapshot, manifest);
+  const { showsById, coffeeById } = assertBundleMatchesSnapshot(snapshot, manifest);
   const referencedPaths = new Set(manifest.entries.map((entry) => entry.archivePath));
   const actualPaths = Object.keys(bundle.files);
   if (
@@ -807,8 +984,23 @@ export function prepareProjectOwnedAssetImport(
   const imageMetadataBySourceId = new Map<string, string>();
   const images: PreparedProjectImage[] = [];
   const imageReferences: PreparedProjectImageReference[] = [];
+  const coffeeImageReferences: PreparedCoffeeImageReference[] = [];
   const audio: PreparedProjectAudio[] = [];
   const generatedIds = new Set<string>();
+  const allocateRestoredImageId = (): string => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const candidate = (options.idFactory ?? (() => randomId(12)))();
+      if (
+        SAFE_ID_PATTERN.test(candidate) &&
+        !generatedIds.has(candidate) &&
+        !options.imageIdExists?.(candidate)
+      ) {
+        generatedIds.add(candidate);
+        return candidate;
+      }
+    }
+    throw new Error("Could not allocate a safe restored project image id.");
+  };
 
   for (const entry of manifest.entries) {
     const fileBytes = bundle.files[entry.archivePath];
@@ -824,54 +1016,65 @@ export function prepareProjectOwnedAssetImport(
     if (entry.mediaType === "audio" && !isMpegAudio(fileBytes)) {
       throw new Error("Project asset intro audio is not valid MPEG audio.");
     }
-    const show = showsById.get(entry.ownerId)!;
-    if (entry.restore.schema === "prism-signal-image-restore-v1") {
-      const sourceImageId = entry.restore.sourceImageId;
-      const existingOwner = imageOwnerBySourceId.get(sourceImageId);
-      if (existingOwner && existingOwner !== show.hostBotId) {
-        throw new Error("A Signal image cannot be restored for multiple project owners.");
+    if (
+      entry.restore.schema === "prism-signal-image-restore-v1" ||
+      entry.restore.schema === "prism-coffee-image-restore-v1"
+    ) {
+      const signalImage = entry.restore.schema === "prism-signal-image-restore-v1";
+      const show = signalImage ? showsById.get(entry.ownerId) : undefined;
+      const coffee = !signalImage ? coffeeById.get(entry.ownerId) : undefined;
+      if ((signalImage && (!show || entry.ownerType !== "signal-show")) ||
+          (!signalImage && (!coffee || entry.ownerType !== "coffee-session"))) {
+        throw new Error("Project image owner metadata does not match its project.");
       }
-      imageOwnerBySourceId.set(sourceImageId, show.hostBotId);
+      const sourceImageId = entry.restore.sourceImageId;
+      const ownerKey = signalImage
+        ? `signal-host:${show!.hostBotId}`
+        : `coffee-session:${coffee!.conversationId}`;
+      const existingOwner = imageOwnerBySourceId.get(sourceImageId);
+      if (existingOwner && existingOwner !== ownerKey) {
+        throw new Error("A project image cannot be restored for multiple project owners.");
+      }
+      imageOwnerBySourceId.set(sourceImageId, ownerKey);
       const metadataKey = JSON.stringify(entry.restore);
       const existingMetadata = imageMetadataBySourceId.get(sourceImageId);
       if (existingMetadata && existingMetadata !== metadataKey) {
-        throw new Error("Project asset manifest conflicts on Signal image metadata.");
+        throw new Error("Project asset manifest conflicts on image metadata.");
       }
       imageMetadataBySourceId.set(sourceImageId, metadataKey);
       let restoredImageId = restoredIdBySourceImageId.get(sourceImageId);
       if (!restoredImageId) {
-        for (let attempt = 0; attempt < 100; attempt += 1) {
-          const candidate = (options.idFactory ?? (() => randomId(12)))();
-          if (
-            SAFE_ID_PATTERN.test(candidate) &&
-            !generatedIds.has(candidate) &&
-            !options.imageIdExists?.(candidate)
-          ) {
-            restoredImageId = candidate;
-            break;
-          }
-        }
-        if (!restoredImageId) {
-          throw new Error("Could not allocate a safe restored project image id.");
-        }
-        generatedIds.add(restoredImageId);
+        restoredImageId = allocateRestoredImageId();
         restoredIdBySourceImageId.set(sourceImageId, restoredImageId);
         images.push({
           sourceImageId,
           restoredImageId,
           localRelPath: buildGeneratedImageRelativePath(userId, restoredImageId),
           bytes: Buffer.from(fileBytes),
-          hostBotId: show.hostBotId,
+          ownerType: signalImage ? "signal-show" : "coffee-session",
+          ownerId: entry.ownerId,
+          hostBotId: show?.hostBotId ?? null,
           restore: entry.restore,
         });
       }
-      imageReferences.push({
-        showId: entry.ownerId,
-        slot: entry.logicalSlot as PreparedProjectImageReference["slot"],
-        sourceImageId,
-        restoredImageId,
-      });
+      if (signalImage) {
+        imageReferences.push({
+          showId: entry.ownerId,
+          slot: entry.logicalSlot as PreparedProjectImageReference["slot"],
+          sourceImageId,
+          restoredImageId,
+        });
+      } else {
+        coffeeImageReferences.push({
+          conversationId: entry.ownerId,
+          sourceImageId,
+          restoredImageId,
+        });
+      }
     } else {
+      if (entry.ownerType !== "signal-show" || !showsById.has(entry.ownerId)) {
+        throw new Error("Project audio owner metadata does not match its project.");
+      }
       audio.push({
         showId: entry.ownerId,
         slot: entry.logicalSlot as PreparedProjectAudio["slot"],
@@ -882,7 +1085,13 @@ export function prepareProjectOwnedAssetImport(
     }
   }
 
-  return { images, imageReferences, audio, stagedLocalRelPaths: [] };
+  return {
+    images,
+    imageReferences,
+    coffeeImageReferences,
+    audio,
+    stagedLocalRelPaths: [],
+  };
 }
 
 export function stagePreparedProjectOwnedAssetFiles(
@@ -981,19 +1190,23 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
   userId: string,
   prepared: PreparedProjectOwnedAssetImport,
 ): void {
-  const insertImage = db.prepare(
+  const insertSignalImage = db.prepare(
     `INSERT INTO images
        (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
         prompt, revised_prompt, url, size, quality, provider, model,
         local_rel_path, purpose, created_at)
      VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, 'project_import', ?)`,
   );
+  const insertCoffeeImage = db.prepare(
+    `INSERT INTO images
+       (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+        prompt, revised_prompt, url, size, quality, provider, model,
+        local_rel_path, purpose, created_at)
+     VALUES (?, ?, ?, NULL, '[]', 'coffee_bar', ?, ?, ?, ?, ?, ?, ?, ?,
+             'coffee_drink_surface', ?)`,
+  );
   for (const image of prepared.images) {
-    insertImage.run(
-      image.restoredImageId,
-      userId,
-      image.hostBotId,
-      serializeImageRelatedBotIds([image.hostBotId], image.hostBotId),
+    const sharedValues = [
       image.restore.prompt,
       image.restore.revisedPrompt,
       `/api/images/${encodeURIComponent(image.restoredImageId)}/file`,
@@ -1003,7 +1216,24 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
       image.restore.model,
       image.localRelPath,
       image.restore.createdAt,
-    );
+    ] as const;
+    if (image.ownerType === "coffee-session") {
+      insertCoffeeImage.run(
+        image.restoredImageId,
+        userId,
+        image.ownerId,
+        ...sharedValues,
+      );
+    } else {
+      if (!image.hostBotId) throw new Error("Restored Signal image host is missing.");
+      insertSignalImage.run(
+        image.restoredImageId,
+        userId,
+        image.hostBotId,
+        serializeImageRelatedBotIds([image.hostBotId], image.hostBotId),
+        ...sharedValues,
+      );
+    }
   }
 
   const referencesByShow = new Map<string, PreparedProjectImageReference[]>();
@@ -1021,6 +1251,35 @@ export function applyPreparedProjectOwnedAssetsWithinTransaction(
     db.prepare(
       "UPDATE botcast_shows SET atmosphere_json = ? WHERE id = ? AND user_id = ?",
     ).run(remapped, showId, userId);
+  }
+
+  for (const reference of prepared.coffeeImageReferences) {
+    const row = db
+      .prepare("SELECT coffee_settings FROM conversations WHERE id = ? AND user_id = ?")
+      .get(reference.conversationId, userId) as
+        | { coffee_settings: string | null }
+        | undefined;
+    if (!row) throw new Error("Restored Coffee session owner is missing.");
+    const settings = normalizeCoffeeSessionSettings(
+      row.coffee_settings ? JSON.parse(row.coffee_settings) as unknown : undefined,
+    );
+    const ritual = settings.barRitual;
+    if (!ritual || ritual.specialImageId !== reference.sourceImageId) {
+      throw new Error("Restored Coffee drink reference does not match its session.");
+    }
+    db.prepare(
+      "UPDATE conversations SET coffee_settings = ? WHERE id = ? AND user_id = ?",
+    ).run(
+      JSON.stringify({
+        ...settings,
+        barRitual: {
+          ...ritual,
+          specialImageId: reference.restoredImageId,
+        },
+      }),
+      reference.conversationId,
+      userId,
+    );
   }
 
   const insertIntroAudio = db.prepare(

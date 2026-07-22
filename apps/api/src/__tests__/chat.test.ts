@@ -427,6 +427,14 @@ describe("Coffee continuity context for private chats", () => {
       ),
       true
     );
+    const modelFacingPrompt = chatCalls
+      .flat()
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n\n");
+    assert.match(modelFacingPrompt, /PRISM is local-first, self-hosted AI workspace software/u);
+    assert.match(modelFacingPrompt, /not a corporation, employer, or corporate network/u);
+    assert.match(modelFacingPrompt, /Do not guess or claim which provider/u);
   });
 
   it("formats Coffee continuity as summary-level context, not transcript recall", () => {

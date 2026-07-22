@@ -1183,7 +1183,9 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(pageSource, /What makes this bot special\?/u);
   assert.match(pageSource, /Create Power/u);
-  assert.match(pageSource, /Reroll sigil/u);
+  assert.match(pageSource, /<BotPowerRune power=\{\{ \.\.\.power, sigil \}\} size=\{64\} \/>/u);
+  assert.match(pageSource, /Reroll rune/u);
+  assert.doesNotMatch(pageSource, /BOT_POWER_SIGIL_GLYPHS/u);
   assert.match(pageSource, /Pop Power\?/u);
   assert.match(pageSource, /\/api\/bot-powers\/compile/);
   assert.match(cssSource, /\.botPowersPanel/);

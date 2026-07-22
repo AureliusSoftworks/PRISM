@@ -622,6 +622,83 @@ describe("API request integration", () => {
     fetchRecorder.calls.length = 0;
   });
 
+  it("runs the Coffee bar ritual and blocks special drinks in LOCAL mode without egress", async () => {
+    const client = createClient();
+    const email = "coffee-bar-local@example.com";
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({ username: email, password: "coffee-bar-local-password" }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const now = "2026-07-21T18:00:00.000Z";
+    const botIds = ["bar-table-a", "bar-table-b", "barista-cameo"];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+    );
+    insertBot.run(botIds[0], userId, "Avery", "Practical and warm.", now, now);
+    insertBot.run(botIds[1], userId, "Blake", "Curious and concise.", now, now);
+    insertBot.run(botIds[2], userId, "Casey", "A calm host.", now, now);
+
+    const created = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds.slice(0, 2), initialTopic: "A small ritual" }),
+    );
+    const createdPayload = await json(created);
+    assert.equal(created.status, 200, JSON.stringify(createdPayload));
+    const conversationId = String(createdPayload.conversation.id);
+    assert.equal(
+      createdPayload.conversation.coffeeSettings.barRitual.serviceBot.id,
+      botIds[2],
+    );
+
+    const fetchCount = fetchRecorder.calls.length;
+    const blocked = await client.request(
+      `/api/coffee/sessions/${conversationId}/bar/special`,
+      jsonInit({
+        orderText: "a lavender moon cappuccino",
+        idempotencyKey: "local-attempt",
+        preferredProvider: "local",
+      }),
+    );
+    const blockedPayload = await json(blocked);
+    assert.equal(blocked.status, 409, JSON.stringify(blockedPayload));
+    assert.match(blockedPayload.error, /house coffee or make the rounds/i);
+    assert.equal(fetchRecorder.calls.length, fetchCount);
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM images WHERE user_id = ? AND conversation_id = ?",
+      ).get(userId, conversationId) as { count: number }).count,
+      0,
+    );
+
+    const house = await client.request(
+      `/api/coffee/sessions/${conversationId}/bar/house`,
+      { method: "POST" },
+    );
+    const housePayload = await json(house);
+    assert.equal(house.status, 200, JSON.stringify(housePayload));
+    assert.equal(housePayload.conversation.coffeeSettings.barRitual.role, "cup");
+    assert.equal(housePayload.conversation.coffeeSettings.barRitual.drink, "house");
+    assert.ok(housePayload.conversation.coffeeSettings.barRitual.playerCup);
+
+    const second = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds.slice(0, 2), initialTopic: "Another round" }),
+    );
+    const secondPayload = await json(second);
+    const pot = await client.request(
+      `/api/coffee/sessions/${String(secondPayload.conversation.id)}/bar/role`,
+      jsonInit({ role: "pot" }),
+    );
+    const potPayload = await json(pot);
+    assert.equal(pot.status, 200, JSON.stringify(potPayload));
+    assert.equal(potPayload.conversation.coffeeSettings.barRitual.role, "pot");
+    assert.equal(potPayload.conversation.coffeeSettings.barRitual.playerCup, null);
+  });
+
   it("forwards exact attendance through saved-group Coffee routes", async () => {
     const client = createClient();
     const email = "coffee-force-attendance@example.com";
@@ -2351,6 +2428,18 @@ describe("API request integration", () => {
          (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
        VALUES (?, ?, ?, 'host', ?, ?, NULL, ?)`,
     ).run(
+      "signal-starred-voice-message",
+      userId,
+      onlineEpisodeId,
+      "signal-voice-host",
+      "That part surprised me. *burp* Excuse me.",
+      now,
+    );
+    db.prepare(
+      `INSERT INTO botcast_messages
+         (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
+       VALUES (?, ?, ?, 'host', ?, ?, NULL, ?)`,
+    ).run(
       "signal-online-mood-voice-message",
       userId,
       onlineEpisodeId,
@@ -2477,6 +2566,27 @@ describe("API request integration", () => {
       assert.equal(
         providerBody.text,
         "[sighs] Welcome to the difficult part.",
+      );
+      const beforeStarredCalls = fetchRecorder.calls.length;
+      const starredVoice = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          signalMessageId: "signal-starred-voice-message",
+          elevenLabsText: "client presence flag",
+          mode: "english",
+          engine: "elevenlabs",
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "signal-provider-voice",
+          },
+        }),
+      );
+      assert.equal(starredVoice.status, 200);
+      assert.equal(
+        JSON.parse(
+          String(fetchRecorder.calls[beforeStarredCalls]?.init?.body),
+        ).text,
+        "That part surprised me. [burps] Excuse me.",
       );
       const beforeInterruptedPrimaryCalls = fetchRecorder.calls.length;
       const interruptedPrimaryVoice = await client.request(

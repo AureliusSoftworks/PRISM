@@ -511,6 +511,7 @@ export function stopBottishVoice(
 ): void {
   generation += 1;
   stopRealtimeVoiceAudio();
+  stopRealtimeVoiceAudio("presence");
   stopScheduledNodes();
   if (!options.preservePreparedMedia) releasePreparedMedia();
   queue = Promise.resolve();

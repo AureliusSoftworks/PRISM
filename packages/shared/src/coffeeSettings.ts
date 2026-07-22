@@ -12,6 +12,70 @@ export type CoffeeCrossTalkLevel = "rare" | "normal" | "chatty" | "pileup";
 /** How much transcript the models may lean on. `recent` is alias for this-session until cross-thread recall exists. */
 export type CoffeeMemoryCallbacks = "now" | "this-session" | "recent";
 
+export type CoffeeBarRole = "cup" | "pot";
+export type CoffeeBarDrink = "house" | "special";
+export type CoffeeBarSpecialImageStatus = "idle" | "generating" | "ready" | "failed";
+export type CoffeeFarewellFuseKind = "empty-cup" | "no-vessel";
+
+export interface CoffeeBarServiceBotSnapshot {
+  id: string | null;
+  name: string;
+  color: string | null;
+  glyph: string | null;
+  fallback: boolean;
+}
+
+export interface CoffeePlayerCupState {
+  fillId: string;
+  filledAt: string;
+  topOffCount: number;
+  sipCount: number;
+}
+
+export interface CoffeeWaiterOfferState {
+  id: string;
+  offeredAt: string;
+  status: "open" | "accepted" | "declined";
+}
+
+export interface CoffeeBotWaiterVisitState {
+  id: string;
+  targetBotId: string;
+  targetName: string;
+  offeredAt: string;
+  afterReplyCount: number;
+  status: "accepted" | "declined";
+}
+
+export interface CoffeeFarewellFuseState {
+  kind: CoffeeFarewellFuseKind;
+  fillId: string;
+  drainedAt: string;
+  createdReplyCount: number;
+  dueAfterReplyCount: number;
+}
+
+/** Session-only persisted Coffee ritual and physical pacing state. */
+export interface CoffeeBarRitualState {
+  version: 1;
+  serviceBot: CoffeeBarServiceBotSnapshot;
+  role: CoffeeBarRole | null;
+  drink: CoffeeBarDrink | null;
+  orderText: string | null;
+  clarificationUsed: boolean;
+  generationAttemptId: string | null;
+  specialImageStatus: CoffeeBarSpecialImageStatus;
+  specialImageId: string | null;
+  playerCup: CoffeePlayerCupState | null;
+  waiterOffers: number;
+  activeWaiterOffer: CoffeeWaiterOfferState | null;
+  lastBotWaiterVisit: CoffeeBotWaiterVisitState | null;
+  liveStartedAt: string | null;
+  hardStopAt: string | null;
+  visitStartedAtByBotId: Record<string, string>;
+  farewellFusesByBotId: Record<string, CoffeeFarewellFuseState>;
+}
+
 export interface CoffeeSessionSettings {
   responseLength: CoffeeResponseLengthPreset;
   /** 0 = slower pauses, 50 = neutral, 100 = snappier (matches UI slider). */
@@ -25,6 +89,8 @@ export interface CoffeeSessionSettings {
   stayOnThread: boolean;
   givePlayerLastWord: boolean;
   memoryCallbacks: CoffeeMemoryCallbacks;
+  /** Session-only. Groups and presets omit this ritual snapshot. */
+  barRitual?: CoffeeBarRitualState;
 }
 
 /** Defaults are the lively middle-ground Coffee table, with chaos still opt-in. */
@@ -67,6 +133,146 @@ const TABLE_ENERGY_SET = new Set<CoffeeTableEnergy>([
 const CROSS_TALK_SET = new Set<CoffeeCrossTalkLevel>(["rare", "normal", "chatty", "pileup"]);
 
 const MEMORY_SET = new Set<CoffeeMemoryCallbacks>(["now", "this-session", "recent"]);
+
+export const COFFEE_AUTO_HARD_CAP_MS = 30 * 60 * 1000;
+export const COFFEE_BAR_ORDER_MAX_LENGTH = 240;
+
+function compactText(value: unknown, maxLength: number): string {
+  return typeof value === "string"
+    ? value.trim().replace(/\s+/gu, " ").slice(0, maxLength)
+    : "";
+}
+
+function isoString(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function normalizeCoffeeBarRitual(value: unknown): CoffeeBarRitualState | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const serviceRaw = raw.serviceBot && typeof raw.serviceBot === "object" && !Array.isArray(raw.serviceBot)
+    ? raw.serviceBot as Record<string, unknown>
+    : {};
+  const serviceBot: CoffeeBarServiceBotSnapshot = {
+    id: compactText(serviceRaw.id, 180) || null,
+    name: compactText(serviceRaw.name, 100) || "PRISM Barista",
+    color: compactText(serviceRaw.color, 40) || null,
+    glyph: compactText(serviceRaw.glyph, 80) || null,
+    fallback: serviceRaw.fallback === true,
+  };
+  const role = raw.role === "cup" || raw.role === "pot" ? raw.role : null;
+  const drink = raw.drink === "house" || raw.drink === "special" ? raw.drink : null;
+  const specialImageStatus = raw.specialImageStatus === "generating" ||
+    raw.specialImageStatus === "ready" || raw.specialImageStatus === "failed"
+    ? raw.specialImageStatus
+    : "idle";
+  const playerCupRaw = raw.playerCup && typeof raw.playerCup === "object" && !Array.isArray(raw.playerCup)
+    ? raw.playerCup as Record<string, unknown>
+    : null;
+  const playerCup = playerCupRaw && compactText(playerCupRaw.fillId, 180) && isoString(playerCupRaw.filledAt)
+    ? {
+        fillId: compactText(playerCupRaw.fillId, 180),
+        filledAt: isoString(playerCupRaw.filledAt)!,
+        topOffCount: Math.max(0, Math.min(100, Math.floor(Number(playerCupRaw.topOffCount) || 0))),
+        sipCount: Math.max(0, Math.min(100, Math.floor(Number(playerCupRaw.sipCount) || 0))),
+      }
+    : null;
+  const waiterRaw = raw.activeWaiterOffer && typeof raw.activeWaiterOffer === "object" && !Array.isArray(raw.activeWaiterOffer)
+    ? raw.activeWaiterOffer as Record<string, unknown>
+    : null;
+  const activeWaiterOffer: CoffeeWaiterOfferState | null = waiterRaw && compactText(waiterRaw.id, 180) && isoString(waiterRaw.offeredAt)
+    ? {
+        id: compactText(waiterRaw.id, 180),
+        offeredAt: isoString(waiterRaw.offeredAt)!,
+        status: waiterRaw.status === "accepted" || waiterRaw.status === "declined"
+          ? waiterRaw.status
+          : "open",
+      }
+    : null;
+  const botVisitRaw = raw.lastBotWaiterVisit && typeof raw.lastBotWaiterVisit === "object" && !Array.isArray(raw.lastBotWaiterVisit)
+    ? raw.lastBotWaiterVisit as Record<string, unknown>
+    : null;
+  const lastBotWaiterVisit: CoffeeBotWaiterVisitState | null = botVisitRaw &&
+    compactText(botVisitRaw.id, 180) && compactText(botVisitRaw.targetBotId, 180) &&
+    compactText(botVisitRaw.targetName, 100) && isoString(botVisitRaw.offeredAt)
+    ? {
+        id: compactText(botVisitRaw.id, 180),
+        targetBotId: compactText(botVisitRaw.targetBotId, 180),
+        targetName: compactText(botVisitRaw.targetName, 100),
+        offeredAt: isoString(botVisitRaw.offeredAt)!,
+        afterReplyCount: Math.max(0, Math.floor(Number(botVisitRaw.afterReplyCount) || 0)),
+        status: botVisitRaw.status === "declined" ? "declined" : "accepted",
+      }
+    : null;
+  const farewellFusesByBotId: Record<string, CoffeeFarewellFuseState> = {};
+  const visitStartedAtByBotId: Record<string, string> = {};
+  const visitStartRaw = raw.visitStartedAtByBotId && typeof raw.visitStartedAtByBotId === "object" && !Array.isArray(raw.visitStartedAtByBotId)
+    ? raw.visitStartedAtByBotId as Record<string, unknown>
+    : {};
+  for (const [rawBotId, value] of Object.entries(visitStartRaw).slice(0, 12)) {
+    const botId = compactText(rawBotId, 180);
+    const startedAt = isoString(value);
+    if (botId && startedAt) visitStartedAtByBotId[botId] = startedAt;
+  }
+  const fuseRaw = raw.farewellFusesByBotId && typeof raw.farewellFusesByBotId === "object" && !Array.isArray(raw.farewellFusesByBotId)
+    ? raw.farewellFusesByBotId as Record<string, unknown>
+    : {};
+  for (const [rawBotId, value] of Object.entries(fuseRaw).slice(0, 12)) {
+    const botId = compactText(rawBotId, 180);
+    if (!botId || !value || typeof value !== "object" || Array.isArray(value)) continue;
+    const fuse = value as Record<string, unknown>;
+    const fillId = compactText(fuse.fillId, 180);
+    const drainedAt = isoString(fuse.drainedAt);
+    const createdReplyCount = Math.max(0, Math.floor(Number(fuse.createdReplyCount) || 0));
+    const dueAfterReplyCount = Math.max(createdReplyCount + 1, Math.floor(Number(fuse.dueAfterReplyCount) || 0));
+    if (!fillId || !drainedAt) continue;
+    farewellFusesByBotId[botId] = {
+      kind: fuse.kind === "no-vessel" ? "no-vessel" : "empty-cup",
+      fillId,
+      drainedAt,
+      createdReplyCount,
+      dueAfterReplyCount: Math.min(createdReplyCount + 2, dueAfterReplyCount),
+    };
+  }
+  return {
+    version: 1,
+    serviceBot,
+    role,
+    drink,
+    orderText: compactText(raw.orderText, COFFEE_BAR_ORDER_MAX_LENGTH) || null,
+    clarificationUsed: raw.clarificationUsed === true,
+    generationAttemptId: compactText(raw.generationAttemptId, 180) || null,
+    specialImageStatus,
+    specialImageId: compactText(raw.specialImageId, 180) || null,
+    playerCup,
+    waiterOffers: Math.max(0, Math.min(100, Math.floor(Number(raw.waiterOffers) || 0))),
+    activeWaiterOffer,
+    lastBotWaiterVisit,
+    liveStartedAt: isoString(raw.liveStartedAt),
+    hardStopAt: isoString(raw.hardStopAt),
+    visitStartedAtByBotId,
+    farewellFusesByBotId,
+  };
+}
+
+export function coffeeFarewellReplyDelay(seed: string): 2 | 3 {
+  let hash = 2166136261;
+  for (const char of seed) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) % 2 === 0 ? 2 : 3;
+}
+
+/** Removes session ritual state before settings are saved as a reusable group/preset. */
+export function coffeeReusableSessionSettings(
+  settings: CoffeeSessionSettings,
+): CoffeeSessionSettings {
+  const { barRitual: _barRitual, ...reusable } = settings;
+  return reusable;
+}
 
 function clampInt(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;
@@ -131,6 +337,9 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
     stayOnThread,
     givePlayerLastWord,
     memoryCallbacks,
+    ...(normalizeCoffeeBarRitual(o.barRitual)
+      ? { barRitual: normalizeCoffeeBarRitual(o.barRitual) }
+      : {}),
   };
 }
 

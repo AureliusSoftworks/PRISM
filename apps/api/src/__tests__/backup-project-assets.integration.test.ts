@@ -9,6 +9,7 @@ import { strToU8, zipSync } from "fflate";
 import { getAppConfig } from "@localai/config";
 import {
   PROJECT_OWNED_ASSET_MANIFEST_PATH,
+  normalizeCoffeeSessionSettings,
   type ProjectOwnedAssetExportPayloadV1,
 } from "@localai/shared";
 import {
@@ -139,6 +140,34 @@ function insertImage(args: {
   return localRelPath;
 }
 
+function insertCoffeeImage(args: {
+  db: ReturnType<typeof createTestDatabase>;
+  userId: string;
+  conversationId: string;
+  imageId: string;
+  bytes: Buffer;
+}): string {
+  const localRelPath = buildGeneratedImageRelativePath(args.userId, args.imageId);
+  writeGeneratedImageBytes(localRelPath, args.bytes);
+  args.db.prepare(
+    `INSERT INTO images
+       (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+        prompt, revised_prompt, url, size, quality, provider, model,
+        local_rel_path, purpose, created_at)
+     VALUES (?, ?, ?, NULL, '[]', 'coffee_bar', ?, NULL, ?, '1024x1024',
+             'medium', 'openai', 'gpt-image-2', ?, 'coffee_drink_surface', ?)`,
+  ).run(
+    args.imageId,
+    args.userId,
+    args.conversationId,
+    "Top-down lavender foam surface",
+    `/api/images/${args.imageId}/file`,
+    localRelPath,
+    "2026-07-16T16:00:00.000Z",
+  );
+  return localRelPath;
+}
+
 function archiveFromExport(payload: Record<string, any>): Uint8Array {
   const projectOwnedAssets = payload.projectOwnedAssets as ProjectOwnedAssetExportPayloadV1;
   const files: Record<string, Uint8Array> = {
@@ -205,6 +234,14 @@ describe("portable project-owned account backup assets", () => {
       0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07,
       0x52, 0x4f, 0x4f, 0x4d, 0x54, 0x4f, 0x4e, 0x45,
     ]);
+    const coffeeBytes = await sharp({
+      create: {
+        width: 5,
+        height: 5,
+        channels: 4,
+        background: { r: 158, g: 109, b: 180, alpha: 1 },
+      },
+    }).png().toBuffer();
 
     const sourceDb = createTestDatabase();
     const sourceServer = await startTestServer(sourceDb, "prism_backup_source");
@@ -331,15 +368,61 @@ describe("portable project-owned account backup assets", () => {
                  'Portable room tone', 'audio/mpeg', ?, 30000, 2, ?, ?)`,
       ).run(sourceUserId, atmosphereBytes, now, now);
 
+      const coffeeSettings = normalizeCoffeeSessionSettings({
+        barRitual: {
+          serviceBot: {
+            id: null,
+            name: "PRISM Barista",
+            color: null,
+            glyph: "coffee",
+            fallback: true,
+          },
+          role: "cup",
+          drink: "special",
+          orderText: "lavender foam",
+          generationAttemptId: "portable-attempt",
+          specialImageStatus: "ready",
+          specialImageId: "coffee-surface",
+          playerCup: {
+            fillId: "portable-fill",
+            filledAt: now,
+            topOffCount: 0,
+            sipCount: 2,
+          },
+          liveStartedAt: now,
+          hardStopAt: "2026-07-16T16:30:00.000Z",
+          visitStartedAtByBotId: { "signal-host": now },
+        },
+      });
+      sourceDb.prepare(
+        `INSERT INTO conversations
+           (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
+            coffee_duration_minutes, created_at, updated_at)
+         VALUES ('portable-coffee', ?, 'Portable Coffee', 'coffee', ?, ?, NULL, ?, ?)`,
+      ).run(
+        sourceUserId,
+        JSON.stringify(["signal-host", null, null, null, null]),
+        JSON.stringify(coffeeSettings),
+        now,
+        now,
+      );
+      insertCoffeeImage({
+        db: sourceDb,
+        userId: sourceUserId,
+        conversationId: "portable-coffee",
+        imageId: "coffee-surface",
+        bytes: coffeeBytes,
+      });
+
       const exportedResponse = await sourceClient.request("/api/backup/export");
       const exported = await json(exportedResponse);
       assert.equal(exportedResponse.status, 200, JSON.stringify(exported));
       const projectAssets = exported.projectOwnedAssets as ProjectOwnedAssetExportPayloadV1;
-      assert.equal(projectAssets.manifest.entries.length, 6);
-      assert.equal(Object.keys(projectAssets.files).length, 5, "identical studio bytes deduplicate");
+      assert.equal(projectAssets.manifest.entries.length, 7);
+      assert.equal(Object.keys(projectAssets.files).length, 6, "identical studio bytes deduplicate");
       assert.deepEqual(
         projectAssets.manifest.entries
-          .filter((entry) => entry.mediaType === "image")
+          .filter((entry) => entry.ownerType === "signal-show" && entry.mediaType === "image")
           .map((entry) => entry.restore.schema === "prism-signal-image-restore-v1"
             ? entry.restore.sourceImageId
             : "")
@@ -349,6 +432,17 @@ describe("portable project-owned account backup assets", () => {
           "active-logo-upload",
           "active-night-generated",
         ],
+      );
+      const exportedCoffee = projectAssets.manifest.entries.find(
+        (entry) => entry.ownerType === "coffee-session",
+      );
+      assert.equal(exportedCoffee?.logicalSlot, "drink-surface");
+      assert.equal(exportedCoffee?.restore.schema, "prism-coffee-image-restore-v1");
+      assert.equal(
+        exportedCoffee?.restore.schema === "prism-coffee-image-restore-v1"
+          ? exportedCoffee.restore.sourceImageId
+          : null,
+        "coffee-surface",
       );
       assert.equal(
         "audioBase64" in exported.snapshot.botcast.shows[0].introAudio,
@@ -394,7 +488,7 @@ describe("portable project-owned account backup assets", () => {
       assert.equal(importedResponse.status, 200, JSON.stringify(imported));
       assert.equal(
         (targetDb.prepare("SELECT COUNT(*) AS count FROM images").get() as { count: number }).count,
-        3,
+        4,
       );
       assert.equal(
         targetDb.prepare("SELECT id FROM images WHERE id IN ('replaced-generation', 'gallery-only')").get(),
@@ -437,6 +531,35 @@ describe("portable project-owned account backup assets", () => {
             : studioBytes;
         assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected);
       }
+      const restoredCoffeeRow = targetDb.prepare(
+        "SELECT coffee_settings FROM conversations WHERE id = 'portable-coffee'",
+      ).get() as { coffee_settings: string };
+      const restoredCoffee = normalizeCoffeeSessionSettings(
+        JSON.parse(restoredCoffeeRow.coffee_settings),
+      );
+      const restoredCoffeeImageId = restoredCoffee.barRitual?.specialImageId;
+      assert.ok(restoredCoffeeImageId);
+      assert.notEqual(restoredCoffeeImageId, "coffee-surface");
+      const restoredCoffeeImage = targetDb.prepare(
+        "SELECT conversation_id, origin, purpose FROM images WHERE id = ?",
+      ).get(restoredCoffeeImageId) as {
+        conversation_id: string;
+        origin: string;
+        purpose: string;
+      };
+      assert.deepEqual({ ...restoredCoffeeImage }, {
+        conversation_id: "portable-coffee",
+        origin: "coffee_bar",
+        purpose: "coffee_drink_surface",
+      });
+      const coffeeResponse = await targetClient.request(
+        `/api/images/${encodeURIComponent(restoredCoffeeImageId)}/file`,
+      );
+      assert.equal(coffeeResponse.status, 200);
+      assert.deepEqual(
+        Buffer.from(await coffeeResponse.arrayBuffer()),
+        coffeeBytes,
+      );
       const introResponse = await targetClient.request(
         "/api/botcast/shows/signal-show/intro-audio",
       );

@@ -58,27 +58,27 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.25");
-    assert.equal(PRISM_APPLETS.zen.version, "1.24");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.24");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.45");
+    assert.equal(PRISM_APPLETS.chat.version, "1.26");
+    assert.equal(PRISM_APPLETS.zen.version, "1.25");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.25");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.46");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.24");
+    assert.equal(PRISM_APPLETS.story.version, "0.25");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.25");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.24");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.24");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.45");
-    assert.equal(prismAppletVersionLabel("story"), "v0.24");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.26");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.25");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.25");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.46");
+    assert.equal(prismAppletVersionLabel("story"), "v0.25");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });
 
-  it("declares holder-only public designation support for every applet", () => {
+  it("declares holder-scoped bot-naming support for every applet", () => {
     assert.deepEqual(Object.keys(BOT_POWER_DESIGNATION_MODE_POLICY), Object.keys(PRISM_APPLETS));
     assert.deepEqual(BOT_POWER_DESIGNATION_MODE_POLICY, {
-      chat: "direct",
-      zen: "direct",
+      chat: "cue",
+      zen: "cue",
       arena: "deferred",
       polling: "deferred",
       coffee: "direct",

@@ -66,6 +66,9 @@ import type {
   CoffeeBotSocialSnapshot,
   CoffeeCupTopOffSnapshot,
   CoffeeArrivalScenario,
+  CoffeeBarDrink,
+  CoffeeBarRitualState,
+  CoffeeBarRole,
   CoffeeGroup,
   CoffeeGroupModelChoice,
   CoffeeGroupStarterTopicsByBotId,
@@ -119,7 +122,7 @@ import {
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
   botPowerObserverProjectionFromEffectsV1,
-  botPowerDisplayNameV1,
+  botPowerTargetNameFromEffectsV1,
   botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botNaturalAddressAliasesV1,
@@ -130,6 +133,8 @@ import {
   createBotIdentityMirrorStateV1,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
+  COFFEE_AUTO_HARD_CAP_MS,
+  COFFEE_BAR_ORDER_MAX_LENGTH,
   COFFEE_TOPIC_MAX_LENGTH,
   DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   COFFEE_POLL_FINALIZE_REMAINING_MS,
@@ -143,7 +148,6 @@ import {
   coffeeCupPromptCueForStatus,
   coffeeCupSeedWithTempoRole,
   coffeeCupSipLikelihoodForProgress,
-  coffeeCupStatusForFillAndTemperatureProgress,
   coffeeCupStatusForProgress,
   coffeeCupTempoRoleForBot,
   coffeeCupTopOffSnapshotForProgress,
@@ -152,6 +156,8 @@ import {
   coffeeSocialSnapshotToPrismMoodState,
   derivePrismMoodKey,
   coffeeEffectiveHistoryLimit,
+  coffeeFarewellReplyDelay,
+  coffeeReusableSessionSettings,
   coffeeReplyLengthCaps,
   coffeeRouterTailMessageCount,
   coffeeRouterTemperature,
@@ -214,6 +220,8 @@ import {
   coffeePowerQuietTurnIsIgnored,
   coffeePowerBotVisibleTo,
   coffeePowerCupRateMultiplier,
+  coffeePowerStayRateMultiplier,
+  coffeePowerVesselMode,
   coffeePowerEchoSourceForTurn,
   coffeePowerHistoryForSpeaker,
   coffeePowerHistoryLimitForSpeaker,
@@ -361,8 +369,6 @@ export interface CoffeeBotProfile {
   semanticFacetsRaw?: string | null;
   semanticFacetsSourceHash?: string | null;
   semanticFacetsUpdatedAt?: string | null;
-  /** Stored raw contract; session planning still freezes only ready effects. */
-  powers?: unknown;
 }
 
 export interface CoffeeStarterMemoryContextEntry {
@@ -1435,13 +1441,21 @@ export function buildCoffeeRequiredDepartureReply(args: {
   historyLength: number;
   avoidTexts?: readonly string[];
   maxChars: number;
+  neutral?: boolean;
 }): string {
-  const options = [
-    "*stands from the table* I need to get going now.",
-    "*pushes the chair back* Thanks for the coffee, everyone; I should get going.",
-    "*sets the cup aside* I need to leave the table.",
-    "*rises with a tight nod* I have to go.",
-  ];
+  const options = args.neutral
+    ? [
+        "*stands from the table* I need to get going now.",
+        "*pushes the chair back* Thanks, everyone; I should get going.",
+        "*rises with a small nod* I need to leave the table.",
+        "*stands with a tight nod* I have to go.",
+      ]
+    : [
+        "*stands from the table* I need to get going now.",
+        "*pushes the chair back* Thanks for the coffee, everyone; I should get going.",
+        "*sets the cup aside* I need to leave the table.",
+        "*rises with a tight nod* I have to go.",
+      ];
   const seed = `${args.conversationId}:${args.speaker.id}:${args.historyLength}:required-departure`;
   const startIndex = Math.floor(stableUnitValue(seed) * options.length) % options.length;
   const avoidKeys = new Set((args.avoidTexts ?? []).map(coffeeReplyRepeatKey).filter(Boolean));
@@ -6125,16 +6139,12 @@ type CoffeeBotProfileRow = {
   semantic_facets: string | null;
   semantic_facets_source_hash: string | null;
   semantic_facets_updated_at: string | null;
-  powers_json: string | null;
 };
 
 function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
-  const savedName = typeof row.name === "string" && row.name.trim().length > 0
-    ? row.name.trim()
-    : "Unnamed bot";
   return {
     id: row.id,
-    name: botPowerDisplayNameV1(savedName, row.powers_json),
+    name: typeof row.name === "string" && row.name.trim().length > 0 ? row.name.trim() : "Unnamed bot",
     systemPrompt: typeof row.system_prompt === "string" ? row.system_prompt : "",
     cloneFamilyId: row.clone_family_id ?? null,
     color: row.color ?? null,
@@ -6190,7 +6200,6 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     semanticFacetsRaw: row.semantic_facets ?? null,
     semanticFacetsSourceHash: row.semantic_facets_source_hash ?? null,
     semanticFacetsUpdatedAt: row.semantic_facets_updated_at ?? null,
-    powers: row.powers_json,
   };
 }
 
@@ -6242,8 +6251,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("top_p")},
               ${selectOptionalBotColumn("top_k")},
               ${selectOptionalBotColumn("repetition_penalty")},
-              semantic_facets, semantic_facets_source_hash, semantic_facets_updated_at,
-              powers_json
+              semantic_facets, semantic_facets_source_hash, semantic_facets_updated_at
          FROM bots
         WHERE id IN (${placeholders})
           AND (user_id = ? OR visibility = 'public')`
@@ -6746,7 +6754,9 @@ export function createCoffeePreset(
 ): CoffeePreset {
   const now = new Date().toISOString();
   const presetId = randomId(12);
-  const settings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  const settings = coffeeReusableSessionSettings(
+    normalizeCoffeeSessionSettings(input.coffeeSettings),
+  );
   const name = normalizeCoffeePresetName(input.name, "Coffee Preset");
   db.prepare(
     `INSERT INTO coffee_presets (id, user_id, name, coffee_settings, created_at, updated_at)
@@ -6772,8 +6782,8 @@ export function updateCoffeePreset(
   const name = input.name !== undefined ? normalizeCoffeePresetName(input.name, row.name) : row.name;
   const settings =
     input.coffeeSettings !== undefined
-      ? normalizeCoffeeSessionSettings(input.coffeeSettings)
-      : parseStoredCoffeeSessionSettings(row.coffee_settings);
+      ? coffeeReusableSessionSettings(normalizeCoffeeSessionSettings(input.coffeeSettings))
+      : coffeeReusableSessionSettings(parseStoredCoffeeSessionSettings(row.coffee_settings));
   db.prepare(
     `UPDATE coffee_presets
         SET name = ?, coffee_settings = ?, updated_at = ?
@@ -6834,7 +6844,9 @@ export function createCoffeeGroup(
   );
   const now = new Date().toISOString();
   const groupId = randomId(12);
-  const settings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  const settings = coffeeReusableSessionSettings(
+    normalizeCoffeeSessionSettings(input.coffeeSettings),
+  );
   const name = normalizeCoffeeGroupName(input.name, generateCoffeeTitle("", group));
   const modelChoice = normalizeCoffeeGroupModelChoice(input.modelChoiceByProvider);
   const providedStarterTopics = normalizeCanonicalCoffeeGroupStarterTopics(
@@ -6907,7 +6919,9 @@ export async function createCoffeeGroupWithGeneratedName(
     provider
   );
   const requestedName = typeof input.name === "string" ? input.name : null;
-  const settings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  const settings = coffeeReusableSessionSettings(
+    normalizeCoffeeSessionSettings(input.coffeeSettings),
+  );
   const providedStarterTopics = normalizeCanonicalCoffeeGroupStarterTopics(
     input.starterTopics,
     group
@@ -6974,7 +6988,9 @@ export function updateCoffeeGroup(
       input.coffeeSettings && typeof input.coffeeSettings === "object" && !Array.isArray(input.coffeeSettings)
         ? { ...nextSettings, ...(input.coffeeSettings as Record<string, unknown>) }
         : input.coffeeSettings;
-    const settings = normalizeCoffeeSessionSettings(mergedUnknown);
+    const settings = coffeeReusableSessionSettings(
+      normalizeCoffeeSessionSettings(mergedUnknown),
+    );
     nextSettings = settings;
     updates.push("coffee_settings = ?");
     values.push(JSON.stringify(settings));
@@ -7118,7 +7134,7 @@ export async function updateCoffeeGroupWithGeneratedTopics(
     provider
   );
   const currentSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
-  const nextSettings = input.coffeeSettings === undefined
+  const nextSettings = coffeeReusableSessionSettings(input.coffeeSettings === undefined
     ? currentSettings
     : normalizeCoffeeSessionSettings(
         input.coffeeSettings &&
@@ -7126,7 +7142,7 @@ export async function updateCoffeeGroupWithGeneratedTopics(
         !Array.isArray(input.coffeeSettings)
           ? { ...currentSettings, ...(input.coffeeSettings as Record<string, unknown>) }
           : input.coffeeSettings
-      );
+      ));
   const starterTopics = await inferCoffeeGroupStarterTopics({
     provider,
     group,
@@ -7230,7 +7246,7 @@ export function buildCoffeeSpeakerStyleAppendix(
     "Coffee style cues (the soft tabletop target below shapes everything):",
     energyLine,
     crossLine,
-    `Soft tabletop target for this session: ${tableReplyMaxChars} characters including spaces. The server no longer truncates, so a slightly longer line is fine — but please don't ramble; brevity reads best on the table.`,
+    `Soft tabletop target for this session: ${tableReplyMaxChars} characters including spaces. A slightly longer line is fine, but please don't ramble; brevity reads best on the table.`,
   ].join("\n");
 }
 
@@ -9118,7 +9134,7 @@ export async function inferCoffeeStarterTopics(args: {
         'Respond with compact JSON exactly in this shape: {"candidates":[{"label":"...","kind":"reflective","rationale":"...","participantBotIds":["...","..."],"scores":{"relevance":0,"depth":0,"novelty":0,"balance":0,"fit":0}}]}',
         "Generate exactly eight candidates internally: two reflective/shared-curiosity, two productive-tension, two concrete dilemma/scenario, and two surprising wildcard angles.",
         "Score every candidate from 0-5 for relevance, depth, novelty, conversational balance, and fit with these exact participants. Use participantBotIds to name every seated bot who can contribute meaningfully.",
-        "The server will rank the eight candidates and keep the strongest balanced set; do not pre-sort weak filler ahead of stronger ideas.",
+        "PRISM will rank the eight candidates and keep the strongest balanced set; do not pre-sort weak filler ahead of stronger ideas.",
         "Each label is a TOPIC THE GROUP EXPLORES together (not a user quick-reply, not a question directed only at the player).",
         "Each label must be 2–8 words, concrete, safe, single-line UTF-8; no numbering or prefixes inside strings.",
         "Ground every topic in the seated bots' stated interests, values, purpose, roles, memories, or productive contrasts between them.",
@@ -9655,6 +9671,30 @@ async function loadCoffeePeerAddressPreferences(args: {
     byTargetBotId.set(targetBotId, parsed.preferredAddress);
   }
   return byTargetBotId;
+}
+
+/**
+ * Applies the current speaker's session-frozen naming Power to bot addressees.
+ * Learned preferred labels remain the base label, but only this holder's map
+ * receives the affix; no saved bot name or other speaker is changed.
+ */
+export function coffeePowerPeerAddressLabelsV1(args: {
+  speakerBotId: string;
+  peers: readonly Pick<CoffeeBotProfile, "id" | "name">[];
+  plan: CoffeePowerPlanV1 | null;
+  learned?: ReadonlyMap<string, string>;
+}): Map<string, string> {
+  const labels = new Map(args.learned ?? []);
+  const effects = args.plan?.bots[args.speakerBotId]?.effects ?? [];
+  for (const peer of args.peers) {
+    if (peer.id === args.speakerBotId) continue;
+    const baseLabel = labels.get(peer.id)?.trim() || peer.name;
+    const named = botPowerTargetNameFromEffectsV1(baseLabel, effects);
+    if (named !== peer.name || labels.has(peer.id)) {
+      labels.set(peer.id, named);
+    }
+  }
+  return labels;
 }
 
 function maybeInjectAutonomousPeerAddress(args: {
@@ -10475,6 +10515,8 @@ export function buildSpeakerPrompt(args: {
   identityMirrorState?: BotIdentityMirrorStateV1 | null;
   /** Resolved cup consumption multiplier from this session's immutable power plan. */
   coffeeCupRateMultiplier?: number;
+  /** Physical vessel state is separate from the hidden Auto-session stay clock. */
+  coffeeVesselMode?: "coffee" | "none";
 }): ProviderMessage[] {
   const {
     speaker,
@@ -10510,6 +10552,7 @@ export function buildSpeakerPrompt(args: {
     identityMirrorPrompt,
     identityMirrorState,
     coffeeCupRateMultiplier = 1,
+    coffeeVesselMode = "coffee",
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const moodDrainTurnActive = /\bCoffee Power drag:/u.test(
@@ -10517,16 +10560,16 @@ export function buildSpeakerPrompt(args: {
   );
   const promptHistory = coffeeBotPromptHistory(history);
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
+  const peerNameFor = (bot: Pick<CoffeeBotProfile, "id" | "name">): string =>
+    peerAddressByBotId?.get(bot.id)?.trim() || bot.name;
   const speakerSystemPrompt = composeBotSystemPrompt(
     speaker.name,
     identityMirrorState?.targetPersonaPrompt ?? speaker.systemPrompt,
     speaker.flirtEnabled === true,
-    speaker.powers,
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
   const peers = group.filter((bot) => bot.id !== speaker.id);
-  const peerLines = peers.map((bot) => `- ${botPowerDisplayNameV1(bot.name, bot.powers)}`);
-  const speakerDesignation = botPowerDisplayNameV1(speaker.name, speaker.powers);
+  const peerLines = peers.map((bot) => `- ${peerNameFor(bot)}`);
   const speakerSocial = socialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL;
   const latestTableMessage = promptHistory.at(-1) ?? null;
   const latestTableMessageIsSpeaker =
@@ -10564,16 +10607,16 @@ export function buildSpeakerPrompt(args: {
     peers,
     peerAddressByBotId
   );
-  const peerAddressPreferenceBullets = peers
+  const peerAddressRuleBullets = peers
     .map((peer) => {
       const preferred = peerAddressByBotId?.get(peer.id)?.trim();
       if (!preferred || preferred === peer.name) return null;
-      return `- ${peer.name} prefers "${preferred}" when you address them directly.`;
+      return `- Whenever you name or address ${peer.name}, say "${preferred}".`;
     })
     .filter((line): line is string => line !== null);
   const peerAddressPreferenceLines =
-    peerAddressPreferenceBullets.length > 0
-      ? ["", "Peer addressing preferences you have learned:", ...peerAddressPreferenceBullets]
+    peerAddressRuleBullets.length > 0
+      ? ["", "Required bot-name forms for this speaker:", ...peerAddressRuleBullets]
       : [];
   const speakerRelationshipPrompt = formatCoffeeRelationshipPromptSummary({
     group,
@@ -10682,21 +10725,17 @@ export function buildSpeakerPrompt(args: {
     group,
     speaker,
   });
-  const coffeeCupProgress = coffeeCupProgressFromSessionTiming({
-    sessionRemainingMs,
-    durationMinutes: coffeeSessionDurationMinutes,
-  });
+  const coffeeCupProgress = coffeeVesselMode === "none"
+    ? null
+    : coffeeCupProgressFromSessionTiming({
+        sessionRemainingMs,
+        durationMinutes: coffeeSessionDurationMinutes,
+      });
   const coffeeCupStatusSeed = coffeeCupSeed?.trim() || speaker.id;
   const coffeeCupStatus =
     coffeeCupProgress === null
       ? null
-      : coffeeCupRateMultiplier === 0
-        ? coffeeCupStatusForFillAndTemperatureProgress(
-            0,
-            coffeeCupProgress,
-            coffeeCupStatusSeed,
-          )
-        : coffeeCupStatusForProgress(
+      : coffeeCupStatusForProgress(
             coffeeCupProgressAfterTopOff({
               progress: coffeeCupPacedProgress(
                 coffeeCupProgress,
@@ -10715,9 +10754,7 @@ export function buildSpeakerPrompt(args: {
     coffeeCupStatus !== null
       ? [
           "",
-          coffeeCupRateMultiplier === 0
-            ? `Your table coffee: Your coffee remains ${coffeeCupStatus.amountLabel} and ${coffeeCupStatus.temperatureLabel} because you have left it untouched. You dislike coffee: do not sip it, drink it, stir it, request a refill, or describe tasting it. Let it continue cooling without making it the topic every turn.`
-            : `Your table coffee: ${coffeeCupPromptCueForStatus(coffeeCupStatus)}`,
+          `Your table coffee: ${coffeeCupPromptCueForStatus(coffeeCupStatus)}`,
         ]
       : [];
   const departureOpportunityTrim =
@@ -10804,7 +10841,7 @@ export function buildSpeakerPrompt(args: {
     "Reply as one line of plain prose (no line breaks). Prefer one or two short sentences max, and vary your rhythm across turns so the table doesn't sound templated.",
     "Do not keep the same line length every turn. Mix very short reactions, medium lines, and occasional longer lines so the table breathes like a real conversation.",
     buildCoffeeTransitionalBeatPromptLine(speaker, settings.humanPacing),
-    `Aim for a soft target around ${tableReplyMaxChars} characters including spaces; brevity reads best on the table. The server no longer truncates, so a slightly longer line is fine, but please don't ramble — keep the table feeling like a single quick exchange.`,
+    "Keep the table feeling like a single quick exchange; do not ramble.",
     "Make the line concrete: pull one small image, opinion, object, motive, or emotional beat from your persona or the latest table moment.",
     "Never repeat a recent table line exactly; if the table keeps circling the same nouns or joke shape, change the concrete detail or social motion instead.",
     "Questions are allowed when they naturally move the table; avoid reflexively ending every line with one.",
@@ -10876,7 +10913,7 @@ export function buildSpeakerPrompt(args: {
       "Other bots at the table right now:",
       ...group
         .filter((bot) => bot.id !== speaker.id)
-        .map((bot) => `- ${botPowerDisplayNameV1(bot.name, bot.powers)}`),
+        .map((bot) => `- ${peerNameFor(bot)}`),
     ].join("\n"),
   });
   messages.push(
@@ -10891,14 +10928,14 @@ export function buildSpeakerPrompt(args: {
                 ...(moodDrainTurnActive
                   ? ["Required current-state beat: open by showing your own reduced momentum in first person or one visible *stage action*, not the other bot's mood."]
                   : []),
-                `${speakerDesignation}, say your next short table line now.`,
+                `${speaker.name}, say your next short table line now.`,
               ].join("\n")
             : [
                 `Latest table moment: ${userMessage}`,
                 ...(moodDrainTurnActive
                   ? ["Required current-state beat: open by showing your own reduced momentum in first person or one visible *stage action*, not another character's mood."]
                   : []),
-                `${speakerDesignation}, say your next short table line now.`,
+                `${speaker.name}, say your next short table line now.`,
               ].join("\n"),
         }
       : userActionOnly
@@ -10906,14 +10943,14 @@ export function buildSpeakerPrompt(args: {
             role: "user",
             content: [
               `The user performs a non-verbal table action: ${userMessage}`,
-              `${speakerDesignation}, respond with a brief table action unless a spoken line is clearly needed.`,
+              `${speaker.name}, respond with a brief table action unless a spoken line is clearly needed.`,
             ].join("\n"),
           }
       : {
           role: "user",
           content: [
             `The user says: ${userMessage}`,
-            `${speakerDesignation}, answer with your next short table line now.`,
+            `${speaker.name}, answer with your next short table line now.`,
           ].join("\n"),
         }
   );
@@ -13724,7 +13761,67 @@ export async function createCoffeeConversation(
     group,
     socialByBotId: relationshipSeededSocialByBotId,
   });
-  const sessionSettings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  const reusableSessionSettings = coffeeReusableSessionSettings(
+    normalizeCoffeeSessionSettings(input.coffeeSettings),
+  );
+  const serviceCandidates = db.prepare(
+    `SELECT id, name, color, glyph
+       FROM bots
+      WHERE user_id = ?
+      ORDER BY id ASC`,
+  ).all(userId) as Array<{
+    id: string;
+    name: string;
+    color: string | null;
+    glyph: string | null;
+  }>;
+  const eligibleServiceCandidates = serviceCandidates.filter(
+    (candidate) => !groupIds.includes(candidate.id),
+  );
+  let serviceBot: CoffeeBarRitualState["serviceBot"] = {
+    id: null,
+    name: "PRISM Barista",
+    color: null,
+    glyph: "☕",
+    fallback: true,
+  };
+  if (eligibleServiceCandidates.length > 0) {
+    const hash = Array.from(conversationId).reduce(
+      (value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0,
+      2166136261,
+    );
+    const picked = eligibleServiceCandidates[hash % eligibleServiceCandidates.length]!;
+    serviceBot = {
+      id: picked.id,
+      name: picked.name.trim() || "PRISM Barista",
+      color: picked.color,
+      glyph: picked.glyph,
+      fallback: false,
+    };
+  }
+  const barRitual: CoffeeBarRitualState = {
+    version: 1,
+    serviceBot,
+    role: null,
+    drink: null,
+    orderText: null,
+    clarificationUsed: false,
+    generationAttemptId: null,
+    specialImageStatus: "idle",
+    specialImageId: null,
+    playerCup: null,
+    waiterOffers: 0,
+    activeWaiterOffer: null,
+    lastBotWaiterVisit: null,
+    liveStartedAt: null,
+    hardStopAt: null,
+    visitStartedAtByBotId: {},
+    farewellFusesByBotId: {},
+  };
+  const sessionSettings: CoffeeSessionSettings = {
+    ...reusableSessionSettings,
+    barRitual,
+  };
   const coffeeSettingsJson = JSON.stringify(sessionSettings);
   const durationMinutes =
     input.durationMinutes === undefined || input.durationMinutes === null
@@ -14223,6 +14320,251 @@ async function generateCoffeeBotReply(args: {
     row.id,
     group.map((bot) => bot.id)
   );
+  let runtimeBarRitual = sessionSettings.barRitual ?? null;
+  if (runtimeBarRitual?.role && runtimeBarRitual.liveStartedAt) {
+    const now = new Date().toISOString();
+    const firstFirmSeat = Object.keys(runtimeBarRitual.visitStartedAtByBotId).length === 0;
+    const visitStartedAtByBotId = { ...runtimeBarRitual.visitStartedAtByBotId };
+    let changed = false;
+    for (const bot of group) {
+      if (!visitStartedAtByBotId[bot.id]) {
+        visitStartedAtByBotId[bot.id] = now;
+        changed = true;
+      }
+    }
+    if (changed) {
+      runtimeBarRitual = {
+        ...runtimeBarRitual,
+        ...(firstFirmSeat
+          ? {
+              liveStartedAt: now,
+              hardStopAt: row.coffee_duration_minutes == null
+                ? new Date(Date.parse(now) + COFFEE_AUTO_HARD_CAP_MS).toISOString()
+                : null,
+            }
+          : {}),
+        visitStartedAtByBotId,
+      };
+      db.prepare(
+        "UPDATE conversations SET coffee_settings = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        JSON.stringify({ ...sessionSettings, barRitual: runtimeBarRitual }),
+        now,
+        row.id,
+        userId,
+      );
+    }
+  }
+  let forcedFarewellFuse: {
+    botId: string;
+    kind: "empty-cup" | "no-vessel";
+  } | null = null;
+  const assistantReplyCount = history.filter(
+    (message) => message.role === "assistant",
+  ).length;
+  if (
+    runtimeBarRitual?.role === "cup" &&
+    runtimeBarRitual.liveStartedAt &&
+    runtimeBarRitual.activeWaiterOffer?.status !== "open" &&
+    assistantReplyCount >= 4 &&
+    assistantReplyCount - (runtimeBarRitual.lastBotWaiterVisit?.afterReplyCount ?? 0) >= 4
+  ) {
+    const nowMs = Date.now();
+    const fixedBaseProgress = row.coffee_duration_minutes != null
+      ? coffeeCupProgressFromSessionTiming({
+          sessionRemainingMs: settings.sessionRemainingMs,
+          durationMinutes: row.coffee_duration_minutes,
+        })
+      : null;
+    const seatBotIds = coffeeActiveSeatBotIdsFromStored(row.bot_group_ids);
+    const candidates = group
+      .filter((bot) => coffeePowerVesselMode(coffeePowerPlan, bot.id) === "coffee")
+      .flatMap((bot) => {
+          const visitStartedAtMs = Date.parse(
+            runtimeBarRitual!.visitStartedAtByBotId[bot.id] ?? "",
+          );
+          const baseProgress = row.coffee_duration_minutes != null
+            ? fixedBaseProgress
+            : Number.isFinite(visitStartedAtMs)
+              ? Math.max(
+                  0,
+                  (nowMs - visitStartedAtMs) /
+                    (DEFAULT_COFFEE_SESSION_DURATION_MINUTES * 60_000),
+                )
+              : null;
+          if (baseProgress === null) return [];
+          const seed = coffeeCupSeedForBot({
+            conversationId: row.id,
+            botId: bot.id,
+            seatBotIds,
+          });
+          const pacedProgress = coffeeCupPacedProgress(
+            baseProgress,
+            seed,
+            row.coffee_duration_minutes,
+            coffeePowerStayRateMultiplier(coffeePowerPlan, bot.id),
+          );
+          const progress = coffeeCupProgressAfterTopOff({
+            progress: pacedProgress,
+            topOff: cupTopOffsByBotId[bot.id] ?? null,
+            nowMs,
+            durationMinutes: row.coffee_duration_minutes,
+            seed,
+          });
+          return [{ bot, progress }];
+      })
+      .filter((candidate) => candidate.progress >= 0.44 && candidate.progress < 0.96)
+      .sort((left, right) =>
+        right.progress - left.progress || left.bot.id.localeCompare(right.bot.id),
+      );
+    const target = candidates[0];
+    if (target) {
+        const now = new Date(nowMs).toISOString();
+        const topOff = coffeeCupTopOffSnapshotForProgress(
+          target.progress,
+          now,
+          0.04,
+        );
+        if (topOff) {
+          upsertCoffeeCupTopOffState(
+            db,
+            userId,
+            row.id,
+            { [target.bot.id]: topOff },
+            now,
+          );
+          cupTopOffsByBotId[target.bot.id] = topOff;
+          const nextFuses = { ...runtimeBarRitual.farewellFusesByBotId };
+          delete nextFuses[target.bot.id];
+          runtimeBarRitual = {
+            ...runtimeBarRitual,
+            waiterOffers: runtimeBarRitual.waiterOffers + 1,
+            lastBotWaiterVisit: {
+              id: randomId(8),
+              targetBotId: target.bot.id,
+              targetName: target.bot.name,
+              offeredAt: now,
+              afterReplyCount: assistantReplyCount,
+              status: "accepted",
+            },
+            farewellFusesByBotId: nextFuses,
+          };
+          db.prepare(
+            "UPDATE conversations SET coffee_settings = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+          ).run(
+            JSON.stringify({ ...sessionSettings, barRitual: runtimeBarRitual }),
+            now,
+            row.id,
+            userId,
+          );
+        }
+    }
+  }
+  if (
+    row.coffee_duration_minutes == null &&
+    runtimeBarRitual?.liveStartedAt
+  ) {
+    const liveStartedAtMs = Date.parse(runtimeBarRitual.liveStartedAt);
+    const hardStopAtMs = runtimeBarRitual.hardStopAt
+      ? Date.parse(runtimeBarRitual.hardStopAt)
+      : Number.NaN;
+    if (Number.isFinite(hardStopAtMs) && Date.now() >= hardStopAtMs) {
+      return {
+        conversation: buildCurrentCoffeeConversationResponse(db, userId, row.id),
+        speakerBotId: null,
+        poll: null,
+        routerReason: "Coffee Auto session reached its hidden 30-minute cap.",
+        shouldEndSession: true,
+      };
+    }
+    if (Number.isFinite(liveStartedAtMs)) {
+      const nextFuses = { ...runtimeBarRitual.farewellFusesByBotId };
+      let changed = false;
+      for (const bot of group) {
+        const vesselMode = coffeePowerVesselMode(coffeePowerPlan, bot.id);
+        const visitStartedAt = runtimeBarRitual.visitStartedAtByBotId[bot.id] ??
+          runtimeBarRitual.liveStartedAt;
+        const visitStartedAtMs = Date.parse(visitStartedAt);
+        const seed = coffeeCupSeedForBot({
+          conversationId: row.id,
+          botId: bot.id,
+          seatBotIds: coffeeActiveSeatBotIdsFromStored(row.bot_group_ids),
+        });
+        const baseProgress = Math.max(
+          0,
+          (Date.now() - visitStartedAtMs) /
+            (DEFAULT_COFFEE_SESSION_DURATION_MINUTES * 60_000),
+        );
+        const pacedProgress = coffeeCupPacedProgress(
+          baseProgress,
+          seed,
+          null,
+          coffeePowerStayRateMultiplier(coffeePowerPlan, bot.id),
+        );
+        const topOff = vesselMode === "coffee"
+          ? cupTopOffsByBotId[bot.id] ?? null
+          : null;
+        const progress = vesselMode === "coffee"
+          ? coffeeCupProgressAfterTopOff({
+              progress: pacedProgress,
+              topOff,
+              nowMs: Date.now(),
+              durationMinutes: null,
+              seed,
+            })
+          : pacedProgress;
+        const fillId = vesselMode === "none"
+          ? `visit:${visitStartedAt}`
+          : `coffee:${topOff?.toppedOffAt ?? visitStartedAt}`;
+        const existing = nextFuses[bot.id];
+        if (existing && (existing.fillId !== fillId || progress < 0.96)) {
+          delete nextFuses[bot.id];
+          changed = true;
+        }
+        if (progress >= 0.96 && !nextFuses[bot.id]) {
+          nextFuses[bot.id] = {
+            kind: vesselMode === "none" ? "no-vessel" : "empty-cup",
+            fillId,
+            drainedAt: new Date().toISOString(),
+            createdReplyCount: assistantReplyCount,
+            dueAfterReplyCount:
+              assistantReplyCount +
+              coffeeFarewellReplyDelay(`${row.id}:${bot.id}:${fillId}`) - 1,
+          };
+          changed = true;
+        }
+      }
+      const dueEntry = Object.entries(nextFuses)
+        .filter(
+          ([botId, fuse]) =>
+            group.some((bot) => bot.id === botId) &&
+            assistantReplyCount >= fuse.dueAfterReplyCount,
+        )
+        .sort((left, right) =>
+          left[1].dueAfterReplyCount - right[1].dueAfterReplyCount ||
+          left[0].localeCompare(right[0]),
+        )[0];
+      if (dueEntry) {
+        forcedFarewellFuse = {
+          botId: dueEntry[0],
+          kind: dueEntry[1].kind,
+        };
+      }
+      if (changed) {
+        runtimeBarRitual = {
+          ...runtimeBarRitual,
+          farewellFusesByBotId: nextFuses,
+        };
+        db.prepare(
+          "UPDATE conversations SET coffee_settings = ? WHERE id = ? AND user_id = ?",
+        ).run(
+          JSON.stringify({ ...sessionSettings, barRitual: runtimeBarRitual }),
+          row.id,
+          userId,
+        );
+      }
+    }
+  }
   const durableRelationshipsBySource =
     row.incognito === 1
       ? {}
@@ -14375,7 +14717,13 @@ async function generateCoffeeBotReply(args: {
   let pickedBotId: string;
   let routerReason: string;
   let routerDirective: string | null = null;
-  if (hearingRepeatDirective) {
+  const forcedFarewellSpeaker = forcedFarewellFuse
+    ? routableTurnGroup.find((bot) => bot.id === forcedFarewellFuse.botId) ?? null
+    : null;
+  if (forcedFarewellSpeaker) {
+    pickedBotId = forcedFarewellSpeaker.id;
+    routerReason = `${forcedFarewellSpeaker.name}'s visit clock requires a farewell now.`;
+  } else if (hearingRepeatDirective) {
     pickedBotId = hearingRepeatDirective.repeatingBotId;
     const requesterName = group.find(
       (bot) => bot.id === hearingRepeatDirective.requesterBotId,
@@ -14582,7 +14930,19 @@ async function generateCoffeeBotReply(args: {
         playerDepartureEpilogue.turnIndex,
         playerDepartureEpilogue.totalTurns
       )
-    : buildCoffeeDepartureOpportunity({
+    : forcedFarewellFuse?.botId === speaker.id
+      ? forcedFarewellFuse.kind === "no-vessel"
+        ? [
+            "Required exit beat: your visit has naturally run its course.",
+            "Leave the table now with one brief, immersive, in-character farewell.",
+            "Do not mention coffee, a cup, a refill, a hidden clock, or a system rule.",
+          ].join(" ")
+        : [
+            "Required exit beat: your coffee is finished and your visit has naturally run its course.",
+            "Leave the table now with one brief, immersive, in-character farewell.",
+            "Do not ask permission or mention a hidden clock or system rule.",
+          ].join(" ")
+      : buildCoffeeDepartureOpportunity({
         conversationId: row.id,
         speaker,
         seatBotIds: activeSeatBotIds,
@@ -14622,12 +14982,18 @@ async function generateCoffeeBotReply(args: {
       coffeePowerBotAudibleTo(coffeePowerPlan, bot.id, speaker.id),
   );
   const speakerHasHiddenPeers = speakerPromptGroup.length !== turnGroup.length;
-  const peerAddressByBotId = await loadCoffeePeerAddressPreferences({
+  const learnedPeerAddressByBotId = await loadCoffeePeerAddressPreferences({
     db,
     userId,
     userKey: settings.userKey,
     speakerBotId: speaker.id,
     peers: speakerPromptGroup.filter((bot) => bot.id !== speaker.id),
+  });
+  const peerAddressByBotId = coffeePowerPeerAddressLabelsV1({
+    speakerBotId: speaker.id,
+    peers: speakerPromptGroup,
+    plan: coffeePowerPlan,
+    learned: learnedPeerAddressByBotId,
   });
   if (!interruptionEvent) {
     const botInterruptionEvent = maybeBuildBotInterruptionEvent({
@@ -14926,6 +15292,7 @@ async function generateCoffeeBotReply(args: {
         }),
     identityMirrorState: activeIdentityMirrorState,
     coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
+    coffeeVesselMode: coffeePowerVesselMode(coffeePowerPlan, speaker.id),
   });
   if (
     !speakerUsesHardResponse &&
@@ -15288,6 +15655,7 @@ async function generateCoffeeBotReply(args: {
       historyLength: history.length,
       avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
       maxChars: replyCaps.tableReplyMaxChars,
+      neutral: forcedFarewellFuse?.kind === "no-vessel",
     });
   }
   if (
@@ -15564,6 +15932,19 @@ async function generateCoffeeBotReply(args: {
     replyText,
     now: assistantNow,
   });
+  if (
+    coffeeDepartureOpportunityRequiresExit(departureOpportunity) &&
+    !coffeeReplySignalsPoliteDeparture(replyText)
+  ) {
+    replyText = buildCoffeeRequiredDepartureReply({
+      speaker,
+      conversationId: row.id,
+      historyLength: history.length,
+      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
+      maxChars: replyCaps.tableReplyMaxChars,
+      neutral: forcedFarewellFuse?.kind === "no-vessel",
+    });
+  }
   const departureSignaled = Boolean(
     departureOpportunity && coffeeReplySignalsPoliteDeparture(replyText)
   );
@@ -16356,6 +16737,249 @@ function buildCurrentCoffeeConversationResponse(
   });
 }
 
+function persistCoffeeBarRitual(
+  db: DatabaseSync,
+  userId: string,
+  row: ConversationRow,
+  ritual: CoffeeBarRitualState,
+  now: string,
+): Conversation {
+  const settings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  db.prepare(
+    `UPDATE conversations
+        SET coffee_settings = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(JSON.stringify({ ...settings, barRitual: ritual }), now, row.id, userId);
+  return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+}
+
+function requireCoffeeBarRitual(row: ConversationRow): CoffeeBarRitualState {
+  const ritual = parseStoredCoffeeSessionSettings(row.coffee_settings).barRitual;
+  if (!ritual) throw new Error("Coffee bar service is unavailable for this session.");
+  return ritual;
+}
+
+export function chooseCoffeeBarRole(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  rawRole: unknown,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const role: CoffeeBarRole = rawRole === "pot" ? "pot" : rawRole === "cup" ? "cup" : (() => {
+    throw new Error("Choose a cup or the coffee pot.");
+  })();
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.role && ritual.role !== role) {
+    throw new Error("Your Coffee role is locked for this session.");
+  }
+  const now = new Date().toISOString();
+  const hardStopAt = row.coffee_duration_minutes == null
+    ? new Date(Date.parse(now) + COFFEE_AUTO_HARD_CAP_MS).toISOString()
+    : null;
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    role,
+    ...(role === "pot"
+      ? {
+          drink: null,
+          orderText: null,
+          specialImageStatus: "idle" as const,
+          specialImageId: null,
+          playerCup: null,
+          activeWaiterOffer: null,
+          lastBotWaiterVisit: null,
+        }
+      : {}),
+    liveStartedAt: ritual.liveStartedAt ?? now,
+    hardStopAt: ritual.hardStopAt ?? hardStopAt,
+  }, now);
+}
+
+export function chooseCoffeeHouseDrink(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.role === "pot") throw new Error("You took the coffee pot for this session.");
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    role: "cup",
+    drink: "house",
+    orderText: null,
+    generationAttemptId: null,
+    specialImageStatus: "idle",
+    specialImageId: null,
+    playerCup: {
+      fillId: randomId(8),
+      filledAt: now,
+      topOffCount: ritual.playerCup?.topOffCount ?? 0,
+      sipCount: 0,
+    },
+    liveStartedAt: ritual.liveStartedAt ?? now,
+    hardStopAt: ritual.hardStopAt ?? (row.coffee_duration_minutes == null
+      ? new Date(Date.parse(now) + COFFEE_AUTO_HARD_CAP_MS).toISOString()
+      : null),
+  }, now);
+}
+
+export interface CoffeeSpecialOrderPreparation {
+  conversation: Conversation;
+  shouldGenerate: boolean;
+  imageId: string | null;
+  orderText: string;
+}
+
+export function prepareCoffeeSpecialOrder(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  rawOrderText: unknown,
+  rawAttemptId: unknown,
+): CoffeeSpecialOrderPreparation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.role === "pot") throw new Error("You took the coffee pot for this session.");
+  const orderText = typeof rawOrderText === "string"
+    ? rawOrderText.trim().replace(/\s+/gu, " ").slice(0, COFFEE_BAR_ORDER_MAX_LENGTH)
+    : "";
+  const attemptId = typeof rawAttemptId === "string" ? rawAttemptId.trim().slice(0, 180) : "";
+  if (!orderText) throw new Error("Tell the barista what you would like.");
+  if (!attemptId) throw new Error("A generation attempt id is required.");
+  if (ritual.generationAttemptId === attemptId) {
+    return {
+      conversation: buildCurrentCoffeeConversationResponse(db, userId, row.id),
+      shouldGenerate: false,
+      imageId: ritual.specialImageId,
+      orderText: ritual.orderText ?? orderText,
+    };
+  }
+  if (ritual.specialImageStatus === "generating") {
+    throw new Error("The barista is already making your drink.");
+  }
+  const now = new Date().toISOString();
+  const conversation = persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    role: "cup",
+    drink: "special",
+    orderText,
+    generationAttemptId: attemptId,
+    specialImageStatus: "generating",
+    specialImageId: null,
+    playerCup: null,
+    liveStartedAt: ritual.liveStartedAt ?? now,
+    hardStopAt: ritual.hardStopAt ?? (row.coffee_duration_minutes == null
+      ? new Date(Date.parse(now) + COFFEE_AUTO_HARD_CAP_MS).toISOString()
+      : null),
+  }, now);
+  return { conversation, shouldGenerate: true, imageId: null, orderText };
+}
+
+export function completeCoffeeSpecialOrder(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  attemptId: string,
+  imageId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.generationAttemptId !== attemptId) {
+    throw new Error("That special-order attempt is no longer active.");
+  }
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    specialImageStatus: "ready",
+    specialImageId: imageId,
+    playerCup: {
+      fillId: randomId(8),
+      filledAt: now,
+      topOffCount: 0,
+      sipCount: 0,
+    },
+  }, now);
+}
+
+export function failCoffeeSpecialOrder(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  attemptId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.generationAttemptId !== attemptId || ritual.specialImageStatus !== "generating") {
+    return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+  }
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    specialImageStatus: "failed",
+  }, now);
+}
+
+export function sipCoffeePlayerCup(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.role !== "cup" || !ritual.playerCup) throw new Error("There is no player cup to sip.");
+  const now = new Date().toISOString();
+  const sipCount = Math.min(6, ritual.playerCup.sipCount + 1);
+  const shouldOffer = !ritual.activeWaiterOffer && (sipCount === 3 || sipCount === 5);
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    playerCup: { ...ritual.playerCup, sipCount },
+    ...(shouldOffer
+      ? {
+          waiterOffers: ritual.waiterOffers + 1,
+          activeWaiterOffer: {
+            id: randomId(8),
+            offeredAt: now,
+            status: "open" as const,
+          },
+        }
+      : {}),
+  }, now);
+}
+
+export function respondCoffeeWaiterOffer(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  rawResponse: unknown,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.role !== "cup" || !ritual.playerCup || ritual.activeWaiterOffer?.status !== "open") {
+    throw new Error("There is no waiter offer to answer.");
+  }
+  const accepted = rawResponse === "accept";
+  if (!accepted && rawResponse !== "decline") throw new Error("Accept or decline the refill.");
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    activeWaiterOffer: null,
+    ...(accepted
+      ? {
+          playerCup: {
+            ...ritual.playerCup,
+            fillId: randomId(8),
+            filledAt: now,
+            topOffCount: ritual.playerCup.topOffCount + 1,
+            sipCount: 0,
+          },
+        }
+      : {}),
+  }, now);
+}
+
 export function topOffCoffeeCupForBot(
   db: DatabaseSync,
   userId: string,
@@ -16370,6 +16994,26 @@ export function topOffCoffeeCupForBot(
   }
   if (!row.coffee_topic?.trim()) {
     throw new Error("Coffee session is not active yet.");
+  }
+  const coffeePowerPlan = resolveCoffeePowersForSession(db, userId, row.id);
+  if (coffeePowerVesselMode(coffeePowerPlan, botId) === "none") {
+    throw new Error("This bot does not take coffee.");
+  }
+  const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  const ritual = sessionSettings.barRitual;
+  if (ritual?.farewellFusesByBotId[botId]) {
+    const nextFuses = { ...ritual.farewellFusesByBotId };
+    delete nextFuses[botId];
+    db.prepare(
+      "UPDATE conversations SET coffee_settings = ? WHERE id = ? AND user_id = ?",
+    ).run(
+      JSON.stringify({
+        ...sessionSettings,
+        barRitual: { ...ritual, farewellFusesByBotId: nextFuses },
+      }),
+      row.id,
+      userId,
+    );
   }
   const progress =
     typeof rawProgress === "number" && Number.isFinite(rawProgress)

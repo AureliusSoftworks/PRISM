@@ -66,6 +66,8 @@ import {
   type BotcastFallbackStudioAccentVariant,
   type BotPowerV1,
   type CoffeePowerPlanV1,
+  type CoffeeSessionSettings,
+  normalizeCoffeeSessionSettings,
   type EnglishVoiceEngine,
   type VoiceMode,
   type AutoFallbackChainV1,
@@ -257,6 +259,16 @@ export interface BackupSnapshot {
     createdAt: string;
     updatedAt: string;
     coffeePowerPlan?: CoffeePowerPlanV1;
+    coffee?: {
+      settings: CoffeeSessionSettings;
+      botGroupIds: Array<string | null>;
+      groupId: string | null;
+      durationMinutes: number | null;
+      presetId: string | null;
+      topic: string | null;
+      absentBotIds: string[];
+      teamsJson: string | null;
+    };
     messages: Array<{
       id: string;
       role: string;
@@ -1694,11 +1706,26 @@ export function exportUserSnapshot(
 
   const conversations = db
     .prepare(
-      "SELECT id, title, coffee_power_plan_json, created_at, updated_at FROM conversations WHERE user_id = ? ORDER BY updated_at DESC",
+      `SELECT id, title, conversation_mode, bot_group_ids, coffee_settings,
+              coffee_group_id, coffee_duration_minutes, coffee_preset_id,
+              coffee_topic, coffee_absent_bot_ids, coffee_team_mode_json,
+              coffee_power_plan_json, created_at, updated_at
+         FROM conversations
+        WHERE user_id = ?
+        ORDER BY updated_at DESC`,
     )
     .all(userId) as Array<{
     id: string;
     title: string;
+    conversation_mode: string;
+    bot_group_ids: string | null;
+    coffee_settings: string | null;
+    coffee_group_id: string | null;
+    coffee_duration_minutes: number | null;
+    coffee_preset_id: string | null;
+    coffee_topic: string | null;
+    coffee_absent_bot_ids: string | null;
+    coffee_team_mode_json: string | null;
     coffee_power_plan_json: string | null;
     created_at: string;
     updated_at: string;
@@ -1741,6 +1768,28 @@ export function exportUserSnapshot(
       createdAt: conversation.created_at,
       updatedAt: conversation.updated_at,
       ...(coffeePowerPlan ? { coffeePowerPlan } : {}),
+      ...(conversation.conversation_mode === "coffee"
+        ? {
+            coffee: {
+              settings: normalizeCoffeeSessionSettings(
+                conversation.coffee_settings
+                  ? JSON.parse(conversation.coffee_settings) as unknown
+                  : undefined,
+              ),
+              botGroupIds: conversation.bot_group_ids
+                ? (JSON.parse(conversation.bot_group_ids) as Array<string | null>)
+                : [],
+              groupId: conversation.coffee_group_id,
+              durationMinutes: conversation.coffee_duration_minutes,
+              presetId: conversation.coffee_preset_id,
+              topic: conversation.coffee_topic,
+              absentBotIds: conversation.coffee_absent_bot_ids
+                ? (JSON.parse(conversation.coffee_absent_bot_ids) as string[])
+                : [],
+              teamsJson: conversation.coffee_team_mode_json,
+            },
+          }
+        : {}),
       messages: messages.map((message) => {
         const provider: ProviderName | undefined =
           message.provider === "local" ||
@@ -2431,6 +2480,15 @@ export function importUserSnapshot(
     );
   }
   validateBackupBotAvatarDetails(snapshot.bots);
+  const hasCoffeeDrinkSurface = snapshot.conversations.some(
+    (conversation) =>
+      Boolean(conversation.coffee?.settings.barRitual?.specialImageId?.trim()),
+  );
+  if (hasCoffeeDrinkSurface && !projectOwnedAssets) {
+    throw new Error(
+      "Account backup is missing the project-asset archive for a Coffee drink surface.",
+    );
+  }
   const preparedAssets = projectOwnedAssets
     ? prepareProjectOwnedAssetImport(userId, snapshot, projectOwnedAssets, {
         imageIdExists: (imageId) =>
@@ -3113,8 +3171,11 @@ function importUserSnapshotWithinTransaction(
   }
 
   const insertConversation = db.prepare(`
-    INSERT OR REPLACE INTO conversations (id, user_id, title, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO conversations
+      (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
+       coffee_group_id, coffee_duration_minutes, coffee_preset_id, coffee_topic,
+       coffee_absent_bot_ids, coffee_team_mode_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMessage = db.prepare(`
     INSERT OR REPLACE INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
@@ -3126,10 +3187,22 @@ function importUserSnapshotWithinTransaction(
   `);
 
   for (const conversation of snapshot.conversations) {
+    const coffee = conversation.coffee;
     insertConversation.run(
       conversation.id,
       userId,
       conversation.title,
+      coffee ? "coffee" : "sandbox",
+      coffee ? JSON.stringify(coffee.botGroupIds) : null,
+      coffee
+        ? JSON.stringify(normalizeCoffeeSessionSettings(coffee.settings))
+        : null,
+      coffee?.groupId ?? null,
+      coffee?.durationMinutes ?? null,
+      coffee?.presetId ?? null,
+      coffee?.topic ?? null,
+      JSON.stringify(coffee?.absentBotIds ?? []),
+      coffee?.teamsJson ?? null,
       conversation.createdAt,
       conversation.updatedAt,
     );

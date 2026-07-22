@@ -148,6 +148,7 @@ export interface ImageAssetCleanupFileOperations {
 const IMAGE_FILE_URL_PATTERN = /\/api\/images\/([^/\s?#]+)\/(?:file|thumb)\b/giu;
 const SYSTEM_MANAGED_IMAGE_ORIGINS = new Set([
   "botcast",
+  "coffee_bar",
   "slate_cover",
   "zen_wallpaper",
   "bot_profile_picture",
@@ -354,9 +355,10 @@ function buildImageAssetCleanupGraph(
   for (const row of readRows<{
     zen_wallpaper_image_id: string | null;
     zen_wallpaper_history: string | null;
+    coffee_settings: string | null;
   }>(
     db,
-    `SELECT zen_wallpaper_image_id, zen_wallpaper_history
+    `SELECT zen_wallpaper_image_id, zen_wallpaper_history, coffee_settings
        FROM conversations WHERE user_id = ?`,
     userId,
   )) {
@@ -366,6 +368,12 @@ function buildImageAssetCleanupGraph(
       knownImageIds,
       references,
       "Zen wallpaper history",
+    );
+    collectImageReferencesFromText(
+      row.coffee_settings,
+      knownImageIds,
+      references,
+      "Coffee drink surface",
     );
   }
   for (const row of readRows<{

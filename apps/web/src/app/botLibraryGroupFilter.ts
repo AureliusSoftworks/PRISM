@@ -7,6 +7,10 @@ export interface BotLibraryGroupFilterGroup {
   botIds: readonly string[];
 }
 
+export type BotLibrarySearchTextForBot<TBot> = (
+  bot: TBot
+) => readonly (string | null | undefined)[];
+
 export const BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS = 2;
 
 export interface BotLibraryGroupMaintenanceGroup {
@@ -90,6 +94,23 @@ export function filterBotsByLibraryGroup<TBot extends BotLibraryGroupFilterBot>(
 
   const allowedBotIds = new Set(group.botIds);
   return bots.filter((bot) => allowedBotIds.has(bot.id));
+}
+
+export function filterBotsByLibrarySearch<TBot>(
+  bots: readonly TBot[],
+  query: string,
+  searchTextForBot: BotLibrarySearchTextForBot<TBot>
+): TBot[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [...bots];
+
+  return bots.filter((bot) =>
+    searchTextForBot(bot).some(
+      (value) =>
+        typeof value === "string" &&
+        value.toLocaleLowerCase().includes(normalizedQuery)
+    )
+  );
 }
 
 export function groupedBotIdsForLibraryGroups(

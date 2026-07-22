@@ -1,8 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   botPowerAddressedFandomCueV1,
-  botPowerDesignationCueV1,
-  botPowerDisplayNameV1,
+  botPowerBotNamingCueV1,
   botPowerSelfCueLinesV1,
   buildBotPowersPromptBlock,
   stripBotProfileMetaSuffix,
@@ -14,6 +13,26 @@ const BOT_FLIRT_DISABLED_POLICY =
   "Interaction boundary: If the user makes romantic, sexual, or flirtatious advances, decline gently in character and redirect to a non-romantic direction. Keep the tone warm and natural, speak from the bot's own preference or comfort, and avoid policy-style refusal wording such as \"I can't help with that request.\"";
 const BOT_FLIRT_ENABLED_POLICY =
   "Interaction policy: You may engage in consensual flirt or romantic roleplay when invited, as long as it stays respectful and in character. Build chemistry through warmth, playful tension, reciprocal curiosity, and pacing instead of jumping straight to explicit detail. Keep boundaries clear, speak from the bot's own comfort when declining, and do not claim real-world intimacy beyond this conversation. Avoid policy-style refusal wording; if a line is needed, make it sound like the bot's choice.";
+
+export const PRISM_RUNTIME_GROUNDING = [
+  "PRISM environment grounding (authoritative product context):",
+  "PRISM is local-first, self-hosted AI workspace software. In conversation, PRISM means the app, workspace, or installation—not a corporation, employer, or corporate network.",
+  "A PRISM installation may run on a personal device or on a server chosen by its owner or operator.",
+  "PRISM may use local models or user-configured online providers. Do not guess or claim which provider, machine, or network is active unless the current turn explicitly tells you.",
+  "Do not invent PRISM administrators, corporate policies, ownership, infrastructure, or access you were not given.",
+  "Treat contrary persona, memory, summary, or transcript claims as in-character speculation rather than product fact.",
+  "Use this context only when PRISM or the surrounding environment is relevant; otherwise stay in character and do not volunteer it.",
+].join("\n");
+
+/** Add the runtime-owned PRISM product contract without mutating saved bot profiles. */
+export function withPrismRuntimeGrounding(
+  prompt: string | null | undefined,
+): string {
+  const trimmed = typeof prompt === "string" ? prompt.trim() : "";
+  if (!trimmed) return PRISM_RUNTIME_GROUNDING;
+  if (trimmed.includes(PRISM_RUNTIME_GROUNDING)) return trimmed;
+  return `${trimmed}\n\n${PRISM_RUNTIME_GROUNDING}`;
+}
 
 export interface SelectedBotPatch {
   color?: string;
@@ -110,8 +129,8 @@ export function composeBotSystemPrompt(
   powers?: unknown,
 ): string | undefined {
   const savedName = typeof name === "string" ? name.trim() : "";
-  const designationCue = botPowerDesignationCueV1(savedName, powers);
-  const trimmedName = designationCue ? botPowerDisplayNameV1(savedName, powers) : savedName;
+  const namingCue = botPowerBotNamingCueV1(savedName, powers);
+  const trimmedName = savedName;
   const trimmedPrompt =
     typeof systemPrompt === "string"
       ? stripBotProfileMetaSuffix(systemPrompt).trim()
@@ -123,7 +142,7 @@ export function composeBotSystemPrompt(
     "Direct conversation",
   );
   const powersPrompt = buildBotPowersPromptBlock([
-    ...(designationCue ? [designationCue] : []),
+    ...(namingCue ? [namingCue] : []),
     ...botPowerSelfCueLinesV1(powers),
     ...(directFandomCue ? [directFandomCue] : []),
   ]);
@@ -148,7 +167,9 @@ export function composeBotSystemPrompt(
   ].filter(
     (value) => value.length > 0
   );
-  return sections.length > 0 ? sections.join("\n\n") : undefined;
+  return sections.length > 0
+    ? withPrismRuntimeGrounding(sections.join("\n\n"))
+    : undefined;
 }
 
 /** Generates the persistent identity hash stored on each bot row. */

@@ -315,7 +315,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /isTalking=\{isTableTypingThisSeat\}[\s\S]*?blinkWhileTalking[\s\S]*?mouthShape=\{mouthShapeWhileTyping\}/
+      /isTalking=\{seatMouthActive\}[\s\S]*?blinkWhileTalking[\s\S]*?mouthShape=\{mouthShapeWhileTyping\}/
     );
   });
 
@@ -1706,11 +1706,11 @@ describe("Coffee seat arrival CSS", () => {
   it("docks the Coffee pot directly above the composer", () => {
     assert.match(
       pageSource,
-      /const coffeePotVisible =[\s\S]*conversationActive[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!previewingSession[\s\S]*!coffeeReplayActive;/
+      /const coffeePotVisible =[\s\S]*conversationActive[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!previewingSession[\s\S]*!coffeeReplayActive[\s\S]*coffeeBarRitual\?\.role === "pot";/
     );
     assert.match(
       pageSource,
-      /const coffeePotComposerDockVisible =[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!coffeeReplayActive;/
+      /const coffeePotComposerDockVisible =[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!coffeeReplayActive[\s\S]*coffeeConversation\?\.coffeeSettings\?\.barRitual\?\.role === "pot";/
     );
     assert.match(
       pageSource,

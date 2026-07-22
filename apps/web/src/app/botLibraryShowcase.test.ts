@@ -291,7 +291,10 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /showcaseName = bot\?\.name \?\? "Prism"/);
     assert.match(pageSource, />\s*Customize Prism\s*</);
     assert.match(pageSource, /onClick=\{\(\) => selectBotPanelShowcase\(null\)\}/);
-    assert.match(pageSource, /selectBotPanelShowcase\(b\);/);
+    assert.match(
+      pageSource,
+      /onClick=\{\(\) => selectBotPanelShowcase\(b\)\}/
+    );
     assert.match(pageSource, /onDoubleClick=\{\(event\) => \{[\s\S]*?openBotPanelHub\(b\);/);
     assert.match(pageSource, /double-click to manage/);
     assert.match(cssSource, /\.botCard\[data-preview-selected="true"\]/);

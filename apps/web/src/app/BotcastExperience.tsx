@@ -34,6 +34,7 @@ import {
   REPLAY_VIDEO_WIDTH,
   botPowerAvatarScaleModeV1,
   botPowerAvatarVisibilityModeV1,
+  botPowerEchoesAddressedSpeechV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
   botPowerVoiceGainMultiplierV1,
@@ -395,7 +396,9 @@ export interface BotcastApiRequest {
   <T>(path: string, options?: RequestInit): Promise<T>;
 }
 
-const SIGNAL_NATURAL_HANDOFF_MS = 40;
+// Give the device-output path a short release window so a synthesized final
+// word cannot be reclaimed when the other subject's prepared clip starts.
+const SIGNAL_NATURAL_HANDOFF_MS = 260;
 const SIGNAL_NOTICE_TOAST_MS = 7_000;
 const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 4_200;
 const SIGNAL_ATMOSPHERE_BUSES = [
@@ -617,6 +620,22 @@ type SignalEpisodeOutro = {
 type SignalPendingCutRequest = {
   episodeId: string;
   waitForOutro: boolean;
+  audienceCheckpoint: {
+    lastAudienceMessageId: string | null;
+    lastAudienceEventSequence: number;
+    audienceSegmentCount: number;
+  };
+  interruption: {
+    messageId: string;
+    speakerRole: "host" | "guest";
+    spokenContent: string;
+    bridgeLine?: string;
+    interruptedSpeakerCue?: NonNullable<
+      ListenerReactionPlanV1["interruptedSpeakerCue"]
+    >;
+  } | null;
+  interruptionBridgeMessage: BotcastMessage | null;
+  interruptionCrosstalkPlan: ListenerReactionPlanV1 | null;
   promise: Promise<boolean>;
   resolve: (completed: boolean) => void;
 };
@@ -1336,12 +1355,6 @@ export function BotcastExperience({
     null,
   );
   const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
-  // The next bot begins preparing while the current answer is still on mic.
-  // This is real orchestration work, surfaced as a restrained listen/thinking
-  // cue rather than filler dialogue during the handoff.
-  const [anticipatingSpeakerRole, setAnticipatingSpeakerRole] = useState<
-    "host" | "guest" | null
-  >(null);
   const [hostInterruptionOrdinal, setHostInterruptionOrdinal] = useState(0);
   const [signalStageNowMs, setSignalStageNowMs] = useState(() => Date.now());
   const {
@@ -2019,7 +2032,6 @@ export function BotcastExperience({
     episodeOperationAbortRef.current = null;
     preparedAdvanceRef.current?.controller.abort();
     preparedAdvanceRef.current = null;
-    setAnticipatingSpeakerRole(null);
     advanceInFlightRef.current = false;
     setAutoRun(false);
     setBusy(false);
@@ -3144,18 +3156,59 @@ export function BotcastExperience({
     setBusy(true);
     setError(null);
     try {
-      const response = await request<BotcastEpisodeAdvanceResponse>(
+      const interruptionBridgePlayback = pending.interruptionBridgeMessage
+        ? (() => {
+            prepareEpisodeMessageRef.current(
+              pending.interruptionBridgeMessage,
+              episode,
+            );
+            const interrupter = pending.interruptionCrosstalkPlan
+              ? botsById.get(
+                  pending.interruptionCrosstalkPlan.listenerBotId,
+                )
+              : null;
+            return playPreparedEpisodeMessageRef.current(
+              pending.interruptionBridgeMessage,
+              episode,
+              controller,
+              runId,
+              false,
+              pending.interruptionCrosstalkPlan && interrupter
+                ? () => {
+                    void Promise.resolve(
+                      onListenerReaction?.(
+                        pending.interruptionCrosstalkPlan!,
+                        interrupter,
+                        signalStudioVoicePan(
+                          selectedShow.studioLayout,
+                          "host",
+                        ),
+                        undefined,
+                        episode.id,
+                      ),
+                    );
+                  }
+                : undefined,
+            );
+          })()
+        : null;
+      const responsePromise = request<BotcastEpisodeAdvanceResponse>(
         `/api/botcast/episodes/${encodeURIComponent(episode.id)}/end`,
         {
           method: "POST",
           signal: controller.signal,
           body: JSON.stringify({
-            lastAudienceMessageId: episode.messages.at(-1)?.id ?? null,
-            lastAudienceEventSequence: episode.events.at(-1)?.sequence ?? 0,
-            audienceSegmentCount: episode.segments.length,
+            ...pending.audienceCheckpoint,
+            ...(pending.interruption
+              ? { interruption: pending.interruption }
+              : {}),
           }),
         },
       );
+      const [response] = await Promise.all([
+        responsePromise,
+        interruptionBridgePlayback ?? Promise.resolve(),
+      ]);
       if (!episodeOperationIsCurrent(controller, runId)) {
         settlePendingCut(pending, false);
         return;
@@ -3200,10 +3253,12 @@ export function BotcastExperience({
     }
   }, [
     beginEpisodeOperation,
+    botsById,
     episode,
     episodeOperationIsCurrent,
     invalidateEpisodeOperation,
     loadEpisodes,
+    onListenerReaction,
     playEpisodeOutro,
     request,
     selectedShow,
@@ -3228,27 +3283,108 @@ export function BotcastExperience({
       const pending: SignalPendingCutRequest = {
         episodeId: episode.id,
         waitForOutro: options.waitForOutro === true,
+        audienceCheckpoint: {
+          lastAudienceMessageId: episode.messages.at(-1)?.id ?? null,
+          lastAudienceEventSequence: episode.events.at(-1)?.sequence ?? 0,
+          audienceSegmentCount: episode.segments.length,
+        },
+        interruption: null,
+        interruptionBridgeMessage: null,
+        interruptionCrosstalkPlan: null,
         promise,
         resolve,
       };
+      const activeMessage = episode.messages.find(
+        (message) => message.id === speakingMessageId,
+      );
+      const activeReveal =
+        activeMessage && liveSpeech?.messageId === activeMessage.id
+          ? liveSpeech.reveal
+          : null;
+      const spokenContent =
+        activeReveal?.phase === "playing"
+          ? botcastSpeechRevealVisibleText(activeReveal).trimEnd()
+          : "";
+      const interruptedContent = activeMessage
+        ? botcastInterruptedGuestContent(activeMessage.content, spokenContent)
+        : null;
+      const activeLineCanBeInterrupted = Boolean(
+        activeMessage &&
+          interruptedContent !== activeMessage.content &&
+          (!spokenContent || interruptedContent),
+      );
+      const guestBridge =
+        activeLineCanBeInterrupted &&
+        activeMessage?.speakerRole === "guest" &&
+        Boolean(spokenContent.trim()) &&
+        nextHostInterruptionBridge &&
+        !hostBot?.muted &&
+        !botPowerEchoesAddressedSpeechV1(
+          botcastSnapshotPowersForRoleV1(episode, "host") ??
+            hostBot?.powers,
+        ) &&
+        !botPowerResponseIsSilentV1(nextHostInterruptionBridge.content)
+          ? nextHostInterruptionBridge
+          : null;
+      const interruptionCrosstalkPlan = guestBridge
+        ? nextHostInterruptionCrosstalkPlan
+        : null;
+      if (activeMessage && activeLineCanBeInterrupted) {
+        pending.interruption = {
+          messageId: activeMessage.id,
+          speakerRole: activeMessage.speakerRole,
+          spokenContent,
+          ...(guestBridge ? { bridgeLine: guestBridge.content } : {}),
+          ...(interruptionCrosstalkPlan?.interruptedSpeakerCue
+            ? {
+                interruptedSpeakerCue:
+                  interruptionCrosstalkPlan.interruptedSpeakerCue,
+              }
+            : {}),
+        };
+        pending.interruptionBridgeMessage = guestBridge;
+        pending.interruptionCrosstalkPlan = interruptionCrosstalkPlan;
+        setEpisode({
+          ...episode,
+          messages: interruptedContent
+            ? episode.messages.map((message) =>
+                message.id === activeMessage.id
+                  ? {
+                      ...message,
+                      content:
+                        activeMessage.speakerRole === "guest" &&
+                        interruptionCrosstalkPlan?.interruptedSpeakerCue
+                          ? appendBotCrosstalkInterruptedSpeakerCue(
+                              interruptedContent,
+                              interruptionCrosstalkPlan.interruptedSpeakerCue,
+                            )
+                          : interruptedContent,
+                      voicePerformanceText: null,
+                    }
+                  : message,
+              )
+            : episode.messages.filter(
+                (message) => message.id !== activeMessage.id,
+              ),
+        });
+      }
       pendingCutRef.current = pending;
       setCuttingShow(true);
       setAutoRun(false);
       assignQueuedProducerCue(null);
       preparedAdvanceRef.current?.controller.abort();
       preparedAdvanceRef.current = null;
-      if (
-        activeSpeechMessageIdRef.current === null &&
-        speakingMessageId === null
-      ) {
-        invalidateEpisodeOperation();
-      }
+      invalidateEpisodeOperation();
       return promise;
     },
     [
       assignQueuedProducerCue,
       episode,
+      hostBot,
       invalidateEpisodeOperation,
+      liveSpeech,
+      nextHostInterruptionBridge,
+      nextHostInterruptionCrosstalkPlan,
       selectedShow,
       speakingMessageId,
     ],
@@ -4753,25 +4889,26 @@ export function BotcastExperience({
       await releaseSignalModelWarmup(opening.episode.id);
       await Promise.all([introPlayback.finished, visualMinimum]);
       if (!episodeOperationIsCurrent(controller, runId)) return;
-      setEpisodePreRoll((current) =>
-        current?.showId === selectedShow.id
-        ? { ...current, phase: "landing" }
-          : current,
-      );
-      await new Promise<void>((resolve) =>
-        window.setTimeout(
-        resolve,
-        preRollSkipRequestedRef.current || reducedMotion ? 90 : 460,
-        ),
-      );
-      if (!episodeOperationIsCurrent(controller, runId)) return;
-      setEpisodePreRoll(null);
-      stopSignalIntroAudio();
       await playPreparedEpisodeMessage(
         opening.message,
         opening.episode,
         controller,
         runId,
+        true,
+        () => {
+          setEpisodePreRoll((current) =>
+            current?.showId === selectedShow.id
+              ? { ...current, phase: "landing" }
+              : current,
+          );
+          window.setTimeout(() => {
+            if (!episodeOperationIsCurrent(controller, runId)) return;
+            setEpisodePreRoll((current) =>
+              current?.showId === selectedShow.id ? null : current,
+            );
+            stopSignalIntroAudio();
+          }, preRollSkipRequestedRef.current || reducedMotion ? 90 : 460);
+        },
       );
     } catch (startError) {
       if (episodeOperationIsCurrent(controller, runId)) {
@@ -4963,7 +5100,6 @@ export function BotcastExperience({
   const prepareEpisodeMessage = useCallback(
     (message: BotcastMessage, currentEpisode: BotcastEpisode): void => {
       activeSpeechMessageIdRef.current = message.id;
-      setAnticipatingSpeakerRole(null);
       cacheListenerReactionPlan(currentEpisode, message);
       let bot = botsById.get(message.botId);
       if (bot) {
@@ -5210,7 +5346,6 @@ export function BotcastExperience({
     (currentEpisode: BotcastEpisode, message: BotcastMessage): void => {
       preparedAdvanceRef.current?.controller.abort();
       preparedAdvanceRef.current = null;
-      setAnticipatingSpeakerRole(null);
       const nextSpeakerRole = signalNextSpeakerRole(currentEpisode);
       if (
         currentEpisode.status === "completed" ||
@@ -5218,7 +5353,6 @@ export function BotcastExperience({
         nextSpeakerRole === null
       )
         return;
-      setAnticipatingSpeakerRole(nextSpeakerRole);
       const controller = new AbortController();
       const prepared: PreparedBotcastAdvance = {
         episodeId: currentEpisode.id,
@@ -5396,7 +5530,6 @@ export function BotcastExperience({
             initial: false,
             episodeId: episode.id,
           });
-          setAnticipatingSpeakerRole(null);
           setAutoRun(false);
           return false;
         }
@@ -5443,7 +5576,6 @@ export function BotcastExperience({
           if (directHoldStart) await directHoldStart;
           if (preparationStatus.state === "unavailable") {
             signalModelWarmupVisibleRef.current = true;
-            setAnticipatingSpeakerRole(null);
             setAutoRun(false);
             return false;
           }
@@ -5530,7 +5662,6 @@ export function BotcastExperience({
           );
         }
         if (response.episode.status === "completed") {
-          setAnticipatingSpeakerRole(null);
           assignQueuedProducerCue(null);
           setAutoRun(false);
           if (selectedShow) {
@@ -5550,7 +5681,6 @@ export function BotcastExperience({
             await releaseSignalModelWarmup(episode.id);
           }
           if (activeSpeechMessageIdRef.current !== null) stopUtterance();
-          setAnticipatingSpeakerRole(null);
           setAutoRun(false);
           setError(signalErrorToast("Advance Signal episode", advanceError));
         }
@@ -6854,8 +6984,6 @@ export function BotcastExperience({
         (!args.replay &&
           ((speechReveal?.phase === "preparing" &&
             args.activeMessage?.speakerRole === role) ||
-            (anticipatingSpeakerRole === role &&
-              args.activeMessage?.speakerRole !== role) ||
             (busy && speakingMessageId === null && thinkingRole === role))));
     const episodeStartedAtCandidate = Date.parse(args.currentEpisode.startedAt);
     const episodeStartedAtMs = Number.isFinite(episodeStartedAtCandidate)
@@ -9595,7 +9723,7 @@ export function BotcastExperience({
                 className={styles.cutShowButton}
                 onClick={() => void cutShow()}
                 disabled={episode.status === "completed" || cuttingShow}
-                aria-label="Finish the current line and close the live show"
+                aria-label="Interrupt the current line and close the live show"
               >
                 {cuttingShow ? "Finishing…" : "■ Cut show"}
               </button>

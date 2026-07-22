@@ -67,13 +67,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.25",
+    version: "1.26",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.24",
+    version: "1.25",
     status: "active",
   },
   arena: {
@@ -91,13 +91,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.24",
+    version: "2.25",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.45",
+    version: "1.46",
     status: "active",
   },
   feed: {
@@ -115,7 +115,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.24",
+    version: "0.25",
     status: "preview",
   },
   gym: {
@@ -144,13 +144,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   },
 };
 
-/** A designation is direct wherever a bot can be seen or heard; Slate has no live bot embodiment. */
+/** The holder changes other bot names in their own speech; 1:1 lanes carry only the cue. */
 export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerDesignationModePolicy
 > = {
-  chat: "direct",
-  zen: "direct",
+  chat: "cue",
+  zen: "cue",
   arena: "deferred",
   polling: "deferred",
   coffee: "direct",

@@ -2,7 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   activeBotPowerEffectsV1,
   activeBotPowersV1,
+  botPowerBotNamingCueFromEffectsV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
+  botPowerDesignationEffectFromIntentV1,
   botPowerAddressedFandomCueFromEffectsV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
@@ -19,6 +21,8 @@ import {
   buildCoffeePowersPromptBlock,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
+  coffeePowerStayRateMultiplierV1,
+  coffeePowerVesselModeV1,
   type BotPowerEffectV1,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResolvedThemeV1,
@@ -515,8 +519,18 @@ export function resolveCoffeePowersForSession(
     const powers = activeBotPowersV1(bot.powers_json);
     if (powers.length === 0) continue;
     const warnings: string[] = [];
-    const effects = powers.flatMap((power) =>
-      activeBotPowerEffectsV1([power]).map((effect) =>
+    const effects = powers.flatMap((power) => {
+      const activeEffects = activeBotPowerEffectsV1([power]);
+      const recoveredDesignation = botPowerDesignationEffectFromIntentV1(
+        power.intent,
+      );
+      const effectiveEffects = recoveredDesignation
+        ? [
+            recoveredDesignation,
+            ...activeEffects.filter((effect) => effect.type !== "designation"),
+          ]
+        : activeEffects;
+      return effectiveEffects.map((effect) =>
         resolvedEffect(
           effect.type === "interruption" &&
             botPowerDefinitionIsUnconditionalInterruptionV1(
@@ -529,28 +543,36 @@ export function resolveCoffeePowersForSession(
           orderedBots,
           warnings,
         ),
-      ),
-    );
+      );
+    });
     const awareness = effects.find((effect) => effect.type === "awareness");
     const speechAudience = effects.find((effect) => effect.type === "speech_audience");
     const genericCuePowers = powers.filter(
       (power) =>
         !power.compiled?.effects.some(
-          (effect) => effect.type === "identity_mirror",
-        ),
+          (effect) => effect.type === "identity_mirror" || effect.type === "designation",
+        ) && !botPowerDesignationEffectFromIntentV1(power.intent),
     );
+    const namingCue = botPowerBotNamingCueFromEffectsV1(
+      bot.name,
+      effects,
+      orderedBots.filter((target) => target.id !== bot.id).map((target) => target.name),
+    );
+    const namingObserverCue = namingCue
+      ? `${bot.name}'s naming Power changes only bot names spoken by ${bot.name}. Keep every bot's saved identity and do not copy that prefix or suffix into another speaker's words.`
+      : null;
     const resolved: ResolvedCoffeePowerBotV1 = {
       botId: bot.id,
       powerIds: powers.map((power) => power.id),
       powerNames: powers.map((power) => power.name || "Power"),
-      selfCue: genericCuePowers
-        .map((power) => power.compiled?.selfCue ?? "")
-        .filter(Boolean)
-        .join(" "),
-      observerCue: genericCuePowers
-        .map((power) => power.compiled?.observerCue ?? "")
-        .filter(Boolean)
-        .join(" "),
+      selfCue: [
+        namingCue,
+        ...genericCuePowers.map((power) => power.compiled?.selfCue ?? ""),
+      ].filter(Boolean).join(" "),
+      observerCue: [
+        namingObserverCue,
+        ...genericCuePowers.map((power) => power.compiled?.observerCue ?? ""),
+      ].filter(Boolean).join(" "),
       visibleToBotIds:
         audienceIdsFromResolvedEffect(awareness, "awareness"),
       speechAudienceBotIds:
@@ -1003,6 +1025,20 @@ export function coffeePowerCupRateMultiplier(
   botId: string
 ): number {
   return coffeePowerCupRateMultiplierV1(plan, botId);
+}
+
+export function coffeePowerVesselMode(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string
+): "coffee" | "none" {
+  return coffeePowerVesselModeV1(plan, botId);
+}
+
+export function coffeePowerStayRateMultiplier(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string
+): number {
+  return coffeePowerStayRateMultiplierV1(plan, botId);
 }
 
 export function coffeePowerActionBias(

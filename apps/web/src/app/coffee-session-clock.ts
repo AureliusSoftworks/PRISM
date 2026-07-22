@@ -1,6 +1,7 @@
 export type CoffeeSessionClockPhase =
   | "selecting"
   | "preview"
+  | "barista"
   | "topic"
   | "arriving"
   | "live"

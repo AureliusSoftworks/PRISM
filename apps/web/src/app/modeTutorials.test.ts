@@ -4,6 +4,15 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("explains holder-scoped bot-name prefixes and suffixes", () => {
+    for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /changes only how its holder names other bots/u);
+      assert.match(copy, /holder keeps their own name/u);
+      assert.match(copy, /other speakers do not copy/u);
+    }
+  });
+
   it("keeps every step click-specific and targetable", () => {
     for (const tutorial of Object.values(MODE_TUTORIALS)) {
       assert.ok(tutorial.steps.length > 0);
@@ -58,7 +67,7 @@ describe("mode tutorials", () => {
   });
 
   it("explains that Coffee cross-talk controls audible backchannels", () => {
-    const joinCopy = MODE_TUTORIALS.coffee.steps[4]?.body ?? "";
+    const joinCopy = MODE_TUTORIALS.coffee.steps.at(-1)?.body ?? "";
     assert.match(joinCopy, /brief spoken acknowledgement/u);
     assert.match(joinCopy, /Cross-talk setting/u);
     assert.match(joinCopy, /audible overlaps/u);
@@ -73,12 +82,24 @@ describe("mode tutorials", () => {
     assert.match(joinCopy, /sparse mic-ready breath/u);
   });
 
+  it("teaches the Coffee bar roles and cup-driven Auto pacing", () => {
+    const copy = MODE_TUTORIALS.coffee.steps.map((step) => step.body).join(" ");
+    assert.match(copy, /Have something made/u);
+    assert.match(copy, /Make the rounds/u);
+    assert.match(copy, /LOCAL/u);
+    assert.match(copy, /hidden 30-minute ceiling/u);
+    assert.match(copy, /two or three table replies/u);
+    assert.match(copy, /invisible visit clock/u);
+    assert.match(copy, /tops off an eligible bot/u);
+    assert.match(copy, /outside the transcript, turn count, and memory/u);
+  });
+
   it("explains shared mic-ready breaths without adding a setup gate", () => {
     assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /Voice Effects on/u);
     assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /mic-ready breath/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
-      /saved episodes choose them deterministically on replay/u,
+      /saved episodes choose it deterministically on replay/u,
     );
   });
 
@@ -193,10 +214,11 @@ describe("mode tutorials", () => {
       .join(" ");
     assert.match(
       signalCopy,
-      /Cut show is quicker[^.]*currently on mic finishes the line[^.]*unspoken next turn is cancelled/u,
+      /Cut show now stops the bot currently on mic immediately[^.]*cancels any unheard next turn/u,
     );
-    assert.match(signalCopy, /one brief natural sign-off/u);
-    assert.match(signalCopy, /Even an immediate cut is saved/u);
+    assert.match(signalCopy, /guest is cut off by one of the host’s saved short interjections/u);
+    assert.match(signalCopy, /host breaks off its own line and then closes/u);
+    assert.match(signalCopy, /even an immediate cut is saved/u);
     assert.match(
       signalCopy,
       /After several substantive exchanges[^.]*host who genuinely refuses to continue[^.]*Host ended the show/u,
@@ -560,11 +582,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /switches to Wide whenever any bot is thinking or preparing its voice/u,
+      /never cuts ahead to the next bot merely because its response is preparing/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /moves to that bot only when speech begins/u,
+      /moves to the bot only when speech begins/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -836,7 +858,10 @@ describe("mode tutorials", () => {
     const [chooseRelationship, groupRoom, continueHome, , context] =
       MODE_TUTORIALS.zen.steps;
 
-    assert.deepEqual(chooseRelationship, {
+    assert.deepEqual({
+      ...chooseRelationship,
+      body: chooseRelationship?.body.replace(/ A bot-name prefix or suffix changes only how its holder names other bots:.*$/u, ""),
+    }, {
       heading: "Choose a relationship",
       body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, does not retain the broader topic unless your current message states it, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
@@ -924,7 +949,7 @@ describe("mode tutorials", () => {
   });
 
   it("distinguishes Coffee response routing from the account default model", () => {
-    const [, setup, , routing] = MODE_TUTORIALS.coffee.steps;
+    const [, setup, , , routing] = MODE_TUTORIALS.coffee.steps;
 
     assert.match(
       setup?.body ?? "",
@@ -943,8 +968,9 @@ describe("mode tutorials", () => {
     assert.match(setup?.body ?? "", /one to five local or online fallbacks/);
     assert.match(
       setup?.body ?? "",
-      /Auto duration is open-ended with no countdown/,
+      /Auto has no visible countdown/,
     );
+    assert.match(setup?.body ?? "", /hidden 30-minute ceiling/);
     assert.match(
       routing?.body ?? "",
       /changes response routing, not the Account default model choice/,

@@ -1,5 +1,5 @@
 export type CoffeeShellSessionPhase =
-  "selecting" | "preview" | "topic" | "arriving" | "live" | "finished";
+  "selecting" | "preview" | "barista" | "topic" | "arriving" | "live" | "finished";
 
 export type UniversalNavbarAction =
   | "promptCenter"

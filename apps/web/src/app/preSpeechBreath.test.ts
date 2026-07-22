@@ -27,7 +27,7 @@ describe("pre-speech breath planning", () => {
         ),
       );
       assert.ok(first.gain > 0 && first.gain < 1);
-      assert.ok(first.postGapMs >= 50 && first.postGapMs <= 90);
+      assert.ok(first.voiceOverlapMs >= 90 && first.voiceOverlapMs <= 180);
     }
   });
 
@@ -95,6 +95,7 @@ describe("pre-speech breath planning", () => {
       hasAuthoredBreathDirection("The room needs breathing space."),
       false,
     );
+    assert.equal(hasAuthoredBreathDirection("slow respirator rhythm"), true);
   });
 });
 
@@ -104,7 +105,10 @@ describe("pre-speech breath integration", () => {
     for (const surface of ["chat", "coffee", "signal", "story"] as const) {
       assert.match(pageSource, new RegExp(`surface: ["']${surface}["']`, "u"));
     }
-    assert.match(pageSource, /authoredPerformanceText: message\.voicePerformanceText/u);
+    assert.match(
+      pageSource,
+      /authoredPerformanceText: \[[\s\S]{0,120}performanceText,[\s\S]{0,120}profile\.elevenLabsDirection/u,
+    );
     assert.match(pageSource, /!signalStageSoundcheckMessageIsEphemeral\(message\)/u);
     assert.match(pageSource, /const preSpeechBreath = playerMessage\s*\? null/u);
   });
@@ -115,6 +119,9 @@ describe("pre-speech breath integration", () => {
     const bottishSource = readFileSync(new URL("./bottishVoice.ts", import.meta.url), "utf8");
     assert.match(effectsSource, /fetch\(url, \{ cache: "force-cache" \}\)/u);
     assert.match(effectsSource, /\.catch\(\(\) => null\)/u);
+    assert.match(effectsSource, /activeVoiceChannels\.presence/u);
+    assert.match(effectsSource, /voiceStartsAt/u);
+    assert.doesNotMatch(effectsSource, /postGapMs/u);
     assert.ok(
       englishSource.indexOf("await playPreSpeechBreath") <
         englishSource.indexOf("played = await playRealtimeVoiceBytes"),

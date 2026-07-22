@@ -130,6 +130,9 @@ import {
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
+  chooseCoffeeBarRole,
+  chooseCoffeeHouseDrink,
+  completeCoffeeSpecialOrder,
   deleteCoffeeGroup,
   deleteCoffeePreset,
   getCoffeeConversationTranscript,
@@ -141,16 +144,20 @@ import {
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
+  prepareCoffeeSpecialOrder,
   recordCoffeePlayerDeparture,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
+  respondCoffeeWaiterOffer,
   restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
   setCoffeePlayerTeam,
   setCoffeePollPlayerVote,
+  sipCoffeePlayerCup,
   topOffCoffeeCupForBot,
+  failCoffeeSpecialOrder,
   undoLatestCoffeeDebugMessage,
   updateCoffeePreset,
   updateCoffeeGroupWithGeneratedTopics,
@@ -176,6 +183,7 @@ import {
   deleteBotcastShow,
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
+  type BotcastProducerCutInterruption,
   ensureBotcastEpisodePersonaReview,
   generateBotcastBookingSuggestion,
   generateBotcastProducerGuestBooking,
@@ -566,6 +574,7 @@ import {
   normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
+  voicePerformanceTextFromAsteriskCues,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
@@ -9331,6 +9340,33 @@ function buildRoutes(): RouteDefinition[] {
       if (audienceCheckpoint === null) {
         throw new HttpError(400, "Signal cut checkpoint is invalid.");
       }
+      const rawInterruption = body.interruption;
+      const interruption = rawInterruption === undefined
+        ? undefined
+        : rawInterruption &&
+            typeof rawInterruption === "object" &&
+            !Array.isArray(rawInterruption) &&
+            typeof (rawInterruption as Record<string, unknown>).messageId ===
+              "string" &&
+            ((rawInterruption as Record<string, unknown>).speakerRole ===
+              "host" ||
+              (rawInterruption as Record<string, unknown>).speakerRole ===
+                "guest") &&
+            typeof (rawInterruption as Record<string, unknown>).spokenContent ===
+              "string" &&
+            (typeof (rawInterruption as Record<string, unknown>).bridgeLine ===
+              "string" ||
+              (rawInterruption as Record<string, unknown>).bridgeLine ===
+                undefined) &&
+            (typeof (rawInterruption as Record<string, unknown>)
+              .interruptedSpeakerCue === "string" ||
+              (rawInterruption as Record<string, unknown>)
+                .interruptedSpeakerCue === undefined)
+          ? (rawInterruption as BotcastProducerCutInterruption)
+          : null;
+      if (interruption === null) {
+        throw new HttpError(400, "Signal cut interruption is invalid.");
+      }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
@@ -9353,7 +9389,10 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         currentEpisode.id,
         generation,
-        audienceCheckpoint ? { audienceCheckpoint } : {},
+        {
+          ...(audienceCheckpoint ? { audienceCheckpoint } : {}),
+          ...(interruption ? { interruption } : {}),
+        },
       );
       await ensureBotcastEpisodePersonaReview(
         db,
@@ -9906,6 +9945,139 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         ...result,
       });
+    }),
+    route("POST", "/api/coffee/sessions/:id/bar/role", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = chooseCoffeeBarRole(db, userId, ctx.params.id, body.role);
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
+    route("POST", "/api/coffee/sessions/:id/bar/house", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = chooseCoffeeHouseDrink(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
+    route("POST", "/api/coffee/sessions/:id/bar/special", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      const preferredProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
+      if (preferredProvider === "local") {
+        throw new HttpError(
+          409,
+          "The special-drink machine is unavailable in LOCAL mode. Choose house coffee or make the rounds.",
+        );
+      }
+      const attemptId = typeof body.idempotencyKey === "string"
+        ? body.idempotencyKey.trim().slice(0, 180)
+        : "";
+      const prepared = prepareCoffeeSpecialOrder(
+        db,
+        userId,
+        ctx.params.id,
+        body.orderText,
+        attemptId,
+      );
+      if (!prepared.shouldGenerate) {
+        json(ctx.res, prepared.imageId ? 200 : 202, {
+          ok: true,
+          conversation: prepared.conversation,
+          imageId: prepared.imageId,
+          idempotent: true,
+        });
+        return;
+      }
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const imageAbort = new AbortController();
+      const prompt = [
+        "A seamless, flat top-down macro view of only the beverage surface described below.",
+        `Drink: ${prepared.orderText}`,
+        "Compose it as a centered circular drink surface filling the entire square canvas, suitable for clipping inside a shallow overhead coffee mug opening.",
+        "Opaque background pixels must all be beverage or foam. No cup, rim, saucer, table, hands, utensils, garnish outside the liquid, lettering, logo, watermark, border, perspective view, or cast shadow.",
+      ].join("\n");
+      let imageRowStored = false;
+      try {
+        const userKey = decryptUserKey(userId);
+        const apiKey = getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+        const result = await generateImage(prompt, apiKey, {
+          model: "gpt-image-2",
+          size: "1024x1024",
+          quality: "medium",
+          background: "opaque",
+          signal: imageAbort.signal,
+        });
+        const imageBytes = await readOpenAiGeneratedImageBytes(result, imageAbort.signal);
+        writeGeneratedImageBytes(localRelPath, imageBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        const storedUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+        const createdAt = new Date().toISOString();
+        try {
+          db.prepare(
+            `INSERT INTO images
+               (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+                revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at)
+             VALUES (?, ?, ?, NULL, '[]', 'coffee_bar', ?, ?, ?, '1024x1024',
+                     'medium', 'openai', ?, ?, 'coffee_drink_surface', ?)`,
+          ).run(
+            imageId,
+            userId,
+            ctx.params.id,
+            prepared.orderText,
+            result.revisedPrompt,
+            storedUrl,
+            result.model,
+            localRelPath,
+            createdAt,
+          );
+          imageRowStored = true;
+          recordImageUsage({
+            provider: "openai",
+            model: result.model,
+            purpose: "image_generation",
+            imageCount: 1,
+            imageSize: "1024x1024",
+            imageQuality: "medium",
+            createdAt,
+          });
+        } catch (error) {
+          tryUnlinkGeneratedImageFile(localRelPath);
+          throw error;
+        }
+        const conversation = completeCoffeeSpecialOrder(
+          db,
+          userId,
+          ctx.params.id,
+          attemptId,
+          imageId,
+        );
+        json(ctx.res, 201, { ok: true, conversation, imageId });
+      } catch (error) {
+        if (imageRowStored) {
+          db.prepare(
+            "DELETE FROM images WHERE id = ? AND user_id = ? AND conversation_id = ?",
+          ).run(imageId, userId, ctx.params.id);
+        }
+        tryUnlinkGeneratedImageFile(localRelPath);
+        failCoffeeSpecialOrder(db, userId, ctx.params.id, attemptId);
+        throw error;
+      }
+    }),
+    route("POST", "/api/coffee/sessions/:id/player-cup/sip", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = sipCoffeePlayerCup(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, conversation });
+    }),
+    route("POST", "/api/coffee/sessions/:id/bar/waiter/respond", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const conversation = respondCoffeeWaiterOffer(
+        db,
+        userId,
+        ctx.params.id,
+        body.response,
+      );
+      json(ctx.res, 200, { ok: true, conversation });
     }),
     route("POST", "/api/coffee/sessions/:id/restart", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -12427,7 +12599,9 @@ function buildRoutes(): RouteDefinition[] {
         sourceText = signalMessage.content;
         sourceElevenLabsText =
           typeof raw.elevenLabsText === "string"
-            ? signalMessage.voice_performance_text
+            ? voicePerformanceTextFromAsteriskCues(
+                signalMessage.voice_performance_text ?? signalMessage.content,
+              ) ?? signalMessage.voice_performance_text
             : null;
         persistedMessageProvider =
           signalMessage.response_mode === "local"

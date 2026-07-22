@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   addBotToLibraryGroup,
+  filterBotsByLibrarySearch,
   filterUngroupedBotsByLibraryGroups,
   filterBotsByLibraryGroup,
   pruneBotLibraryGroupsForExistingBots,
@@ -83,6 +84,35 @@ describe("bot library group filtering", () => {
   it("falls back to every bot when a stale group id is selected", () => {
     assert.deepEqual(
       filterBotsByLibraryGroup(bots, groups, "group:deleted").map((bot) => bot.id),
+      ["bot-a", "bot-b", "bot-c"]
+    );
+  });
+
+  it("searches the filtered library by bot name or purpose", () => {
+    const libraryBots = [
+      { id: "bot-a", name: "Astra", purpose: "A practical astronomer" },
+      { id: "bot-b", name: "Basil", purpose: "A patient garden guide" },
+      { id: "bot-c", name: "Cora", purpose: "A sharp copy editor" },
+    ];
+
+    assert.deepEqual(
+      filterBotsByLibrarySearch(libraryBots, "  BAS  ", (bot) => [
+        bot.name,
+        bot.purpose,
+      ]).map((bot) => bot.id),
+      ["bot-b"]
+    );
+    assert.deepEqual(
+      filterBotsByLibrarySearch(libraryBots, "COPY", (bot) => [
+        bot.name,
+        bot.purpose,
+      ]).map((bot) => bot.id),
+      ["bot-c"]
+    );
+    assert.deepEqual(
+      filterBotsByLibrarySearch(libraryBots, "   ", (bot) => [bot.name]).map(
+        (bot) => bot.id
+      ),
       ["bot-a", "bot-b", "bot-c"]
     );
   });

@@ -9,6 +9,7 @@ import {
   STORY_LOCATION_COUNT_MAX,
   STORY_LOCATION_COUNT_MIN,
   applyBotPowerEternalIntroductionResponseV1,
+  applyBotPowerBotNamesV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
@@ -23,8 +24,7 @@ import {
   botPowerMumblesSpeechV1,
   botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
-  botPowerDesignationCueV1,
-  botPowerDisplayNameV1,
+  botPowerBotNamingCueV1,
   botPowerPairwisePerceptionV1,
   botPowerAvatarVisibilityModeV1,
   botPowerSelfCueLinesV1,
@@ -1253,7 +1253,14 @@ function applyStoryHardResponsePowers(
           (target) => storyPowerTargetMatches(target, observer),
           { holderSpeaking: true },
         ).audible,
-    ),
+      ),
+  );
+  const hasBotNamingPower = bots.some((holder) =>
+    botPowerBotNamingCueV1(
+      holder.name,
+      holder.powers,
+      bots.filter((target) => target.id !== holder.id).map((target) => target.name),
+    ) !== null,
   );
   if (
     mutedBotIds.size === 0 &&
@@ -1263,7 +1270,8 @@ function applyStoryHardResponsePowers(
     !bots.some((bot) => botPowerIntermittentMuteEffectV1(bot.powers)) &&
     responseBudgetByBotId.size === 0 &&
     !hasInterruptionPower &&
-    !hasPerceptionBoundary
+    !hasPerceptionBoundary &&
+    !hasBotNamingPower
   ) {
     return episode;
   }
@@ -1388,6 +1396,21 @@ function applyStoryHardResponsePowers(
           ),
         };
       }
+    }
+    if (
+      currentSpeaker &&
+      !mutedBotIds.has(currentSpeaker.id) &&
+      !quietIgnored &&
+      !echoBotIds.has(currentSpeaker.id)
+    ) {
+      nextScene = {
+        ...nextScene,
+        narration: applyBotPowerBotNamesV1(
+          nextScene.narration,
+          currentSpeaker.powers,
+          bots.filter((target) => target.id !== currentSpeaker.id).map((target) => target.name),
+        ),
+      };
     }
     if (
       scene.speakerBotId &&
@@ -1666,7 +1689,6 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
   ];
   const botLines = args.bots
     .map((bot) => {
-      const designation = botPowerDisplayNameV1(bot.name, bot.powers);
       const fandomCue = botPowerAddressedFandomCueV1(
         bot.powers,
         "the character, player, or audience addressed",
@@ -1674,16 +1696,24 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
       );
       const themeMoodCue = botPowerThemeMoodCueV1(bot.powers, args.theme);
       const powers = buildBotPowersPromptBlock([
-        ...(botPowerDesignationCueV1(bot.name, bot.powers)
-          ? [botPowerDesignationCueV1(bot.name, bot.powers)!]
+        ...(botPowerBotNamingCueV1(
+          bot.name,
+          bot.powers,
+          args.bots.filter((target) => target.id !== bot.id).map((target) => target.name),
+        )
+          ? [botPowerBotNamingCueV1(
+              bot.name,
+              bot.powers,
+              args.bots.filter((target) => target.id !== bot.id).map((target) => target.name),
+            )!]
           : []),
         ...botPowerSelfCueLinesV1(bot.powers),
         ...(fandomCue ? [fandomCue] : []),
         ...(themeMoodCue ? [themeMoodCue] : []),
-        ...botPowerObserverCueLinesV1(designation, bot.powers),
+        ...botPowerObserverCueLinesV1(bot.name, bot.powers),
       ]).replace(/\s+/gu, " ").trim();
       const cloneIdentity = buildCloneFamilyIdentityPrompt(bot, args.bots);
-      return `- ${bot.id}: ${designation}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;
+      return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;
     })
     .join("\n");
   const premise = args.premise?.trim()

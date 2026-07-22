@@ -4,6 +4,7 @@ import {
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDesignationEffectFromIntentV1,
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
   normalizeBotPowerEffectV1,
@@ -1112,58 +1113,23 @@ function deterministicResponseBudgetPower(
   };
 }
 
-function designationAffix(value: string, botName: string, placement: "prefix" | "suffix"): string {
-  const authored = compact(value, 100)
-    .replace(/^[\s"“”'‘’]+|[\s"“”'‘’.,!?;:]+$/gu, "");
-  const base = compact(botName, 100);
-  if (!authored || !base) return authored;
-  const authoredWords = authored.split(/\s+/u);
-  const baseWords = base.split(/\s+/u);
-  const startsWithBase = baseWords.every(
-    (word, index) => authoredWords[index]?.toLowerCase() === word.toLowerCase(),
-  );
-  const endsWithBase = baseWords.every(
-    (word, index) => authoredWords[authoredWords.length - baseWords.length + index]?.toLowerCase() === word.toLowerCase(),
-  );
-  if (placement === "suffix" && startsWithBase && authoredWords.length > baseWords.length) {
-    return authoredWords.slice(baseWords.length).join(" ");
-  }
-  if (placement === "prefix" && endsWithBase && authoredWords.length > baseWords.length) {
-    return authoredWords.slice(0, -baseWords.length).join(" ");
-  }
-  return authored;
-}
-
-/**
- * Hard authored-name language must not wait on a compiler model. The direct
- * prefix/suffix form also accepts a complete desired designation (for example
- * "suffix Santa Claus Bot" for a bot saved as "Santa Claus").
- */
+/** Hard authored bot-name prefix/suffix language must not wait on a model. */
 function deterministicDesignationPower(
   source: BotPowerV1,
   botName: string,
 ): CompiledBotPowerV1 | null {
-  const intent = compact(source.intent, 600);
-  const direct = intent.match(
-    /\b(prefix|suffix)\s*(?:designation|name|title)?\s*(?:with|as|to|:|=)?\s*["“']?([^"”'\n.!?]+)["”']?/iu,
-  );
-  const quoted = intent.match(
-    /\b(?:always\s+)?(?:called|known\s+as|referred\s+to\s+as|displayed\s+as|designated\s+as)\s+["“']([^"”']+)["”']/iu,
-  );
-  const fullDesignation = quoted?.[1] ?? direct?.[2];
-  if (!fullDesignation) return null;
-  const placement = direct?.[1]?.toLowerCase() === "prefix" ? "prefix" as const : "suffix" as const;
-  const text = designationAffix(fullDesignation, botName, placement);
-  if (!text) return null;
+  const effect = botPowerDesignationEffectFromIntentV1(source.intent);
+  if (!effect) return null;
+  const { placement, text } = effect;
   const subject = compact(botName, 100) || "This bot";
-  const visible = placement === "prefix" ? `${text} ${subject}` : `${subject} ${text}`;
+  const affix = `${placement} ${JSON.stringify(text)}`;
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue: `Use ${JSON.stringify(visible)} as your public and spoken designation without changing your saved base name.`,
-    observerCue: `${subject}'s current public designation is ${JSON.stringify(visible)}; use it whenever the holder is named.`,
+    selfCue: `Keep your own name ${JSON.stringify(subject)}. Whenever you name or address another bot, apply ${affix} to that bot's name. Never apply it to the player or humans.`,
+    observerCue: `${subject} applies ${affix} whenever naming another bot. Other speakers keep their own naming habits and do not copy this rule.`,
     effects: [{ type: "designation", placement, text }],
-    ruleLabels: [`${placement === "prefix" ? "Prefix" : "Suffix"} designation`],
+    ruleLabels: [`Bot-name ${placement}`],
   };
 }
 
@@ -1710,7 +1676,7 @@ export async function compileBotPowers(args: {
         "Return {\"powers\":[{\"id\":string,\"name\":string,\"sigil\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
-        '- {"type":"designation","placement":"prefix|suffix","text":string up to 80 characters},',
+        '- {"type":"designation","placement":"prefix|suffix","text":string up to 80 characters} means the holder adds that text to every other bot name they say; it never renames the holder or a human,',
         '- {"type":"eternal_introduction","memory":"current_other_speaker_message"},',
         '- {"type":"speech_copy","trigger":"direct_address"},',
         '- {"type":"identity_mirror","trigger":"direct_bot_address"},',

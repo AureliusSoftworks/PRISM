@@ -24,10 +24,10 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.25 | Active | Full playground with direct human access to a companion and half-translucent targeted-Invisible presentation. |
-| Zen | v1.24 | Active | Calm one-to-one continuity with direct human access to a companion and half-translucent targeted-Invisible presentation. |
-| Coffee | v2.24 | Active | Multi-bot tables with frozen pairwise sight and hearing, allowed-minus-excluded targeting, hidden spectral turns, cast-dependent live reveal, full spectral replay, and deterministic Power-driven overlap. |
-| Signal | v1.45 | Active | Bot-owned interviews with pairwise cast perception, allowed-minus-excluded targeting, unrestricted spectral booking, full spectral replay, dual captions, spatial overlap audio, and audience-projected reviews. |
+| Chat | v1.26 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming cues. |
+| Zen | v1.25 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming cues. |
+| Coffee | v2.25 | Active | Multi-bot tables with frozen pairwise sight, hearing, and holder-scoped bot naming. |
+| Signal | v1.46 | Active | Bot-owned interviews with pairwise cast perception and holder-scoped bot naming in prompts, saved dialogue, voice, and replay. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -82,14 +82,23 @@ stages do not block the standalone preview.
 
 ## Changelog
 
+### 2026-07-22
+
+- Bumped `Chat` to `v1.26`, `Zen` to `v1.25`, `Coffee` to `v2.25`, `Signal`
+  to `v1.46`, and `Story` to `v0.25` for holder-scoped bot naming. A Ready
+  Power can add one bounded prefix or suffix whenever its holder names another
+  bot—so Rick Sanchez may say `Sigmund Freud Bot` while remaining `Rick
+  Sanchez`, and unaffected speakers keep their own naming habits. Coffee and
+  Signal enforce the frozen target name in saved output; Story adapts it to
+  cast dialogue, while Chat and Zen carry the rule as a cue when another bot is
+  mentioned. Signal continues to treat public episode titles as editorial
+  labels instead of canned opening dialogue.
+
 ### 2026-07-21
 
-- Bumped `Chat` to `v1.25`, `Zen` to `v1.24`, `Coffee` to `v2.24`, and `Signal`
-  to `v1.45` for holder-scoped persistent public
-  designations. Ready Powers compose one bounded prefix or suffix into
-  participant-facing identity without changing the saved bot name; Signal
-  openings treat public episode titles as editorial labels rather than a line
-  to repeat.
+- Initial designation groundwork and Signal title framing landed in `Chat`
+  `v1.25`, `Zen` `v1.24`, `Coffee` `v2.24`, and `Signal` `v1.45`. The corrected
+  holder-to-target naming contract is documented in the 2026-07-22 entry above.
 
 - Bumped `Signal` to `v1.44` so an Identity Crisis host restores its authored
   default persona, CRT face, Avatar Details ink, and voice before the closing

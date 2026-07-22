@@ -830,6 +830,10 @@ describe("Signal experience shell", () => {
       source,
       /playPreparedEpisodeMessage\(\s*opening\.message,\s*opening\.episode,/u,
     );
+    assert.match(
+      source,
+      /playPreparedEpisodeMessage\([\s\S]{0,180}opening\.episode,[\s\S]{0,180}\(\) => \{[\s\S]{0,260}phase: "landing"/u,
+    );
     assert.match(source, /SIGNAL_OPENING_ADVANCE_ATTEMPTS/u);
     assert.match(
       source,
@@ -955,7 +959,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("lets the active line finish before a compact producer close and outro", () => {
+  it("interrupts the active line before a compact producer close and outro", () => {
     assert.match(source, /playSignalOutdentAudio\(\{/u);
     assert.match(
       source,
@@ -1022,9 +1026,14 @@ describe("Signal experience shell", () => {
       /lastAudienceEventSequence:\s*episode\.events\.at\(-1\)\?\.sequence \?\? 0/u,
     );
     assert.match(source, /audienceSegmentCount:\s*episode\.segments\.length/u);
+    assert.match(source, /pendingCutRef\.current = pending;[\s\S]{0,240}invalidateEpisodeOperation\(\)/u);
     assert.match(
       source,
-      /activeSpeechMessageIdRef\.current === null &&[\s\S]{0,80}speakingMessageId === null[\s\S]{0,80}invalidateEpisodeOperation\(\)/u,
+      /interruption: pending\.interruption[\s\S]{0,300}Promise\.all\(\[[\s\S]{0,120}interruptionBridgePlayback/u,
+    );
+    assert.match(
+      source,
+      /botcastInterruptedGuestContent\(activeMessage\.content, spokenContent\)/u,
     );
     assert.match(
       source,
@@ -1044,7 +1053,7 @@ describe("Signal experience shell", () => {
       /disabled=\{episode\.status === "completed" \|\| cuttingShow\}/u,
     );
     assert.match(source, /■ Cut show/u);
-    assert.match(source, /aria-label="Finish the current line and close the live show"/u);
+    assert.match(source, /aria-label="Interrupt the current line and close the live show"/u);
     assert.match(source, /Finishing…/u);
     assert.doesNotMatch(source, /Signal transmission discarded|Early cut · not saved/u);
     assert.match(css, /\.episodeOutro \.preRollLogo\s*\{[^}]*width:\s*118px/u);
@@ -1396,7 +1405,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /const speechElapsedMs = args\.replay/u);
     assert.match(source, /speechReveal\?\.phase === "playing"/u);
-    assert.match(source, /const SIGNAL_NATURAL_HANDOFF_MS = 40/u);
+    assert.match(source, /const SIGNAL_NATURAL_HANDOFF_MS = 260/u);
     assert.match(source, /const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000/u);
     assert.match(
       source,
@@ -1425,13 +1434,10 @@ describe("Signal experience shell", () => {
       source,
       /const nextSpeakerRole = signalNextSpeakerRole\(currentEpisode\)/u,
     );
+    assert.doesNotMatch(source, /anticipatingSpeakerRole/u);
     assert.match(
       source,
-      /setAnticipatingSpeakerRole\(nextSpeakerRole\)/u,
-    );
-    assert.match(
-      source,
-      /anticipatingSpeakerRole === role[\s\S]{0,100}args\.activeMessage\?\.speakerRole !== role/u,
+      /speechReveal\?\.phase === "preparing"[\s\S]{0,180}busy && speakingMessageId === null && thinkingRole === role/u,
     );
     assert.match(
       source,

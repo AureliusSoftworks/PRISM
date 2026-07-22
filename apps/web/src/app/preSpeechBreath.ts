@@ -7,7 +7,8 @@ export interface PreSpeechBreathPlan {
   url: string;
   intensity: PreSpeechBreathIntensity;
   gain: number;
-  postGapMs: number;
+  /** Starts speech before the decorative breath has fully released. */
+  voiceOverlapMs: number;
 }
 
 export const PRE_SPEECH_BREATH_URLS = {
@@ -42,7 +43,7 @@ const MOOD_CHANCE_MULTIPLIER: Readonly<Record<VoiceDeliveryMood, number>> = {
 };
 
 const BREATH_DIRECTION_RE =
-  /(?:\[[^\]]*\b(?:breath(?:e[sd]?|ing)?|inhales?|exhales?|sighs?|gasps?)\b[^\]]*\]|\*[^*]*\b(?:breath(?:e[sd]?|ing)?|inhales?|exhales?|sighs?|gasps?)\b[^*]*\*)/iu;
+  /(?:\[[^\]]*\b(?:breath(?:e[sd]?|ing)?|inhales?|exhales?|sighs?|gasps?)\b[^\]]*\]|\*[^*]*\b(?:breath(?:e[sd]?|ing)?|inhales?|exhales?|sighs?|gasps?)\b[^*]*\*|\brespirat(?:or|ion|ing)\b)/iu;
 
 function stableHash(value: string): number {
   let hash = 2166136261;
@@ -124,6 +125,7 @@ export function resolvePreSpeechBreathPlan(args: {
   const urls = PRE_SPEECH_BREATH_URLS[intensity];
   const url = urls[stableHash(`${args.seed}:pre-speech-breath:variant`) % urls.length]!;
   const gain = intensity === "micro" ? 0.58 : intensity === "natural" ? 0.66 : 0.72;
-  const postGapMs = intensity === "micro" ? 52 : intensity === "natural" ? 68 : 88;
-  return { url, intensity, gain, postGapMs };
+  const voiceOverlapMs =
+    intensity === "micro" ? 90 : intensity === "natural" ? 140 : 180;
+  return { url, intensity, gain, voiceOverlapMs };
 }

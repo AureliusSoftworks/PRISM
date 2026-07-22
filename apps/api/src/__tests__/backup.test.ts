@@ -17,8 +17,76 @@ import {
 import {
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
+  normalizeCoffeeSessionSettings,
   parseStoredBotPowersV1,
 } from "@localai/shared";
+
+describe("backup Coffee service state", () => {
+  it("round-trips the bar ritual and requires archived pixels for a special drink", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-07-21T18:00:00.000Z";
+      const settings = normalizeCoffeeSessionSettings({
+        barRitual: {
+          serviceBot: {
+            id: "barista-1",
+            name: "Casey",
+            color: "#778899",
+            glyph: "spark",
+            fallback: false,
+          },
+          role: "cup",
+          drink: "house",
+          playerCup: {
+            fillId: "fill-1",
+            filledAt: now,
+            topOffCount: 1,
+            sipCount: 2,
+          },
+          waiterOffers: 1,
+          liveStartedAt: now,
+          hardStopAt: "2026-07-21T18:30:00.000Z",
+        },
+      });
+      db.prepare(
+        `INSERT INTO conversations
+           (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
+            coffee_duration_minutes, created_at, updated_at)
+         VALUES ('coffee-backup', 'user-1', 'Coffee Backup', 'coffee', '[]', ?, NULL, ?, ?)`,
+      ).run(JSON.stringify(settings), now, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const coffee = snapshot.conversations.find(
+        (conversation) => conversation.id === "coffee-backup",
+      )?.coffee;
+      assert.equal(coffee?.settings.barRitual?.serviceBot.name, "Casey");
+      assert.equal(coffee?.settings.barRitual?.playerCup?.sipCount, 2);
+
+      db.prepare("DELETE FROM conversations WHERE id = 'coffee-backup'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT coffee_settings FROM conversations WHERE id = 'coffee-backup' AND user_id = 'user-1'",
+      ).get() as { coffee_settings: string };
+      assert.equal(
+        normalizeCoffeeSessionSettings(JSON.parse(restored.coffee_settings))
+          .barRitual?.serviceBot.name,
+        "Casey",
+      );
+
+      const specialSnapshot = structuredClone(snapshot);
+      const specialRitual = specialSnapshot.conversations.find(
+        (conversation) => conversation.id === "coffee-backup",
+      )?.coffee?.settings.barRitual;
+      assert.ok(specialRitual);
+      specialRitual.drink = "special";
+      specialRitual.specialImageStatus = "ready";
+      specialRitual.specialImageId = "missing-coffee-surface";
+      assert.throws(
+        () => importUserSnapshot(db, "user-1", specialSnapshot, userKey),
+        /missing the project-asset archive/i,
+      );
+    });
+  });
+});
 
 describe("backup Auto model settings", () => {
   it("exports and restores Auto mode without exporting retired text fallback settings", () => {

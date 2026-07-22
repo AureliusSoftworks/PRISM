@@ -7,6 +7,7 @@ import {
   activeBotPowerEffectsV1,
   activeBotPowersV1,
   applyBotPowerEternalIntroductionResponseV1,
+  applyBotPowerBotNamesV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
@@ -23,7 +24,9 @@ import {
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
-  botPowerDisplayNameV1,
+  botPowerBotNamingCueV1,
+  botPowerTargetNameV1,
+  normalizeBotPowerEffectV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
   botPowerForgetfulContextMessageCountV1,
@@ -50,8 +53,9 @@ import {
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
+  coffeePowerStayRateMultiplierV1,
+  coffeePowerVesselModeV1,
   estimateCoffeePowerTokensV1,
-  normalizeBotPowerEffectV1,
   normalizeBotPowersV1,
   parseStoredBotPowersV1,
   serializeBotPowersV1,
@@ -81,8 +85,8 @@ test("bot powers normalize to three bounded entries", () => {
   assert.equal(powers[0]?.intent.length, 640);
 });
 
-test("ready designation effects preserve the saved name and collapse duplicate tokens in source order", () => {
-  const intent = "Always use the suffix Santa Claus Bot.";
+test("ready naming effects transform only target bot names and collapse duplicate tokens", () => {
+  const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
   const powers = [{
     version: 1 as const,
     id: "designation",
@@ -96,19 +100,54 @@ test("ready designation effects preserve the saved name and collapse duplicate t
       selfCue: "",
       observerCue: "",
       effects: [
-        { type: "designation" as const, placement: "suffix" as const, text: "Santa Claus Bot" },
-        { type: "designation" as const, placement: "prefix" as const, text: "Dumb ole Santa Claus" },
+        { type: "designation" as const, placement: "prefix" as const, text: "Dumb ole'" },
+        { type: "designation" as const, placement: "prefix" as const, text: "Very" },
+        { type: "designation" as const, placement: "suffix" as const, text: "Bot" },
         { type: "designation" as const, placement: "suffix" as const, text: "Bot" },
       ],
       ruleLabels: [],
     },
   }];
-  assert.equal(botPowerDisplayNameV1("Santa Claus", powers), "Dumb ole Santa Claus Bot");
-  assert.equal(botPowerDisplayNameV1("Santa Claus", []), "Santa Claus");
+  assert.equal(botPowerTargetNameV1("Santa Claus", powers), "Dumb ole' Very Santa Claus Bot");
+  assert.equal(botPowerTargetNameV1("Santa Claus Bot", powers), "Dumb ole' Very Santa Claus Bot");
+  assert.equal(botPowerTargetNameV1("Santa Claus", []), "Santa Claus");
+  assert.equal(
+    applyBotPowerBotNamesV1(
+      "What's up Sigmund Freud? Rick Sanchez is ready. Sigmund Freud Bot already knows.",
+      powers,
+      ["Sigmund Freud"],
+    ),
+    "What's up Dumb ole' Very Sigmund Freud Bot? Rick Sanchez is ready. Dumb ole' Very Sigmund Freud Bot already knows.",
+  );
+  assert.match(botPowerBotNamingCueV1("Rick Sanchez", powers, ["Sigmund Freud"]) ?? "", /keep your own name exactly "Rick Sanchez"/u);
   assert.equal(
     parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects[0]?.type,
     "designation",
   );
+});
+
+test("designation normalization rejects an unknown placement instead of silently changing identity", () => {
+  assert.equal(normalizeBotPowerEffectV1({ type: "designation", placement: "middle", text: "Bot" }), null);
+});
+
+test("target-name recovery repairs the previously miscompiled suffix wording", () => {
+  const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
+  assert.equal(botPowerTargetNameV1("Sigmund Freud", [{
+    version: 1,
+    id: "bot-designation",
+    name: "Bot Designation",
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1("Bot Designation", intent),
+      selfCue: "Use the broken prior suffix.",
+      observerCue: "Use the broken prior suffix.",
+      effects: [{ type: "designation", placement: "suffix", text: "when saying a bot’s name (e" }],
+      ruleLabels: ["Suffix designation"],
+    },
+  }]), "Sigmund Freud Bot");
 });
 
 test("prompt-authored Power hashes ignore generated names and sigils while legacy hashes stay stable", () => {
@@ -1487,6 +1526,10 @@ test("resolved cup-rate powers return shared multipliers", () => {
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "theodore"), 0);
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "slowpoke"), 0.55);
   assert.equal(coffeePowerCupRateMultiplierV1(plan, "other"), 1);
+  assert.equal(coffeePowerVesselModeV1(plan, "theodore"), "none");
+  assert.equal(coffeePowerVesselModeV1(plan, "voltaire"), "coffee");
+  assert.equal(coffeePowerStayRateMultiplierV1(plan, "theodore"), 1);
+  assert.equal(coffeePowerStayRateMultiplierV1(plan, "voltaire"), 2.5);
 });
 
 test("ready Powers produce bounded app-wide self and observer cues", () => {

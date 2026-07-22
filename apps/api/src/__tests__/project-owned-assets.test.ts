@@ -5,6 +5,7 @@ import { strToU8, zipSync } from "fflate";
 import {
   PROJECT_OWNED_ASSET_MANIFEST_PATH,
   PROJECT_OWNED_ASSET_MANIFEST_SCHEMA,
+  normalizeCoffeeSessionSettings,
   projectOwnedAssetBlobArchivePathForChecksum,
   type ProjectOwnedAssetManifestV1,
 } from "@localai/shared";
@@ -101,6 +102,71 @@ function bundle(): ProjectOwnedAssetArchiveBundleV1 {
   return { manifest: manifest(), files: { [archivePath]: pngBytes } };
 }
 
+function coffeeSnapshot(): BackupSnapshot {
+  const value = snapshot();
+  value.botcast = undefined;
+  value.conversations = [
+    {
+      id: "coffee-1",
+      title: "Coffee",
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      coffee: {
+        settings: normalizeCoffeeSessionSettings({
+          barRitual: {
+            serviceBot: { name: "Barista", fallback: true },
+            role: "cup",
+            drink: "special",
+            specialImageStatus: "ready",
+            specialImageId: "coffee-image-1",
+          },
+        }),
+        botGroupIds: [],
+        groupId: null,
+        durationMinutes: null,
+        presetId: null,
+        topic: null,
+        absentBotIds: [],
+        teamsJson: null,
+      },
+      messages: [],
+    },
+  ];
+  return value;
+}
+
+function coffeeBundle(): ProjectOwnedAssetArchiveBundleV1 {
+  return {
+    manifest: {
+      schema: PROJECT_OWNED_ASSET_MANIFEST_SCHEMA,
+      entries: [
+        {
+          ownerType: "coffee-session",
+          ownerId: "coffee-1",
+          logicalSlot: "drink-surface",
+          mediaType: "image",
+          contentType: "image/png",
+          checksum,
+          byteLength: pngBytes.byteLength,
+          archivePath,
+          restore: {
+            schema: "prism-coffee-image-restore-v1",
+            sourceImageId: "coffee-image-1",
+            prompt: "Top-down drink surface",
+            revisedPrompt: null,
+            size: "1024x1024",
+            quality: "medium",
+            provider: "openai",
+            model: "gpt-image-2",
+            createdAt: "2026-07-16T00:00:00.000Z",
+          },
+        },
+      ],
+    },
+    files: { [archivePath]: pngBytes },
+  };
+}
+
 describe("project-owned asset import validation", () => {
   it("prepares a new image id from the durable Signal slot", () => {
     const prepared = prepareProjectOwnedAssetImport(
@@ -112,6 +178,22 @@ describe("project-owned asset import validation", () => {
     assert.equal(prepared.images[0]?.sourceImageId, "image-1");
     assert.equal(prepared.images[0]?.restoredImageId, "restored-image");
     assert.equal(prepared.imageReferences[0]?.slot, "light-studio");
+  });
+
+  it("prepares and remaps the exact Coffee drink surface without regenerating it", () => {
+    const prepared = prepareProjectOwnedAssetImport(
+      "user-1",
+      coffeeSnapshot(),
+      coffeeBundle(),
+      { idFactory: () => "restored-coffee-image" },
+    );
+    assert.deepEqual(Buffer.from(prepared.images[0]!.bytes), pngBytes);
+    assert.equal(prepared.images[0]?.ownerType, "coffee-session");
+    assert.deepEqual(prepared.coffeeImageReferences[0], {
+      conversationId: "coffee-1",
+      sourceImageId: "coffee-image-1",
+      restoredImageId: "restored-coffee-image",
+    });
   });
 
   it("rejects checksum, MIME, path, and reference mismatches before staging", () => {

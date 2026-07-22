@@ -3,6 +3,7 @@ import type { PrismSceneActivity } from "./prismSceneRuntime";
 export type CoffeeAtmospherePhase =
   | "selecting"
   | "preview"
+  | "barista"
   | "topic"
   | "arriving"
   | "live"

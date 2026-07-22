@@ -442,7 +442,11 @@ function createNoiseBuffer(context: AudioContext, durationSeconds: number, seed:
 }
 
 let audioContext: AudioContext | null = null;
-export type VoicePlaybackChannel = "primary" | "reaction" | "crosstalk";
+export type VoicePlaybackChannel =
+  | "primary"
+  | "presence"
+  | "reaction"
+  | "crosstalk";
 
 type FormantCorrectionNodeLike = AudioNode & {
   pitch: AudioParam;
@@ -495,6 +499,7 @@ const activeVoiceChannels: Record<
   ActiveVoiceChannelState
 > = {
   primary: { nodes: [], resolve: null, progress: null, roomConnection: null },
+  presence: { nodes: [], resolve: null, progress: null, roomConnection: null },
   reaction: { nodes: [], resolve: null, progress: null, roomConnection: null },
   crosstalk: { nodes: [], resolve: null, progress: null, roomConnection: null },
 };
@@ -564,8 +569,8 @@ export async function playPreSpeechBreath(args: {
   const decoded = await loadPreSpeechBreathBuffer(context, args.plan.url);
   if (!decoded || (args.isCurrent && !args.isCurrent())) return Boolean(decoded);
 
-  const active = activeVoiceChannels.primary;
-  stopRealtimeVoiceAudio("primary");
+  const active = activeVoiceChannels.presence;
+  stopRealtimeVoiceAudio("presence");
   const source = context.createBufferSource();
   const highpass = context.createBiquadFilter();
   const lowpass = context.createBiquadFilter();
@@ -575,7 +580,16 @@ export async function playPreSpeechBreath(args: {
   highpass.frequency.value = 90;
   lowpass.type = "lowpass";
   lowpass.frequency.value = 12_000;
-  gain.gain.value = Math.min(1.25, profile.volume) * args.plan.gain;
+  const breathGain = Math.min(1.25, profile.volume) * args.plan.gain;
+  const startedAt = context.currentTime;
+  const overlapSeconds = Math.min(
+    decoded.duration * 0.35,
+    Math.max(0, args.plan.voiceOverlapMs) / 1_000,
+  );
+  const voiceStartsAt = Math.max(startedAt, startedAt + decoded.duration - overlapSeconds);
+  gain.gain.setValueAtTime(breathGain, startedAt);
+  gain.gain.setValueAtTime(breathGain, voiceStartsAt);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startedAt + decoded.duration);
   source.connect(highpass).connect(lowpass).connect(gain);
   active.roomConnection = connectRoomAcoustics({
     context,
@@ -588,30 +602,42 @@ export async function playPreSpeechBreath(args: {
   active.nodes = scheduled;
 
   await new Promise<void>((resolve) => {
-    let settled = false;
-    let gapTimer: number | null = null;
+    let resolved = false;
+    let cleaned = false;
+    let voiceStartTimer: number | null = null;
+    const releaseVoice = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
     const finish = () => {
-      if (settled) return;
-      settled = true;
-      if (gapTimer !== null) window.clearTimeout(gapTimer);
-      if (active.resolve === finish) active.resolve = null;
+      if (cleaned) return;
+      cleaned = true;
+      if (voiceStartTimer !== null) window.clearTimeout(voiceStartTimer);
+      voiceStartTimer = null;
+      if (active.resolve === cancel) active.resolve = null;
       active.roomConnection?.disconnect();
       active.roomConnection = null;
       for (const node of scheduled) {
         try { node.disconnect(); } catch { /* already disconnected */ }
       }
       if (active.nodes === scheduled) active.nodes = [];
-      resolve();
+      releaseVoice();
     };
-    active.resolve = finish;
+    const cancel = () => finish();
+    active.resolve = cancel;
     source.addEventListener("ended", () => {
       if (active.nodes === scheduled) active.nodes = [];
       active.roomConnection?.release();
       active.roomConnection = null;
-      gapTimer = window.setTimeout(finish, args.plan?.postGapMs ?? 0);
+      finish();
     }, { once: true });
     try {
-      source.start(context.currentTime);
+      source.start(startedAt);
+      voiceStartTimer = window.setTimeout(
+        releaseVoice,
+        Math.max(0, Math.round((voiceStartsAt - startedAt) * 1_000)),
+      );
     } catch {
       finish();
     }

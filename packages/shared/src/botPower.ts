@@ -260,6 +260,96 @@ function compactText(value: unknown, limit: number): string {
   return value.replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
+function designationAffixTextV1(
+  value: unknown,
+  baseName: unknown,
+  placement: BotPowerDesignationPlacement,
+): string {
+  let authored = compactText(value, 100)
+    .replace(/^the\s+word\s+/iu, "")
+    .replace(/^[\s()[\]]+|[\s()[\].,!?;:]+$/gu, "");
+  const pairedQuotes = [
+    ['"', '"'],
+    ["'", "'"],
+    ["“", "”"],
+    ["‘", "’"],
+  ] as const;
+  for (const [open, close] of pairedQuotes) {
+    if (authored.length > 1 && authored.startsWith(open) && authored.endsWith(close)) {
+      authored = authored.slice(open.length, -close.length).trim();
+      break;
+    }
+  }
+  const base = compactText(baseName, 100);
+  if (!authored || !base) return authored;
+  const authoredWords = authored.split(/\s+/u);
+  const baseWords = base.split(/\s+/u);
+  const startsWithBase = baseWords.every(
+    (word, index) => authoredWords[index]?.toLocaleLowerCase() === word.toLocaleLowerCase(),
+  );
+  const endsWithBase = baseWords.every(
+    (word, index) => authoredWords[authoredWords.length - baseWords.length + index]?.toLocaleLowerCase() === word.toLocaleLowerCase(),
+  );
+  if (placement === "suffix" && startsWithBase && authoredWords.length > baseWords.length) {
+    return authoredWords.slice(baseWords.length).join(" ");
+  }
+  if (placement === "prefix" && endsWithBase && authoredWords.length > baseWords.length) {
+    return authoredWords.slice(0, -baseWords.length).join(" ");
+  }
+  return authored;
+}
+
+function designationExampleCasingV1(
+  intent: string,
+  text: string,
+  placement: BotPowerDesignationPlacement,
+): string {
+  const example = intent.match(
+    /\b(?:e\.?\s*g\.?|for\s+example)\b[^"“‘'\n]{0,24}["“‘']([^"”’'\n]+)["”’']/iu,
+  )?.[1];
+  if (!example) return text;
+  const affixWords = text.split(/\s+/u).filter(Boolean);
+  const exampleWords = example.split(/\s+/u).filter(Boolean);
+  if (affixWords.length === 0 || exampleWords.length < affixWords.length) return text;
+  const candidateWords = placement === "prefix"
+    ? exampleWords.slice(0, affixWords.length)
+    : exampleWords.slice(-affixWords.length);
+  return candidateWords.join(" ").toLocaleLowerCase() === text.toLocaleLowerCase()
+    ? candidateWords.join(" ")
+    : text;
+}
+
+/** Deterministic recovery for explicit authored bot-name prefix/suffix wording. */
+export function botPowerDesignationEffectFromIntentV1(
+  intentValue: unknown,
+  exampleBaseName: unknown = "",
+): Extract<BotPowerEffectV1, { type: "designation" }> | null {
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH);
+  if (!intent) return null;
+  const affixFirst = intent.match(
+    /\b(?:add|adds|adding|append|appends|appending|use|uses|using|say|says|saying|put|puts|putting|apply|applies|applying)\s+(?!the\s+(?:prefix|suffix)\b)(.+?)\s+(prefix|suffix)\b/iu,
+  );
+  const direct = affixFirst ? null : intent.match(
+    /\b(prefix|suffix)\s*(?:designation|name|title)?\s*(?:with|as|to|:|=)?\s*(?!(?:when|while|whenever|if|to|for|on)\b)(.+?)(?:[.!?]|$)/iu,
+  );
+  const positional = affixFirst || direct ? null : intent.match(
+    /\b(?:say|says|saying|add|adds|adding|put|puts|putting|use|uses|using)\s+(.+?)\s+(?:at|to)\s+the\s+(beginning|start|front|end)\s+of\s+(?:the\s+)?(?:(?:every\s+)?(?:bot(?:['’]s)?|his|her|their|my)\s+)?name\b/iu,
+  );
+  const placement: BotPowerDesignationPlacement = affixFirst
+    ? affixFirst[2]?.toLocaleLowerCase() === "prefix" ? "prefix" : "suffix"
+    : direct
+      ? direct[1]?.toLocaleLowerCase() === "prefix" ? "prefix" : "suffix"
+      : /^(?:beginning|start|front)$/iu.test(positional?.[2] ?? "") ? "prefix" : "suffix";
+  const authored = affixFirst?.[1] ?? direct?.[2] ?? positional?.[1];
+  const normalized = designationAffixTextV1(authored, exampleBaseName, placement);
+  if (!normalized) return null;
+  return {
+    type: "designation",
+    placement,
+    text: designationExampleCasingV1(intent, normalized, placement),
+  };
+}
+
 export function botPowerSourceHashV1(name: string, intent: string): string {
   const source = `v${BOT_POWER_VERSION}\n${name.trim()}\n${intent.trim()}`;
   let hash = 0x811c9dc5;
@@ -363,12 +453,12 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   const effect = value as Record<string, unknown>;
   if (effect.type === "mute") return { type: "mute" };
   if (effect.type === "designation") {
-    const text = compactText(effect.text, BOT_POWER_DESIGNATION_MAX_LENGTH)
-      .replace(/^[\s"“”'‘’]+|[\s"“”'‘’.,!?;:]+$/gu, "");
+    if (effect.placement !== "prefix" && effect.placement !== "suffix") return null;
+    const text = designationAffixTextV1(effect.text, "", effect.placement);
     if (!text) return null;
     return {
       type: "designation",
-      placement: effect.placement === "prefix" ? "prefix" : "suffix",
+      placement: effect.placement,
       text,
     };
   }
@@ -994,50 +1084,171 @@ function sameDesignationWordsV1(left: readonly string[], right: readonly string[
   );
 }
 
+function mergeDesignationWordsV1(
+  left: readonly string[],
+  right: readonly string[],
+): string[] {
+  let overlap = Math.min(left.length, right.length);
+  while (
+    overlap > 0 &&
+    !sameDesignationWordsV1(left.slice(-overlap), right.slice(0, overlap))
+  ) {
+    overlap -= 1;
+  }
+  return [...left, ...right.slice(overlap)];
+}
+
 /**
- * Resolves one ready holder's public name without changing its saved base name.
- * Prefixes and suffixes retain authored source order; repeated designation
- * tokens are ignored and overlapping full-name examples collapse at the join.
+ * Resolves how one Power holder says a target bot's name. The holder's own
+ * identity is never passed through this projection. Prefixes and suffixes
+ * retain authored source order; duplicate and overlapping tokens collapse.
  */
-export function botPowerDisplayNameV1(baseName: unknown, value: unknown): string {
-  const base = compactText(baseName, 100) || "Unnamed bot";
-  const prefixes: string[][] = [];
+export function botPowerTargetNameFromEffectsV1(
+  targetName: unknown,
+  value: unknown,
+): string {
+  const base = compactText(targetName, 100) || "Unnamed bot";
+  const effects = Array.isArray(value)
+    ? value.map(normalizeBotPowerEffectV1).filter((effect): effect is BotPowerEffectV1 => effect !== null)
+    : [];
+  let prefixWords: string[] = [];
   const suffixes: string[][] = [];
   const seen = new Set<string>();
-  for (const effect of activeBotPowerEffectsV1(value)) {
+  for (const effect of effects) {
     if (effect.type !== "designation") continue;
     const words = designationWordsV1(effect.text);
     if (words.length === 0) continue;
     const key = words.join(" ").toLocaleLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    (effect.placement === "prefix" ? prefixes : suffixes).push(words);
-  }
-  let resolved = designationWordsV1(base);
-  for (const prefix of prefixes) {
-    let overlap = Math.min(prefix.length, resolved.length);
-    while (overlap > 0 && !sameDesignationWordsV1(prefix.slice(-overlap), resolved.slice(0, overlap))) {
-      overlap -= 1;
+    if (effect.placement === "prefix") {
+      prefixWords = mergeDesignationWordsV1(prefixWords, words);
+    } else {
+      suffixes.push(words);
     }
-    resolved = [...prefix, ...resolved.slice(overlap)];
   }
+  let resolved = mergeDesignationWordsV1(prefixWords, designationWordsV1(base));
   for (const suffix of suffixes) {
-    let overlap = Math.min(resolved.length, suffix.length);
-    while (overlap > 0 && !sameDesignationWordsV1(resolved.slice(-overlap), suffix.slice(0, overlap))) {
-      overlap -= 1;
-    }
-    resolved = [...resolved, ...suffix.slice(overlap)];
+    resolved = mergeDesignationWordsV1(resolved, suffix);
   }
   return resolved.join(" ").slice(0, 100) || "Unnamed bot";
 }
 
-/** The hard provider cue paired with the deterministic display-name projection. */
-export function botPowerDesignationCueV1(baseName: unknown, value: unknown): string | null {
-  const base = compactText(baseName, 100) || "Unnamed bot";
-  const display = botPowerDisplayNameV1(base, value);
-  return display === base
-    ? null
-    : `Hard designation invariant: your saved base name is ${JSON.stringify(base)}, but your current public, spoken, and on-air designation is ${JSON.stringify(display)}. Use only that designation whenever identity is supplied or said; do not rename the saved character, mention this rule, or duplicate its tokens.`;
+function botPowerDesignationEffectsV1(value: unknown): BotPowerEffectV1[] {
+  const effects = activeBotPowersV1(value).flatMap((power) => {
+    const compiledEffects = power.compiled?.effects ?? [];
+    const recoveredDesignation = botPowerDesignationEffectFromIntentV1(power.intent);
+    const compiledMatchesRecovered = recoveredDesignation && compiledEffects.some(
+      (effect) =>
+        effect.type === "designation" &&
+        effect.placement === recoveredDesignation.placement &&
+        designationAffixTextV1(effect.text, "", effect.placement).toLocaleLowerCase() ===
+          recoveredDesignation.text.toLocaleLowerCase(),
+    );
+    return recoveredDesignation && !compiledMatchesRecovered
+      ? [recoveredDesignation, ...compiledEffects.filter((effect) => effect.type !== "designation")]
+      : compiledEffects;
+  });
+  return effects;
+}
+
+/** Resolves how this holder says one other bot's name. */
+export function botPowerTargetNameV1(targetName: unknown, holderPowers: unknown): string {
+  return botPowerTargetNameFromEffectsV1(
+    targetName,
+    botPowerDesignationEffectsV1(holderPowers),
+  );
+}
+
+function botPowerNamingAffixSummaryV1(value: unknown): string | null {
+  const effects = Array.isArray(value)
+    ? value.map(normalizeBotPowerEffectV1).filter((effect): effect is BotPowerEffectV1 => effect !== null)
+    : [];
+  const prefixes = effects.filter(
+    (effect): effect is Extract<BotPowerEffectV1, { type: "designation" }> =>
+      effect.type === "designation" && effect.placement === "prefix",
+  );
+  const suffixes = effects.filter(
+    (effect): effect is Extract<BotPowerEffectV1, { type: "designation" }> =>
+      effect.type === "designation" && effect.placement === "suffix",
+  );
+  const clauses = [
+    ...prefixes.map((effect) => `prefix ${JSON.stringify(effect.text)}`),
+    ...suffixes.map((effect) => `suffix ${JSON.stringify(effect.text)}`),
+  ];
+  return clauses.length > 0 ? clauses.join(" and ") : null;
+}
+
+export function botPowerBotNamingCueFromEffectsV1(
+  holderName: unknown,
+  effects: unknown,
+  targetBotNames: readonly string[] = [],
+): string | null {
+  const holder = compactText(holderName, 100) || "This bot";
+  const summary = botPowerNamingAffixSummaryV1(effects);
+  if (!summary) return null;
+  const examples = [...new Set(
+    targetBotNames.map((name) => compactText(name, 100)).filter(Boolean),
+  )]
+    .slice(0, 5)
+    .map((name) => `${JSON.stringify(name)} becomes ${JSON.stringify(botPowerTargetNameFromEffectsV1(name, effects))}`);
+  return [
+    `Hard bot-naming invariant for ${holder}: keep your own name exactly ${JSON.stringify(holder)}. When naming or directly addressing another bot, apply ${summary}.`,
+    ...(examples.length > 0 ? [`Exact mappings: ${examples.join("; ")}.`] : []),
+    "Never apply it to yourself, the player, humans, show titles, or ordinary people; never omit, duplicate, copy, or mention the rule.",
+  ].join(" ");
+}
+
+/** Hard provider cue for the holder-scoped bot-naming rule. */
+export function botPowerBotNamingCueV1(
+  holderName: unknown,
+  holderPowers: unknown,
+  targetBotNames: readonly string[] = [],
+): string | null {
+  return botPowerBotNamingCueFromEffectsV1(
+    holderName,
+    botPowerDesignationEffectsV1(holderPowers),
+    targetBotNames,
+  );
+}
+
+/**
+ * Enforces a holder's naming rule against a bounded roster of actual bot
+ * targets. Player and ordinary-person names are never supplied by callers.
+ */
+export function applyBotPowerBotNamesV1(
+  content: unknown,
+  holderPowers: unknown,
+  targetBotNames: readonly string[],
+): string {
+  let output = typeof content === "string" ? content : "";
+  const targets = [...new Set(
+    targetBotNames.map((name) => compactText(name, 100)).filter(Boolean),
+  )].sort((left, right) => right.length - left.length);
+  for (const target of targets) {
+    const designated = botPowerTargetNameV1(target, holderPowers);
+    if (designated === target) continue;
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const pattern = new RegExp(
+      `(?<![\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`,
+      "giu",
+    );
+    output = output.replace(pattern, (match, offset: number, source: string) => {
+      const before = source.slice(0, offset).toLocaleLowerCase();
+      const after = source.slice(offset + match.length).toLocaleLowerCase();
+      const targetLower = target.toLocaleLowerCase();
+      const designatedLower = designated.toLocaleLowerCase();
+      const targetAt = designatedLower.indexOf(targetLower);
+      const prefix = targetAt > 0 ? designated.slice(0, targetAt) : "";
+      const suffix = targetAt >= 0
+        ? designated.slice(targetAt + target.length)
+        : "";
+      const hasPrefix = Boolean(prefix) && before.endsWith(prefix.toLocaleLowerCase());
+      const hasSuffix = Boolean(suffix) && after.startsWith(suffix.toLocaleLowerCase());
+      return `${hasPrefix ? "" : prefix}${match}${hasSuffix ? "" : suffix}`;
+    });
+  }
+  return output;
 }
 
 /** Ready, enabled holder contract for direct bot-to-bot identity mirroring. */
@@ -1822,6 +2033,12 @@ export function botPowerResponseIsSilentV1(value: unknown): boolean {
 export function botPowerSelfCueLinesV1(value: unknown): string[] {
   return activeBotPowersV1(value).flatMap((power) => {
     if (
+      power.compiled?.effects.some((effect) => effect.type === "designation") ||
+      botPowerDesignationEffectFromIntentV1(power.intent, "")
+    ) {
+      return [];
+    }
+    if (
       power.compiled?.effects.some(
         (effect) => effect.type === "eternal_introduction",
       )
@@ -1845,6 +2062,12 @@ export function botPowerObserverCueLinesV1(
 ): string[] {
   const subject = compactText(botName, 100) || "This character";
   return activeBotPowersV1(value).flatMap((power) => {
+    if (
+      power.compiled?.effects.some((effect) => effect.type === "designation") ||
+      botPowerDesignationEffectFromIntentV1(power.intent, "")
+    ) {
+      return [];
+    }
     if (
       power.compiled?.effects.some(
         (effect) => effect.type === "eternal_introduction",
@@ -2170,4 +2393,25 @@ export function coffeePowerCupRateMultiplierV1(
       : effect.rate === "very_fast"
         ? 2.5
         : 1.65;
+}
+
+export type CoffeePowerVesselModeV1 = "coffee" | "none";
+
+/** Physical vessel presentation is categorical and independent from visit pacing. */
+export function coffeePowerVesselModeV1(
+  plan: CoffeePowerPlanV1 | null | undefined,
+  botId: string
+): CoffeePowerVesselModeV1 {
+  const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "cup_rate");
+  return effect?.type === "cup_rate" && effect.rate === "none" ? "none" : "coffee";
+}
+
+/** A no-vessel bot keeps ordinary seeded stay pacing instead of becoming immortal. */
+export function coffeePowerStayRateMultiplierV1(
+  plan: CoffeePowerPlanV1 | null | undefined,
+  botId: string
+): number {
+  return coffeePowerVesselModeV1(plan, botId) === "none"
+    ? 1
+    : coffeePowerCupRateMultiplierV1(plan, botId);
 }

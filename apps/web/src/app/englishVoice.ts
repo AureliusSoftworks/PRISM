@@ -280,6 +280,7 @@ export function stopEnglishVoice(
 ): void {
   generation += 1;
   stopRealtimeVoiceAudio();
+  stopRealtimeVoiceAudio("presence");
   releaseActiveMedia();
   if (!options.preservePreparedMedia) releasePreparedMedia();
   activeMediaResolve?.();

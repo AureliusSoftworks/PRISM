@@ -44,18 +44,26 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
     tutorialsSource,
     /The direct stereo mix follows the host and guest’s saved stage positions subtly while their room reflections remain shared/u,
   );
+  assert.match(
+    tutorialsSource,
+    /mic-ready breath that overlaps the opening of a substantial line instead of leaving a gap/u,
+  );
+  assert.match(
+    tutorialsSource,
+    /Asterisk-wrapped human-made sounds such as sighs, burps, coughs, and laughs are performed/u,
+  );
 });
 
-test("Signal sends saved performance text only through the ElevenLabs request lane", () => {
+test("Signal sends saved and starred vocal performance only through the ElevenLabs request lane", () => {
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+    /voicePerformanceTextFromAsteriskCues\([\s\S]{0,100}message\.voicePerformanceText \?\? message\.content/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
   assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
   assert.match(
     pageSource,
-    /elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+    /signalOnlineVoiceEnabled && performanceText[\s\S]{0,100}elevenLabsText: voiceSpokenText\(performanceText\)/u,
   );
   assert.match(
     pageSource,

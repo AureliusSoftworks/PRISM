@@ -112,13 +112,13 @@ test("compiler deterministically recovers explicit prefix and suffix designation
   };
   const result = await compileBotPowers({
     provider: unusedProvider,
-    botName: "Santa Claus",
+    botName: "Rick Sanchez",
     powers: [
       {
         version: 1,
         id: "suffix",
-        name: "Santa designation",
-        intent: "Always use the suffix Santa Claus Bot.",
+        name: "Bot designation",
+        intent: "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).",
         enabled: true,
         compileStatus: "draft",
         compiled: null,
@@ -127,7 +127,16 @@ test("compiler deterministically recovers explicit prefix and suffix designation
         version: 1,
         id: "prefix",
         name: "Grumpy designation",
-        intent: "Always use the prefix Dumb ole Santa Claus.",
+        intent: "Always adds “Dumb ole'” prefix when saying a bot’s name (e.g. “Dumb ole' Santa Claus”).",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+      {
+        version: 1,
+        id: "positional-prefix",
+        name: "Doctor designation",
+        intent: "Always says “Doctor” at the beginning of every bot's name.",
         enabled: true,
         compileStatus: "draft",
         compiled: null,
@@ -137,8 +146,12 @@ test("compiler deterministically recovers explicit prefix and suffix designation
   assert.equal(calls, 0);
   assert.deepEqual(result.powers.map((power) => power.compiled?.effects), [
     [{ type: "designation", placement: "suffix", text: "Bot" }],
-    [{ type: "designation", placement: "prefix", text: "Dumb ole" }],
+    [{ type: "designation", placement: "prefix", text: "Dumb ole'" }],
+    [{ type: "designation", placement: "prefix", text: "Doctor" }],
   ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Keep your own name "Rick Sanchez"/u);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /another bot/u);
+  assert.doesNotMatch(result.powers[0]?.compiled?.selfCue ?? "", /Rick Sanchez Bot/u);
 });
 
 test("prompt-authored compound invisibility compiles independent Plankton sight and hearing", async () => {
@@ -2104,6 +2117,46 @@ test("Coffee freezes legacy empty-effect mute Powers as absolute silence", () =>
 
   assert.equal(coffeePowerBotIsMuted(plan, "silent-jack"), true);
   assert.deepEqual(plan.bots["silent-jack"]?.effects, [{ type: "mute" }]);
+});
+
+test("Coffee freezes the repaired holder naming rule rather than a malformed stored suffix", () => {
+  const db = powerDb();
+  const name = "Bot Designation";
+  const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
+  db.prepare("INSERT INTO conversations VALUES (?, ?, 'coffee', ?, NULL)")
+    .run("designation-session", "user", JSON.stringify(["rick"]));
+  db.prepare("INSERT INTO bots VALUES (?, 'user', ?, ?, ?, ?)").run(
+    "rick",
+    "Rick Sanchez",
+    "",
+    null,
+    JSON.stringify([{
+      version: 1,
+      id: "bot-designation",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Use the malformed suffix.",
+        observerCue: "Use the malformed suffix.",
+        effects: [{ type: "designation", placement: "suffix", text: "when saying a bot’s name (e" }],
+        ruleLabels: ["Suffix designation"],
+      },
+    }]),
+  );
+
+  const plan = resolveCoffeePowersForSession(db, "user", "designation-session");
+  assert.deepEqual(plan.bots.rick?.effects, [
+    { type: "designation", placement: "suffix", text: "Bot" },
+  ]);
+  assert.match(plan.bots.rick?.selfCue ?? "", /keep your own name exactly "Rick Sanchez"/iu);
+  assert.match(plan.bots.rick?.selfCue ?? "", /suffix "Bot"/u);
+  assert.doesNotMatch(plan.bots.rick?.selfCue ?? "", /Rick Sanchez Bot/u);
+  assert.doesNotMatch(plan.bots.rick?.selfCue ?? "", /malformed suffix/u);
+  assert.equal(resolveCoffeePowersForSession(db, "user", "designation-session").resolvedAt, plan.resolvedAt);
 });
 
 test("Coffee upgrades an older Interrupting Tom snapshot to unconditional cut-ins", () => {

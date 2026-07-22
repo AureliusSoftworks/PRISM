@@ -6,6 +6,7 @@ export type ImageOrigin =
   | "slate_cover"
   | "bot_group_room"
   | "bot_group_room_import"
+  | "coffee_bar"
   | "zen_wallpaper"
   | "bot_profile_picture";
 

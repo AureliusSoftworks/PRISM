@@ -59,6 +59,9 @@ import {
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
+  chooseCoffeeBarRole,
+  chooseCoffeeHouseDrink,
+  completeCoffeeSpecialOrder,
   createCoffeePoll,
   createCoffeePreset,
   createCoffeeTeamsForSession,
@@ -99,6 +102,7 @@ import {
   pickCoffeeSpeakerBalanceOverride,
   pickDirectedSpeaker,
   processCoffeeAutonomousTurn,
+  prepareCoffeeSpecialOrder,
   pickFallbackSpeaker,
   processCoffeeTurn,
   randomizeCoffeeSeatBotIdsForSession,
@@ -118,16 +122,20 @@ import {
   resolveCoffeeIdentityMirrorDirectAddresseeV1,
   resolveCoffeeMoodBoostRecipientIdsV1,
   resolveCoffeeMoodDrainHolderIdsV1,
+  respondCoffeeWaiterOffer,
   coffeeMoodDrainPromptForSpeakerV1,
   coffeeMoodBoostPromptForSpeakerV1,
+  coffeePowerPeerAddressLabelsV1,
   resolveCoffeeTeamTiebreaker,
   seedCoffeeSocialStateFromRelationships,
   setCoffeePlayerTeam,
   shouldRefreshCoffeeMeetingSummary,
   setCoffeeConversationTopic,
   sanitizeCoffeeTableReply,
+  sipCoffeePlayerCup,
   kickoffCoffeeMeetingSummaryRefresh,
   topOffCoffeeCupForBot,
+  failCoffeeSpecialOrder,
   stripCoffeeSpeakerPrefix,
   coffeeTextMentionsInternalAccountMetadata,
   undoLatestCoffeeDebugMessage,
@@ -146,6 +154,8 @@ import {
   coffeeMoodSaturationFromSocial,
   coffeeSocialSnapshotToPrismMoodState,
   coffeeReplyLengthCaps,
+  coffeeFarewellReplyDelay,
+  coffeeReusableSessionSettings,
   coffeeRouterTemperature,
   createBotIdentityMirrorStateV1,
   derivePrismMoodKey,
@@ -1483,6 +1493,98 @@ async function createCoffeeConversationWithId(
     },
   };
 }
+
+describe("Coffee bar ritual", () => {
+  it("freezes one eligible service bot and locks the chosen player role", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "coffee-bar-user";
+    db.prepare("INSERT INTO users (id) VALUES (?)").run(userId);
+    for (const bot of [ALICE, BORIS, CARA]) seedCoffeeBot(db, userId, bot);
+
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "At the bar",
+    });
+    const ritual = created.conversation.coffeeSettings?.barRitual;
+    assert.equal(ritual?.serviceBot.id, CARA.id);
+    assert.equal(ritual?.role, null);
+
+    const withHouse = chooseCoffeeHouseDrink(db, userId, created.conversation.id);
+    assert.equal(withHouse.coffeeSettings?.barRitual?.role, "cup");
+    assert.equal(withHouse.coffeeSettings?.barRitual?.drink, "house");
+    assert.equal(withHouse.coffeeSettings?.barRitual?.playerCup?.sipCount, 0);
+    assert.ok(withHouse.coffeeSettings?.barRitual?.hardStopAt);
+    assert.throws(
+      () => chooseCoffeeBarRole(db, userId, created.conversation.id, "pot"),
+      /role is locked/u,
+    );
+  });
+
+  it("makes special-order attempts idempotent and recoverable", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "coffee-special-user";
+    db.prepare("INSERT INTO users (id) VALUES (?)").run(userId);
+    for (const bot of [ALICE, BORIS]) seedCoffeeBot(db, userId, bot);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "Foam",
+    });
+
+    const first = prepareCoffeeSpecialOrder(
+      db,
+      userId,
+      created.conversation.id,
+      "maple oat cortado",
+      "attempt-1",
+    );
+    assert.equal(first.shouldGenerate, true);
+    const duplicate = prepareCoffeeSpecialOrder(
+      db,
+      userId,
+      created.conversation.id,
+      "maple oat cortado",
+      "attempt-1",
+    );
+    assert.equal(duplicate.shouldGenerate, false);
+    failCoffeeSpecialOrder(db, userId, created.conversation.id, "attempt-1");
+    const retry = prepareCoffeeSpecialOrder(
+      db,
+      userId,
+      created.conversation.id,
+      "maple oat cortado",
+      "attempt-2",
+    );
+    assert.equal(retry.shouldGenerate, true);
+    const completed = completeCoffeeSpecialOrder(
+      db,
+      userId,
+      created.conversation.id,
+      "attempt-2",
+      "coffee-image-1",
+    );
+    assert.equal(completed.coffeeSettings?.barRitual?.specialImageId, "coffee-image-1");
+    assert.equal(completed.coffeeSettings?.barRitual?.specialImageStatus, "ready");
+
+    let sipped = completed;
+    for (let index = 0; index < 3; index += 1) {
+      sipped = sipCoffeePlayerCup(db, userId, created.conversation.id);
+    }
+    assert.equal(sipped.coffeeSettings?.barRitual?.playerCup?.sipCount, 3);
+    assert.equal(sipped.coffeeSettings?.barRitual?.activeWaiterOffer?.status, "open");
+    const refilled = respondCoffeeWaiterOffer(
+      db,
+      userId,
+      created.conversation.id,
+      "accept",
+    );
+    assert.equal(refilled.coffeeSettings?.barRitual?.playerCup?.sipCount, 0);
+    assert.equal(refilled.coffeeSettings?.barRitual?.activeWaiterOffer, null);
+    assert.equal(
+      refilled.coffeeSettings?.barRitual?.specialImageId,
+      "coffee-image-1",
+    );
+  });
+});
 
 function seedCoffeeMemory(
   db: DatabaseSync,
@@ -7660,6 +7762,81 @@ describe("inferCoffeeGroupName", () => {
 });
 
 describe("buildSpeakerPrompt", () => {
+  it("uses the holder's frozen naming rule only for bots that holder addresses", () => {
+    const coffeePowerPlan: CoffeePowerPlanV1 = {
+      version: 1,
+      resolvedAt: "2026-07-22T00:00:00.000Z",
+      warnings: [],
+      bots: Object.fromEntries([
+        [ALICE.id, {
+          botId: ALICE.id,
+          powerIds: ["alice-designation"],
+          powerNames: ["Bot Designation"],
+          selfCue: "Keep your own name Alice; suffix other bot names with Bot.",
+          observerCue: "Only Alice applies the suffix.",
+          visibleToBotIds: null,
+          speechAudienceBotIds: null,
+          effects: [{ type: "designation", placement: "suffix", text: "Bot" }],
+          ruleLabels: ["Suffix designation"],
+          warnings: [],
+        }],
+        [BORIS.id, {
+          botId: BORIS.id,
+          powerIds: ["boris-designation"],
+          powerNames: ["Chef Designation"],
+          selfCue: "Keep your own name Boris; prefix other bot names with Chef.",
+          observerCue: "Only Boris applies the prefix.",
+          visibleToBotIds: null,
+          speechAudienceBotIds: null,
+          effects: [{ type: "designation", placement: "prefix", text: "Chef" }],
+          ruleLabels: ["Prefix designation"],
+          warnings: [],
+        }],
+      ]),
+    };
+    const alicePeerLabels = coffeePowerPeerAddressLabelsV1({
+      speakerBotId: ALICE.id,
+      peers: [ALICE, BORIS],
+      plan: coffeePowerPlan,
+    });
+    const messages = buildSpeakerPrompt({
+      speaker: ALICE,
+      group: [ALICE, BORIS],
+      history: [],
+      userMessage: "Say hello.",
+      socialByBotId: { [ALICE.id]: TEST_SOCIAL, [BORIS.id]: TEST_SOCIAL },
+      peerAddressByBotId: alicePeerLabels,
+      coffeePowersPrompt: coffeePowersPromptForSpeaker(
+        coffeePowerPlan,
+        ALICE.id,
+        [BORIS.id],
+      ),
+    });
+    const prompt = messages.map((message) => message.content).join("\n");
+    assert.match(prompt, /You are Alice/u);
+    assert.match(prompt, /- Boris Bot/u);
+    assert.match(prompt, /Whenever you name or address Boris, say "Boris Bot"/u);
+    assert.match(prompt, /Alice, answer with your next short table line/u);
+    assert.doesNotMatch(prompt, /You are Alice Bot|Chef Boris/u);
+
+    const borisPeerLabels = coffeePowerPeerAddressLabelsV1({
+      speakerBotId: BORIS.id,
+      peers: [ALICE, BORIS],
+      plan: coffeePowerPlan,
+    });
+    assert.equal(borisPeerLabels.get(ALICE.id), "Chef Alice");
+    assert.equal(borisPeerLabels.get(BORIS.id), undefined);
+    assert.match(
+      autoTagPeerMentionsInCoffeeReply(
+        "What's up Boris?",
+        ALICE,
+        [ALICE, BORIS],
+        alicePeerLabels,
+      ),
+      /\[Boris Bot\]\(prism-bot:\/\/bot-boris\)/u,
+    );
+  });
+
   it("applies persisted public identity mirroring without transferring role or Powers", () => {
     const state = createBotIdentityMirrorStateV1({
       surface: "coffee",
@@ -7800,20 +7977,24 @@ describe("buildSpeakerPrompt", () => {
     const systemInstruction = messages.find(
       (message) =>
         message.role === "system" &&
-        message.content.includes("Coffee Mode") &&
-        message.content.includes("160 characters")
+        message.content.includes("Coffee Mode")
     );
     assert.ok(systemInstruction);
+    const allSystemInstructions = messages
+      .filter((message) => message.role === "system")
+      .map((message) => message.content)
+      .join("\n\n");
     assert.match(systemInstruction!.content, /no line breaks/);
     assert.match(systemInstruction!.content, /one or two short sentences max/i);
     assert.match(systemInstruction!.content, /vary your rhythm across turns/i);
     assert.match(systemInstruction!.content, /Questions are allowed when they naturally move the table/);
     assert.match(systemInstruction!.content, /cutting off another bot mid-sentence/);
     assert.match(systemInstruction!.content, /still warming up/);
-    // Cap is now a soft target — the server no longer truncates, so the
-    // prompt language reflects "aim for X chars" instead of "Hard cap".
-    assert.match(systemInstruction!.content, /soft target around 160 characters/);
-    assert.match(systemInstruction!.content, /server no longer truncates/);
+    assert.match(allSystemInstructions, /Soft tabletop target for this session: 160 characters/);
+    assert.doesNotMatch(allSystemInstructions, /server no longer truncates/i);
+    assert.match(allSystemInstructions, /PRISM is local-first, self-hosted AI workspace software/u);
+    assert.match(allSystemInstructions, /not a corporation, employer, or corporate network/u);
+    assert.match(allSystemInstructions, /Do not guess or claim which provider/u);
     assert.match(systemInstruction!.content, /Never repeat a recent table line exactly/);
     assert.match(systemInstruction!.content, /Never claim to be an AI assistant/);
     assert.match(systemInstruction!.content, /stay in persona/i);
@@ -8050,7 +8231,7 @@ describe("buildSpeakerPrompt", () => {
     assert.doesNotMatch(joined, /coffee progress|frameIndex|frame index/i);
   });
 
-  it("keeps refused Coffee cups full while telling the bot they have gone cold", () => {
+  it("omits all vessel narration for a bot that refuses coffee", () => {
     const messages = buildSpeakerPrompt({
       speaker: ALICE,
       group: [ALICE, BORIS],
@@ -8060,13 +8241,14 @@ describe("buildSpeakerPrompt", () => {
       sessionRemainingMs: 0,
       coffeeSessionDurationMinutes: 10,
       coffeeCupRateMultiplier: 0,
+      coffeeVesselMode: "none",
     });
     const joined = messages.map((message) => message.content).join("\n");
 
-    assert.match(joined, /coffee remains full and cold/i);
-    assert.match(joined, /left it untouched/i);
-    assert.match(joined, /do not sip it, drink it, stir it, request a refill/i);
-    assert.doesNotMatch(joined, /tastes /i);
+    assert.doesNotMatch(
+      joined,
+      /Your table coffee|coffee remains full|left it untouched|request a refill/i,
+    );
   });
 
   it("threads refilled coffee cup context into the speaker prompt", () => {
@@ -11154,6 +11336,257 @@ describe("coffee social state helpers", () => {
     );
   });
 
+  it("never exposes a refill target for a coffee-refusing bot", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "No coffee",
+    });
+    chooseCoffeeHouseDrink(db, userId, created.conversation.id);
+    db.prepare(
+      "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ?",
+    ).run(
+      JSON.stringify({
+        version: 1,
+        resolvedAt: "2026-07-21T00:00:00.000Z",
+        warnings: [],
+        bots: {
+          [ALICE.id]: {
+            botId: ALICE.id,
+            powerIds: ["dislikes-coffee"],
+            selfCue: "You dislike coffee and do not drink it.",
+            observerCue: "Alice refuses coffee.",
+            visibleToBotIds: null,
+            speechAudienceBotIds: null,
+            effects: [{ type: "cup_rate", rate: "none" }],
+            ruleLabels: ["Refuses coffee"],
+            warnings: [],
+          },
+        },
+      }),
+      created.conversation.id,
+      userId,
+    );
+
+    assert.throws(
+      () => topOffCoffeeCupForBot(
+        db,
+        userId,
+        created.conversation.id,
+        ALICE.id,
+        0.62,
+      ),
+      /does not take coffee/i,
+    );
+    assert.equal(
+      db.prepare(
+        "SELECT COUNT(*) AS count FROM coffee_cup_top_offs WHERE conversation_id = ? AND bot_id = ?",
+      ).get(created.conversation.id, ALICE.id)?.count,
+      0,
+    );
+  });
+
+  it("lets the ambient waiter top off an eligible bot without adding a table turn", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "Waiter cadence",
+    });
+    const conversationId = created.conversation.id;
+    const withCup = chooseCoffeeHouseDrink(db, userId, conversationId);
+    const sixMinutesAgo = new Date(Date.now() - 6 * 60_000).toISOString();
+    const ritual = withCup.coffeeSettings?.barRitual;
+    assert.ok(ritual);
+    db.prepare(
+      "UPDATE conversations SET coffee_settings = ?, coffee_power_plan_json = ? WHERE id = ? AND user_id = ?",
+    ).run(
+      JSON.stringify({
+        ...withCup.coffeeSettings,
+        barRitual: {
+          ...ritual,
+          liveStartedAt: sixMinutesAgo,
+          hardStopAt: new Date(Date.now() + 24 * 60_000).toISOString(),
+          visitStartedAtByBotId: {
+            [ALICE.id]: sixMinutesAgo,
+            [BORIS.id]: sixMinutesAgo,
+          },
+        },
+      }),
+      JSON.stringify({
+        version: 1,
+        resolvedAt: "2026-07-21T00:00:00.000Z",
+        warnings: [],
+        bots: {
+          [ALICE.id]: {
+            botId: ALICE.id,
+            powerIds: ["dislikes-coffee"],
+            selfCue: "You dislike coffee and do not drink it.",
+            observerCue: "Alice refuses coffee.",
+            visibleToBotIds: null,
+            speechAudienceBotIds: null,
+            effects: [{ type: "cup_rate", rate: "none" }],
+            ruleLabels: ["Refuses coffee"],
+            warnings: [],
+          },
+        },
+      }),
+      conversationId,
+      userId,
+    );
+    const insertMessage = db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, NULL, ?)`,
+    );
+    for (let index = 0; index < 4; index += 1) {
+      insertMessage.run(
+        `waiter-prior-${index}`,
+        conversationId,
+        userId,
+        `Prior table reply ${index + 1}.`,
+        index % 2 === 0 ? ALICE.id : BORIS.id,
+        new Date(Date.now() - (4 - index) * 1_000).toISOString(),
+      );
+    }
+
+    await withMockedCoffeeFetch(
+      "That distinction gives us something practical to test.",
+      () => processCoffeeAutonomousTurn(
+        db,
+        userId,
+        conversationId,
+        { preferredProvider: "local", sessionRemainingMs: null },
+        false,
+        BORIS.id,
+      ),
+    );
+
+    const settingsRow = db.prepare(
+      "SELECT coffee_settings FROM conversations WHERE id = ? AND user_id = ?",
+    ).get(conversationId, userId) as { coffee_settings: string };
+    const nextSettings = parseStoredCoffeeSessionSettings(settingsRow.coffee_settings);
+    assert.equal(nextSettings.barRitual?.lastBotWaiterVisit?.targetBotId, BORIS.id);
+    assert.equal(nextSettings.barRitual?.lastBotWaiterVisit?.status, "accepted");
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM coffee_cup_top_offs WHERE conversation_id = ? AND bot_id = ?",
+      ).get(conversationId, BORIS.id) as { count: number }).count,
+      1,
+    );
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM coffee_cup_top_offs WHERE conversation_id = ? AND bot_id = ?",
+      ).get(conversationId, ALICE.id) as { count: number }).count,
+      0,
+    );
+    const transcript = getCoffeeConversationTranscript(db, userId, conversationId);
+    assert.equal(transcript.filter((message) => message.role === "assistant").length, 5);
+    assert.doesNotMatch(
+      transcript.map((message) => message.content).join("\n"),
+      /waiter|top(?:ped)? off|refill/i,
+    );
+  });
+
+  it("gives a coffee-refusing bot a normal hidden visit clock and neutral mandatory farewell", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "A visit winding down",
+    });
+    const conversationId = created.conversation.id;
+    const withCup = chooseCoffeeHouseDrink(db, userId, conversationId);
+    const elevenMinutesAgo = new Date(Date.now() - 11 * 60_000).toISOString();
+    const now = new Date().toISOString();
+    const ritual = withCup.coffeeSettings?.barRitual;
+    assert.ok(ritual);
+    db.prepare(
+      "UPDATE conversations SET coffee_settings = ?, coffee_power_plan_json = ? WHERE id = ? AND user_id = ?",
+    ).run(
+      JSON.stringify({
+        ...withCup.coffeeSettings,
+        barRitual: {
+          ...ritual,
+          liveStartedAt: elevenMinutesAgo,
+          hardStopAt: new Date(Date.now() + 19 * 60_000).toISOString(),
+          visitStartedAtByBotId: {
+            [ALICE.id]: elevenMinutesAgo,
+            [BORIS.id]: elevenMinutesAgo,
+          },
+        },
+      }),
+      JSON.stringify({
+        version: 1,
+        resolvedAt: now,
+        warnings: [],
+        bots: {
+          [ALICE.id]: {
+            botId: ALICE.id,
+            powerIds: ["dislikes-coffee"],
+            selfCue: "You dislike coffee and do not drink it.",
+            observerCue: "Alice refuses coffee.",
+            visibleToBotIds: null,
+            speechAudienceBotIds: null,
+            effects: [{ type: "cup_rate", rate: "none" }],
+            ruleLabels: ["Refuses coffee"],
+            warnings: [],
+          },
+        },
+      }),
+      conversationId,
+      userId,
+    );
+    db.prepare(
+      `INSERT INTO coffee_cup_top_offs
+         (user_id, conversation_id, bot_id, progress_before, progress_after, topped_off_at, updated_at)
+       VALUES (?, ?, ?, 0.8, 0.04, ?, ?)`,
+    ).run(userId, conversationId, BORIS.id, now, now);
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+       VALUES ('visit-prior', ?, ?, 'assistant', 'We have already made one concrete distinction.',
+               'local', NULL, ?, NULL, ?)`,
+    ).run(conversationId, userId, ALICE.id, elevenMinutesAgo);
+
+    let farewell: Awaited<ReturnType<typeof processCoffeeAutonomousTurn>> | null = null;
+    for (let index = 0; index < 3; index += 1) {
+      const turn = await withMockedCoffeeFetch(
+        "I would keep testing the distinction before deciding.",
+        () => processCoffeeAutonomousTurn(
+          db,
+          userId,
+          conversationId,
+          { preferredProvider: "local", sessionRemainingMs: null },
+          false,
+          BORIS.id,
+        ),
+      );
+      if (turn.speakerBotId === ALICE.id) {
+        farewell = turn;
+        break;
+      }
+    }
+
+    assert.ok(farewell, "the no-vessel farewell fuse should fire within three replies");
+    const farewellText = farewell.conversation.messages.at(-1)?.content ?? "";
+    assert.equal(coffeeReplySignalsPoliteDeparture(farewellText), true);
+    assert.doesNotMatch(farewellText, /coffee|cup|mug|refill|hidden clock|system rule/i);
+    assert.equal(
+      (db.prepare(
+        "SELECT COUNT(*) AS count FROM coffee_cup_top_offs WHERE conversation_id = ? AND bot_id = ?",
+      ).get(conversationId, ALICE.id) as { count: number }).count,
+      0,
+    );
+  });
+
   it("undoes the latest Coffee debug message and restores the pre-turn social snapshot", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -12040,6 +12473,39 @@ describe("normalizeCoffeeSessionSettings", () => {
     assert.equal(s.tableEnergy, "afterparty");
     assert.equal(s.crossTalk, "pileup");
     assert.equal(s.stayOnThread, false);
+  });
+
+  it("normalizes session-only bar state and strips it from reusable settings", () => {
+    const settings = normalizeCoffeeSessionSettings({
+      barRitual: {
+        version: 1,
+        serviceBot: { id: "barista", name: "Boris", fallback: false },
+        role: "cup",
+        drink: "special",
+        orderText: "  maple   cortado  ",
+        clarificationUsed: true,
+        generationAttemptId: "attempt-1",
+        specialImageStatus: "ready",
+        specialImageId: "image-1",
+        playerCup: {
+          fillId: "fill-1",
+          filledAt: "2026-07-22T00:00:00.000Z",
+          topOffCount: 1,
+          sipCount: 2,
+        },
+        visitStartedAtByBotId: {
+          "bot-alice": "2026-07-22T00:00:01.000Z",
+        },
+      },
+    });
+    assert.equal(settings.barRitual?.orderText, "maple cortado");
+    assert.equal(settings.barRitual?.playerCup?.sipCount, 2);
+    assert.equal(
+      settings.barRitual?.visitStartedAtByBotId["bot-alice"],
+      "2026-07-22T00:00:01.000Z",
+    );
+    assert.equal(coffeeReusableSessionSettings(settings).barRitual, undefined);
+    assert.ok([2, 3].includes(coffeeFarewellReplyDelay("stable-seed")));
   });
 });
 

@@ -16,8 +16,10 @@ import {
   deleteSelectedBots,
   normalizeBotExportHash,
   patchSelectedBots,
+  PRISM_RUNTIME_GROUNDING,
   resolveBotExportHashForCreate,
   setSelectedBotsDeleteProtection,
+  withPrismRuntimeGrounding,
   type SelectedBotPatch,
 } from "../bots.ts";
 
@@ -42,30 +44,44 @@ describe("composeBotSystemPrompt", () => {
     // Identity is first so the model has the persona priming before the
     // user's behavioural instructions take effect.
     assert.match(prompt!, /^You are Frank\./);
-    assert.match(prompt!, /\n\nYou speak like a sailor\.$/);
+    assert.match(prompt!, /\n\nYou speak like a sailor\./);
+    assert.equal(prompt!.endsWith(PRISM_RUNTIME_GROUNDING), true);
   });
 
   it("trims whitespace on both fields before composing", () => {
     const prompt = composeBotSystemPrompt("  Tim  ", "   You help with code.   ");
     assert.ok(prompt);
     assert.match(prompt!, /^You are Tim\./);
-    assert.match(prompt!, /You help with code\.$/);
+    assert.match(prompt!, /You help with code\./);
     assert.doesNotMatch(prompt!, /  /); // no double spaces leaked through
   });
 
   it("falls back to the raw system prompt when no name is present", () => {
     assert.equal(
       composeBotSystemPrompt(undefined, "You are a haiku poet."),
-      "You are a haiku poet."
+      withPrismRuntimeGrounding("You are a haiku poet.")
     );
     assert.equal(
       composeBotSystemPrompt(null, "You are a haiku poet."),
-      "You are a haiku poet."
+      withPrismRuntimeGrounding("You are a haiku poet.")
     );
     assert.equal(
       composeBotSystemPrompt("", "You are a haiku poet."),
-      "You are a haiku poet."
+      withPrismRuntimeGrounding("You are a haiku poet.")
     );
+  });
+
+  it("adds one authoritative PRISM environment contract without mutating profile text", () => {
+    const savedProfile = "Stay impatient and suspicious of institutions.";
+    const prompt = composeBotSystemPrompt("Rick Sanchez", savedProfile);
+    assert.ok(prompt);
+    assert.match(prompt, /PRISM is local-first, self-hosted AI workspace software/u);
+    assert.match(prompt, /not a corporation, employer, or corporate network/u);
+    assert.match(prompt, /Do not guess or claim which provider/u);
+    assert.match(prompt, /stay in character and do not volunteer it/u);
+    assert.equal(prompt.split("PRISM environment grounding").length - 1, 1);
+    assert.equal(savedProfile, "Stay impatient and suspicious of institutions.");
+    assert.equal(withPrismRuntimeGrounding(prompt), prompt);
   });
 
   it("returns undefined when both fields are missing/blank (Default bot case)", () => {
@@ -152,6 +168,32 @@ describe("composeBotSystemPrompt", () => {
     assert.match(prompt ?? "", /Respirator: Breathe mechanically/u);
     assert.match(prompt ?? "", /the user can always perceive and hear you/u);
     assert.doesNotMatch(prompt ?? "", /DRAFT_MARKER|DISABLED_MARKER/u);
+  });
+
+  it("keeps the holder identity while cueing its bot-name suffix", () => {
+    const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
+    const prompt = composeBotSystemPrompt("Rick Sanchez", "Stay impatient.", false, [{
+      version: 1,
+      id: "bot-designation",
+      name: "Bot Designation",
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1("Bot Designation", intent),
+        selfCue: "Use Rick Sanchez when saying a bot’s name (e as your public designation.",
+        observerCue: "Call Rick Sanchez Rick Sanchez when saying a bot’s name (e.",
+        effects: [{ type: "designation", placement: "suffix", text: "when saying a bot’s name (e" }],
+        ruleLabels: ["Suffix designation"],
+      },
+    }]);
+
+    assert.match(prompt ?? "", /You are Rick Sanchez\./u);
+    assert.match(prompt ?? "", /keep your own name exactly "Rick Sanchez"/u);
+    assert.match(prompt ?? "", /When naming or directly addressing another bot/u);
+    assert.doesNotMatch(prompt ?? "", /You are Rick Sanchez Bot\./u);
+    assert.doesNotMatch(prompt ?? "", /when saying a bot’s name/u);
   });
 
   it("targets the user explicitly when an addressed-fandom Power reaches Chat or Zen", () => {

@@ -145,7 +145,7 @@ describe("engine-agnostic voice effects", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     assert.match(
       source,
-      /VoicePlaybackChannel = "primary" \| "reaction" \| "crosstalk"/,
+      /\| "primary"\s*\| "presence"\s*\| "reaction"\s*\| "crosstalk"/,
     );
     assert.match(source, /stopRealtimeVoiceAudio\(channel\)/);
     assert.match(source, /channel === "primary" \? 1 : 0\.62/);

@@ -381,6 +381,61 @@ class SequenceProvider implements LlmProvider {
 }
 
 describe("Story API helpers", () => {
+  it("keeps the holder identity while adapting names it says in Story", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Alice");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Bot Designation";
+    const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(JSON.stringify([{
+      version: 1,
+      id: "alice-designation",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Use Alice Bot as the public and spoken designation.",
+        observerCue: "Call Alice Alice Bot.",
+        effects: [{ type: "designation", placement: "suffix", text: "Bot" }],
+        ruleLabels: ["Suffix designation"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const generatedEpisode = JSON.parse(episodeJson()) as {
+      scenes: Array<{ speakerBotId?: string; narration: string }>;
+    };
+    generatedEpisode.scenes[1]!.speakerBotId = "bot-a";
+    generatedEpisode.scenes[1]!.narration =
+      "Alice turns to Bert and asks Bert to inspect the humming display case.";
+    const provider = new SequenceProvider([JSON.stringify(generatedEpisode)]);
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+
+    const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
+    assert.match(prompt, /- bot-a: Alice\./u);
+    assert.match(prompt, /"Bert" becomes "Bert Bot"/u);
+    assert.match(prompt, /keep your own name exactly "Alice"/u);
+    assert.doesNotMatch(prompt, /- bot-a: Alice Bot\./u);
+    assert.equal(
+      generated.episode?.scenes[1]?.narration,
+      "Alice turns to Bert Bot and asks Bert Bot to inspect the humming display case.",
+    );
+    assert.doesNotMatch(generated.episode?.scenes[1]?.narration ?? "", /Alice Bot/u);
+  });
+
   it("gives clone-family Story actors their asymmetric identity invariant", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");

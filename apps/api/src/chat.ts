@@ -168,6 +168,7 @@ import {
   searchWebWithBrave,
 } from "./web-search.ts";
 import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
+import { withPrismRuntimeGrounding } from "./bots.ts";
 
 const config = getAppConfig();
 
@@ -5652,15 +5653,11 @@ function buildPromptMessages(args: {
   imageSlotSystemHint?: string | null;
 }): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
-  const trimmedBot = args.botSystemPrompt?.trim();
+  const trimmedBot = withPrismRuntimeGrounding(args.botSystemPrompt);
   const trimmedDisplayName = args.userDisplayName?.trim() ?? "";
   const relationshipContext = botOpinionPromptContext(args.botOpinion ?? null);
   const moodContext = prismMoodPromptContext(args.prismMood ?? null);
-  const toolsBlock =
-    trimmedBot &&
-    trimmedBot.length > 0
-      ? `${trimmedBot}\n\n${PRISM_ASSISTANT_TOOLS_APPENDIX}`
-      : PRISM_ASSISTANT_TOOLS_APPENDIX;
+  const toolsBlock = `${trimmedBot}\n\n${PRISM_ASSISTANT_TOOLS_APPENDIX}`;
   promptMessages.push({ role: "system", content: toolsBlock });
   if (
     trimmedDisplayName.length > 0 &&
@@ -6383,7 +6380,7 @@ export async function processChatMessage(
   const webSearchUnavailableMessage =
     webSearchUnavailableReason === "local_mode"
       ? "WebSearch is unavailable in LOCAL mode. Switch to ONLINE mode to search the web."
-      : "WebSearch is unavailable because a Brave Search API key is not configured. Add one in Settings → Connections or set BRAVE_SEARCH_API_KEY on the server.";
+      : "WebSearch is unavailable because a Brave Search API key is not configured. Add one in Settings → Connections or configure BRAVE_SEARCH_API_KEY for this PRISM installation.";
   const modeRuntimePlan = buildModeRuntimePlan(mode, incognitoForTurn);
   const skipPersonalFacts =
     modeRuntimePlan.skipPersonalFacts || botPowerEternalIntroductionTurn;
