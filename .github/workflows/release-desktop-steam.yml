@@ -101,8 +101,12 @@ jobs:
         if: ${{ inputs.publish_to_steam }}
         run: |
           set -euo pipefail
+          sudo dpkg --add-architecture i386
+          sudo add-apt-repository -y multiverse
           sudo apt-get update
-          sudo apt-get install -y steamcmd
+          echo steam steam/question select "I AGREE" | sudo debconf-set-selections
+          echo steam steam/license note "" | sudo debconf-set-selections
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y steamcmd
 
       - name: Upload to Steam
         if: ${{ inputs.publish_to_steam }}
