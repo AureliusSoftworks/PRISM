@@ -10,6 +10,7 @@ import {
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
+  replayVoiceTakesForRecording,
   retryReplayRecording,
   upsertReplayVoiceTake,
 } from "../replay-recordings.ts";
@@ -41,6 +42,11 @@ function fixture(): DatabaseSync {
              'The Episode', 'Truth', 'local', 'local', 'completed', 'closing',
              ?, ?, ?, ?)`,
   ).run(now, now, now, now);
+  db.prepare(
+    `INSERT INTO conversations
+      (id, user_id, title, conversation_mode, created_at, updated_at)
+     VALUES ('coffee-1', 'user-1', 'Coffee replay', 'coffee', ?, ?)`,
+  ).run(now, now);
   return db;
 }
 
@@ -189,6 +195,30 @@ describe("durable replay recordings", () => {
     assert.equal(deleted?.videoUrl, null);
   });
 
+  it("claims only the requested replay surface and source", () => {
+    const db = fixture();
+    queueReplayRecording(db, "user-1", {
+      ...manifest,
+      surface: "coffee",
+      sourceId: "coffee-1",
+      title: "Coffee replay",
+    });
+    queueReplayRecording(db, "user-1", manifest);
+
+    const signal = claimNextReplayRecording(db, "user-1", {
+      surface: "signal",
+      sourceId: "episode-1",
+    });
+    assert.equal(signal?.recording.surface, "signal");
+    assert.equal(signal?.recording.sourceId, "episode-1");
+
+    const coffee = claimNextReplayRecording(db, "user-1", {
+      surface: "coffee",
+    });
+    assert.equal(coffee?.recording.surface, "coffee");
+    assert.equal(coffee?.recording.sourceId, "coffee-1");
+  });
+
   it("rejects traversal in every replay media path segment", () => {
     assert.throws(
       () => replayRecordingRelativeDirectory("../user-1", "recording-1"),
@@ -197,6 +227,40 @@ describe("durable replay recordings", () => {
     assert.throws(
       () => replayRecordingRelativeDirectory("user-1", "../../recording-1"),
       /Invalid replay media path segment/u,
+    );
+  });
+
+  it("freezes English, Premium, Bottish, and Muted on the exact next utterances", () => {
+    const db = fixture();
+    const expected = [
+      { mode: "english" as const, requestedEngine: "builtin" as const },
+      { mode: "english" as const, requestedEngine: "elevenlabs" as const },
+      { mode: "bottish" as const, requestedEngine: null },
+      { mode: "mute" as const, requestedEngine: null },
+    ];
+    const recordingId = expected
+      .map((voice, index) =>
+        upsertReplayVoiceTake(db, "user-1", "signal", "episode-1", {
+          ...takeSnapshot,
+          sourceKey: `message-${index + 1}`,
+          sourceMessageId: `message-${index + 1}`,
+          mode: voice.mode,
+          requestedEngine: voice.requestedEngine,
+          audible: voice.mode !== "mute",
+        }),
+      )[0]!.recordingId;
+    assert.deepEqual(
+      replayVoiceTakesForRecording(db, "user-1", recordingId).map((take) => ({
+        messageId: take.snapshot.sourceMessageId,
+        mode: take.snapshot.mode,
+        engine: take.snapshot.requestedEngine,
+      })),
+      [
+        { messageId: "message-1", mode: "english", engine: "builtin" },
+        { messageId: "message-2", mode: "english", engine: "elevenlabs" },
+        { messageId: "message-3", mode: "bottish", engine: null },
+        { messageId: "message-4", mode: "mute", engine: null },
+      ],
     );
   });
 });

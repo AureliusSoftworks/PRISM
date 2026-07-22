@@ -36,6 +36,7 @@ import {
   rasterizeVisibleAvatarDetailsRgba,
   resolveAvatarDetailStampAnchor,
   replaceAvatarDetailStampForCategory,
+  removeAvatarDetailStamp,
   toggleAvatarDetailStamp,
   type AvatarDetailStampV1,
   type AvatarDetailsV1,
@@ -495,6 +496,34 @@ describe("avatar details input geometry", () => {
       ["freckles", "diagonal-scar"],
     );
     assert.deepEqual(capped, second);
+  });
+
+  it("removes one accessory without disturbing other stamps or screen ink", () => {
+    const colorMap = paintAvatarDetailsColorMap(
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
+      [{ x: 64, y: 64 }],
+      1,
+      "brush",
+      "effect",
+    ).colorMap;
+    const withInk = avatarDetailsWithPaintColorMap(
+      toggleAvatarDetailStamp(
+        toggleAvatarDetailStamp(emptyDetails(), "round-glasses"),
+        "diagonal-scar",
+      ),
+      colorMap,
+    );
+
+    const removed = removeAvatarDetailStamp(withInk, "round-glasses");
+
+    assert.deepEqual(
+      removed.screen.stamps.map((stamp) => stamp.id),
+      ["diagonal-scar"],
+    );
+    assert.equal(
+      removed.screen.paintColorMapBase64,
+      withInk.screen.paintColorMapBase64,
+    );
   });
 });
 

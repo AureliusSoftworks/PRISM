@@ -802,7 +802,7 @@ describe("Coffee seat arrival CSS", () => {
       /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
     );
     assert.match(facePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/);
-    assert.match(facePartRule, /filter:\s*var\(--zen-live-bot-idle-face-glow-filter\)\s*;/);
+    assert.match(facePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(facePartRule, /animation:\s*zenLiveBotIdleLightBreath/);
 
     const liveFacePartRule = ruleForSelectorNeedlesWithBody(
@@ -828,7 +828,7 @@ describe("Coffee seat arrival CSS", () => {
       liveFacePartRule,
       /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/
     );
-    assert.match(liveFacePartRule, /filter:\s*var\(--zen-live-bot-idle-face-glow-filter\)\s*;/);
+    assert.match(liveFacePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(liveFacePartRule, /animation:\s*zenLiveBotIdleLightBreath/);
 
     const glyphLayerCrtFlickerRule = ruleForSelectorNeedlesWithBody(
@@ -873,7 +873,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.42em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
     assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.34em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
     assert.match(talkingFacePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
-    assert.match(talkingFacePartRule, /filter:\s*var\(--crt-face-glow-filter\)\s*;/);
+    assert.match(talkingFacePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(talkingFacePartRule, /animation:/);
 
     const talkingFaceGlowCloneRule = ruleForSelectorNeedles(

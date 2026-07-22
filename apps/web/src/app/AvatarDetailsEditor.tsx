@@ -52,6 +52,7 @@ import {
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
   paintAvatarDetailsColorMap,
+  removeAvatarDetailStamp,
   toggleAvatarDetailStamp,
   updateAvatarDetailStamp,
   rasterizeAvatarDetailsSemanticRgba,
@@ -1065,19 +1066,37 @@ const AvatarDetailsEditorSession = forwardRef<
                 <article key={stamp.id} className={styles.stampTransformCard}>
                   <header>
                     <strong>{definition.label}</strong>
-                    <button
-                      type="button"
-                      aria-label={`Randomize ${definition.label} stamp`}
-                      title={`Randomize ${definition.label} stamp`}
-                      onClick={() => {
-                        const alternatives = siblingIds.filter((id) => id !== stamp.id);
-                        const nextId = alternatives[Math.floor(Math.random() * alternatives.length)];
-                        if (nextId) updateStamp(stamp, { id: nextId });
-                      }}
-                      disabled={siblingIds.length < 2}
-                    >
-                      <Dices size={13} aria-hidden="true" />
-                    </button>
+                    <span className={styles.stampTransformActions}>
+                      <button
+                        type="button"
+                        aria-label={`Randomize ${definition.label} stamp`}
+                        title={`Randomize ${definition.label} stamp`}
+                        onClick={() => {
+                          const alternatives = siblingIds.filter((id) => id !== stamp.id);
+                          const nextId = alternatives[Math.floor(Math.random() * alternatives.length)];
+                          if (nextId) updateStamp(stamp, { id: nextId });
+                        }}
+                        disabled={siblingIds.length < 2}
+                      >
+                        <Dices size={13} aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${definition.label} stamp`}
+                        title={`Remove ${definition.label}`}
+                        onClick={() => {
+                          onEditStart?.();
+                          commitMutation(
+                            removeAvatarDetailStamp(
+                              workingRef.current,
+                              stamp.id,
+                            ),
+                          );
+                        }}
+                      >
+                        <Trash2 size={13} aria-hidden="true" />
+                      </button>
+                    </span>
                   </header>
                   <label>
                     <span>X <button type="button" aria-label={`Randomize ${definition.label} X offset`} onClick={() => updateStamp(stamp, { offsetX: differentInteger(stamp.offsetX, AVATAR_DETAIL_OFFSET_MIN, AVATAR_DETAIL_OFFSET_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>

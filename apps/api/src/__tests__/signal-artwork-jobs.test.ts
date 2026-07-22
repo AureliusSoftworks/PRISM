@@ -324,6 +324,99 @@ test("finishes every generated Studio with a fresh local lighting map", async ()
   ]);
 });
 
+test("keeps a standalone Studio lighting refresh visibly queued until its image slot starts", async () => {
+  let releaseQueue!: () => void;
+  const queueGate = new Promise<void>((resolve) => {
+    releaseQueue = resolve;
+  });
+  const calls: string[] = [];
+  let released = 0;
+  const manager = new SignalArtworkJobManager(
+    () => new Date(),
+    () => "job-lighting-only",
+  );
+  const initial = manager.start({
+    userId: "user-lighting-only",
+    showId: "show-lighting-only",
+    showName: "Queued Signal",
+    studioLightingOnly: true,
+    acquireSlot: async () => {
+      calls.push("queue");
+      await queueGate;
+      calls.push("acquired");
+    },
+    releaseSlot: async () => {
+      released += 1;
+    },
+    refreshStudioLighting: async () => {
+      calls.push("refresh");
+      return {
+        imageId: "lighting-only-image",
+        imageUrl: "/images/lighting-only",
+      };
+    },
+  });
+
+  assert.equal(initial.currentAsset, null);
+  assert.deepEqual(initial.assets.map((asset) => asset.kind), [
+    "studio-lighting",
+  ]);
+  assert.deepEqual(initial.assets.map((asset) => asset.status), ["waiting"]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, ["queue"]);
+
+  releaseQueue();
+  const completed = await waitForTerminal(manager, "user-lighting-only");
+  assert.equal(completed.status, "completed");
+  assert.equal(completed.completedCount, 1);
+  assert.equal(completed.assets[0]?.status, "complete");
+  assert.deepEqual(calls, ["queue", "acquired", "refresh"]);
+  assert.equal(released, 1);
+});
+
+test("cancels a standalone Studio lighting refresh before it acquires the image slot", async () => {
+  let released = 0;
+  let refreshed = false;
+  const manager = new SignalArtworkJobManager(
+    () => new Date(),
+    () => "job-lighting-queued-cancel",
+  );
+  manager.start({
+    userId: "user-lighting-queued-cancel",
+    showId: "show-lighting-queued-cancel",
+    showName: "Cancelled Signal",
+    studioLightingOnly: true,
+    acquireSlot: (signal) =>
+      new Promise<void>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("cancelled", "AbortError")),
+          { once: true },
+        );
+      }),
+    releaseSlot: async () => {
+      released += 1;
+    },
+    refreshStudioLighting: async () => {
+      refreshed = true;
+      return { imageId: "never", imageUrl: "/images/never" };
+    },
+  });
+
+  manager.cancel(
+    "user-lighting-queued-cancel",
+    "job-lighting-queued-cancel",
+  );
+  const cancelled = await waitForTerminal(
+    manager,
+    "user-lighting-queued-cancel",
+  );
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.assets[0]?.status, "skipped");
+  assert.equal(refreshed, false);
+  assert.equal(released, 0);
+});
+
 test("can render an independent online logo while preserving the Dark-to-Light dependency", async () => {
   const started: string[] = [];
   let releaseNight: (() => void) | null = null;

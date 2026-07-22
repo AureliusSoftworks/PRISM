@@ -618,13 +618,6 @@
   place-items: center;
 }
 
-.storyBotGlyph > .botPowerSurfaceBadgeWrap {
-  position: absolute;
-  top: -7px;
-  right: -9px;
-  z-index: 3;
-}
-
 .storyPremiseField {
   display: grid;
   gap: 8px;
@@ -25075,13 +25068,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
-.signalBotPresencePlate > .botPowerSurfaceBadgeWrap {
-  position: absolute;
-  z-index: 6;
-  top: 8px;
-  right: 0;
-}
-
 /* Signal's authored Studio set supplies the receiving surfaces for its light.
    Keep the shared avatar hover, but remove the portable tabletop underglow. */
 .signalBotPresencePlate .botAmbientUnderglow {
@@ -26369,7 +26355,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     );
   --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
   opacity: 1;
-  filter: var(--crt-face-glow-filter);
+  filter: none;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
@@ -27009,7 +26995,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --zen-live-bot-idle-face-glow-filter-high
   );
   --crt-face-glow-filter: var(--zen-live-bot-idle-face-glow-filter-high);
-  filter: var(--zen-live-bot-idle-face-glow-filter);
+  /* The glyph bloom clone already applies this filter. Reapplying it to the
+     whole feature composites the core and bloom a second time, making the
+     built-in face float above authored ink in the same CRT root. */
+  filter: none;
 }
 
 :global(html[data-prism-render-platform="windows"])
@@ -27360,7 +27349,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
     );
   --crt-face-glow-filter: var(--zen-live-bot-talking-face-glow-filter-high);
-  filter: var(--crt-face-glow-filter);
+  filter: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -31631,11 +31620,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   max-width: 11ch; /* bot names beyond ~11 chars ellipsize gracefully */
 }
 
-.composeBotTrigger .botPowerSurfaceBadge {
-  min-width: 20px;
-  height: 16px;
-  padding: 0 4px;
-  font-size: 8px;
+.composeBotTrigger .botPowerNameplateIndicator {
+  color: var(--bot-color, currentColor);
 }
 
 .composeBotTrigger:disabled .composeBotTriggerGlyph,
@@ -38917,13 +38903,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 20%, transparent);
 }
 
-.botMarketplaceCardGlyph > .botPowerSurfaceBadgeWrap {
-  position: absolute;
-  top: -7px;
-  right: -8px;
-  z-index: 3;
-}
-
 .botMarketplaceCardGlyph .headerIconGlyph {
   width: 23px;
   height: 23px;
@@ -45395,87 +45374,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 8px;
 }
 
-.botPowerSurfaceBadgeWrap {
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
-  outline: none;
-}
-
-.botPowerSurfaceBadgeWrap[data-passive="true"] {
-  cursor: inherit;
-}
-
-.botPowerSurfaceBadge {
+.botPowerNameplateIndicator {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  min-width: 24px;
-  height: 20px;
-  padding: 0 6px;
-  border: 1px solid
-    color-mix(
-      in srgb,
-      var(--bot-color, var(--editor-bot-color, var(--accent))) 55%,
-      var(--line)
-    );
-  border-radius: 999px;
-  color: var(--fg);
-  background: color-mix(
-    in srgb,
-    var(--bot-color, var(--editor-bot-color, var(--accent))) 16%,
-    rgba(0, 0, 0, 0.24)
-  );
+  gap: 2px;
+  flex: 0 0 auto;
+  min-width: 0;
+  color: currentColor;
+  opacity: 0.68;
   font-size: 9px;
   font-weight: 850;
   line-height: 1;
 }
 
-.botPowerSurfaceBadgeWrap:focus-visible .botPowerSurfaceBadge,
-.botPowerSurfaceBadgeWrap[data-open="true"] .botPowerSurfaceBadge {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
-}
-
-.botPowerSurfacePopover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 120;
-  width: min(280px, 70vw);
-  display: grid;
-  gap: 5px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line));
-  border-radius: 9px;
-  color: var(--fg);
-  background: color-mix(in srgb, var(--panel-strong) 96%, #000);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-align: left;
-  white-space: normal;
-}
-
-.botPowerSurfacePopover strong {
-  color: var(--fg);
-  font-size: 11px;
-}
-
-.botPowerSurfacePopover em {
-  color: #ffd08a;
-  font-style: normal;
-}
-
-.storyBotGlyph > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge,
-.coffeeCanvasBotTile > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge,
-.botMarketplaceCardGlyph > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge,
-.coffeeSeatGlowPill > .botPowerSurfaceBadgeWrap .botPowerSurfaceBadge {
-  min-width: 20px;
-  height: 17px;
-  padding: 0 4px;
-  font-size: 8px;
+.botPowerNameplateIndicator svg {
+  width: 9px;
+  height: 9px;
 }
 
 .coffeePowerWarning {
@@ -48822,23 +48737,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .themeLight.botAvatarStudioThemeScope
   .botAvatarSaveStatus[data-state="saving"] {
   color: var(--fg);
-}
-
-.themeLight.botAvatarStudioThemeScope .botPowerSurfaceBadge {
-  border-color: var(--avatar-studio-border);
-  background: var(--avatar-studio-selected);
-  color: var(--fg);
-}
-
-.themeLight.botAvatarStudioThemeScope .botPowerSurfacePopover {
-  border-color: var(--avatar-studio-border);
-  background: var(--bg-elevated);
-  color: var(--fg);
-  box-shadow: var(--shadow-lg);
-}
-
-.themeLight.botAvatarStudioThemeScope .botPowerSurfacePopover em {
-  color: var(--avatar-editor-warning);
 }
 
 .themeLight.botAvatarStudioThemeScope .botAvatarControlGroupIcon {
@@ -63959,18 +63857,29 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     translateY(calc(var(--coffee-seat-name-plate-y) + 6px)) scale(0.96);
 }
 
-.coffeeSeatGlowPill > .botPowerSurfaceBadgeWrap {
-  position: absolute;
-  top: -8px;
-  left: 22px;
-  z-index: 4;
+.coffeeSeatGlowPill:has(> .botPowerNameplateIndicator) {
+  grid-template-columns:
+    var(--coffee-seat-glyph-slot-width) 16px minmax(0, 1fr)
+    var(--coffee-seat-cup-slot-width);
+}
+
+.coffeeSeat[data-cup-side="left"]
+  .coffeeSeatGlowPill:has(> .botPowerNameplateIndicator) {
+  grid-template-columns:
+    var(--coffee-seat-cup-slot-width) minmax(0, 1fr) 16px
+    var(--coffee-seat-glyph-slot-width);
+}
+
+.coffeeSeatGlowPill > .botPowerNameplateIndicator {
+  grid-column: 2;
+  grid-row: 1;
+  color: var(--coffee-seat-emotion-color);
 }
 
 .coffeeSeat[data-cup-side="left"]
   .coffeeSeatGlowPill
-  > .botPowerSurfaceBadgeWrap {
-  right: 22px;
-  left: auto;
+  > .botPowerNameplateIndicator {
+  grid-column: 3;
 }
 
 .coffeeSeatGlowGlyph {
@@ -63991,6 +63900,23 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatGlowGlyph {
   grid-column: 3;
+}
+
+.coffeeSeatGlowPill:has(> .botPowerNameplateIndicator)
+  .coffeeSeatGlowText {
+  grid-column: 3;
+}
+
+.coffeeSeat[data-cup-side="left"]
+  .coffeeSeatGlowPill:has(> .botPowerNameplateIndicator)
+  .coffeeSeatGlowGlyph {
+  grid-column: 4;
+}
+
+.coffeeSeat[data-cup-side="left"]
+  .coffeeSeatGlowPill:has(> .botPowerNameplateIndicator)
+  .coffeeSeatGlowText {
+  grid-column: 2;
 }
 
 .coffeeSeat[data-cup-side="left"] .coffeeSeatGlowPill {
@@ -64117,6 +64043,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --coffee-speaker-gaze-body-shift-y: 0px;
   --coffee-speaker-gaze-body-rotation: 0deg;
   --coffee-speaker-gaze-face-shift-x: 0px;
+  --avatar-details-offset-x: var(--coffee-speaker-gaze-face-shift-x);
 }
 
 .coffeeSeat[data-gaze-direction="left"],
@@ -64155,7 +64082,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
       calc(-50% + var(--coffee-speaker-gaze-face-shift-x)),
       -50%
     )
-    scale(var(--zen-live-bot-face-scale, 1));
+    scale(var(--zen-live-bot-face-scale, 1))
+    scaleX(var(--zen-live-bot-face-layer-scale-x, 1));
   transition: transform 380ms cubic-bezier(0.22, 0.72, 0.24, 1);
 }
 
@@ -68130,13 +68058,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeCanvasBotTile .chatBotTileFeaturedName {
   font-size: clamp(9px, calc(var(--tile-size) * 0.088), 12px);
   letter-spacing: 0.045em;
-}
-
-.coffeeCanvasBotTile > .botPowerSurfaceBadgeWrap {
-  position: absolute;
-  top: 5px;
-  left: 5px;
-  z-index: 4;
 }
 
 .coffeeCanvasBotTileBadge {

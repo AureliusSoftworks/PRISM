@@ -135,6 +135,7 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.glyph, "moon");
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
+    assert.equal(draft.face.eyeRotationDeg, -90);
     assert.equal(draft.avatarDetails?.screen.stamps.length, 3);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");

@@ -126,7 +126,10 @@ describe("English voice post processing", () => {
       load(): void {}
       play(): Promise<void> {
         playCount += 1;
-        setTimeout(() => this.listeners.get("ended")?.(), 0);
+        setTimeout(() => {
+          this.listeners.get("playing")?.();
+          this.listeners.get("ended")?.();
+        }, 0);
         return Promise.resolve();
       }
     }

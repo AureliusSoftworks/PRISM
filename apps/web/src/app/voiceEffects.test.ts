@@ -241,7 +241,7 @@ describe("voice performance", () => {
     }
   });
 
-  it("uses the audible device clock for English lifecycle timing", () => {
+  it("uses the audible device clock for every realtime primary voice mode", () => {
     assert.equal(
       estimateVoiceOutputLatencyMs(
         {
@@ -281,6 +281,32 @@ describe("voice performance", () => {
       englishSource,
       /compensateLifecycleForOutputLatency: true/,
     );
+    const bottishSource = readFileSync(
+      new URL("./bottishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    assert.equal(
+      bottishSource.match(/compensateLifecycleForOutputLatency: true/g)?.length,
+      2,
+    );
+  });
+
+  it("does not start media-backed voice lifecycle from an accepted play request", () => {
+    const englishSource = readFileSync(
+      new URL("./englishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    const bottishSource = readFileSync(
+      new URL("./bottishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    for (const source of [englishSource, bottishSource]) {
+      assert.match(
+        source,
+        /audio\.addEventListener\("playing", beginAudiblePlayback, \{ once: true \}\)/,
+      );
+      assert.match(source, /void audio\.play\(\)\.then\(\s*\(\) => undefined,/);
+    }
   });
 
   it("applies per-bot Voice Character shelves and gain before limiting", () => {

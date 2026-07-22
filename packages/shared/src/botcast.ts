@@ -563,7 +563,7 @@ export type BotcastLogoGlyph =
 export interface BotcastLogoDesignV1 {
   version: 1;
   signature: string;
-  /** Original concrete visual metaphor that makes the mark legible and show-specific. */
+  /** Provider-safe persona brief and concrete metaphor that make the mark host-specific. */
   showThesis: string;
   personaMotif: string;
   broadcastArchetype: string;
@@ -1104,6 +1104,7 @@ export interface BotcastCameraSuggestion {
   reason:
     | "opening"
     | "speaker"
+    | "hidden_speaker"
     | "power_effect"
     | "listener_reaction"
     | "transition"
@@ -1952,6 +1953,8 @@ export function botcastDirectorSuggestion(args: {
   previous?: BotcastCameraSuggestion | null;
   atMs: number;
   speakerRole?: BotcastSpeakerRole | null;
+  /** A hidden performer remains audible, but Auto must not frame an empty chair. */
+  speakerVisible?: boolean;
   utteranceDurationMs?: number;
   segment: BotcastEpisodeSegment;
   event?: "utterance" | "transition" | "tension" | "departure" | "empty_chair";
@@ -1971,6 +1974,9 @@ export function botcastDirectorSuggestion(args: {
   } else if (event === "tension") {
     shot = "wide";
     reason = "tension";
+  } else if (args.speakerVisible === false) {
+    shot = "wide";
+    reason = "hidden_speaker";
   } else if (args.segment === "opening") {
     shot = args.speakerRole === "guest" ? "right" : "left";
     reason = "opening";

@@ -111,6 +111,7 @@ import {
   releaseImageSlot,
   releaseImageSlotIfOwned,
   tryAcquireImageSlot,
+  waitForImageSlot,
 } from "./image-job-slot.ts";
 import {
   SignalArtworkJobManager,
@@ -251,7 +252,10 @@ import type {
   ReplaySurfaceV1,
   ReplayVoiceTakeV1,
 } from "@localai/shared";
-import { generateSignalStudioLightingMap } from "./signal-studio-lighting.ts";
+import {
+  SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT,
+  generateSignalStudioLightingMap,
+} from "./signal-studio-lighting.ts";
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
@@ -719,7 +723,10 @@ import {
   getInactiveAccountCutoff,
 } from "./account-retention.ts";
 import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
-import { removeReplayMediaForUser } from "./replay-storage.ts";
+import {
+  removeReplayMediaForUser,
+  removeReplayRecordingDirectory,
+} from "./replay-storage.ts";
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
@@ -730,6 +737,7 @@ import {
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
+  resolveFrozenReplayVoiceEngine,
   resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
@@ -745,12 +753,14 @@ import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
 const signalArtworkJobs = new SignalArtworkJobManager();
-const activeSignalStudioLightingRefreshes = new Set<string>();
 
 async function rebuildSignalStudioLighting(
   userId: string,
   showId: string,
-  signal?: AbortSignal,
+  options: {
+    preferredProvider?: ImageProviderName;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<ReturnType<typeof getBotcastShow>> {
   const show = getBotcastShow(db, userId, showId);
   if (!show.dayAtmosphere.imageId || !show.nightAtmosphere.imageId) {
@@ -789,17 +799,92 @@ async function rebuildSignalStudioLighting(
     }
   };
 
-  if (signal?.aborted) throw new DOMException("cancelled", "AbortError");
+  const signal = options.signal ?? new AbortController().signal;
+  if (signal.aborted) throw new DOMException("cancelled", "AbortError");
   const dayBytes = loadSource(show.dayAtmosphere.imageId, "Light");
   const nightBytes = loadSource(show.nightAtmosphere.imageId, "Dark");
-  const generated = await generateSignalStudioLightingMap(dayBytes, nightBytes);
-  if (signal?.aborted) throw new DOMException("cancelled", "AbortError");
+  let generated = await generateSignalStudioLightingMap(dayBytes, nightBytes);
+  let prompt = `Derived Studio lighting receiver map for ${show.name}`;
+  let revisedPrompt = prompt;
+  let quality = "derived";
+  let provider: "local" | "openai" = "local";
+  let model = "prism-studio-lighting-v1";
+
+  const user = getUserRow(userId);
+  const effectiveProvider = resolveImageProviderName({
+    savedProvider: user.preferred_image_provider,
+    requestedProvider:
+      options.preferredProvider ?? user.preferred_image_provider,
+    offlineOnly: imageContextIncludesOfflineOnlyBot(db, userId, [
+      show.hostBotId,
+    ]),
+  });
+  const preferredOpenAiImageModel =
+    user.preferred_openai_image_model?.trim() ?? "";
+  if (
+    effectiveProvider === "openai" &&
+    !isDisabledModelChoice(preferredOpenAiImageModel)
+  ) {
+    const userKey = decryptUserKey(userId);
+    const apiKey =
+      getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+    const imageModel = DEFAULT_OPENAI_IMAGE_MODEL_ID;
+    const imageQuality = "high";
+    enterUsageSession({
+      db,
+      userId,
+      privacyScope: "normal",
+      mode: "sandbox",
+      surface: "images",
+      conversationId: null,
+      botId: show.hostBotId,
+    });
+    try {
+      const result = await editImage(
+        SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT,
+        dayBytes,
+        apiKey,
+        {
+          model: imageModel,
+          size: "1536x1024",
+          quality: imageQuality,
+          signal,
+        },
+      );
+      const receiverBytes = await readOpenAiGeneratedImageBytes(result, signal);
+      recordImageUsage({
+        provider: "openai",
+        model: result.model,
+        purpose: "image_generation",
+        imageCount: 1,
+        imageSize: "1536x1024",
+        imageQuality,
+        createdAt: new Date().toISOString(),
+      });
+      generated = await generateSignalStudioLightingMap(
+        dayBytes,
+        nightBytes,
+        receiverBytes,
+      );
+      prompt = SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT;
+      revisedPrompt = result.revisedPrompt;
+      quality = imageQuality;
+      provider = "openai";
+      model = result.model;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      console.warn(
+        "[signal-artwork] generated Studio receiver matte unavailable; using deterministic default",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+  if (signal.aborted) throw new DOMException("cancelled", "AbortError");
 
   const imageId = randomId(12);
   const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
   const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
   const createdAt = new Date().toISOString();
-  const prompt = `Derived Studio lighting receiver map for ${show.name}`;
   const relatedBotIds = serializeImageRelatedBotIds(
     [show.hostBotId],
     show.hostBotId,
@@ -812,17 +897,20 @@ async function rebuildSignalStudioLighting(
          (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
           prompt, revised_prompt, url, size, quality, provider, model,
           local_rel_path, purpose, created_at)
-       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'derived',
-               'local', 'prism-studio-lighting-v1', ?, 'signal_studio_lighting', ?)`,
+       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?,
+               ?, ?, ?, 'signal_studio_lighting', ?)`,
     ).run(
       imageId,
       userId,
       show.hostBotId,
       relatedBotIds,
       prompt,
-      prompt,
+      revisedPrompt,
       displayUrl,
       `${generated.width}x${generated.height}`,
+      quality,
+      provider,
+      model,
       localRelPath,
       createdAt,
     );
@@ -2606,6 +2694,31 @@ function touchUserActivity(userId: string): void {
     new Date().toISOString(),
     userId,
   );
+}
+
+function replayRecordingIdsForSource(
+  userId: string,
+  surface: "signal" | "coffee",
+  sourceIds: readonly string[],
+): string[] {
+  if (sourceIds.length === 0) return [];
+  const find = db.prepare(
+    "SELECT id FROM replay_recordings WHERE user_id = ? AND surface = ? AND source_id = ?",
+  );
+  return sourceIds.flatMap((sourceId) => {
+    const row = find.get(userId, surface, sourceId) as { id: string } | undefined;
+    return row ? [row.id] : [];
+  });
+}
+
+function removeReplayDirectories(userId: string, recordingIds: readonly string[]): void {
+  for (const recordingId of recordingIds) {
+    try {
+      removeReplayRecordingDirectory(userId, recordingId);
+    } catch {
+      // Database deletion remains authoritative; list pruning removes stragglers.
+    }
+  }
 }
 
 async function deleteUserAccount(userId: string): Promise<void> {
@@ -6613,7 +6726,13 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/conversations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const replayIds = replayRecordingIdsForSource(
+        userId,
+        "coffee",
+        [ctx.params.id],
+      );
       deleteConversation(db, userId, ctx.params.id);
+      removeReplayDirectories(userId, replayIds);
       json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/conversations/:id/clear", async (ctx) => {
@@ -8208,7 +8327,10 @@ function buildRoutes(): RouteDefinition[] {
             throw attachmentError;
           },
           refreshStudioLighting: (signal) =>
-            rebuildSignalStudioLighting(userId, show.id, signal).then(
+            rebuildSignalStudioLighting(userId, show.id, {
+              preferredProvider: effectiveArtworkProvider,
+              signal,
+            }).then(
               (refreshedShow) => ({
                 imageId: refreshedShow.studioLighting.imageId!,
                 imageUrl: refreshedShow.studioLighting.imageUrl!,
@@ -8538,23 +8660,79 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/studio-lighting/refresh", async (ctx) => {
       const userId = requireAuth(ctx);
       const show = getBotcastShow(db, userId, ctx.params.id);
-      const refreshKey = `${userId}\u0000${show.id}`;
-      if (activeSignalStudioLightingRefreshes.has(refreshKey)) {
-        throw new HttpError(409, "This Studio lighting map is already refreshing.");
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const preferredProvider: ImageProviderName =
+        body.preferredProvider === "local" ||
+        body.preferredProvider === "openai"
+          ? body.preferredProvider
+          : user.preferred_image_provider;
+      const effectiveProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider: preferredProvider,
+        offlineOnly: imageContextIncludesOfflineOnlyBot(db, userId, [
+          show.hostBotId,
+        ]),
+      });
+      if (signalArtworkJobs.hasActiveJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Wait for the current Signal artwork job to finish before refreshing Studio lighting.",
+        );
       }
-      activeSignalStudioLightingRefreshes.add(refreshKey);
-      try {
-        if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
-          throw new HttpError(
-            409,
-            "Wait for the current Studio artwork to finish before refreshing its lighting.",
-          );
-        }
-        const savedShow = await rebuildSignalStudioLighting(userId, show.id);
-        json(ctx.res, 200, { ok: true, show: savedShow });
-      } finally {
-        activeSignalStudioLightingRefreshes.delete(refreshKey);
-      }
+      const usesSharedImageSlot =
+        effectiveProvider === "openai" &&
+        !isDisabledModelChoice(user.preferred_openai_image_model?.trim() ?? "");
+      const controller = new AbortController();
+      let acquiredJobId: string | null = null;
+      const job = signalArtworkJobs.start({
+        userId,
+        showId: show.id,
+        showName: show.name,
+        studioLightingOnly: true,
+        controller,
+        ...(usesSharedImageSlot
+          ? {
+              acquireSlot: async (signal: AbortSignal) => {
+                const acquired = await waitForImageSlot({
+                  userId,
+                  conversationId: null,
+                  botId: show.hostBotId,
+                  mode: "sandbox",
+                  incognito: false,
+                  captionPrompt: `${show.name} Studio lighting refresh`,
+                  userMessage: `[Signal] Refresh ${show.name}'s Studio lighting`,
+                  source: "signal_artwork",
+                  requestedSize: "1536x1024",
+                  abortController: controller,
+                  signal,
+                });
+                acquiredJobId = acquired.id;
+              },
+            }
+          : {}),
+        releaseSlot: async () => {
+          if (acquiredJobId) {
+            await releaseImageSlotIfOwned(userId, acquiredJobId);
+          }
+        },
+        refreshStudioLighting: (signal) =>
+          rebuildSignalStudioLighting(userId, show.id, {
+            preferredProvider: effectiveProvider,
+            signal,
+          }).then((refreshedShow) => ({
+            imageId: refreshedShow.studioLighting.imageId!,
+            imageUrl: refreshedShow.studioLighting.imageUrl!,
+          })),
+      });
+      console.info("[signal-artwork] Studio lighting job accepted", {
+        jobId: job.id,
+        userId,
+        showId: show.id,
+        provider: effectiveProvider,
+        queuedForImageSlot: usesSharedImageSlot,
+      });
+      json(ctx.res, 202, { ok: true, job });
     }),
     route("POST", "/api/botcast/shows/:id/intro-audio/generate", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -8917,9 +9095,16 @@ function buildRoutes(): RouteDefinition[] {
           "Cancel this show’s artwork job before deleting it.",
         );
       }
+      const episodeIds = (
+        db
+          .prepare("SELECT id FROM botcast_episodes WHERE user_id = ? AND show_id = ?")
+          .all(userId, ctx.params.id) as Array<{ id: string }>
+      ).map((row) => row.id);
+      const replayIds = replayRecordingIdsForSource(userId, "signal", episodeIds);
       if (!deleteBotcastShow(db, userId, ctx.params.id)) {
         throw new HttpError(404, "Signal show not found.");
       }
+      removeReplayDirectories(userId, replayIds);
       json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/botcast/shows/:id/episodes", async (ctx) => {
@@ -9093,9 +9278,15 @@ function buildRoutes(): RouteDefinition[] {
           "Finish the Signal broadcast before deleting its episode.",
         );
       }
+      const replayIds = replayRecordingIdsForSource(
+        userId,
+        "signal",
+        [ctx.params.id],
+      );
       if (!deleteBotcastEpisode(db, userId, ctx.params.id)) {
         throw new HttpError(404, "Signal episode not found.");
       }
+      removeReplayDirectories(userId, replayIds);
       json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
@@ -11902,7 +12093,19 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/replays/claim", async (ctx) => {
       const userId = requireAuth(ctx);
-      const claimed = claimNextReplayRecording(db, userId);
+      const body = ctx.body as Record<string, unknown>;
+      const surface =
+        body.surface === "signal" || body.surface === "coffee"
+          ? body.surface
+          : undefined;
+      const sourceId =
+        typeof body.sourceId === "string" && body.sourceId.trim()
+          ? body.sourceId.trim()
+          : undefined;
+      const claimed = claimNextReplayRecording(db, userId, {
+        surface,
+        sourceId,
+      });
       json(ctx.res, 200, { ok: true, claimed });
     }),
     route("PATCH", "/api/replays/:id/progress", async (ctx) => {
@@ -12054,11 +12257,75 @@ function buildRoutes(): RouteDefinition[] {
         typeof raw.messageId === "string" && raw.messageId.trim()
           ? raw.messageId.trim()
           : null;
+      const replayTakeId =
+        typeof raw.replayTakeId === "string" && raw.replayTakeId.trim()
+          ? raw.replayTakeId.trim().slice(0, 180)
+          : null;
+      const replayRecordingId =
+        typeof raw.replayRecordingId === "string" && raw.replayRecordingId.trim()
+          ? raw.replayRecordingId.trim().slice(0, 180)
+          : null;
       if (
-        [signalMessageId, signalEpisodeId, ordinaryMessageId].filter(Boolean)
+        [signalMessageId, signalEpisodeId, ordinaryMessageId, replayTakeId].filter(Boolean)
           .length > 1
       ) {
         throw new HttpError(400, "Choose one voice message source.");
+      }
+      if (replayTakeId) {
+        if (!replayRecordingId) {
+          throw new HttpError(400, "Replay recording is required for frozen-take synthesis.");
+        }
+        const replayTake = db
+          .prepare(
+            `SELECT take.snapshot_json, recording.manifest_json
+               FROM replay_voice_takes AS take
+               JOIN replay_recordings AS recording
+                 ON recording.id = take.recording_id
+                AND recording.user_id = take.user_id
+              WHERE take.id = ? AND take.recording_id = ? AND take.user_id = ?`,
+          )
+          .get(replayTakeId, replayRecordingId, userId) as
+          | { snapshot_json: string; manifest_json: string | null }
+          | undefined;
+        if (!replayTake) throw new HttpError(404, "Replay voice take not found.");
+        let replaySnapshot: ReplayVoiceTakeV1;
+        let replayManifest: ReplayManifestV1 | null = null;
+        try {
+          replaySnapshot = JSON.parse(replayTake.snapshot_json) as ReplayVoiceTakeV1;
+          replayManifest = replayTake.manifest_json
+            ? (JSON.parse(replayTake.manifest_json) as ReplayManifestV1)
+            : null;
+        } catch {
+          throw new HttpError(409, "Frozen replay voice take is invalid.");
+        }
+        sourceText = replaySnapshot.spokenText;
+        sourceElevenLabsText =
+          replaySnapshot.performanceText ?? replaySnapshot.spokenText;
+        sourceBotId = replaySnapshot.speakerId;
+        const frozenReplayEngine = resolveFrozenReplayVoiceEngine({
+          privacyMode: replayManifest?.privacyMode ?? "local",
+          requestedEngine: replaySnapshot.requestedEngine,
+          resolvedEngine: replaySnapshot.resolvedEngine,
+        });
+        if (!frozenReplayEngine) {
+          throw new HttpError(
+            409,
+            "The frozen external replay voice is unavailable in LOCAL mode.",
+          );
+        }
+        raw.profile = replaySnapshot.profile;
+        raw.engine = frozenReplayEngine;
+        raw.mode = replaySnapshot.mode;
+        raw.seed = replaySnapshot.seed;
+        raw.moodKey = replaySnapshot.moodKey;
+        raw.explicitVoicePreview = frozenReplayEngine === "elevenlabs";
+        raw.explicitOnlineContext =
+          frozenReplayEngine === "elevenlabs" &&
+          replayManifest?.privacyMode !== "local";
+        persistedMessageProvider =
+          replayManifest?.privacyMode === "local"
+            ? "local"
+            : "replay-online";
       }
       if (ordinaryMessageId) {
         const message = db
@@ -13948,7 +14215,7 @@ function buildRoutes(): RouteDefinition[] {
         promptForPersistence = promptForModel;
       }
 
-      const acqPanel = await tryAcquireImageSlot({
+      const acqPanel = await waitForImageSlot({
         userId,
           conversationId:
             conversationIdRaw.length > 0 ? conversationIdRaw : null,
@@ -13965,14 +14232,10 @@ function buildRoutes(): RouteDefinition[] {
             "Group room atmosphere"
         ).slice(0, 500)}`,
         source: "images_panel",
+        abortController: imageGenAbort,
+        signal: imageGenAbort.signal,
       });
-      if (!acqPanel.ok) {
-        throw new HttpError(
-          503,
-            "Another image is generating right now. Wait for it to finish, then try again.",
-        );
-      }
-      ownedImageSlotJobId = acqPanel.job.id;
+      ownedImageSlotJobId = acqPanel.id;
 
       const imageId = randomId(12);
       const localRelPath = buildGeneratedImageRelativePath(userId, imageId);

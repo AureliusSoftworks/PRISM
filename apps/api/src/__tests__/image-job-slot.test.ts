@@ -9,7 +9,21 @@ import {
   releaseImageSlot,
   releaseImageSlotIfOwned,
   tryAcquireImageSlot,
+  waitForImageSlot,
 } from "../image-job-slot.ts";
+
+function slotRequest(userId: string, label: string) {
+  return {
+    userId,
+    conversationId: null,
+    botId: null,
+    mode: "sandbox" as const,
+    incognito: false,
+    captionPrompt: label,
+    userMessage: label,
+    source: "signal_artwork" as const,
+  };
+}
 
 describe("image-job-slot", () => {
   it("grants one slot per user and refuses second acquire while running", async () => {
@@ -141,6 +155,68 @@ describe("image-job-slot", () => {
     assert.equal(await releaseImageSlotIfOwned(userId, "another-job"), false);
     assert.equal(peekActiveImageJobForUser(userId)?.id, acquired.job.id);
     assert.equal(await releaseImageSlotIfOwned(userId, acquired.job.id), true);
+    assert.equal(peekActiveImageJobForUser(userId), undefined);
+  });
+
+  it("waits for the active image slot and promotes queued work FIFO", async () => {
+    const userId = "image-slot-fifo-user";
+    const first = await tryAcquireImageSlot(slotRequest(userId, "first"));
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const secondController = new AbortController();
+    const thirdController = new AbortController();
+    let secondStarted = false;
+    let thirdStarted = false;
+    const secondPromise = waitForImageSlot({
+      ...slotRequest(userId, "second"),
+      signal: secondController.signal,
+    }).then((job) => {
+      secondStarted = true;
+      return job;
+    });
+    const thirdPromise = waitForImageSlot({
+      ...slotRequest(userId, "third"),
+      signal: thirdController.signal,
+    }).then((job) => {
+      thirdStarted = true;
+      return job;
+    });
+
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(secondStarted, false);
+    assert.equal(thirdStarted, false);
+
+    await releaseImageSlotIfOwned(userId, first.job.id);
+    const second = await secondPromise;
+    assert.equal(second.captionPrompt, "second");
+    assert.equal(thirdStarted, false);
+    assert.equal(peekActiveImageJobForUser(userId)?.id, second.id);
+
+    await releaseImageSlotIfOwned(userId, second.id);
+    const third = await thirdPromise;
+    assert.equal(third.captionPrompt, "third");
+    assert.equal(peekActiveImageJobForUser(userId)?.id, third.id);
+    await releaseImageSlotIfOwned(userId, third.id);
+  });
+
+  it("removes cancelled work while it is waiting for the image slot", async () => {
+    const userId = "image-slot-cancel-user";
+    const first = await tryAcquireImageSlot(slotRequest(userId, "active"));
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const waitingController = new AbortController();
+    const waiting = waitForImageSlot({
+      ...slotRequest(userId, "cancel me"),
+      signal: waitingController.signal,
+    });
+    waitingController.abort();
+    await assert.rejects(waiting, (error: unknown) => {
+      return error instanceof Error && error.name === "AbortError";
+    });
+
+    await releaseImageSlotIfOwned(userId, first.job.id);
     assert.equal(peekActiveImageJobForUser(userId), undefined);
   });
 });

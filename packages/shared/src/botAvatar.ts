@@ -54,6 +54,8 @@ export const BOT_FACE_EYE_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_EYE_OFFSET_Y_STEP = 0.02;
 /** Plate-relative default — custom eyes inherit the same sideways orientation as built-ins. */
 export const DEFAULT_BOT_FACE_EYE_ROTATION_DEG = 0;
+/** A duplicated custom eye pair needs this plate-relative angle to read horizontally. */
+export const DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG = -90;
 export const BOT_FACE_EYE_ROTATION_DEG_MIN = -180;
 export const BOT_FACE_EYE_ROTATION_DEG_MAX = 180;
 export const BOT_FACE_EYE_ROTATION_DEG_STEP = 5;

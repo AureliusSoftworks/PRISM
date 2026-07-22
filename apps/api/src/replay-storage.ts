@@ -6,6 +6,7 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -120,12 +121,36 @@ export function writeReplayRenderChunk(args: {
 export function finalizeReplayUpload(args: {
   uploadRelativePath: string;
   videoRelativePath: string;
+  contentType: "video/mp4" | "video/webm";
 }): { sizeBytes: number } {
   const uploadAbsolutePath = resolveAbsoluteUnderDataRoot(args.uploadRelativePath);
   const videoAbsolutePath = resolveAbsoluteUnderDataRoot(args.videoRelativePath);
   if (!existsSync(uploadAbsolutePath)) throw new Error("Replay upload is missing.");
   const sizeBytes = statSync(uploadAbsolutePath).size;
-  if (sizeBytes <= 0) throw new Error("Replay upload is empty.");
+  if (sizeBytes < 32) throw new Error("Replay upload is incomplete.");
+  const descriptor = openSync(uploadAbsolutePath, "r");
+  const header = new Uint8Array(16);
+  try {
+    readSync(descriptor, header, 0, header.byteLength, 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  const validMp4 =
+    header[4] === 0x66 &&
+    header[5] === 0x74 &&
+    header[6] === 0x79 &&
+    header[7] === 0x70;
+  const validWebM =
+    header[0] === 0x1a &&
+    header[1] === 0x45 &&
+    header[2] === 0xdf &&
+    header[3] === 0xa3;
+  if (
+    (args.contentType === "video/mp4" && !validMp4) ||
+    (args.contentType === "video/webm" && !validWebM)
+  ) {
+    throw new Error("Replay upload container does not match its declared format.");
+  }
   mkdirSync(dirname(videoAbsolutePath), { recursive: true });
   if (existsSync(videoAbsolutePath)) unlinkSync(videoAbsolutePath);
   renameSync(uploadAbsolutePath, videoAbsolutePath);

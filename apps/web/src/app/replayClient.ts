@@ -8,7 +8,7 @@ import type {
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
 
-function replayAuthHeaders(): HeadersInit {
+export function replayAuthHeaders(): Record<string, string> {
   if (typeof window === "undefined") return {};
   try {
     const nativeSessionToken = window.localStorage.getItem(
@@ -177,7 +177,12 @@ export async function replayRecordingDetail(recordingId: string): Promise<{
   return { recording: result.recording, takes: result.takes };
 }
 
-export async function claimReplayRecording(): Promise<{
+export async function claimReplayRecording(
+  filters: {
+    surface?: "signal" | "coffee";
+    sourceId?: string;
+  } = {},
+): Promise<{
   recording: ReplayRecordingV1;
   takes: ReplayVoiceTakeRecordV1[];
   renderToken: string;
@@ -189,7 +194,10 @@ export async function claimReplayRecording(): Promise<{
       takes: ReplayVoiceTakeRecordV1[];
       renderToken: string;
     } | null;
-  }>("/api/replays/claim", { method: "POST", body: "{}" });
+  }>("/api/replays/claim", {
+    method: "POST",
+    body: JSON.stringify(filters),
+  });
   return result.claimed;
 }
 

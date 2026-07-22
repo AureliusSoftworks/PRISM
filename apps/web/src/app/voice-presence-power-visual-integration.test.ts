@@ -11,11 +11,6 @@ const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
 );
-const signalCss = readFileSync(
-  new URL("./botcast.module.css", import.meta.url),
-  "utf8",
-);
-
 describe("Loud and Quiet Power presentation", () => {
   it("scales Chat and Zen text and playback from the active bot Power", () => {
     assert.match(pageSource, /data-power-voice-presence=\{[\s\S]{0,120}assistantVoicePresence/u);
@@ -31,12 +26,10 @@ describe("Loud and Quiet Power presentation", () => {
     assert.match(pageCss, /\.coffeeCenterFeedLine\[data-power-voice-presence="quiet"\][\s\S]{0,140}--power-message-font-scale:\s*0\.88/u);
   });
 
-  it("carries Signal's frozen voice presentation into replay", () => {
+  it("carries Signal's frozen voice gain into captured replay audio", () => {
     assert.match(signalSource, /botcastSnapshotPowersForRoleV1\(episode, "host"\)[\s\S]{0,260}voiceGainMultiplier:\s*botPowerVoiceGainMultiplierV1\(powers\)/u);
-    assert.match(signalSource, /data-power-voice-presence=\{[\s\S]{0,100}messageBot\?\.voicePresence/u);
     assert.match(pageSource, /botSummary\.voiceGainMultiplier\s*\?\?/u);
-    assert.match(signalCss, /\.replayTranscript button\[data-power-voice-presence="loud"\][\s\S]{0,180}--power-message-font-scale:\s*1\.12/u);
-    assert.match(signalCss, /\.replayTranscript button\[data-power-voice-presence="quiet"\][\s\S]{0,180}--power-message-font-scale:\s*\.88/u);
+    assert.doesNotMatch(signalSource, /className=\{styles\.replayTranscript\}/u);
   });
 
   it("adapts the same text and playback treatment to Story dialogue", () => {

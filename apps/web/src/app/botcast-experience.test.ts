@@ -45,7 +45,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /<h1>Signal<\/h1>/u);
     assert.match(source, /aria-label="Signal shows"/u);
     assert.match(source, /aria-label="Signal live cameras"/u);
-    assert.match(source, /aria-label="Signal replay playback"/u);
+    assert.match(source, /<ReplayRecordingPanel[\s\S]{0,120}surface="signal"/u);
     assert.match(
       pageSource,
       /sidebarHeader=\{renderSharedAppletSidebarHeader\("botcast"\)\}/u,
@@ -244,7 +244,7 @@ describe("Signal experience shell", () => {
     assert.ok(producerGuestComposerIndex > soundboardIndex);
     assert.match(source, /aria-label="On-air soundboard"/u);
     assert.match(source, /Play \$\{cue\.label\} on air/u);
-    const livePlayIndex = source.indexOf("playSignalSoundboardCue(kind)");
+    const livePlayIndex = source.indexOf("playSignalSoundboardCue(kind, {");
     const soundboardRouteIndex = source.indexOf(
       "/soundboard`",
       livePlayIndex,
@@ -253,9 +253,10 @@ describe("Signal experience shell", () => {
     assert.ok(soundboardRouteIndex > livePlayIndex);
     assert.match(
       source,
-      /signalSoundboardEventsBetween\(\{[\s\S]{0,500}playSignalSoundboardCue\(cue\.kind\)/u,
+      /signalSoundboardEventsBetween\(\{[\s\S]{0,700}playSignalSoundboardCue\(cue\.kind, \{/u,
     );
-    assert.match(source, /stopSignalSoundboardAudio\(\)/u);
+    assert.match(source, /stopSignalSoundboardAudio\(180, signalAtmosphereControllerRef\.current\)/u);
+    assert.match(source, /controllerHandleRef=\{signalAtmosphereControllerRef\}/u);
     assert.match(css, /grid-template-areas:\s*"composer soundboard cues"/u);
     assert.match(css, /\.signalSoundboardGrid button\[data-hit="true"\]/u);
     assert.deepEqual(
@@ -269,7 +270,8 @@ describe("Signal experience shell", () => {
       ),
       [36_406, 29_301, 20_106, 17_180],
     );
-    assert.match(soundboardSource, /volume: 0\.58/u);
+    assert.match(soundboardSource, /trim: 0\.16/u);
+    assert.match(soundboardSource, /SIGNAL_SOUNDBOARD_VARIATIONS/u);
     assert.match(soundboardSource, /Short release fade for pause, seek, or teardown/u);
   });
 
@@ -350,7 +352,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       pageSource,
-      /if \(botSummary\.producerGuest\)[\s\S]{0,2400}data-prism-persona="true"[\s\S]{0,2400}glyph=\{zenDefaultPrismGlyph\}[\s\S]{0,1400}frameMaterialSeed=\{PRISM_FACTORY_CLEAN_FRAME_SEED\}/u,
+      /if \(botSummary\.producerGuest\)[\s\S]{0,2400}data-prism-persona="true"[\s\S]{0,2400}glyph=\{zenDefaultPrismGlyph\}[\s\S]{0,1600}frameMaterialSeed=\{PRISM_FACTORY_CLEAN_FRAME_SEED\}/u,
     );
     assert.match(pageSource, /renderMug=\{\(botSummary, mugState\) =>/u);
     assert.match(pageSource, /buildCoffeeCupVisualState\(\{/u);
@@ -365,7 +367,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const roleIsSpeaking = \(role: "host" \| "guest"\): boolean =>[\s\S]{0,500}replayActiveMessageIndexes[\s\S]{0,700}speechIsPlaying/u,
+      /const roleIsSpeaking = \(role: "host" \| "guest"\): boolean =>[\s\S]{0,500}stageReplayActiveMessageIndexes[\s\S]{0,700}speechIsPlaying/u,
     );
     assert.match(source, /speaking: roleIsSpeaking\(role\)/u);
     assert.match(
@@ -390,9 +392,12 @@ describe("Signal experience shell", () => {
       source,
       /guest && guestHasCoffeeCup[\s\S]{0,120}layoutHandle\("guestCup"/u,
     );
-    assert.match(
-      pageSource,
-      /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u,
+    assert.doesNotMatch(
+      pageSource.slice(
+        pageSource.indexOf("renderAvatar={(botSummary, avatarState) =>"),
+        pageSource.indexOf("renderMug={(botSummary, mugState) =>"),
+      ),
+      /BotPowerNameplateIndicator/u,
     );
     assert.match(source, /data-sip-requested=\{hostSipping/u);
     assert.match(source, /data-sip-requested=\{guestSipping/u);
@@ -476,28 +481,10 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("adds an off-canvas spotlight and drives the shared Zen bot refraction", () => {
-    assert.match(source, /function SignalStudioSpotlight\(\)/u);
-    assert.match(source, /className=\{styles\.studioSpotlight\}/u);
-    assert.match(source, /data-prism-decorative-motion="true"/u);
-    assert.equal(source.match(/<SignalStudioSpotlight \/>/gu)?.length, 2);
+  it("keeps the studio free of a procedural center spotlight", () => {
+    assert.doesNotMatch(source, /SignalStudioSpotlight|studioSpotlight/u);
+    assert.doesNotMatch(css, /studioSpotlight|signalStudioSpotlightSweep/u);
     assert.doesNotMatch(source, /studioLight(?:Cable|Fixture|Bulb)/u);
-    assert.match(
-      css,
-      /\.studioSpotlight\s*\{[^}]*top:\s*-56%[^}]*signalStudioSpotlightSweep 7\.2s/iu,
-    );
-    assert.match(
-      css,
-      /\.studioSpotlightBeam\s*\{[^}]*mix-blend-mode:\s*screen/iu,
-    );
-    assert.match(
-      css,
-      /\.shell\[data-theme="light"\] \.studioSpotlightBeam\s*\{[^}]*mix-blend-mode:\s*soft-light/iu,
-    );
-    assert.match(
-      css,
-      /prefers-reduced-motion[\s\S]*?\.studioSpotlight\s*\{[^}]*animation:\s*none/iu,
-    );
     assert.match(pageSource, /data-signal-role=\{avatarState\.role\}/u);
     assert.match(
       pageSource,
@@ -563,10 +550,6 @@ describe("Signal experience shell", () => {
     assert.match(source, /signalStudioPlacementStyle\(studioLayout, "hostBot"\)/u);
     assert.match(source, /signalStudioPlacementStyle\(studioLayout, "guestCup"\)/u);
     assert.match(source, /signalStudioPlacementStyle\(layout, item\)/u);
-    assert.match(
-      source,
-      /facing: signalStudioFacingForRole\([\s\S]{0,120}selectedShow\.studioLayout[\s\S]{0,120}"host"/u,
-    );
     assert.match(css, /\.stageLayoutModal\s*\{[^}]*overflow:\s*hidden[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\)/u);
     assert.match(css, /\.stageLayoutEditor\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(290px, 350px\)/u);
     assert.match(css, /data-preview-theme="light"/u);
@@ -580,6 +563,24 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /▶ Test voices/u);
     assert.match(source, /■ Stop check/u);
+    assert.match(source, /surface: "alignment"/u);
+    assert.match(
+      source,
+      /const bookedGuest = eligibleBots\.find\(\(bot\) => bot\.id === guestDraftId\)/u,
+    );
+    assert.match(
+      source,
+      /bookedGuest\?\.id \?\? randomSignalEpisodeGuestId\(\{/u,
+    );
+    assert.match(
+      source,
+      /sfxEnabled: sfxMixGain > 0,[\s\S]{0,80}sfxMixGain/u,
+    );
+    assert.match(
+      source,
+      /sessionAtmosphereBusVolume\(\{[\s\S]{0,120}bus: "foley"/u,
+    );
+    assert.match(source, /sfxMixGain: avatarSfxMixGain/u);
     assert.match(source, /signalStageSoundcheckMessages\(\{/u);
     assert.match(source, /aria-label="Signal voice level mixer"/u);
     assert.match(source, /aria-label=\{`\$\{role\} \$\{bot\.name\} voice level`\}/u);
@@ -591,6 +592,37 @@ describe("Signal experience shell", () => {
     assert.match(source, /aria-label="Signal screen treatment"/u);
     assert.match(source, /aria-label="Film grain strength"/u);
     assert.match(source, /filmGrain: BOTCAST_DEFAULT_STUDIO_FILM_GRAIN/u);
+    assert.match(source, /data-signal-studio-glow-tuner="true"/u);
+    assert.match(source, /glowTheme === "dark" \? "Dark" : "Light"/u);
+    assert.match(
+      source,
+      /aria-label=\{`\$\{label\} underglow opacity`\}/u,
+    );
+    assert.match(
+      source,
+      /aria-label=\{`\$\{label\} underglow blend mode`\}/u,
+    );
+    assert.match(source, /Session preview only/u);
+    assert.match(
+      source,
+      /dark:\s*\{ opacity:\s*0\.62, blendMode:\s*"screen" \}/u,
+    );
+    assert.match(
+      source,
+      /light:\s*\{ opacity:\s*0\.44, blendMode:\s*"overlay" \}/u,
+    );
+    assert.match(
+      source,
+      /\["--signal-studio-glow-opacity" as string\]: tuning\.opacity/u,
+    );
+    assert.match(
+      source,
+      /\["--signal-studio-glow-blend-mode" as string\]: tuning\.blendMode/u,
+    );
+    assert.match(
+      css,
+      /\.stageStudioGlowTunerRows\s*\{[^}]*grid-template-columns:\s*repeat\(2/iu,
+    );
     assert.match(
       source,
       /\["--signal-film-grain-level" as string\]: studioMix\.filmGrain/gu,
@@ -692,7 +724,8 @@ describe("Signal experience shell", () => {
       source,
       /const liveSessionActive = episode\?\.status === "live"/u,
     );
-    assert.match(source, /data-live-episode=\{liveSessionActive/u);
+    assert.match(source, /const episodeStageActive = episode !== null/u);
+    assert.match(source, /data-live-episode=\{episodeStageActive/u);
     assert.match(
       css,
       /\.shell\[data-live-episode="true"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/iu,
@@ -718,7 +751,7 @@ describe("Signal experience shell", () => {
       /\.shell\[data-live-episode="true"\] \.liveLayout \.stageViewport\s*\{[^}]*calc\(\(100dvh - 320px\) \* 1\.7778\)/iu,
     );
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
-    assert.match(source, /className=\{styles\.replayTranscript\}/u);
+    assert.doesNotMatch(source, /className=\{styles\.replayTranscript\}/u);
   });
 
   it("floats Signal errors and updates in dismissible toast notifications", () => {
@@ -999,7 +1032,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /pendingCutRef\.current !== null \|\|[\s\S]{0,80}message\.speakerRole !== "host"/u,
+      /pendingCutRef\.current !== null[\s\S]{0,100}followingTurnPrepared/u,
     );
     assert.match(source, /if \(pendingCutRef\.current\) return true;/u);
     assert.match(
@@ -1189,7 +1222,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /elapsedMs \/ Math\.max\(1, durationMs\) >=[\s\S]{0,120}SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS[\s\S]{0,120}prepareFollowingGuest\(\)/u,
+      /elapsedMs \/ Math\.max\(1, durationMs\) >=[\s\S]{0,120}SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS[\s\S]{0,120}prepareFollowingBotTurn\(\)/u,
     );
     assert.match(source, /const activeGuestMessage =[\s\S]{0,180}speakerRole === "guest"/u);
     assert.match(source, /setEpisode\(optimisticEpisode\)/u);
@@ -1341,6 +1374,26 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /onStart: \(durationMs, alignment\)/u);
     assert.match(source, /onProgress: \(elapsedMs, durationMs\)/u);
+    assert.match(
+      source,
+      /progress callback may arrive ahead of a browser audio start[\s\S]{0,240}current\.reveal\.phase === "preparing"\) return current/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /current\.reveal\.phase === "preparing"\s*\?\s*startBotcastSpeechReveal/u,
+    );
+    const soundcheckSource = source.slice(
+      source.indexOf("const runStudioSoundcheck = async"),
+      source.indexOf("const renderStage = (args:"),
+    );
+    assert.match(
+      soundcheckSource,
+      /onStart: \(durationMs, alignment\) => \{[\s\S]{0,360}setStudioSoundcheckCaption\(/u,
+    );
+    assert.doesNotMatch(
+      soundcheckSource,
+      /if \(bot\.muted\) continue;\s*setStudioSoundcheckCaption/u,
+    );
     assert.match(source, /const speechElapsedMs = args\.replay/u);
     assert.match(source, /speechReveal\?\.phase === "playing"/u);
     assert.match(source, /const SIGNAL_NATURAL_HANDOFF_MS = 40/u);
@@ -1363,7 +1416,23 @@ describe("Signal experience shell", () => {
       source,
       /episode\.messages\.length \? SIGNAL_NATURAL_HANDOFF_MS : 0/u,
     );
-    assert.match(source, /const prepareGuestResponse = useCallback/u);
+    assert.match(source, /const prepareFollowingBotResponse = useCallback/u);
+    assert.match(
+      source,
+      /onPlaybackStart\?\.\(\);[\s\S]{0,80}prepareFollowingBotTurn\(\)/u,
+    );
+    assert.match(
+      source,
+      /const nextSpeakerRole = signalNextSpeakerRole\(currentEpisode\)/u,
+    );
+    assert.match(
+      source,
+      /setAnticipatingSpeakerRole\(nextSpeakerRole\)/u,
+    );
+    assert.match(
+      source,
+      /anticipatingSpeakerRole === role[\s\S]{0,100}args\.activeMessage\?\.speakerRole !== role/u,
+    );
     assert.match(
       source,
       /!bot\.muted[\s\S]{0,120}!botPowerResponseIsSilentV1\(response\.message\.content\)[\s\S]{0,120}onPrefetchUtterance\?\.\(response\.message, bot\)/u,
@@ -1382,7 +1451,7 @@ describe("Signal experience shell", () => {
       pageSource,
       /onPrefetchUtterance=\{prefetchBotcastUtterance\}/u,
     );
-    assert.match(source, /hostMessage\.speakerRole !== "host"/u);
+    assert.doesNotMatch(source, /hostMessage\.speakerRole !== "host"/u);
     assert.match(source, /prepared \? await prepared\.result : null/u);
     assert.doesNotMatch(
       source,
@@ -1487,13 +1556,29 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("reserves the full transcript and playback controls for replay", () => {
+  it("opens only a rendered Signal video without duplicate transcript chrome", () => {
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
     assert.doesNotMatch(source, /signalTranscriptFollowingRef/u);
-    assert.match(source, /className=\{styles\.replayControls\}/u);
-    assert.match(source, /className=\{styles\.replayTranscript\}/u);
-    assert.match(css, /\.replayControls\s*\{[^}]*background:\s*var\(--botcast-panel\)/u);
-    assert.match(css, /\.replayTranscript\s*\{[^}]*max-height:\s*320px/u);
+    assert.doesNotMatch(source, /className=\{styles\.replayControls\}/u);
+    assert.doesNotMatch(source, /className=\{styles\.replayTranscript\}/u);
+    assert.doesNotMatch(css, /\.replayControls|\.replayTranscript/u);
+    assert.match(
+      source,
+      /from "\.\/signalReplayVideoGate"/u,
+    );
+    assert.match(
+      source,
+      /!signalReplayRecordingHasVideo\(existingRecording\)[\s\S]{0,260}prepareSignalEpisodeVideo/u,
+    );
+    assert.match(source, /setReplayRenderTarget\(\{ episode: detail, show \}\)/u);
+    assert.match(
+      pageSource,
+      /const replayTake = playback\.ephemeral[\s\S]{0,180}captureReplayVoiceTake\(\{[\s\S]{0,80}surface: "signal"/u,
+    );
+    assert.match(
+      pageSource,
+      /storeCapturedReplayVoiceAudio\(\{[\s\S]{0,100}takePromise: replayTake/u,
+    );
   });
 
   it("shows only the active live transcript after a small delay", () => {
@@ -1573,7 +1658,10 @@ describe("Signal experience shell", () => {
       source,
       /guestPresentOnStage && args\.guest && renderMug && guestCupVisual/u,
     );
-    assert.match(source, /botcastMessageIsAudibleToAudienceV1\(message\) \? \(/u);
+    assert.match(
+      source,
+      /!message \|\| !botcastMessageIsAudibleToAudienceV1\(message\)/u,
+    );
     assert.match(source, /!botcastMessageIsAudibleToAudienceV1\(replayActiveMessage\)/u);
     assert.doesNotMatch(css, /data-audience-only/iu);
   });
@@ -1582,7 +1670,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /botcastStrongestNegativeSocialInfluenceAt/u);
     assert.match(
       source,
-      /elapsedMs: args\.replay \? replayElapsedMs : Number\.POSITIVE_INFINITY/u,
+      /elapsedMs: args\.replay[\s\S]{0,80}stageReplayEventElapsedMs[\s\S]{0,80}Number\.POSITIVE_INFINITY/u,
     );
     assert.match(
       source,
@@ -1603,7 +1691,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("completes missing legacy identity pieces without replacing installed assets", () => {
+  it("synthesizes a new show's full identity and keeps the pass resumable", () => {
     const createShowSource = source.slice(
       source.indexOf("const createShow"),
       source.indexOf("const renameShow"),
@@ -1612,13 +1700,9 @@ describe("Signal experience shell", () => {
       source,
       /synthesizeArtwork|Synthesize studios \+ logo/u,
     );
-    assert.doesNotMatch(
-      createShowSource,
-      /generateShowArtwork|\/brand|\/name/u,
-    );
     assert.match(
-      source,
-      /ready with its built-in PRISM set\. Create its custom look whenever you want one/u,
+      createShowSource,
+      /await synthesizeShowLook\(response\.show\)/u,
     );
     assert.match(source, /signalShowMagicManifest\(selectedShow\)/u);
     assert.match(source, /!selectedShowMagicManifest\.complete/u);
@@ -1707,6 +1791,16 @@ describe("Signal experience shell", () => {
     assert.match(source, /regenerateLightStudio\(\)/u);
     assert.match(source, /refreshStudioLighting\(\)/u);
     assert.match(source, /\/studio-lighting\/refresh/u);
+    const studioLightingRefresh = source.slice(
+      source.indexOf("const refreshStudioLighting = async"),
+      source.indexOf("const regenerateLogo = async"),
+    );
+    assert.match(
+      studioLightingRefresh,
+      /request<\{ job: SignalArtworkJobSnapshot \}>/u,
+    );
+    assert.match(studioLightingRefresh, /announceSignalArtworkJob\(response\.job\)/u);
+    assert.match(studioLightingRefresh, /Studio lighting is queued in the background/u);
     assert.match(source, /selectedShow\.studioLighting\.status === "stale"/u);
     assert.match(
       source,
@@ -1730,10 +1824,60 @@ describe("Signal experience shell", () => {
     assert.match(source, /function SignalFallbackStudio/u);
     assert.match(source, /function signalStudioLightingStyle/u);
     assert.match(css, /mask-image:\s*var\(--signal-studio-lighting-map\)/u);
-    assert.match(css, /\.studioGlow\s*\{[^}]*mix-blend-mode:\s*screen/iu);
     assert.match(
       css,
-      /\.shell\[data-theme="light"\] \.studioGlow\s*\{[^}]*mix-blend-mode:\s*overlay/iu,
+      /\.studioGlow\s*\{[^}]*opacity:\s*var\(--signal-studio-glow-opacity,\s*\.62\)[^}]*mix-blend-mode:\s*var\(--signal-studio-glow-blend-mode,\s*screen\)/iu,
+    );
+    assert.match(css, /\.atmosphere\s*\{[^}]*inset:\s*-5%/iu);
+    assert.match(
+      css,
+      /\.stageScene > \.studioGlow\s*\{[^}]*--signal-studio-light-host-x:\s*var\(--signal-studio-stage-host-x\)[^}]*inset:\s*-5%/iu,
+    );
+    assert.match(
+      css,
+      /\.showBrandPreview > \.studioGlow\s*\{[^}]*transform:\s*scale\(1\.035\)/iu,
+    );
+    assert.match(
+      source,
+      /\["--signal-studio-stage-host-x" as string\]:\s*`\$\{signalStudioOverscanCoordinate\(args\.layout\.hostBot\.x\)\}%`/u,
+    );
+    assert.equal(source.match(/data-talk-reactive="true"/gu)?.length ?? 0, 2);
+    assert.match(
+      source,
+      /data-host-talking=\{[\s\S]{0,120}hostVisibleToAudience && roleMouthIsActive\("host"\)/u,
+    );
+    assert.match(
+      source,
+      /data-guest-talking=\{[\s\S]{0,120}guestVisibleToAudience && roleMouthIsActive\("guest"\)/u,
+    );
+    assert.match(
+      source,
+      /data-host-talking=\{[\s\S]{0,140}studioSoundcheckSpeech\?\.botId === host\.id/u,
+    );
+    assert.match(
+      source,
+      /data-guest-talking=\{[\s\S]{0,160}guest && studioSoundcheckSpeech\?\.botId === guest\.id/u,
+    );
+    assert.match(
+      css,
+      /\.studioGlow::before,\s*\.studioGlow::after\s*\{[^}]*transition:\s*opacity 160ms ease-out/iu,
+    );
+    assert.match(
+      css,
+      /\.studioGlow\[data-host-talking="true"\]::before,\s*\.studioGlow\[data-guest-talking="true"\]::after\s*\{[^}]*animation:\s*signalStudioTalkingLightFlicker 780ms ease-in-out infinite/iu,
+    );
+    assert.match(
+      css,
+      /\.avatarRig\[data-talking="true"\]::after\s*\{[^}]*animation:\s*signalStudioTalkingLightFlicker 780ms ease-in-out infinite/iu,
+    );
+    assert.match(
+      css,
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]{0,1800}\.studioGlow\[data-host-talking="true"\]::before[^}]*animation:\s*none !important/iu,
+    );
+    assert.match(css, /@keyframes signalStudioTalkingLightFlicker/u);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\] \.studioGlow\s*\{[^}]*opacity:\s*var\(--signal-studio-glow-opacity,\s*\.44\)[^}]*mix-blend-mode:\s*var\(--signal-studio-glow-blend-mode,\s*overlay\)/iu,
     );
   });
 
@@ -1841,7 +1985,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /JSON\.stringify\(\{ inspiration, preferredProvider \}\)/u,
+      /preferredProvider: accountDefaultProvider/u,
+    );
+    assert.match(
+      source,
+      /accountDefaultModelOption\?\.provider \?\? preferredProvider/u,
     );
     assert.match(source, /setShowPremiseDraft\(response\.show\.premise\)/u);
     assert.match(css, /\.showLookPremiseInput/u);
@@ -1926,7 +2074,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const stageAtmosphere = activeShowAtmosphere\(args\.show, theme\)/u,
+      /const stageAtmosphere = activeShowAtmosphere\(args\.show, stageTheme\)/u,
     );
     assert.match(css, /\.showBrandPreview\s*\{/u);
     assert.match(css, /\.showBrandPreview\s*\{[^}]*min-height:\s*360px/iu);
@@ -2021,9 +2169,14 @@ describe("Signal experience shell", () => {
       /\{hostBot && !showIdentityControlsExpanded && !hostChatOpen \? \([\s\S]{0,180}className=\{styles\.showCardHostPresence\}/u,
       "The dashboard host should yield to show configuration and the focused chat",
     );
-    assert.match(
-      source,
-      /renderAvatar\?\.\(hostBot,[\s\S]{0,220}role:\s*"host"[\s\S]{0,320}facing:\s*signalStudioFacingForRole\([\s\S]{0,240}mouthShape:\s*"closed"/u,
+    assert.equal(
+      (
+        source.match(
+          /role:\s*"host"[\s\S]{0,80}surface:\s*"dashboard"[\s\S]{0,80}sfxEnabled:\s*false[\s\S]{0,80}facing:\s*"left"/gu,
+        ) ?? []
+      ).length,
+      2,
+      "The show-card and focused off-air host should both face left",
     );
     assert.match(
       pageSource,
@@ -2328,6 +2481,31 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(css, /\.episodeDeleteButton/u);
   });
 
+  it("opens the shared PRISM context menu from episode archive cards", () => {
+    assert.match(source, /const \{ closeMenu, openMenu \} = usePrismMenu\(\)/u);
+    assert.match(
+      source,
+      /onContextMenu=\{\(event\) => openEpisodeContextMenu\(event, item\)\}/u,
+    );
+    const menuStart = source.indexOf("const openEpisodeContextMenu = (");
+    const menuSource = source.slice(
+      menuStart,
+      source.indexOf("const replayTimeline = useMemo", menuStart),
+    );
+    assert.match(menuSource, /event\.preventDefault\(\)/u);
+    assert.match(menuSource, /kind: "pointer"/u);
+    assert.match(menuSource, /focusRestoreTarget: opener/u);
+    assert.match(
+      menuSource,
+      /label: signalEpisodeArchiveActionLabel\(item, recording\)/u,
+    );
+    assert.match(
+      menuSource,
+      /if \(item\.status === "completed"\)[\s\S]*?Copy for Signal Review[\s\S]*?Delete episode/u,
+    );
+    assert.match(menuSource, /tone: "danger"/u);
+  });
+
   it("opens a bounded ephemeral host chat from the dashboard avatar", () => {
     assert.match(source, /data-tutorial-target="botcast-host-chat"/u);
     assert.match(source, /className=\{styles\.showCardHostTrigger\}/u);
@@ -2337,7 +2515,7 @@ describe("Signal experience shell", () => {
       source,
       /`\/api\/botcast\/shows\/\$\{encodeURIComponent\(showId\)\}\/host-chat`/u,
     );
-    assert.match(source, /SIGNAL_HOST_CHAT_RECOVERY_LIMIT = 3/u);
+    assert.match(source, /SIGNAL_HOST_CHAT_CONTEXT_LIMIT = 3/u);
     assert.match(
       source,
       /messages: priorMessages,[\s\S]{0,100}preferredProvider: hostChatProvider/u,
@@ -2354,12 +2532,17 @@ describe("Signal experience shell", () => {
     assert.match(source, /className=\{styles\.showHostChatFocusBackdrop\}/u);
     assert.match(source, /className=\{styles\.showHostChatFocusStage\}/u);
     assert.match(source, /role="dialog"[\s\S]{0,80}aria-modal="true"/u);
-    assert.match(source, /signalHostChatStreamChunks\(message\.content\)/u);
+    assert.match(source, /signalHostChatStreamChunks\(spokenContent\)/u);
     assert.match(source, /await streamSignalHostChatResponse\(/u);
+    assert.match(source, /resolveZenActionPresentation\(message\.content\)/u);
+    assert.match(source, /className=\{styles\.showHostChatAction\}/u);
+    assert.match(source, /ephemeral: true/u);
+    assert.match(source, /explicitOnlineContext: hostChatProvider !== "local"/u);
+    assert.match(source, /onPrepareUtterance\?\.\(\)/u);
     assert.match(source, /data-streaming="true"/u);
     assert.match(
       source,
-      /talking: Boolean\(hostChatStreamingMessage\?\.content\)/u,
+      /talking: hostChatStreamingMessage !== null/u,
     );
     assert.match(
       source,
@@ -2370,8 +2553,22 @@ describe("Signal experience shell", () => {
       /showCardQuips &&[\s\S]{0,80}!hostChatOpen/u,
     );
     assert.match(css, /\.showHostChatConversation\s*\{/u);
+    assert.match(css, /\.showHostChatCloud\s*\{[^}]*overflow-y: auto/u);
+    assert.match(css, /\.showHostChatCloud\s*\{[^}]*pointer-events: auto/u);
+    assert.match(css, /\.showHostChatCloud\s*\{[^}]*touch-action: pan-y/u);
     assert.match(css, /\.showHostChatBubble\s*\{/u);
     assert.match(css, /\.showHostChatComposer\s*\{/u);
+    assert.match(source, /onScroll=\{\(event\) =>/u);
+    assert.match(source, /hostChatAutoFollowRef\.current/u);
+    assert.match(
+      source,
+      /const closeSignalHostChat = useCallback[\s\S]{0,700}setHostChatMessages\(\[\]\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const replayTake = playback\.ephemeral[\s\S]{0,40}\? null/u,
+    );
+    assert.match(pageSource, /const ephemeralHostChat = playback\?\.ephemeral === true/u);
     const hostComposerSections =
       source.match(
         /className=\{styles\.showHostChatComposer\}[\s\S]{0,3000}?<\/form>/gu,

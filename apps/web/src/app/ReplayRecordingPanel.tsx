@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { ReplayRecordingV1 } from "@localai/shared";
 import {
   deleteReplayRecording,
@@ -13,17 +20,17 @@ import styles from "./replayRecording.module.css";
 function statusLabel(recording: ReplayRecordingV1): string {
   switch (recording.status) {
     case "collecting":
-      return recording.manifest ? "Recording deleted" : "Collecting replay";
+      return recording.manifest ? "Video deleted" : "Capturing episode";
     case "queued":
-      return "Queued";
+      return "Video queued";
     case "preparing_audio":
-      return "Preparing audio";
+      return "Preparing video";
     case "rendering":
       return `Rendering ${Math.round(recording.progress * 100)}%`;
     case "ready":
-      return "Ready";
+      return "Video ready";
     case "ready_with_warnings":
-      return "Ready · Needs attention";
+      return "Video ready · Needs attention";
     case "failed":
       return "Needs attention";
   }
@@ -34,12 +41,54 @@ function formatDuration(ms: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-export function ReplayRecordingPanel({
+export function ReplayRecordingStatusBadge({
   surface,
   sourceId,
+  onRecordingChange,
 }: {
   surface: "signal" | "coffee";
   sourceId: string;
+  onRecordingChange?: (
+    sourceId: string,
+    recording: ReplayRecordingV1 | null,
+  ) => void;
+}): React.JSX.Element | null {
+  const [recording, setRecording] = useState<ReplayRecordingV1 | null>(null);
+  useEffect(() => {
+    let disposed = false;
+    const refresh = () =>
+      void replayRecordingForSource(surface, sourceId)
+        .then((next) => {
+          if (!disposed) {
+            setRecording(next);
+            onRecordingChange?.(sourceId, next);
+          }
+        })
+        .catch(() => undefined);
+    refresh();
+    window.addEventListener(REPLAY_RECORDING_CHANGED_EVENT, refresh);
+    const timer = window.setInterval(refresh, 8_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener(REPLAY_RECORDING_CHANGED_EVENT, refresh);
+    };
+  }, [onRecordingChange, sourceId, surface]);
+  return recording ? (
+    <span className={styles.badge} data-replay-status={recording.status}>
+      {statusLabel(recording)}
+    </span>
+  ) : null;
+}
+
+export function ReplayRecordingPanel({
+  surface,
+  sourceId,
+  preview,
+}: {
+  surface: "signal" | "coffee";
+  sourceId: string;
+  preview?: ReactNode;
 }): React.JSX.Element | null {
   const [recording, setRecording] = useState<ReplayRecordingV1 | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,10 +117,35 @@ export function ReplayRecordingPanel({
     () => recording?.timeline?.beats.filter((beat) => beat.kind === "utterance") ?? [],
     [recording?.timeline?.beats],
   );
-  if (!recording) return null;
+  if (!recording) {
+    if (surface === "signal") return null;
+    return preview ? (
+      <section className={styles.panel} data-replay-status="collecting">
+        <header className={styles.header}>
+          <div>
+            <p className={styles.eyebrow}>Episode video</p>
+            <h3>Preparing recording</h3>
+          </div>
+          <span className={styles.status}>Starting render</span>
+        </header>
+        <div className={styles.screen}>{preview}</div>
+        <div className={styles.pending}>
+          <p>
+            PRISM is preparing this session video while the recap remains open.
+          </p>
+        </div>
+      </section>
+    ) : null;
+  }
+  const legacySignalVideo =
+    surface === "signal" &&
+    recording.manifest?.visual.metadata?.renderContract !==
+      "signal-studio-dom-v2";
   const ready =
+    !legacySignalVideo &&
     (recording.status === "ready" || recording.status === "ready_with_warnings") &&
     recording.videoUrl;
+  if (surface === "signal" && !ready) return null;
   const retry = async () => {
     setBusy(true);
     try {
@@ -94,10 +168,12 @@ export function ReplayRecordingPanel({
     <section className={styles.panel} data-replay-status={recording.status}>
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Director&apos;s cut</p>
+          <p className={styles.eyebrow}>Episode video</p>
           <h3>{recording.manifest?.title ?? "Replay video"}</h3>
         </div>
-        <span className={styles.status}>{statusLabel(recording)}</span>
+        <span className={styles.status}>
+          {legacySignalVideo ? "Updating video" : statusLabel(recording)}
+        </span>
       </header>
       {(recording.status === "rendering" || recording.status === "preparing_audio") && (
         <div className={styles.progress} aria-label={statusLabel(recording)}>
@@ -106,25 +182,19 @@ export function ReplayRecordingPanel({
       )}
       {ready ? (
         <>
-          <video
-            ref={videoRef}
-            className={styles.video}
-            controls
-            preload="metadata"
-            src={recording.videoUrl ?? undefined}
-            onTimeUpdate={(event) =>
-              setCurrentTimeMs(event.currentTarget.currentTime * 1_000)
-            }
-          >
-            {recording.transcriptVttUrl && (
-              <track
-                kind="captions"
-                src={recording.transcriptVttUrl}
-                srcLang="en"
-                label="English"
-              />
-            )}
-          </video>
+          <div className={styles.screen}>
+            <video
+              ref={videoRef}
+              className={styles.video}
+              controls
+              playsInline
+              preload="metadata"
+              src={recording.videoUrl ?? undefined}
+              onTimeUpdate={(event) =>
+                setCurrentTimeMs(event.currentTarget.currentTime * 1_000)
+              }
+            />
+          </div>
           <div className={styles.actions}>
             <a href={`${recording.videoUrl}?download=1`} download>
               Download video
@@ -145,17 +215,24 @@ export function ReplayRecordingPanel({
           </div>
         </>
       ) : (
-        <div className={styles.pending}>
-          <p>{recording.error ?? recording.warning ?? "PRISM will finish this replay while a capable client is open."}</p>
+        <>
+          {preview ? <div className={styles.screen}>{preview}</div> : null}
+          <div className={styles.pending}>
+          <p>
+            {recording.error ??
+              recording.warning ??
+              "PRISM will finish this replay while a capable client is open."}
+          </p>
           {(recording.status === "failed" ||
             (recording.status === "collecting" && recording.manifest)) && (
             <button type="button" disabled={busy} onClick={() => void retry()}>
               {recording.status === "collecting" ? "Rebuild video" : "Retry"}
             </button>
           )}
-        </div>
+          </div>
+        </>
       )}
-      {transcriptBeats.length > 0 && (
+      {surface === "coffee" && transcriptBeats.length > 0 && (
         <div className={styles.transcript} aria-label="Synchronized transcript">
           {transcriptBeats.map((beat) => {
             const active = currentTimeMs >= beat.startMs && currentTimeMs < beat.endMs;

@@ -17,6 +17,7 @@ import {
   type BotAvatarDetailsV1,
 } from "./botAvatarDetails.ts";
 import {
+  DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   resolveBotFaceStyle,
   type BotFaceStyle,
 } from "./botAvatar.ts";
@@ -424,10 +425,16 @@ export function normalizeBotGeneratedDraftV1(
   if (!isRecord(value)) return null;
   const name = compactText(value.name, 80) || "New bot";
   const profile = normalizeGeneratedProfile(value.profile, name);
-  const face = resolveBotFaceStyle(
+  const resolvedFace = resolveBotFaceStyle(
     recordAt(value, "face"),
     profile.core.communicationStyle,
   );
+  const face = resolvedFace.eyeCount === 2
+    ? {
+        ...resolvedFace,
+        eyeRotationDeg: DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
+      }
+    : resolvedFace;
   const voicePreviewLine = compactText(
     value.voicePreviewLine,
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,

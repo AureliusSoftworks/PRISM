@@ -87,7 +87,6 @@ test("Light Mode covers studio chrome, panels, controls, fields, and dialogs", (
     ".botAvatarPreviewThemeToggle",
     ".botAvatarControlTabs",
     ".botAvatarSavePromptPanel",
-    ".botPowerSurfacePopover",
   ]) {
     assert.match(lightMode, new RegExp(selector.replaceAll(".", "\\.")));
   }

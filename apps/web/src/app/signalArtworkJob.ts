@@ -38,6 +38,7 @@ export type SignalArtworkJobSnapshot = {
     identityMs: number | null;
     nightStudioMs: number | null;
     dayRelightMs: number | null;
+    studioLightingMs: number | null;
     logoMs: number | null;
     downloadMs: number;
     localPersistenceMs: number;
@@ -89,11 +90,17 @@ export function signalArtworkJobHeadline(
   if (job.status === "partial") return "Show look partially complete";
   if (job.status === "failed") return "Show look needs attention";
   if (job.status === "cancelled") return "Show look cancelled";
+  if (
+    job.currentAsset === null &&
+    job.assets.some((asset) => asset.status === "waiting")
+  ) {
+    return "Queued for image generation";
+  }
   if (job.currentAsset === "day-studio") {
     return "Relighting the completed Dark studio";
   }
   if (job.currentAsset === "studio-lighting") {
-    return "Building the Studio light map";
+    return "Generating surface-aware Studio lighting";
   }
   if (job.currentAsset) {
     return `Generating ${signalArtworkAssetLabel(job.currentAsset)}`;

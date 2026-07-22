@@ -316,6 +316,27 @@ async function playBytesWithMedia(
     let settled = false;
     let started = false;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
+    const beginAudiblePlayback = () => {
+      if (started) return;
+      started = true;
+      const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
+      const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+        ? Math.round((audio.duration * 1000) / playbackTempo)
+        : null;
+      if (durationMs) {
+        progress = beginVoicePlaybackProgress(
+          lifecycle,
+          durationMs,
+          () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
+        );
+      } else {
+        lifecycle?.onStart?.(null);
+      }
+      if (activeMediaStartTimer !== null) {
+        window.clearTimeout(activeMediaStartTimer);
+        activeMediaStartTimer = null;
+      }
+    };
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -334,31 +355,17 @@ async function playBytesWithMedia(
     audio.addEventListener("error", () => finish(new Error("English audio could not play.")), {
       once: true,
     });
+    // play() resolving means the browser accepted the request, not that the
+    // first audible frame has reached its media pipeline. Signal's captions
+    // and avatar state must wait for the latter.
+    audio.addEventListener("playing", beginAudiblePlayback, { once: true });
+    const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
+    audio.playbackRate = playbackTempo;
     activeMediaStartTimer = window.setTimeout(() => {
       if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
     }, MEDIA_PLAY_START_TIMEOUT_MS);
     void audio.play().then(
-      () => {
-        started = true;
-        const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
-        audio.playbackRate = playbackTempo;
-        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.round((audio.duration * 1000) / playbackTempo)
-          : null;
-        if (durationMs) {
-          progress = beginVoicePlaybackProgress(
-            lifecycle,
-            durationMs,
-            () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
-          );
-        } else {
-          lifecycle?.onStart?.(null);
-        }
-        if (activeMediaStartTimer !== null) {
-          window.clearTimeout(activeMediaStartTimer);
-          activeMediaStartTimer = null;
-        }
-      },
+      () => undefined,
       (error: unknown) => finish(
         error instanceof Error ? error : new Error("English audio could not play.")
       )

@@ -67,6 +67,12 @@ describe("replay manifests", () => {
     const show = {
       name: "The Glass",
       accentColor: "#55ddff",
+      atmosphereMix: {
+        background: 0.16,
+        grain: 0,
+        foley: 1,
+        filmGrain: 0.65,
+      },
       studioLayout: {},
       logo: { imageUrl: null },
       dayAtmosphere: { imageUrl: null },
@@ -76,7 +82,18 @@ describe("replay manifests", () => {
       episode,
       show,
       bots: [
-        { id: "host-1", name: "Host" },
+        {
+          id: "host-1",
+          name: "Host",
+          replayVisualSnapshot: {
+            v: 1,
+            faceStyle: { eyes: "dot", mouth: "flat" },
+            avatarDetails: null,
+            voicePreset: "alto",
+            screenMaterialSeed: "host-screen",
+            frameMaterialSeed: "host-frame",
+          } as never,
+        },
         { id: "guest-1", name: "Guest" },
       ],
       producerName: "Jared",
@@ -86,6 +103,23 @@ describe("replay manifests", () => {
       manifest.participants.find((participant) => participant.role === "producer")?.id,
       "prism-player",
     );
+    assert.equal(
+      (
+        manifest.participants.find((participant) => participant.role === "host")
+          ?.metadata?.visualSnapshot as { screenMaterialSeed?: string }
+      )?.screenMaterialSeed,
+      "host-screen",
+    );
+    assert.equal(
+      manifest.visual.metadata?.renderContract,
+      "signal-studio-dom-v2",
+    );
+    assert.deepEqual(manifest.visual.metadata?.atmosphereMix, {
+      background: 0.16,
+      grain: 0,
+      foley: 1,
+      filmGrain: 0.65,
+    });
   });
 });
 
@@ -94,6 +128,7 @@ describe("replay implementation contracts", () => {
     const sources = [
       "replayAudio.ts",
       "replayClient.ts",
+      "replayEncoder.worker.ts",
       "replayManifest.ts",
       "replayScene.ts",
       "ReplayRenderCoordinator.tsx",
@@ -108,16 +143,17 @@ describe("replay implementation contracts", () => {
   });
 
   it("prefers MP4 and explicitly falls back to WebM with bounded chunks", () => {
-    const source = readFileSync(
-      new URL("ReplayRenderCoordinator.tsx", import.meta.url),
-      "utf8",
-    );
+    const source = ["ReplayRenderCoordinator.tsx", "replayEncoder.worker.ts"]
+      .map((file) => readFileSync(new URL(file, import.meta.url), "utf8"))
+      .join("\n");
     assert.match(source, /getFirstEncodableVideoCodec\(\["avc"\]/u);
-    assert.match(source, /new media\.Mp4OutputFormat/u);
-    assert.match(source, /new media\.WebMOutputFormat/u);
-    assert.match(source, /new media\.StreamTarget/u);
+    assert.match(source, /new Mp4OutputFormat/u);
+    assert.match(source, /new WebMOutputFormat/u);
+    assert.match(source, /new StreamTarget/u);
     assert.match(source, /chunkSize: 4 \* 1024 \* 1024/u);
     assert.match(source, /REPLAY_VIDEO_FPS/u);
+    assert.match(source, /paintSignalFilmGrain/u);
+    assert.match(source, /videoBitrate: replayVideoBitrateForFilmGrain/u);
   });
 
   it("exposes seeking, downloads, retry, and recording-only deletion", () => {
@@ -131,5 +167,34 @@ describe("replay implementation contracts", () => {
     assert.match(source, /Delete recording/u);
     assert.match(source, /currentTime = beat\.startMs/u);
     assert.match(source, /original session and transcript will remain/u);
+    assert.match(source, /playsInline/u);
+    assert.match(source, /preview\?: ReactNode/u);
+    assert.match(source, /surface === "signal" && !ready/u);
+    assert.match(source, /surface === "coffee" && transcriptBeats\.length > 0/u);
+    assert.doesNotMatch(source, /interactive episode/u);
+    assert.doesNotMatch(source, /<track/u);
+  });
+
+  it("renders Signal from its real Studio DOM and never claims it in the generic queue", () => {
+    const coordinator = readFileSync(
+      new URL("ReplayRenderCoordinator.tsx", import.meta.url),
+      "utf8",
+    );
+    const signal = readFileSync(
+      new URL("BotcastExperience.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(coordinator, /surface = "coffee"/u);
+    assert.match(coordinator, /claimReplayRecording\(\{ surface, sourceId \}\)/u);
+    assert.match(signal, /import\("html-to-image"\)/u);
+    assert.match(signal, /toCanvas\(stage/u);
+    assert.match(signal, /replayRenderCapture\.frame\.shot/u);
+    assert.match(signal, /sourceId=\{replayRenderTarget\.episode\.id\}/u);
+    assert.match(signal, /setReplayRenderTarget\(\{ episode: detail, show \}\)/u);
+    assert.match(
+      signal,
+      /replayRenderTarget &&[\s\S]{0,100}replayRenderCapture &&[\s\S]{0,800}currentEpisode: replayRenderTarget\.episode/u,
+    );
+    assert.doesNotMatch(signal, /preview=\{/u);
   });
 });

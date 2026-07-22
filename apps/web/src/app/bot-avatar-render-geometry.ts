@@ -52,3 +52,16 @@ export function botAvatarDetailsFacingScaleX(
   const canonicalIsNegative = BOT_AVATAR_CANONICAL_FACE_SCALE_Y.startsWith("-");
   return faceIsNegative === canonicalIsNegative ? "1" : "-1";
 }
+
+/**
+ * The mirrored runtime glyph settles three authored pixels above the raw
+ * canvas reflection. Preserve the editor/front-facing registration and apply
+ * that optical correction only when the bot turns to face screen-left.
+ */
+export function botAvatarDetailsFacingOffsetY(
+  faceScaleY: string | number,
+): "0%" | "-2.34375%" {
+  return botAvatarDetailsFacingScaleX(faceScaleY) === "-1"
+    ? "-2.34375%"
+    : "0%";
+}

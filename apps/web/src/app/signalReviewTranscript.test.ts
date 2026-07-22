@@ -128,6 +128,12 @@ const episode: BotcastEpisode = {
         immersiveVoiceEffect: true,
         moodKey: "neutral",
         autoRecovery: { attempts: 2, recoveredFrom: "primary-model" },
+        utteranceRepair: {
+          v: 1,
+          source: "sanitizer",
+          reason: "peer_label",
+          fallbackKind: "host_opening",
+        },
       },
       occurredAt: "2026-07-17T17:00:04.000Z",
     },
@@ -220,6 +226,10 @@ describe("Signal review transcript", () => {
       /- AUTO recovery: \{"attempts":2,"recoveredFrom":"primary-model"\}/u,
     );
     assert.match(transcript, /- ONLINE retry: None recorded/u);
+    assert.match(
+      transcript,
+      /- Deterministic repair: \{"fallbackKind":"host_opening","reason":"peer_label","source":"sanitizer","v":1\}/u,
+    );
     assert.match(transcript, /- Immersive voice effect: yes/u);
     assert.match(
       transcript,
@@ -307,6 +317,10 @@ describe("Signal review transcript", () => {
     assert.match(
       transcript,
       /- ONLINE retry: Not applicable \(human-authored\)/u,
+    );
+    assert.match(
+      transcript,
+      /- Deterministic repair: Not applicable \(human-authored\)/u,
     );
   });
 

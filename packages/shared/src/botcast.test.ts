@@ -956,6 +956,24 @@ describe("Botcast replay director", () => {
     );
   });
 
+  it("keeps Auto wide for an audible but hidden performer", () => {
+    assert.deepEqual(
+      botcastDirectorSuggestion({
+        atMs: 4_000,
+        speakerRole: "host",
+        speakerVisible: false,
+        utteranceDurationMs: 4_000,
+        segment: "interview",
+      }),
+      {
+        shot: "wide",
+        reason: "hidden_speaker",
+        atMs: 4_000,
+        minimumHoldMs: 3_200,
+      },
+    );
+  });
+
   it("holds short opposing lines instead of thrashing cameras", () => {
     const host = botcastDirectorSuggestion({
       atMs: 4_000,

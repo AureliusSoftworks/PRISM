@@ -146,6 +146,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /handleNewBotFaceEyeCharacterChange\(normalized\);/);
   assert.match(
     pageSource,
+    /next === 2[\s\S]{0,180}DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG/,
+  );
+  assert.match(
+    pageSource,
     /handleNewBotFaceMouthCharacterChange\(normalized\);/,
   );
   assert.match(
@@ -350,7 +354,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   const eyesTabSource = pageSource.slice(eyesBranchStart, mouthBranchStart);
   const mouthTabSource = pageSource.slice(
     mouthBranchStart,
-    pageSource.indexOf("function BotPowerBadge", mouthBranchStart),
+    pageSource.indexOf("function BotPowerNameplateIndicator", mouthBranchStart),
   );
   assert.doesNotMatch(faceTabSource, /label="Eye size"/);
   assert.doesNotMatch(faceTabSource, /label="Eye position"/);
@@ -1818,11 +1822,16 @@ test("desktop kiosk shell shows a full-screen notice below the viewport floor", 
 test("Powers read as an app-wide bot trait across active surfaces", () => {
   assert.match(pageSource, /Describe the magic or hard rule\. PRISM names it and makes it real\./u);
   assert.doesNotMatch(pageSource, /apply only during Coffee sessions/u);
-  assert.match(pageSource, /<BotPowerBadge powers=\{selectedBot\.powers\} passive \/>/u);
-  assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
-  assert.match(pageSource, /<BotPowerBadge powers=\{npcActor\?\.bot\.powers\} \/>/u);
+  assert.match(
+    pageSource,
+    /<BotPowerNameplateIndicator powers=\{selectedBot\.powers\} \/>/u,
+  );
+  assert.match(
+    pageSource,
+    /<BotPowerNameplateIndicator[\s\S]{0,120}powers=\{bot\.powers\}[\s\S]{0,120}resolved=\{coffeePowerPlan\?\.bots\[bot\.id\] \?\? null\}/u,
+  );
+  assert.doesNotMatch(pageSource, /<BotPowerBadge/u);
   assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
-  assert.match(pageSource, /effect\.rate === "none"[\s\S]*?"Refuses coffee"/u);
   assert.match(
     pageSource,
     /const coffeeCupRefused = coffeeCupPowerRateMultiplier === 0/u,
@@ -1831,60 +1840,47 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
     pageSource,
     /coffeeCupRefused \|\| refillSipLocked \|\| seatIsThinking/u,
   );
-  assert.match(pageSource, /speaker pull/u);
-  assert.match(pageSource, /response pull/u);
-  assert.match(pageSource, /topic pull/u);
-  assert.match(pageSource, /memory for/u);
-  assert.match(pageSource, /private insight into/u);
-  assert.match(
-    pageSource,
-    /effect\.type === "response_budget"[\s\S]{0,160}response budget/u,
-  );
-  assert.match(pageSource, /deterministic effect/u);
   assert.match(pageSource, /<strong>Holder:<\/strong>/u);
   assert.match(pageSource, /<strong>Others:<\/strong>/u);
-  assert.match(
-    pageSource,
-    /effect\.type === "candor"[\s\S]{0,140}one-response candor pressure/u,
-  );
-  assert.match(pageSource, /effect\.type === "mute"\) return "Never speaks"/u);
-  assert.match(
-    pageSource,
-    /effect\.type === "speech_copy"\) return "Repeats addressed speech exactly"/u,
-  );
-  assert.match(
-    pageSource,
-    /effect\.type === "hearing_repeat"[\s\S]{0,140}requests exact repeats with a[\s\S]{0,80}mood cost/u,
-  );
 });
 
-test("Power badges sit with bot portraits instead of crowding identity text", () => {
-  assert.match(
-    pageSource,
-    /styles\.botMarketplaceCardGlyph[\s\S]{0,260}<BotPowerBadge[\s\S]{0,180}installedBot\?\.powers \?\? entry\.powers[\s\S]{0,80}passive/u,
+test("Power indicators stay unboxed inside glyph-bearing nameplates", () => {
+  assert.equal(
+    [...pageSource.matchAll(/<BotPowerNameplateIndicator\b/gu)].length,
+    2,
   );
   assert.match(
     pageSource,
-    /showFeaturedName \? \([\s\S]{0,100}<BotPowerBadge powers=\{bot\.powers\} passive \/>[\s\S]{0,130}<span className=\{styles\.chatBotTileFeaturedName\}>\{bot\.name\}<\/span>/u,
+    /styles\.composeBotTriggerGlyph[\s\S]{0,240}<BotPowerNameplateIndicator powers=\{selectedBot\.powers\}/u,
   );
   assert.match(
     pageSource,
-    /className=\{styles\.storyBotGlyph\}[\s\S]{0,120}<BotPowerBadge powers=\{bot\.powers\} passive \/>/u,
+    /className=\{styles\.coffeeSeatGlowPill\}[\s\S]{0,180}<BotPowerNameplateIndicator[\s\S]{0,180}<span className=\{styles\.coffeeSeatGlowGlyph\}/u,
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
-    /className=\{styles\.coffeeSeatGlowPill\}[\s\S]{0,260}<BotPowerBadge[\s\S]{0,160}passive/u,
+    /styles\.botMarketplaceCardGlyph[\s\S]{0,180}<BotPowerNameplateIndicator/u,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /className=\{styles\.storyBotGlyph\}[\s\S]{0,120}<BotPowerNameplateIndicator/u,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /className=\{styles\.coffeeMessageBotLabel\}[\s\S]{0,180}<BotPowerNameplateIndicator/u,
+  );
+  assert.doesNotMatch(pageSource, /powerCount=|botPowerSurfaceBadge/u);
+  assert.doesNotMatch(cssSource, /botPowerSurfaceBadge|botPowerSurfacePopover/u);
+  assert.match(
+    cssSource,
+    /\.botPowerNameplateIndicator\s*\{[\s\S]{0,220}opacity:\s*0\.68/u,
   );
   assert.match(
     cssSource,
-    /\.botMarketplaceCardGlyph > \.botPowerSurfaceBadgeWrap\s*\{[\s\S]*position:\s*absolute/u,
+    /\.coffeeSeatGlowPill:has\(> \.botPowerNameplateIndicator\)[\s\S]{0,180}grid-template-columns/u,
   );
-  assert.match(
+  assert.doesNotMatch(
     cssSource,
-    /\.coffeeCanvasBotTile > \.botPowerSurfaceBadgeWrap\s*\{[\s\S]*position:\s*absolute/u,
-  );
-  assert.match(
-    cssSource,
-    /\.coffeeSeatGlowPill > \.botPowerSurfaceBadgeWrap\s*\{[\s\S]*position:\s*absolute/u,
+    /\.coffeeSeatGlowPill > \.botPowerNameplateIndicator\s*\{[^}]*position:\s*absolute/u,
   );
 });

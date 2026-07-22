@@ -32,6 +32,7 @@ export interface SessionAtmosphereLayerProps {
     cue: SessionAmbientBotVocalizationCue,
   ) => boolean;
   coffeeCupRootRef?: RefObject<HTMLElement | null>;
+  controllerHandleRef?: RefObject<SessionAtmosphereController | null>;
 }
 
 export function SessionAtmosphereLayer({
@@ -52,6 +53,7 @@ export function SessionAtmosphereLayer({
   ambientBotVocalizationProfile,
   onAmbientBotVocalization,
   coffeeCupRootRef,
+  controllerHandleRef,
 }: SessionAtmosphereLayerProps): null {
   const deferFoleyRef = useRef(deferFoley);
   const deferBotVocalizationRef = useRef(deferBotVocalization);
@@ -96,6 +98,7 @@ export function SessionAtmosphereLayer({
         ambientBotVocalizationRef.current?.(cue) === true,
     });
     controllerRef.current = controller;
+    if (controllerHandleRef) controllerHandleRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
       ? attachCoffeeCupFoley(coffeeCupRootRef.current, controller)
       : null;
@@ -103,6 +106,9 @@ export function SessionAtmosphereLayer({
       detachCupFoley?.();
       controller.stop();
       if (controllerRef.current === controller) controllerRef.current = null;
+      if (controllerHandleRef?.current === controller) {
+        controllerHandleRef.current = null;
+      }
     };
   }, [
     active,
@@ -114,6 +120,7 @@ export function SessionAtmosphereLayer({
     backgroundTone,
     backgroundUrl,
     coffeeCupRootRef,
+    controllerHandleRef,
     foleyRoomAcoustics,
     grainUrl,
     sessionKey,

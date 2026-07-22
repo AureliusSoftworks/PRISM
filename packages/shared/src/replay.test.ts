@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  REPLAY_VIDEO_FPS,
   compileReplayTimelineV1,
   replayManifestToMarkdownV1,
   replayTimelineToWebVttV1,
@@ -147,4 +148,15 @@ test("replay transcript exports use the same deterministic timeline", () => {
   assert.match(vtt, /Host: Welcome to the show\./u);
   assert.match(markdown, /# A deterministic episode/u);
   assert.match(markdown, /\*\*\d\d:\d\d · Guest\*\*/u);
+});
+
+test("the fixed video clock keeps scheduled speech and captions inside the drift budget", () => {
+  const timeline = compileReplayTimelineV1(manifest);
+  const frameDurationMs = 1_000 / REPLAY_VIDEO_FPS;
+  for (const beat of timeline.beats.filter((entry) => entry.kind === "utterance")) {
+    const firstVisibleFrameMs =
+      Math.ceil(beat.startMs / frameDurationMs) * frameDurationMs;
+    assert.ok(firstVisibleFrameMs - beat.startMs <= frameDurationMs);
+    assert.ok(firstVisibleFrameMs - beat.startMs < 80);
+  }
 });

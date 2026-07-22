@@ -324,6 +324,41 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
+      "I’m Forgetful Freddie; pleased to meet you. The archive key is under the blue case.",
+      name,
+      "Where is the archive key?",
+      { hasPreviousOnAirTurn: true },
+    ),
+    "The archive key is under the blue case.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "The archive key is under the blue case; I’m Forgetful Freddie, by the way—pleased to meet you.",
+      name,
+      "Where is the archive key?",
+      { hasPreviousOnAirTurn: true },
+    ),
+    "The archive key is under the blue case.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "I am Forgetful Freddie, pleased to meet you.",
+      name,
+      "What is your name?",
+      { hasPreviousOnAirTurn: true },
+    ),
+    "I am Forgetful Freddie, pleased to meet you.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
+      "Pleased to meet you; I am Forgetful Freddie. The archive key is under the blue case.",
+      name,
+      "Where is the archive key?",
+    ),
+    "Pleased to meet you; I am Forgetful Freddie. The archive key is under the blue case.",
+  );
+  assert.equal(
+    applyBotPowerEternalIntroductionResponseV1(
       "We've known each other for years.",
       name,
       "Do you remember me?",

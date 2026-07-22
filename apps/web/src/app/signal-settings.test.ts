@@ -71,7 +71,7 @@ test("Signal sends saved performance text only through the ElevenLabs request la
 test("Signal procedural voices use the same stage-direction-free spoken text", () => {
   assert.match(
     pageSource,
-    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]{0,1800}sourceText: spokenText/u,
+    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]{0,6500}sourceText: spokenText/u,
   );
   assert.match(
     pageSource,

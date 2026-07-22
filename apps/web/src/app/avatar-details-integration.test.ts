@@ -77,6 +77,8 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} X offset`\}/);
     assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} Y offset`\}/);
     assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} scale`\}/);
+    assert.match(editorSource, /aria-label=\{`Remove \$\{definition\.label\} stamp`\}/);
+    assert.match(editorSource, /removeAvatarDetailStamp\(/);
   });
 
   it("uses compact icon tools without losing labels or selected state", () => {
@@ -473,7 +475,15 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+      /translateX\(var\(--avatar-details-offset-x, 0px\)\)[\s\S]*translateY\(var\(--avatar-details-facing-offset-y, 0%\)\)[\s\S]*scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+    );
+    assert.match(
+      pageCss,
+      /--coffee-speaker-gaze-face-shift-x:\s*0px;[\s\S]*--avatar-details-offset-x:\s*var\(--coffee-speaker-gaze-face-shift-x\)/,
+    );
+    assert.match(
+      pageCss,
+      /\.coffeeSeat \.zenLiveBotPresenceFaceRig,\s*\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceFaceRig\s*\{[^}]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
     );
     assert.match(
       pageCss,
@@ -490,7 +500,15 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
+      /"--avatar-details-facing-offset-y":\s*botAvatarDetailsFacingOffsetY\(faceScaleY\)/,
+    );
+    assert.match(
+      pageSource,
       /\["--avatar-details-facing-scale-x" as string\]:\s*botAvatarDetailsFacingScaleX\(coffeePlateFaceScaleY\)/,
+    );
+    assert.match(
+      pageSource,
+      /\["--avatar-details-facing-offset-y" as string\]:\s*botAvatarDetailsFacingOffsetY\(coffeePlateFaceScaleY\)/,
     );
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
     assert.match(

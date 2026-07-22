@@ -180,6 +180,16 @@
   grid-column: 1 / -1;
 }
 
+.stampTransformActions {
+  display: flex;
+  gap: 5px;
+}
+
+.stampTransformActions button {
+  min-width: 27px;
+  padding: 4px;
+}
+
 .stampTransformCard label {
   display: grid;
   grid-template-columns: 1fr auto;

@@ -817,6 +817,19 @@ export function toggleAvatarDetailStamp(
   });
 }
 
+export function removeAvatarDetailStamp(
+  details: AvatarDetailsV1,
+  id: AvatarDetailStampId,
+): AvatarDetailsV1 {
+  return normalizeAvatarDetails({
+    ...details,
+    screen: {
+      ...details.screen,
+      stamps: details.screen.stamps.filter((stamp) => stamp.id !== id),
+    },
+  });
+}
+
 export function updateAvatarDetailStamp(
   details: AvatarDetailsV1,
   nextStamp: AvatarDetailStampV1,

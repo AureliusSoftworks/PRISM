@@ -36,25 +36,25 @@ test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state
   assert.match(coffeeSource, /seatIsThinkingThisSeat/);
 
   const signalSource = sourceBefore(
-    "scheduleKey={`botcast-${avatarState.role}-${bot.id}`}",
+    "scheduleKey={`botcast-${avatarState.role}-${botSummary.id}`}",
     3_000,
   );
   assert.match(
     signalSource,
-    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,120}botAvatarSfxForBot\(bot\)[\s\S]{0,40}: null/u,
+    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForSignalMix\([\s\S]{0,120}botAvatarSfxForBot\(bot\)/u,
   );
   assert.match(signalSource, /avatarState\.talking/);
   assert.match(signalSource, /avatarState\.thinking/);
 });
 
-test("Signal keeps dashboard avatars quiet while preserving live-stage Persona SFX", () => {
+test("Signal keeps dashboard avatars quiet while preserving live-stage and alignment Persona SFX", () => {
   const botcastSource = readFileSync(
     new URL("./BotcastExperience.tsx", import.meta.url),
     "utf8",
   );
   assert.match(
     botcastSource,
-    /surface: "dashboard" \| "stage";/u,
+    /surface: "dashboard" \| "stage" \| "alignment";/u,
   );
   assert.match(
     botcastSource,
@@ -62,8 +62,21 @@ test("Signal keeps dashboard avatars quiet while preserving live-stage Persona S
   );
   assert.equal(
     botcastSource.match(/surface: "dashboard",/gu)?.length,
-    3,
+    2,
     "Every non-live Signal avatar surface should be marked as dashboard UI",
+  );
+  assert.match(
+    botcastSource,
+    /surface: "alignment",[\s\S]{0,140}sfxEnabled: sfxMixGain > 0,[\s\S]{0,80}sfxMixGain/u,
+  );
+  assert.match(botcastSource, /sessionAtmosphereBusVolume\(\{/u);
+  assert.match(
+    pageSource,
+    /botAvatarSfxForSignalMix\([\s\S]{0,180}avatarState\.sfxMixGain,[\s\S]{0,100}avatarState\.surface === "alignment"/u,
+  );
+  assert.match(
+    pageSource,
+    /forcePreview[\s\S]{0,260}playWhileIdle: true,[\s\S]{0,80}playWhileTalking: true,[\s\S]{0,80}playWhileThinking: true/u,
   );
 
   const producerSource = sourceBefore(
@@ -72,6 +85,6 @@ test("Signal keeps dashboard avatars quiet while preserving live-stage Persona S
   );
   assert.match(
     producerSource,
-    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForProfile\([\s\S]{0,220}: null/u,
+    /avatarSfx=\{[\s\S]{0,80}avatarState\.sfxEnabled[\s\S]{0,180}botAvatarSfxForProfile\([\s\S]{0,360}: null/u,
   );
 });

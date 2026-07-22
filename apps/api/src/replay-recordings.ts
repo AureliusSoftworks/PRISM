@@ -441,6 +441,10 @@ export function queueReplayRecording(
 export function claimNextReplayRecording(
   db: DatabaseSync,
   userId: string,
+  filters: {
+    surface?: ReplaySurfaceV1;
+    sourceId?: string;
+  } = {},
 ): { recording: ReplayRecordingV1; takes: ReplayVoiceTakeRecordV1[]; renderToken: string } | null {
   const staleBefore = new Date(Date.now() - 90_000).toISOString();
   const interrupted = db
@@ -466,9 +470,17 @@ export function claimNextReplayRecording(
     .prepare(
       `SELECT * FROM replay_recordings
         WHERE user_id = ? AND status = 'queued' AND manifest_json IS NOT NULL
+          AND (? IS NULL OR surface = ?)
+          AND (? IS NULL OR source_id = ?)
         ORDER BY updated_at, rowid LIMIT 1`,
     )
-    .get(userId) as ReplayRecordingRow | undefined;
+    .get(
+      userId,
+      filters.surface ?? null,
+      filters.surface ?? null,
+      filters.sourceId ?? null,
+      filters.sourceId ?? null,
+    ) as ReplayRecordingRow | undefined;
   if (!candidate) return null;
   const renderToken = randomBytes(18).toString("hex");
   const uploadRelativePath = replayUploadRelativePath(userId, candidate.id, renderToken);
@@ -563,6 +575,7 @@ export function completeReplayRender(
   const { sizeBytes } = finalizeReplayUpload({
     uploadRelativePath: row.upload_rel_path,
     videoRelativePath,
+    contentType: metadata.contentType,
   });
   const manifest = parseJson<ReplayManifestV1>(row.manifest_json);
   if (!manifest) throw new Error("Stored replay manifest is invalid.");

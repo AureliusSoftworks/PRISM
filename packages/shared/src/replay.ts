@@ -211,7 +211,10 @@ export function compileReplayTimelineV1(
 ): ReplayTimelineV1 {
   const takeByMessageId = new Map(
     takes
-      .filter((take) => take.snapshot.sourceMessageId)
+      .filter(
+        (take) =>
+          take.snapshot.sourceMessageId && take.snapshot.channel === "primary",
+      )
       .map((take) => [take.snapshot.sourceMessageId as string, take]),
   );
   const participantById = new Map(

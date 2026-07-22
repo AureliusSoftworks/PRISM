@@ -14,11 +14,15 @@ describe("mode tutorials", () => {
     }
   });
 
-  it("teaches the local refreshable Studio lighting map", () => {
+  it("teaches the generated Studio lighting map and its private default", () => {
     const identityCopy = MODE_TUTORIALS.botcast.steps[1]?.body ?? "";
-    assert.match(identityCopy, /Every generated Studio finishes/u);
+    assert.match(identityCopy, /Every generated Studio (?:keeps|finishes with)/u);
+    assert.match(identityCopy, /guaranteed local default/u);
     assert.match(identityCopy, /Refresh Studio Lighting/u);
-    assert.match(identityCopy, /one shared ambient receiver map/u);
+    assert.match(identityCopy, /aligned image-model pass/u);
+    assert.match(identityCopy, /waits visibly behind any image already rendering/u);
+    assert.match(identityCopy, /starts automatically when its turn arrives/u);
+    assert.match(identityCopy, /LOCAL stays on the private deterministic default/u);
     assert.match(identityCopy, /without changing either image/u);
     assert.match(identityCopy, /never applies a stale map/u);
   });
@@ -45,7 +49,11 @@ describe("mode tutorials", () => {
     assert.match(coffeeCopy, /third-person video automatically/u);
     assert.match(coffeeCopy, /adds no AI conversation turn/u);
     assert.match(signalCopy, /never asks an AI to recreate/u);
-    assert.match(signalCopy, /transcript-line seeking/u);
+    assert.match(signalCopy, /without a finished video starts or resumes/u);
+    assert.match(signalCopy, /without opening anything/u);
+    assert.match(signalCopy, /Select it again after Video ready/u);
+    assert.match(signalCopy, /browser-playable video/u);
+    assert.match(signalCopy, /download the video or transcript/u);
     assert.match(signalCopy, /Delete Recording without deleting the episode transcript/u);
   });
 
@@ -222,11 +230,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
-      /never waits on synthesis/u,
+      /automatically tries every supported identity asset in one pass/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /Complete this show is resumable/u,
+      /creation pass is resumable/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -234,7 +242,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /rerunning it retries only unfinished pieces/u,
+      /Complete this show retries only unfinished pieces/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -492,6 +500,14 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /selected guest when one is booked/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /tied character sound loop is forced on for audition at its real Master × Foley level/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /Test voices runs a random two-line soundcheck/u,
     );
     assert.match(
@@ -640,7 +656,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /show library and Create show controls hide while Signal is on air[\s\S]*return automatically after the broadcast/u,
+      /show library and Create show controls hide while Signal is on air[\s\S]*remain hidden through closing[\s\S]*Return to show/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -656,7 +672,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /full transcript stays out of the initial play and returns with playback/u,
+      /transcript remains available as a download instead of a second on-screen reading pane/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -668,7 +684,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /saved at its live timing, and returns in replay/u,
+      /rotates through room-matched variations[\s\S]*returns with the same variation in replay/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
@@ -676,11 +692,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
-      /outside your Library/u,
+      /recommends only available bots from your current Library/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
       /does not add or book anyone/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      /speaks through your current Signal Voice choice as each word appears/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
+      /transcript stays scrollable while open and clears when you close it/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
@@ -708,7 +732,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-      /restores the full transcript beside the saved camera cut/u,
+      /episode card shows progress/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -1088,7 +1112,15 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /without overriding the other bot’s agency or boundaries/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /both frozen cast members are muted[\s\S]*short silent exchange and closing/u,
+      /audible host and a muted guest[\s\S]*timed episode honors its target/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /distinct nonverbal routes, choices, hypotheses, and pressure[\s\S]*growing in-character frustration/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /both frozen cast members are muted[\s\S]*neither performer can carry the interview/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

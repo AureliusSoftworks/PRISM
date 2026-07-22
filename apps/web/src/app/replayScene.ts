@@ -13,6 +13,7 @@ interface ParticipantNode {
   participant: ReplayParticipantSnapshotV1;
   root: Container;
   plate: Graphics;
+  cup: Graphics;
   name: Text;
 }
 
@@ -36,6 +37,27 @@ function activeBeatsAt(
 function wrappedCaption(text: string, max = 150): string {
   const normalized = text.replace(/\s+/gu, " ").trim();
   return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}…`;
+}
+
+function replayEventTimeMs(args: {
+  manifest: ReplayManifestV1;
+  timeline: ReplayTimelineV1;
+  eventIndex: number;
+}): number {
+  const event = args.manifest.events[args.eventIndex]!;
+  if (event.sourceMessageId) {
+    const beat = args.timeline.beats.find(
+      (candidate) => candidate.sourceMessageId === event.sourceMessageId,
+    );
+    if (beat) return beat.startMs + Math.min(500, (beat.endMs - beat.startMs) * 0.22);
+  }
+  const runtimeMs = Number(args.manifest.visual.metadata?.runtimeMs);
+  const atMs = Number(event.payload.atMs);
+  const endStart = args.timeline.beats.find((beat) => beat.kind === "end")?.startMs ?? args.timeline.durationMs;
+  if (Number.isFinite(runtimeMs) && runtimeMs > 0 && Number.isFinite(atMs) && atMs >= 0) {
+    return 2_100 + Math.max(0, Math.min(1, atMs / runtimeMs)) * Math.max(0, endStart - 2_100);
+  }
+  return 2_100 + ((args.eventIndex + 1) / (args.manifest.events.length + 1)) * Math.max(0, endStart - 2_100);
 }
 
 export class ReplayPixiScene {
@@ -166,7 +188,11 @@ export class ReplayPixiScene {
         });
         name.anchor.set(0.5, 0);
         name.y = 88;
-        nodeRoot.addChild(plate, glyphText, name);
+        const cup = new pixi.Graphics();
+        cup.roundRect(52, 24, 35, 31, 7).fill({ color: 0xe8ddd0, alpha: 0.92 });
+        cup.circle(89, 39, 11).stroke({ color: 0xe8ddd0, alpha: 0.92, width: 5 });
+        cup.visible = args.manifest.surface === "coffee";
+        nodeRoot.addChild(plate, glyphText, cup, name);
         if (args.manifest.surface === "signal") {
           if (participant.role === "producer") {
             nodeRoot.position.set(960, 270);
@@ -181,7 +207,7 @@ export class ReplayPixiScene {
           nodeRoot.position.set(960 + Math.cos(angle) * radiusX, 570 + Math.sin(angle) * radiusY);
         }
         root.addChild(nodeRoot);
-        return { participant, root: nodeRoot, plate, name };
+        return { participant, root: nodeRoot, plate, cup, name };
       });
     const title = new pixi.Text({
       text: args.manifest.title,
@@ -260,24 +286,83 @@ export class ReplayPixiScene {
       ? `${crosstalk.speakerName ?? "Speaker"}: ${wrappedCaption(crosstalk.text, 120)}`
       : "";
     const activeIds = new Set(utterances.map((beat) => beat.speakerId));
+    const thinkingBeat = this.timeline.beats.find(
+      (beat) =>
+        beat.kind === "utterance" &&
+        timeMs >= beat.startMs - 650 &&
+        timeMs < beat.startMs,
+    );
     for (const node of this.participants) {
+      const arrivalIndex = this.manifest.events.findIndex(
+        (event) => event.kind === "arrival" && event.payload.botId === node.participant.id,
+      );
+      const departed = this.manifest.events.some((event, eventIndex) => {
+        if (replayEventTimeMs({ manifest: this.manifest, timeline: this.timeline, eventIndex }) > timeMs) {
+          return false;
+        }
+        if (this.manifest.surface === "coffee") {
+          return (
+            (event.kind === "botDeparture" && event.payload.botId === node.participant.id) ||
+            (event.kind === "playerDeparture" && node.participant.id === "prism-player")
+          );
+        }
+        return (
+          event.kind === "departure" &&
+          (event.payload.botId === node.participant.id ||
+            event.payload.speakerRole === node.participant.role ||
+            event.payload.role === node.participant.role)
+        );
+      });
+      const arrived =
+        arrivalIndex < 0 ||
+        replayEventTimeMs({
+          manifest: this.manifest,
+          timeline: this.timeline,
+          eventIndex: arrivalIndex,
+        }) <= timeMs;
+      node.root.visible = arrived && !departed;
       const speaking = activeIds.has(node.participant.id);
+      const thinking = thinkingBeat?.speakerId === node.participant.id;
       const pulse = speaking ? 1 + Math.sin(timeMs / 95) * 0.018 : 1;
       node.root.alpha = activeIds.size === 0 || speaking ? 1 : 0.68;
       node.root.scale.set((node.participant.role === "producer" ? 0.78 : 1) * (speaking ? 1.1 : pulse));
       node.plate.alpha = speaking ? 1 : 0.72;
+      if (thinking) node.plate.alpha = 0.88 + Math.sin(timeMs / 110) * 0.1;
+      const recentTopOff = this.manifest.events.some((event, eventIndex) => {
+        if (event.kind !== "topOff" || event.payload.botId !== node.participant.id) return false;
+        const atMs = replayEventTimeMs({
+          manifest: this.manifest,
+          timeline: this.timeline,
+          eventIndex,
+        });
+        return timeMs >= atMs && timeMs < atMs + 900;
+      });
+      node.cup.scale.set(recentTopOff ? 1 + Math.sin(timeMs / 75) * 0.08 : 1);
+      node.cup.alpha = recentTopOff ? 1 : 0.86;
     }
-    const sourceMessageId = utterances.at(-1)?.sourceMessageId;
-    const event = sourceMessageId
-      ? this.manifest.events.find((candidate) => candidate.sourceMessageId === sourceMessageId)
-      : null;
+    const event = this.manifest.events
+      .map((candidate, eventIndex) => ({
+        candidate,
+        atMs: replayEventTimeMs({
+          manifest: this.manifest,
+          timeline: this.timeline,
+          eventIndex,
+        }),
+      }))
+      .filter((candidate) => candidate.atMs <= timeMs)
+      .at(-1)?.candidate ?? null;
     this.eventLabel.text = event
       ? event.kind.replace(/[_-]+/gu, " ").toUpperCase()
       : this.manifest.surface === "signal"
         ? "PRISM CONTROL ROOM"
         : "PRISM AT THE TABLE";
+    const cameraClose =
+      this.manifest.surface === "signal" &&
+      event &&
+      (event.kind === "camera_mode" || event.kind === "camera_suggestion") &&
+      String(event.payload.shot ?? event.payload.mode ?? "").includes("close");
     this.root.x = this.manifest.surface === "signal" && crosstalk ? -18 : 0;
-    this.root.scale.set(this.manifest.surface === "signal" && primary ? 1.012 : 1);
+    this.root.scale.set(cameraClose ? 1.035 : this.manifest.surface === "signal" && primary ? 1.012 : 1);
     this.app.render();
   }
 

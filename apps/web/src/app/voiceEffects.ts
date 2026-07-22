@@ -666,7 +666,7 @@ export async function playRealtimeVoiceBytes(args: {
   maxDurationMs?: number;
   /** Prevents an older asynchronous decode from replacing newer playback. */
   isCurrent?: () => boolean;
-  /** Keep visible English speech on the device-output clock instead of the render clock. */
+  /** Keep visible speech on the device-output clock instead of the render clock. */
   compensateLifecycleForOutputLatency?: boolean;
 }): Promise<boolean> {
   const context = contextForPlayback();

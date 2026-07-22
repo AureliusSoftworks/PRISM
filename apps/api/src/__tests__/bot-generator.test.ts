@@ -176,6 +176,8 @@ describe("PRISM bot generator", () => {
     assert.equal(parsed.name, "Mara Vale");
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, "premium-mara");
     assert.equal(parsed.audioVoiceProfile.baseVoiceId, "voice-7");
+    assert.equal(parsed.face.eyeCount, 1);
+    assert.equal(parsed.face.eyeRotationDeg, 0);
     assert.equal(parsed.face.mouthCoffeePucker, false);
     assert.ok(parsed.avatarDetails?.screen.paintColorMapBase64);
   });
@@ -212,6 +214,10 @@ describe("PRISM bot generator", () => {
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
       /faceMouthCoffeePucker true by default/u,
+    );
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /faceEyeCount is 2, set faceEyeRotationDeg to -90/u,
     );
   });
 

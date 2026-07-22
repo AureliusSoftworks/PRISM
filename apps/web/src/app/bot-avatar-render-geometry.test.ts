@@ -5,6 +5,7 @@ import {
   BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
   BOT_AVATAR_DETAILS_FACE_PLACEMENT,
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+  botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
 } from "./bot-avatar-render-geometry.ts";
 
@@ -34,5 +35,17 @@ describe("botAvatarDetailsFacingScaleX", () => {
   it("mirrors ink only when the runtime face actually flips", () => {
     assert.equal(botAvatarDetailsFacingScaleX("1"), "-1");
     assert.equal(botAvatarDetailsFacingScaleX(1), "-1");
+  });
+});
+
+describe("botAvatarDetailsFacingOffsetY", () => {
+  it("keeps canonical ink registration and lifts only the left-facing mirror", () => {
+    assert.equal(
+      botAvatarDetailsFacingOffsetY(BOT_AVATAR_CANONICAL_FACE_SCALE_Y),
+      "0%",
+    );
+    assert.equal(botAvatarDetailsFacingOffsetY(-1), "0%");
+    assert.equal(botAvatarDetailsFacingOffsetY("1"), "-2.34375%");
+    assert.equal(botAvatarDetailsFacingOffsetY(1), "-2.34375%");
   });
 });

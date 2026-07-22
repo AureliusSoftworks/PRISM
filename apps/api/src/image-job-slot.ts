@@ -79,8 +79,30 @@ export type RunningImageJob = {
   abortController: AbortController;
 };
 
+type ImageSlotRequest = {
+  userId: string;
+  conversationId: string | null;
+  botId: string | null;
+  mode: ChatMode;
+  incognito: boolean;
+  captionPrompt: string;
+  userMessage: string;
+  source: ImageJobSource;
+  requestedSize?: string;
+  abortController?: AbortController;
+};
+
+type WaitingImageSlotRequest = {
+  args: ImageSlotRequest;
+  signal: AbortSignal;
+  resolve: (job: RunningImageJob) => void;
+  reject: (error: Error) => void;
+  onAbort: () => void;
+};
+
 const runningByUser = new Map<string, RunningImageJob>();
 const runningByJobId = new Map<string, RunningImageJob>();
+const waitingByUser = new Map<string, WaitingImageSlotRequest[]>();
 
 type CompletedImageJobPoll =
   | { status: "succeeded"; messages: ChatMessage[] }
@@ -89,6 +111,61 @@ type CompletedImageJobPoll =
 type CompletedWithOwner = CompletedImageJobPoll & { userId: string };
 
 const completedWithOwner = new Map<string, CompletedWithOwner>();
+
+function createAbortError(): Error {
+  const error = new Error("Image generation was cancelled.");
+  error.name = "AbortError";
+  return error;
+}
+
+function createRunningImageJob(args: ImageSlotRequest): RunningImageJob {
+  return {
+    id: randomUUID(),
+    userId: args.userId,
+    conversationId: args.conversationId,
+    botId: args.botId,
+    mode: args.mode,
+    incognito: args.incognito,
+    captionPrompt: args.captionPrompt.trim(),
+    userMessage: args.userMessage.trim(),
+    source: args.source,
+    requestedSize: args.requestedSize?.trim() || "1024x1024",
+    startedAt: new Date().toISOString(),
+    abortController: args.abortController ?? new AbortController(),
+  };
+}
+
+function installRunningImageJob(job: RunningImageJob): void {
+  runningByUser.set(job.userId, job);
+  runningByJobId.set(job.id, job);
+}
+
+function promoteNextWaitingImageSlot(userId: string): void {
+  const queue = waitingByUser.get(userId);
+  while (queue && queue.length > 0) {
+    const waiting = queue.shift()!;
+    waiting.signal.removeEventListener("abort", waiting.onAbort);
+    if (waiting.signal.aborted) {
+      waiting.reject(createAbortError());
+      continue;
+    }
+    const job = createRunningImageJob(waiting.args);
+    installRunningImageJob(job);
+    if (queue.length === 0) waitingByUser.delete(userId);
+    waiting.resolve(job);
+    return;
+  }
+  waitingByUser.delete(userId);
+}
+
+function releaseRunningImageJob(userId: string, jobId?: string): boolean {
+  const job = runningByUser.get(userId);
+  if (!job || (jobId && job.id !== jobId)) return false;
+  runningByUser.delete(userId);
+  runningByJobId.delete(job.id);
+  promoteNextWaitingImageSlot(userId);
+  return true;
+}
 
 /** Stale read OK — used only for LLM prompt hints. */
 export function peekActiveImageJobForUser(userId: string): RunningImageJob | undefined {
@@ -107,52 +184,81 @@ export function cancelActiveImageJobForConversation(
   runningByUser.delete(userId);
   runningByJobId.delete(job.id);
   completedWithOwner.delete(job.id);
+  void mutexFor(userId).runExclusive(() => {
+    promoteNextWaitingImageSlot(userId);
+  });
   return job.id;
 }
 
-export async function tryAcquireImageSlot(args: {
-  userId: string;
-  conversationId: string | null;
-  botId: string | null;
-  mode: ChatMode;
-  incognito: boolean;
-  captionPrompt: string;
-  userMessage: string;
-  source: ImageJobSource;
-  requestedSize?: string;
-}): Promise<{ ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }> {
+export async function tryAcquireImageSlot(
+  args: ImageSlotRequest,
+): Promise<{ ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }> {
   return mutexFor(args.userId).runExclusive(() => {
     const existing = runningByUser.get(args.userId);
     if (existing) {
       return { ok: false, busyJob: existing };
     }
-    const job: RunningImageJob = {
-      id: randomUUID(),
-      userId: args.userId,
-      conversationId: args.conversationId,
-      botId: args.botId,
-      mode: args.mode,
-      incognito: args.incognito,
-      captionPrompt: args.captionPrompt.trim(),
-      userMessage: args.userMessage.trim(),
-      source: args.source,
-      requestedSize: args.requestedSize?.trim() || "1024x1024",
-      startedAt: new Date().toISOString(),
-      abortController: new AbortController(),
-    };
-    runningByUser.set(args.userId, job);
-    runningByJobId.set(job.id, job);
+    const job = createRunningImageJob(args);
+    installRunningImageJob(job);
     return { ok: true, job };
+  });
+}
+
+/**
+ * FIFO acquisition for background work that can honestly remain queued.
+ * Cancelling the supplied signal removes a waiting request before it starts.
+ */
+export function waitForImageSlot(
+  args: ImageSlotRequest & { signal: AbortSignal },
+): Promise<RunningImageJob> {
+  if (args.signal.aborted) return Promise.reject(createAbortError());
+  return new Promise<RunningImageJob>((resolve, reject) => {
+    const waiting: WaitingImageSlotRequest = {
+      args,
+      signal: args.signal,
+      resolve,
+      reject,
+      onAbort: () => {
+        void mutexFor(args.userId).runExclusive(() => {
+          const queue = waitingByUser.get(args.userId);
+          if (!queue) return;
+          const index = queue.indexOf(waiting);
+          if (index < 0) return;
+          queue.splice(index, 1);
+          if (queue.length === 0) waitingByUser.delete(args.userId);
+          waiting.reject(createAbortError());
+        });
+      },
+    };
+    args.signal.addEventListener("abort", waiting.onAbort, { once: true });
+    void mutexFor(args.userId)
+      .runExclusive(() => {
+        if (args.signal.aborted) {
+          args.signal.removeEventListener("abort", waiting.onAbort);
+          waiting.reject(createAbortError());
+          return;
+        }
+        const existing = runningByUser.get(args.userId);
+        const queue = waitingByUser.get(args.userId);
+        if (!existing && (!queue || queue.length === 0)) {
+          args.signal.removeEventListener("abort", waiting.onAbort);
+          const job = createRunningImageJob(args);
+          installRunningImageJob(job);
+          waiting.resolve(job);
+          return;
+        }
+        waitingByUser.set(args.userId, [...(queue ?? []), waiting]);
+      })
+      .catch((error: unknown) => {
+        args.signal.removeEventListener("abort", waiting.onAbort);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      });
   });
 }
 
 export async function releaseImageSlot(userId: string): Promise<void> {
   return mutexFor(userId).runExclusive(() => {
-    const job = runningByUser.get(userId);
-    if (job) {
-      runningByUser.delete(userId);
-      runningByJobId.delete(job.id);
-    }
+    releaseRunningImageJob(userId);
   });
 }
 
@@ -161,11 +267,7 @@ export async function releaseImageSlotIfOwned(
   jobId: string,
 ): Promise<boolean> {
   return mutexFor(userId).runExclusive(() => {
-    const job = runningByUser.get(userId);
-    if (!job || job.id !== jobId) return false;
-    runningByUser.delete(userId);
-    runningByJobId.delete(job.id);
-    return true;
+    return releaseRunningImageJob(userId, jobId);
   });
 }
 
@@ -173,8 +275,7 @@ export async function finishImageJob(jobId: string, userId: string, result: Comp
   return mutexFor(userId).runExclusive(() => {
     const live = runningByUser.get(userId);
     if (!live || live.id !== jobId) return;
-    runningByUser.delete(userId);
-    runningByJobId.delete(jobId);
+    releaseRunningImageJob(userId, jobId);
     completedWithOwner.set(jobId, { ...result, userId });
   });
 }

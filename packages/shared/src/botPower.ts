@@ -1541,6 +1541,44 @@ export function botPowerResponseIsFirstIntroductionV1(
   return explicitSelfIntroduction.test(source) || greetingIntroduction.test(source);
 }
 
+function botPowerInputDirectlyRequestsIdentityV1(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return /\b(?:who are you|what(?:'s| is) your name|what should I call you|may I call you|tell (?:me|us) (?:who you are|your name)|introduce yourself|identify yourself)\b/iu.test(
+    value,
+  );
+}
+
+/** Removes a redundant canned greeting while retaining the substantive answer. */
+function botPowerWithoutRepeatedIntroductionV1(
+  value: string,
+  botName: string,
+): string {
+  const escapedName = botPowerEscapeRegExpV1(botName);
+  const selfIntroduction = `(?:i am|i['’]m|my name is|call me)\\s+${escapedName}\\b`;
+  const greeting =
+    "(?:(?:it['’]?s\\s+)?(?:nice|pleased)|(?:a\\s+)?pleasure)\\s+to\\s+meet\\s+you";
+  const introductionSeparator = "[\\s,;:—–\\-]*";
+  const prefix = new RegExp(
+    `^\\s*(?:(?:hello|hi|hey|greetings)[,!—–\\-\\s]*)?(?:${greeting}[,;:.!?\\s]*)?(?:${selfIntroduction})(?:${introductionSeparator}(?:by the way|${greeting}))*[\\s,;:.!—–\\-]*`,
+    "iu",
+  );
+  const suffix = new RegExp(
+    `(?:[\\s,;:.!—–\\-]+)(?:(?:${selfIntroduction})(?:${introductionSeparator}(?:by the way|${greeting}))*|(?:${greeting})${introductionSeparator}(?:${selfIntroduction})(?:${introductionSeparator}by the way)?)[\\s.!?]*$`,
+    "iu",
+  );
+  const withoutPrefix = value.replace(prefix, "");
+  const trimmed = withoutPrefix
+    .replace(suffix, "")
+    .replace(/^(?:and|but)\s+/iu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!trimmed) return value;
+  const terminalPunctuation = value.match(/[.!?]+\s*$/u)?.[0].trim() ?? "";
+  return trimmed !== value && terminalPunctuation && !/[.!?]$/u.test(trimmed)
+    ? `${trimmed}${terminalPunctuation}`
+    : trimmed;
+}
+
 /**
  * Preserves a natural locally grounded reply while blocking claims of an
  * established relationship. Context-specific fallbacks keep a stale compiled
@@ -1550,6 +1588,7 @@ export function applyBotPowerEternalIntroductionResponseV1(
   value: unknown,
   botName: unknown,
   currentInput?: unknown,
+  options?: { hasPreviousOnAirTurn?: boolean },
 ): string {
   const name = botPowerIntroductionNameV1(botName);
   const source = typeof value === "string" ? value.trim() : "";
@@ -1577,6 +1616,11 @@ export function applyBotPowerEternalIntroductionResponseV1(
     /\b(?:what do you mean|not sure what you mean|I (?:do not|don't) understand|I (?:do not|don't) think we(?:'ve| have) met|have we met|who are you|confus(?:ed|ing)|what(?:'s| is) the matter|what(?:'s| is) wrong)\b/iu.test(
       source,
     );
+  const shouldRemoveRepeatedIntroduction = Boolean(
+    options?.hasPreviousOnAirTurn &&
+      !repetitionComplaint &&
+      !botPowerInputDirectlyRequestsIdentityV1(input),
+  );
 
   if (
     source &&
@@ -1587,7 +1631,9 @@ export function applyBotPowerEternalIntroductionResponseV1(
       (explainsUnseenAmnesiaOrRepetition || !respondsWithFirstContactConfusion)
     )
   ) {
-    return source;
+    return shouldRemoveRepeatedIntroduction
+      ? botPowerWithoutRepeatedIntroductionV1(source, name)
+      : source;
   }
   if (repetitionComplaint) {
     return "What do you mean? I don't think we've met yet.";

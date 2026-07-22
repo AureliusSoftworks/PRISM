@@ -1,19 +1,34 @@
 import {
   botcastMessageIsAudibleToAudienceV1,
+  botcastSnapshotPowersForRoleV1,
+  botPowerResponseIsSilentV1,
   voiceSpokenText,
   type BotcastEpisode,
   type BotcastShow,
+  type BotAvatarDetailsV1,
+  type BotFaceStyle,
+  type BotVoicePreset,
   type ReplayEventV1,
   type ReplayManifestV1,
   type ReplayParticipantSnapshotV1,
   type ReplayUtteranceV1,
 } from "@localai/shared";
 
+export interface SignalReplayBotVisualSnapshotV1 {
+  v: 1;
+  faceStyle: BotFaceStyle;
+  avatarDetails: BotAvatarDetailsV1 | null;
+  voicePreset: BotVoicePreset;
+  screenMaterialSeed: string;
+  frameMaterialSeed: string;
+}
+
 export interface ReplayBotSnapshotInput {
   id: string;
   name: string;
   color?: string | null;
   glyph?: string | null;
+  replayVisualSnapshot?: SignalReplayBotVisualSnapshotV1 | null;
 }
 
 export function buildSignalReplayManifestV1(args: {
@@ -37,6 +52,10 @@ export function buildSignalReplayManifestV1(args: {
       glyph: host?.glyph ?? null,
       seatIndex: 0,
       visible: true,
+      metadata: {
+        powers: botcastSnapshotPowersForRoleV1(args.episode, "host") ?? [],
+        visualSnapshot: host?.replayVisualSnapshot ?? null,
+      },
     },
     {
       id: guestIsProducer ? "prism-player" : args.episode.guestBotId,
@@ -49,6 +68,10 @@ export function buildSignalReplayManifestV1(args: {
       glyph: guestIsProducer ? "prism" : guest?.glyph ?? null,
       seatIndex: 1,
       visible: true,
+      metadata: {
+        powers: botcastSnapshotPowersForRoleV1(args.episode, "guest") ?? [],
+        visualSnapshot: guest?.replayVisualSnapshot ?? null,
+      },
     },
     ...(guestIsProducer
       ? []
@@ -78,7 +101,9 @@ export function buildSignalReplayManifestV1(args: {
       message.voicePerformanceText || message.content,
     ),
     moodKey: message.moodKey,
-    audible: botcastMessageIsAudibleToAudienceV1(message),
+    audible:
+      botcastMessageIsAudibleToAudienceV1(message) &&
+      !botPowerResponseIsSilentV1(message.content),
     visible: message.audienceDelivery?.speakerVisible !== false,
     createdAt: message.createdAt,
     metadata: {
@@ -119,11 +144,22 @@ export function buildSignalReplayManifestV1(args: {
     visual: {
       theme: args.theme,
       accentColor: args.show.accentColor,
-      atmosphereImageUrl: atmosphere.imageUrl,
+      atmosphereImageUrl: atmosphere?.imageUrl ?? null,
       metadata: {
         showName: args.show.name,
         studioLayout: args.show.studioLayout,
-        logoImageUrl: args.show.logo.imageUrl,
+        logoImageUrl: args.show.logo?.imageUrl ?? null,
+        runtimeMs: args.episode.runtimeMs,
+        introAudioUrl: args.show.introAudio?.audioUrl ?? null,
+        introAudioDurationMs: args.show.introAudio?.durationMs ?? null,
+        outdentAudioUrl: args.show.introAudio?.outdentAudioUrl ?? null,
+        outdentAudioDurationMs: args.show.introAudio?.outdentDurationMs ?? null,
+        atmosphereAudioUrl: args.show.atmosphereAudio?.audioUrl ?? null,
+        atmosphereAudioDurationMs: args.show.atmosphereAudio?.durationMs ?? null,
+        atmosphereMix: args.show.atmosphereMix,
+        studioLighting: args.show.studioLighting,
+        fallbackStudioAccentVariant: args.show.fallbackStudioAccentVariant,
+        renderContract: "signal-studio-dom-v2",
       },
     },
   };
@@ -154,6 +190,7 @@ export function buildCoffeeReplayManifestV1(args: {
     updatedAt?: string;
     botGroupIds?: string[];
     coffeeSeatBotIds?: Array<string | null>;
+    coffeePowerPlan?: { bots?: Record<string, unknown> } | null;
     messages: CoffeeReplayMessageInput[];
   };
   bots: readonly ReplayBotSnapshotInput[];
@@ -178,6 +215,9 @@ export function buildCoffeeReplayManifestV1(args: {
         glyph: bot?.glyph ?? null,
         seatIndex,
         visible: true,
+        metadata: {
+          powers: args.conversation.coffeePowerPlan?.bots?.[botId] ?? null,
+        },
       };
     }),
     {
@@ -206,7 +246,10 @@ export function buildCoffeeReplayManifestV1(args: {
       text: message.content,
       spokenText: voiceSpokenText(message.content),
       moodKey: message.moodKey ?? "neutral",
-      audible: message.coffeeObserverProjection?.audible !== false,
+      audible:
+        message.coffeeObserverProjection?.audible !== false &&
+        voiceSpokenText(message.content).length > 0 &&
+        message.content.trim() !== "...",
       visible: message.coffeeObserverProjection?.visible !== false,
       createdAt: message.createdAt,
       metadata: {

@@ -543,6 +543,22 @@ async function playPlanWithMedia(
     let settled = false;
     let started = false;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
+    const beginAudiblePlayback = () => {
+      if (started) return;
+      started = true;
+      const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+        BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+      progress = beginVoicePlaybackProgress(
+        lifecycle,
+        Math.round(plan.durationMs / playbackTempo),
+        () => audio.currentTime * 1000 / playbackTempo,
+        plan.alignment,
+      );
+      if (activeTimer !== null) {
+        window.clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+    };
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -565,26 +581,15 @@ async function playPlanWithMedia(
     audio.addEventListener("error", () => finish(new Error("Bottish audio could not play.")), {
       once: true,
     });
+    audio.addEventListener("playing", beginAudiblePlayback, { once: true });
+    const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+      BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+    audio.playbackRate = playbackTempo;
     activeTimer = window.setTimeout(() => {
       if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
     }, MEDIA_PLAY_START_TIMEOUT_MS);
     void audio.play().then(
-      () => {
-        started = true;
-        const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
-          BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
-        audio.playbackRate = playbackTempo;
-        progress = beginVoicePlaybackProgress(
-          lifecycle,
-          Math.round(plan.durationMs / playbackTempo),
-          () => audio.currentTime * 1000 / playbackTempo,
-          plan.alignment
-        );
-        if (activeTimer !== null) {
-          window.clearTimeout(activeTimer);
-          activeTimer = null;
-        }
-      },
+      () => undefined,
       (error: unknown) => finish(
         error instanceof Error ? error : new Error("Bottish audio could not play.")
       )
@@ -622,6 +627,7 @@ async function playPlan(
     stereoPan,
     lifecycle,
     alignment: plan.alignment,
+    compensateLifecycleForOutputLatency: true,
     isCurrent: () => expectedGeneration === generation,
   });
   if (!played) await playPlanWithMedia(plan, profile, expectedGeneration, lifecycle);
@@ -890,6 +896,28 @@ async function playHybridBytesWithMedia(
     let settled = false;
     let started = false;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
+    const beginAudiblePlayback = () => {
+      if (started) return;
+      started = true;
+      const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+        BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+      const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
+        ? Math.round(audio.duration * 1000 / playbackTempo)
+        : null;
+      if (durationMs) {
+        progress = beginVoicePlaybackProgress(
+          lifecycle,
+          durationMs,
+          () => audio.currentTime * 1000 / playbackTempo,
+        );
+      } else {
+        lifecycle?.onStart?.(null);
+      }
+      if (activeTimer !== null) {
+        window.clearTimeout(activeTimer);
+        activeTimer = null;
+      }
+    };
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -912,32 +940,15 @@ async function playHybridBytesWithMedia(
     audio.addEventListener("error", () => finish(new Error("Babble voice could not play.")), {
       once: true,
     });
+    audio.addEventListener("playing", beginAudiblePlayback, { once: true });
+    const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
+      BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
+    audio.playbackRate = playbackTempo;
     activeTimer = window.setTimeout(() => {
       if (!started) finish(new Error("Audio playback did not start. Check the browser tab's sound setting."));
     }, MEDIA_PLAY_START_TIMEOUT_MS);
     void audio.play().then(
-      () => {
-        started = true;
-        const playbackTempo = 1 + normalizeBotAudioVoiceProfileV1(profile).pace *
-          BOT_AUDIO_VOICE_PACE_RATE_DEPTH;
-        audio.playbackRate = playbackTempo;
-        const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
-          ? Math.round(audio.duration * 1000 / playbackTempo)
-          : null;
-        if (durationMs) {
-          progress = beginVoicePlaybackProgress(
-            lifecycle,
-            durationMs,
-            () => audio.currentTime * 1000 / playbackTempo,
-          );
-        } else {
-          lifecycle?.onStart?.(null);
-        }
-        if (activeTimer !== null) {
-          window.clearTimeout(activeTimer);
-          activeTimer = null;
-        }
-      },
+      () => undefined,
       (error: unknown) => finish(
         error instanceof Error ? error : new Error("Babble voice could not play.")
       )
@@ -979,6 +990,7 @@ async function playBabble(
     lifecycle,
     roboticPlan,
     cleanRoboticCarrier: true,
+    compensateLifecycleForOutputLatency: true,
     isCurrent: () => expectedGeneration === generation,
   });
   if (!played) {

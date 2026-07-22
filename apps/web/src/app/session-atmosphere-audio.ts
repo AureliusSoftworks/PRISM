@@ -228,8 +228,22 @@ export function sessionAmbientBotVocalizationTargetId(
 
 export interface SessionAtmosphereController {
   playCue(cue: SessionAtmosphereCue): void;
+  playFoley(
+    url: string,
+    options?: SessionAtmosphereFoleyPlaybackOptions,
+  ): boolean;
+  stopFoley(tag: string, fadeMs?: number): void;
   setMix(args: { volume: number; mix?: SessionAtmosphereMix }): void;
   stop(): void;
+}
+
+export interface SessionAtmosphereFoleyPlaybackOptions {
+  trim?: number;
+  playbackRate?: number;
+  lowCutHz?: number;
+  highCutHz?: number;
+  stereoPan?: number;
+  tag?: string;
 }
 
 interface SessionAtmosphereSourceLeveler {
@@ -241,6 +255,7 @@ interface SessionAtmosphereActiveSource {
   bus: SessionAtmosphereBus;
   trim: number;
   leveler: SessionAtmosphereSourceLeveler | null;
+  tag?: string;
 }
 
 interface SessionAtmosphereActiveLoop extends SessionAtmosphereActiveSource {
@@ -276,20 +291,49 @@ function levelSessionAtmosphereNode(
   bus: SessionAtmosphereBus,
   backgroundTone: SessionAtmosphereBackgroundTone,
   foleyRoomAcoustics?: RoomAcousticsSend,
+  oneShotOptions?: Pick<
+    SessionAtmosphereFoleyPlaybackOptions,
+    "lowCutHz" | "highCutHz" | "stereoPan"
+  >,
 ): SessionAtmosphereSourceLeveler {
   if (!normalizeLoop) {
     const busGain = context.createGain();
-    source.connect(busGain);
+    const toneNodes: AudioNode[] = [];
+    let toneOutput = source;
+    if ((oneShotOptions?.lowCutHz ?? 0) > 0) {
+      const lowCut = context.createBiquadFilter();
+      lowCut.type = "highpass";
+      lowCut.frequency.value = Math.max(20, oneShotOptions!.lowCutHz!);
+      lowCut.Q.value = 0.7;
+      toneOutput.connect(lowCut);
+      toneOutput = lowCut;
+      toneNodes.push(lowCut);
+    }
+    if ((oneShotOptions?.highCutHz ?? 0) > 0) {
+      const highCut = context.createBiquadFilter();
+      highCut.type = "lowpass";
+      highCut.frequency.value = Math.max(
+        (oneShotOptions?.lowCutHz ?? 20) + 100,
+        oneShotOptions!.highCutHz!,
+      );
+      highCut.Q.value = 0.7;
+      toneOutput.connect(highCut);
+      toneOutput = highCut;
+      toneNodes.push(highCut);
+    }
+    toneOutput.connect(busGain);
     const roomConnection = connectRoomAcoustics({
       context,
       input: busGain,
       destination: context.destination,
       send: bus === "foley" ? foleyRoomAcoustics : null,
+      stereoPan: oneShotOptions?.stereoPan,
     });
     return {
       busGain,
       disconnect(preserveRoomTail = false) {
         source.disconnect();
+        for (const node of toneNodes) node.disconnect();
         if (preserveRoomTail) roomConnection.release();
         else roomConnection.disconnect();
       },
@@ -352,6 +396,10 @@ function levelSessionAtmosphereSource(
   bus: SessionAtmosphereBus,
   backgroundTone: SessionAtmosphereBackgroundTone,
   foleyRoomAcoustics?: RoomAcousticsSend,
+  oneShotOptions?: Pick<
+    SessionAtmosphereFoleyPlaybackOptions,
+    "lowCutHz" | "highCutHz" | "stereoPan"
+  >,
 ): SessionAtmosphereSourceLeveler | null {
   const context = sessionAtmosphereContext();
   if (!context) return null;
@@ -363,6 +411,7 @@ function levelSessionAtmosphereSource(
       bus,
       backgroundTone,
       foleyRoomAcoustics,
+      oneShotOptions,
     );
   } catch {
     // Keep ordinary HTMLAudio playback as a compatibility fallback.
@@ -584,16 +633,23 @@ export function startSessionAtmosphere(args: {
   const play = (
     url: string,
     bus: SessionAtmosphereBus,
-    trim = 1,
-    loop = false,
+    options: SessionAtmosphereFoleyPlaybackOptions & { loop?: boolean } = {},
   ): HTMLAudioElement | null => {
     if (stopped || typeof Audio === "undefined") return null;
+    const trim = Math.max(0, options.trim ?? 1);
+    const loop = options.loop === true;
     const audio = new Audio(url);
     audio.preload = "auto";
     audio.loop = loop;
+    audio.playbackRate = Math.max(
+      0.85,
+      Math.min(1.15, options.playbackRate ?? 1),
+    );
+    audio.preservesPitch = false;
     const source = {
       bus,
       trim,
+      ...(options.tag ? { tag: options.tag } : {}),
       leveler:
         loop || args.allowMixBoost
           ? levelSessionAtmosphereSource(
@@ -602,6 +658,7 @@ export function startSessionAtmosphere(args: {
               bus,
               args.backgroundTone ?? "neutral",
               args.foleyRoomAcoustics,
+              options,
             )
           : null,
     } satisfies SessionAtmosphereActiveSource;
@@ -631,7 +688,7 @@ export function startSessionAtmosphere(args: {
       typeof context.decodeAudioData !== "function" ||
       typeof fetch !== "function"
     ) {
-      play(url, bus, trim, true);
+      play(url, bus, { trim, loop: true });
       return;
     }
 
@@ -681,7 +738,7 @@ export function startSessionAtmosphere(args: {
           activeLoop.leveler?.disconnect();
         }
         if (!stopped && !loadController.signal.aborted) {
-          play(url, bus, trim, true);
+          play(url, bus, { trim, loop: true });
         }
       } finally {
         pendingLoopLoads.delete(loadController);
@@ -706,7 +763,7 @@ export function startSessionAtmosphere(args: {
         play(
           sessionAmbientFoleyUrl(args.seed, index),
           "foley",
-          Math.max(0, ambientFoleyProfile.trim),
+          { trim: Math.max(0, ambientFoleyProfile.trim) },
         );
         foleyIndex += 1;
         scheduleFoley();
@@ -743,7 +800,7 @@ export function startSessionAtmosphere(args: {
           play(
             cue.url,
             "foley",
-            Math.max(0, ambientBotVocalizationProfile.trim),
+            { trim: Math.max(0, ambientBotVocalizationProfile.trim) },
           );
         }
         botVocalizationIndex += 1;
@@ -763,8 +820,37 @@ export function startSessionAtmosphere(args: {
       play(
         SESSION_FOLEY_URLS[cue],
         "foley",
-        cue === "coffeeSip" ? 1.25 : 1.0625,
+        { trim: cue === "coffeeSip" ? 1.25 : 1.0625 },
       );
+    },
+    playFoley(url, options = {}) {
+      return play(url, "foley", options) !== null;
+    },
+    stopFoley(tag, fadeMs = 180) {
+      const normalizedTag = tag.trim();
+      if (!normalizedTag) return;
+      for (const [audio, source] of [...activeAudio]) {
+        if (source.tag !== normalizedTag) continue;
+        const initialLevel = source.leveler
+          ? source.leveler.busGain.gain.value
+          : audio.volume;
+        if (audio.paused || fadeMs <= 0 || typeof window === "undefined") {
+          audio.pause();
+          releaseAudio(audio, true);
+          continue;
+        }
+        const startedAt = Date.now();
+        const timer = window.setInterval(() => {
+          const progress = Math.min(1, (Date.now() - startedAt) / fadeMs);
+          const level = initialLevel * (1 - progress);
+          if (source.leveler) source.leveler.busGain.gain.value = level;
+          else audio.volume = clampAudioLevel(level);
+          if (progress < 1) return;
+          window.clearInterval(timer);
+          audio.pause();
+          releaseAudio(audio, true);
+        }, 20);
+      }
     },
     setMix(next) {
       volume = clampAudioLevel(next.volume);

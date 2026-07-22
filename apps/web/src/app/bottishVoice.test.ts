@@ -566,6 +566,7 @@ describe("Bottish speech plan", () => {
       const media = mediaInstances[0];
       assert.ok(media);
       assert.equal(media.playbackRate, 1.24);
+      media.listeners.get("playing")?.();
       assert.deepEqual(starts, [1_613]);
       media.currentTime = 0.62;
       assert.equal(typeof frameCallback, "function");

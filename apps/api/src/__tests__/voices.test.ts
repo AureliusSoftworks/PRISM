@@ -13,12 +13,40 @@ import {
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
   resolveElevenLabsVoiceId,
+  resolveFrozenReplayVoiceEngine,
   resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
   validateVoiceSynthesisRequest,
 } from "../voices.ts";
 
 describe("voice Phase 1 boundary", () => {
+  it("regenerates replay speech only with the frozen resolved engine", () => {
+    assert.equal(
+      resolveFrozenReplayVoiceEngine({
+        privacyMode: "local",
+        requestedEngine: "elevenlabs",
+        resolvedEngine: "builtin-local-fallback",
+      }),
+      "builtin",
+    );
+    assert.equal(
+      resolveFrozenReplayVoiceEngine({
+        privacyMode: "local",
+        requestedEngine: "elevenlabs",
+        resolvedEngine: null,
+      }),
+      null,
+    );
+    assert.equal(
+      resolveFrozenReplayVoiceEngine({
+        privacyMode: "online",
+        requestedEngine: "builtin",
+        resolvedEngine: "elevenlabs",
+      }),
+      "elevenlabs",
+    );
+  });
+
   it("advertises the packaged local neural voice model", () => {
     assert.equal(VOICE_CAPABILITIES.builtinEnglish.model, "kokoro-82m-q8");
     assert.deepEqual(VOICE_CAPABILITIES.modes, ["mute", "english", "babble", "bottish"]);

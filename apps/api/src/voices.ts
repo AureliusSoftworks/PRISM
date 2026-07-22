@@ -726,6 +726,22 @@ export function resolveVoiceSynthesisExplicitOnlineContext(args: {
   return args.explicitVoicePreview && !args.hasMessageId;
 }
 
+export function resolveFrozenReplayVoiceEngine(args: {
+  privacyMode: "local" | "online" | "mixed";
+  requestedEngine: EnglishVoiceEngine | null;
+  resolvedEngine: string | null;
+}): EnglishVoiceEngine | null {
+  const resolved = args.resolvedEngine?.trim().toLowerCase() ?? "";
+  const engine: EnglishVoiceEngine = resolved.includes("builtin")
+    ? "builtin"
+    : resolved === "elevenlabs"
+      ? "elevenlabs"
+      : args.requestedEngine ?? "builtin";
+  return args.privacyMode === "local" && engine === "elevenlabs"
+    ? null
+    : engine;
+}
+
 export function resolveVoiceSynthesisBoundary(args: VoiceSynthesisRequest & {
   persistedMessageProvider?: string | null;
 }):

@@ -30,6 +30,7 @@ function activeSingleAssetJob(
       identityMs: null,
       nightStudioMs: null,
       dayRelightMs: null,
+      studioLightingMs: null,
       logoMs: null,
       downloadMs: 0,
       localPersistenceMs: 0,
@@ -70,7 +71,7 @@ test("Studio artwork progress includes its automatic receiver-map pass", () => {
   assert.equal(signalArtworkAssetLabel("studio-lighting"), "Studio lighting");
   assert.equal(
     signalArtworkJobHeadline(lighting),
-    "Building the Studio light map",
+    "Generating surface-aware Studio lighting",
   );
 
   const studio = activeSingleAssetJob("day-studio");
@@ -89,5 +90,15 @@ test("Studio artwork progress includes its automatic receiver-map pass", () => {
   assert.equal(
     signalArtworkJobCompletionNotice(studio),
     "The refreshed Light studio and its Studio lighting are live.",
+  );
+});
+
+test("a waiting Studio lighting refresh names the shared image queue", () => {
+  const lighting = activeSingleAssetJob("studio-lighting");
+  lighting.currentAsset = null;
+  lighting.assets[0]!.status = "waiting";
+  assert.equal(
+    signalArtworkJobHeadline(lighting),
+    "Queued for image generation",
   );
 });

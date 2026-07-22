@@ -30,8 +30,11 @@ function assetStatusLabel(
   asset: SignalArtworkJobSnapshot["assets"][number],
 ): string {
   if (asset.status === "waiting-for-night") return "Waiting for Dark studio";
+  if (asset.kind === "studio-lighting" && asset.status === "waiting") {
+    return "Waiting for the image queue";
+  }
   if (asset.kind === "studio-lighting" && asset.status === "generating") {
-    return "Reading the Studio pair";
+    return "Mapping real Studio surfaces";
   }
   if (asset.status === "attaching") return "Saving to show";
   return asset.status.replaceAll("-", " ");

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { BOTCAST_DEFAULT_STUDIO_LAYOUT } from "@localai/shared";
 import {
+  SIGNAL_STUDIO_ARTWORK_OVERSCAN_PERCENT,
   SIGNAL_STUDIO_VOICE_MAX_PAN,
+  signalStudioOverscanCoordinate,
   signalStudioPlacementStyle,
   signalStudioVoicePan,
 } from "./signalStudioPlacement.ts";
@@ -29,6 +31,13 @@ describe("Signal studio placement parity", () => {
       signalStudioPlacementStyle(undefined, "hostBot"),
       signalStudioPlacementStyle(BOTCAST_DEFAULT_STUDIO_LAYOUT, "hostBot"),
     );
+  });
+
+  it("projects light emitters into the same overscanned canvas as the Studio artwork", () => {
+    assert.equal(SIGNAL_STUDIO_ARTWORK_OVERSCAN_PERCENT, 5);
+    assert.equal(signalStudioOverscanCoordinate(0), 4.5455);
+    assert.equal(signalStudioOverscanCoordinate(50), 50);
+    assert.equal(signalStudioOverscanCoordinate(100), 95.4545);
   });
 
   it("stages voices subtly from their saved seats", () => {

@@ -677,6 +677,19 @@ describe("Zen live presence CSS", () => {
     assert.match(featurePartRule, /overflow:\s*visible\s*;/);
     assert.match(featurePartRule, /text-align:\s*center\s*;/);
 
+    const fullAvatarFaceEmissionPartRule = ruleForSelectorNeedlesWithBody(
+      [
+        ".zenLiveBotPresenceFaceGlyph",
+        "[data-coffee-plate-emoji-part]",
+      ],
+      "--zen-live-bot-idle-face-glow-filter:",
+    );
+    assert.match(fullAvatarFaceEmissionPartRule, /filter:\s*none\s*;/);
+    assert.doesNotMatch(
+      fullAvatarFaceEmissionPartRule,
+      /filter:\s*var\(--zen-live-bot-idle-face-glow-filter\)/,
+    );
+
     const featureGeometryDebugRule = ruleForSelectorNeedlesWithBody(
       ['.zenLiveBotPresenceFaceEmissionMask[data-crt-debug="feature-geometry"]'],
       "--crt-glyph-beam-softness"
@@ -699,6 +712,10 @@ describe("Zen live presence CSS", () => {
     assert.match(
       glyphBloomRule,
       /mix-blend-mode:\s*var\(--crt-face-glow-blend-mode,\s*screen\)\s*;/
+    );
+    assert.match(
+      glyphBloomRule,
+      /filter:\s*blur\(var\(--crt-glyph-beam-softness\)\) var\(--crt-face-glow-filter\)\s*;/
     );
 
     const glyphConvergenceRule = ruleForSelectorNeedlesWithBody(
@@ -1473,7 +1490,7 @@ describe("Zen live presence CSS", () => {
     assert.match(talkingGlyphPartRule, /--crt-bloom-wide-radius:\s*12px\s*;/);
     assert.match(talkingGlyphPartRule, /opacity:\s*1\s*;/);
     assert.match(talkingGlyphPartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
-    assert.match(talkingGlyphPartRule, /filter:\s*var\(--crt-face-glow-filter\)\s*;/);
+    assert.match(talkingGlyphPartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(talkingGlyphPartRule, /animation:/);
 
     const talkingGlyphGlowRule = ruleForNormalizedSelector(
@@ -1792,7 +1809,7 @@ describe("Zen live presence CSS", () => {
       talkingFacePartRule,
       /rgba\(255,\s*63,\s*111,\s*calc\(0\.34 \* var\(--crt-prism-face-rim-strength-scale,\s*1\)\)\)/
     );
-    assert.match(talkingFacePartRule, /filter:\s*var\(--crt-face-glow-filter\)\s*;/);
+    assert.match(talkingFacePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(talkingFacePartRule, /animation:/);
     const talkingFaceGlowRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"] .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part] [data-crt-glyph-layer="true"]::before'
