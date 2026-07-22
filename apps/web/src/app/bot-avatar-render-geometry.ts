@@ -65,3 +65,18 @@ export function botAvatarDetailsFacingOffsetY(
     ? "-2.34375%"
     : "0%";
 }
+
+/**
+ * Signal's scaled Align-stage preview rasterizes authored ink a touch below
+ * the same avatar in Studio and live surfaces. Lift that preview by one pixel
+ * on the authored 128px canvas without changing the saved stage coordinate.
+ */
+export function botAvatarDetailsSignalFacingOffsetY(
+  faceScaleY: string | number,
+  surface: "dashboard" | "stage" | "alignment",
+): string {
+  const facingOffset = botAvatarDetailsFacingOffsetY(faceScaleY);
+  return surface === "alignment"
+    ? `calc(${facingOffset} - 0.78125%)`
+    : facingOffset;
+}

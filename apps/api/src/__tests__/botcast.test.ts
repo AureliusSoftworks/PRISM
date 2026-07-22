@@ -7535,6 +7535,115 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("repairs unusable show identity output with a bounded retry", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "I can help with that show.",
+        JSON.stringify({
+          name: "The Vale Index",
+          premise:
+            "Precise conversations that inventory the stories culture tells itself.",
+          studioIdentity:
+            "A forensic archive organized around annotated cultural ephemera, pinned redactions, specimen drawers, a magnifying lens, index cards, balance weights, and one severe sculptural clock.",
+          logoThesis:
+            "An evidence tag has one clipped corner become a transmission pulse.",
+          dashboardBlurbs: Array.from(
+            { length: 24 },
+            (_, index) => `Cultural alibi ${index + 1}: indexed.`,
+          ),
+        }),
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowIdentity(
+        db,
+        "user-1",
+        show.id,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(result.attempts, 2);
+      assert.equal(result.recovered, true);
+      assert.equal(result.failureReason, null);
+      assert.equal(captures.length, 2);
+      assert.match(
+        captures[1]?.[0]?.content ?? "",
+        /previous response could not be used.*return only the complete JSON object/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stops after a non-retryable show identity provider error and classifies it", async () => {
+    const db = fixture();
+    let attempts = 0;
+    const provider: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        attempts += 1;
+        throw new Error(
+          "OpenAI request failed (404): model does not exist.",
+        );
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowIdentity(db, "user-1", show.id, {
+        preferredProvider: "openai",
+        preferredOnlineModel: "gpt-missing",
+        providerFactory: (() => provider) as typeof selectProvider,
+      });
+
+      assert.equal(result.generated, false);
+      assert.equal(result.attempts, 1);
+      assert.equal(result.recovered, false);
+      assert.equal(result.failureReason, "provider_error");
+      assert.equal(attempts, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("classifies repeated empty show identity responses as invalid output", async () => {
+    const db = fixture();
+    let attempts = 0;
+    const provider: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        attempts += 1;
+        throw new Error("OpenAI returned an empty response.");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowIdentity(db, "user-1", show.id, {
+        preferredProvider: "openai",
+        preferredOnlineModel: "gpt-5.6-sol",
+        providerFactory: (() => provider) as typeof selectProvider,
+      });
+
+      assert.equal(result.generated, false);
+      assert.equal(result.attempts, 3);
+      assert.equal(result.recovered, false);
+      assert.equal(result.failureReason, "invalid_output");
+      assert.equal(attempts, 3);
+    } finally {
+      db.close();
+    }
+  });
+
   it("generates a muted host's show identity without inventing anything they say", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];

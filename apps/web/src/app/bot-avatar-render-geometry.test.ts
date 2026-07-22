@@ -7,6 +7,7 @@ import {
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
   botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
+  botAvatarDetailsSignalFacingOffsetY,
 } from "./bot-avatar-render-geometry.ts";
 
 describe("Avatar Details face registration", () => {
@@ -47,5 +48,23 @@ describe("botAvatarDetailsFacingOffsetY", () => {
     assert.equal(botAvatarDetailsFacingOffsetY(-1), "0%");
     assert.equal(botAvatarDetailsFacingOffsetY("1"), "-2.34375%");
     assert.equal(botAvatarDetailsFacingOffsetY(1), "-2.34375%");
+  });
+});
+
+describe("botAvatarDetailsSignalFacingOffsetY", () => {
+  it("lifts only Signal's Align-stage ink by one authored pixel", () => {
+    assert.equal(
+      botAvatarDetailsSignalFacingOffsetY(-1, "alignment"),
+      "calc(0% - 0.78125%)",
+    );
+    assert.equal(
+      botAvatarDetailsSignalFacingOffsetY(1, "alignment"),
+      "calc(-2.34375% - 0.78125%)",
+    );
+    assert.equal(botAvatarDetailsSignalFacingOffsetY(-1, "stage"), "0%");
+    assert.equal(
+      botAvatarDetailsSignalFacingOffsetY(1, "dashboard"),
+      "-2.34375%",
+    );
   });
 });

@@ -510,6 +510,10 @@ describe("Avatar Details shared mannequin rendering", () => {
       pageSource,
       /\["--avatar-details-facing-offset-y" as string\]:\s*botAvatarDetailsFacingOffsetY\(coffeePlateFaceScaleY\)/,
     );
+    assert.match(
+      pageSource,
+      /botAvatarDetailsSignalFacingOffsetY\(\s*faceScaleY,\s*avatarState\.surface,\s*\)/,
+    );
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
     assert.match(
       pageSource,

@@ -11,6 +11,7 @@ import {
 import {
   BOT_FACE_BLINK_BAR_VALUES,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
@@ -363,6 +364,10 @@ export function CoffeeSeatPlateEmoji({
   const customBlinkBarActive = !BOT_FACE_BLINK_BAR_VALUES.some(
     (blinkBar) => blinkBar === normalizedFaceBlinkBar,
   );
+  const faceBlinkRotationCssDeg =
+    customBlinkBarActive && normalizedFaceEyeCount === 2
+      ? DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG
+      : 0;
   const forcedBlinkPhase =
     forceBlinkPhase === "open" || forceBlinkPhase === "closed"
       ? forceBlinkPhase
@@ -704,6 +709,7 @@ export function CoffeeSeatPlateEmoji({
               ? undefined
               : `${faceEyeRotationCssDeg}deg`,
           ["--bot-face-blink-scale" as string]: normalizedFaceBlinkScale,
+          ["--bot-face-blink-rotation" as string]: `${faceBlinkRotationCssDeg}deg`,
           ["--bot-face-blink-offset-x" as string]:
             faceBlinkOffset === null ? undefined : `${faceBlinkOffset.x}em`,
           ["--bot-face-blink-offset-y" as string]:

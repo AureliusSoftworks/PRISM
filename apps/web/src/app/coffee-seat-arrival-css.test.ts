@@ -333,6 +333,14 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
+      /const faceBlinkRotationCssDeg =\s+customBlinkBarActive && normalizedFaceEyeCount === 2\s+\? DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG\s+: 0;/
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /\["--bot-face-blink-rotation" as string\]: `\$\{faceBlinkRotationCssDeg\}deg`/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
       /const normalizedThinkingFrames =\s+normalizeBotFaceThinkingFrames\(faceThinkingFrames\) \?\?\s+DEFAULT_BOT_FACE_THINKING_FRAMES;/
     );
     assert.match(
@@ -545,6 +553,14 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(blinkEmissionRule, /--crt-glyph-core-blue-rgb:\s*255 255 255\s*;/);
     assert.match(blinkEmissionRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.24\s*;/);
     assert.match(blinkEmissionRule, /--crt-glyph-phosphor-bright-strength:\s*0\.09\s*;/);
+    assert.match(
+      blinkEmissionRule,
+      /--bot-face-custom-glyph-base-rotation:\s*var\(--bot-face-blink-rotation,\s*0deg\)\s*;/,
+    );
+    assert.match(
+      blinkEmissionRule,
+      /transform:\s*rotate\(var\(--bot-face-blink-rotation,\s*0deg\)\)\s*;/,
+    );
   });
 
   it("maps bot face inflation to weight and stroke while face glow stays live through talking", () => {

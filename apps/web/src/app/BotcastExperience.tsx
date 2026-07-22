@@ -4096,6 +4096,9 @@ export function BotcastExperience({
           const identity = await request<{
             show: BotcastShow;
             generated: boolean;
+            attempts: number;
+            recovered: boolean;
+            failureReason: "provider_error" | "invalid_output" | null;
           }>(`/api/botcast/shows/${encodeURIComponent(sourceShow.id)}/brand`, {
             method: "POST",
             body: JSON.stringify({
@@ -4109,11 +4112,15 @@ export function BotcastExperience({
             replaceShow(identity.show);
             setShowNameDraft(identity.show.name);
           } else {
-            recoverableFailures.push("the text identity");
+            recoverableFailures.push(
+              identity.failureReason === "provider_error"
+                ? "the text identity because the selected model was unavailable"
+                : `the text identity because the model returned unusable text across ${identity.attempts} attempts`,
+            );
           }
         } catch (identityError) {
           if (isAbortError(identityError)) throw identityError;
-          recoverableFailures.push("the text identity");
+          recoverableFailures.push("the text identity because its request failed");
         }
       }
 

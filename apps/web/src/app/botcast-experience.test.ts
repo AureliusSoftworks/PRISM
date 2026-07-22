@@ -1720,6 +1720,8 @@ describe("Signal experience shell", () => {
     assert.match(source, /preserveArtwork: true/u);
     assert.match(source, /Writing the missing text identity/u);
     assert.match(source, /setShowNameDraft\(identity\.show\.name\)/u);
+    assert.match(source, /identity\.failureReason === "provider_error"/u);
+    assert.match(source, /model returned unusable text across/u);
     assert.match(
       source,
       /\/api\/botcast\/shows\/\$\{encodeURIComponent\(sourceShow\.id\)\}\/artwork-job/u,

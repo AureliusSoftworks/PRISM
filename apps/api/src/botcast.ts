@@ -4503,78 +4503,130 @@ export async function generateBotcastShowIdentity(
   userId: string,
   showId: string,
   generation: BotcastGenerationOptions,
-): Promise<{ show: BotcastShow; generated: boolean }> {
+): Promise<{
+  show: BotcastShow;
+  generated: boolean;
+  attempts: number;
+  recovered: boolean;
+  failureReason: "provider_error" | "invalid_output" | null;
+}> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
   const hostIsMuted = botPowerIsMutedV1(host.powers);
   const hostEchoesAddressedSpeech =
     !hostIsMuted && botPowerEchoesAddressedSpeechV1(host.powers);
+  let attempts = 0;
+  let providerErrors = 0;
   try {
     const selected = generationProvider(generation);
-    const raw = await selected.provider.generateResponse(
-      [
-        {
-          role: "system",
-          content: [
-            "You are naming a premium podcast show around its host's singular voice.",
-            "Return one JSON object with exactly five fields: string fields name, premise, studioIdentity, and logoThesis, plus a string array named dashboardBlurbs.",
-            ...BOTCAST_SHOW_NAME_DIRECTIONS,
-            "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
-            "Treat the supplied origin inspiration as editable creative direction: preserve its core idea while sharpening it into that promise. Never erase the player's authorship with an unrelated premise.",
-            "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
-            "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
-            "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
-            "logoThesis is a compact, provider-safe persona design brief, not merely a logo concept. Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 350-650 characters total.",
-            "Persona fingerprint names the host's distinctive worldview, obsessions, social energy, contradictions, and creative or intellectual posture. Emblem chooses one familiar, nameable subject or action rooted in that identity and transforms only one part of it with a subtle broadcast behavior. Art direction turns the persona into specific material character, shape behavior, balance, edge language, and emotional temperature.",
-            "Make enough choices persona-specific that the mark would feel wrong for a different host even after a palette swap. The persona must control the symbol; broadcast language stays subordinate. State what a viewer sees first and what is happening to it. Keep the subject recognizable at thumbnail size, and avoid briefs made only from abstract cuts, intervals, planes, contours, voids, or geometry.",
-            "The logo should communicate its premise before anyone reads the show name and make the host's identity unmistakable in how it does so. Favor a simple visual sentence such as an evidence tag whose clipped corner becomes a transmission pulse, then specify why its material, posture, and tension belong to this persona rather than to a generic podcast.",
-            "logoThesis must use no host or show name, portrait, character likeness, signature prop, lettering, initials, existing insignia, or recognizable entertainment-property imagery. Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
-            ...(hostIsMuted
-              ? BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS
-              : hostEchoesAddressedSpeech
-                ? BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS
-                : BOTCAST_DASHBOARD_BLURB_DIRECTIONS),
-          ].join(" "),
-        },
-        {
-          role: "user",
-          content: `Host: ${host.name}\nOrigin inspiration: ${current.premise}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
-        },
-      ],
+    const messages = (retrying: boolean): ProviderMessage[] => [
       {
-        ...(selected.model ? { model: selected.model } : {}),
-        temperature: 0.82,
-        ...botcastBookingGenerationOptions(
-          selected.providerName,
-          selected.model ?? defaultModelIdForProvider(selected.providerName),
-          1_200,
-        ),
-        jsonMode: true,
-        usagePurpose: "botcast_brand",
+        role: "system",
+        content: [
+          "You are naming a premium podcast show around its host's singular voice.",
+          "Return one JSON object with exactly five fields: string fields name, premise, studioIdentity, and logoThesis, plus a string array named dashboardBlurbs.",
+          ...BOTCAST_SHOW_NAME_DIRECTIONS,
+          "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
+          "Treat the supplied origin inspiration as editable creative direction: preserve its core idea while sharpening it into that promise. Never erase the player's authorship with an unrelated premise.",
+          "studioIdentity is a compact persona-first set bible, not a mood board: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete artifacts whose subjects and arrangement reveal this host.",
+          "The room should be recognizable as the host's world without their name, portrait, logo, or readable text. Generic books, plants, luxury chairs, acoustic panels, and podcast gear do not count as identity details unless made meaningfully specific.",
+          "Do not specify lighting or time of day in studioIdentity; the same physical set will be rendered in both daylight and nighttime variants.",
+          "logoThesis is a compact, provider-safe persona design brief, not merely a logo concept. Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 350-650 characters total.",
+          "Persona fingerprint names the host's distinctive worldview, obsessions, social energy, contradictions, and creative or intellectual posture. Emblem chooses one familiar, nameable subject or action rooted in that identity and transforms only one part of it with a subtle broadcast behavior. Art direction turns the persona into specific material character, shape behavior, balance, edge language, and emotional temperature.",
+          "Make enough choices persona-specific that the mark would feel wrong for a different host even after a palette swap. The persona must control the symbol; broadcast language stays subordinate. State what a viewer sees first and what is happening to it. Keep the subject recognizable at thumbnail size, and avoid briefs made only from abstract cuts, intervals, planes, contours, voids, or geometry.",
+          "The logo should communicate its premise before anyone reads the show name and make the host's identity unmistakable in how it does so. Favor a simple visual sentence such as an evidence tag whose clipped corner becomes a transmission pulse, then specify why its material, posture, and tension belong to this persona rather than to a generic podcast.",
+          "logoThesis must use no host or show name, portrait, character likeness, signature prop, lettering, initials, existing insignia, or recognizable entertainment-property imagery. Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
+          ...(hostIsMuted
+            ? BOTCAST_MUTED_DASHBOARD_BLURB_DIRECTIONS
+            : hostEchoesAddressedSpeech
+              ? BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS
+              : BOTCAST_DASHBOARD_BLURB_DIRECTIONS),
+          ...(retrying
+            ? [
+                "The previous response could not be used. Repair the contract now: return only the complete JSON object, with no prose or code fence, and do not omit name or premise.",
+              ]
+            : []),
+        ].join(" "),
       },
-    );
-    const identity = parseGeneratedShowIdentity(
-      raw,
-      host.name,
-      hostEchoesAddressedSpeech,
-    );
-    if (!identity) return { show: current, generated: false };
+      {
+        role: "user",
+        content: `Host: ${host.name}\nOrigin inspiration: ${current.premise}\nHost persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+      },
+    ];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      attempts = attempt + 1;
+      let raw: string;
+      try {
+        raw = await selected.provider.generateResponse(
+          messages(attempt > 0),
+          {
+            ...(selected.model ? { model: selected.model } : {}),
+            temperature: Math.max(0.68, 0.82 - attempt * 0.07),
+            ...botcastBookingGenerationOptions(
+              selected.providerName,
+              selected.model ?? defaultModelIdForProvider(selected.providerName),
+              1_200,
+            ),
+            jsonMode: true,
+            usagePurpose: "botcast_brand",
+          },
+        );
+      } catch (error) {
+        const emptyResponse = botcastProviderReturnedEmptyResponse(
+          error,
+          selected.providerName,
+        );
+        if (!emptyResponse) {
+          providerErrors += 1;
+        }
+        if (
+          !emptyResponse &&
+          !signalOnlineProviderFailureIsRetryable(error, false)
+        ) {
+          break;
+        }
+        continue;
+      }
+      const identity = parseGeneratedShowIdentity(
+        raw,
+        host.name,
+        hostEchoesAddressedSpeech,
+      );
+      if (!identity) continue;
+      return {
+        show: updateBotcastShow(db, userId, showId, {
+          ...identity,
+          ...(hostIsMuted
+            ? { dashboardBlurbs: botcastCanonicalSilentHostLines() }
+            : hostEchoesAddressedSpeech
+              ? { dashboardBlurbs: botcastEchoHostLines(identity.dashboardBlurbs) }
+              : {}),
+          ...(generation.preserveArtwork
+            ? {}
+            : { regenerateAtmosphere: true, regenerateLogo: true }),
+        }),
+        generated: true,
+        attempts,
+        recovered: attempt > 0,
+        failureReason: null,
+      };
+    }
     return {
-      show: updateBotcastShow(db, userId, showId, {
-        ...identity,
-        ...(hostIsMuted
-          ? { dashboardBlurbs: botcastCanonicalSilentHostLines() }
-          : hostEchoesAddressedSpeech
-            ? { dashboardBlurbs: botcastEchoHostLines(identity.dashboardBlurbs) }
-          : {}),
-        ...(generation.preserveArtwork
-          ? {}
-          : { regenerateAtmosphere: true, regenerateLogo: true }),
-      }),
-      generated: true,
+      show: current,
+      generated: false,
+      attempts,
+      recovered: false,
+      failureReason:
+        providerErrors === attempts ? "provider_error" : "invalid_output",
     };
   } catch {
-    return { show: current, generated: false };
+    return {
+      show: current,
+      generated: false,
+      attempts,
+      recovered: false,
+      failureReason: "provider_error",
+    };
   }
 }
 

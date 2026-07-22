@@ -65500,8 +65500,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   }
 }
 
-/* Blink bars replace the authored eye glyph. They stay upright and still even
-   when the open-eye glyph has rotation or a custom animation. */
+/* Blink bars replace the authored eye glyph. Built-ins stay upright; a custom
+   glyph on paired eyes follows the same -90deg rule as the generated eye pair. */
 :is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
   [data-coffee-plate-emoji-part="eyes"][data-coffee-plate-emoji-blink-glyph="true"]
   > [data-crt-glyph-layer="true"] {
@@ -65510,9 +65510,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --crt-glyph-core-blue-rgb: 255 255 255;
   --crt-glyph-phosphor-midtone-strength: 0.24;
   --crt-glyph-phosphor-bright-strength: 0.09;
-  --bot-face-custom-glyph-base-rotation: 0deg;
+  --bot-face-custom-glyph-base-rotation: var(
+    --bot-face-blink-rotation,
+    0deg
+  );
   animation: none;
-  transform: rotate(0deg);
+  transform: rotate(var(--bot-face-blink-rotation, 0deg));
 }
 
 @media (prefers-reduced-motion: reduce) {
