@@ -101,6 +101,48 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(pageSource, /previewMode !== "bottish"/);
   });
 
+  it("unlocks every voice preview before yielding the click gesture", () => {
+    const editorPreview = pageSource.slice(
+      pageSource.indexOf("const previewVoice = async"),
+      pageSource.indexOf("const randomizeVoice ="),
+    );
+    const selectedPreview = pageSource.slice(
+      pageSource.indexOf("async function previewSelectedVoice"),
+      pageSource.indexOf("async function playBotHubVoicePreview"),
+    );
+    const hubPreview = pageSource.slice(
+      pageSource.indexOf("async function playBotHubVoicePreview"),
+      pageSource.indexOf("async function previewSelectedBotVoice"),
+    );
+    const regeneratePreview = pageSource.slice(
+      pageSource.indexOf("async function regenerateBotHubAudioSample"),
+      pageSource.indexOf("async function loadElevenLabsVoiceCatalog"),
+    );
+
+    for (const [label, source, firstYield] of [
+      ["Avatar Studio", editorPreview, "await resolvePreviewText()"],
+      ["shared preview", selectedPreview, "await enqueueRobotVoiceMode("],
+      ["bot hub", hubPreview, "await resolveBotHubVoicePreviewText(bot)"],
+      ["regenerated sample", regeneratePreview, "await api("],
+    ] as const) {
+      const primeIndex = source.indexOf(
+        "primeVoiceModePlaybackFromUserGesture(",
+      );
+      const yieldIndex = source.indexOf(firstYield);
+      assert.ok(primeIndex >= 0, `${label} should authorize browser audio`);
+      assert.ok(yieldIndex >= 0, `${label} should contain its expected async work`);
+      assert.ok(
+        primeIndex < yieldIndex,
+        `${label} must authorize browser audio before async work`,
+      );
+    }
+
+    assert.match(
+      selectedPreview,
+      /stopVoicePlaybackPreservingPreparedMode\(previewVoiceMode\)/,
+    );
+  });
+
   it("uses profile-owned identities for randomization and session-cached previews", () => {
     assert.doesNotMatch(pageSource, /System Classic default voice/);
     assert.doesNotMatch(pageSource, /ElevenLabs default voice/);
