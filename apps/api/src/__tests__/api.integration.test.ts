@@ -1465,6 +1465,24 @@ describe("API request integration", () => {
     assert.equal(typeof payload.value, "string");
     assert.deepEqual(providerFactoryCalls.slice(providerCallsBefore), ["local"]);
 
+    const bookingResponse = await client.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,
+      jsonInit({
+        guestBotId: "signal-suggestion-guest",
+        field: "booking",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-must-not-run",
+      }),
+    );
+    const bookingPayload = await json(bookingResponse);
+    assert.equal(bookingResponse.status, 200, JSON.stringify(bookingPayload));
+    assert.equal(bookingPayload.ok, true);
+    assert.equal(bookingPayload.generated, true);
+    assert.equal(typeof bookingPayload.topic, "string");
+    assert.ok(bookingPayload.topic.length > 0);
+    assert.equal(typeof bookingPayload.producerBrief, "string");
+    assert.ok(bookingPayload.producerBrief.length > 0);
+
     const invalidTopicResponse = await client.request(
       `/api/botcast/shows/${encodeURIComponent(showId)}/booking-suggestion`,
       jsonInit({

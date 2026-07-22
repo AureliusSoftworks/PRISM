@@ -8492,7 +8492,19 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       const requestedProvider = readProvider(body.preferredProvider);
+      const autoFallbackChain = parseStoredAutoFallbackChain(
+        user.auto_fallback_chain,
+      );
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
       const localModeLocked = user.preferred_provider === "local";
+      const autoEnabled =
+        !localModeLocked &&
+        requestedResponseMode === "auto" &&
+        user.auto_switch_model === 1 &&
+        autoFallbackChain !== null;
       const preferredProvider = localModeLocked
         ? "local"
         : (requestedProvider ?? user.preferred_provider);
@@ -8531,6 +8543,11 @@ function buildRoutes(): RouteDefinition[] {
         },
         {
           preferredProvider,
+          responseMode: autoEnabled
+            ? "auto"
+            : preferredProvider === "local"
+              ? "local"
+              : "online",
           openAiApiKey:
             getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
           anthropicApiKey:
@@ -8539,6 +8556,7 @@ function buildRoutes(): RouteDefinition[] {
           secondaryOllamaHost: user.secondary_ollama_host,
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
+          autoFallbackChain,
           providerFactory: providerFactoryOverride,
         },
       );

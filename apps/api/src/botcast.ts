@@ -3869,14 +3869,25 @@ function cleanGeneratedEpisodeTopic(raw: unknown): string | null {
 function cleanGeneratedBooking(
   raw: string,
 ): { topic: string; producerBrief: string } | null {
-  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  const candidate = raw
+    .replace(/^\s*```(?:json|text)?\s*/iu, "")
+    .replace(/\s*```\s*$/u, "")
+    .match(/\{[\s\S]*\}/u)?.[0] ?? raw;
   try {
     const parsed = JSON.parse(candidate) as Record<string, unknown>;
     const topic = cleanGeneratedEpisodeTopic(
-      parsed.topicTitle ?? parsed.topic_title ?? parsed.topic,
+      parsed.topicTitle ??
+        parsed.topic_title ??
+        parsed.topic ??
+        parsed.title ??
+        parsed.value,
     );
     const producerBrief = cleanText(
-      parsed.producerBrief ?? parsed.producer_brief,
+      parsed.producerBrief ??
+        parsed.producer_brief ??
+        parsed.producerComments ??
+        parsed.producer_comments ??
+        parsed.brief,
       "",
       900,
     );
@@ -3884,6 +3895,40 @@ function cleanGeneratedBooking(
   } catch {
     return null;
   }
+}
+
+function deterministicBotcastBookingRecovery(input: {
+  show: BotcastShow;
+  hostName: string;
+  guestName: string;
+  audienceOnlyGuest: boolean;
+}): { topic: string; producerBrief: string } {
+  const guestWords = input.guestName
+    .replace(/[^\p{L}\p{N}'’-]+/gu, " ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(" ");
+  const topic =
+    cleanGeneratedEpisodeTopic(
+      `${guestWords || "Guest"}'s Unfinished Argument`,
+    ) ?? "An Unfinished Argument";
+  const rawPremise = cleanText(
+    input.show.premise,
+    "the saved show's central tension",
+    220,
+  ).replace(/[.!?]+$/u, "");
+  const premise = botcastProducerBriefRefersToHostInThirdPerson(
+    rawPremise,
+    input.hostName,
+  )
+    ? "the saved show's central tension"
+    : rawPremise;
+  const producerBrief = input.audienceOnlyGuest
+    ? `Build a self-contained argument around ${premise}, using ${input.guestName}'s absence as the pressure point. Keep the path grounded in the show's premise without asking the imperceptible guest for a response.`
+    : `Open with ${premise}, then invite ${input.guestName} to make the stakes concrete. Follow the guest's specific claims, tradeoffs, and resistance rather than recapping biography.`;
+  return { topic, producerBrief };
 }
 
 function botcastProducerBriefRefersToHostInThirdPerson(
@@ -4022,6 +4067,51 @@ export async function generateBotcastBookingSuggestion(
         "Shape the episode as a self-contained host argument around the failed encounter. Never rely on private guest output or instruct the host to ask, press, question, follow up with, wait for, or thank the guest.",
       ]
     : [];
+  const bookingMessages = (rejection = ""): ProviderMessage[] => [
+    {
+      role: "system",
+      content: [
+        "You are a sharp podcast producer preparing one fictional, non-canonical Signal episode.",
+        "Use the supplied personas only as creative context. Do not claim real-world consent, endorsement, memory, or prior appearances.",
+        ...fieldDirections,
+        ...presenceDirections,
+      ].join(" "),
+    },
+    {
+      role: "user",
+      content: [
+        `Show: ${show.name}`,
+        `Show premise: ${show.premise}`,
+        `Hosting style: ${show.hostingStyle}`,
+        `Show identity: ${show.studioIdentity}`,
+        `Host: ${host.name}`,
+        `Host persona: ${host.systemPrompt.slice(0, 1_800)}`,
+        `Guest: ${guest.name}`,
+        `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
+        `Episode format: ${audienceOnlyGuest ? "Imperceptible guest; neither the host nor broadcast listeners can perceive or hear the guest." : "Two-way host and guest interview."}`,
+        `Current topic to avoid repeating: ${currentTopic || "None"}`,
+        `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
+        `Current producer brief: ${currentProducerBrief || "None"}`,
+        ...(rejection ? [`Rejected prior output: ${rejection}`] : []),
+      ].join("\n"),
+    },
+  ];
+  const validBooking = (
+    raw: string,
+  ): { topic: string; producerBrief: string } | null => {
+    const booking = cleanGeneratedBooking(raw);
+    if (!booking) return null;
+    const producerBrief = audienceOnlyGuest
+      ? repairBotcastAudienceOnlyProducerBrief({
+          producerBrief: booking.producerBrief,
+          topic: booking.topic,
+          guestName: guest.name,
+        })
+      : booking.producerBrief;
+    return botcastProducerBriefRefersToHostInThirdPerson(producerBrief, host.name)
+      ? null
+      : { ...booking, producerBrief };
+  };
   try {
     const selected = generationProvider(
       generation,
@@ -4030,6 +4120,65 @@ export async function generateBotcastBookingSuggestion(
     );
     const selectedModel =
       selected.model ?? defaultModelIdForProvider(selected.providerName);
+    if (input.field === "booking" && generation.responseMode === "auto") {
+      const resolvedChain = autoFallbackResolvedChain(
+        { provider: selected.providerName, model: selectedModel },
+        generation.autoFallbackChain,
+      );
+      if (resolvedChain) {
+        try {
+          const providerFactory = generation.providerFactory ?? selectProvider;
+          const result = await runAutoFallbackChain({
+            attempts: resolvedChain.map((attempt, index) => ({
+              ...attempt,
+              available:
+                index === 0 ||
+                generation.providerFactory !== undefined ||
+                attempt.provider === "local" ||
+                (attempt.provider === "openai"
+                  ? Boolean(generation.openAiApiKey)
+                  : Boolean(generation.anthropicApiKey)),
+              run: (signal) => {
+                const provider =
+                  index === 0
+                    ? selected.provider
+                    : providerFactory(
+                        attempt.provider,
+                        generation.openAiApiKey,
+                        generation.secondaryOllamaHost,
+                        generation.anthropicApiKey,
+                      );
+                return provider.generateResponse(bookingMessages(), {
+                  model: attempt.model,
+                  temperature: 0.78,
+                  ...botcastBookingGenerationOptions(attempt.provider, attempt.model, 260),
+                  usagePurpose: index === 0 ? "botcast_brand" : "chat_fallback",
+                  jsonMode: true,
+                  signal,
+                });
+              },
+            })),
+            perAttemptTimeoutMs: 60_000,
+            totalTimeoutMs: resolvedChain.length * 60_000,
+            validate: (raw) => {
+              const booking = validBooking(raw);
+              return booking
+                ? { ok: true, value: booking }
+                : { ok: false, reason: "invalid_output" };
+            },
+          });
+          return { ...result.value, generated: true };
+        } catch {
+          const recovery = deterministicBotcastBookingRecovery({
+            show,
+            hostName: host.name,
+            guestName: guest.name,
+            audienceOnlyGuest,
+          });
+          return { ...recovery, generated: true, failureReason: "invalid_model_output" };
+        }
+      }
+    }
     const attemptCount = input.field === "producerBrief" ? 2 : 3;
     let rejectedOutput = "";
     let failureReason: BotcastBookingSuggestionFailureReason =
@@ -4037,39 +4186,7 @@ export async function generateBotcastBookingSuggestion(
     for (let attempt = 0; attempt < attemptCount; attempt += 1) {
       try {
         const raw = await selected.provider.generateResponse(
-          [
-            {
-              role: "system",
-              content: [
-                "You are a sharp podcast producer preparing one fictional, non-canonical Signal episode.",
-                "Use the supplied personas only as creative context. Do not claim real-world consent, endorsement, memory, or prior appearances.",
-                ...fieldDirections,
-                ...presenceDirections,
-              ].join(" "),
-            },
-            {
-              role: "user",
-              content: [
-                `Show: ${show.name}`,
-                `Show premise: ${show.premise}`,
-                `Hosting style: ${show.hostingStyle}`,
-                `Show identity: ${show.studioIdentity}`,
-                `Host: ${host.name}`,
-                `Host persona: ${host.systemPrompt.slice(0, 1_800)}`,
-                `Guest: ${guest.name}`,
-                `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
-                `Episode format: ${audienceOnlyGuest ? "Imperceptible guest; neither the host nor broadcast listeners can perceive or hear the guest." : "Two-way host and guest interview."}`,
-                `Current topic to avoid repeating: ${currentTopic || "None"}`,
-                `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
-                `Current producer brief: ${currentProducerBrief || "None"}`,
-                ...(rejectedOutput
-                  ? [
-                      `Rejected prior output (it violated the requested field contract): ${rejectedOutput}`,
-                    ]
-                  : []),
-              ].join("\n"),
-            },
-          ],
+          bookingMessages(rejectedOutput),
           {
             ...(selected.model ? { model: selected.model } : {}),
             temperature: attempt === 0 ? 0.94 : 0.78,
@@ -4087,32 +4204,14 @@ export async function generateBotcastBookingSuggestion(
           },
         );
         if (input.field === "booking") {
-          const booking = cleanGeneratedBooking(raw);
+          const booking = validBooking(raw);
           if (booking) {
-            const producerBrief = audienceOnlyGuest
-              ? repairBotcastAudienceOnlyProducerBrief({
-                  producerBrief: booking.producerBrief,
-                  topic: booking.topic,
-                  guestName: guest.name,
-                })
-              : booking.producerBrief;
-            if (
-              botcastProducerBriefRefersToHostInThirdPerson(
-                producerBrief,
-                host.name,
-              )
-            ) {
-              rejectedOutput = cleanText(raw, "Third-person host reference", 280);
-              failureReason = "invalid_model_output";
-              continue;
-            }
             return {
               ...booking,
-              producerBrief,
               generated: true,
             };
           }
-          rejectedOutput = cleanText(raw, "Malformed JSON", 280);
+          rejectedOutput = "booking field contract violation";
           failureReason = "invalid_model_output";
           continue;
         }
@@ -4132,7 +4231,7 @@ export async function generateBotcastBookingSuggestion(
         ) {
           return { value, generated: true };
         }
-        rejectedOutput = cleanText(raw, "Empty output", 280);
+        rejectedOutput = "requested field contract violation";
         failureReason = "invalid_model_output";
       } catch (error) {
         rejectedOutput = "Provider request failed";
@@ -4145,14 +4244,27 @@ export async function generateBotcastBookingSuggestion(
       }
     }
     return input.field === "booking"
-      ? { topic: "", producerBrief: "", generated: false, failureReason }
+      ? {
+          ...deterministicBotcastBookingRecovery({
+            show,
+            hostName: host.name,
+            guestName: guest.name,
+            audienceOnlyGuest,
+          }),
+          generated: true,
+          failureReason,
+        }
       : { value: "", generated: false, failureReason };
   } catch {
     return input.field === "booking"
       ? {
-          topic: "",
-          producerBrief: "",
-          generated: false,
+          ...deterministicBotcastBookingRecovery({
+            show,
+            hostName: host.name,
+            guestName: guest.name,
+            audienceOnlyGuest,
+          }),
+          generated: true,
           failureReason: "provider_request_failed",
         }
       : {

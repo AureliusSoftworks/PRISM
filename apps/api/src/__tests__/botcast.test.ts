@@ -6127,6 +6127,14 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
+      /booking-suggestion[\s\S]{0,3800}requestedResponseMode[\s\S]{0,1400}autoEnabled[\s\S]{0,2200}responseMode: autoEnabled[\s\S]{0,1800}autoFallbackChain/iu,
+    );
+    assert.match(
+      serverSource,
+      /booking-suggestion[\s\S]{0,1800}localModeLocked = user\.preferred_provider === "local"[\s\S]{0,900}autoEnabled =\s*!localModeLocked/iu,
+    );
+    assert.match(
+      serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/host-chat"/u,
     );
     assert.match(
@@ -6772,7 +6780,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(
         captures[3]?.[1]?.content ?? "",
-        /Rejected prior output.*The host should/isu,
+        /Rejected prior output: requested field contract violation/iu,
       );
       assert.deepEqual(
         optionCaptures.map((options) => options.model),
@@ -7082,7 +7090,108 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("classifies an empty OpenAI random-booking response as invalid output", async () => {
+  it("accepts wrapped alternate booking keys without weakening title or host safety", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        'Here is the booking:\n```json\n{"title":"The Cost of Better Tools","brief":"Open with the practical tradeoff, then press for the consequences Ivo accepts."}\n```',
+      ],
+      [],
+      [],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const booking = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        { guestBotId: "guest-1", field: "booking" },
+        generation(provider),
+      );
+      assert.deepEqual(booking, {
+        topic: "The Cost of Better Tools",
+        producerBrief:
+          "Open with the practical tradeoff, then press for the consequences Ivo accepts.",
+        generated: true,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses AUTO fallbacks for ordinary guest bookings after invalid primary output", async () => {
+    const db = fixture();
+    const attempts: Array<{ provider: string; model: string | undefined }> = [];
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse(_messages, options) {
+        attempts.push({ provider: providerName, model: options.model });
+        return providerName === "local"
+          ? '{"topic":"What Should You Build?","producerBrief":"Ask the host about tools."}'
+          : '{"topic":"The Cost of Better Tools","producerComments":"Open with the practical tradeoff, then follow what the guest actually claims."}';
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const booking = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        { guestBotId: "guest-1", field: "booking", modelOverride: "local-primary" },
+        {
+          preferredProvider: "local",
+          responseMode: "auto",
+          providerFactory,
+          autoFallbackChain: { v: 1, fallbacks: [{ provider: "openai", model: "gpt-5.6-terra" }] },
+        },
+      );
+      assert.deepEqual(attempts, [
+        { provider: "local", model: "local-primary" },
+        { provider: "openai", model: "gpt-5.6-terra" },
+      ]);
+      assert.equal(booking.generated, true);
+      assert.equal("topic" in booking ? booking.topic : "", "The Cost of Better Tools");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps ordinary LOCAL booking retries on the selected model", async () => {
+    const db = fixture();
+    let attempts = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        attempts += 1;
+        return attempts === 3
+          ? "{\"topic\":\"The Cost of Better Tools\",\"producerBrief\":\"Open with the practical tradeoff, then follow the guest's claims.\"}"
+          : "not structured";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const booking = await generateBotcastBookingSuggestion(
+        db,
+        "user-1",
+        show.id,
+        { guestBotId: "guest-1", field: "booking", modelOverride: "local-only" },
+        generation(provider),
+      );
+      assert.equal(attempts, 3);
+      assert.equal(booking.generated, true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers an empty selected-model booking with a deterministic editable contract", async () => {
     const db = fixture();
     let attemptCount = 0;
     const provider: LlmProvider = {
@@ -7114,11 +7223,16 @@ describe("Botcast persistence and isolation", () => {
 
       assert.equal(attemptCount, 3);
       assert.deepEqual(booking, {
-        topic: "",
-        producerBrief: "",
-        generated: false,
+        topic: "Ivo Stone's Unfinished Argument",
+        producerBrief:
+          "Open with the saved show's central tension, then invite Ivo Stone to make the stakes concrete. Follow the guest's specific claims, tradeoffs, and resistance rather than recapping biography.",
+        generated: true,
         failureReason: "invalid_model_output",
       });
+      assert.doesNotMatch(
+        "producerBrief" in booking ? booking.producerBrief : "",
+        /\b(?:the\s+)?host\b|\bMara\b/iu,
+      );
     } finally {
       db.close();
     }
@@ -7157,7 +7271,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(captures.length, 2);
       assert.match(
         captures[1]?.[1]?.content ?? "",
-        /Rejected prior output.*Mr\. Watts/isu,
+        /Rejected prior output: booking field contract violation/iu,
       );
       assert.ok("topic" in booking && booking.topic.length <= 60);
       assert.doesNotMatch("topic" in booking ? booking.topic : "", /\?|\byour?\b/iu);
