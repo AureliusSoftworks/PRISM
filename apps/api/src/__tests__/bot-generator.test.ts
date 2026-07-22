@@ -4,7 +4,9 @@ import { createDeterministicProvider } from "../test-support.ts";
 import {
   BotGenerationError,
   generateBotDraft,
+  generateBotField,
   parseGeneratedBotDraftText,
+  sanitizeBotGenerationFieldContext,
 } from "../bot-generator.ts";
 import type { GenerateOptions, ProviderMessage } from "../providers.ts";
 
@@ -119,6 +121,52 @@ function rawDraft(voiceId: string | null = null): Record<string, unknown> {
 }
 
 describe("PRISM bot generator", () => {
+  it("scrubs memories, media, exact Voice IDs, routing, and secrets from field context", () => {
+    assert.deepEqual(sanitizeBotGenerationFieldContext({
+      name: "Mara",
+      profile: { core: { traits: "dry" } },
+      memories: ["private"],
+      conversation: "private",
+      imageData: "private",
+      audioDataUrl: "private",
+      elevenLabsVoiceId: "private",
+      provider: "online",
+      apiKey: "private",
+    }), {
+      name: "Mara",
+      profile: { core: { traits: "dry" } },
+    });
+  });
+
+  it("rerolls one semantic field locally and rejects unchanged output", async () => {
+    const provider = createDeterministicProvider([JSON.stringify({ value: "Mara Voss" })]);
+    const result = await generateBotField({
+      fieldKey: "identity.name",
+      currentValue: "Mara Vale",
+      context: { name: "Mara Vale", memories: ["private"] },
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+    });
+    assert.equal(result.fieldKey, "identity.name");
+    assert.equal(result.value, "Mara Voss");
+    assert.equal(result.providerNameUsed, "local");
+    assert.equal(provider.calls.length, 1);
+    await assert.rejects(
+      generateBotField({
+        fieldKey: "identity.name",
+        currentValue: "Mara Vale",
+        context: {},
+        provider: createDeterministicProvider([JSON.stringify({ value: "Mara Vale" })]),
+        providerName: "local",
+        model: "llama-local",
+        responseMode: "local",
+      }),
+      (error: unknown) => error instanceof BotGenerationError && error.kind === "invalid_output",
+    );
+  });
+
   it("parses fenced model JSON and accepts only catalog-backed Premium voices", () => {
     const parsed = parseGeneratedBotDraftText(
       `\n\`\`\`json\n${JSON.stringify(rawDraft("premium-mara"))}\n\`\`\``,

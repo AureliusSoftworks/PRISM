@@ -67,13 +67,16 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("keeps Details focused on screen ink without accessory preset controls", () => {
+  it("keeps screen ink and bounded accessory recipes independently editable", () => {
     assert.match(editorSource, /<strong>Screen editor<\/strong>/);
-    assert.doesNotMatch(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
+    assert.match(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
     assert.doesNotMatch(editorSource, /AvatarStampAdjustments/);
-    assert.doesNotMatch(editorSource, /Round glasses|Facial hair|Marking/);
     assert.doesNotMatch(editorSource, /Reset details/);
     assert.match(editorSource, /avatarDetailsWithPaintColorMap\(/);
+    assert.match(editorSource, /aria-label="Randomize ink recipe"/);
+    assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} X offset`\}/);
+    assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} Y offset`\}/);
+    assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} scale`\}/);
   });
 
   it("uses compact icon tools without losing labels or selected state", () => {
@@ -525,7 +528,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.doesNotMatch(maskSource, /data-avatar-details-ink-role/);
     assert.match(
       pageSource,
-      /inkTalking=\{[\s\S]*?isTableTypingThisSeat \|\|[\s\S]*?seatSipPresentation\.active[\s\S]*?\}/,
+      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipPresentation\.active \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
     );
     assert.match(
       pageSource,

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { botPowerSourceHashV1, type CoffeePowerPlanV1 } from "@localai/shared";
+import {
+  botPowerSourceHashForPowerV1,
+  botPowerSourceHashV1,
+  type CoffeePowerPlanV1,
+} from "@localai/shared";
 import { compileBotPowers } from "../bot-powers.ts";
 import {
   applyCoffeeHearingRepeatMoodPenalty,
@@ -94,6 +98,49 @@ test("local compiler produces ready structured powers", async () => {
     result.powers[0]?.compiled?.sourceHash,
     botPowerSourceHashV1("Invisible", "Only visible to the bot named Light Yagami")
   );
+});
+
+test("prompt-authored compound invisibility compiles independent Plankton sight and hearing", async () => {
+  const intent = "He's invisible, and he can only talk to Plankton. He, however, can't be seen by Plankton; he can only be seen by everyone else.";
+  const result = await compileBotPowers({
+    provider,
+    botName: "Specter",
+    targetBots: [
+      { id: "plankton-id", name: "Plankton" },
+      { id: "lincoln-id", name: "Abraham Lincoln" },
+    ],
+    powers: [{
+      version: 1,
+      id: "compound-spectral",
+      authoringMode: "prompt",
+      name: "",
+      intent,
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  const power = result.powers[0];
+  assert.equal(power?.compileStatus, "ready");
+  assert.ok(power?.name);
+  assert.ok(power?.sigil);
+  assert.equal(power?.compiled?.sourceHash, botPowerSourceHashForPowerV1({
+    authoringMode: "prompt",
+    name: power?.name ?? "",
+    intent,
+  }));
+  assert.deepEqual(power?.compiled?.effects, [
+    {
+      type: "awareness",
+      allowed: [{ kind: "all" }],
+      excluded: [{ kind: "bot", name: "Plankton", botId: "plankton-id" }],
+    },
+    {
+      type: "speech_audience",
+      allowed: [{ kind: "bot", name: "Plankton", botId: "plankton-id" }],
+    },
+    { type: "avatar_visibility", mode: "translucent" },
+  ]);
 });
 
 test("Loud Simon compiles fixed amplification, larger text, annoyance, and precedence", async () => {
@@ -1843,6 +1890,61 @@ function powerDb(): DatabaseSync {
   `);
   return db;
 }
+
+test("Coffee freezes allowed-minus-excluded sight independently from speech", () => {
+  const db = powerDb();
+  db.prepare("INSERT INTO conversations VALUES (?, ?, 'coffee', ?, NULL)").run(
+    "compound-session",
+    "user",
+    JSON.stringify(["ryuk", "plankton", "lincoln"]),
+  );
+  const name = "Selective Specter";
+  const intent = "Only Plankton hears me, while everyone except Plankton sees me.";
+  const powers = JSON.stringify([{
+    version: 1,
+    id: "compound-spectral",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Plankton hears but cannot see the holder.",
+      observerCue: "Others see but cannot hear the holder.",
+      effects: [
+        {
+          type: "awareness",
+          allowed: [{ kind: "all" }],
+          excluded: [{ kind: "bot", name: "Plankton" }],
+        },
+        {
+          type: "speech_audience",
+          allowed: [{ kind: "bot", name: "Plankton" }],
+        },
+        { type: "avatar_visibility", mode: "translucent" },
+      ],
+      ruleLabels: ["Selective spectral presence"],
+    },
+  }]);
+  for (const [id, botName] of [
+    ["ryuk", "Ryuk"],
+    ["plankton", "Plankton"],
+    ["lincoln", "Abraham Lincoln"],
+  ] as const) {
+    db.prepare("INSERT INTO bots VALUES (?, 'user', ?, '', NULL, ?)").run(
+      id,
+      botName,
+      id === "ryuk" ? powers : "[]",
+    );
+  }
+
+  const plan = resolveCoffeePowersForSession(db, "user", "compound-session");
+  assert.deepEqual(plan.bots.ryuk?.visibleToBotIds, ["lincoln"]);
+  assert.deepEqual(plan.bots.ryuk?.speechAudienceBotIds, ["plankton"]);
+  assert.equal(coffeePowerBotVisibleTo(plan, "ryuk", "plankton"), false);
+  assert.equal(coffeePowerBotVisibleTo(plan, "ryuk", "lincoln"), true);
+});
 
 test("Coffee resolution freezes named visibility and session-start trait mood", () => {
   const db = powerDb();

@@ -15,6 +15,7 @@ import type { BotFaceStyle } from "@localai/shared";
 import {
   Brush,
   Circle,
+  Dices,
   Eraser,
   Eye,
   EyeOff,
@@ -31,6 +32,11 @@ import {
   AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
   AVATAR_DETAILS_INK_ROLE_COLORS,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
+  AVATAR_DETAIL_OFFSET_MAX,
+  AVATAR_DETAIL_OFFSET_MIN,
+  AVATAR_DETAIL_SCALE_MAX,
+  AVATAR_DETAIL_SCALE_MIN,
+  AVATAR_DETAIL_STAMP_DEFINITIONS,
   avatarDetailsCirclePoints,
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
@@ -46,6 +52,8 @@ import {
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
   paintAvatarDetailsColorMap,
+  toggleAvatarDetailStamp,
+  updateAvatarDetailStamp,
   rasterizeAvatarDetailsSemanticRgba,
   type AvatarDetailsBrushSize,
   type AvatarDetailsGridPoint,
@@ -665,6 +673,60 @@ const AvatarDetailsEditorSession = forwardRef<
     );
   };
 
+  const randomizeInkRecipe = (): void => {
+    onEditStart?.();
+    let colorMap: Uint8Array<ArrayBufferLike> = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    const strokeCount = 3 + Math.floor(Math.random() * 3);
+    for (let index = 0; index < strokeCount; index += 1) {
+      const role = AVATAR_DETAILS_INK_OPTIONS[
+        Math.floor(Math.random() * AVATAR_DETAILS_INK_OPTIONS.length)
+      ]?.role ?? "effect";
+      const brushSize = AVATAR_DETAILS_BRUSH_SIZES[
+        Math.floor(Math.random() * AVATAR_DETAILS_BRUSH_SIZES.length)
+      ] ?? 3;
+      const start = {
+        x: 25 + Math.floor(Math.random() * 78),
+        y: 22 + Math.floor(Math.random() * 84),
+      };
+      const end = {
+        x: 25 + Math.floor(Math.random() * 78),
+        y: 22 + Math.floor(Math.random() * 84),
+      };
+      const points =
+        index % 2 === 0
+          ? interpolateAvatarDetailsGridLine(start, end)
+          : avatarDetailsCirclePoints(start, end);
+      colorMap = paintAvatarDetailsColorMap(
+        colorMap,
+        points,
+        brushSize,
+        "brush",
+        role,
+      ).colorMap;
+    }
+    commitMutation(avatarDetailsWithPaintColorMap(workingRef.current, colorMap));
+  };
+
+  const updateStamp = (
+    stamp: AvatarDetailsV1["screen"]["stamps"][number],
+    patch: Partial<AvatarDetailsV1["screen"]["stamps"][number]>,
+  ): void => {
+    onEditStart?.();
+    commitMutation(updateAvatarDetailStamp(workingRef.current, { ...stamp, ...patch }));
+  };
+
+  const differentInteger = (
+    current: number,
+    min: number,
+    max: number,
+  ): number => {
+    const count = max - min + 1;
+    const currentIndex = current - min;
+    return min + ((currentIndex + 1 + Math.floor(Math.random() * (count - 1))) % count);
+  };
+
   const canvasInstruction =
     paintMode === "move"
       ? "Drag to move the illustration."
@@ -687,6 +749,16 @@ const AvatarDetailsEditorSession = forwardRef<
             <small>128 × 128 · 5× preview</small>
           </div>
           <div className={styles.paintHeaderActions}>
+            <button
+              type="button"
+              className={styles.guideToggleButton}
+              onClick={randomizeInkRecipe}
+              aria-label="Randomize ink recipe"
+              title="Create a bounded random ink recipe"
+            >
+              <Dices size={13} aria-hidden="true" />
+              Random ink
+            </button>
             <button
               type="button"
               className={styles.guideToggleButton}
@@ -945,6 +1017,88 @@ const AvatarDetailsEditorSession = forwardRef<
             </span>
           ) : null}
         </div>
+      </section>
+
+      <section className={styles.stampSection} aria-label="Avatar detail stamps">
+        <header>
+          <strong>Stamps</strong>
+          <small>Accessories stay editable independently from ink.</small>
+        </header>
+        <div className={styles.stampPalette} role="group" aria-label="Detail stamp catalog">
+          {AVATAR_DETAIL_STAMP_DEFINITIONS.map((definition) => {
+            const selected = working.screen.stamps.some(
+              (stamp) => stamp.id === definition.id,
+            );
+            return (
+              <button
+                key={definition.id}
+                type="button"
+                data-selected={selected ? "true" : undefined}
+                aria-pressed={selected}
+                onClick={() => {
+                  onEditStart?.();
+                  commitMutation(toggleAvatarDetailStamp(workingRef.current, definition.id));
+                }}
+              >
+                {definition.label}
+              </button>
+            );
+          })}
+        </div>
+        {working.screen.stamps.length > 0 ? (
+          <div className={styles.stampTransforms}>
+            {working.screen.stamps.map((stamp) => {
+              const definition = AVATAR_DETAIL_STAMP_DEFINITIONS.find(
+                (candidate) => candidate.id === stamp.id,
+              )!;
+              const siblingIds = AVATAR_DETAIL_STAMP_DEFINITIONS
+                .filter(
+                  (candidate) =>
+                    candidate.category === definition.category &&
+                    !working.screen.stamps.some(
+                      (selected) =>
+                        selected.id !== stamp.id && selected.id === candidate.id,
+                    ),
+                )
+                .map((candidate) => candidate.id);
+              return (
+                <article key={stamp.id} className={styles.stampTransformCard}>
+                  <header>
+                    <strong>{definition.label}</strong>
+                    <button
+                      type="button"
+                      aria-label={`Randomize ${definition.label} stamp`}
+                      title={`Randomize ${definition.label} stamp`}
+                      onClick={() => {
+                        const alternatives = siblingIds.filter((id) => id !== stamp.id);
+                        const nextId = alternatives[Math.floor(Math.random() * alternatives.length)];
+                        if (nextId) updateStamp(stamp, { id: nextId });
+                      }}
+                      disabled={siblingIds.length < 2}
+                    >
+                      <Dices size={13} aria-hidden="true" />
+                    </button>
+                  </header>
+                  <label>
+                    <span>X <button type="button" aria-label={`Randomize ${definition.label} X offset`} onClick={() => updateStamp(stamp, { offsetX: differentInteger(stamp.offsetX, AVATAR_DETAIL_OFFSET_MIN, AVATAR_DETAIL_OFFSET_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>
+                    <input type="range" min={AVATAR_DETAIL_OFFSET_MIN} max={AVATAR_DETAIL_OFFSET_MAX} step={1} value={stamp.offsetX} onChange={(event) => updateStamp(stamp, { offsetX: Number(event.currentTarget.value) })} />
+                    <output>{stamp.offsetX}</output>
+                  </label>
+                  <label>
+                    <span>Y <button type="button" aria-label={`Randomize ${definition.label} Y offset`} onClick={() => updateStamp(stamp, { offsetY: differentInteger(stamp.offsetY, AVATAR_DETAIL_OFFSET_MIN, AVATAR_DETAIL_OFFSET_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>
+                    <input type="range" min={AVATAR_DETAIL_OFFSET_MIN} max={AVATAR_DETAIL_OFFSET_MAX} step={1} value={stamp.offsetY} onChange={(event) => updateStamp(stamp, { offsetY: Number(event.currentTarget.value) })} />
+                    <output>{stamp.offsetY}</output>
+                  </label>
+                  <label>
+                    <span>Scale <button type="button" aria-label={`Randomize ${definition.label} scale`} onClick={() => updateStamp(stamp, { scalePct: differentInteger(stamp.scalePct, AVATAR_DETAIL_SCALE_MIN, AVATAR_DETAIL_SCALE_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>
+                    <input type="range" min={AVATAR_DETAIL_SCALE_MIN} max={AVATAR_DETAIL_SCALE_MAX} step={1} value={stamp.scalePct} onChange={(event) => updateStamp(stamp, { scalePct: Number(event.currentTarget.value) })} />
+                    <output>{stamp.scalePct}%</output>
+                  </label>
+                </article>
+              );
+            })}
+          </div>
+        ) : null}
       </section>
 
       <footer className={styles.footer}>

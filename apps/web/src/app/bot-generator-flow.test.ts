@@ -47,12 +47,28 @@ test("generation hydrates the full editable Avatar Studio draft", () => {
     "setNewBotVoicePreviewLine",
     "setNewBotTemperature",
     "setNewBotMaxTokens",
+    "setNewBotPowers",
   ]) {
     assert.match(applyDraft, new RegExp(`${setter}\\(`, "u"));
   }
 
   assert.match(pageSource, /styles\.botGeneratedBriefCard/u);
   assert.match(pageSource, /Regenerate draft/u);
+});
+
+test("Avatar Studio exposes atomic semantic and bounded local field dice", () => {
+  const reroll = functionSource(
+    "randomizeSemanticBotField",
+    "applyGeneratedBotDraft",
+  );
+  assert.match(reroll, /"\/api\/bots\/generate-field"/u);
+  assert.match(reroll, /botFieldGenerationRunRef/u);
+  assert.match(reroll, /pushBotAvatarUndoSnapshot\(\)/u);
+  assert.match(pageSource, /function BotFieldRandomizerButton/u);
+  assert.match(pageSource, /label="temperature"/u);
+  assert.match(pageSource, /label=\{`\$\{label\} X coordinate`\}/u);
+  assert.match(pageSource, /label=\{`\$\{label\} Y coordinate`\}/u);
+  assert.match(pageSource, /BOT_POWER_SIGIL_IDS_V1/u);
 });
 
 test("generation produces only a reviewable draft and keeps manual creation", () => {

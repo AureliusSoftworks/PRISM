@@ -67,7 +67,7 @@ test("Signal mix removes static while keeping atmosphere and tactile Foley separ
     background: 0.16,
     grain: 0,
     foley: 1,
-    filmGrain: 0.3,
+    filmGrain: 1,
   });
   assert.ok(
     DEFAULT_SIGNAL_ATMOSPHERE_MIX.background >

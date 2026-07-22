@@ -1,4 +1,4 @@
-import { utimesSync } from "node:fs";
+import { createReadStream, utimesSync } from "node:fs";
 import {
   createServer,
   type IncomingMessage,
@@ -115,7 +115,7 @@ import {
 import {
   SignalArtworkJobManager,
   normalizeSignalArtworkAssetKinds,
-  type SignalArtworkAssetKind,
+  type SignalArtworkGenerationKind,
   type SignalArtworkGeneratedAsset,
 } from "./signal-artwork-jobs.ts";
 import {
@@ -226,6 +226,31 @@ import {
   normalizeSignalLogoImage,
   readSignalAssetSlot,
 } from "./signal-asset-upload.ts";
+import {
+  REPLAY_RENDER_CHUNK_MAX_BYTES,
+  claimNextReplayRecording,
+  completeReplayRender,
+  deleteReplayRecordingMedia,
+  failReplayRender,
+  getReplayRecording,
+  listReplayRecordings,
+  queueReplayRecording,
+  replayTranscript,
+  replayVideoFile,
+  replayVoiceTakeAudioFile,
+  retryReplayRecording,
+  storeReplayRenderChunk,
+  storeReplayVoiceTakeAudio,
+  updateReplayRenderProgress,
+  updateReplayVoiceTakeSnapshot,
+  upsertReplayVoiceTake,
+} from "./replay-recordings.ts";
+import type {
+  ReplayManifestV1,
+  ReplayRecordingStatusV1,
+  ReplaySurfaceV1,
+  ReplayVoiceTakeV1,
+} from "@localai/shared";
 import { generateSignalStudioLightingMap } from "./signal-studio-lighting.ts";
 import {
   createDevSeedMemories,
@@ -385,6 +410,7 @@ import { compileBotPowers } from "./bot-powers.ts";
 import {
   BotGenerationError,
   generateBotDraft,
+  generateBotField,
 } from "./bot-generator.ts";
 import { resolveCoffeePowersForSession } from "./coffee-powers.ts";
 import {
@@ -693,6 +719,7 @@ import {
   getInactiveAccountCutoff,
 } from "./account-retention.ts";
 import { restoreFactoryDefaultsInDatabase } from "./account-reset.ts";
+import { removeReplayMediaForUser } from "./replay-storage.ts";
 import {
   ElevenLabsVoiceError,
   VOICE_CAPABILITIES,
@@ -719,6 +746,134 @@ let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
 const signalArtworkJobs = new SignalArtworkJobManager();
 const activeSignalStudioLightingRefreshes = new Set<string>();
+
+async function rebuildSignalStudioLighting(
+  userId: string,
+  showId: string,
+  signal?: AbortSignal,
+): Promise<ReturnType<typeof getBotcastShow>> {
+  const show = getBotcastShow(db, userId, showId);
+  if (!show.dayAtmosphere.imageId || !show.nightAtmosphere.imageId) {
+    throw new HttpError(
+      409,
+      "Install both the Light and Dark studios before refreshing Studio lighting.",
+    );
+  }
+
+  type StudioSourceRow = {
+    id: string;
+    bot_id: string | null;
+    origin: string | null;
+    local_rel_path: string | null;
+  };
+  const loadSource = (imageId: string, label: string): Buffer => {
+    const source = db
+      .prepare(
+        `SELECT id, bot_id, origin, local_rel_path
+           FROM images
+          WHERE id = ? AND user_id = ?`,
+      )
+      .get(imageId, userId) as StudioSourceRow | undefined;
+    if (
+      !source ||
+      source.origin !== "botcast" ||
+      source.bot_id !== show.hostBotId ||
+      !source.local_rel_path?.trim()
+    ) {
+      throw new HttpError(404, `${label} studio source is not available locally.`);
+    }
+    try {
+      return readGeneratedImageBytes(source.local_rel_path);
+    } catch {
+      throw new HttpError(404, `${label} studio source file was not found.`);
+    }
+  };
+
+  if (signal?.aborted) throw new DOMException("cancelled", "AbortError");
+  const dayBytes = loadSource(show.dayAtmosphere.imageId, "Light");
+  const nightBytes = loadSource(show.nightAtmosphere.imageId, "Dark");
+  const generated = await generateSignalStudioLightingMap(dayBytes, nightBytes);
+  if (signal?.aborted) throw new DOMException("cancelled", "AbortError");
+
+  const imageId = randomId(12);
+  const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+  const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+  const createdAt = new Date().toISOString();
+  const prompt = `Derived Studio lighting receiver map for ${show.name}`;
+  const relatedBotIds = serializeImageRelatedBotIds(
+    [show.hostBotId],
+    show.hostBotId,
+  );
+  let savedShow = show;
+  try {
+    writeGeneratedImageBytes(localRelPath, generated.pngBytes);
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+          prompt, revised_prompt, url, size, quality, provider, model,
+          local_rel_path, purpose, created_at)
+       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'derived',
+               'local', 'prism-studio-lighting-v1', ?, 'signal_studio_lighting', ?)`,
+    ).run(
+      imageId,
+      userId,
+      show.hostBotId,
+      relatedBotIds,
+      prompt,
+      prompt,
+      displayUrl,
+      `${generated.width}x${generated.height}`,
+      localRelPath,
+      createdAt,
+    );
+    try {
+      savedShow = updateBotcastShow(db, userId, show.id, {
+        studioLighting: {
+          imageUrl: displayUrl,
+          imageId,
+          sourceDayImageId: show.dayAtmosphere.imageId,
+          sourceNightImageId: show.nightAtmosphere.imageId,
+          revision: show.studioLighting.revision + 1,
+          status: "ready",
+        },
+      });
+    } catch (error) {
+      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+        imageId,
+        userId,
+      );
+      throw error;
+    }
+  } catch (error) {
+    tryUnlinkGeneratedImageFile(localRelPath);
+    throw error;
+  }
+
+  const previousImageId = show.studioLighting.imageId;
+  if (previousImageId && previousImageId !== imageId) {
+    const previous = db
+      .prepare(
+        `SELECT local_rel_path
+           FROM images
+          WHERE id = ? AND user_id = ? AND bot_id = ?
+            AND origin = 'botcast' AND purpose = 'signal_studio_lighting'`,
+      )
+      .get(previousImageId, userId, show.hostBotId) as
+      | { local_rel_path: string | null }
+      | undefined;
+    if (previous) {
+      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+        previousImageId,
+        userId,
+      );
+      if (previous.local_rel_path?.trim()) {
+        tryUnlinkGeneratedImageFile(previous.local_rel_path);
+      }
+    }
+  }
+  return savedShow;
+}
+
 let masterKey = deriveMasterKey(config.encryptionMasterKey);
 let providerFactoryOverride: typeof selectProvider = selectProvider;
 let auxiliaryProviderFactoryOverride: typeof getAuxiliaryProvider =
@@ -1318,6 +1473,94 @@ function requireAuth(ctx: RequestContext): string {
   ctx.userId = session.userId;
   touchUserActivity(session.userId);
   return session.userId;
+}
+
+function readReplaySurface(value: unknown): ReplaySurfaceV1 | null {
+  return value === "signal" || value === "coffee" ? value : null;
+}
+
+function readReplayStatus(value: unknown): ReplayRecordingStatusV1 | null {
+  return value === "collecting" ||
+    value === "queued" ||
+    value === "preparing_audio" ||
+    value === "rendering" ||
+    value === "ready" ||
+    value === "ready_with_warnings" ||
+    value === "failed"
+    ? value
+    : null;
+}
+
+function readReplayRenderToken(ctx: RequestContext): string {
+  const raw = ctx.req.headers["x-prism-replay-token"];
+  const value = (Array.isArray(raw) ? raw[0] : raw)?.trim() ?? "";
+  if (!/^[a-f0-9]{36}$/u.test(value)) {
+    throw new HttpError(409, "Replay render lease is missing or invalid.");
+  }
+  return value;
+}
+
+function streamReplayFile(
+  ctx: RequestContext,
+  file: { absolutePath: string; contentType: string; sizeBytes: number },
+  options: { attachmentName?: string; range?: boolean } = {},
+): void {
+  const rangeHeader = options.range ? ctx.req.headers.range : undefined;
+  let start = 0;
+  let end = Math.max(0, file.sizeBytes - 1);
+  if (typeof rangeHeader === "string") {
+    const match = rangeHeader.match(/^bytes=(\d*)-(\d*)$/u);
+    if (!match) {
+      ctx.res.statusCode = 416;
+      ctx.res.setHeader("content-range", `bytes */${file.sizeBytes}`);
+      ctx.res.end();
+      return;
+    }
+    const requestedStart = match[1] ? Number(match[1]) : null;
+    const requestedEnd = match[2] ? Number(match[2]) : null;
+    if (requestedStart === null && requestedEnd !== null) {
+      start = Math.max(0, file.sizeBytes - requestedEnd);
+    } else if (requestedStart !== null) {
+      start = requestedStart;
+    }
+    if (requestedEnd !== null && requestedStart !== null) end = requestedEnd;
+    end = Math.min(end, file.sizeBytes - 1);
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      start > end ||
+      start >= file.sizeBytes
+    ) {
+      ctx.res.statusCode = 416;
+      ctx.res.setHeader("content-range", `bytes */${file.sizeBytes}`);
+      ctx.res.end();
+      return;
+    }
+    ctx.res.statusCode = 206;
+    ctx.res.setHeader("content-range", `bytes ${start}-${end}/${file.sizeBytes}`);
+  } else {
+    ctx.res.statusCode = 200;
+  }
+  ctx.res.setHeader("content-type", file.contentType);
+  ctx.res.setHeader("content-length", String(end - start + 1));
+  ctx.res.setHeader("cache-control", "private, no-store");
+  if (options.range) ctx.res.setHeader("accept-ranges", "bytes");
+  if (options.attachmentName) {
+    ctx.res.setHeader(
+      "content-disposition",
+      `attachment; filename="${options.attachmentName.replace(/[^a-zA-Z0-9._-]/gu, "-")}"`,
+    );
+  }
+  const stream = createReadStream(file.absolutePath, { start, end });
+  stream.on("error", () => {
+    if (!ctx.res.headersSent) {
+      json(ctx.res, 404, { ok: false, error: "Replay media is unavailable." });
+    } else if (!ctx.res.writableEnded) {
+      ctx.res.destroy();
+    }
+  });
+  stream.pipe(ctx.res);
 }
 
 function isLoopbackRequest(ctx: RequestContext): boolean {
@@ -2403,6 +2646,11 @@ async function deleteUserAccount(userId: string): Promise<void> {
   } catch {
     // Best-effort recovery-trash cleanup after SQLite removes the account.
   }
+  try {
+    removeReplayMediaForUser(userId);
+  } catch {
+    // Best-effort replay cleanup after SQLite removes the account.
+  }
 
   try {
     await deleteVectorsForUser(userId);
@@ -2432,6 +2680,11 @@ async function restoreUserFactoryDefaults(userId: string): Promise<void> {
     removeAssetCleanupTrashDirectoryForUser(userId);
   } catch {
     // Best-effort recovery-trash cleanup after SQLite resets the account.
+  }
+  try {
+    removeReplayMediaForUser(userId);
+  } catch {
+    // Best-effort replay cleanup after SQLite resets the account.
   }
 
   try {
@@ -2971,7 +3224,7 @@ async function readOpenAiGeneratedImageBytes(
 async function generateAndPersistSignalArtworkAsset(args: {
   userId: string;
   hostBotId: string;
-  kind: SignalArtworkAssetKind;
+  kind: SignalArtworkGenerationKind;
   prompt: string;
   size: "1536x1024" | "1024x1024";
   preferredProvider: ImageProviderName;
@@ -7889,7 +8142,7 @@ function buildRoutes(): RouteDefinition[] {
       }
 
       try {
-        const promptByKind: Record<SignalArtworkAssetKind, string> = {
+        const promptByKind: Record<SignalArtworkGenerationKind, string> = {
           "night-studio": show.nightAtmosphere.prompt,
           "day-studio": show.dayAtmosphere.prompt,
           logo: show.logo.prompt,
@@ -7954,6 +8207,13 @@ function buildRoutes(): RouteDefinition[] {
             }
             throw attachmentError;
           },
+          refreshStudioLighting: (signal) =>
+            rebuildSignalStudioLighting(userId, show.id, signal).then(
+              (refreshedShow) => ({
+                imageId: refreshedShow.studioLighting.imageId!,
+                imageUrl: refreshedShow.studioLighting.imageUrl!,
+              }),
+            ),
         });
         console.info("[signal-artwork] background job started", {
           jobId: job.id,
@@ -8284,125 +8544,14 @@ function buildRoutes(): RouteDefinition[] {
       }
       activeSignalStudioLightingRefreshes.add(refreshKey);
       try {
-      if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
-        throw new HttpError(
-          409,
-          "Wait for the current Studio artwork to finish before refreshing its lighting.",
-        );
-      }
-      if (!show.dayAtmosphere.imageId || !show.nightAtmosphere.imageId) {
-        throw new HttpError(
-          409,
-          "Install both the Light and Dark studios before refreshing Studio lighting.",
-        );
-      }
-      type StudioSourceRow = {
-        id: string;
-        bot_id: string | null;
-        origin: string | null;
-        local_rel_path: string | null;
-      };
-      const loadSource = (imageId: string, label: string): Buffer => {
-        const source = db
-          .prepare(
-            `SELECT id, bot_id, origin, local_rel_path
-               FROM images
-              WHERE id = ? AND user_id = ?`,
-          )
-          .get(imageId, userId) as StudioSourceRow | undefined;
-        if (
-          !source ||
-          source.origin !== "botcast" ||
-          source.bot_id !== show.hostBotId ||
-          !source.local_rel_path?.trim()
-        ) {
-          throw new HttpError(404, `${label} studio source is not available locally.`);
-        }
-        try {
-          return readGeneratedImageBytes(source.local_rel_path);
-        } catch {
-          throw new HttpError(404, `${label} studio source file was not found.`);
-        }
-      };
-      const dayBytes = loadSource(show.dayAtmosphere.imageId, "Light");
-      const nightBytes = loadSource(show.nightAtmosphere.imageId, "Dark");
-      const generated = await generateSignalStudioLightingMap(dayBytes, nightBytes);
-      const imageId = randomId(12);
-      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
-      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
-      const createdAt = new Date().toISOString();
-      const prompt = `Derived Studio lighting receiver map for ${show.name}`;
-      const relatedBotIds = serializeImageRelatedBotIds(
-        [show.hostBotId],
-        show.hostBotId,
-      );
-      let savedShow = show;
-      try {
-        writeGeneratedImageBytes(localRelPath, generated.pngBytes);
-        db.prepare(
-          `INSERT INTO images
-             (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
-              prompt, revised_prompt, url, size, quality, provider, model,
-              local_rel_path, purpose, created_at)
-           VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'derived',
-                   'local', 'prism-studio-lighting-v1', ?, 'signal_studio_lighting', ?)`,
-        ).run(
-          imageId,
-          userId,
-          show.hostBotId,
-          relatedBotIds,
-          prompt,
-          prompt,
-          displayUrl,
-          `${generated.width}x${generated.height}`,
-          localRelPath,
-          createdAt,
-        );
-        try {
-          savedShow = updateBotcastShow(db, userId, show.id, {
-            studioLighting: {
-              imageUrl: displayUrl,
-              imageId,
-              sourceDayImageId: show.dayAtmosphere.imageId,
-              sourceNightImageId: show.nightAtmosphere.imageId,
-              revision: show.studioLighting.revision + 1,
-              status: "ready",
-            },
-          });
-        } catch (error) {
-          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
-            imageId,
-            userId,
+        if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+          throw new HttpError(
+            409,
+            "Wait for the current Studio artwork to finish before refreshing its lighting.",
           );
-          throw error;
         }
-      } catch (error) {
-        tryUnlinkGeneratedImageFile(localRelPath);
-        throw error;
-      }
-      const previousImageId = show.studioLighting.imageId;
-      if (previousImageId && previousImageId !== imageId) {
-        const previous = db
-          .prepare(
-            `SELECT local_rel_path
-               FROM images
-              WHERE id = ? AND user_id = ? AND bot_id = ?
-                AND origin = 'botcast' AND purpose = 'signal_studio_lighting'`,
-          )
-          .get(previousImageId, userId, show.hostBotId) as
-          | { local_rel_path: string | null }
-          | undefined;
-        if (previous) {
-          db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
-            previousImageId,
-            userId,
-          );
-          if (previous.local_rel_path?.trim()) {
-            tryUnlinkGeneratedImageFile(previous.local_rel_path);
-          }
-        }
-      }
-      json(ctx.res, 200, { ok: true, show: savedShow });
+        const savedShow = await rebuildSignalStudioLighting(userId, show.id);
+        json(ctx.res, 200, { ok: true, show: savedShow });
       } finally {
         activeSignalStudioLightingRefreshes.delete(refreshKey);
       }
@@ -11636,6 +11785,237 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onClose);
       }
     }),
+    route("GET", "/api/replays", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const surface = readReplaySurface(ctx.query.get("surface"));
+      const status = readReplayStatus(ctx.query.get("status"));
+      const sourceId = ctx.query.get("sourceId")?.trim().slice(0, 180) || null;
+      json(ctx.res, 200, {
+        ok: true,
+        recordings: listReplayRecordings(db, userId, {
+          surface,
+          status,
+          sourceId,
+        }),
+      });
+    }),
+    route("GET", "/api/replays/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const detail = getReplayRecording(db, userId, ctx.params.id);
+      if (!detail) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 200, { ok: true, ...detail });
+    }),
+    route("POST", "/api/replays/queue", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const recording = queueReplayRecording(
+        db,
+        userId,
+        body.manifest as ReplayManifestV1,
+      );
+      json(ctx.res, 202, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/takes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const surface = readReplaySurface(body.surface);
+      const sourceId =
+        typeof body.sourceId === "string" ? body.sourceId.trim().slice(0, 180) : "";
+      if (!surface || !sourceId) throw new HttpError(400, "Replay source is invalid.");
+      const take = upsertReplayVoiceTake(
+        db,
+        userId,
+        surface,
+        sourceId,
+        body.snapshot as ReplayVoiceTakeV1,
+      );
+      json(ctx.res, 201, { ok: true, take });
+    }),
+    route("PATCH", "/api/replays/:id/takes/:takeId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const take = updateReplayVoiceTakeSnapshot(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.takeId,
+        {
+          durationMs:
+            typeof body.durationMs === "number" ? body.durationMs : undefined,
+          resolvedEngine:
+            typeof body.resolvedEngine === "string"
+              ? body.resolvedEngine
+              : body.resolvedEngine === null
+                ? null
+                : undefined,
+          alignment:
+            body.alignment === null ||
+            (body.alignment && typeof body.alignment === "object")
+              ? (body.alignment as ReplayVoiceTakeV1["alignment"])
+              : undefined,
+          sourceMessageId:
+            typeof body.sourceMessageId === "string"
+              ? body.sourceMessageId
+              : body.sourceMessageId === null
+                ? null
+                : undefined,
+        },
+      );
+      if (!take) throw new HttpError(404, "Replay voice take not found.");
+      json(ctx.res, 200, { ok: true, take });
+    }),
+    route("POST", "/api/replays/:id/takes/:takeId/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (!(ctx.body instanceof Uint8Array)) {
+        throw new HttpError(400, "Replay voice audio must be binary.");
+      }
+      const contentType = String(
+        ctx.req.headers["content-type"] ?? "application/octet-stream",
+      )
+        .split(";", 1)[0]
+        .trim()
+        .slice(0, 120);
+      if (!contentType.startsWith("audio/")) {
+        throw new HttpError(400, "Replay voice take must use an audio content type.");
+      }
+      const take = storeReplayVoiceTakeAudio(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.takeId,
+        ctx.body,
+        contentType,
+      );
+      if (!take) throw new HttpError(404, "Replay voice take not found.");
+      json(ctx.res, 201, { ok: true, take });
+    }),
+    route("GET", "/api/replays/:id/takes/:takeId/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayVoiceTakeAudioFile(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.takeId,
+      );
+      if (!file) throw new HttpError(404, "Replay voice audio not found.");
+      streamReplayFile(ctx, file);
+    }),
+    route("POST", "/api/replays/claim", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const claimed = claimNextReplayRecording(db, userId);
+      json(ctx.res, 200, { ok: true, claimed });
+    }),
+    route("PATCH", "/api/replays/:id/progress", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const renderToken =
+        typeof body.renderToken === "string" ? body.renderToken : "";
+      const status =
+        body.status === "rendering" ? "rendering" : "preparing_audio";
+      const recording = updateReplayRenderProgress(
+        db,
+        userId,
+        ctx.params.id,
+        renderToken,
+        status,
+        Number(body.progress),
+      );
+      json(ctx.res, 200, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/render-chunk", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const renderToken = readReplayRenderToken(ctx);
+      if (!(ctx.body instanceof Uint8Array)) {
+        throw new HttpError(400, "Replay render chunk must be binary.");
+      }
+      const rawPosition = ctx.req.headers["x-prism-replay-position"];
+      const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
+      const sizeBytes = storeReplayRenderChunk(
+        db,
+        userId,
+        ctx.params.id,
+        renderToken,
+        position,
+        ctx.body,
+      );
+      json(ctx.res, 201, { ok: true, sizeBytes });
+    }),
+    route("POST", "/api/replays/:id/complete", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const contentType =
+        body.contentType === "video/webm" ? "video/webm" : "video/mp4";
+      const recording = completeReplayRender(
+        db,
+        userId,
+        ctx.params.id,
+        String(body.renderToken ?? ""),
+        {
+          contentType,
+          codec: String(body.codec ?? (contentType === "video/webm" ? "vp9/opus" : "avc/aac")),
+          durationMs: Number(body.durationMs),
+          warning: typeof body.warning === "string" ? body.warning : null,
+        },
+      );
+      json(ctx.res, 201, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/fail", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const recording = failReplayRender(
+        db,
+        userId,
+        ctx.params.id,
+        String(body.renderToken ?? ""),
+        body.error,
+      );
+      json(ctx.res, 200, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const recording = retryReplayRecording(db, userId, ctx.params.id);
+      if (!recording) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 202, { ok: true, recording });
+    }),
+    route("DELETE", "/api/replays/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (body.confirm !== "delete-recording") {
+        throw new HttpError(400, "Replay deletion requires explicit confirmation.");
+      }
+      const recording = deleteReplayRecordingMedia(db, userId, ctx.params.id);
+      if (!recording) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 200, { ok: true, recording });
+    }),
+    route("GET", "/api/replays/:id/video", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayVideoFile(db, userId, ctx.params.id);
+      if (!file) throw new HttpError(404, "Replay video not found.");
+      streamReplayFile(ctx, file, {
+        range: true,
+        attachmentName:
+          ctx.query.get("download") === "1"
+            ? `prism-replay.${file.contentType === "video/webm" ? "webm" : "mp4"}`
+            : undefined,
+      });
+    }),
+    route("GET", "/api/replays/:id/transcript.vtt", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const transcript = replayTranscript(db, userId, ctx.params.id, "vtt");
+      if (transcript === null) throw new HttpError(404, "Replay transcript not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "text/vtt; charset=utf-8");
+      ctx.res.end(transcript);
+    }),
+    route("GET", "/api/replays/:id/transcript.md", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const transcript = replayTranscript(db, userId, ctx.params.id, "markdown");
+      if (transcript === null) throw new HttpError(404, "Replay transcript not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", "text/markdown; charset=utf-8");
+      ctx.res.setHeader("content-disposition", 'attachment; filename="replay-transcript.md"');
+      ctx.res.end(transcript);
+    }),
     route("POST", "/api/voices/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
@@ -14377,12 +14757,100 @@ function buildRoutes(): RouteDefinition[] {
               dualOllamaWorkloadOptions(user),
           ),
           botName: typeof body.botName === "string" ? body.botName : "",
-            systemPrompt:
+          systemPrompt:
               typeof body.systemPrompt === "string" ? body.systemPrompt : "",
           powers: body.powers,
+          targetBots: db
+            .prepare("SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id")
+            .all(userId) as Array<{ id: string; name: string }>,
           }),
       );
       json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/bots/generate-field", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const storedAutoFallbackChain = parseStoredAutoFallbackChain(user.auto_fallback_chain);
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
+      const responseMode =
+        requestedResponseMode === "auto" && user.auto_switch_model === 1 && storedAutoFallbackChain
+          ? "auto"
+          : requestedResponseMode === "auto"
+            ? user.preferred_provider === "local" ? "local" : "online"
+            : requestedResponseMode;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const primaryProvider: ProviderName =
+        responseMode === "local"
+          ? "local"
+          : responseMode === "auto"
+            ? (requestedProvider ?? user.preferred_provider)
+            : requestedProvider && requestedProvider !== "local"
+              ? requestedProvider
+              : user.preferred_provider === "anthropic" ? "anthropic" : "openai";
+      const userKey = decryptUserKey(userId);
+      const onlineAllowed = responseMode !== "local";
+      const openAiApiKey = onlineAllowed
+        ? getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey
+        : undefined;
+      const anthropicApiKey = onlineAllowed
+        ? getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey
+        : undefined;
+      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host, anthropicApiKey);
+      const preferredModel = primaryProvider === "local"
+        ? readOptionalString(user.preferred_local_model)
+        : readOptionalString(user.preferred_online_model);
+      if (isDisabledModelChoice(preferredModel)) {
+        throw new HttpError(400, `${primaryProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before rerolling this field.`);
+      }
+      const resolved = resolveAutoModel({
+        provider: primaryProvider,
+        explicitModelOverride: null,
+        preferredModel,
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      const provider = providerFactoryOverride(
+        resolved.provider,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const result = await runWithUsageSession(
+          { db, userId, privacyScope: "normal", mode: "system", surface: "bots" },
+          () => generateBotField({
+            fieldKey: body.fieldKey,
+            currentValue: body.currentValue,
+            context: body.context,
+            provider,
+            providerName: resolved.provider,
+            model: resolved.model,
+            responseMode,
+            autoFallbackChain: responseMode === "auto" ? storedAutoFallbackChain : null,
+            providerFactory: providerFactoryOverride,
+            openAiApiKey,
+            anthropicApiKey,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            signal: controller.signal,
+          }),
+        );
+        json(ctx.res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error instanceof BotGenerationError) {
+          throw new HttpError(error.kind === "invalid_prompt" ? 400 : 502, error.message);
+        }
+        if (controller.signal.aborted) throw error;
+        throw new HttpError(502, "PRISM could not reach the selected model. The field is unchanged.");
+      } finally {
+        ctx.req.off("close", onClose);
+      }
     }),
     route("POST", "/api/bots/generate-draft", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -14515,7 +14983,38 @@ function buildRoutes(): RouteDefinition[] {
               signal: controller.signal,
             }),
         );
-        json(ctx.res, 200, { ok: true, ...result });
+        const compiledPowers = result.draft.powers.length > 0
+          ? await runWithUsageSession(
+              {
+                db,
+                userId,
+                privacyScope: "normal",
+                mode: "system",
+                surface: "bots",
+              },
+              () =>
+                compileBotPowers({
+                  provider: auxiliaryProviderFactoryOverride(
+                    user.prism_default_llm_model ?? undefined,
+                    dualOllamaWorkloadOptions(user),
+                  ),
+                  botName: result.draft.name,
+                  systemPrompt: JSON.stringify(result.draft.profile),
+                  powers: result.draft.powers,
+                  targetBots: db
+                    .prepare("SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id")
+                    .all(userId) as Array<{ id: string; name: string }>,
+                }),
+            )
+          : null;
+        json(ctx.res, 200, {
+          ok: true,
+          ...result,
+          draft: {
+            ...result.draft,
+            powers: compiledPowers?.powers ?? result.draft.powers,
+          },
+        });
       } catch (error) {
         if (error instanceof BotGenerationError) {
           throw new HttpError(
@@ -16053,14 +16552,26 @@ async function dispatchRequest(
       String(req.headers["content-type"] ?? "")
         .toLowerCase()
         .startsWith(ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE);
+    const replayRenderChunkUpload =
+      method === "POST" && /^\/api\/replays\/[^/]+\/render-chunk$/u.test(pathname);
+    const replayVoiceTakeUpload =
+      method === "POST" &&
+      /^\/api\/replays\/[^/]+\/takes\/[^/]+\/audio$/u.test(pathname);
     const body =
       method === "POST" || method === "PATCH" || method === "DELETE"
-        ? slateArchiveUpload || accountBackupArchiveUpload
+        ? slateArchiveUpload ||
+          accountBackupArchiveUpload ||
+          replayRenderChunkUpload ||
+          replayVoiceTakeUpload
           ? await readBinaryBody(
               req,
               slateArchiveUpload
                 ? MAX_SLATE_ARCHIVE_BYTES
-                : ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES,
+                : accountBackupArchiveUpload
+                  ? ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES
+                  : replayRenderChunkUpload
+                    ? REPLAY_RENDER_CHUNK_MAX_BYTES
+                    : 24 * 1024 * 1024,
             )
           : await readJsonBody(req)
         : {};

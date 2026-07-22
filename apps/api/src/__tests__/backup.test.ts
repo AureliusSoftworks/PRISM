@@ -15,6 +15,7 @@ import {
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
 } from "../settings.ts";
 import {
+  botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
   parseStoredBotPowersV1,
 } from "@localai/shared";
@@ -1441,6 +1442,62 @@ describe("backup clone lineage", () => {
 });
 
 describe("backup spectral Power compatibility", () => {
+  it("round-trips prompt metadata, curated sigils, and audience exclusions", () => {
+    withBackupDatabase((db, userKey) => {
+      const intent = "Only Plankton hears me; everyone except Plankton sees me.";
+      const power = {
+        version: 1 as const,
+        id: "selective-specter",
+        authoringMode: "prompt" as const,
+        name: "Selective Specter",
+        intent,
+        sigil: "eye" as const,
+        enabled: true,
+        compileStatus: "ready" as const,
+        compiled: {
+          version: 1 as const,
+          sourceHash: botPowerSourceHashForPowerV1({
+            authoringMode: "prompt",
+            name: "Selective Specter",
+            intent,
+          }),
+          selfCue: "Plankton hears but cannot see the holder.",
+          observerCue: "Others see but cannot hear the holder.",
+          effects: [
+            {
+              type: "awareness" as const,
+              allowed: [{ kind: "all" as const }],
+              excluded: [{ kind: "bot" as const, name: "Plankton" }],
+            },
+            {
+              type: "speech_audience" as const,
+              allowed: [{ kind: "bot" as const, name: "Plankton" }],
+            },
+            { type: "avatar_visibility" as const, mode: "translucent" as const },
+          ],
+          ruleLabels: ["Selective spectral presence"],
+        },
+      };
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, powers_json, created_at, updated_at)
+         VALUES ('prompt-spectral-bot', 'user-1', 'Ryuk', '', ?, ?, ?)`,
+      ).run(
+        JSON.stringify([power]),
+        "2026-07-21T00:00:00.000Z",
+        "2026-07-21T00:00:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      db.prepare("UPDATE bots SET powers_json = '[]' WHERE id = 'prompt-spectral-bot'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT powers_json FROM bots WHERE id = 'prompt-spectral-bot'",
+      ).get() as { powers_json: string | null };
+      assert.deepEqual(parseStoredBotPowersV1(restored.powers_json)[0], power);
+    });
+  });
+
   it("upgrades and round-trips a frozen targeted-Invisible bot without changing its source hash", () => {
     withBackupDatabase((db, userKey) => {
       const name = "Invisible";

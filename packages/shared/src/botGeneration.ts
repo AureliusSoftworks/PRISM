@@ -31,6 +31,11 @@ import {
   serializeStoredBotPrompt,
   type BotProfileFields,
 } from "./botProfile.ts";
+import {
+  BOT_POWER_INTENT_MAX_LENGTH,
+  botPowerSourceHashForPowerV1,
+  type BotPowerV1,
+} from "./botPower.ts";
 
 export const BOT_GENERATION_DRAFT_VERSION = 1 as const;
 export const BOT_GENERATION_PROMPT_MAX_LENGTH = 2_000;
@@ -131,6 +136,8 @@ export interface BotGeneratedDraftV1 {
   avatarDetails: BotAvatarDetailsV1 | null;
   audioVoiceProfile: BotAudioVoiceProfileV2;
   voicePreviewLine: string;
+  /** Zero or one compiler-ready prompt-authored Power from the master brief. */
+  powers: BotPowerV1[];
   settings: BotGeneratedSettingsV1;
 }
 
@@ -425,6 +432,23 @@ export function normalizeBotGeneratedDraftV1(
     value.voicePreviewLine,
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
   ) || `Hello. I'm ${name}.`;
+  const powerPrompt = compactText(value.powerPrompt, BOT_POWER_INTENT_MAX_LENGTH);
+  const generatedPower: BotPowerV1 | null = powerPrompt
+    ? {
+        version: 1,
+        id: `generated-${botPowerSourceHashForPowerV1({
+          authoringMode: "prompt",
+          name: "",
+          intent: powerPrompt,
+        }).replace(/[^a-z0-9-]+/giu, "-")}`,
+        authoringMode: "prompt",
+        name: "",
+        intent: powerPrompt,
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      }
+    : null;
   return {
     v: BOT_GENERATION_DRAFT_VERSION,
     name,
@@ -440,6 +464,7 @@ export function normalizeBotGeneratedDraftV1(
       options.availableElevenLabsVoiceIds ?? [],
     ),
     voicePreviewLine,
+    powers: generatedPower ? [generatedPower] : [],
     settings: normalizeGeneratedSettings(value.settings),
   };
 }

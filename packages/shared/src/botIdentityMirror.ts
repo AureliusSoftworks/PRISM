@@ -8,6 +8,10 @@ import {
   type BotFaceStyle,
   type BotFaceStyleInput,
 } from "./botAvatar.ts";
+import {
+  parseBotAvatarDetailsV1,
+  type BotAvatarDetailsV1,
+} from "./botAvatarDetails.ts";
 
 export const BOT_IDENTITY_MIRROR_VERSION = 1 as const;
 export const BOT_IDENTITY_MIRROR_TRANSITION_MS = 760;
@@ -26,6 +30,8 @@ export interface BotIdentityMirrorStateV1 {
   targetBotName: string;
   targetPersonaPrompt: string;
   targetFace: BotFaceStyle;
+  /** Missing only on legacy replay events created before public ink was copied. */
+  targetAvatarDetails?: BotAvatarDetailsV1 | null;
   targetVoice: NormalizedBotAudioVoiceProfileV1;
   sourceMessageId: string;
   occurredAt: string;
@@ -84,6 +90,34 @@ export function botIdentityMirrorVoiceV1(
     : normalizeBotAudioVoiceProfileV1(undefined);
 }
 
+/** Invalid or absent public ink safely becomes an explicit blank recipe. */
+export function botIdentityMirrorAvatarDetailsV1(
+  value: unknown,
+): BotAvatarDetailsV1 | null {
+  if (value == null) return null;
+  try {
+    return parseBotAvatarDetailsV1(value);
+  } catch {
+    return null;
+  }
+}
+
+/** Legacy mirror events keep their historical holder-ink presentation. */
+export function resolveBotIdentityMirrorAvatarDetailsV1(
+  state: BotIdentityMirrorStateV1 | null | undefined,
+  holderAvatarDetails: BotAvatarDetailsV1 | null | undefined,
+  targetVisualActive = true,
+): BotAvatarDetailsV1 | null {
+  if (
+    !state ||
+    !targetVisualActive ||
+    !Object.prototype.hasOwnProperty.call(state, "targetAvatarDetails")
+  ) {
+    return holderAvatarDetails ?? null;
+  }
+  return state.targetAvatarDetails ?? null;
+}
+
 /** Persisted mirror voice wins; otherwise preserve the holder's resolved voice. */
 export function resolveBotIdentityMirrorVoiceV1(
   state: BotIdentityMirrorStateV1 | null | undefined,
@@ -110,6 +144,13 @@ export function normalizeBotIdentityMirrorStateV1(
   const targetBotId = boundedText(row.targetBotId, 128);
   const targetBotName = boundedText(row.targetBotName, 120);
   const targetPersonaPrompt = boundedText(row.targetPersonaPrompt, 12_000);
+  const hasTargetAvatarDetails = Object.prototype.hasOwnProperty.call(
+    row,
+    "targetAvatarDetails",
+  );
+  const targetAvatarDetails = hasTargetAvatarDetails
+    ? botIdentityMirrorAvatarDetailsV1(row.targetAvatarDetails)
+    : undefined;
   const sourceMessageId = boundedText(row.sourceMessageId, 160);
   const occurredAt = normalizedIso(row.occurredAt);
   if (
@@ -145,6 +186,7 @@ export function normalizeBotIdentityMirrorStateV1(
     targetBotName,
     targetPersonaPrompt,
     targetFace: botIdentityMirrorFaceV1(row.targetFace as BotFaceStyle),
+    ...(hasTargetAvatarDetails ? { targetAvatarDetails } : {}),
     targetVoice: botIdentityMirrorVoiceV1(row.targetVoice),
     sourceMessageId,
     occurredAt,
@@ -159,6 +201,7 @@ export function createBotIdentityMirrorStateV1(args: {
   targetBotName: string;
   targetPersonaPrompt: string;
   targetFace: BotFaceStyleInput | BotFaceStyle;
+  targetAvatarDetails?: unknown;
   targetVoice: unknown;
   sourceMessageId: string;
   occurredAt: string;
@@ -174,6 +217,13 @@ export function createBotIdentityMirrorStateV1(args: {
     targetBotName: args.targetBotName,
     targetPersonaPrompt: args.targetPersonaPrompt,
     targetFace: botIdentityMirrorFaceV1(args.targetFace),
+    ...(Object.prototype.hasOwnProperty.call(args, "targetAvatarDetails")
+      ? {
+          targetAvatarDetails: botIdentityMirrorAvatarDetailsV1(
+            args.targetAvatarDetails,
+          ),
+        }
+      : {}),
     targetVoice: botIdentityMirrorVoiceV1(args.targetVoice),
     sourceMessageId: args.sourceMessageId,
     occurredAt: args.occurredAt,

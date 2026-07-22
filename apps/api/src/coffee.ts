@@ -106,6 +106,7 @@ import type {
   AutoFallbackChainV1,
   AutoRecoveryTraceV1,
   BotIdentityMirrorStateV1,
+  BotAvatarDetailsV1,
   ResponseMode,
 } from "@localai/shared";
 import {
@@ -163,6 +164,7 @@ import {
   normalizeCoffeeSessionSettings,
   modelSupportsNativeReasoningEffort,
   parseStoredAssistantToolPayload,
+  parseStoredBotAvatarDetailsV1,
   parseStoredBotPrompt,
   resolveBotAudioVoiceProfileV1,
   pickCoffeeInterruptionReaction,
@@ -340,6 +342,7 @@ export interface CoffeeBotProfile {
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
   faceThinkingFrames?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
   authoredAudioVoiceProfile?: string | null;
   audioVoiceProfileOverride?: string | null;
@@ -6102,6 +6105,7 @@ type CoffeeBotProfileRow = {
   face_blink_offset_x: number | null;
   face_blink_offset_y: number | null;
   face_thinking_frames: string | null;
+  avatar_details_json: string | null;
   profile_picture_image_id: string | null;
   authored_audio_voice_profile: string | null;
   audio_voice_profile_override: string | null;
@@ -6161,6 +6165,7 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
     faceBlinkOffsetY:
       typeof row.face_blink_offset_y === "number" ? row.face_blink_offset_y : null,
     faceThinkingFrames: row.face_thinking_frames ?? null,
+    avatarDetails: parseStoredBotAvatarDetailsV1(row.avatar_details_json),
     profilePictureImageId: row.profile_picture_image_id ?? null,
     authoredAudioVoiceProfile: row.authored_audio_voice_profile ?? null,
     audioVoiceProfileOverride: row.audio_voice_profile_override ?? null,
@@ -6220,6 +6225,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_blink_offset_x")},
               ${selectOptionalBotColumn("face_blink_offset_y")},
               ${selectOptionalBotColumn("face_thinking_frames")},
+              ${selectOptionalBotColumn("avatar_details_json")},
               ${selectOptionalBotColumn("profile_picture_image_id")},
               ${selectOptionalBotColumn("authored_audio_voice_profile")},
               ${selectOptionalBotColumn("audio_voice_profile_override")},
@@ -15525,6 +15531,7 @@ async function generateCoffeeBotReply(args: {
           targetBotName: speaker.name,
           targetPersonaPrompt: speaker.systemPrompt,
           targetFace: botIdentityMirrorFaceV1(speaker),
+          targetAvatarDetails: speaker.avatarDetails ?? null,
           targetVoice: resolveBotAudioVoiceProfileV1(
             speaker.authoredAudioVoiceProfile,
             speaker.audioVoiceProfileOverride,

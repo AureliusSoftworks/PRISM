@@ -16,10 +16,11 @@ describe("mode tutorials", () => {
 
   it("teaches the local refreshable Studio lighting map", () => {
     const identityCopy = MODE_TUTORIALS.botcast.steps[1]?.body ?? "";
+    assert.match(identityCopy, /Every generated Studio finishes/u);
     assert.match(identityCopy, /Refresh Studio Lighting/u);
     assert.match(identityCopy, /one shared ambient receiver map/u);
     assert.match(identityCopy, /without changing either image/u);
-    assert.match(identityCopy, /instead of applying stale light/u);
+    assert.match(identityCopy, /never applies a stale map/u);
   });
 
   it("clamps restored progress to a valid step", () => {
@@ -36,6 +37,16 @@ describe("mode tutorials", () => {
       modeTutorialStep("slate", 99).heading,
       "Approve revisions deliberately",
     );
+  });
+
+  it("teaches deterministic replay video controls without implying another AI turn", () => {
+    const coffeeCopy = MODE_TUTORIALS.coffee.steps.at(-1)?.body ?? "";
+    const signalCopy = MODE_TUTORIALS.botcast.steps.at(-1)?.body ?? "";
+    assert.match(coffeeCopy, /third-person video automatically/u);
+    assert.match(coffeeCopy, /adds no AI conversation turn/u);
+    assert.match(signalCopy, /never asks an AI to recreate/u);
+    assert.match(signalCopy, /transcript-line seeking/u);
+    assert.match(signalCopy, /Delete Recording without deleting the episode transcript/u);
   });
 
   it("explains that Coffee cross-talk controls audible backchannels", () => {
@@ -81,6 +92,15 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Microscopic/u);
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /fully unseen even while speaking/u);
     assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /half-translucent/u);
+  });
+
+  it("teaches prompt-authored sight and hearing exclusions in social modes", () => {
+    for (const mode of ["coffee", "botcast"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /plain-language Power prompt/u);
+      assert.match(copy, /sight and hearing separately/u);
+      assert.match(copy, /excluded bot stays excluded/u);
+    }
   });
 
   it("explains that Auto requires substantive interview progress", () => {
@@ -460,7 +480,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /Film grain controls the full composited screen[\s\S]*preserved in live playback and replay[\s\S]*zero for a clean digital image/u,
+      /Film grain defaults to the full on-air TV treatment[\s\S]*preserved in live playback and replay[\s\S]*zero for a clean digital image/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -477,6 +497,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /never creates an episode or transcript/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.clickLabel ?? "",
+      /top-bar routing controls/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
@@ -668,7 +692,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",
-      /global response toggle at the top of Signal/u,
+      /global response control in Signal’s top bar beside the episode model/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[8]?.body ?? "",

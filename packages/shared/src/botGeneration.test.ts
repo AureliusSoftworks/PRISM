@@ -138,11 +138,23 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.avatarDetails?.screen.stamps.length, 3);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
+    assert.deepEqual(draft.powers, []);
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, "voice-premium-nyx");
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceIdOverride, undefined);
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
     assert.equal(draft.settings.maxTokens, 1800);
+  });
+
+  it("creates at most one compiler-ready prompt Power from a master draft", () => {
+    const value = completeDraft();
+    value.powerPrompt = "She can hear lies as broken glass, but only from detectives.";
+    const draft = normalizeBotGeneratedDraftV1(value);
+    assert.ok(draft);
+    assert.equal(draft.powers.length, 1);
+    assert.equal(draft.powers[0]?.authoringMode, "prompt");
+    assert.equal(draft.powers[0]?.intent, value.powerPrompt);
+    assert.equal(draft.powers[0]?.compileStatus, "draft");
   });
 
   it("rejects invented premium voice IDs while preserving the local equivalent", () => {

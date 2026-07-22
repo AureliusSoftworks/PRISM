@@ -140,7 +140,7 @@ import {
 import {
   SIGNAL_ARTWORK_JOB_EVENT,
   announceSignalArtworkJob,
-  signalArtworkAssetLabel,
+  signalArtworkJobCompletionNotice,
   signalArtworkJobIsActive,
   type SignalArtworkJobSnapshot,
 } from "./signalArtworkJob";
@@ -158,6 +158,10 @@ import {
   signalHostCueShouldRedirect,
 } from "./signalHostCueTiming";
 import { signalLiveCaptionText } from "./signalLiveCaptions";
+import { ReplayRecordingPanel } from "./ReplayRecordingPanel";
+import { buildSignalReplayManifestV1 } from "./replayManifest";
+import { queueReplayManifest } from "./replayClient";
+import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import {
   readSignalCameraTransitionMode,
   signalLiveAutoCameraShot,
@@ -401,7 +405,6 @@ export interface BotcastExperienceProps {
   accountDefaultModel: string | null;
   responseMode: BotcastEpisodeResponseMode;
   voiceMode: VoiceMode;
-  providerModeToggle?: ReactNode;
   theme?: "light" | "dark";
   renderAvatar?: (
     bot: BotcastBotSummary,
@@ -465,7 +468,16 @@ export interface BotcastExperienceProps {
   introAudioVolume?: number;
   sidebarHeader: ReactNode;
   navigationHeader:
-    ReactNode | ((state: { liveSessionActive: boolean }) => ReactNode);
+    | ReactNode
+    | ((state: {
+        liveSessionActive: boolean;
+        episodeModelControl: {
+          value: string;
+          onChange: (value: string) => void;
+          disabled: boolean;
+          disabledReason?: string;
+        };
+      }) => ReactNode);
   producerName?: string;
   renderProducerGuestComposer?: (
     state: BotcastProducerGuestComposerState,
@@ -1088,7 +1100,6 @@ export function BotcastExperience({
   accountDefaultModel,
   responseMode,
   voiceMode,
-  providerModeToggle,
   theme = "dark",
   renderAvatar,
   renderMug,
@@ -1971,6 +1982,24 @@ export function BotcastExperience({
   }, [episodeModelDraft, modelOptions]);
 
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
+  const replayQueuedEpisodeIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!episode || episode.status !== "completed" || !selectedShow) return;
+    if (replayQueuedEpisodeIdsRef.current.has(episode.id)) return;
+    replayQueuedEpisodeIdsRef.current.add(episode.id);
+    const manifest = buildSignalReplayManifestV1({
+      episode,
+      show: selectedShow,
+      bots: eligibleBots,
+      producerName,
+      theme,
+    });
+    void queueReplayManifest(manifest)
+      .then(() =>
+        window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT)),
+      )
+      .catch(() => replayQueuedEpisodeIdsRef.current.delete(episode.id));
+  }, [eligibleBots, episode, producerName, selectedShow, theme]);
   useEffect(() => {
     setShowPremiseDraft(selectedShow?.premise ?? "");
   }, [selectedShow?.id, selectedShow?.premise]);
@@ -2620,11 +2649,7 @@ export function BotcastExperience({
       });
     }
     if (artworkJob.status === "completed") {
-      setNotice(
-        artworkJob.totalCount === 1
-          ? `The refreshed ${signalArtworkAssetLabel(artworkJob.assets[0]!.kind)} is live.`
-          : "The custom logo and matching Light and Dark studios are live.",
-      );
+      setNotice(signalArtworkJobCompletionNotice(artworkJob));
     } else if (artworkJob.status === "partial") {
       setNotice(
         "Finished custom artwork is live; the PRISM set covers anything still missing.",
@@ -7873,31 +7898,6 @@ export function BotcastExperience({
           )}
         </div>
         <div className={styles.episodeLaunchRow}>
-          <label className={styles.episodeModelControl}>
-            <span>Episode model</span>
-            <select
-              value={episodeModelDraft}
-              onChange={(event) => setEpisodeModelDraft(event.target.value)}
-              aria-label="Signal episode model"
-              disabled={responseMode === "auto"}
-            >
-              <option value="">
-                {`Account default · ${accountDefaultModel ? (modelLabels.get(accountDefaultModel) ?? accountDefaultModel) : "Provider default"}`}
-              </option>
-              {modelOptions
-                .filter((option) => option.id !== accountDefaultModel)
-                .map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-            </select>
-            <small>
-              {responseMode === "auto"
-                ? "AUTO · primary may recover through your fallback chain"
-                : `${providerLabel(episodeModelProvider)} · locked for this recording`}
-            </small>
-          </label>
           <label className={styles.episodeLengthControl}>
             <span>Episode length</span>
             <select
@@ -8257,9 +8257,24 @@ export function BotcastExperience({
           guestDeparted: guestHasDeparted(episode),
         }) === "guest"));
   const liveSessionActive = episode?.status === "live";
+  const episodeModelControlDisabled =
+    liveSessionActive || responseMode === "auto";
+  const episodeModelControlDisabledReason = liveSessionActive
+    ? "End the live Signal episode before changing its model."
+    : responseMode === "auto"
+      ? "AUTO uses the account primary and configured fallback chain."
+      : undefined;
   const resolvedNavigationHeader =
     typeof navigationHeader === "function"
-      ? navigationHeader({ liveSessionActive })
+      ? navigationHeader({
+          liveSessionActive,
+          episodeModelControl: {
+            value: episodeModelDraft,
+            onChange: setEpisodeModelDraft,
+            disabled: episodeModelControlDisabled,
+            disabledReason: episodeModelControlDisabledReason,
+          },
+        })
       : navigationHeader;
   const copySignalErrorToast = async (): Promise<void> => {
     if (!error || error.copyState === "copying") return;
@@ -8774,13 +8789,6 @@ export function BotcastExperience({
                     "A bot owns the show. You produce the episode."}
                 </p>
             </div>
-            {providerModeToggle ? (
-              <div className={styles.signalGlobalProviderControl}>
-                <span>Global response mode</span>
-                {providerModeToggle}
-                <small>Ephemeral chat follows this unless overridden.</small>
-              </div>
-            ) : null}
           </header>
         ) : null}
         {episode && selectedShow ? (
@@ -9256,6 +9264,10 @@ export function BotcastExperience({
                 </button>
               </div>
             </div>
+            <ReplayRecordingPanel
+              surface="signal"
+              sourceId={replayEpisode.id}
+            />
             {renderStage({
               show: selectedShow,
               currentEpisode: replayEpisode,

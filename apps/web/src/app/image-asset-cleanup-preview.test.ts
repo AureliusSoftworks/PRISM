@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const settingsPanelSource = readFileSync(
+  new URL("./SettingsPanel.tsx", import.meta.url),
+  "utf8",
+);
 const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
@@ -71,6 +75,10 @@ describe("unused image asset cleanup", () => {
       /new Set\(result\.preview\.candidates\.map\(\(candidate\) => candidate\.id\)\)/u,
     );
     assert.match(modalSlice, /Unused asset preview/u);
+    assert.match(
+      modalSlice,
+      /createPortal\([\s\S]*data-asset-cleanup-preview="true"[\s\S]*document\.body/u,
+    );
     assert.match(modalSlice, /role="alertdialog"/u);
     assert.match(modalSlice, /ref=\{imageCleanupConfirmCancelRef\}/u);
     assert.match(
@@ -102,8 +110,14 @@ describe("unused image asset cleanup", () => {
     assert.match(modalSlice, /Run audit again/u);
     assert.match(
       pageSource,
-      /activeSettingsScope === "account"[\s\S]{0,10000}data-settings-action="clean-unused-assets"/u,
+      /activeSettingsScope === "help"[\s\S]{0,6000}data-settings-action="clean-unused-assets"/u,
     );
+    assert.match(settingsPanelSource, /\| "help"/u);
+    assert.match(
+      settingsPanelSource,
+      /label: "Info"[\s\S]{0,300}scope: "help",[\s\S]{0,80}title: "Help"/u,
+    );
+    assert.match(pageSource, /data-settings-section="help"/u);
     assert.equal(
       [...pageSource.matchAll(/data-settings-action="clean-unused-assets"/gu)]
         .length,

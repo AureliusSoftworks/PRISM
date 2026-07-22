@@ -16,6 +16,8 @@ import {
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
   "pairing_codes",
+  "replay_voice_takes",
+  "replay_recordings",
   "botcast_events",
   "botcast_messages",
   "botcast_episode_segments",

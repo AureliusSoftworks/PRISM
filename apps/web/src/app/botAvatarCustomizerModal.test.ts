@@ -241,8 +241,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /none:\s*"Default"/);
   assert.match(pageSource, /aria-label="Eyes"/);
   assert.match(pageSource, /aria-label="Mouth"/);
-  assert.match(pageSource, />\s*Blink\s*</);
-  assert.match(pageSource, />\s*Thinking animation\s*</);
+  assert.match(pageSource, /label="blink glyph"/);
+  assert.match(pageSource, /label="thinking animation"/);
   assert.match(pageSource, /aria-label="Custom blink bar"/);
   assert.match(
     pageSource,
@@ -361,7 +361,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(faceTabSource, /<BotAvatarIdentityControls/);
   assert.match(faceTabSource, /identitySection \?/);
   assert.match(faceTabSource, /<ColorGlyphPicker/);
-  assert.match(faceTabSource, /<legend>Thinking animation<\/legend>/);
+  assert.match(faceTabSource, /label="thinking animation"/);
   assert.match(faceTabSource, /aria-label="Custom thinking animation frames"/);
   assert.match(faceTabSource, /\sinline\s/);
   assert.doesNotMatch(faceTabSource, /label="Stroke weight"/);
@@ -383,10 +383,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.match(eyesTabSource, /botAvatarSingleGlyphInput/);
   assert.match(eyesTabSource, /disabled=\{!customEyeActive\}/);
-  assert.doesNotMatch(
-    eyesTabSource,
-    /Eye animation|BotAvatarGlyphAnimationControl|faceEyeAnimation/,
-  );
+  assert.match(eyesTabSource, /label="Eye animation"/);
+  assert.match(eyesTabSource, /value=\{faceEyeAnimation\}/);
   assert.match(eyesTabSource, /botAvatarCustomMotionRowSingle/);
   assert.match(eyesTabSource, /part="eyes"/);
   assert.match(eyesTabSource, /aria-label="Custom eye count"/);
@@ -395,7 +393,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(eyesTabSource, /Two eyes/);
   assert.match(eyesTabSource, /label="Eye size"/);
   assert.match(eyesTabSource, /label="Eye position"/);
-  assert.match(eyesTabSource, /<legend>Blink<\/legend>/);
+  assert.match(eyesTabSource, /label="blink glyph"/);
   assert.match(eyesTabSource, /botAvatarBlinkBarOptionLabel\(blinkBar\)/);
   assert.match(eyesTabSource, /aria-label="Use a custom blink bar"/);
   assert.match(eyesTabSource, /label="Blink size"/);
@@ -1074,10 +1072,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /<span>Avatar Studio<\/span>/);
   assert.match(pageSource, /function BotAvatarPreviewPanel\(/);
   assert.match(pageSource, /function BotAvatarIdentityControls\(/);
-  assert.match(pageSource, /<span>Pronunciation<\/span>/);
+  assert.match(pageSource, /<span>Pronunciation[\s\S]*?onRandomizeNamePronunciation[\s\S]*?<\/span>/);
   assert.match(pageSource, /aria-label="Bot name pronunciation"/);
   assert.match(pageSource, /placeholder="How bots should say this name"/);
-  assert.match(pageSource, /<span>Self-referral<\/span>/);
+  assert.match(pageSource, /<span>Self-referral[\s\S]*?onRandomizeSelfReferral[\s\S]*?<\/span>/);
   assert.match(pageSource, /aria-label="Bot self-referral"/);
   assert.match(pageSource, /placeholder="How this bot refers to itself"/);
   assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
@@ -1177,8 +1175,12 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     pageSource,
-    /<BotPowersEditor powers=\{newBotPowers\} onChange=\{setNewBotPowers\}/,
+    /<BotPowersEditor[\s\S]*?powers=\{newBotPowers\}[\s\S]*?onCompile=\{compileBotPowersForEditor\}/,
   );
+  assert.match(pageSource, /What makes this bot special\?/u);
+  assert.match(pageSource, /Create Power/u);
+  assert.match(pageSource, /Reroll sigil/u);
+  assert.match(pageSource, /Pop Power\?/u);
   assert.match(pageSource, /\/api\/bot-powers\/compile/);
   assert.match(cssSource, /\.botPowersPanel/);
   assert.match(
@@ -1814,7 +1816,7 @@ test("desktop kiosk shell shows a full-screen notice below the viewport floor", 
 });
 
 test("Powers read as an app-wide bot trait across active surfaces", () => {
-  assert.match(pageSource, /Short rules and quirks that follow this bot throughout PRISM\./u);
+  assert.match(pageSource, /Describe the magic or hard rule\. PRISM names it and makes it real\./u);
   assert.doesNotMatch(pageSource, /apply only during Coffee sessions/u);
   assert.match(pageSource, /<BotPowerBadge powers=\{selectedBot\.powers\} passive \/>/u);
   assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
@@ -1838,10 +1840,9 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
     pageSource,
     /effect\.type === "response_budget"[\s\S]{0,160}response budget/u,
   );
-  assert.match(pageSource, /structured engine effect/u);
-  assert.match(pageSource, /Model-guided cues only\./u);
-  assert.match(pageSource, /Guidance — bot:/u);
-  assert.match(pageSource, /Guidance — others:/u);
+  assert.match(pageSource, /deterministic effect/u);
+  assert.match(pageSource, /<strong>Holder:<\/strong>/u);
+  assert.match(pageSource, /<strong>Others:<\/strong>/u);
   assert.match(
     pageSource,
     /effect\.type === "candor"[\s\S]{0,140}one-response candor pressure/u,

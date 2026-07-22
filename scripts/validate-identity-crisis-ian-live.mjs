@@ -10,6 +10,7 @@ import {
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import {
   botcastIdentityMirrorCanTriggerV1,
+  botcastIdentityMirrorStatesV1,
   buildBotcastSpeakerPrompt,
 } from "../apps/api/src/botcast.ts";
 import {
@@ -43,6 +44,15 @@ const state = createBotIdentityMirrorStateV1({
   targetBotName: "Mara Vale",
   targetPersonaPrompt: targetPersona,
   targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
+  targetAvatarDetails: {
+    version: 1,
+    screen: {
+      stamps: [
+        { id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 },
+      ],
+      paintMaskBase64: null,
+    },
+  },
   targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.18 },
   sourceMessageId: "mara-addresses-ian",
   occurredAt,
@@ -176,6 +186,50 @@ const signalPrompt = buildBotcastSpeakerPrompt({
   guest: mara,
   speakerRole: "host",
 });
+const closingOccurredAt = "2026-07-20T20:00:02.000Z";
+const signalClosingEpisode = {
+  ...signalEpisode,
+  segment: "closing",
+  messages: [
+    {
+      id: "ian-opening",
+      botId: "ian",
+      speakerRole: "host",
+      content:
+        "Mara Vale, chart the safest relay route outward from Shackleton crater.",
+      createdAt: "2026-07-20T20:00:00.000Z",
+    },
+    ...signalEpisode.messages,
+  ],
+  events: [
+    ...signalEpisode.events,
+    {
+      id: "identity-live-reset",
+      episodeId: "identity-live-signal",
+      sequence: 2,
+      kind: "power_effect",
+      payload: {
+        v: 1,
+        effect: "identity_mirror_reset",
+        holderBotId: "ian",
+        reason: "signal_host_closing",
+      },
+      occurredAt: closingOccurredAt,
+    },
+  ],
+};
+const signalClosingPrompt = buildBotcastSpeakerPrompt({
+  show: {
+    name: "South Pole Signal",
+    premise: "Precise navigation under pressure.",
+    hostingStyle: "direct and economical",
+  },
+  episode: signalClosingEpisode,
+  host: ian,
+  guest: mara,
+  speakerRole: "host",
+  producerCut: true,
+});
 
 const provider = providerKind === "openai"
   ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY ?? "" })
@@ -186,6 +240,8 @@ const PASS_CRITERIA = Object.freeze([
   "The response demonstrates Mara's public cartographer persona.",
   "The response does not claim the human/player, private memory, provider settings, target Powers, or host role.",
   "The production-composed prompt retains Ian's Coffee participant or Signal host mechanical boundary.",
+  "The persisted public snapshot carries Mara's normalized Avatar Details ink; runtime rendering, not the model, enforces that visual handoff.",
+  "Signal's persisted closing reset restores Ian's authored host persona before the sign-off prompt and suppresses the copied Mara identity.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 const generate = (messages) =>
@@ -194,10 +250,12 @@ const generate = (messages) =>
     temperature: 0.25,
     maxTokens: 140,
   });
-const [coffeeRawResponse, signalRawResponse] = await Promise.all([
-  generate(coffeePrompt),
-  generate(signalPrompt),
-]);
+const [coffeeRawResponse, signalRawResponse, signalClosingResponse] =
+  await Promise.all([
+    generate(coffeePrompt),
+    generate(signalPrompt),
+    generate(signalClosingPrompt),
+  ]);
 const coffeeResponse = applyBotIdentityMirrorResponseV1(
   coffeeRawResponse,
   state,
@@ -238,6 +296,31 @@ function judgment(mode, prompt, response) {
   };
 }
 
+function closingJudgment(prompt, response) {
+  const promptText = prompt.map((message) => message.content).join("\n");
+  const defaultPersonaInPrompt = promptText.includes(ian.systemPrompt);
+  const copiedPersonaAbsentFromPrompt =
+    !/absolutely convinced that you are Mara Vale|mechanical Signal host/iu.test(
+      promptText,
+    );
+  const copiedIdentityAbsentFromResponse =
+    !/I(?:'m| am) Mara(?: Vale)?|my name is Mara Vale|\bimpostor\b/iu.test(
+      response,
+    );
+  const closesShow = /thank|listen|join|until|goodbye|show|episode/iu.test(response);
+  return {
+    pass:
+      defaultPersonaInPrompt &&
+      copiedPersonaAbsentFromPrompt &&
+      copiedIdentityAbsentFromResponse &&
+      closesShow,
+    defaultPersonaInPrompt,
+    copiedPersonaAbsentFromPrompt,
+    copiedIdentityAbsentFromResponse,
+    closesShow,
+  };
+}
+
 const result = {
   provider: provider.name,
   model,
@@ -252,6 +335,14 @@ const result = {
     containsFullTargetName: false,
     shortNameTriggerDetected,
   },
+  runtimeInvariant: {
+    targetInkSnapshotted:
+      state.targetAvatarDetails?.screen.stamps.some(
+        (stamp) => stamp.id === "diagonal-scar",
+      ) === true,
+    signalHostMirrorClearedForClosing:
+      !botcastIdentityMirrorStatesV1(signalClosingEpisode.events).has("ian"),
+  },
   coffee: {
     productionPrompt: coffeePrompt,
     rawModelResponse: coffeeRawResponse,
@@ -265,7 +356,18 @@ const result = {
     response: signalResponse,
     judgment: judgment("signal", signalPrompt, signalResponse),
   },
+  signalClosing: {
+    mechanicalRole: "host",
+    productionPrompt: signalClosingPrompt,
+    response: signalClosingResponse,
+    judgment: closingJudgment(signalClosingPrompt, signalClosingResponse),
+  },
 };
-result.pass = result.coffee.judgment.pass && result.signal.judgment.pass;
+result.pass =
+  result.runtimeInvariant.targetInkSnapshotted &&
+  result.runtimeInvariant.signalHostMirrorClearedForClosing &&
+  result.coffee.judgment.pass &&
+  result.signal.judgment.pass &&
+  result.signalClosing.judgment.pass;
 console.log(JSON.stringify(result, null, 2));
 if (!result.pass) process.exitCode = 1;

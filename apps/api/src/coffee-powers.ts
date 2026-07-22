@@ -119,6 +119,7 @@ function resolveTargets(args: {
   subjectBotId: string;
   bots: readonly CoffeePowerBotRow[];
   warnings: string[];
+  warnOnMissing?: boolean;
 }): string[] {
   const resolved = new Set<string>();
   for (const target of args.targets) {
@@ -132,7 +133,7 @@ function resolveTargets(args: {
           bot.name.trim().toLowerCase() === target.name.trim().toLowerCase()
         )
       : args.bots.filter((bot) => botMatchesTrait(bot, target.trait));
-    if (matches.length === 0) {
+    if (matches.length === 0 && args.warnOnMissing !== false) {
       const label = target.kind === "bot" ? target.name : target.trait;
       args.warnings.push(`No matching Coffee participant for “${label}”.`);
     }
@@ -153,8 +154,25 @@ function resolvedEffect(
       botId,
       name: bots.find((bot) => bot.id === botId)?.name ?? botId,
     }));
+  const resolveExcluded = (targets: readonly BotPowerTargetV1[]): BotPowerTargetV1[] =>
+    resolveTargets({
+      targets,
+      subjectBotId,
+      bots,
+      warnings,
+      warnOnMissing: false,
+    }).map((botId) => ({
+      kind: "bot" as const,
+      botId,
+      name: bots.find((bot) => bot.id === botId)?.name ?? botId,
+    }));
   if (effect.type === "awareness" || effect.type === "speech_audience") {
-    return { ...effect, allowed: resolve(effect.allowed) };
+    const excluded = resolveExcluded(effect.excluded ?? []);
+    return {
+      ...effect,
+      allowed: resolve(effect.allowed),
+      ...(excluded.length > 0 ? { excluded } : {}),
+    };
   }
   if (
     effect.type === "social_influence" ||
@@ -171,6 +189,15 @@ function resolvedEffect(
 
 function idsFromResolvedTargets(targets: readonly BotPowerTargetV1[]): string[] {
   return targets.flatMap((target) => target.kind === "bot" && target.botId ? [target.botId] : []);
+}
+
+function audienceIdsFromResolvedEffect(
+  effect: BotPowerEffectV1 | undefined,
+  type: "awareness" | "speech_audience",
+): string[] | null {
+  if (!effect || effect.type !== type) return null;
+  const excluded = new Set(idsFromResolvedTargets(effect.excluded ?? []));
+  return idsFromResolvedTargets(effect.allowed).filter((botId) => !excluded.has(botId));
 }
 
 function powerStrengthScore(strength: BotPowerStrength): number {
@@ -525,11 +552,9 @@ export function resolveCoffeePowersForSession(
         .filter(Boolean)
         .join(" "),
       visibleToBotIds:
-        awareness?.type === "awareness" ? idsFromResolvedTargets(awareness.allowed) : null,
+        audienceIdsFromResolvedEffect(awareness, "awareness"),
       speechAudienceBotIds:
-        speechAudience?.type === "speech_audience"
-          ? idsFromResolvedTargets(speechAudience.allowed)
-          : null,
+        audienceIdsFromResolvedEffect(speechAudience, "speech_audience"),
       effects,
       ruleLabels: powers.flatMap((power) => power.compiled?.ruleLabels ?? []),
       warnings: [...new Set(warnings)],

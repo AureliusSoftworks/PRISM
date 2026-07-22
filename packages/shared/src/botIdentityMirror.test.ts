@@ -12,15 +12,27 @@ import {
   botIdentityMirrorTransitionActiveV1,
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
+  resolveBotIdentityMirrorAvatarDetailsV1,
   resolveBotIdentityMirrorVoiceV1,
 } from "./botIdentityMirror.ts";
+import type { BotAvatarDetailsV1 } from "./botAvatarDetails.ts";
 import {
   botcastIdentityMirrorStateBeforeMessageV1,
   botcastIdentityMirrorStatesAtV1,
+  normalizeBotcastIdentityMirrorResetV1,
   type BotcastEpisode,
 } from "./botcast.ts";
 
 const occurredAt = "2026-07-20T20:00:00.000Z";
+const targetAvatarDetails: BotAvatarDetailsV1 = {
+  version: 1,
+  screen: {
+    stamps: [
+      { id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 },
+    ],
+    paintMaskBase64: null,
+  },
+};
 
 function identityState() {
   return createBotIdentityMirrorStateV1({
@@ -31,6 +43,7 @@ function identityState() {
     targetBotName: "Mara Vale",
     targetPersonaPrompt: "A terse lunar cartographer who speaks in bearings.",
     targetFace: { faceEyeCharacter: "◉", faceMouthCharacter: "_" },
+    targetAvatarDetails,
     targetVoice: { v: 2, enabled: true, baseVoiceId: "voice-4", pitch: 0.2 },
     sourceMessageId: "message-1",
     occurredAt,
@@ -121,9 +134,10 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
 });
 
-test("identity mirror snapshot is bounded to public persona, normalized face, and voice", () => {
+test("identity mirror snapshot is bounded to public persona, face, ink, and voice", () => {
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
+  assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
   assert.equal(state.targetVoice.enabled, true);
   assert.equal("powers" in state, false);
   assert.equal("privateMemories" in state, false);
@@ -154,9 +168,50 @@ test("identity mirror snapshot is bounded to public persona, normalized face, an
   assert.equal(
     normalizeBotIdentityMirrorStateV1({
       ...state,
+      targetAvatarDetails: { raw: "not a portable avatar recipe" },
+    })?.targetAvatarDetails,
+    null,
+  );
+  assert.equal(
+    normalizeBotIdentityMirrorStateV1({
+      ...state,
       targetVoice: { ...state.targetVoice, enabled: false },
     })?.targetVoice.enabled,
     true,
+  );
+  const holderAvatarDetails: BotAvatarDetailsV1 = {
+    version: 1,
+    screen: {
+      stamps: [
+        { id: "freckles", offsetX: 0, offsetY: 0, scalePct: 100 },
+      ],
+      paintMaskBase64: null,
+    },
+  };
+  assert.deepEqual(
+    resolveBotIdentityMirrorAvatarDetailsV1(
+      state,
+      holderAvatarDetails,
+      true,
+    ),
+    targetAvatarDetails,
+  );
+  assert.deepEqual(
+    resolveBotIdentityMirrorAvatarDetailsV1(
+      state,
+      holderAvatarDetails,
+      false,
+    ),
+    holderAvatarDetails,
+  );
+  const { targetAvatarDetails: _legacyInk, ...legacyState } = state;
+  assert.deepEqual(
+    resolveBotIdentityMirrorAvatarDetailsV1(
+      legacyState,
+      holderAvatarDetails,
+      true,
+    ),
+    holderAvatarDetails,
   );
   assert.equal(botIdentityMirrorTargetChangesV1(state, "mara"), false);
   assert.equal(botIdentityMirrorTargetChangesV1(state, "jo"), true);
@@ -243,6 +298,7 @@ test("identity mirror snapshot is bounded to public persona, normalized face, an
 test("identity mirror transition and Signal replay use persisted event timing and reset cleanly", () => {
   const state = identityState();
   const atMs = Date.parse(occurredAt);
+  const resetOccurredAt = new Date(atMs + 1_000).toISOString();
   assert.equal(botIdentityMirrorTransitionActiveV1(state, atMs), true);
   assert.equal(
     botIdentityMirrorTransitionActiveV1(
@@ -256,12 +312,43 @@ test("identity mirror transition and Signal replay use persisted event timing an
     messages: [
       { id: "message-1" },
       { id: "message-2" },
+      { id: "message-3" },
     ],
     events: [
       {
+        sequence: 1,
+        kind: "utterance",
+        payload: { messageId: "message-1" },
+        occurredAt,
+      },
+      {
+        sequence: 2,
         kind: "power_effect",
         payload: { state },
         occurredAt,
+      },
+      {
+        sequence: 3,
+        kind: "utterance",
+        payload: { messageId: "message-2" },
+        occurredAt,
+      },
+      {
+        sequence: 4,
+        kind: "power_effect",
+        payload: {
+          v: 1,
+          effect: "identity_mirror_reset",
+          holderBotId: "ian",
+          reason: "signal_host_closing",
+        },
+        occurredAt: resetOccurredAt,
+      },
+      {
+        sequence: 5,
+        kind: "utterance",
+        payload: { messageId: "message-3" },
+        occurredAt: resetOccurredAt,
       },
     ],
   } as unknown as BotcastEpisode;
@@ -275,8 +362,28 @@ test("identity mirror transition and Signal replay use persisted event timing an
     "mara",
   );
   assert.equal(
+    botcastIdentityMirrorStateBeforeMessageV1(episode, "ian", "message-3"),
+    null,
+  );
+  assert.equal(
     botcastIdentityMirrorStatesAtV1(episode.events, atMs - 1).size,
     0,
   );
-  assert.equal(botcastIdentityMirrorStatesAtV1([], atMs + 1).size, 0);
+  assert.equal(botcastIdentityMirrorStatesAtV1(episode.events, atMs).size, 1);
+  assert.equal(
+    botcastIdentityMirrorStatesAtV1(
+      episode.events,
+      Date.parse(resetOccurredAt),
+    ).size,
+    0,
+  );
+  assert.deepEqual(
+    normalizeBotcastIdentityMirrorResetV1(episode.events[3]?.payload),
+    {
+      v: 1,
+      effect: "identity_mirror_reset",
+      holderBotId: "ian",
+      reason: "signal_host_closing",
+    },
+  );
 });

@@ -260,7 +260,7 @@ export interface BotcastStudioAtmosphereMix {
   filmGrain: number;
 }
 
-export const BOTCAST_DEFAULT_STUDIO_FILM_GRAIN = 0.3;
+export const BOTCAST_DEFAULT_STUDIO_FILM_GRAIN = 1;
 export const BOTCAST_STUDIO_FILM_GRAIN_MAX = 1;
 export const BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX: Readonly<BotcastStudioAtmosphereMix> = {
   background: 0.16,
@@ -869,6 +869,38 @@ export function botcastPerceptionOverlapEventsV1(
   });
 }
 
+export interface BotcastIdentityMirrorResetV1 {
+  v: 1;
+  effect: "identity_mirror_reset";
+  holderBotId: string;
+  reason: "signal_host_closing";
+}
+
+export function normalizeBotcastIdentityMirrorResetV1(
+  value: unknown,
+): BotcastIdentityMirrorResetV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const holderBotId =
+    typeof row.holderBotId === "string"
+      ? row.holderBotId.trim().slice(0, 160)
+      : "";
+  if (
+    row.v !== 1 ||
+    row.effect !== "identity_mirror_reset" ||
+    !holderBotId ||
+    row.reason !== "signal_host_closing"
+  ) {
+    return null;
+  }
+  return {
+    v: 1,
+    effect: "identity_mirror_reset",
+    holderBotId,
+    reason: "signal_host_closing",
+  };
+}
+
 /** Rehydrates the last persisted identity theft for each holder at a live/replay cutoff. */
 export function botcastIdentityMirrorStatesAtV1(
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload" | "occurredAt">[],
@@ -879,6 +911,11 @@ export function botcastIdentityMirrorStatesAtV1(
     if (event.kind !== "power_effect") continue;
     const eventAtMs = Date.parse(event.occurredAt);
     if (Number.isFinite(eventAtMs) && eventAtMs > cutoffOccurredAtMs) continue;
+    const reset = normalizeBotcastIdentityMirrorResetV1(event.payload);
+    if (reset) {
+      states.delete(reset.holderBotId);
+      continue;
+    }
     const state = normalizeBotIdentityMirrorStateV1(event.payload.state);
     if (!state || state.surface !== "signal") continue;
     states.set(state.holderBotId, state);
@@ -892,9 +929,34 @@ export function botcastIdentityMirrorStateBeforeMessageV1(
   holderBotId: string,
   messageId: string,
 ): BotIdentityMirrorStateV1 | null {
-  const messageIndex = episode.messages.findIndex((message) => message.id === messageId);
+  const messageIndex = episode.messages.findIndex(
+    (message) => message.id === messageId,
+  );
   if (messageIndex < 0) return null;
+  const targetUtteranceSequence = episode.events.find(
+    (event) =>
+      event.kind === "utterance" && event.payload.messageId === messageId,
+  )?.sequence;
   let state: BotIdentityMirrorStateV1 | null = null;
+  if (targetUtteranceSequence !== undefined) {
+    for (const event of episode.events) {
+      if (event.sequence >= targetUtteranceSequence) break;
+      if (event.kind !== "power_effect") continue;
+      const reset = normalizeBotcastIdentityMirrorResetV1(event.payload);
+      if (reset?.holderBotId === holderBotId) {
+        state = null;
+        continue;
+      }
+      const candidate = normalizeBotIdentityMirrorStateV1(event.payload.state);
+      if (
+        candidate?.surface === "signal" &&
+        candidate.holderBotId === holderBotId
+      ) {
+        state = candidate;
+      }
+    }
+    return state;
+  }
   for (const event of episode.events) {
     if (event.kind !== "power_effect") continue;
     const candidate = normalizeBotIdentityMirrorStateV1(event.payload.state);

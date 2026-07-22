@@ -5,6 +5,7 @@ import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   BOT_POWER_MAX_COUNT,
   activeBotPowerEffectsV1,
+  activeBotPowersV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
@@ -39,6 +40,8 @@ import {
   botPowerResponseIsSilentV1,
   botPowerResponseIsFirstIntroductionV1,
   botPowerSourceHashV1,
+  botPowerSourceHashForPowerV1,
+  botPowerSigilForPowerV1,
   botPowerTextScaleV1,
   botPowerThemeMoodCueV1,
   botPowerVoiceGainMultiplierV1,
@@ -67,17 +70,82 @@ test("bot powers normalize to three bounded entries", () => {
       version: 1,
       id: `power-${index}`,
       name: `Power ${index}`,
-      intent: "x".repeat(500),
+      intent: "x".repeat(900),
       enabled: true,
       compileStatus: "draft",
       compiled: null,
     }))
   );
   assert.equal(powers.length, BOT_POWER_MAX_COUNT);
-  assert.equal(powers[0]?.intent.length, 300);
+  assert.equal(powers[0]?.intent.length, 640);
 });
 
-test("stale compiled power data retains intent but returns to draft", () => {
+test("prompt-authored Power hashes ignore generated names and sigils while legacy hashes stay stable", () => {
+  const legacy = botPowerSourceHashV1("Invisible", "Only Light can see him.");
+  assert.equal(
+    botPowerSourceHashForPowerV1({ name: "Invisible", intent: "Only Light can see him." }),
+    legacy,
+  );
+  const promptA = botPowerSourceHashForPowerV1({
+    authoringMode: "prompt",
+    name: "Spectral Accord",
+    intent: "Only Light can see him.",
+  });
+  const promptB = botPowerSourceHashForPowerV1({
+    authoringMode: "prompt",
+    name: "Veiled Communion",
+    intent: "Only Light can see him.",
+  });
+  assert.equal(promptA, promptB);
+  assert.notEqual(promptA, legacy);
+  assert.equal(
+    botPowerSigilForPowerV1({ id: "legacy", name: "Invisible", intent: "Only Light can see him." }),
+    botPowerSigilForPowerV1({ id: "legacy", name: "Invisible", intent: "Only Light can see him." }),
+  );
+});
+
+test("audience exclusions win for compound visibility and speech restrictions", () => {
+  const effects = [
+    {
+      type: "awareness" as const,
+      allowed: [{ kind: "all" as const }],
+      excluded: [{ kind: "bot" as const, name: "Plankton", botId: "plankton" }],
+    },
+    {
+      type: "speech_audience" as const,
+      allowed: [{ kind: "bot" as const, name: "Plankton", botId: "plankton" }],
+    },
+    { type: "avatar_visibility" as const, mode: "translucent" as const },
+  ];
+  const perception = (id: string) => botPowerPairwisePerceptionV1(
+    [{
+      version: 1,
+      id: "compound",
+      authoringMode: "prompt" as const,
+      name: "Veiled Communion",
+      intent: "Invisible; only Plankton hears him, but everyone except Plankton sees him.",
+      enabled: true,
+      compileStatus: "ready" as const,
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashForPowerV1({
+          authoringMode: "prompt",
+          name: "Veiled Communion",
+          intent: "Invisible; only Plankton hears him, but everyone except Plankton sees him.",
+        }),
+        selfCue: "",
+        observerCue: "",
+        effects,
+        ruleLabels: [],
+      },
+    }],
+    (target) => target.kind === "all" || (target.kind === "bot" && target.botId === id),
+  );
+  assert.deepEqual(perception("plankton"), { version: 1, visible: false, audible: true });
+  assert.deepEqual(perception("lincoln"), { version: 1, visible: true, audible: false });
+});
+
+test("stale compiled power data retains the last artifact but returns to an inactive draft", () => {
   const powers = normalizeBotPowersV1([{
     version: 1,
     id: "stoic",
@@ -96,7 +164,8 @@ test("stale compiled power data retains intent but returns to draft", () => {
   }]);
   assert.equal(powers[0]?.intent, "Mood hardly changes.");
   assert.equal(powers[0]?.compileStatus, "draft");
-  assert.equal(powers[0]?.compiled, null);
+  assert.equal(powers[0]?.compiled?.selfCue, "Stay steady.");
+  assert.deepEqual(activeBotPowersV1(powers), []);
 });
 
 test("compiler effect inputs can only produce bounded strength tiers", () => {

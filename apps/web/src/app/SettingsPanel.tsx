@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import {
   BookOpen,
+  CircleHelp,
   Coffee,
   FlaskConical,
   Info,
@@ -30,6 +31,7 @@ export type SettingsScope =
   | "experimental"
   | "models"
   | "voice"
+  | "help"
   | "about"
   | "account";
 
@@ -77,6 +79,11 @@ const SETTINGS_NAV_GROUPS: readonly {
   {
     label: "Info",
     items: [
+      {
+        scope: "help",
+        title: "Help",
+        icon: <CircleHelp size={16} strokeWidth={2} />,
+      },
       { scope: "about", title: "About", icon: <Info size={16} strokeWidth={2} /> },
       { scope: "account", title: "Account", icon: <UserRound size={16} strokeWidth={2} /> },
     ],

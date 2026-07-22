@@ -26,9 +26,9 @@ ship as `0.5.2` while Coffee is `v0.7` and Story is `v0.1`.
 | --- | --- | --- | --- |
 | Chat | v1.24 | Active | Full playground with direct human access to a companion and half-translucent targeted-Invisible presentation. |
 | Zen | v1.23 | Active | Calm one-to-one continuity with direct human access to a companion and half-translucent targeted-Invisible presentation. |
-| Coffee | v2.21 | Active | Multi-bot tables with frozen pairwise sight and hearing, hidden spectral turns, cast-dependent live reveal, full spectral replay, and deterministic Power-driven overlap. |
-| Signal | v1.40 | Active | Bot-owned interviews with pairwise cast perception, unrestricted spectral booking, cast-dependent live reveal, full spectral replay, dual captions, spatial overlap audio, and audience-projected reviews. |
-| Story | v0.22 | Preview | Generated visual-novel episodes with an omniscient reader, half-translucent spectral actors, pairwise character knowledge, accidental prose overlap, choices, maps, inventory, and transcripts. |
+| Coffee | v2.23 | Active | Multi-bot tables with frozen pairwise sight and hearing, allowed-minus-excluded targeting, hidden spectral turns, cast-dependent live reveal, full spectral replay, and deterministic Power-driven overlap. |
+| Signal | v1.44 | Active | Bot-owned interviews with pairwise cast perception, allowed-minus-excluded targeting, unrestricted spectral booking, full spectral replay, dual captions, spatial overlap audio, and audience-projected reviews. |
+| Story | v0.23 | Preview | Generated visual-novel episodes with an omniscient reader, excluded-target-aware character knowledge, half-translucent spectral actors, accidental prose overlap, choices, maps, inventory, and transcripts. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -90,6 +90,28 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-07-21
+
+- Bumped `Signal` to `v1.44` so an Identity Crisis host restores its authored
+  default persona, CRT face, Avatar Details ink, and voice before the closing
+  sign-off. The saved reset keeps live playback and replay in sync.
+
+- Bumped `Coffee` to `v2.23`, `Signal` to `v1.43`, and `Story` to `v0.23`
+  for prompt-authored compound Powers. Sight and hearing can now each allow a
+  cast and exclude exceptions, with exclusion winning and legacy audience
+  projections recomputed as allowed-minus-excluded. Avatar Studio authors one
+  plain-language prompt, then presents the compiled outcome as an editable,
+  rerollable sigil artifact.
+
+- Bumped `Coffee` to `v2.22` and `Signal` to `v1.42` so Identity Crisis
+  copies the directly addressing bot's authored Avatar Details ink together
+  with its public persona, CRT face, and voice. Live play and replay share the
+  persisted handoff, while legacy recordings keep their original presentation.
+
+- Bumped `Signal` to `v1.41` for an on-air broadcast texture and dependable
+  Studio lighting. Fine high-contrast TV noise and scanlines replace the old
+  brightness-like film layer, full strength is the new-show default, and every
+  generated Studio now finishes by rebuilding and installing its local ambient
+  receiver map automatically.
 
 - Bumped `Chat` to `v1.24`, `Zen` to `v1.23`, `Coffee` to `v2.21`, `Signal`
   to `v1.40`, and `Story` to `v0.22` for shared spectral perception. Targeted

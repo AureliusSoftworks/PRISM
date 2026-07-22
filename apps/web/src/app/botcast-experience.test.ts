@@ -597,7 +597,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.stageViewport::after\s*\{[^}]*url\("\/signal-film-grain\.svg"\)[^}]*opacity:\s*calc\(var\(--signal-film-grain-level\) \* \.65\)[^}]*pointer-events:\s*none/iu,
+      /\.stageViewport::after\s*\{[^}]*repeating-linear-gradient[^}]*url\("\/signal-film-grain\.svg"\)[^}]*background-size:\s*100% 4px, 96px 96px[^}]*mix-blend-mode:\s*overlay[^}]*opacity:\s*calc\(var\(--signal-film-grain-level\) \* \.36\)[^}]*pointer-events:\s*none/iu,
     );
     assert.match(
       css,
@@ -1730,7 +1730,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /function SignalFallbackStudio/u);
     assert.match(source, /function signalStudioLightingStyle/u);
     assert.match(css, /mask-image:\s*var\(--signal-studio-lighting-map\)/u);
-    assert.match(css, /mix-blend-mode:\s*multiply/u);
+    assert.match(css, /\.studioGlow\s*\{[^}]*mix-blend-mode:\s*screen/iu);
+    assert.match(
+      css,
+      /\.shell\[data-theme="light"\] \.studioGlow\s*\{[^}]*mix-blend-mode:\s*overlay/iu,
+    );
   });
 
   it("blocks only for identity handoff, then exposes honest persistent background progress", () => {
@@ -2216,16 +2220,20 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("locks one account or episode model before recording", () => {
-    assert.match(source, /aria-label="Signal episode model"/u);
-    assert.match(source, /Account default ·/u);
-    assert.match(source, /locked for this recording/u);
+  it("keeps Signal response and episode model controls together in the top bar", () => {
+    assert.match(source, /episodeModelControl:\s*\{/u);
+    assert.match(source, /value: episodeModelDraft/u);
+    assert.match(source, /onChange: setEpisodeModelDraft/u);
+    assert.match(
+      source,
+      /liveSessionActive \|\| responseMode === "auto"/u,
+    );
+    assert.match(source, /AUTO uses the account primary/u);
     assert.match(
       source,
       /guestBotId: startGuestId,[\s\S]{0,260}preferredProvider: episodeProvider,[\s\S]{0,120}responseMode,[\s\S]{0,120}modelOverride: selectedModelOption\?\.id \?\? accountDefaultModel/u,
     );
     assert.match(source, /provider: "local" \| "openai" \| "anthropic"/u);
-    assert.match(source, /providerLabel\(episodeModelProvider\)/u);
     assert.match(source, /episodeModeLabel\(episode\)/u);
     assert.match(source, /episodeModeLabel\(replayEpisode\)/u);
     assert.match(source, /function episodeModeLabel/u);
@@ -2248,15 +2256,22 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /accountDefaultModel=/u);
     assert.match(
       pageSource,
-      /providerModeToggle=\{renderProviderModeToggle\("", true\)\}/u,
+      /modelControls:\s*\([\s\S]{0,800}renderProviderModeToggle\([\s\S]{0,220}styles\.chatHeaderModeToggle,[\s\S]{0,80}true,[\s\S]{0,120}liveChromePolicy\?\.lockMessage[\s\S]{0,520}<ComposerModelPicker/u,
     );
-    assert.match(source, /Global response mode/u);
-    assert.match(source, /Ephemeral chat follows this unless overridden\./u);
+    assert.match(pageSource, /ariaLabel="Signal episode model"/u);
+    assert.match(pageSource, /autoOptionLabel="Account default"/u);
+    assert.match(pageSource, /placement="down"/u);
+    assert.match(
+      pageSource,
+      /options\.modelControls[\s\S]{0,100}<div className=\{styles\.chatHeaderModelPicker\}>/u,
+    );
+    assert.doesNotMatch(source, /providerModeToggle/u);
+    assert.doesNotMatch(source, /signalGlobalProviderControl/u);
+    assert.doesNotMatch(source, /styles\.episodeModelControl/u);
+    assert.doesNotMatch(source, /aria-label="Signal episode model"/u);
     assert.doesNotMatch(source, />Episode mode</u);
-    assert.match(source, /primary may recover through your fallback chain/u);
-    assert.match(source, /disabled=\{responseMode === "auto"\}/u);
-    assert.match(css, /\.episodeModelControl\s*\{/u);
-    assert.match(css, /\.signalGlobalProviderControl\s*\{/u);
+    assert.doesNotMatch(css, /\.episodeModelControl/u);
+    assert.doesNotMatch(css, /\.signalGlobalProviderControl/u);
   });
 
   it("inherits the active theme in shared panels and uses image settings for artwork", () => {

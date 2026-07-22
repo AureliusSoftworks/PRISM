@@ -147,7 +147,7 @@ describe("botArchive", () => {
     assert.deepEqual(parsePrismBotArchive(archive).memories, []);
   });
 
-  it("round-trips powers and queues mismatched compiled rules for recompilation", () => {
+  it("round-trips powers and retains the last valid artifact while queuing recompilation", () => {
     const name = "Stoic";
     const intent = "Mood hardly changes from praise or criticism.";
     const archive = createPrismBotArchive({
@@ -191,7 +191,10 @@ describe("botArchive", () => {
     });
     const stalePower = parsePrismBotArchive(stale).botJson.bot.powers?.[0];
     assert.equal(stalePower?.compileStatus, "draft");
-    assert.equal(stalePower?.compiled, null);
+    assert.equal(
+      stalePower?.compiled?.sourceHash,
+      botPowerSourceHashV1(name, intent),
+    );
     assert.equal(stalePower?.intent, "A revised intent that invalidates compiled rules.");
   });
 

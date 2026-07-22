@@ -1,12 +1,16 @@
 import {
+  BOT_POWER_SIGIL_IDS_V1,
   BOT_POWER_VERSION,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowersV1,
   type BotPowerEffectV1,
+  type BotPowerSigilIdV1,
+  type BotPowerTargetV1,
   type BotPowerV1,
   type CompiledBotPowerV1,
 } from "@localai/shared";
@@ -18,6 +22,10 @@ import {
 
 const BOT_POWER_COMPILE_MAX_TOKENS = 900;
 type HardAudienceEffectType = "awareness" | "speech_audience";
+type HardAudienceSelector = {
+  allowed: BotPowerTargetV1[];
+  excluded?: BotPowerTargetV1[];
+};
 
 function compact(value: unknown, limit: number): string {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, limit) : "";
@@ -87,6 +95,7 @@ function audienceNamesForIntent(
         /\b(?:inaudible|unheard|silent)\b[\s\S]*?\bexcept(?:\s+(?:to|by|for))?\s+(.+?)\s*[.!?]*$/iu,
         /\b(?:heard|audible)\s+only\s+(?:to|by)\s+(.+?)\s*[.!?]*$/iu,
         /\bonly\s+(.+?)\s+can\s+hear\b/iu,
+        /\bcan\s+only\s+(?:speak|talk|address)\s+(?:to|with)\s+([^.!?;]+)/iu,
         /\b(?:speaks?|talks?|addresses?)\s+only\s+(?:to|with)\s+(.+?)\s*[.!?]*$/iu,
       ];
   for (const pattern of patterns) {
@@ -96,6 +105,86 @@ function audienceNamesForIntent(
     if (names.length > 0) return names;
   }
   return [];
+}
+
+function targetNames(value: string): BotPowerTargetV1[] {
+  return normalizedAudienceNames(value).map((name) => ({
+    kind: "bot" as const,
+    name,
+  }));
+}
+
+function normalizedTargetLabels(targets: readonly BotPowerTargetV1[]): string[] {
+  return targets.map((target) =>
+    target.kind === "all"
+      ? "everyone"
+      : target.kind === "bot"
+        ? target.name
+        : target.trait,
+  );
+}
+
+function excludedAudienceNamesForIntent(
+  intent: string,
+  type: HardAudienceEffectType,
+): string[] {
+  const source = compact(intent, 640);
+  const perceptionWord = type === "awareness"
+    ? "(?:seen|visible|perceived|noticed)"
+    : "(?:heard|audible)";
+  const patterns = [
+    new RegExp(`\\b(?:everyone|everybody|all(?:\\s+bots?)?)\\s+(?:except|but)\\s+([^,.!?;]+)`, "iu"),
+    new RegExp(`\\b(?:can(?:not|'t)|is\\s+not|isn't|never)\\s+(?:be\\s+)?${perceptionWord}\\s+(?:by|to)\\s+([^,.!?;]+)`, "iu"),
+    new RegExp(`\\b${perceptionWord}\\s+(?:by|to)\\s+(?:everyone|everybody|all(?:\\s+bots?)?)\\s+(?:except|but)\\s+([^,.!?;]+)`, "iu"),
+  ];
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (!match?.[1]) continue;
+    const names = normalizedAudienceNames(match[1]);
+    if (names.length > 0) return names;
+  }
+  return [];
+}
+
+function hardAudienceSelectorForIntent(
+  intent: string,
+  type: HardAudienceEffectType,
+): HardAudienceSelector | null {
+  const source = compact(intent, 640);
+  const sourceLower = source.toLowerCase().replace(/[’]/gu, "'");
+  const excludedNames = excludedAudienceNamesForIntent(source, type);
+  const namedAllowed = audienceNamesForIntent(source, type);
+  const negativeUniversalExcept = type === "awareness"
+    ? /\b(?:invisible|unseen|imperceptible)\b[\s\S]*?\b(?:everyone|everybody|all(?:\s+bots?)?)\s+except\b/u.test(sourceLower)
+    : /\b(?:inaudible|unheard|silent)\b[\s\S]*?\b(?:everyone|everybody|all(?:\s+bots?)?)\s+except\b/u.test(sourceLower);
+  const everyoneElse = /\b(?:everyone|everybody)\s+else\b|\b(?:everyone|everybody|all(?:\s+bots?)?)\s+(?:except|but)\b/u.test(
+    sourceLower,
+  ) && !negativeUniversalExcept;
+  const relevant = type === "awareness"
+    ? /\b(?:see|seen|visible|invisible|unseen|perceive|perceived|notice|noticed)\b/u.test(sourceLower)
+    : /\b(?:hear|heard|audible|inaudible|unheard|speak|speaks|talk|talks|address|addresses)\b/u.test(sourceLower);
+  if (!relevant) return null;
+  if (everyoneElse && excludedNames.length > 0) {
+    return {
+      allowed: [{ kind: "all" }],
+      excluded: targetNames(excludedNames.join(", ")),
+    };
+  }
+  if (namedAllowed.length > 0) {
+    return {
+      allowed: targetNames(namedAllowed.join(", ")),
+      ...(!negativeUniversalExcept && excludedNames.length > 0
+        ? { excluded: targetNames(excludedNames.join(", ")) }
+        : {}),
+    };
+  }
+  if (excludedNames.length > 0) {
+    return {
+      allowed: [{ kind: "all" }],
+      excluded: targetNames(excludedNames.join(", ")),
+    };
+  }
+  return null;
 }
 
 function requiredHardAudienceEffect(intent: string): HardAudienceEffectType | null {
@@ -111,17 +200,23 @@ function requiredHardAudienceEffect(intent: string): HardAudienceEffectType | nu
   return null;
 }
 
+function requiredHardAudienceEffects(intent: string): HardAudienceEffectType[] {
+  return (["awareness", "speech_audience"] as const).filter((type) =>
+    hardAudienceSelectorForIntent(intent, type) !== null
+  );
+}
+
 function deterministicHardAudiencePower(
   source: BotPowerV1,
   botName: string
 ): CompiledBotPowerV1 | null {
-  const required = requiredHardAudienceEffect(source.intent);
-  if (!required) return null;
-  const names = audienceNamesForIntent(source.intent, required);
-  if (names.length === 0) return null;
-  const audience = names.join(", ");
+  const selectors = requiredHardAudienceEffects(source.intent).flatMap((type) => {
+    const selector = hardAudienceSelectorForIntent(source.intent, type);
+    return selector ? [{ type, selector }] : [];
+  });
+  if (selectors.length === 0) return null;
   const subject = compact(botName, 100) || "This bot";
-  const visibility = required === "awareness";
+  const visibility = selectors.some(({ type }) => type === "awareness");
   const spectralInvisible = visibility &&
     /\b(?:invisible|unseen)\b/u.test(
       `${source.name} ${source.intent}`.toLowerCase(),
@@ -129,26 +224,52 @@ function deterministicHardAudiencePower(
     !/\bmicroscopic\b/u.test(`${source.name} ${source.intent}`.toLowerCase());
   return {
     version: BOT_POWER_VERSION,
-    sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue: visibility
-      ? `Remain unseen to everyone except ${audience}.`
-      : `Address only ${audience}.`,
-    observerCue: visibility
-      ? `Only ${audience} can perceive ${subject}.`
-      : `Only ${audience} can hear ${subject}.`,
+    sourceHash: botPowerSourceHashForPowerV1(source),
+    selfCue: selectors.map(({ type, selector }) => {
+      const allowed = selector.allowed.some((target) => target.kind === "all")
+        ? "everyone"
+        : normalizedTargetLabels(selector.allowed).join(", ");
+      const excluded = normalizedTargetLabels(selector.excluded ?? []);
+      const audience = excluded.length > 0
+        ? `${allowed} except ${excluded.join(", ")}`
+        : allowed;
+      return type === "awareness"
+        ? `Be perceptible only to ${audience}.`
+        : `Let only ${audience} hear your speech.`;
+    }).join(" "),
+    observerCue: selectors.map(({ type, selector }) => {
+      const allowed = selector.allowed.some((target) => target.kind === "all")
+        ? "everyone"
+        : normalizedTargetLabels(selector.allowed).join(", ");
+      const excluded = normalizedTargetLabels(selector.excluded ?? []);
+      const audience = excluded.length > 0
+        ? `${allowed} except ${excluded.join(", ")}`
+        : allowed;
+      return type === "awareness"
+        ? `${subject} is perceptible only to ${audience}.`
+        : `${subject} is audible only to ${audience}.`;
+    }).join(" "),
     effects: [
-      {
-        type: required,
-        allowed: names.map((name) => ({ kind: "bot" as const, name })),
-      },
+      ...selectors.map(({ type, selector }) => ({ type, ...selector })),
       ...(spectralInvisible
         ? [{ type: "avatar_visibility" as const, mode: "translucent" as const }]
         : []),
     ],
     ruleLabels: [
-      visibility ? `Visible only to ${audience}` : `Heard only by ${audience}`,
+      ...selectors.map(({ type, selector }) => {
+        const allowed = selector.allowed.some((target) => target.kind === "all")
+          ? "everyone"
+          : normalizedTargetLabels(selector.allowed).join(", ");
+        const excluded = normalizedTargetLabels(selector.excluded ?? []);
+        const audience = excluded.length > 0
+          ? `${allowed} except ${excluded.join(", ")}`
+          : allowed;
+        return type === "awareness"
+          ? `Visible to ${audience}`
+          : `Heard by ${audience}`;
+      }),
       ...(spectralInvisible ? ["Half-translucent observer presence"] : []),
-    ],
+    ].slice(0, 8),
   };
 }
 
@@ -1031,14 +1152,16 @@ function deterministicPower(
     deterministicAddressedFandomPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
     deterministicInvisiblePower(source, botName) ??
-    deterministicHardAudiencePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName);
   return mergeDeterministicPowerParts(
     mergeDeterministicPowerParts(
-      primary,
+      mergeDeterministicPowerParts(
+        primary,
+        deterministicHardAudiencePower(source, botName),
+      ),
       deterministicAvatarScalePower(source, botName),
     ),
     deterministicResponseBudgetPower(source, botName),
@@ -1188,8 +1311,12 @@ function compiledEntrySatisfiesIntent(
   ) {
     return false;
   }
-  const required = requiredHardAudienceEffect(source.intent);
-  return !required || compiled.effects.some((effect) => effect.type === required);
+  const required = requiredHardAudienceEffects(source.intent);
+  const legacyRequired = requiredHardAudienceEffect(source.intent);
+  if (legacyRequired && !required.includes(legacyRequired)) required.push(legacyRequired);
+  return required.every((type) =>
+    compiled.effects.some((effect) => effect.type === type),
+  );
 }
 
 function normalizedMatchText(value: unknown): string {
@@ -1198,7 +1325,8 @@ function normalizedMatchText(value: unknown): string {
 
 function compiledEntriesByDraft(
   drafts: readonly BotPowerV1[],
-  generated: readonly unknown[]
+  generated: readonly unknown[],
+  decorations?: Map<string, { name?: string; sigil?: BotPowerSigilIdV1 }>,
 ): Map<string, CompiledBotPowerV1> {
   const compiled = new Map<string, CompiledBotPowerV1>();
   const usedIndexes = new Set<number>();
@@ -1235,6 +1363,18 @@ function compiledEntriesByDraft(
     if (generatedIndex < 0) continue;
     const normalized = normalizeCompiledEntry(generated[generatedIndex], power);
     if (!normalized || !compiledEntrySatisfiesIntent(normalized, power)) continue;
+    const generatedEntry = generated[generatedIndex] as Record<string, unknown>;
+    if (power.authoringMode === "prompt") {
+      const name = compact(generatedEntry.name, 40);
+      const sigil = typeof generatedEntry.sigil === "string" &&
+          (BOT_POWER_SIGIL_IDS_V1 as readonly string[]).includes(generatedEntry.sigil)
+        ? generatedEntry.sigil as BotPowerSigilIdV1
+        : undefined;
+      if (name || sigil) decorations?.set(power.id, {
+        ...(name ? { name } : {}),
+        ...(sigil ? { sigil } : {}),
+      });
+    }
     usedIndexes.add(generatedIndex);
     compiled.set(power.id, normalized);
   }
@@ -1243,8 +1383,11 @@ function compiledEntriesByDraft(
 
 function hardAudienceSignature(effect: BotPowerEffectV1): string | null {
   if (effect.type !== "awareness" && effect.type !== "speech_audience") return null;
-  const targets = effect.allowed.map((target) => JSON.stringify(target)).sort();
-  return `${effect.type}:${targets.join("|")}`;
+  const allowed = effect.allowed.map((target) => JSON.stringify(target)).sort();
+  const excluded = (effect.excluded ?? [])
+    .map((target) => JSON.stringify(target))
+    .sort();
+  return `${effect.type}:allow=${allowed.join("|")}:exclude=${excluded.join("|")}`;
 }
 
 function conflictingPowerIds(powers: readonly BotPowerV1[]): Set<string> {
@@ -1348,11 +1491,128 @@ function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string
   return `Local power compilation failed: invalid compiler output. ${context}; try one short description with one effect.`;
 }
 
+function promptPowerDisplayName(
+  power: BotPowerV1,
+  compiled: CompiledBotPowerV1,
+): string {
+  if (power.name.trim()) return compact(power.name, 40);
+  const types = new Set(compiled.effects.map((effect) => effect.type));
+  if (types.has("awareness") && types.has("speech_audience")) {
+    return "Veiled Communion";
+  }
+  if (types.has("awareness")) return "Spectral Veil";
+  if (types.has("speech_audience")) return "Bound Voice";
+  if (types.has("mute")) return "Silent Oath";
+  if (types.has("identity_mirror")) return "Borrowed Self";
+  if (types.has("speech_copy")) return "Echo Binding";
+  if (types.has("interruption")) return "Broken Cadence";
+  if (types.has("mood_boost")) return "Radiant Wake";
+  if (types.has("mood_drain")) return "Gravitic Gloom";
+  if (types.has("response_budget")) return "Measured Tongue";
+  const words = power.intent.match(/[A-Za-z0-9]+/gu)?.slice(0, 3) ?? [];
+  const candidate = words
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    .join(" ");
+  return compact(candidate, 40) || "Unwritten Gift";
+}
+
+function promptPowerSigil(
+  power: BotPowerV1,
+  compiled: CompiledBotPowerV1,
+): BotPowerSigilIdV1 {
+  if (
+    power.sigil &&
+    (BOT_POWER_SIGIL_IDS_V1 as readonly string[]).includes(power.sigil)
+  ) {
+    return power.sigil;
+  }
+  const types = new Set(compiled.effects.map((effect) => effect.type));
+  if (types.has("awareness")) return "eye";
+  if (types.has("speech_audience") || types.has("mute")) return "bind";
+  if (types.has("identity_mirror")) return "prism";
+  if (types.has("speech_copy")) return "wave";
+  if (types.has("interruption")) return "thorn";
+  if (types.has("mood_boost")) return "star";
+  if (types.has("mood_drain")) return "moon";
+  const seed = `${power.id}\n${power.intent}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return BOT_POWER_SIGIL_IDS_V1[hash % BOT_POWER_SIGIL_IDS_V1.length]!;
+}
+
+function readyCompiledPower(
+  power: BotPowerV1,
+  compiled: CompiledBotPowerV1,
+  targetBots: readonly { id: string; name: string }[] = [],
+): BotPowerV1 {
+  const decorated = power.authoringMode === "prompt"
+    ? {
+        ...power,
+        name: promptPowerDisplayName(power, compiled),
+        sigil: promptPowerSigil(power, compiled),
+      }
+    : power;
+  return {
+    ...decorated,
+    compileStatus: "ready",
+    compileError: undefined,
+    compiled: {
+      ...bindCompiledPowerTargetIds(compiled, targetBots),
+      sourceHash: botPowerSourceHashForPowerV1(decorated),
+    },
+  };
+}
+
+function bindCompiledPowerTargetIds(
+  compiled: CompiledBotPowerV1,
+  bots: readonly { id: string; name: string }[],
+): CompiledBotPowerV1 {
+  const byName = new Map<string, Array<{ id: string; name: string }>>();
+  for (const bot of bots) {
+    const key = bot.name.trim().toLowerCase();
+    if (!key) continue;
+    byName.set(key, [...(byName.get(key) ?? []), bot]);
+  }
+  const bind = (targets: readonly BotPowerTargetV1[]): BotPowerTargetV1[] =>
+    targets.map((target) => {
+      if (target.kind !== "bot" || target.botId) return target;
+      const matches = byName.get(target.name.trim().toLowerCase()) ?? [];
+      return matches.length === 1
+        ? { ...target, botId: matches[0]!.id, name: matches[0]!.name }
+        : target;
+    });
+  const effects = compiled.effects.map((effect): BotPowerEffectV1 => {
+    if (effect.type === "awareness" || effect.type === "speech_audience") {
+      return {
+        ...effect,
+        allowed: bind(effect.allowed),
+        ...(effect.excluded ? { excluded: bind(effect.excluded) } : {}),
+      };
+    }
+    if (
+      effect.type === "social_influence" ||
+      effect.type === "candor" ||
+      effect.type === "interruption" ||
+      effect.type === "response_bond" ||
+      effect.type === "selective_memory" ||
+      effect.type === "insight"
+    ) {
+      return { ...effect, targets: bind(effect.targets) };
+    }
+    return effect;
+  });
+  return { ...compiled, effects };
+}
+
 export async function compileBotPowers(args: {
   provider: LlmProvider;
   botName?: string;
   systemPrompt?: string;
   powers: unknown;
+  targetBots?: readonly { id: string; name: string }[];
 }): Promise<{ powers: BotPowerV1[]; conflicts: string[] }> {
   const drafts = normalizeBotPowersV1(args.powers).map((power) => ({
     ...power,
@@ -1368,11 +1628,11 @@ export async function compileBotPowers(args: {
   }
   const modelDrafts = drafts.filter((power) => !deterministic.has(power.id));
   if (modelDrafts.length === 0) {
-    return finalizeCompiledPowers(drafts.map((power) => ({
-      ...power,
-      compileStatus: "ready" as const,
-      compiled: deterministic.get(power.id)!,
-    })));
+    return finalizeCompiledPowers(
+      drafts.map((power) =>
+        readyCompiledPower(power, deterministic.get(power.id)!, args.targetBots),
+      ),
+    );
   }
 
   const messages: ProviderMessage[] = [
@@ -1389,16 +1649,17 @@ export async function compileBotPowers(args: {
       content: [
         `Bot: ${compact(args.botName, 100) || "Unnamed bot"}`,
         `Profile context: ${compact(args.systemPrompt, 1200) || "(blank)"}`,
-        `Powers: ${JSON.stringify(modelDrafts.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
-        "Return {\"powers\":[{\"id\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
+        `Powers: ${JSON.stringify(modelDrafts.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
+        `For prompt-authored entries, generate a concise evocative name and choose one sigil from: ${BOT_POWER_SIGIL_IDS_V1.join(", ")}.`,
+        "Return {\"powers\":[{\"id\":string,\"name\":string,\"sigil\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
         '- {"type":"eternal_introduction","memory":"current_other_speaker_message"},',
         '- {"type":"speech_copy","trigger":"direct_address"},',
         '- {"type":"identity_mirror","trigger":"direct_bot_address"},',
         '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
-        '- {"type":"awareness","allowed":[target...]},',
-        '- {"type":"speech_audience","allowed":[target...]},',
+        '- {"type":"awareness","allowed":[target...],"excluded":[target...] (optional)},',
+        '- {"type":"speech_audience","allowed":[target...],"excluded":[target...] (optional)},',
         '- {"type":"avatar_visibility","mode":"speaking_only|hidden|translucent"},',
         '- {"type":"avatar_scale","mode":"larger|smaller"},',
         '- {"type":"voice_presence","mode":"loud|quiet"},',
@@ -1437,7 +1698,7 @@ export async function compileBotPowers(args: {
     return finalizeCompiledPowers(drafts.map((power) => {
       const deterministicPower = deterministic.get(power.id);
       return deterministicPower
-        ? { ...power, compileStatus: "ready" as const, compiled: deterministicPower }
+        ? readyCompiledPower(power, deterministicPower, args.targetBots)
         : {
             ...power,
             compileStatus: "error" as const,
@@ -1447,7 +1708,15 @@ export async function compileBotPowers(args: {
     }));
   }
 
-  const compiledById = compiledEntriesByDraft(modelDrafts, generatedPowerEntries(raw));
+  const decorations = new Map<
+    string,
+    { name?: string; sigil?: BotPowerSigilIdV1 }
+  >();
+  const compiledById = compiledEntriesByDraft(
+    modelDrafts,
+    generatedPowerEntries(raw),
+    decorations,
+  );
   const unresolved = modelDrafts.filter((power) => !compiledById.has(power.id));
   if (unresolved.length > 0) {
     const repairMessages: ProviderMessage[] = [
@@ -1462,7 +1731,7 @@ export async function compileBotPowers(args: {
       {
         role: "user",
         content: [
-          `Expected powers: ${JSON.stringify(unresolved.map(({ id, name, intent, enabled }) => ({ id, name, intent, enabled })))}`,
+          `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
           "Allowed effect types: mute, eternal_introduction, speech_copy, identity_mirror, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
@@ -1476,7 +1745,11 @@ export async function compileBotPowers(args: {
         jsonMode: true,
         usagePurpose: "memory_inference",
       });
-      const repaired = compiledEntriesByDraft(unresolved, generatedPowerEntries(repairedRaw));
+      const repaired = compiledEntriesByDraft(
+        unresolved,
+        generatedPowerEntries(repairedRaw),
+        decorations,
+      );
       for (const [id, compiled] of repaired) compiledById.set(id, compiled);
     } catch {
       // Keep deterministic and successfully compiled powers; the unresolved entries report errors below.
@@ -1485,8 +1758,10 @@ export async function compileBotPowers(args: {
 
   return finalizeCompiledPowers(drafts.map((power) => {
     const compiled = deterministic.get(power.id) ?? compiledById.get(power.id);
+    const decoration = decorations.get(power.id);
+    const decorated = decoration ? { ...power, ...decoration } : power;
     return compiled
-      ? { ...power, compileStatus: "ready" as const, compiled }
+      ? readyCompiledPower(decorated, compiled, args.targetBots)
       : {
           ...power,
           compileStatus: "error" as const,

@@ -113,6 +113,92 @@
   background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
 }
 
+.stampSection {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-deep) 64%, transparent);
+}
+
+.stampSection > header,
+.stampTransformCard > header,
+.stampTransformCard label,
+.stampTransformCard label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.stampSection small,
+.stampTransformCard output {
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.stampPalette {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.stampPalette button,
+.stampTransformCard button {
+  min-height: 27px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.stampPalette button[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 65%, var(--line));
+  color: var(--fg);
+}
+
+.stampTransforms {
+  display: grid;
+  gap: 7px;
+}
+
+.stampTransformCard {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 9px;
+}
+
+.stampTransformCard > header {
+  grid-column: 1 / -1;
+}
+
+.stampTransformCard label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+}
+
+.stampTransformCard label > span,
+.stampTransformCard input {
+  grid-column: 1 / -1;
+}
+
+.stampTransformCard label > span button {
+  min-width: 25px;
+  padding: 0;
+}
+
+.stampTransformCard input {
+  width: 100%;
+}
+
 .paintHeader {
   grid-area: header;
 }

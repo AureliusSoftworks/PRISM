@@ -55,6 +55,7 @@ import type {
   ListenerReactionPlanV1,
   SignalPersonaTemperament,
   BotIdentityMirrorStateV1,
+  BotAvatarDetailsV1,
   VoiceDeliveryMood,
 } from "@localai/shared";
 import {
@@ -85,6 +86,8 @@ import {
   botPowerMirrorsIdentityV1,
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
+  normalizeBotcastIdentityMirrorResetV1,
+  parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
@@ -562,6 +565,7 @@ export type BotcastBotProfile = {
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
   faceThinkingFrames?: string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
   authoredAudioVoiceProfile?: string | null;
   audioVoiceProfileOverride?: string | null;
   temperature: number;
@@ -1857,7 +1861,7 @@ function loadBotProfile(
             face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x,
             face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
             face_blink_scale, face_blink_offset_x, face_blink_offset_y,
-            face_thinking_frames, authored_audio_voice_profile,
+            face_thinking_frames, avatar_details_json, authored_audio_voice_profile,
             audio_voice_profile_override, online_enabled, temperature, max_tokens, top_p,
             top_k, repetition_penalty
        FROM bots WHERE id = ? AND user_id = ? AND chat_enabled = 1`,
@@ -1892,6 +1896,7 @@ function loadBotProfile(
         face_blink_offset_x: number | null;
         face_blink_offset_y: number | null;
         face_thinking_frames: string | null;
+        avatar_details_json: string | null;
         authored_audio_voice_profile: string | null;
         audio_voice_profile_override: string | null;
         online_enabled: number;
@@ -1933,6 +1938,7 @@ function loadBotProfile(
     faceBlinkOffsetX: row.face_blink_offset_x,
     faceBlinkOffsetY: row.face_blink_offset_y,
     faceThinkingFrames: row.face_thinking_frames,
+    avatarDetails: parseStoredBotAvatarDetailsV1(row.avatar_details_json),
     authoredAudioVoiceProfile: row.authored_audio_voice_profile,
     audioVoiceProfileOverride: row.audio_voice_profile_override,
     temperature: row.temperature,
@@ -2520,9 +2526,13 @@ function botcastPowerRestriction(
   for (const power of activeBotPowersV1(poweredBot.powers)) {
     for (const effect of power.compiled?.effects ?? []) {
       if (effect.type !== effectType) continue;
-      if (
-        effect.allowed.some((target) => botcastPowerTargetMatches(target, peer))
-      )
+      const allowed = effect.allowed.some((target) =>
+        botcastPowerTargetMatches(target, peer),
+      );
+      const excluded = (effect.excluded ?? []).some((target) =>
+        botcastPowerTargetMatches(target, peer),
+      );
+      if (allowed && !excluded)
         continue;
       return power;
     }
@@ -5647,13 +5657,18 @@ export interface BotcastPromptBuildArgs {
   producerCut?: boolean;
 }
 
-/** Latest persisted mirror target per holder. Episode reset yields an empty map. */
+/** Latest persisted mirror target per holder, including explicit closing resets. */
 export function botcastIdentityMirrorStatesV1(
   events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
 ): Map<string, BotIdentityMirrorStateV1> {
   const states = new Map<string, BotIdentityMirrorStateV1>();
   for (const event of events) {
     if (event.kind !== "power_effect") continue;
+    const reset = normalizeBotcastIdentityMirrorResetV1(event.payload);
+    if (reset) {
+      states.delete(reset.holderBotId);
+      continue;
+    }
     const state = normalizeBotIdentityMirrorStateV1(event.payload.state);
     if (!state || state.surface !== "signal") continue;
     states.set(state.holderBotId, state);
@@ -6496,7 +6511,9 @@ export function buildBotcastSpeakerPrompt(
           ? `The identity change just occurred. First state plainly that you are ${activeIdentityMirrorState.targetBotName}, call the original ${activeIdentityMirrorState.targetBotName} an impostor, then continue in that public persona while remaining the mechanical ${args.speakerRole}.`
           : activeIdentityMirrorState
             ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Do not repeat that you are ${activeIdentityMirrorState.targetBotName} or that the original is an impostor; demonstrate the copied persona by advancing the substantive conversation.`
-            : `Continue as ${speaker.name}.`,
+            : args.episode.segment === "closing"
+              ? `Close the show now as ${speaker.name}. This is the final sign-off, not another substantive answer or question.`
+              : `Continue as ${speaker.name}.`,
           ]).join("\n\n"),
     },
   ];
@@ -7822,6 +7839,27 @@ export async function advanceBotcastEpisode(
     transitionEpisodeSegment(db, userId, episode, nextSegment, now);
     episode = getBotcastEpisode(db, userId, episodeId);
   }
+  const mirroredHostAtClosing =
+    episode.segment === "closing"
+      ? botcastIdentityMirrorStatesV1(episode.events).get(episode.hostBotId) ??
+        null
+      : null;
+  if (mirroredHostAtClosing) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "identity_mirror_reset",
+        holderBotId: episode.hostBotId,
+        reason: "signal_host_closing",
+      },
+      now,
+    );
+    episode = getBotcastEpisode(db, userId, episodeId);
+  }
   let scheduledSpeakerRole = botcastNextSpeakerRole({
     messages: episode.messages,
     segment: episode.segment,
@@ -8654,34 +8692,37 @@ export async function advanceBotcastEpisode(
   const currentIdentityMirrorState =
     botcastIdentityMirrorStatesV1(episode.events).get(peer.id) ?? null;
   const identityMirrorState =
-    botcastIdentityMirrorCanTriggerV1({
-      guestKind: episode.guestKind,
-      guestPresenceMode: episode.guestPresenceMode,
-      speakerRole,
-      holderRole: listenerRole,
-      speakerIsMuted: speakerIsMutedForTurn,
-      speakerMumbles: speakerMumblesSpeech,
-      speaker,
-      holder: peer,
-      currentState: currentIdentityMirrorState,
-      content,
-    })
-      ? createBotIdentityMirrorStateV1({
-          surface: "signal",
-          holderBotId: peer.id,
-          holderBotName: peer.name,
-          targetBotId: speaker.id,
-          targetBotName: speaker.name,
-          targetPersonaPrompt: speaker.systemPrompt,
-          targetFace: botIdentityMirrorFaceV1(speaker),
-          targetVoice: resolveBotAudioVoiceProfileV1(
-            speaker.authoredAudioVoiceProfile,
-            speaker.audioVoiceProfileOverride,
-          ),
-          sourceMessageId: messageId,
-          occurredAt: now,
+    episode.segment === "closing" && listenerRole === "host"
+      ? null
+      : botcastIdentityMirrorCanTriggerV1({
+          guestKind: episode.guestKind,
+          guestPresenceMode: episode.guestPresenceMode,
+          speakerRole,
+          holderRole: listenerRole,
+          speakerIsMuted: speakerIsMutedForTurn,
+          speakerMumbles: speakerMumblesSpeech,
+          speaker,
+          holder: peer,
+          currentState: currentIdentityMirrorState,
+          content,
         })
-      : null;
+        ? createBotIdentityMirrorStateV1({
+            surface: "signal",
+            holderBotId: peer.id,
+            holderBotName: peer.name,
+            targetBotId: speaker.id,
+            targetBotName: speaker.name,
+            targetPersonaPrompt: speaker.systemPrompt,
+            targetFace: botIdentityMirrorFaceV1(speaker),
+            targetAvatarDetails: speaker.avatarDetails ?? null,
+            targetVoice: resolveBotAudioVoiceProfileV1(
+              speaker.authoredAudioVoiceProfile,
+              speaker.audioVoiceProfileOverride,
+            ),
+            sourceMessageId: messageId,
+            occurredAt: now,
+          })
+        : null;
   if (identityMirrorState) {
     recordEvent(
       db,

@@ -395,6 +395,32 @@ export interface BackupSnapshot {
       occurredAt: string;
     }>;
   };
+  /** Derived video bytes are excluded; these portable inputs can rebuild them. */
+  replays?: {
+    recordings: Array<{
+      id: string;
+      surface: "signal" | "coffee";
+      sourceId: string;
+      manifestVersion: number;
+      manifestJson: string;
+      manifestHash: string | null;
+      timelineJson: string | null;
+      transcriptVtt: string | null;
+      transcriptMarkdown: string | null;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    voiceTakes: Array<{
+      id: string;
+      recordingId: string;
+      sourceKey: string;
+      sourceMessageId: string | null;
+      sourceEventId: string | null;
+      snapshotJson: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
 }
 
 type SlateBackupCollectionKey = keyof BackupSlateSnapshot;
@@ -1853,6 +1879,27 @@ export function exportUserSnapshot(
   const botcastAtmosphereAudioByShowId = new Map(
     botcastAtmosphereAudio.map((row) => [row.show_id, row] as const),
   );
+  const replayRecordings = db
+    .prepare(
+      `SELECT id, surface, source_id, manifest_version, manifest_json,
+              manifest_hash, timeline_json, transcript_vtt,
+              transcript_markdown, created_at, updated_at
+         FROM replay_recordings
+        WHERE user_id = ? AND manifest_json IS NOT NULL
+        ORDER BY created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const replayVoiceTakes = db
+    .prepare(
+      `SELECT take.id, take.recording_id, take.source_key,
+              take.source_message_id, take.source_event_id,
+              take.snapshot_json, take.created_at, take.updated_at
+         FROM replay_voice_takes AS take
+         JOIN replay_recordings AS recording ON recording.id = take.recording_id
+        WHERE take.user_id = ? AND recording.manifest_json IS NOT NULL
+        ORDER BY take.created_at, take.rowid`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
 
   return {
     version: 1,
@@ -2135,6 +2182,41 @@ export function exportUserSnapshot(
         occurredAt: String(row.occurred_at),
       })),
     },
+    replays: {
+      recordings: replayRecordings.map((row) => ({
+        id: String(row.id),
+        surface: row.surface === "signal" ? "signal" : "coffee",
+        sourceId: String(row.source_id),
+        manifestVersion: Number(row.manifest_version ?? 1),
+        manifestJson: String(row.manifest_json),
+        manifestHash:
+          typeof row.manifest_hash === "string" ? row.manifest_hash : null,
+        timelineJson:
+          typeof row.timeline_json === "string" ? row.timeline_json : null,
+        transcriptVtt:
+          typeof row.transcript_vtt === "string" ? row.transcript_vtt : null,
+        transcriptMarkdown:
+          typeof row.transcript_markdown === "string"
+            ? row.transcript_markdown
+            : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+      voiceTakes: replayVoiceTakes.map((row) => ({
+        id: String(row.id),
+        recordingId: String(row.recording_id),
+        sourceKey: String(row.source_key),
+        sourceMessageId:
+          typeof row.source_message_id === "string"
+            ? row.source_message_id
+            : null,
+        sourceEventId:
+          typeof row.source_event_id === "string" ? row.source_event_id : null,
+        snapshotJson: String(row.snapshot_json),
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+      })),
+    },
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
@@ -2172,6 +2254,8 @@ function assertSnapshotIdsStayWithinTenant(
       | "botcast_episode_segments"
       | "botcast_messages"
       | "botcast_events"
+      | "replay_recordings"
+      | "replay_voice_takes"
       | SlateBackupTable,
     ids: readonly string[],
     idColumn: "id" | "project_id" = "id",
@@ -2252,6 +2336,16 @@ function assertSnapshotIdsStayWithinTenant(
     assertIds(
       "botcast_events",
       botcast.events.map((item) => item.id),
+    );
+  }
+  if (snapshot.replays) {
+    assertIds(
+      "replay_recordings",
+      snapshot.replays.recordings.map((item) => item.id),
+    );
+    assertIds(
+      "replay_voice_takes",
+      snapshot.replays.voiceTakes.map((item) => item.id),
     );
   }
   const slate = snapshot.slate;
@@ -3085,6 +3179,61 @@ function importUserSnapshotWithinTransaction(
           "UPDATE messages SET coffee_audience_bot_ids = ? WHERE id = ? AND user_id = ?",
         ).run(JSON.stringify(message.coffeeAudienceBotIds), message.id, userId);
       }
+    }
+  }
+
+  if (snapshot.replays) {
+    const recordingIds = new Set<string>();
+    for (const recording of snapshot.replays.recordings) {
+      const sourceExists = recording.surface === "signal"
+        ? db
+            .prepare("SELECT id FROM botcast_episodes WHERE id = ? AND user_id = ?")
+            .get(recording.sourceId, userId)
+        : db
+            .prepare("SELECT id FROM conversations WHERE id = ? AND user_id = ?")
+            .get(recording.sourceId, userId);
+      if (!sourceExists || !recording.manifestJson.trim()) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO replay_recordings
+          (id, user_id, surface, source_id, status, progress,
+           manifest_version, manifest_json, manifest_hash, timeline_json,
+           transcript_vtt, transcript_markdown, width, height, fps,
+           created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?, ?, ?, 1920, 1080, 30, ?, ?)`,
+      ).run(
+        recording.id,
+        userId,
+        recording.surface,
+        recording.sourceId,
+        Math.max(1, Math.round(recording.manifestVersion || 1)),
+        recording.manifestJson,
+        recording.manifestHash,
+        recording.timelineJson,
+        recording.transcriptVtt,
+        recording.transcriptMarkdown,
+        recording.createdAt,
+        recording.updatedAt,
+      );
+      recordingIds.add(recording.id);
+    }
+    for (const take of snapshot.replays.voiceTakes) {
+      if (!recordingIds.has(take.recordingId) || !take.snapshotJson.trim()) continue;
+      db.prepare(
+        `INSERT OR REPLACE INTO replay_voice_takes
+          (id, user_id, recording_id, source_key, source_message_id,
+           source_event_id, snapshot_json, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)`,
+      ).run(
+        take.id,
+        userId,
+        take.recordingId,
+        take.sourceKey,
+        take.sourceMessageId,
+        take.sourceEventId,
+        take.snapshotJson,
+        take.createdAt,
+        take.updatedAt,
+      );
     }
   }
 

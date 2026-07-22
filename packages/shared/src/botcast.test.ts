@@ -592,6 +592,7 @@ describe("Signal studio atmosphere mix", () => {
       normalizeBotcastStudioAtmosphereMix(undefined),
       BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
     );
+    assert.equal(BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX.filmGrain, 1);
     assert.deepEqual(
       normalizeBotcastStudioAtmosphereMix({
         background: 99,

@@ -3865,14 +3865,26 @@ describe("Botcast persistence and isolation", () => {
       `UPDATE bots
           SET face_eye_character = '◉',
               face_mouth_character = '_',
-              authored_audio_voice_profile = ?
+              authored_audio_voice_profile = ?,
+              avatar_details_json = ?
         WHERE id = 'host-1'`,
-    ).run(serializeBotAudioVoiceProfileV1({
-      v: 2,
-      enabled: true,
-      baseVoiceId: "voice-4",
-      pitch: 0.2,
-    }));
+    ).run(
+      serializeBotAudioVoiceProfileV1({
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-4",
+        pitch: 0.2,
+      }),
+      JSON.stringify({
+        version: 1,
+        screen: {
+          stamps: [
+            { id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 },
+          ],
+          paintMaskBase64: null,
+        },
+      }),
+    );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       const episode = createBotcastEpisode(db, "user-1", show.id, {
@@ -3909,6 +3921,15 @@ describe("Botcast persistence and isolation", () => {
         (state.targetVoice as Record<string, unknown>).baseVoiceId,
         "voice-4",
       );
+      assert.deepEqual(state.targetAvatarDetails, {
+        version: 1,
+        screen: {
+          stamps: [
+            { id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 },
+          ],
+          paintMaskBase64: null,
+        },
+      });
       assert.equal("powers" in state, false);
       assert.equal("color" in state, false);
       assert.equal("glyph" in state, false);
@@ -3996,6 +4017,7 @@ describe("Botcast persistence and isolation", () => {
         "Ivo Stone, give me the north bearing.",
         "The north bearing is the only defensible route.",
         "The bearing holds under the ridge.",
+        "Ivo Stone, thank you for joining Identity Crisis Ian, and thank you all for listening.",
       ],
       captures,
     );
@@ -4081,6 +4103,61 @@ describe("Botcast persistence and isolation", () => {
         holderTurn.message?.content ?? "",
         /\bI (?:am|remain) Identity Crisis Ian\b/iu,
       );
+
+      const closing = await endBotcastEpisodeOnProducerCut(
+        db,
+        "user-1",
+        episode.id,
+        generation(provider),
+      );
+      const resetEvent = closing.episode.events.find(
+        (event) =>
+          event.kind === "power_effect" &&
+          event.payload.effect === "identity_mirror_reset",
+      );
+      assert.deepEqual(resetEvent?.payload, {
+        v: 1,
+        effect: "identity_mirror_reset",
+        holderBotId: "host-1",
+        reason: "signal_host_closing",
+      });
+      const closingUtterance = closing.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === closing.message?.id,
+      );
+      assert.ok(
+        (resetEvent?.sequence ?? Infinity) <
+          (closingUtterance?.sequence ?? -1),
+      );
+      const closingPrompt = captures[3]
+        ?.map((message) => message.content)
+        .join("\n") ?? "";
+      assert.match(
+        closingPrompt,
+        /Persona:\s*A brittle identity thief waiting for a bot to address him/iu,
+      );
+      assert.doesNotMatch(
+        closingPrompt,
+        /Persona:\s*A guarded inventor who resists personal speculation/iu,
+      );
+      assert.doesNotMatch(
+        closingPrompt,
+        /absolutely convinced that you are Ivo Stone/iu,
+      );
+      assert.match(
+        closingPrompt,
+        /Close the show now as Identity Crisis Ian.*final sign-off/iu,
+      );
+      assert.equal(
+        closing.message?.content,
+        "Ivo Stone, thank you for joining Identity Crisis Ian, and thank you all for listening.",
+      );
+      assert.equal(
+        botcastIdentityMirrorStatesV1(closing.episode.events).has("host-1"),
+        false,
+      );
+      assert.equal(closing.episode.status, "completed");
     } finally {
       db.close();
     }
@@ -5810,6 +5887,10 @@ describe("Botcast persistence and isolation", () => {
     assert.match(
       serverSource,
       /parallelIndependentAssets: effectiveArtworkProvider === "openai"/u,
+    );
+    assert.match(
+      serverSource,
+      /refreshStudioLighting: \(signal\)[\s\S]{0,160}rebuildSignalStudioLighting\(userId, show\.id, signal\)/u,
     );
     assert.match(serverSource, /signalArtworkJobs\.hasActiveJobForShow/u);
     assert.match(

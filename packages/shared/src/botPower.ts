@@ -2,13 +2,33 @@ export const BOT_POWER_VERSION = 1 as const;
 export const BOT_POWER_CANONICAL_SILENCE_V1 = "..." as const;
 export const BOT_POWER_MAX_COUNT = 3;
 export const BOT_POWER_NAME_MAX_LENGTH = 40;
-export const BOT_POWER_INTENT_MAX_LENGTH = 300;
+export const BOT_POWER_INTENT_MAX_LENGTH = 640;
 export const BOT_POWER_PROMPT_MAX_CHARS = 640;
 export const BOT_POWER_PROMPT_MAX_TOKENS = 160;
 export const COFFEE_POWER_PROMPT_MAX_CHARS = 640;
 export const COFFEE_POWER_PROMPT_MAX_TOKENS = 160;
 
 export type BotPowerCompileStatus = "draft" | "compiling" | "ready" | "error";
+export type BotPowerAuthoringModeV1 = "prompt";
+export const BOT_POWER_SIGIL_IDS_V1 = [
+  "aether",
+  "arc",
+  "bind",
+  "comet",
+  "crown",
+  "eye",
+  "gate",
+  "halo",
+  "knot",
+  "moon",
+  "prism",
+  "rune",
+  "spiral",
+  "star",
+  "thorn",
+  "wave",
+] as const;
+export type BotPowerSigilIdV1 = (typeof BOT_POWER_SIGIL_IDS_V1)[number];
 export type BotPowerStrength = "small" | "medium" | "large";
 export type BotPowerFrequency = "occasional" | "frequent";
 export type BotPowerGravityDirection = "more" | "less";
@@ -55,8 +75,18 @@ export type BotPowerEffectV1 =
       frequency: BotPowerFrequency;
       moodPenalty: BotPowerStrength;
     }
-  | { type: "awareness"; allowed: BotPowerTargetV1[] }
-  | { type: "speech_audience"; allowed: BotPowerTargetV1[] }
+  | {
+      type: "awareness";
+      allowed: BotPowerTargetV1[];
+      /** Optional negative selector. A match here always defeats `allowed`. */
+      excluded?: BotPowerTargetV1[];
+    }
+  | {
+      type: "speech_audience";
+      allowed: BotPowerTargetV1[];
+      /** Optional negative selector. A match here always defeats `allowed`. */
+      excluded?: BotPowerTargetV1[];
+    }
   /** Apply one bounded live-avatar visibility treatment. */
   | { type: "avatar_visibility"; mode: BotPowerAvatarVisibilityModeV1 }
   /** Render the holder at a restrained relative size without changing layout. */
@@ -170,8 +200,13 @@ export interface CompiledBotPowerV1 {
 export interface BotPowerV1 {
   version: 1;
   id: string;
+  /** Missing means the legacy user-authored name + intent contract. */
+  authoringMode?: BotPowerAuthoringModeV1;
   name: string;
+  /** User-authored source prompt for prompt-mode Powers; legacy description otherwise. */
   intent: string;
+  /** Presentation-only. It never participates in source staleness. */
+  sigil?: BotPowerSigilIdV1;
   enabled: boolean;
   compileStatus: BotPowerCompileStatus;
   compileError?: string;
@@ -225,6 +260,48 @@ export function botPowerSourceHashV1(name: string, intent: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return `v${BOT_POWER_VERSION}-${hash.toString(16).padStart(8, "0")}`;
+}
+
+/**
+ * Prompt-authored Powers intentionally hash only the authored fiction. Their
+ * generated title and sigil may change without making hard runtime rules stale.
+ * Legacy Powers retain the exact historical name + intent hash.
+ */
+export function botPowerSourceHashForPowerV1(
+  power: Pick<BotPowerV1, "authoringMode" | "name" | "intent">,
+): string {
+  if (power.authoringMode !== "prompt") {
+    return botPowerSourceHashV1(power.name, power.intent);
+  }
+  const source = `v${BOT_POWER_VERSION}-prompt\n${power.intent.trim()}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `v${BOT_POWER_VERSION}-prompt-${hash.toString(16).padStart(8, "0")}`;
+}
+
+function normalizeBotPowerSigilIdV1(value: unknown): BotPowerSigilIdV1 | null {
+  return typeof value === "string" &&
+    (BOT_POWER_SIGIL_IDS_V1 as readonly string[]).includes(value)
+    ? value as BotPowerSigilIdV1
+    : null;
+}
+
+/** Stable presentation fallback for legacy and malformed portable Powers. */
+export function botPowerSigilForPowerV1(
+  value: Pick<BotPowerV1, "id" | "name" | "intent" | "sigil">,
+): BotPowerSigilIdV1 {
+  const explicit = normalizeBotPowerSigilIdV1(value.sigil);
+  if (explicit) return explicit;
+  const seed = `${value.id}\n${value.name}\n${value.intent}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return BOT_POWER_SIGIL_IDS_V1[hash % BOT_POWER_SIGIL_IDS_V1.length]!;
 }
 
 function normalizeTarget(value: unknown): BotPowerTargetV1 | null {
@@ -296,7 +373,12 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
     };
   }
   if (effect.type === "awareness" || effect.type === "speech_audience") {
-    return { type: effect.type, allowed: normalizeTargets(effect.allowed) };
+    const excluded = normalizeTargets(effect.excluded);
+    return {
+      type: effect.type,
+      allowed: normalizeTargets(effect.allowed),
+      ...(excluded.length > 0 ? { excluded } : {}),
+    };
   }
   if (effect.type === "avatar_visibility") {
     return {
@@ -603,15 +685,23 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
   const name = compactText(power.name, BOT_POWER_NAME_MAX_LENGTH);
   const intent = compactText(power.intent, BOT_POWER_INTENT_MAX_LENGTH);
   if (!name && !intent) return null;
+  const authoringMode: BotPowerAuthoringModeV1 | undefined =
+    power.authoringMode === "prompt" ? "prompt" : undefined;
+  const sigil = normalizeBotPowerSigilIdV1(power.sigil);
   const parsedCompiled = normalizeCompiledBotPowerV1(power.compiled);
   const compiled =
-    parsedCompiled?.sourceHash === botPowerSourceHashV1(name, intent)
+    parsedCompiled?.sourceHash === botPowerSourceHashForPowerV1({
+      authoringMode,
+      name,
+      intent,
+    })
       ? upgradeLegacyLazyResponseBudgetV1(
           upgradeLegacyAvatarPresentationV1(parsedCompiled, name),
           name,
           intent,
         )
       : null;
+  const lastValidCompiled = parsedCompiled;
   const compileStatus: BotPowerCompileStatus =
     power.compileStatus === "ready" && compiled
       ? "ready"
@@ -621,14 +711,18 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
   return {
     version: BOT_POWER_VERSION,
     id: compactText(power.id, 100) || `power-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "draft"}`,
+    ...(authoringMode ? { authoringMode } : {}),
     name,
     intent,
+    ...(sigil ? { sigil } : {}),
     enabled: power.enabled !== false,
     compileStatus,
     ...(compileStatus === "error"
       ? { compileError: compactText(power.compileError, 180) || "Compilation failed." }
       : {}),
-    compiled: compileStatus === "ready" ? compiled : null,
+    // Draft and error Powers never execute, but retain their last valid
+    // artifact so an explicit edit/recompile failure is recoverable.
+    compiled: compileStatus === "ready" ? compiled : lastValidCompiled,
   };
 }
 
@@ -1088,11 +1182,15 @@ function botPowerRestrictionAllowsV1(
       { type: "awareness" | "speech_audience" }
     > => effect.type === type,
   );
-  return restrictions.every((restriction) =>
-    restriction.allowed.some(
+  return restrictions.every((restriction) => {
+    const allowed = restriction.allowed.some(
       (target) => target.kind === "all" || matchesTarget(target),
-    ),
-  );
+    );
+    const excluded = (restriction.excluded ?? []).some(
+      (target) => target.kind === "all" || matchesTarget(target),
+    );
+    return allowed && !excluded;
+  });
 }
 
 /** What one participant can truthfully perceive about a Power holder. */

@@ -88,6 +88,7 @@ export {
   BOT_POWER_LOUD_VOICE_GAIN_MULTIPLIER_V1,
   BOT_POWER_QUIET_TEXT_SCALE_V1,
   BOT_POWER_QUIET_VOICE_GAIN_MULTIPLIER_V1,
+  BOT_POWER_SIGIL_IDS_V1,
   BOT_POWER_VERSION,
   COFFEE_POWER_PROMPT_MAX_CHARS,
   COFFEE_POWER_PROMPT_MAX_TOKENS,
@@ -141,6 +142,8 @@ export {
   botPowerThemeMoodCueFromEffectsV1,
   botPowerThemeMoodCueV1,
   botPowerSourceHashV1,
+  botPowerSourceHashForPowerV1,
+  botPowerSigilForPowerV1,
   botPowerTextScaleFromEffectsV1,
   botPowerTextScaleV1,
   botPowerVoiceGainMultiplierFromEffectsV1,
@@ -172,6 +175,7 @@ export {
   type BotPowerBondDirection,
   type BotPowerAvatarScaleMode,
   type BotPowerAvatarVisibilityModeV1,
+  type BotPowerAuthoringModeV1,
   type BotPowerCompileStatus,
   type BotPowerEffectV1,
   type BotPowerFrequency,
@@ -188,6 +192,7 @@ export {
   type BotPowerResolvedThemeV1,
   type BotPowerVoicePresenceMode,
   type BotPowerStrength,
+  type BotPowerSigilIdV1,
   type BotPowerTargetV1,
   type BotPowerTopicDirection,
   type BotPowerV1,
@@ -298,6 +303,7 @@ export {
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
   botNaturalAddressAliasesV1,
+  botIdentityMirrorAvatarDetailsV1,
   botIdentityMirrorFaceV1,
   botIdentityMirrorVoiceV1,
   botIdentityMirrorHolderPromptV1,
@@ -306,6 +312,7 @@ export {
   botIdentityMirrorTargetChangesV1,
   createBotIdentityMirrorStateV1,
   normalizeBotIdentityMirrorStateV1,
+  resolveBotIdentityMirrorAvatarDetailsV1,
   resolveBotIdentityMirrorVoiceV1,
   type BotIdentityMirrorStateV1,
   type BotIdentityMirrorSurfaceV1,
@@ -555,6 +562,17 @@ export {
   type BotGenerationGlyphId,
   type NormalizeBotGeneratedDraftOptions,
 } from "./botGeneration.js";
+
+export {
+  BOT_GENERATION_FIELD_REGISTRY_VERSION,
+  BOT_GENERATION_FIELD_REGISTRY_V1,
+  botGenerationFieldDefinitionV1,
+  normalizeBotGenerationFieldKeyV1,
+  type BotGenerationFieldDefinitionV1,
+  type BotGenerationFieldKeyV1,
+  type BotGenerationFieldPolicyV1,
+  type BotGenerationFieldValueKindV1,
+} from "./botGenerationFields.js";
 
 export {
   PRISM_TOOL_END,
@@ -2791,3 +2809,4 @@ export * from "./modelReadiness.js";
 export * from "./graphicsQuality.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";
+export * from "./replay.js";

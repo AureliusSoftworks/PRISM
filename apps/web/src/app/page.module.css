@@ -41552,6 +41552,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 700;
 }
 
+.botProfileField > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
 .botProfileField small {
   color: var(--fg-muted);
   font-size: 11.5px;
@@ -42043,6 +42050,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botProfileFactRow input:focus {
   outline: none;
   border-color: color-mix(in srgb, var(--accent, var(--fg)) 60%, var(--line));
+}
+
+.botProfileAtomicFactField {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
 }
 
 .botProfileFactLabel {
@@ -43369,6 +43384,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarIdentityNameField > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   color: color-mix(
     in srgb,
     var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 52%,
@@ -43378,6 +43397,33 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 760;
   letter-spacing: 0.07em;
   text-transform: uppercase;
+}
+
+.botFieldRandomizerButton {
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, var(--line));
+  border-radius: 7px;
+  color: var(--fg-muted);
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 7%, rgba(0, 0, 0, 0.2));
+  cursor: pointer;
+}
+
+.botFieldRandomizerButton:hover:not(:disabled),
+.botFieldRandomizerButton:focus-visible {
+  outline: none;
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 58%, var(--line));
+}
+
+.botAvatarAtomicFieldActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .botAvatarIdentityNameField input {
@@ -45648,6 +45694,151 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 .botPowerAddButton:disabled {
   opacity: 0.45;
+}
+
+.botPowerComposer {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 26%, var(--line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 7%, rgba(0, 0, 0, 0.16));
+}
+
+.botPowerSigilCollection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+}
+
+.botPowerSigilCollection .botPowerCard {
+  padding: 0;
+  overflow: hidden;
+}
+
+.botPowerSigilCollection .botPowerCard[data-expanded="true"] {
+  grid-column: 1 / -1;
+}
+
+.botPowerSigilButton {
+  width: 100%;
+  min-height: 126px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 5px;
+  padding: 14px;
+  border: 0;
+  color: var(--fg);
+  background: radial-gradient(circle at 50% 36%, color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, transparent), transparent 62%);
+}
+
+.botPowerSigilButton > span {
+  display: grid;
+  place-items: center;
+  width: 54px;
+  height: 54px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 55%, var(--line));
+  border-radius: 50%;
+  color: color-mix(in srgb, var(--editor-bot-color, var(--accent)) 78%, white);
+  font-family: ui-serif, Georgia, serif;
+  font-size: 28px;
+  line-height: 1;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, transparent);
+}
+
+.botPowerSigilButton strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.botPowerSigilButton small {
+  color: var(--fg-muted);
+  font-size: 9px;
+}
+
+.botPowerSigilButton[data-disabled="true"] {
+  opacity: 0.46;
+  filter: grayscale(0.72);
+}
+
+.botPowerArtifactEditor {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.botPowerArtifactEditor > .botPowerCardHeader {
+  padding-top: 12px;
+}
+
+.botPowerGeneratedName {
+  margin: 0;
+  color: var(--fg);
+  font-size: 13px;
+}
+
+.botPowerArtifactActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.botPowerArtifactActions button,
+.botPowerUndoNotice button {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.035);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 740;
+}
+
+.botPowerArtifactActions .botPowerRemoveButton {
+  width: auto;
+  margin-left: auto;
+}
+
+.botPowerArtifactActions .botPowerRemoveButton[data-armed="true"] {
+  border-color: color-mix(in srgb, #ff6b7a 65%, var(--line));
+  color: #ffb4bc;
+  animation: botPowerPopArm 180ms ease-out both;
+}
+
+.botPowerUndoNotice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color, var(--accent)) 32%, var(--line));
+  border-radius: 9px;
+  color: var(--fg-muted);
+  background: rgba(0, 0, 0, 0.18);
+  font-size: 10px;
+}
+
+@keyframes botPowerPopArm {
+  from { transform: scale(1); }
+  55% { transform: scale(1.06); }
+  to { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botPowerArtifactActions .botPowerRemoveButton[data-armed="true"] {
+    animation: none;
+  }
 }
 
 .botAvatarProfilePanel {
@@ -54169,6 +54360,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botPurposeFieldHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   color: var(--fg);
   font-size: 12px;
   font-weight: 700;

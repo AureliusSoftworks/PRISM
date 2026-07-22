@@ -1339,6 +1339,79 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS replay_recordings (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      surface TEXT NOT NULL CHECK (surface IN ('signal', 'coffee')),
+      source_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'collecting'
+        CHECK (status IN (
+          'collecting', 'queued', 'preparing_audio', 'rendering',
+          'ready', 'ready_with_warnings', 'failed'
+        )),
+      progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
+      manifest_version INTEGER NOT NULL DEFAULT 1,
+      manifest_json TEXT,
+      manifest_hash TEXT,
+      timeline_json TEXT,
+      transcript_vtt TEXT,
+      transcript_markdown TEXT,
+      render_token TEXT,
+      upload_rel_path TEXT,
+      video_rel_path TEXT,
+      codec TEXT,
+      content_type TEXT,
+      width INTEGER NOT NULL DEFAULT 1920,
+      height INTEGER NOT NULL DEFAULT 1080,
+      fps INTEGER NOT NULL DEFAULT 30,
+      duration_ms INTEGER,
+      size_bytes INTEGER,
+      warning TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, surface, source_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS replay_voice_takes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      recording_id TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      source_message_id TEXT,
+      source_event_id TEXT,
+      snapshot_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'planned'
+        CHECK (status IN ('planned', 'captured', 'missing', 'failed')),
+      audio_rel_path TEXT,
+      content_type TEXT,
+      size_bytes INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(recording_id, source_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(recording_id) REFERENCES replay_recordings(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS replay_recordings_queue_idx
+      ON replay_recordings(user_id, status, updated_at);
+    CREATE INDEX IF NOT EXISTS replay_voice_takes_message_idx
+      ON replay_voice_takes(user_id, recording_id, source_message_id);
+    CREATE TRIGGER IF NOT EXISTS replay_recordings_delete_signal_source
+      AFTER DELETE ON botcast_episodes
+      BEGIN
+        DELETE FROM replay_recordings
+         WHERE user_id = OLD.user_id
+           AND surface = 'signal'
+           AND source_id = OLD.id;
+      END;
+    CREATE TRIGGER IF NOT EXISTS replay_recordings_delete_coffee_source
+      AFTER DELETE ON conversations
+      BEGIN
+        DELETE FROM replay_recordings
+         WHERE user_id = OLD.user_id
+           AND surface = 'coffee'
+           AND source_id = OLD.id;
+      END;
     CREATE TABLE IF NOT EXISTS coffee_polls (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

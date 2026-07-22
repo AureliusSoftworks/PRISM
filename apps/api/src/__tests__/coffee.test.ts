@@ -4678,6 +4678,7 @@ describe("Coffee group foundation", () => {
     const userId = "user-1";
     const conversationId = "conv-power-identity-mirror";
     db.exec("ALTER TABLE bots ADD COLUMN face_eye_character TEXT;");
+    db.exec("ALTER TABLE bots ADD COLUMN avatar_details_json TEXT;");
     const ian: CoffeeBotProfile = {
       ...BORIS,
       id: "identity-crisis-ian",
@@ -4689,9 +4690,18 @@ describe("Coffee group foundation", () => {
     seedCoffeeBot(db, userId, ALICE);
     seedCoffeeBot(db, userId, ian);
     seedCoffeeBot(db, userId, CARA);
+    const aliceAvatarDetails = {
+      version: 1,
+      screen: {
+        stamps: [
+          { id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 },
+        ],
+        paintMaskBase64: null,
+      },
+    };
     db.prepare(
-      "UPDATE bots SET face_eye_character = '◉' WHERE id = ?",
-    ).run(ALICE.id);
+      "UPDATE bots SET face_eye_character = '◉', avatar_details_json = ? WHERE id = ?",
+    ).run(JSON.stringify(aliceAvatarDetails), ALICE.id);
     const name = "Identity Crisis";
     const intent = "Copy the public identity of the latest bot that directly addresses this bot.";
     db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
@@ -4765,6 +4775,10 @@ describe("Coffee group foundation", () => {
     assert.equal(firstEvent.state.targetBotId, ALICE.id);
     assert.equal(firstEvent.state.targetPersonaPrompt, ALICE.systemPrompt);
     assert.equal(firstEvent.state.targetFace.eyeCharacter, "◉");
+    assert.deepEqual(
+      firstEvent.state.targetAvatarDetails,
+      aliceAvatarDetails,
+    );
     assert.equal(firstEvent.state.targetVoice.enabled, true);
     assert.equal("powers" in firstEvent.state, false);
     assert.equal("color" in firstEvent.state, false);
