@@ -291,6 +291,23 @@ describe("voice performance", () => {
     );
   });
 
+  it("anchors realtime scheduling after async worklet setup", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const workletReadyAt = source.indexOf(
+      "const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);",
+    );
+    const playbackClockAt = source.indexOf(
+      "const now = context.currentTime;",
+      workletReadyAt,
+    );
+
+    assert.ok(workletReadyAt >= 0);
+    assert.ok(
+      playbackClockAt > workletReadyAt,
+      "source scheduling must read the live audio clock after asynchronous worklet setup",
+    );
+  });
+
   it("does not start media-backed voice lifecycle from an accepted play request", () => {
     const englishSource = readFileSync(
       new URL("./englishVoice.ts", import.meta.url),

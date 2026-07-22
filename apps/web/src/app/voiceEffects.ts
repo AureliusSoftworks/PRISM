@@ -717,8 +717,11 @@ export async function playRealtimeVoiceBytes(args: {
           voiceLiltDetuneCents(profile.lilt, elapsedSeconds),
       })
     : [];
-  const now = context.currentTime;
   const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);
+  // Worklet registration can take long enough for a timestamp captured before
+  // the await to become stale. Anchor both source scheduling and the visible
+  // lifecycle to the live audio clock so neither starts ahead nor cuts short.
+  const now = context.currentTime;
   const createPitchTransform = (
     startAt: number,
     effectDetuneCents = 0,

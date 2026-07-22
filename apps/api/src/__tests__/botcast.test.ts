@@ -4817,20 +4817,20 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("gives the opening host a natural show, self, and guest introduction contract", async () => {
+  it("asks the opening host to reframe a raw topic organically in persona", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
+    const organicOpening =
+      "Welcome to Mara Vale in the Margins. I'm Mara Vale, and Ivo Stone joins me. Ivo, beneath all the doctrine and doubt, do you believe there is a god—and what would count as evidence?";
     const provider = recordingProvider(
-      [
-        "Welcome to the Frequency Room. I'm Mara Vale, and today I'm joined by Ivo Stone to examine what invention owes the people it disrupts.",
-      ],
+      [organicOpening],
       captures,
     );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       const episode = createBotcastEpisode(db, "user-1", show.id, {
         guestBotId: "guest-1",
-        topic: "The responsibility behind celebrated breakthroughs",
+        topic: "Does God exist",
       });
 
       const advanced = await advanceBotcastEpisode(
@@ -4848,9 +4848,19 @@ describe("Botcast persistence and isolation", () => {
       assert.match(prompt, /Complete all three introductions before asking/u);
       assert.match(prompt, /not generic podcast copy/u);
       assert.match(prompt, /two to four concise sentences/u);
-      assert.equal(
-        advanced.message?.content,
-        `Welcome to ${show.name}. I'm Mara Vale, and today I'm joined by Ivo Stone to explore The responsibility behind celebrated breakthroughs. Ivo Stone, where should we begin?`,
+      assert.match(prompt, /raw editorial title, not a line of dialogue/u);
+      assert.match(prompt, /expand or grammatically reframe it as needed/u);
+      assert.match(prompt, /preserve its meaning/u);
+      assert.match(prompt, /let the host persona flavor the framing/u);
+      assert.match(prompt, /exact title does not need to appear verbatim/u);
+      assert.match(prompt, /Do not treat verbatim wording as a requirement/u);
+      assert.match(prompt, /Do not .*fall back to a fixed topic-announcement template/u);
+      assert.doesNotMatch(prompt, /Today we (?:are|'re) going to talk about/iu);
+      assert.equal(advanced.message?.content, organicOpening);
+      assert.doesNotMatch(advanced.message?.content ?? "", /Does God exist/u);
+      assert.doesNotMatch(
+        advanced.message?.content ?? "",
+        /Today we (?:are|'re) going to talk about/iu,
       );
     } finally {
       db.close();

@@ -6676,6 +6676,9 @@ export function buildBotcastSpeakerPrompt(
       ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions, but do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
       : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${args.guest.name}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
     : null;
+  const openingTopicFramingRule = firstHostOpening
+    ? "Treat the public Topic field as a raw editorial title, not a line of dialogue. Introduce its idea organically: expand or grammatically reframe it as needed, preserve its meaning, and let the host persona flavor the framing. The exact title does not need to appear verbatim. Do not treat verbatim wording as a requirement or fall back to a fixed topic-announcement template."
+    : null;
   const producerBriefRule =
     args.speakerRole === "host" &&
     args.episode.producerBrief
@@ -6934,6 +6937,7 @@ export function buildBotcastSpeakerPrompt(
         ...(moodBoostRule ? [moodBoostRule] : []),
         ...(moodDrainRule ? [moodDrainRule] : []),
         ...(openingIntroductionRule ? [openingIntroductionRule] : []),
+        ...(openingTopicFramingRule ? [openingTopicFramingRule] : []),
         ...(producerBriefRule ? [producerBriefRule] : []),
         ...(producerGuestHostRule ? [producerGuestHostRule] : []),
         ...(producerGuestHostExitRule ? [producerGuestHostExitRule] : []),
