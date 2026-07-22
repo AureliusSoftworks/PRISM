@@ -22,6 +22,10 @@ import {
   voicePitchCorrectionCentsAt,
   type VoicePitchCorrectionPlan,
 } from "./voicePitchCorrection.ts";
+import {
+  signalLiveAudioContext,
+  signalLiveAudioDestination,
+} from "./signalLiveAudioRoute.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -507,6 +511,8 @@ const activeVoiceChannels: Record<
 const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
 
 function contextForPlayback(): AudioContext | null {
+  const liveContext = signalLiveAudioContext();
+  if (liveContext) return liveContext;
   if (typeof window === "undefined" || typeof window.AudioContext !== "function") return null;
   if (audioContext?.state === "closed") audioContext = null;
   audioContext ??= new window.AudioContext();
@@ -594,7 +600,7 @@ export async function playPreSpeechBreath(args: {
   active.roomConnection = connectRoomAcoustics({
     context,
     input: gain,
-    destination: context.destination,
+    destination: signalLiveAudioDestination(context),
     send: args.roomAcoustics,
     stereoPan: args.stereoPan,
   });
@@ -872,7 +878,7 @@ export async function playRealtimeVoiceBytes(args: {
   const roomConnection = connectRoomAcoustics({
     context,
     input: limiter,
-    destination: context.destination,
+    destination: signalLiveAudioDestination(context),
     send: args.roomAcoustics,
     stereoPan: args.stereoPan,
   });

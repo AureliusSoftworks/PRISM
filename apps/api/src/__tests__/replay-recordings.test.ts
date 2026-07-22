@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import type { ReplayManifestV1, ReplayVoiceTakeV1 } from "@localai/shared";
+import type {
+  ReplayCaptureReportV1,
+  ReplayManifestV1,
+  ReplayTimelineV1,
+  ReplayVoiceTakeV1,
+} from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
 import {
   claimNextReplayRecording,
+  abortLiveReplayRecording,
+  completeLiveReplayRecording,
   deleteReplayRecordingMedia,
   failReplayRender,
   getReplayRecording,
@@ -12,9 +19,14 @@ import {
   queueReplayRecording,
   replayVoiceTakesForRecording,
   retryReplayRecording,
+  startLiveReplayRecording,
+  storeReplayRenderChunk,
   upsertReplayVoiceTake,
 } from "../replay-recordings.ts";
-import { replayRecordingRelativeDirectory } from "../replay-storage.ts";
+import {
+  removeReplayRecordingDirectory,
+  replayRecordingRelativeDirectory,
+} from "../replay-storage.ts";
 
 function fixture(): DatabaseSync {
   const db = initializeDatabase(new DatabaseSync(":memory:"));
@@ -123,7 +135,188 @@ const takeSnapshot: ReplayVoiceTakeV1 = {
   alignment: null,
 };
 
+const liveTimeline: ReplayTimelineV1 = {
+  v: 1,
+  durationMs: 4_000,
+  beats: [
+    {
+      id: "title",
+      kind: "title",
+      startMs: 0,
+      endMs: 1_000,
+      utteranceId: null,
+      sourceMessageId: null,
+      speakerId: null,
+      speakerName: null,
+      text: "The Episode",
+      channel: null,
+    },
+    {
+      id: "message-1",
+      kind: "utterance",
+      startMs: 1_000,
+      endMs: 2_400,
+      utteranceId: "message-1",
+      sourceMessageId: "message-1",
+      speakerId: "host-1",
+      speakerName: "Host",
+      text: "Welcome.",
+      channel: "primary",
+    },
+    {
+      id: "end",
+      kind: "end",
+      startMs: 2_400,
+      endMs: 4_000,
+      utteranceId: null,
+      sourceMessageId: null,
+      speakerId: null,
+      speakerName: null,
+      text: "The Episode",
+      channel: null,
+    },
+  ],
+};
+
+const liveCaptureReport: ReplayCaptureReportV1 = {
+  startedAt: "2026-07-21T00:00:00.000Z",
+  completedAt: "2026-07-21T00:00:04.000Z",
+  capturedFrames: 36,
+  heldFrames: 84,
+  audioFrames: 192_000,
+  audioDiscontinuities: 0,
+  visibilityInterruptions: 0,
+  longestVisualGapMs: 144,
+  degradedReason: null,
+};
+
 describe("durable replay recordings", () => {
+  it("leases Signal live capture tenant-safely and aborts without affecting its source", () => {
+    const db = fixture();
+    const lease = startLiveReplayRecording(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    assert.equal(lease.recording.captureMode, "live");
+    assert.equal(lease.recording.status, "rendering");
+    assert.throws(
+      () =>
+        startLiveReplayRecording(
+          db,
+          "other-user",
+          "signal",
+          "episode-1",
+        ),
+      /Unknown signal replay source/u,
+    );
+    assert.throws(
+      () =>
+        completeLiveReplayRecording(
+          db,
+          "user-1",
+          lease.recording.id,
+          lease.renderToken,
+          {
+            manifest,
+            timeline: liveTimeline,
+            captureReport: {
+              ...liveCaptureReport,
+              degradedReason: "audio gap",
+            },
+            contentType: "video/webm",
+            codec: "vp9/opus",
+            durationMs: liveTimeline.durationMs,
+          },
+        ),
+      /capture report is invalid/u,
+    );
+    const aborted = abortLiveReplayRecording(
+      db,
+      "user-1",
+      lease.recording.id,
+      lease.renderToken,
+      "tab hidden",
+      { ...liveCaptureReport, degradedReason: "tab hidden" },
+    );
+    assert.equal(aborted.captureMode, "rebuild");
+    assert.equal(aborted.status, "collecting");
+    assert.equal(aborted.captureReport?.degradedReason, "tab hidden");
+    const queued = queueReplayRecording(db, "user-1", manifest);
+    assert.equal(queued.captureMode, "rebuild");
+    assert.equal(queued.status, "queued");
+    assert.ok(queued.manifest);
+    assert.equal(queued.captureReport?.degradedReason, "tab hidden");
+  });
+
+  it("atomically promotes a live upload with its actual timeline and report", () => {
+    const db = fixture();
+    const lease = startLiveReplayRecording(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    const webm = new Uint8Array(64);
+    webm.set([0x1a, 0x45, 0xdf, 0xa3]);
+    try {
+      assert.equal(
+        storeReplayRenderChunk(
+          db,
+          "user-1",
+          lease.recording.id,
+          lease.renderToken,
+          0,
+          webm,
+        ),
+        webm.byteLength,
+      );
+      const completed = completeLiveReplayRecording(
+        db,
+        "user-1",
+        lease.recording.id,
+        lease.renderToken,
+        {
+          manifest,
+          timeline: liveTimeline,
+          captureReport: liveCaptureReport,
+          contentType: "video/webm",
+          codec: "vp9/opus",
+          durationMs: liveTimeline.durationMs,
+        },
+      );
+      assert.equal(completed.status, "ready");
+      assert.equal(completed.captureMode, "live");
+      assert.deepEqual(completed.captureReport, liveCaptureReport);
+      assert.equal(completed.timeline?.beats[1]?.startMs, 1_000);
+      assert.match(completed.videoUrl ?? "", /video/u);
+    } finally {
+      removeReplayRecordingDirectory("user-1", lease.recording.id);
+    }
+  });
+
+  it("recovers an abandoned live lease through the deterministic queue", () => {
+    const db = fixture();
+    queueReplayRecording(db, "user-1", manifest);
+    const live = startLiveReplayRecording(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    db.prepare(
+      "UPDATE replay_recordings SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?",
+    ).run(live.recording.id);
+    const recovered = claimNextReplayRecording(db, "user-1", {
+      surface: "signal",
+      sourceId: "episode-1",
+    });
+    assert.ok(recovered);
+    assert.equal(recovered.recording.captureMode, "rebuild");
+    assert.equal(recovered.recording.status, "preparing_audio");
+  });
+
   it("freezes a take, queues deterministically, and leases without any provider work", () => {
     const db = fixture();
     const firstTake = upsertReplayVoiceTake(

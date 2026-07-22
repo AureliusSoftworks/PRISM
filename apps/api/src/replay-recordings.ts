@@ -9,6 +9,8 @@ import {
   replayManifestToMarkdownV1,
   replayManifestV1IsValid,
   replayTimelineToWebVttV1,
+  type ReplayCaptureModeV1,
+  type ReplayCaptureReportV1,
   type ReplayManifestV1,
   type ReplayRecordingStatusV1,
   type ReplayRecordingV1,
@@ -31,6 +33,8 @@ import {
 } from "./replay-storage.ts";
 
 const REPLAY_MANIFEST_MAX_BYTES = 4 * 1024 * 1024;
+const REPLAY_TIMELINE_MAX_BYTES = 4 * 1024 * 1024;
+const REPLAY_CAPTURE_REPORT_MAX_BYTES = 64 * 1024;
 const REPLAY_TAKE_SNAPSHOT_MAX_BYTES = 256 * 1024;
 export const REPLAY_RENDER_CHUNK_MAX_BYTES = 8 * 1024 * 1024;
 
@@ -40,6 +44,8 @@ type ReplayRecordingRow = {
   surface: ReplaySurfaceV1;
   source_id: string;
   status: ReplayRecordingStatusV1;
+  capture_mode: ReplayCaptureModeV1;
+  capture_report_json: string | null;
   progress: number;
   manifest_json: string | null;
   timeline_json: string | null;
@@ -91,6 +97,64 @@ function boundedMessage(value: unknown, max = 1_000): string | null {
   return normalized || null;
 }
 
+function assertLiveReplayTimeline(
+  manifest: ReplayManifestV1,
+  timeline: ReplayTimelineV1,
+): void {
+  if (
+    !timeline ||
+    typeof timeline !== "object" ||
+    timeline.v !== 1 ||
+    !Number.isFinite(timeline.durationMs) ||
+    timeline.durationMs <= 0 ||
+    timeline.durationMs > 4 * 60 * 60 * 1_000 ||
+    !Array.isArray(timeline.beats)
+  ) {
+    throw new Error("Live replay timeline is invalid.");
+  }
+  const messageIds = new Set(
+    manifest.utterances.map((utterance) => utterance.sourceMessageId),
+  );
+  const beatIds = new Set<string>();
+  for (const beat of timeline.beats) {
+    if (
+      !beat.id?.trim() ||
+      beatIds.has(beat.id) ||
+      !Number.isFinite(beat.startMs) ||
+      !Number.isFinite(beat.endMs) ||
+      beat.startMs < 0 ||
+      beat.endMs <= beat.startMs ||
+      beat.endMs > timeline.durationMs + 1_000 ||
+      (beat.sourceMessageId !== null && !messageIds.has(beat.sourceMessageId))
+    ) {
+      throw new Error("Live replay timeline contains an invalid beat.");
+    }
+    beatIds.add(beat.id);
+  }
+}
+
+function replayCaptureReportIsValid(
+  report: ReplayCaptureReportV1 | null | undefined,
+): report is ReplayCaptureReportV1 {
+  if (!report || typeof report !== "object") return false;
+  const counts = [
+    report.capturedFrames,
+    report.heldFrames,
+    report.audioFrames,
+    report.audioDiscontinuities,
+    report.visibilityInterruptions,
+    report.longestVisualGapMs,
+  ];
+  return (
+    typeof report.startedAt === "string" &&
+    report.startedAt.length <= 80 &&
+    (report.completedAt === null ||
+      (typeof report.completedAt === "string" && report.completedAt.length <= 80)) &&
+    report.degradedReason === null &&
+    counts.every((value) => Number.isFinite(value) && value >= 0)
+  );
+}
+
 function assertReplaySourceOwned(
   db: DatabaseSync,
   userId: string,
@@ -136,6 +200,8 @@ function mapRecordingRow(row: ReplayRecordingRow): ReplayRecordingV1 {
     surface: row.surface,
     sourceId: row.source_id,
     status: row.status,
+    captureMode: row.capture_mode === "live" ? "live" : "rebuild",
+    captureReport: parseJson<ReplayCaptureReportV1>(row.capture_report_json),
     progress: Math.max(0, Math.min(1, Number(row.progress) || 0)),
     manifest: parseJson<ReplayManifestV1>(row.manifest_json),
     timeline: parseJson<ReplayTimelineV1>(row.timeline_json),
@@ -216,6 +282,41 @@ export function ensureReplayRecording(
     now,
   );
   return mapRecordingRow(recordingRow(db, userId, id)!);
+}
+
+export function startLiveReplayRecording(
+  db: DatabaseSync,
+  userId: string,
+  surface: ReplaySurfaceV1,
+  sourceId: string,
+): { recording: ReplayRecordingV1; renderToken: string } {
+  if (surface !== "signal") {
+    throw new Error("Live replay recording is currently available only for Signal.");
+  }
+  const recording = ensureReplayRecording(db, userId, surface, sourceId);
+  const row = recordingRow(db, userId, recording.id)!;
+  removeReplayFile(row.upload_rel_path);
+  removeReplayFile(row.video_rel_path);
+  const renderToken = randomBytes(18).toString("hex");
+  const uploadRelativePath = replayUploadRelativePath(
+    userId,
+    recording.id,
+    renderToken,
+  );
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE replay_recordings
+        SET status = 'rendering', progress = 0.01, capture_mode = 'live',
+            capture_report_json = NULL, render_token = ?, upload_rel_path = ?,
+            video_rel_path = NULL, codec = NULL, content_type = NULL,
+            duration_ms = NULL, size_bytes = NULL, warning = NULL,
+            error = NULL, updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(renderToken, uploadRelativePath, now, recording.id, userId);
+  return {
+    recording: mapRecordingRow(recordingRow(db, userId, recording.id)!),
+    renderToken,
+  };
 }
 
 export function getReplayRecording(
@@ -418,10 +519,11 @@ export function queueReplayRecording(
     row.manifest_json === manifestJson &&
     (row.status === "ready" || row.status === "ready_with_warnings");
   if (unchangedReady) return mapRecordingRow(row);
+  if (row.capture_mode === "live") removeReplayFile(row.upload_rel_path);
   db.prepare(
     `UPDATE replay_recordings
-        SET status = 'queued', progress = 0, manifest_version = 1,
-            manifest_json = ?, manifest_hash = ?, timeline_json = ?,
+        SET status = 'queued', progress = 0, capture_mode = 'rebuild',
+            manifest_version = 1, manifest_json = ?, manifest_hash = ?, timeline_json = ?,
             transcript_vtt = ?, transcript_markdown = ?, render_token = NULL,
             upload_rel_path = NULL, warning = NULL, error = NULL, updated_at = ?
       WHERE id = ? AND user_id = ?`,
@@ -458,7 +560,11 @@ export function claimNextReplayRecording(
   for (const row of interrupted) removeReplayFile(row.upload_rel_path);
   db.prepare(
     `UPDATE replay_recordings
-        SET status = 'queued', progress = 0, render_token = NULL,
+        SET status = CASE
+              WHEN manifest_json IS NULL THEN 'collecting'
+              ELSE 'queued'
+            END,
+            progress = 0, capture_mode = 'rebuild', render_token = NULL,
             upload_rel_path = NULL,
             warning = 'Interrupted replay render restarted safely.',
             updated_at = ?
@@ -487,8 +593,9 @@ export function claimNextReplayRecording(
   const now = new Date().toISOString();
   const result = db.prepare(
     `UPDATE replay_recordings
-        SET status = 'preparing_audio', progress = 0.01, render_token = ?,
-            upload_rel_path = ?, error = NULL, updated_at = ?
+        SET status = 'preparing_audio', progress = 0.01,
+            capture_mode = 'rebuild', render_token = ?, upload_rel_path = ?,
+            error = NULL, updated_at = ?
       WHERE id = ? AND user_id = ? AND status = 'queued'`,
   ).run(renderToken, uploadRelativePath, now, candidate.id, userId);
   if (Number(result.changes ?? 0) === 0) return null;
@@ -544,11 +651,137 @@ export function storeReplayRenderChunk(
 ): number {
   const row = requireActiveRender(db, userId, recordingId, renderToken);
   if (!row.upload_rel_path) throw new Error("Replay render upload is not initialized.");
-  return writeReplayRenderChunk({
+  const sizeBytes = writeReplayRenderChunk({
     relativePath: row.upload_rel_path,
     position,
     bytes,
   });
+  db.prepare(
+    `UPDATE replay_recordings SET updated_at = ?
+      WHERE id = ? AND user_id = ? AND render_token = ?`,
+  ).run(new Date().toISOString(), recordingId, userId, renderToken);
+  return sizeBytes;
+}
+
+export function completeLiveReplayRecording(
+  db: DatabaseSync,
+  userId: string,
+  recordingId: string,
+  renderToken: string,
+  input: {
+    manifest: ReplayManifestV1;
+    timeline: ReplayTimelineV1;
+    captureReport: ReplayCaptureReportV1;
+    contentType: "video/mp4" | "video/webm";
+    codec: string;
+    durationMs: number;
+  },
+): ReplayRecordingV1 {
+  const row = requireActiveRender(db, userId, recordingId, renderToken);
+  if (row.capture_mode !== "live" || !row.upload_rel_path) {
+    throw new Error("Live replay upload is not active.");
+  }
+  if (
+    !replayManifestV1IsValid(input.manifest) ||
+    input.manifest.surface !== row.surface ||
+    input.manifest.sourceId !== row.source_id
+  ) {
+    throw new Error("Live replay manifest does not match its source.");
+  }
+  assertLiveReplayTimeline(input.manifest, input.timeline);
+  if (!replayCaptureReportIsValid(input.captureReport)) {
+    throw new Error("Live replay capture report is invalid.");
+  }
+  const manifestJson = JSON.stringify(input.manifest);
+  const timelineJson = JSON.stringify(input.timeline);
+  const captureReportJson = JSON.stringify(input.captureReport);
+  if (Buffer.byteLength(manifestJson) > REPLAY_MANIFEST_MAX_BYTES) {
+    throw new Error("Replay manifest is too large.");
+  }
+  if (Buffer.byteLength(timelineJson) > REPLAY_TIMELINE_MAX_BYTES) {
+    throw new Error("Replay timeline is too large.");
+  }
+  if (
+    Buffer.byteLength(captureReportJson) > REPLAY_CAPTURE_REPORT_MAX_BYTES
+  ) {
+    throw new Error("Live replay capture report is invalid.");
+  }
+  const videoRelativePath = replayVideoRelativePath({
+    userId,
+    recordingId,
+    contentType: input.contentType,
+  });
+  const { sizeBytes } = finalizeReplayUpload({
+    uploadRelativePath: row.upload_rel_path,
+    videoRelativePath,
+    contentType: input.contentType,
+  });
+  const now = new Date().toISOString();
+  const manifestHash = createHash("sha256").update(manifestJson).digest("hex");
+  db.prepare(
+    `UPDATE replay_recordings
+        SET status = 'ready', progress = 1, capture_mode = 'live',
+            capture_report_json = ?, manifest_version = 1,
+            manifest_json = ?, manifest_hash = ?, timeline_json = ?,
+            transcript_vtt = ?, transcript_markdown = ?,
+            video_rel_path = ?, upload_rel_path = NULL, render_token = NULL,
+            content_type = ?, codec = ?, duration_ms = ?, size_bytes = ?,
+            warning = NULL, error = NULL, updated_at = ?
+      WHERE id = ? AND user_id = ? AND render_token = ?`,
+  ).run(
+    captureReportJson,
+    manifestJson,
+    manifestHash,
+    timelineJson,
+    replayTimelineToWebVttV1(input.timeline),
+    replayManifestToMarkdownV1(input.manifest, input.timeline),
+    videoRelativePath,
+    input.contentType,
+    boundedMessage(input.codec, 120),
+    Math.max(1, Math.round(input.durationMs || input.timeline.durationMs)),
+    sizeBytes,
+    now,
+    recordingId,
+    userId,
+    renderToken,
+  );
+  return mapRecordingRow(recordingRow(db, userId, recordingId)!);
+}
+
+export function abortLiveReplayRecording(
+  db: DatabaseSync,
+  userId: string,
+  recordingId: string,
+  renderToken: string,
+  reason: unknown,
+  captureReport: ReplayCaptureReportV1 | null = null,
+): ReplayRecordingV1 {
+  const row = requireActiveRender(db, userId, recordingId, renderToken);
+  if (row.capture_mode !== "live") {
+    throw new Error("Live replay upload is not active.");
+  }
+  removeReplayFile(row.upload_rel_path);
+  const reportJson = captureReport ? JSON.stringify(captureReport) : null;
+  const nextStatus = row.manifest_json ? "queued" : "collecting";
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE replay_recordings
+        SET status = ?, progress = 0, capture_mode = 'rebuild',
+            capture_report_json = ?, render_token = NULL,
+            upload_rel_path = NULL, warning = ?, error = NULL, updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(
+    nextStatus,
+    reportJson && Buffer.byteLength(reportJson) <= REPLAY_CAPTURE_REPORT_MAX_BYTES
+      ? reportJson
+      : null,
+    boundedMessage(reason, 1_000) ??
+      "Live recording was interrupted. PRISM will rebuild it safely.",
+    now,
+    recordingId,
+    userId,
+  );
+  return mapRecordingRow(recordingRow(db, userId, recordingId)!);
 }
 
 export function completeReplayRender(
@@ -585,8 +818,9 @@ export function completeReplayRender(
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE replay_recordings
-        SET status = ?, progress = 1, timeline_json = ?, transcript_vtt = ?,
-            transcript_markdown = ?, video_rel_path = ?, upload_rel_path = NULL,
+        SET status = ?, progress = 1, capture_mode = 'rebuild',
+            timeline_json = ?, transcript_vtt = ?, transcript_markdown = ?,
+            video_rel_path = ?, upload_rel_path = NULL,
             render_token = NULL, content_type = ?, codec = ?, duration_ms = ?,
             size_bytes = ?, warning = ?, error = NULL, updated_at = ?
       WHERE id = ? AND user_id = ?`,
@@ -620,7 +854,8 @@ export function failReplayRender(
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE replay_recordings
-        SET status = 'failed', progress = 0, render_token = NULL,
+        SET status = 'failed', progress = 0, capture_mode = 'rebuild',
+            render_token = NULL,
             upload_rel_path = NULL, error = ?, updated_at = ?
       WHERE id = ? AND user_id = ?`,
   ).run(
@@ -644,8 +879,9 @@ export function retryReplayRecording(
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE replay_recordings
-        SET status = 'queued', progress = 0, render_token = NULL,
-            upload_rel_path = NULL, warning = NULL, error = NULL, updated_at = ?
+        SET status = 'queued', progress = 0, capture_mode = 'rebuild',
+            render_token = NULL, upload_rel_path = NULL, warning = NULL,
+            error = NULL, updated_at = ?
       WHERE id = ? AND user_id = ?`,
   ).run(now, recordingId, userId);
   return mapRecordingRow(recordingRow(db, userId, recordingId)!);
@@ -670,7 +906,8 @@ export function deleteReplayRecordingMedia(
     ).run(now, userId, recordingId);
     db.prepare(
       `UPDATE replay_recordings
-          SET status = 'collecting', progress = 0, render_token = NULL,
+          SET status = 'collecting', progress = 0,
+              capture_mode = 'rebuild', render_token = NULL,
               upload_rel_path = NULL, video_rel_path = NULL, codec = NULL,
               content_type = NULL, duration_ms = NULL, size_bytes = NULL,
               warning = 'Recording deleted. The saved transcript can rebuild it.',

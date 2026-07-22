@@ -1,6 +1,8 @@
 import type {
+  ReplayCaptureReportV1,
   ReplayManifestV1,
   ReplayRecordingV1,
+  ReplayTimelineV1,
   ReplayVoiceTakeRecordV1,
   ReplayVoiceTakeV1,
 } from "@localai/shared";
@@ -255,6 +257,51 @@ export async function completeReplayRender(args: {
 }): Promise<ReplayRecordingV1> {
   const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
     `/api/replays/${encodeURIComponent(args.recordingId)}/complete`,
+    { method: "POST", body: JSON.stringify(args) },
+  );
+  return result.recording;
+}
+
+export async function startLiveReplayRecording(sourceId: string): Promise<{
+  recording: ReplayRecordingV1;
+  renderToken: string;
+}> {
+  const result = await replayJson<{
+    ok: true;
+    recording: ReplayRecordingV1;
+    renderToken: string;
+  }>("/api/replays/live/start", {
+    method: "POST",
+    body: JSON.stringify({ surface: "signal", sourceId }),
+  });
+  return { recording: result.recording, renderToken: result.renderToken };
+}
+
+export async function completeLiveReplayRecording(args: {
+  recordingId: string;
+  renderToken: string;
+  manifest: ReplayManifestV1;
+  timeline: ReplayTimelineV1;
+  captureReport: ReplayCaptureReportV1;
+  contentType: "video/mp4" | "video/webm";
+  codec: string;
+  durationMs: number;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/live/complete`,
+    { method: "POST", body: JSON.stringify(args) },
+  );
+  return result.recording;
+}
+
+export async function abortLiveReplayRecording(args: {
+  recordingId: string;
+  renderToken: string;
+  reason: string;
+  captureReport: ReplayCaptureReportV1;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/live/abort`,
     { method: "POST", body: JSON.stringify(args) },
   );
   return result.recording;

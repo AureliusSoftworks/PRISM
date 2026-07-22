@@ -22,11 +22,13 @@ function statusLabel(recording: ReplayRecordingV1): string {
     case "collecting":
       return recording.manifest ? "Video deleted" : "Capturing episode";
     case "queued":
-      return "Video queued";
+      return "Rebuilding episode video";
     case "preparing_audio":
-      return "Preparing video";
+      return "Rebuilding episode video";
     case "rendering":
-      return `Rendering ${Math.round(recording.progress * 100)}%`;
+      return recording.captureMode === "live"
+        ? "Finishing recording"
+        : `Rebuilding episode video ${Math.round(recording.progress * 100)}%`;
     case "ready":
       return "Video ready";
     case "ready_with_warnings":

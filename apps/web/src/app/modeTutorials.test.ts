@@ -52,15 +52,16 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("teaches deterministic replay video controls without implying another AI turn", () => {
+  it("teaches live Signal recording with deterministic recovery and no extra AI turn", () => {
     const coffeeCopy = MODE_TUTORIALS.coffee.steps.at(-1)?.body ?? "";
     const signalCopy = MODE_TUTORIALS.botcast.steps.at(-1)?.body ?? "";
     assert.match(coffeeCopy, /third-person video automatically/u);
     assert.match(coffeeCopy, /adds no AI conversation turn/u);
-    assert.match(signalCopy, /never asks an AI to recreate/u);
-    assert.match(signalCopy, /without a finished video starts or resumes/u);
-    assert.match(signalCopy, /without opening anything/u);
-    assert.match(signalCopy, /Select it again after Video ready/u);
+    assert.match(signalCopy, /records the real broadcast live from ident through outdent/u);
+    assert.match(signalCopy, /ready within seconds/u);
+    assert.match(signalCopy, /quietly rebuilds the episode from the same frozen source material/u);
+    assert.match(signalCopy, /without another AI turn/u);
+    assert.match(signalCopy, /after Video ready/u);
     assert.match(signalCopy, /browser-playable video/u);
     assert.match(signalCopy, /download the video or transcript/u);
     assert.match(signalCopy, /Delete Recording without deleting the episode transcript/u);

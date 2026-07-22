@@ -158,6 +158,7 @@ import {
 } from "./signalArtworkJob";
 import { signalShowMagicManifest } from "./signalShowIdentity";
 import {
+  SIGNAL_AUDIO_STOP_FADE_MS,
   SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
   playSignalIntroAudio,
   playSignalOutdentAudio,
@@ -174,6 +175,7 @@ import {
   signalHostCueShouldRedirect,
 } from "./signalHostCueTiming";
 import { signalLiveCaptionText } from "./signalLiveCaptions";
+import { SignalLiveReplayRecorder } from "./SignalLiveReplayRecorder";
 import {
   ReplayRecordingPanel,
   ReplayRecordingStatusBadge,
@@ -1301,6 +1303,8 @@ export function BotcastExperience({
     useState<SignalReplayRenderTarget | null>(null);
   const [replayRecordingsByEpisodeId, setReplayRecordingsByEpisodeId] =
     useState<Record<string, ReplayRecordingV1 | null>>({});
+  const [signalLiveRecorderRevision, setSignalLiveRecorderRevision] =
+    useState(0);
   const [hostDraftId, setHostDraftId] = useState("");
   const [showPremiseInspirationDraft, setShowPremiseInspirationDraft] =
     useState("");
@@ -1505,6 +1509,7 @@ export function BotcastExperience({
   const studioAtmosphereMixSaveInFlightRef = useRef(false);
   const studioSoundcheckRunIdRef = useRef(0);
   const signalStageRef = useRef<HTMLElement | null>(null);
+  const signalLiveRecorderRef = useRef<SignalLiveReplayRecorder | null>(null);
   const signalAtmosphereControllerRef =
     useRef<SessionAtmosphereController | null>(null);
   const signalReplayRenderStageRef = useRef<HTMLElement | null>(null);
@@ -1934,6 +1939,25 @@ export function BotcastExperience({
     onStopUtteranceRef.current?.();
   }, []);
 
+  const finishSignalLiveReplay = useCallback(
+    async (completedEpisode: BotcastEpisode, show: BotcastShow): Promise<void> => {
+      const recorder = signalLiveRecorderRef.current;
+      if (!recorder) return;
+      const manifest = buildSignalReplayManifestV1({
+        episode: completedEpisode,
+        show,
+        bots: eligibleBots,
+        producerName,
+        theme,
+      });
+      await recorder.finish(manifest);
+      if (signalLiveRecorderRef.current === recorder) {
+        signalLiveRecorderRef.current = null;
+      }
+    },
+    [eligibleBots, producerName, theme],
+  );
+
   useEffect(() => {
     if (!studioLayoutEditorOpen) return;
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -1971,6 +1995,7 @@ export function BotcastExperience({
         window.setTimeout(resolve, SIGNAL_EPISODE_OUTRO_DEAD_AIR_MS),
       );
       if (outroRunIdRef.current !== runId) return;
+      signalLiveRecorderRef.current?.noteClosingStarted();
       setEpisodeOutro({
         episodeId: args.episode.id,
         showName: args.show.name,
@@ -2010,8 +2035,9 @@ export function BotcastExperience({
           : current,
       );
       stopSignalIntroAudio();
+      await finishSignalLiveReplay(args.episode, args.show);
     },
-    [bots, introAudioEnabled, introAudioVolume],
+    [bots, finishSignalLiveReplay, introAudioEnabled, introAudioVolume],
   );
 
   useEffect(() => {
@@ -2022,6 +2048,11 @@ export function BotcastExperience({
     () => () => {
       studioSoundcheckRunIdRef.current += 1;
       onStopUtteranceRef.current?.();
+      void signalLiveRecorderRef.current?.degrade(
+        "Signal page was closed during live recording.",
+        false,
+      );
+      signalLiveRecorderRef.current = null;
     },
     [],
   );
@@ -2163,6 +2194,8 @@ export function BotcastExperience({
   const replayQueuedEpisodeIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!episode || episode.status !== "completed" || !selectedShow) return;
+    const liveRecorder = signalLiveRecorderRef.current;
+    if (liveRecorder?.isCapturing) return;
     if (replayQueuedEpisodeIdsRef.current.has(episode.id)) return;
     replayQueuedEpisodeIdsRef.current.add(episode.id);
     const manifest = buildSignalReplayManifestV1({
@@ -2172,12 +2205,21 @@ export function BotcastExperience({
       producerName,
       theme,
     });
-    void queueReplayManifest(manifest)
+    void (liveRecorder
+      ? liveRecorder.queueRebuild(manifest)
+      : queueReplayManifest(manifest).then(() => undefined))
       .then(() =>
         window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT)),
       )
       .catch(() => replayQueuedEpisodeIdsRef.current.delete(episode.id));
-  }, [eligibleBots, episode, producerName, selectedShow, theme]);
+  }, [
+    eligibleBots,
+    episode,
+    producerName,
+    selectedShow,
+    signalLiveRecorderRevision,
+    theme,
+  ]);
   useEffect(() => {
     if (!replayRenderTarget) return;
     let disposed = false;
@@ -3321,7 +3363,7 @@ export function BotcastExperience({
         !hostBot?.muted &&
         !botPowerEchoesAddressedSpeechV1(
           botcastSnapshotPowersForRoleV1(episode, "host") ??
-            hostBot?.powers,
+            hostBot?.replayPowers,
         ) &&
         !botPowerResponseIsSilentV1(nextHostInterruptionBridge.content)
           ? nextHostInterruptionBridge
@@ -4680,6 +4722,20 @@ export function BotcastExperience({
       );
       return;
     }
+    const liveRecorder = SignalLiveReplayRecorder.begin({
+      title: `${selectedShow.name} — ${startTopic.trim() || "Signal episode"}`,
+      captureRoot: () =>
+        document.querySelector<HTMLElement>(
+          '[data-signal-live-capture-root="outro"]',
+        ) ??
+        document.querySelector<HTMLElement>(
+          '[data-signal-live-capture-root="intro"]',
+        ) ??
+        signalStageRef.current,
+      onRecordingChange: handleReplayRecordingChange,
+      onDegraded: () => setSignalLiveRecorderRevision((value) => value + 1),
+    });
+    signalLiveRecorderRef.current = liveRecorder;
     stopStudioSoundcheck();
     setStudioLayoutEditorOpen(false);
     stopIntroPreview();
@@ -4810,6 +4866,7 @@ export function BotcastExperience({
       );
       if (!episodeOperationIsCurrent(controller, runId)) return;
       unstartedEpisodeId = response.episode.id;
+      void liveRecorder?.attach(response.episode.id);
       if (producerGuest) {
         setEpisodePreRoll((current) =>
           current
@@ -4849,6 +4906,13 @@ export function BotcastExperience({
         });
         setEpisodePreRoll(null);
         stopSignalIntroAudio();
+        await liveRecorder?.degrade(
+          "Signal model preparation interrupted live recording.",
+          false,
+        );
+        if (signalLiveRecorderRef.current === liveRecorder) {
+          signalLiveRecorderRef.current = null;
+        }
         return;
       }
       if (!signalModelWarmupVisibleRef.current) {
@@ -4917,6 +4981,13 @@ export function BotcastExperience({
         stopSignalIntroAudio();
         setEpisodePreRoll(null);
         setAutoRun(false);
+        await liveRecorder?.degrade(
+          "Signal episode start failed before live recording could continue.",
+          false,
+        );
+        if (signalLiveRecorderRef.current === liveRecorder) {
+          signalLiveRecorderRef.current = null;
+        }
         if (unstartedEpisodeId && signalModelWarmupRef.current) {
           await releaseSignalModelWarmup(unstartedEpisodeId);
         }
@@ -5156,6 +5227,10 @@ export function BotcastExperience({
       const notifyPlaybackStart = (): void => {
         if (playbackStartNotified) return;
         playbackStartNotified = true;
+        signalLiveRecorderRef.current?.noteUtteranceStart(
+          message,
+          bot?.name ?? message.speakerRole,
+        );
         if (
           currentEpisode.guestKind === "producer" &&
           message.speakerRole === "guest" &&
@@ -5234,6 +5309,7 @@ export function BotcastExperience({
           });
         },
         onEnd: () => {
+          signalLiveRecorderRef.current?.noteUtteranceEnd(message.id);
           if (
             activeSpeechMessageIdRef.current !== message.id ||
             !episodeOperationIsCurrent(controller, runId)
@@ -5317,6 +5393,7 @@ export function BotcastExperience({
             : current,
         );
       }
+      signalLiveRecorderRef.current?.noteUtteranceEnd(message.id);
       if (activeSpeechMessageIdRef.current === message.id) {
         prepareFollowingBotTurn();
         holdLiveCameraAfterSpeech(message.speakerRole);
@@ -9490,6 +9567,7 @@ export function BotcastExperience({
       {episodePreRoll && selectedShow ? (
         <section
           className={styles.episodePreRoll}
+          data-signal-live-capture-root="intro"
           data-phase={episodePreRoll.phase}
           data-kind="intro"
           data-source={episodePreRoll.source}
@@ -9526,7 +9604,11 @@ export function BotcastExperience({
                 : "Signal Synth · generated locally"}
             </small>
           </div>
-            <button type="button" onClick={skipEpisodePreRoll}>
+            <button
+              type="button"
+              data-signal-recording-exclude="true"
+              onClick={skipEpisodePreRoll}
+            >
               Skip intro
             </button>
         </section>
@@ -9534,6 +9616,7 @@ export function BotcastExperience({
       {episodeOutro && selectedShow ? (
         <section
           className={`${styles.episodePreRoll} ${styles.episodeOutro}`}
+          data-signal-live-capture-root="outro"
           data-phase={episodeOutro.phase}
           data-kind="outro"
             style={
@@ -9564,7 +9647,10 @@ export function BotcastExperience({
               </p>
             <small>Signal</small>
           </div>
-            <div className={styles.episodeOutroActions}>
+            <div
+              className={styles.episodeOutroActions}
+              data-signal-recording-exclude="true"
+            >
               {episode?.id === episodeOutro.episodeId &&
               episode.status === "completed" ? (
                 <>
@@ -9595,7 +9681,22 @@ export function BotcastExperience({
             <button
               type="button"
               onClick={() => {
+                const completedEpisode = episode;
+                const completedShow = selectedShow;
                 stopEpisodeOutro();
+                if (
+                  completedEpisode?.status === "completed" &&
+                  completedShow
+                ) {
+                  window.setTimeout(
+                    () =>
+                      void finishSignalLiveReplay(
+                        completedEpisode,
+                        completedShow,
+                      ),
+                    SIGNAL_AUDIO_STOP_FADE_MS,
+                  );
+                }
                 setEpisode(null);
                 if (selectedShowId)
                   void loadEpisodes(selectedShowId).catch(() => undefined);

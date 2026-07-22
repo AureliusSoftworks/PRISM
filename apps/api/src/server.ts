@@ -237,7 +237,9 @@ import {
 } from "./signal-asset-upload.ts";
 import {
   REPLAY_RENDER_CHUNK_MAX_BYTES,
+  abortLiveReplayRecording,
   claimNextReplayRecording,
+  completeLiveReplayRecording,
   completeReplayRender,
   deleteReplayRecordingMedia,
   failReplayRender,
@@ -248,6 +250,7 @@ import {
   replayVideoFile,
   replayVoiceTakeAudioFile,
   retryReplayRecording,
+  startLiveReplayRecording,
   storeReplayRenderChunk,
   storeReplayVoiceTakeAudio,
   updateReplayRenderProgress,
@@ -255,9 +258,11 @@ import {
   upsertReplayVoiceTake,
 } from "./replay-recordings.ts";
 import type {
+  ReplayCaptureReportV1,
   ReplayManifestV1,
   ReplayRecordingStatusV1,
   ReplaySurfaceV1,
+  ReplayTimelineV1,
   ReplayVoiceTakeV1,
 } from "@localai/shared";
 import {
@@ -12186,6 +12191,22 @@ function buildRoutes(): RouteDefinition[] {
       if (!detail) throw new HttpError(404, "Replay recording not found.");
       json(ctx.res, 200, { ok: true, ...detail });
     }),
+    route("POST", "/api/replays/live/start", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const sourceId =
+        typeof body.sourceId === "string" ? body.sourceId.trim().slice(0, 180) : "";
+      if (!sourceId || body.surface !== "signal") {
+        throw new HttpError(400, "Live replay source is invalid.");
+      }
+      const started = startLiveReplayRecording(
+        db,
+        userId,
+        "signal",
+        sourceId,
+      );
+      json(ctx.res, 201, { ok: true, ...started });
+    }),
     route("POST", "/api/replays/queue", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -12351,6 +12372,45 @@ function buildRoutes(): RouteDefinition[] {
         },
       );
       json(ctx.res, 201, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/live/complete", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const contentType =
+        body.contentType === "video/webm" ? "video/webm" : "video/mp4";
+      const recording = completeLiveReplayRecording(
+        db,
+        userId,
+        ctx.params.id,
+        String(body.renderToken ?? ""),
+        {
+          manifest: body.manifest as ReplayManifestV1,
+          timeline: body.timeline as ReplayTimelineV1,
+          captureReport: body.captureReport as ReplayCaptureReportV1,
+          contentType,
+          codec: String(
+            body.codec ??
+              (contentType === "video/webm" ? "vp9/opus" : "avc/aac"),
+          ),
+          durationMs: Number(body.durationMs),
+        },
+      );
+      json(ctx.res, 201, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/live/abort", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const recording = abortLiveReplayRecording(
+        db,
+        userId,
+        ctx.params.id,
+        String(body.renderToken ?? ""),
+        body.reason,
+        body.captureReport && typeof body.captureReport === "object"
+          ? (body.captureReport as ReplayCaptureReportV1)
+          : null,
+      );
+      json(ctx.res, 200, { ok: true, recording });
     }),
     route("POST", "/api/replays/:id/fail", async (ctx) => {
       const userId = requireAuth(ctx);

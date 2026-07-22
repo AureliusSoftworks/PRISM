@@ -23,11 +23,17 @@ export function signalEpisodeArchiveActionLabel(
   if (item.status === "live") return "Resume episode";
   if (signalReplayRecordingHasVideo(recording)) return "Watch episode";
   if (
+    recording?.status === "rendering" &&
+    recording.captureMode === "live"
+  ) {
+    return "Finishing recording";
+  }
+  if (
     recording?.status === "queued" ||
     recording?.status === "preparing_audio" ||
     recording?.status === "rendering"
   ) {
-    return "Rendering episode video";
+    return "Rebuilding episode video";
   }
   return "Render episode video";
 }

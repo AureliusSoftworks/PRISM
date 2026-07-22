@@ -73,7 +73,7 @@ describe("Signal episode video gate", () => {
         episode("completed"),
         recording("rendering"),
       ),
-      "Rendering episode video",
+      "Rebuilding episode video",
     );
     assert.equal(
       signalEpisodeArchiveActionLabel(

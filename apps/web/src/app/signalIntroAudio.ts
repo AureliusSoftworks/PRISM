@@ -6,6 +6,7 @@ import {
   type SignalMusicProfile,
   type SignalPersonaTemperament,
 } from "@localai/shared";
+import { connectSignalLiveMediaElement } from "./signalLiveAudioRoute.ts";
 
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
 export const SIGNAL_SYNTH_OUTDENT_DURATION_MS =
@@ -657,6 +658,7 @@ type ActiveSignalAudio = {
   startTimer: number | null;
   watchdogTimer: number | null;
   fadeTimer: number | null;
+  disconnectRecordingRoute: (() => void) | null;
   stopping: boolean;
   settled: boolean;
 };
@@ -682,6 +684,8 @@ function releaseSignalAudio(state: ActiveSignalAudio): void {
   state.startTimer = null;
   state.watchdogTimer = null;
   state.fadeTimer = null;
+  state.disconnectRecordingRoute?.();
+  state.disconnectRecordingRoute = null;
   if (activeSignalAudio === state) activeSignalAudio = null;
   try {
     state.audio.pause();
@@ -752,6 +756,7 @@ function playSignalAudio(args: {
     startTimer: null,
     watchdogTimer: null,
     fadeTimer: null,
+    disconnectRecordingRoute: connectSignalLiveMediaElement(args.audio),
     stopping: false,
     settled: false,
   };

@@ -7,6 +7,7 @@ import type {
   SessionAtmosphereController,
   SessionAtmosphereFoleyPlaybackOptions,
 } from "./session-atmosphere-audio.ts";
+import { connectSignalLiveMediaElement } from "./signalLiveAudioRoute.ts";
 
 export interface SignalSoundboardCueDefinition {
   kind: BotcastSoundboardCueKind;
@@ -125,6 +126,10 @@ export interface SignalSoundboardPlaybackOptions {
 
 const SIGNAL_SOUNDBOARD_FOLEY_TAG = "signal-soundboard";
 const activeSoundboardAudio = new Set<SignalSoundboardAudio>();
+const soundboardRecordingDisconnects = new WeakMap<
+  SignalSoundboardAudio,
+  () => void
+>();
 
 function cueDefinition(
   kind: BotcastSoundboardCueKind,
@@ -174,6 +179,8 @@ export function signalSoundboardNextVariantIndex(
 
 function releaseSoundboardAudio(audio: SignalSoundboardAudio): void {
   activeSoundboardAudio.delete(audio);
+  soundboardRecordingDisconnects.get(audio)?.();
+  soundboardRecordingDisconnects.delete(audio);
   audio.pause();
   audio.currentTime = 0;
 }
@@ -203,6 +210,13 @@ export function playSignalSoundboardCue(
   audio.playbackRate = plan.playbackRate;
   if ("preservesPitch" in audio) audio.preservesPitch = false;
   activeSoundboardAudio.add(audio);
+  if (
+    typeof HTMLAudioElement !== "undefined" &&
+    audio instanceof HTMLAudioElement
+  ) {
+    const disconnect = connectSignalLiveMediaElement(audio);
+    if (disconnect) soundboardRecordingDisconnects.set(audio, disconnect);
+  }
   const release = (): void => releaseSoundboardAudio(audio);
   audio.addEventListener("ended", release, { once: true });
   audio.addEventListener("error", release, { once: true });

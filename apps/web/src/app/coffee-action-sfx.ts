@@ -1,4 +1,5 @@
 import { extractStageDirectionCues } from "./botMention.ts";
+import { connectSignalLiveMediaElement } from "./signalLiveAudioRoute.ts";
 
 export type CoffeeActionSfxKind =
   | "cup_set_down"
@@ -277,6 +278,7 @@ const preparedClips = new Map<CoffeeActionSfxKind, Blob>();
 const pendingClips = new Map<CoffeeActionSfxKind, Promise<void>>();
 let activeAudio: HTMLAudioElement | null = null;
 let activeAudioUrl: string | null = null;
+let activeAudioRecordingDisconnect: (() => void) | null = null;
 
 export function prefetchCoffeeActionSfx(args: {
   kind: CoffeeActionSfxKind;
@@ -350,6 +352,8 @@ export async function playPreparedCoffeeActionSfx(args: {
   const audio = new Audio(url);
   activeAudio = audio;
   activeAudioUrl = clip ? url : null;
+  const recordingDisconnect = connectSignalLiveMediaElement(audio);
+  activeAudioRecordingDisconnect = recordingDisconnect;
   audio.preload = "auto";
   audio.volume = bundledPlayback
     ? Math.min(0.48, Math.max(0, args.voiceVolume) * 0.42)
@@ -362,7 +366,13 @@ export async function playPreparedCoffeeActionSfx(args: {
     ).webkitPreservesPitch = false;
   }
   const release = (): void => {
-    if (activeAudio === audio) activeAudio = null;
+    if (activeAudio === audio) {
+      activeAudio = null;
+      recordingDisconnect?.();
+      if (activeAudioRecordingDisconnect === recordingDisconnect) {
+        activeAudioRecordingDisconnect = null;
+      }
+    }
     if (clip) {
       if (activeAudioUrl === url) activeAudioUrl = null;
       URL.revokeObjectURL(url);
@@ -382,6 +392,8 @@ export async function playPreparedCoffeeActionSfx(args: {
 export function stopCoffeeActionSfx(): void {
   activeAudio?.pause();
   activeAudio = null;
+  activeAudioRecordingDisconnect?.();
+  activeAudioRecordingDisconnect = null;
   if (activeAudioUrl) URL.revokeObjectURL(activeAudioUrl);
   activeAudioUrl = null;
 }

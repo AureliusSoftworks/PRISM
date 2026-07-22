@@ -21,6 +21,20 @@ export type ReplayRecordingStatusV1 =
   | "ready_with_warnings"
   | "failed";
 
+export type ReplayCaptureModeV1 = "live" | "rebuild";
+
+export interface ReplayCaptureReportV1 {
+  startedAt: string;
+  completedAt: string | null;
+  capturedFrames: number;
+  heldFrames: number;
+  audioFrames: number;
+  audioDiscontinuities: number;
+  visibilityInterruptions: number;
+  longestVisualGapMs: number;
+  degradedReason: string | null;
+}
+
 export type ReplayParticipantKindV1 = "bot" | "player" | "prism";
 
 export interface ReplayParticipantSnapshotV1 {
@@ -142,6 +156,8 @@ export interface ReplayRecordingV1 {
   surface: ReplaySurfaceV1;
   sourceId: string;
   status: ReplayRecordingStatusV1;
+  captureMode: ReplayCaptureModeV1;
+  captureReport: ReplayCaptureReportV1 | null;
   progress: number;
   manifest: ReplayManifestV1 | null;
   timeline: ReplayTimelineV1 | null;

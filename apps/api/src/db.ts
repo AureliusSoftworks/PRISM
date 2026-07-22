@@ -1349,6 +1349,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
           'collecting', 'queued', 'preparing_audio', 'rendering',
           'ready', 'ready_with_warnings', 'failed'
         )),
+      capture_mode TEXT NOT NULL DEFAULT 'rebuild'
+        CHECK (capture_mode IN ('live', 'rebuild')),
+      capture_report_json TEXT,
       progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
       manifest_version INTEGER NOT NULL DEFAULT 1,
       manifest_json TEXT,
@@ -1445,6 +1448,20 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+
+  const replayRecordingColumns = new Set(
+    (db.prepare("PRAGMA table_info(replay_recordings)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!replayRecordingColumns.has("capture_mode")) {
+    db.exec(
+      "ALTER TABLE replay_recordings ADD COLUMN capture_mode TEXT NOT NULL DEFAULT 'rebuild' CHECK (capture_mode IN ('live', 'rebuild'));",
+    );
+  }
+  if (!replayRecordingColumns.has("capture_report_json")) {
+    db.exec("ALTER TABLE replay_recordings ADD COLUMN capture_report_json TEXT;");
+  }
   const botcastIntroAudioColumns = new Set(
     (db.prepare("PRAGMA table_info(botcast_show_intro_audio)").all() as Array<{
       name: string;

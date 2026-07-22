@@ -7,6 +7,10 @@ import {
   connectRoomAcoustics,
   type RoomAcousticsSend,
 } from "./roomAcoustics.ts";
+import {
+  signalLiveAudioContext,
+  signalLiveAudioDestination,
+} from "./signalLiveAudioRoute.ts";
 
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
@@ -266,6 +270,8 @@ interface SessionAtmosphereActiveLoop extends SessionAtmosphereActiveSource {
 let sessionAtmosphereAudioContext: AudioContext | null = null;
 
 function sessionAtmosphereContext(): AudioContext | null {
+  const liveContext = signalLiveAudioContext();
+  if (liveContext) return liveContext;
   if (
     typeof window === "undefined" ||
     typeof window.AudioContext !== "function"
@@ -325,7 +331,7 @@ function levelSessionAtmosphereNode(
     const roomConnection = connectRoomAcoustics({
       context,
       input: busGain,
-      destination: context.destination,
+      destination: signalLiveAudioDestination(context),
       send: bus === "foley" ? foleyRoomAcoustics : null,
       stereoPan: oneShotOptions?.stereoPan,
     });
@@ -364,7 +370,7 @@ function levelSessionAtmosphereNode(
     compressor.connect(lowShelf);
     lowShelf.connect(highShelf);
     highShelf.connect(busGain);
-    busGain.connect(context.destination);
+    busGain.connect(signalLiveAudioDestination(context));
     return {
       busGain,
       disconnect() {
@@ -378,7 +384,7 @@ function levelSessionAtmosphereNode(
     };
   }
   compressor.connect(busGain);
-  busGain.connect(context.destination);
+  busGain.connect(signalLiveAudioDestination(context));
   return {
     busGain,
     disconnect() {
