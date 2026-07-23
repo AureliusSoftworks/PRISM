@@ -133,7 +133,8 @@
 
     @media (prefers-reduced-motion: reduce) {
       .atmosphere::before,
-      .atmosphere::after { animation: none; }
+      .atmosphere::after,
+      .demo-glass-orb { animation: none !important; }
     }
 
     /* ── Shell ── */
@@ -229,12 +230,34 @@
     }
 
     .header-meta {
-      display: grid;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
       gap: 8px;
-      justify-items: end;
       text-align: right;
       min-width: 0;
-      max-width: 11rem;
+      max-width: none;
+    }
+
+    .view-controls {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .view-control {
+      padding: 7px 12px;
+      border-color: color-mix(in srgb, var(--prism-m) 28%, var(--line));
+      color: color-mix(in srgb, var(--prism-m) 58%, var(--fg));
+      font-size: 0.72rem;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .view-control[hidden] {
+      display: none;
     }
 
     .pill {
@@ -267,6 +290,7 @@
     }
 
     .slogan {
+      flex-basis: 100%;
       margin: 0;
       color: var(--fg-subtle);
       font-size: 0.78rem;
@@ -298,6 +322,21 @@
       align-items: center;
       padding: 12px clamp(12px, 1.2vw, 18px);
       min-width: 0;
+    }
+
+    .player-bar.is-demo-playing {
+      animation: demo-player-glow 640ms ease-out;
+    }
+
+    @keyframes demo-player-glow {
+      0% {
+        border-color: color-mix(in srgb, var(--prism-s) 64%, var(--line));
+        box-shadow: var(--shadow-lg), 0 0 34px color-mix(in srgb, var(--prism-s) 24%, transparent);
+      }
+      100% {
+        border-color: var(--line);
+        box-shadow: var(--shadow-lg);
+      }
     }
 
     .player-label {
@@ -503,12 +542,45 @@
 
     .editor-controls {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 10px;
     }
 
-    .editor-controls .editor-control:last-child {
-      grid-column: 1 / -1;
+    .fade-waveform {
+      position: relative;
+      display: grid;
+      gap: 10px;
+      overflow: hidden;
+      padding: 12px 12px 10px;
+      border: 1px solid color-mix(in srgb, var(--prism-s) 28%, var(--line));
+      border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+    }
+
+    .fade-waveform svg {
+      position: absolute;
+      inset: 26px 12px 10px;
+      width: calc(100% - 24px);
+      height: calc(100% - 36px);
+      opacity: 0.28;
+      pointer-events: none;
+    }
+
+    .fade-track {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 3px;
+      color: var(--fg-muted);
+      font-size: 0.76rem;
+    }
+
+    .fade-track output { color: var(--fg); font-variant-numeric: tabular-nums; }
+    .fade-track input { width: 100%; accent-color: var(--prism-s); }
+    .fade-track.fade-out input { direction: rtl; }
+
+    @media (max-width: 700px) {
+      .editor-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
     .editor-control {
@@ -785,6 +857,596 @@
 
     code { color: #d5d7df; }
 
+    /* ── Live assignment demo ── */
+    .demo-view {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 14px;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      padding: clamp(14px, 1.5vw, 22px);
+    }
+
+    .demo-view[hidden] {
+      display: none;
+    }
+
+    .grid[hidden],
+    .generator[hidden] {
+      display: none;
+    }
+
+    .demo-view-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .demo-view-head h2 {
+      margin: 0;
+      font-family: var(--font-title);
+      font-size: clamp(1.45rem, 2.5vw, 2rem);
+      font-weight: 300;
+      letter-spacing: -0.025em;
+    }
+
+    .demo-view-head p {
+      max-width: 620px;
+      margin: 5px 0 0;
+      color: var(--fg-muted);
+      font-size: 0.86rem;
+    }
+
+    .demo-live-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      flex-shrink: 0;
+      border: 1px solid color-mix(in srgb, var(--prism-i) 30%, var(--line));
+      border-radius: 999px;
+      padding: 7px 11px;
+      color: color-mix(in srgb, var(--prism-i) 64%, var(--fg));
+      background: color-mix(in srgb, var(--prism-i) 8%, transparent);
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .demo-view-tools {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .demo-spatial-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      color: var(--fg-muted);
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
+    .demo-spatial-toggle input {
+      width: 17px;
+      height: 17px;
+      accent-color: var(--prism-s);
+      cursor: pointer;
+    }
+
+    .demo-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+      gap: 12px;
+      min-width: 0;
+      min-height: 0;
+      overflow-y: auto;
+      align-content: start;
+      padding: 2px 5px 8px 0;
+    }
+
+    .demo-card {
+      --demo-accent: var(--prism-s);
+      display: grid;
+      grid-template-rows: auto minmax(132px, 1fr) auto;
+      gap: 11px;
+      min-width: 0;
+      min-height: 222px;
+      border: 1px solid color-mix(in srgb, var(--demo-accent) 20%, var(--line));
+      border-radius: 17px;
+      padding: 13px;
+      background:
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--demo-accent) 9%, transparent), transparent 44%),
+        var(--panel-soft);
+      box-shadow: 0 12px 34px rgba(0, 0, 0, 0.2);
+      overflow: hidden;
+    }
+
+    .demo-card[data-demo-tone="rose"] { --demo-accent: var(--prism-p); }
+    .demo-card[data-demo-tone="amber"] { --demo-accent: var(--prism-r); }
+    .demo-card[data-demo-tone="lime"] { --demo-accent: var(--prism-i); }
+    .demo-card[data-demo-tone="cyan"] { --demo-accent: var(--prism-s); }
+    .demo-card[data-demo-tone="violet"] { --demo-accent: var(--prism-m); }
+
+    .demo-card-head,
+    .demo-card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .demo-card-head strong {
+      overflow: hidden;
+      color: var(--fg);
+      font-size: 0.88rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .demo-mode-tag {
+      flex-shrink: 0;
+      color: color-mix(in srgb, var(--demo-accent) 65%, var(--fg-muted));
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .demo-mini {
+      position: relative;
+      display: grid;
+      place-items: center;
+      min-width: 0;
+      min-height: 132px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background:
+        radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--demo-accent) 13%, transparent), transparent 44%),
+        color-mix(in srgb, var(--field) 90%, transparent);
+    }
+
+    .demo-card-footer code {
+      overflow: hidden;
+      color: var(--fg-subtle);
+      font-size: 0.66rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .demo-pool-state {
+      flex-shrink: 0;
+      color: var(--fg-muted);
+      font-size: 0.67rem;
+    }
+
+    .demo-pool-state[data-empty="true"] {
+      color: var(--danger);
+    }
+
+    .demo-action {
+      cursor: pointer;
+    }
+
+    .demo-action:disabled {
+      cursor: not-allowed;
+      opacity: 0.42;
+    }
+
+    .demo-action[data-cue-empty="true"] {
+      opacity: 0.5;
+    }
+
+    .demo-bot-grid {
+      width: min(184px, 100%);
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .demo-bot-tile {
+      --bot-tile-color: var(--prism-s);
+      position: relative;
+      display: grid;
+      place-items: center;
+      aspect-ratio: 1;
+      min-width: 0;
+      border: 1px solid color-mix(in srgb, var(--bot-tile-color) 34%, var(--line));
+      border-radius: 13px;
+      padding: 0;
+      color: var(--bot-tile-color);
+      background:
+        radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--bot-tile-color) 16%, transparent), transparent 58%),
+        color-mix(in srgb, var(--bot-tile-color) 9%, #11131a);
+      box-shadow: inset 0 0 20px color-mix(in srgb, var(--bot-tile-color) 4%, transparent);
+      transition:
+        transform 150ms var(--ease),
+        border-color 150ms ease,
+        background 150ms ease,
+        box-shadow 150ms ease,
+        color 150ms ease;
+    }
+
+    .demo-bot-tile:nth-child(1) { --bot-tile-color: #ff6545; }
+    .demo-bot-tile:nth-child(2) { --bot-tile-color: #ff3f71; }
+    .demo-bot-tile:nth-child(3) { --bot-tile-color: #ff477d; }
+    .demo-bot-tile:nth-child(4) { --bot-tile-color: #bb7b24; }
+    .demo-bot-tile:nth-child(5) { --bot-tile-color: #a78a56; }
+    .demo-bot-tile:nth-child(6) { --bot-tile-color: #c48a3b; }
+    .demo-bot-tile:nth-child(7) { --bot-tile-color: #44d45c; }
+    .demo-bot-tile:nth-child(8) { --bot-tile-color: #76a780; }
+    .demo-bot-tile:nth-child(9) { --bot-tile-color: #46b58d; }
+
+    .demo-bot-tile::after {
+      content: "";
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #f7e36d;
+      box-shadow: 0 0 8px rgba(247, 227, 109, 0.75);
+      opacity: 0;
+      transform: scale(0.65);
+      transition: opacity 120ms ease, transform 150ms var(--ease);
+    }
+
+    .demo-bot-tile:hover,
+    .demo-bot-tile.is-hovering,
+    .demo-bot-tile[aria-pressed="true"] {
+      z-index: 1;
+      border-color: color-mix(in srgb, var(--bot-tile-color) 72%, #fff);
+      color: color-mix(in srgb, var(--bot-tile-color) 74%, #fff);
+      background:
+        radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--bot-tile-color) 28%, transparent), transparent 62%),
+        color-mix(in srgb, var(--bot-tile-color) 18%, #11131a);
+      box-shadow:
+        0 10px 24px rgba(0, 0, 0, 0.32),
+        0 0 20px color-mix(in srgb, var(--bot-tile-color) 18%, transparent);
+      transform: translateY(-3px) scale(1.035);
+    }
+
+    .demo-bot-tile:hover::after,
+    .demo-bot-tile.is-hovering::after,
+    .demo-bot-tile[aria-pressed="true"]::after {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .demo-bot-glyph {
+      font-family: var(--font-title);
+      font-size: 1.45rem;
+      font-weight: 650;
+      line-height: 1;
+    }
+
+    .demo-panel-shell {
+      width: min(224px, 100%);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.035);
+      transform: translateY(8px);
+      opacity: 0.72;
+      transition: transform 180ms var(--ease), opacity 180ms ease, border-color 180ms ease;
+    }
+
+    .demo-panel-shell[data-open="true"] {
+      border-color: color-mix(in srgb, var(--prism-m) 42%, var(--line));
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    .demo-panel-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      color: var(--fg-muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+    }
+
+    .demo-panel-body {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+    }
+
+    .demo-panel-line {
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .demo-panel-line:last-child { width: 58%; }
+
+    .demo-switch-row {
+      width: min(220px, 100%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      padding: 11px 12px;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--fg);
+      text-align: left;
+    }
+
+    .demo-switch-copy {
+      display: grid;
+      gap: 2px;
+    }
+
+    .demo-switch-copy small {
+      color: var(--fg-subtle);
+      font-size: 0.65rem;
+    }
+
+    .demo-switch-track {
+      position: relative;
+      width: 42px;
+      height: 23px;
+      flex-shrink: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      box-shadow: inset 0 0 0 1px var(--line);
+      transition: background 160ms ease;
+    }
+
+    .demo-switch-track::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      background: var(--fg);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+      transition: transform 160ms var(--ease);
+    }
+
+    .demo-switch-row[aria-checked="true"] .demo-switch-track {
+      background: color-mix(in srgb, var(--prism-s) 60%, #1c2730);
+    }
+
+    .demo-switch-row[aria-checked="true"] .demo-switch-track::after {
+      transform: translateX(19px);
+    }
+
+    .demo-confirm-button {
+      min-width: 142px;
+      border: 0;
+      padding: 11px 18px;
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 80%, var(--prism-s));
+      font-weight: 850;
+      box-shadow: 0 10px 26px rgba(123, 92, 255, 0.2);
+    }
+
+    .demo-confirm-button:hover:not(:disabled) {
+      border-color: transparent;
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 80%, var(--prism-s));
+      filter: brightness(1.06);
+    }
+
+    .demo-companion-arena {
+      min-height: 176px;
+      isolation: isolate;
+    }
+
+    .demo-companion-arena::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 96px;
+      height: 96px;
+      border: 1px solid color-mix(in srgb, var(--prism-m) 10%, transparent);
+      border-radius: 50%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--prism-m) 8%, transparent), transparent 68%);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .demo-companion-arena .demo-glass-orb {
+      position: absolute;
+      z-index: 1;
+      left: 50%;
+      top: 50%;
+      width: 72px;
+      height: 72px;
+      margin: -36px 0 0 -36px;
+      border: 1px solid rgba(255, 255, 255, 0.23);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.78), transparent 13%),
+        conic-gradient(from 30deg, var(--prism-p), var(--prism-r), var(--prism-i), var(--prism-s), var(--prism-m), var(--prism-p));
+      box-shadow:
+        inset 0 0 22px rgba(255, 255, 255, 0.25),
+        0 0 30px color-mix(in srgb, var(--prism-s) 25%, transparent);
+      transform: translate3d(var(--companion-x, 0px), var(--companion-y, 0px), 0);
+      transition: border-color 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      will-change: transform;
+    }
+
+    .demo-companion-arena .demo-glass-orb.is-dragging {
+      border-color: rgba(255, 255, 255, 0.42);
+      filter: brightness(1.12) saturate(1.08);
+      cursor: grabbing;
+      box-shadow:
+        inset 0 0 24px rgba(255, 255, 255, 0.3),
+        0 12px 32px rgba(0, 0, 0, 0.28),
+        0 0 36px color-mix(in srgb, var(--prism-s) 31%, transparent);
+    }
+
+    .demo-companion-arena .demo-glass-orb.is-tapped {
+      animation: demo-orb-tap 340ms var(--ease);
+    }
+
+    .demo-companion-arena .demo-glass-orb:hover:not(:disabled) {
+      border-color: rgba(255, 255, 255, 0.32);
+      color: var(--fg);
+      background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.78), transparent 13%),
+        conic-gradient(from 30deg, var(--prism-p), var(--prism-r), var(--prism-i), var(--prism-s), var(--prism-m), var(--prism-p));
+      filter: brightness(1.08);
+    }
+
+    @keyframes demo-orb-tap {
+      0%, 100% {
+        filter: brightness(1);
+      }
+      42% {
+        filter: brightness(1.22) saturate(1.12);
+        box-shadow:
+          inset 0 0 26px rgba(255, 255, 255, 0.34),
+          0 0 42px color-mix(in srgb, var(--prism-s) 38%, transparent);
+      }
+    }
+
+    .demo-pad-grid {
+      width: min(230px, 100%);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .demo-action-composer {
+      width: min(236px, 100%);
+      display: grid;
+      gap: 9px;
+    }
+
+    .demo-action-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .demo-action-input {
+      width: 100%;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 9px 10px;
+      outline: none;
+      color: var(--fg);
+      background: var(--field);
+      font-size: 0.72rem;
+      transition: border-color 150ms ease, box-shadow 150ms ease;
+    }
+
+    .demo-action-input:focus {
+      border-color: color-mix(in srgb, var(--prism-r) 52%, var(--line));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--prism-r) 13%, transparent);
+    }
+
+    .demo-action-submit {
+      border-radius: 11px;
+      padding: 8px 10px;
+      color: color-mix(in srgb, var(--prism-r) 70%, var(--fg));
+      font-size: 0.7rem;
+      font-weight: 800;
+    }
+
+    .demo-action-match {
+      min-height: 2.5em;
+      margin: 0;
+      color: var(--fg-subtle);
+      font-size: 0.67rem;
+      line-height: 1.35;
+    }
+
+    .demo-action-match[data-match="true"] {
+      color: color-mix(in srgb, var(--prism-i) 64%, var(--fg-muted));
+    }
+
+    .demo-action-match[data-match="false"] {
+      color: color-mix(in srgb, var(--danger) 68%, var(--fg-muted));
+    }
+
+    .demo-pad {
+      min-width: 0;
+      border-radius: 10px;
+      padding: 10px 8px;
+      color: var(--fg);
+      background: color-mix(in srgb, var(--demo-accent) 9%, rgba(255, 255, 255, 0.035));
+      font-size: 0.72rem;
+      font-weight: 750;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .demo-pad:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--demo-accent) 50%, var(--line));
+      color: color-mix(in srgb, var(--demo-accent) 74%, #fff);
+      background: color-mix(in srgb, var(--demo-accent) 16%, transparent);
+    }
+
+    .demo-thinking-avatar {
+      width: 88px;
+      height: 88px;
+      display: grid;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--prism-m) 38%, var(--line));
+      border-radius: 28px;
+      color: var(--fg);
+      background:
+        radial-gradient(circle at 36% 30%, rgba(255, 255, 255, 0.12), transparent 24%),
+        color-mix(in srgb, var(--prism-m) 14%, var(--field));
+      box-shadow: 0 0 28px color-mix(in srgb, var(--prism-m) 16%, transparent);
+      font-size: 1.35rem;
+      letter-spacing: 0.12em;
+    }
+
+    .demo-thinking-avatar.is-thinking span {
+      animation: demo-thinking-pulse 760ms ease-in-out;
+    }
+
+    .demo-thinking-avatar:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--prism-m) 60%, var(--line));
+      color: var(--fg);
+      background:
+        radial-gradient(circle at 36% 30%, rgba(255, 255, 255, 0.14), transparent 24%),
+        color-mix(in srgb, var(--prism-m) 20%, var(--field));
+    }
+
+    @keyframes demo-thinking-pulse {
+      0%, 100% { opacity: 0.45; transform: scale(0.9); }
+      50% { opacity: 1; transform: scale(1.12); }
+    }
+
+    .demo-status {
+      margin: 0;
+      min-height: 1.35em;
+    }
+
     /* ── Controls ── */
     button, select, input { font: inherit; }
 
@@ -923,7 +1585,7 @@
       .title-block { grid-area: title; }
       .header-meta {
         grid-area: meta;
-        justify-items: end;
+        justify-content: flex-end;
         text-align: right;
         align-self: start;
         max-width: none;
@@ -967,12 +1629,22 @@
       }
       .grid { overflow: visible; }
       .panel { overflow: visible; }
+      .demo-view {
+        grid-template-rows: auto auto auto;
+        overflow: visible;
+      }
+      .demo-view-head {
+        align-items: start;
+        flex-direction: column;
+      }
+      .demo-gallery { overflow: visible; }
       .library, .assignments {
         height: 380px;
         max-height: min(50vh, 420px);
       }
       header { grid-template-columns: minmax(0, 1fr); }
-      .header-meta { justify-items: start; text-align: left; }
+      .header-meta { justify-content: flex-start; text-align: left; }
+      .slogan { text-align: left; }
       .generator { grid-template-columns: minmax(0, 1fr); }
     }
   </style>
@@ -1003,6 +1675,10 @@
         <p class="intro">Audition local sounds, generate candidates, shape action pools, and copy the finished assignment map — all inside the sanctum.</p>
       </div>
       <div class="header-meta">
+        <div class="view-controls" aria-label="Bench view">
+          <button id="enterDemo" class="view-control" type="button">Enter demo</button>
+          <button id="backToLibrary" class="view-control" type="button" hidden>Back to library</button>
+        </div>
         <span class="pill"><span class="pill-dot" aria-hidden="true"></span> Local session</span>
         <p class="slogan">One light. Many colors.</p>
       </div>
@@ -1015,6 +1691,29 @@
           <span id="playerLabel"><strong>Sound player</strong> · choose Play to load a sound</span>
         </div>
         <audio id="player" controls preload="metadata" aria-label="Sound player"></audio>
+      </div>
+      <div id="editor" class="editor" hidden>
+        <div class="editor-heading">
+          <strong id="editorTitle" class="editor-title"></strong>
+          <button id="editCancel" type="button">Cancel</button>
+        </div>
+        <p class="editor-note">Edits run locally in your browser. Preview loops in the player above — use the button to pause and play.</p>
+        <div class="fade-waveform" aria-label="Fade thresholds">
+          <svg viewBox="0 0 800 120" preserveAspectRatio="none" aria-hidden="true"><path d="M0 60 C18 12 28 108 48 60 S78 8 98 60 S128 112 148 60 S178 15 198 60 S228 105 248 60 S278 12 298 60 S328 108 348 60 S378 8 398 60 S428 112 448 60 S478 15 498 60 S528 105 548 60 S578 12 598 60 S628 108 648 60 S678 8 698 60 S728 112 748 60 S778 15 800 60" fill="none" stroke="currentColor" stroke-width="3" vector-effect="non-scaling-stroke"/></svg>
+          <label class="fade-track fade-in">Fade in <output id="editFadeInValue">None</output><input id="editFadeIn" type="range" min="0" max="0.8" step="0.05" value="0"></label>
+          <label class="fade-track fade-out">Fade out <output id="editFadeOutValue">None</output><input id="editFadeOut" type="range" min="0" max="0.8" step="0.05" value="0"></label>
+        </div>
+        <div class="editor-controls">
+          <label class="editor-control">Volume <output id="editGainValue">0 dB</output><input id="editGain" type="range" min="-12" max="12" step="1" value="0"></label>
+          <label class="editor-control">High-end <output id="editHighEndValue">0 dB</output><input id="editHighEnd" type="range" min="-18" max="6" step="1" value="0"></label>
+          <label class="editor-control">Speed <output id="editSpeedValue">1×</output><input id="editSpeed" type="range" min="0.75" max="1.25" step="0.01" value="1"></label>
+        </div>
+        <label class="editor-check"><input id="editInvert" type="checkbox"> Invert polarity</label>
+        <div class="editor-actions">
+          <button id="editPreview" type="button">Preview</button>
+          <button id="editOverwrite" type="button">Overwrite</button>
+          <button id="editSaveNew" type="button" class="primary">Save as new</button>
+        </div>
       </div>
       <form id="generator" class="generator glass">
         <input id="prompt" required maxlength="450" placeholder="Describe a sound to generate…" aria-label="Sound effect description">
@@ -1035,7 +1734,7 @@
       </form>
     </section>
 
-    <div class="grid">
+    <div id="libraryView" class="grid">
       <section class="panel glass">
         <div class="panel-head">
           <h2>Sound library</h2>
@@ -1051,26 +1750,6 @@
           <span id="assignmentCount" class="panel-count">0 actions</span>
         </div>
         <p id="sideHint" class="hint">Pick what the sound means in plain English. Several sounds on one action become a random pool.</p>
-        <div id="editor" class="editor" hidden>
-          <div class="editor-heading">
-            <strong id="editorTitle" class="editor-title"></strong>
-            <button id="editCancel" type="button">Cancel</button>
-          </div>
-          <p class="editor-note">Edits run locally in your browser. Preview loops in the player above — use the button to pause and play.</p>
-          <div class="editor-controls">
-            <label class="editor-control">Volume <output id="editGainValue">0 dB</output><input id="editGain" type="range" min="-12" max="12" step="1" value="0"></label>
-            <label class="editor-control">High-end <output id="editHighEndValue">0 dB</output><input id="editHighEnd" type="range" min="-18" max="6" step="1" value="0"></label>
-            <label class="editor-control">Fade in <output id="editFadeInValue">None</output><input id="editFadeIn" type="range" min="0" max="0.8" step="0.05" value="0"></label>
-            <label class="editor-control">Fade out <output id="editFadeOutValue">None</output><input id="editFadeOut" type="range" min="0" max="0.8" step="0.05" value="0"></label>
-            <label class="editor-control">Speed <output id="editSpeedValue">1×</output><input id="editSpeed" type="range" min="0.75" max="1.25" step="0.01" value="1"></label>
-          </div>
-          <label class="editor-check"><input id="editInvert" type="checkbox"> Invert polarity</label>
-          <div class="editor-actions">
-            <button id="editPreview" type="button">Preview</button>
-            <button id="editOverwrite" type="button">Overwrite</button>
-            <button id="editSaveNew" type="button" class="primary">Save as new</button>
-          </div>
-        </div>
         <div id="assignmentsView" class="assignments-view">
           <div id="assignments" class="assignments"></div>
           <div class="toolbar">
@@ -1081,6 +1760,112 @@
         <p id="status" class="status" role="status"></p>
       </section>
     </div>
+
+    <section id="demoView" class="demo-view glass" aria-labelledby="demoTitle" hidden>
+      <div class="demo-view-head">
+        <div>
+          <p class="eyebrow">Assignment audition</p>
+          <h2 id="demoTitle">Prism interaction snippets</h2>
+          <p>Use these tiny interaction scenes to hear the live assignment map before copying it.</p>
+        </div>
+        <div class="demo-view-tools"><label class="demo-spatial-toggle"><input id="demoSpatialAudio" type="checkbox" role="switch" checked> Spatial audio</label><span class="demo-live-pill"><span class="pill-dot" aria-hidden="true"></span> Live map</span></div>
+      </div>
+
+      <div id="demoGallery" class="demo-gallery">
+        <article class="demo-card" data-demo-tone="cyan">
+          <div class="demo-card-head"><strong>Bot cards</strong><span class="demo-mode-tag">Chat · Sandbox</span></div>
+          <div class="demo-mini">
+            <div class="demo-bot-grid" aria-label="Bot card hover grid">
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Prism bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">Φ</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Heart bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">♡</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Bond bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">∞</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Logic bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">⌘</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Link bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">⌁</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Compass bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">⌖</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Alchemy bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">⚗</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Nature bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">◒</span></button>
+              <button class="demo-bot-tile demo-action" type="button" aria-label="Community bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">♙</span></button>
+            </div>
+          </div>
+          <div class="demo-card-footer"><code>Hovered · bot-hover / selected · bot-select</code><span class="demo-pool-state" data-pool-keys="bot-hover,bot-select"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="violet">
+          <div class="demo-card-head"><strong>Panel transition</strong><span class="demo-mode-tag">Global chrome</span></div>
+          <div class="demo-mini">
+            <button id="demoPanelToggle" class="demo-panel-shell demo-action" type="button" aria-expanded="false" data-open="false">
+              <span class="demo-panel-bar"><span>Settings</span><span aria-hidden="true">⌁</span></span>
+              <span class="demo-panel-body"><span class="demo-panel-line"></span><span class="demo-panel-line"></span></span>
+            </button>
+          </div>
+          <div class="demo-card-footer"><code>panel-open · panel-close</code><span class="demo-pool-state" data-pool-keys="panel-open,panel-close"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="cyan">
+          <div class="demo-card-head"><strong>Mode switch</strong><span class="demo-mode-tag">Chat · Settings</span></div>
+          <div class="demo-mini">
+            <button id="demoToggle" class="demo-switch-row demo-action" type="button" role="switch" aria-checked="false" data-demo-cue="toggle">
+              <span class="demo-switch-copy"><strong>Local mode</strong><small>Private on-device inference</small></span>
+              <span class="demo-switch-track" aria-hidden="true"></span>
+            </button>
+          </div>
+          <div class="demo-card-footer"><code>toggle</code><span class="demo-pool-state" data-pool-keys="toggle"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="lime">
+          <div class="demo-card-head"><strong>Confirm action</strong><span class="demo-mode-tag">Global chrome</span></div>
+          <div class="demo-mini">
+            <button class="demo-confirm-button demo-action" type="button" data-demo-cue="confirm">Save changes</button>
+          </div>
+          <div class="demo-card-footer"><code>confirm</code><span class="demo-pool-state" data-pool-keys="confirm"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="violet">
+          <div class="demo-card-head"><strong>Companion glass</strong><span class="demo-mode-tag">Prism companion</span></div>
+          <div id="demoCompanionArena" class="demo-mini demo-companion-arena">
+            <button id="demoCompanion" class="demo-glass-orb demo-action" type="button" aria-label="Drag or tap Prism companion"></button>
+          </div>
+          <div class="demo-card-footer"><code>drag · release · confirm impacts</code><span class="demo-pool-state" data-pool-keys="confirm"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="amber">
+          <div class="demo-card-head"><strong>Action audio</strong><span class="demo-mode-tag">Action text</span></div>
+          <div class="demo-mini">
+            <div class="demo-action-composer">
+              <form id="demoActionAudioForm" class="demo-action-form">
+                <input id="demoActionAudioInput" class="demo-action-input" type="text" maxlength="180" required placeholder="e.g. sets her mug down" aria-label="Action text to test">
+                <button class="demo-action-submit" type="submit">Send</button>
+              </form>
+              <p id="demoActionAudioMatch" class="demo-action-match" aria-live="polite">Try a cough, burp, fart, pour, stir, table tap, or setting a cup down.</p>
+            </div>
+          </div>
+          <div class="demo-card-footer"><code>Text → matched action cue</code><span class="demo-pool-state" data-pool-keys="fart,burp,cough,coffee_pour,spoon_stir,table_knock,cup_set_down"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="rose">
+          <div class="demo-card-head"><strong>Signal soundboard</strong><span class="demo-mode-tag">Signal</span></div>
+          <div class="demo-mini">
+            <div class="demo-pad-grid">
+              <button class="demo-pad demo-action" type="button" data-demo-cue="applause">Applause</button>
+              <button class="demo-pad demo-action" type="button" data-demo-cue="laughter">Laughter</button>
+              <button class="demo-pad demo-action" type="button" data-demo-cue="gasp">Gasp</button>
+              <button class="demo-pad demo-action" type="button" data-demo-cue="rimshot">Rimshot</button>
+            </div>
+          </div>
+          <div class="demo-card-footer"><code>applause · laughter · gasp · rimshot</code><span class="demo-pool-state" data-pool-keys="applause,laughter,gasp,rimshot"></span></div>
+        </article>
+
+        <article class="demo-card" data-demo-tone="violet">
+          <div class="demo-card-head"><strong>Avatar thinking</strong><span class="demo-mode-tag">Chat · Zen</span></div>
+          <div class="demo-mini">
+            <button id="demoThinking" class="demo-thinking-avatar demo-action" type="button" aria-label="Start avatar thinking sound" data-demo-cue="avatar-thinking"><span>···</span></button>
+          </div>
+          <div class="demo-card-footer"><code>avatar-thinking</code><span class="demo-pool-state" data-pool-keys="avatar-thinking"></span></div>
+        </article>
+      </div>
+
+      <p id="demoStatus" class="status demo-status" role="status"></p>
+    </section>
   </main>
   <script>
     const isPrismServer = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname) && location.port === "18788";
@@ -1099,7 +1884,8 @@
       ["Bot card hovered", "bot-hover"], ["Bot selected", "bot-select"], ["Panel opened", "panel-open"], ["Panel closed", "panel-close"],
       ["Toggle / checkbox changed", "toggle"], ["Save / confirm completed", "confirm"], ["Coffee cup set down", "cup_set_down"],
       ["Coffee poured", "coffee_pour"], ["Spoon stirred", "spoon_stir"], ["Table knocked", "table_knock"], ["Coffee: fart", "fart"],
-      ["Coffee: burp", "burp"], ["Coffee: cough", "cough"], ["Avatar thinking", "avatar-thinking"], ["Custom action", "custom-action"]
+      ["Coffee: burp", "burp"], ["Coffee: cough", "cough"], ["Signal: applause", "applause"], ["Signal: laughter", "laughter"],
+      ["Signal: gasp", "gasp"], ["Signal: rimshot", "rimshot"], ["Avatar thinking", "avatar-thinking"], ["Custom action", "custom-action"]
     ];
     const actionFor = (key) => ({ label: actionOptions.find(([label, value]) => value === key)?.[0] || "Custom action", key });
     const $ = (id) => document.getElementById(id);
@@ -1121,7 +1907,11 @@
       "cup_set_down": ["/audio/session-atmosphere/coffee-cup-place.mp3"],
       fart: ["/audio/coffee/action-reactions/fart-01.mp3","/audio/coffee/action-reactions/fart-02.mp3","/audio/coffee/action-reactions/fart-03.mp3","/audio/coffee/action-reactions/fart-04.mp3"],
       burp: ["/audio/coffee/action-reactions/burp-01.mp3","/audio/coffee/action-reactions/burp-02.mp3","/audio/coffee/action-reactions/burp-03.mp3","/audio/coffee/action-reactions/burp-04.mp3"],
-      cough: ["/audio/coffee/action-reactions/cough-01.mp3","/audio/coffee/action-reactions/cough-02.mp3","/audio/coffee/action-reactions/cough-03.mp3","/audio/coffee/action-reactions/cough-04.mp3"]
+      cough: ["/audio/coffee/action-reactions/cough-01.mp3","/audio/coffee/action-reactions/cough-02.mp3","/audio/coffee/action-reactions/cough-03.mp3","/audio/coffee/action-reactions/cough-04.mp3"],
+      applause: ["/audio/signal/soundboard/applause.mp3"],
+      laughter: ["/audio/signal/soundboard/laughter.mp3"],
+      gasp: ["/audio/signal/soundboard/gasp.mp3"],
+      rimshot: ["/audio/signal/soundboard/rimshot.mp3"]
     };
     const storageKey = "prism_sound_fx_bench_v2";
     const savedBenchState = (() => { try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; } })();
@@ -1136,6 +1926,54 @@
     let editorPreviewReady = false;
     let editorPreviewPlaying = false;
     let editorSettings = { gainDb: 0, highEndDb: 0, fadeIn: 0, fadeOut: 0, playbackRate: 1, invert: false };
+    const DEMO_DEFAULT_CUE_CONFIG = Object.freeze({ gain: 0.22, cooldownMs: 72 });
+    const DEMO_CUE_CONFIG = Object.freeze({
+      "bot-hover": { gain: 0.24, cooldownMs: 46 },
+      "bot-select": { gain: 0.3, cooldownMs: 70 },
+      "panel-open": { gain: 0.18, cooldownMs: 90 },
+      "panel-close": { gain: 0.18, cooldownMs: 90 },
+      toggle: { gain: 0.16, cooldownMs: 55 },
+      confirm: { gain: 0.2, cooldownMs: 80 },
+      "avatar-thinking": { gain: 0.17, cooldownMs: 260 },
+      cup_set_down: { gain: 0.2, cooldownMs: 160 },
+      fart: { gain: 0.24, cooldownMs: 180 },
+      burp: { gain: 0.24, cooldownMs: 180 },
+      cough: { gain: 0.22, cooldownMs: 180 },
+      applause: { gain: 0.28, cooldownMs: 220 },
+      laughter: { gain: 0.27, cooldownMs: 220 },
+      gasp: { gain: 0.26, cooldownMs: 180 },
+      rimshot: { gain: 0.27, cooldownMs: 200 },
+    });
+    const DEMO_MAX_ACTIVE_SOURCES = 8;
+    const DEMO_MAX_PAN = 0.88;
+    const DEMO_PRESS_FEEDBACK_MS = 420;
+    const DEMO_THINKING_FEEDBACK_MS = 760;
+    const COMPANION_GLASS_PHYSICS = Object.freeze({
+      springStrength: 72,
+      damping: 1.1,
+      wallRestitution: 0.84,
+      slingshotStrength: 11,
+      releaseVelocityCarry: 0.45,
+      velocityBlend: 0.65,
+      maxSpeed: 1400,
+      maxFrameSeconds: 1 / 30,
+      minPointerSampleSeconds: 1 / 240,
+      impactSoundSpeed: 150,
+      dragThreshold: 5,
+      maxTapDurationMs: 260,
+      settleDistance: 0.65,
+      settleSpeed: 8,
+    });
+    const demoBufferCache = new Map();
+    const demoLastPlayedAt = new Map();
+    const demoLastVariant = new Map();
+    const demoActiveSources = new Set();
+    let demoAudioContext = null;
+    let demoPlaybackEpoch = 0;
+    let demoSpatialAudioEnabled = true;
+    let benchView = "library";
+    let preDemoPlayerLabel = null;
+    let companionGlassController = null;
     function entries() {
       const library = sounds.map((path) => {
         const override = typeof soundOverrides[path] === "string" ? soundOverrides[path] : "";
@@ -1169,6 +2007,522 @@
       return Boolean(item?.overwritten || item?.generated || String(item?.path || "").startsWith("data:"));
     }
     function isEditing() { return Boolean(editorItemId); }
+    function cueConfig(key) {
+      return DEMO_CUE_CONFIG[key] || DEMO_DEFAULT_CUE_CONFIG;
+    }
+    function actionAudioCueForText(value) {
+      // Keep these keyword families aligned with coffee-action-sfx.ts.
+      const normalized = String(value || "").replace(/\s+/gu, " ").trim().toLowerCase();
+      if (!normalized) return null;
+      if (
+        /\b(?:fart(?:s|ed|ing)?|flatulat(?:e|es|ed|ing)|toot(?:s|ed|ing)?)\b/u.test(normalized) ||
+        /\b(?:pass(?:es|ed|ing)?\s+(?:some\s+)?gas|break(?:s|ing)?\s+wind|broke\s+wind|cut(?:s|ting)?\s+the\s+cheese|let(?:s|ting)?\s+(?:one|it|a\s+fart)\s+rip)\b/u.test(normalized)
+      ) return "fart";
+      if (
+        /\b(?:burp(?:s|ed|ing)?|belch(?:es|ed|ing)?|eructat(?:e|es|ed|ing))\b/u.test(normalized) ||
+        /\bbring(?:s|ing)?\s+up\s+wind\b/u.test(normalized)
+      ) return "burp";
+      if (
+        /\b(?:cough(?:s|ed|ing)?|hack(?:s|ed|ing)?|ahem(?:s|ed|ing)?)\b/u.test(normalized) ||
+        /\bclear(?:s|ed|ing)?\s+(?:(?:his|her|their|its)\s+)?throat\b/u.test(normalized)
+      ) return "cough";
+      if (
+        /\b(?:pour|pours|poured|pouring|refill|refills|refilled|refilling)\b[^.!?]{0,42}\b(?:coffee|cup|mug|refill)\b/u.test(normalized) ||
+        /\b(?:top|tops|topped|topping)\b[^.!?]{0,24}\b(?:off|up)\b[^.!?]{0,24}\b(?:cup|mug|coffee)\b/u.test(normalized)
+      ) return "coffee_pour";
+      if (
+        /\b(?:stir|stirs|stirred|stirring)\b[^.!?]{0,42}\b(?:coffee|cup|mug|spoon)\b/u.test(normalized) ||
+        /\bspoon\b[^.!?]{0,32}\b(?:circle|circles|clink|clinks|stir|stirs)\b/u.test(normalized)
+      ) return "spoon_stir";
+      if (
+        /\b(?:knock|knocks|knocked|knocking|tap|taps|tapped|tapping)\b[^.!?]{0,28}\b(?:table|tabletop)\b/u.test(normalized)
+      ) return "table_knock";
+      if (
+        /\b(?:set|sets|setting|put|puts|putting|place|places|placed|placing|lower|lowers|lowered|lowering)\b[^.!?]{0,42}\b(?:cup|mug)\b[^.!?]{0,28}\b(?:down|table|tabletop)\b/u.test(normalized) ||
+        /\b(?:cup|mug)\b[^.!?]{0,24}\b(?:clink|clinks|clinked|touches|meets)\b[^.!?]{0,20}\b(?:table|tabletop|wood)\b/u.test(normalized)
+      ) return "cup_set_down";
+      return null;
+    }
+    function resolveCueSources(key) {
+      const seen = new Set();
+      return assignments
+        .filter((action) => action.key === key)
+        .flatMap((action) => action.sounds)
+        .map((soundIndex) => entry(soundIndex))
+        .filter((item) => {
+          if (!item || isDisabled(item) || seen.has(item.id)) return false;
+          seen.add(item.id);
+          return true;
+        })
+        .map((item) => ({
+          id: item.id,
+          name: displayName(item),
+          path: item.path,
+        }));
+    }
+    function nextDemoVariantIndex(key, variantCount) {
+      if (variantCount <= 1) return 0;
+      const previous = demoLastVariant.get(key);
+      const candidate = Math.floor(Math.random() * variantCount);
+      const index = candidate === previous ? (candidate + 1) % variantCount : candidate;
+      demoLastVariant.set(key, index);
+      return index;
+    }
+    function demoPanFor(element) {
+      if (!element || !window.innerWidth) return 0;
+      const rect = element.getBoundingClientRect();
+      const normalized = ((rect.left + rect.width / 2) / window.innerWidth) * 2 - 1;
+      return Math.max(-DEMO_MAX_PAN, Math.min(DEMO_MAX_PAN, normalized * DEMO_MAX_PAN));
+    }
+    function getDemoAudioContext() {
+      if (demoAudioContext) return demoAudioContext;
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) throw new Error("This browser does not support the live sound demo.");
+      demoAudioContext = new AudioContextClass({ latencyHint: "interactive" });
+      return demoAudioContext;
+    }
+    async function decodeDemoSource(path) {
+      const sourcePath = playbackPath(path);
+      if (!demoBufferCache.has(sourcePath)) {
+        const pending = (async () => {
+          const context = getDemoAudioContext();
+          const response = await fetch(sourcePath);
+          if (!response.ok) throw new Error("The assigned sound could not be loaded.");
+          return context.decodeAudioData((await response.arrayBuffer()).slice(0));
+        })().catch((error) => {
+          demoBufferCache.delete(sourcePath);
+          throw error;
+        });
+        demoBufferCache.set(sourcePath, pending);
+      }
+      return demoBufferCache.get(sourcePath);
+    }
+    function stopDemoPlayback() {
+      demoPlaybackEpoch += 1;
+      for (const source of demoActiveSources) {
+        try { source.stop(); } catch { /* The source may have already ended. */ }
+      }
+      demoActiveSources.clear();
+    }
+    function setDemoStatus(message) {
+      const status = $("demoStatus");
+      if (!status) return;
+      status.textContent = message;
+      window.clearTimeout(setDemoStatus.timer);
+      setDemoStatus.timer = window.setTimeout(() => { status.textContent = ""; }, 3000);
+    }
+    function showDemoNowPlaying(source, key) {
+      const action = actionFor(key);
+      $("playerLabel").innerHTML = `<strong>${escapeHtml(source.name)}</strong> · ${escapeHtml(action.label)}`;
+      const playerBar = document.querySelector(".player-bar");
+      playerBar?.classList.remove("is-demo-playing");
+      window.requestAnimationFrame(() => playerBar?.classList.add("is-demo-playing"));
+    }
+    async function playDemoCue(key, origin) {
+      const sources = resolveCueSources(key);
+      if (!sources.length) {
+        setDemoStatus(`No sounds assigned to ${actionFor(key).label}.`);
+        updateDemoAvailability();
+        return false;
+      }
+      const now = performance.now();
+      const config = cueConfig(key);
+      if (now - (demoLastPlayedAt.get(key) ?? -Infinity) < config.cooldownMs) return false;
+      demoLastPlayedAt.set(key, now);
+      const sourceInfo = sources[nextDemoVariantIndex(key, sources.length)];
+      const epoch = demoPlaybackEpoch;
+      try {
+        const context = getDemoAudioContext();
+        if (context.state === "suspended") await context.resume();
+        const buffer = await decodeDemoSource(sourceInfo.path);
+        if (epoch !== demoPlaybackEpoch || benchView !== "demo") return false;
+        if (demoActiveSources.size >= DEMO_MAX_ACTIVE_SOURCES) {
+          const oldest = demoActiveSources.values().next().value;
+          demoActiveSources.delete(oldest);
+          try { oldest?.stop(); } catch { /* The source may have already ended. */ }
+        }
+        const source = context.createBufferSource();
+        const mono = context.createGain();
+        const panner = context.createStereoPanner();
+        const output = context.createGain();
+        source.buffer = buffer;
+        mono.channelCount = 1;
+        mono.channelCountMode = "explicit";
+        mono.channelInterpretation = "speakers";
+        panner.pan.value = demoSpatialAudioEnabled ? demoPanFor(origin) : 0;
+        output.gain.value = Math.max(0, Math.min(1, config.gain));
+        source.connect(mono);
+        mono.connect(panner);
+        panner.connect(output);
+        output.connect(context.destination);
+        source.addEventListener("ended", () => {
+          demoActiveSources.delete(source);
+          source.disconnect();
+          mono.disconnect();
+          panner.disconnect();
+          output.disconnect();
+        }, { once: true });
+        demoActiveSources.add(source);
+        source.start();
+        showDemoNowPlaying(sourceInfo, key);
+        setDemoStatus(`${actionFor(key).label} · ${sourceInfo.name}`);
+        return true;
+      } catch (error) {
+        setDemoStatus(error instanceof Error ? error.message : "The assigned sound could not be played.");
+        return false;
+      }
+    }
+    function updateDemoAvailability() {
+      const gallery = $("demoGallery");
+      if (!gallery) return;
+      gallery.querySelectorAll("[data-demo-cue]").forEach((element) => {
+        const cue = element.dataset.demoCue;
+        const empty = resolveCueSources(cue).length === 0;
+        element.dataset.cueEmpty = String(empty);
+        element.title = empty ? `No sounds assigned to ${actionFor(cue).label}.` : "";
+      });
+      const botCards = [...gallery.querySelectorAll("[data-demo-bot-card]")];
+      if (botCards.length) {
+        const hoverCue = botCards[0].dataset.demoHoverCue;
+        const clickCue = botCards[0].dataset.demoClickCue;
+        const hoverEmpty = resolveCueSources(hoverCue).length === 0;
+        const clickEmpty = resolveCueSources(clickCue).length === 0;
+        const botCardTitle = hoverEmpty || clickEmpty
+          ? `No sounds assigned to: ${[
+              hoverEmpty ? actionFor(hoverCue).label : "",
+              clickEmpty ? actionFor(clickCue).label : "",
+            ].filter(Boolean).join(", ")}.`
+          : "Hover to audition bot-hover; click to audition bot-select.";
+        botCards.forEach((botCard) => {
+          botCard.dataset.cueEmpty = String(hoverEmpty && clickEmpty);
+          botCard.dataset.hoverCueEmpty = String(hoverEmpty);
+          botCard.dataset.clickCueEmpty = String(clickEmpty);
+          botCard.title = botCardTitle;
+        });
+      }
+      const panelToggle = $("demoPanelToggle");
+      if (panelToggle) {
+        const panelCue = panelToggle.getAttribute("aria-expanded") === "true" ? "panel-close" : "panel-open";
+        const panelEmpty = resolveCueSources(panelCue).length === 0;
+        panelToggle.dataset.cueEmpty = String(panelEmpty);
+        panelToggle.title = panelEmpty ? `No sounds assigned to ${actionFor(panelCue).label}.` : `Play ${actionFor(panelCue).label}.`;
+      }
+      const companion = $("demoCompanion");
+      if (companion) {
+        const companionEmpty = resolveCueSources("confirm").length === 0;
+        companion.dataset.cueEmpty = String(companionEmpty);
+        companion.title = companionEmpty
+          ? `No sounds assigned to ${actionFor("confirm").label}.`
+          : "Drag and release to sling the companion; tap for a glass sound.";
+      }
+      gallery.querySelectorAll("[data-pool-keys]").forEach((element) => {
+        const keys = element.dataset.poolKeys.split(",").filter(Boolean);
+        const counts = keys.map((key) => ({ key, count: resolveCueSources(key).length }));
+        const sourceCount = counts.reduce((total, item) => total + item.count, 0);
+        const emptyKeys = counts.filter((item) => item.count === 0).map((item) => item.key);
+        element.dataset.empty = String(sourceCount === 0);
+        element.textContent = sourceCount === 0
+          ? "No sounds assigned"
+          : emptyKeys.length
+            ? `${emptyKeys.length} unassigned`
+            : `${sourceCount} assigned`;
+        element.title = emptyKeys.length
+          ? `No sounds assigned to: ${emptyKeys.map((key) => actionFor(key).label).join(", ")}.`
+          : `${sourceCount} sound${sourceCount === 1 ? "" : "s"} assigned.`;
+      });
+    }
+    function setBenchView(nextView) {
+      if (nextView === "demo" && isEditing()) return;
+      const previousView = benchView;
+      benchView = nextView === "demo" ? "demo" : "library";
+      const inDemo = benchView === "demo";
+      document.body.dataset.benchView = benchView;
+      $("libraryView").hidden = inDemo;
+      $("generator").hidden = inDemo;
+      $("demoView").hidden = !inDemo;
+      $("enterDemo").hidden = inDemo;
+      $("backToLibrary").hidden = !inDemo;
+      companionGlassController?.reset();
+      if (inDemo) {
+        const player = $("player");
+        if (previousView !== "demo") preDemoPlayerLabel = $("playerLabel").innerHTML;
+        player.pause();
+        player.loop = false;
+        companionGlassController?.refreshBounds();
+        updateDemoAvailability();
+      } else {
+        stopDemoPlayback();
+        if (previousView === "demo" && preDemoPlayerLabel !== null) {
+          $("playerLabel").innerHTML = preDemoPlayerLabel;
+          preDemoPlayerLabel = null;
+        }
+        document.querySelector(".player-bar")?.classList.remove("is-demo-playing");
+        setDemoStatus("");
+      }
+    }
+    function pulseDemoElement(element, className, durationMs) {
+      if (!element) return;
+      window.clearTimeout(element.demoPulseTimer);
+      element.classList.remove(className);
+      window.requestAnimationFrame(() => {
+        element.classList.add(className);
+        element.demoPulseTimer = window.setTimeout(() => element.classList.remove(className), durationMs);
+      });
+    }
+    function createCompanionGlassController(arena, orb) {
+      const physics = COMPANION_GLASS_PHYSICS;
+      const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const state = {
+        x: 0,
+        y: 0,
+        velocityX: 0,
+        velocityY: 0,
+        maxX: 0,
+        maxY: 0,
+        pointerId: null,
+        dragging: false,
+        moved: false,
+        grabOffsetX: 0,
+        grabOffsetY: 0,
+        downClientX: 0,
+        downClientY: 0,
+        downAt: 0,
+        lastPointerX: 0,
+        lastPointerY: 0,
+        lastPointerAt: 0,
+        frameId: 0,
+        lastFrameAt: 0,
+        collisionCount: 0,
+      };
+      function cancelFrame() {
+        if (state.frameId) window.cancelAnimationFrame(state.frameId);
+        state.frameId = 0;
+        state.lastFrameAt = 0;
+      }
+      function applyPosition() {
+        orb.style.setProperty("--companion-x", `${state.x.toFixed(2)}px`);
+        orb.style.setProperty("--companion-y", `${state.y.toFixed(2)}px`);
+      }
+      function refreshBounds() {
+        const arenaRect = arena.getBoundingClientRect();
+        const orbRect = orb.getBoundingClientRect();
+        state.maxX = Math.max(0, (arenaRect.width - orbRect.width) / 2);
+        state.maxY = Math.max(0, (arenaRect.height - orbRect.height) / 2);
+        state.x = Math.max(-state.maxX, Math.min(state.maxX, state.x));
+        state.y = Math.max(-state.maxY, Math.min(state.maxY, state.y));
+        applyPosition();
+      }
+      function clampVelocity() {
+        const speed = Math.hypot(state.velocityX, state.velocityY);
+        if (speed <= physics.maxSpeed) return;
+        const scale = physics.maxSpeed / speed;
+        state.velocityX *= scale;
+        state.velocityY *= scale;
+      }
+      function stopAtCenter() {
+        cancelFrame();
+        state.x = 0;
+        state.y = 0;
+        state.velocityX = 0;
+        state.velocityY = 0;
+        arena.dataset.moving = "false";
+        applyPosition();
+      }
+      function reset() {
+        const pointerId = state.pointerId;
+        state.pointerId = null;
+        state.dragging = false;
+        state.moved = false;
+        orb.classList.remove("is-dragging");
+        if (pointerId !== null && orb.hasPointerCapture(pointerId)) orb.releasePointerCapture(pointerId);
+        state.collisionCount = 0;
+        orb.dataset.collisionCount = "0";
+        stopAtCenter();
+      }
+      function playImpact(impactSpeed) {
+        if (impactSpeed < physics.impactSoundSpeed) return;
+        state.collisionCount += 1;
+        orb.dataset.collisionCount = String(state.collisionCount);
+        void playDemoCue("confirm", orb);
+      }
+      function integrateFrame(timestamp) {
+        if (benchView !== "demo") {
+          reset();
+          return;
+        }
+        if (!state.lastFrameAt) {
+          state.lastFrameAt = timestamp;
+          state.frameId = window.requestAnimationFrame(integrateFrame);
+          return;
+        }
+        const elapsedSeconds = (timestamp - state.lastFrameAt) / 1000;
+        const deltaSeconds = Math.min(physics.maxFrameSeconds, Math.max(0, elapsedSeconds));
+        state.lastFrameAt = timestamp;
+        if (deltaSeconds > 0) {
+          state.velocityX += (-physics.springStrength * state.x - physics.damping * state.velocityX) * deltaSeconds;
+          state.velocityY += (-physics.springStrength * state.y - physics.damping * state.velocityY) * deltaSeconds;
+          clampVelocity();
+          state.x += state.velocityX * deltaSeconds;
+          state.y += state.velocityY * deltaSeconds;
+        }
+        let impactSpeed = 0;
+        if (state.x < -state.maxX) {
+          state.x = -state.maxX;
+          if (state.velocityX < 0) {
+            impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityX));
+            state.velocityX = Math.abs(state.velocityX) * physics.wallRestitution;
+          }
+        } else if (state.x > state.maxX) {
+          state.x = state.maxX;
+          if (state.velocityX > 0) {
+            impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityX));
+            state.velocityX = -Math.abs(state.velocityX) * physics.wallRestitution;
+          }
+        }
+        if (state.y < -state.maxY) {
+          state.y = -state.maxY;
+          if (state.velocityY < 0) {
+            impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityY));
+            state.velocityY = Math.abs(state.velocityY) * physics.wallRestitution;
+          }
+        } else if (state.y > state.maxY) {
+          state.y = state.maxY;
+          if (state.velocityY > 0) {
+            impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityY));
+            state.velocityY = -Math.abs(state.velocityY) * physics.wallRestitution;
+          }
+        }
+        playImpact(impactSpeed);
+        applyPosition();
+        const settled = Math.hypot(state.x, state.y) <= physics.settleDistance
+          && Math.hypot(state.velocityX, state.velocityY) <= physics.settleSpeed;
+        if (settled) {
+          stopAtCenter();
+          return;
+        }
+        state.frameId = window.requestAnimationFrame(integrateFrame);
+      }
+      function startMotion({ applySlingshot = true } = {}) {
+        if (reducedMotionQuery.matches) {
+          stopAtCenter();
+          return;
+        }
+        refreshBounds();
+        if (applySlingshot) {
+          state.velocityX = state.velocityX * physics.releaseVelocityCarry - state.x * physics.slingshotStrength;
+          state.velocityY = state.velocityY * physics.releaseVelocityCarry - state.y * physics.slingshotStrength;
+        }
+        clampVelocity();
+        const alreadySettled = Math.hypot(state.x, state.y) <= physics.settleDistance
+          && Math.hypot(state.velocityX, state.velocityY) <= physics.settleSpeed;
+        if (alreadySettled) {
+          stopAtCenter();
+          return;
+        }
+        cancelFrame();
+        arena.dataset.moving = "true";
+        state.frameId = window.requestAnimationFrame(integrateFrame);
+      }
+      function localPointerPosition(event) {
+        const rect = arena.getBoundingClientRect();
+        return {
+          x: event.clientX - (rect.left + rect.width / 2),
+          y: event.clientY - (rect.top + rect.height / 2),
+        };
+      }
+      function onPointerDown(event) {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        cancelFrame();
+        refreshBounds();
+        const pointer = localPointerPosition(event);
+        state.pointerId = event.pointerId;
+        state.dragging = true;
+        state.moved = false;
+        state.grabOffsetX = pointer.x - state.x;
+        state.grabOffsetY = pointer.y - state.y;
+        state.downClientX = event.clientX;
+        state.downClientY = event.clientY;
+        state.downAt = event.timeStamp;
+        state.lastPointerX = state.x;
+        state.lastPointerY = state.y;
+        state.lastPointerAt = event.timeStamp;
+        state.velocityX = 0;
+        state.velocityY = 0;
+        state.collisionCount = 0;
+        orb.dataset.collisionCount = "0";
+        arena.dataset.moving = "false";
+        orb.classList.add("is-dragging");
+        orb.setPointerCapture(event.pointerId);
+      }
+      function onPointerMove(event) {
+        if (!state.dragging || event.pointerId !== state.pointerId) return;
+        const pointer = localPointerPosition(event);
+        const nextX = Math.max(-state.maxX, Math.min(state.maxX, pointer.x - state.grabOffsetX));
+        const nextY = Math.max(-state.maxY, Math.min(state.maxY, pointer.y - state.grabOffsetY));
+        const elapsedSeconds = Math.max(
+          physics.minPointerSampleSeconds,
+          (event.timeStamp - state.lastPointerAt) / 1000,
+        );
+        const instantVelocityX = (nextX - state.lastPointerX) / elapsedSeconds;
+        const instantVelocityY = (nextY - state.lastPointerY) / elapsedSeconds;
+        state.velocityX = state.velocityX * (1 - physics.velocityBlend) + instantVelocityX * physics.velocityBlend;
+        state.velocityY = state.velocityY * (1 - physics.velocityBlend) + instantVelocityY * physics.velocityBlend;
+        state.x = nextX;
+        state.y = nextY;
+        state.lastPointerX = nextX;
+        state.lastPointerY = nextY;
+        state.lastPointerAt = event.timeStamp;
+        state.moved ||= Math.hypot(
+          event.clientX - state.downClientX,
+          event.clientY - state.downClientY,
+        ) >= physics.dragThreshold;
+        applyPosition();
+      }
+      function finishPointer(event, { cancelled = false } = {}) {
+        if (!state.dragging || event.pointerId !== state.pointerId) return;
+        const pointerId = state.pointerId;
+        state.pointerId = null;
+        state.dragging = false;
+        orb.classList.remove("is-dragging");
+        if (orb.hasPointerCapture(pointerId)) orb.releasePointerCapture(pointerId);
+        const quickTap = !cancelled
+          && !state.moved
+          && event.timeStamp - state.downAt <= physics.maxTapDurationMs;
+        if (quickTap) {
+          pulseDemoElement(orb, "is-tapped", DEMO_PRESS_FEEDBACK_MS);
+          void playDemoCue("confirm", orb);
+        }
+        const displaced = Math.hypot(state.x, state.y) > physics.settleDistance;
+        startMotion({ applySlingshot: !quickTap || displaced });
+      }
+      orb.addEventListener("pointerdown", onPointerDown);
+      orb.addEventListener("pointermove", onPointerMove);
+      orb.addEventListener("pointerup", (event) => finishPointer(event));
+      orb.addEventListener("pointercancel", (event) => finishPointer(event, { cancelled: true }));
+      orb.addEventListener("lostpointercapture", (event) => finishPointer(event, { cancelled: true }));
+      orb.addEventListener("click", (event) => {
+        if (event.detail !== 0) return;
+        pulseDemoElement(orb, "is-tapped", DEMO_PRESS_FEEDBACK_MS);
+        void playDemoCue("confirm", orb);
+      });
+      window.addEventListener("resize", reset);
+      window.addEventListener("pagehide", reset);
+      reducedMotionQuery.addEventListener("change", reset);
+      reset();
+      return {
+        reset,
+        refreshBounds,
+        snapshot: () => ({
+          x: state.x,
+          y: state.y,
+          velocityX: state.velocityX,
+          velocityY: state.velocityY,
+          dragging: state.dragging,
+          moving: Boolean(state.frameId),
+          collisionCount: state.collisionCount,
+        }),
+      };
+    }
     function updateCounts() {
       const visible = libraryEntries().filter((item) => !committedDisabledIds.has(item.id)).length;
       const libraryCount = $("libraryCount");
@@ -1194,6 +2548,8 @@
         : "Play loads into the stage above. Edit, rename, assign, or disable inline.";
       $("addAction").disabled = editing;
       $("copy").disabled = editing;
+      $("enterDemo").disabled = editing;
+      $("enterDemo").title = editing ? "Save or cancel the active edit before entering Demo." : "Test the live assignment map";
       updateCounts();
     }
     function loadPlayer(path, name, autoplay = false, sourceId = "") {
@@ -1260,6 +2616,7 @@
       const available = libraryEntries().map((item) => ({ item, i: soundIndexForId(item.id) })).filter(({ item }) => !committedDisabledIds.has(item.id));
       $("assignments").innerHTML = assignments.length ? assignments.map((action, i) => `<div class="assignment"><div class="assignment-top"><div class="picker action-picker"><button class="picker-button" data-picker="action:${i}" aria-haspopup="menu">${escapeHtml(action.label)}</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-action-choice="${i}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-remove="${i}" aria-label="Remove action">×</button></div><span class="hint">Add sound to this action</span><div class="picker sound-picker"><button class="picker-button" data-picker="sound:${i}" aria-haspopup="menu">Choose a sound…</button><div class="picker-menu">${available.map(({ item, i: soundIndex }) => `<button class="picker-option" data-sound-choice="${i}:${soundIndex}">${escapeHtml(displayName(item))}</button>`).join("")}</div></div><div class="chips">${action.sounds.length ? action.sounds.map((soundIndex, chipIndex) => `<span class="chip${isDisabled(entry(soundIndex)) ? " deleted" : ""}">${escapeHtml(entry(soundIndex) ? displayName(entry(soundIndex)) : "Unknown sound")} <button class="remove" data-chip="${i}:${chipIndex}" aria-label="Remove sound">×</button></span>`).join("") : `<span class="hint">No sounds assigned yet.</span>`}</div></div>`).join("") : `<div class="empty">Add an action to start building the map.</div>`;
       updateCounts();
+      updateDemoAvailability();
     }
     function persistChanges() {
       const disabledIds = [...new Set([...committedDisabledIds, ...pendingDisabledIds])];
@@ -1523,6 +2880,67 @@
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[char]));
     }
+    companionGlassController = createCompanionGlassController($("demoCompanionArena"), $("demoCompanion"));
+    $("enterDemo").addEventListener("click", () => setBenchView("demo"));
+    $("backToLibrary").addEventListener("click", () => setBenchView("library"));
+    $("demoSpatialAudio").addEventListener("change", (event) => {
+      demoSpatialAudioEnabled = event.target.checked;
+      stopDemoPlayback();
+      setDemoStatus(demoSpatialAudioEnabled ? "Spatial audio enabled." : "Spatial audio disabled.");
+    });
+    document.querySelectorAll("[data-demo-bot-card]").forEach((button) => {
+      button.addEventListener("mouseenter", (event) => {
+        event.currentTarget.classList.add("is-hovering");
+        playDemoCue(event.currentTarget.dataset.demoHoverCue, event.currentTarget);
+      });
+      button.addEventListener("mouseleave", (event) => {
+        event.currentTarget.classList.remove("is-hovering");
+      });
+      button.addEventListener("click", (event) => {
+        const botCard = event.currentTarget;
+        botCard.setAttribute("aria-pressed", "true");
+        window.clearTimeout(botCard.demoPressedTimer);
+        botCard.demoPressedTimer = window.setTimeout(() => botCard.setAttribute("aria-pressed", "false"), DEMO_PRESS_FEEDBACK_MS);
+        playDemoCue(botCard.dataset.demoClickCue, botCard);
+      });
+    });
+    $("demoActionAudioInput").addEventListener("input", () => {
+      const match = $("demoActionAudioMatch");
+      match.removeAttribute("data-match");
+      match.textContent = "Press Send to test this action against PRISM’s production keywords.";
+    });
+    $("demoActionAudioForm").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const cue = actionAudioCueForText($("demoActionAudioInput").value);
+      const match = $("demoActionAudioMatch");
+      if (!cue) {
+        match.dataset.match = "false";
+        match.textContent = "No action-audio keyword matched.";
+        setDemoStatus("No action-audio keyword matched that text.");
+        return;
+      }
+      match.dataset.match = "true";
+      match.textContent = `Matched ${actionFor(cue).label} · ${cue}`;
+      playDemoCue(cue, event.submitter || event.currentTarget);
+    });
+    $("demoPanelToggle").addEventListener("click", (event) => {
+      const panel = event.currentTarget;
+      const opening = panel.getAttribute("aria-expanded") !== "true";
+      panel.setAttribute("aria-expanded", String(opening));
+      panel.dataset.open = String(opening);
+      playDemoCue(opening ? "panel-open" : "panel-close", panel);
+      updateDemoAvailability();
+    });
+    $("demoGallery").addEventListener("click", (event) => {
+      const action = event.target.closest("[data-demo-cue]");
+      if (!action) return;
+      if (action.id === "demoToggle") {
+        action.setAttribute("aria-checked", String(action.getAttribute("aria-checked") !== "true"));
+      } else if (action.id === "demoThinking") {
+        pulseDemoElement(action, "is-thinking", DEMO_THINKING_FEEDBACK_MS);
+      }
+      playDemoCue(action.dataset.demoCue, action);
+    });
     $("library").addEventListener("click", (event) => {
       const picker = event.target.closest("[data-picker]");
       const playButton = event.target.closest("[data-play]");
@@ -1729,6 +3147,7 @@
     });
     window.addEventListener("pagehide", persistChanges);
     document.addEventListener("click", () => document.querySelectorAll(".picker.open").forEach((item) => item.classList.remove("open")));
+    setBenchView("library");
     syncSidePanel();
     renderLibrary();
     renderAssignments();

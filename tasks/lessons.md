@@ -4,6 +4,16 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench demo represented bot-card hover with one large card, but evaluating hover sound and visual timing needs repeated neighboring targets.
+**Lesson**: Interaction demos should preserve the density that gives the behavior meaning. For bot-card hover auditions, use a compact multi-card grid so moving between targets exposes hover onset, visual activation, and release timing together.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` demo snippets.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench represented action audio with direct soundboard pads, bypassing the action-text keywords that trigger those sounds in PRISM.
+**Lesson**: A fidelity demo should exercise the real trigger path, not only the final output. Action-audio auditioning should accept prose, report the matched production keyword family, and then resolve the cue through the live assignment map.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` action-audio snippet and `apps/web/src/app/coffee-action-sfx.ts` keyword parity.
+
 ### 2026-07-11 · [UX]
 **Trigger**: Zen's first-session transcript became downward-scroll locked again after an earlier flex-margin fix, while the console also reported a maximum React update depth from the autonomy scheduler.
 **Lesson**: Zen's artificial readable-bottom boundary must anchor to the conversation's chronologically final message before role-specific assistant/user fallbacks; otherwise a new user prompt can be trapped behind the previous assistant reply. Any request-animation-frame scheduler that advances React state must also reject queued ticks once its feature is inactive, and inactive reset effects should reset refs/timers without scheduling another state update.
@@ -363,6 +373,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Trigger**: Memory directory flicker debugging regressed intentional visual styling through broad CSS suppressions instead of isolating the underlying breakpoint/layout cause.
 **Lesson**: When visual polish is already intentional, do not flatten/remove styling as a diagnostic fix unless explicitly approved. First preserve the visual baseline, reproduce the issue, and isolate layout/re-render/compositing causes with the smallest reversible probe.
 **Applies to**: LocalAI responsive UI/debugging work in `apps/web/src/app/page.tsx` and `apps/web/src/app/page.module.css`.
+
+### 2026-07-23 · [UX]
+**Trigger**: “More tension” was initially interpreted as held drag resistance, but the intended feel was several strong wall-to-wall passes before momentum visibly decays.
+**Lesson**: For elastic pointer toys, distinguish held resistance, spring acceleration, and post-release momentum retention before tuning. Companion Glass should keep direct drag and use damping/restitution to preserve roughly two or three strong edge-to-edge passes.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Companion Glass pointer physics.
 
 ### 2026-04-24 · [UX]
 **Trigger**: Mobile bot customizer color/glyph popover used vertical space well but felt ambiguous to dismiss because it behaved like a near-full-height sheet.
