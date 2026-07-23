@@ -113,19 +113,56 @@ describe("shared composer actions", () => {
   it("uppercases action text visually without changing its canonical value", () => {
     assert.match(
       pageCssSource,
-      /\.composerActionField > input \{[\s\S]{0,280}text-transform: uppercase;/u,
+      /\.composerActionField > input \{[\s\S]{0,360}font-weight: 750;[\s\S]{0,120}letter-spacing: 0\.08em;[\s\S]{0,120}text-transform: uppercase;/u,
     );
     assert.match(
       pageCssSource,
-      /\.zenActionCueText,[\s\S]{0,220}text-transform: uppercase;/u,
+      /\.zenActionCueText \{[\s\S]{0,220}text-transform: none;/u,
     );
     assert.match(
       pageCssSource,
-      /\.zenLiveBotPresenceText \{[\s\S]{0,850}text-transform: uppercase;/u,
+      /\.zenLiveBotPresenceText \{[\s\S]{0,850}text-transform: none;/u,
     );
     assert.equal(
       serializeComposerAction("smiles softly", "Hello."),
       "*smiles softly* Hello.",
+    );
+  });
+
+  it("uses the Action label itself as the writing surface", () => {
+    assert.match(pageSource, /placeholder="Action"/u);
+    assert.doesNotMatch(pageSource, /<span>Action<\/span>/u);
+    assert.doesNotMatch(pageSource, /placeholder="What you do…"/u);
+    assert.match(
+      pageCssSource,
+      /\.composerActionField > input::placeholder \{[\s\S]{0,120}color: var\(--fg-muted\);/u,
+    );
+  });
+
+  it("keeps Action spelling assistance aligned with the composer setting", () => {
+    assert.match(pageSource, /spellCheck=\{writingAssistEnabled\}/u);
+    assert.match(
+      pageSource,
+      /autoCorrect=\{writingAssistEnabled \? "on" : "off"\}/u,
+    );
+    assert.match(
+      pageSource,
+      /autoCapitalize=\{writingAssistEnabled \? "sentences" : "none"\}/u,
+    );
+  });
+
+  it("presents a user's sent action above their accompanying Zen message", () => {
+    assert.match(
+      pageSource,
+      /zenActionsEnabled === true &&[\s\S]{0,140}\(messageRole === "assistant" \|\| messageRole === "user"\)[\s\S]{0,120}resolveZenActionPresentation\(source\)/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /zenActionsEnabled === true &&\s*renderAsEphemeralLines === true/u,
+    );
+    assert.match(
+      pageSource,
+      /zenActionActorLabel=\{[\s\S]{0,100}msg\.role === "user" \? "You"/u,
     );
   });
 

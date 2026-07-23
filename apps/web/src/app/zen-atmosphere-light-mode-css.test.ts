@@ -19,9 +19,10 @@ describe("light-mode zen atmosphere wallpaper visibility", () => {
     assert.match(imgRule, /mix-blend-mode:\s*normal/);
     assert.doesNotMatch(imgRule, /mix-blend-mode:\s*multiply/);
     assert.match(imgRule, /opacity:\s*calc\(/);
+    assert.match(imgRule, /\*\s*2\.35/);
   });
 
-  it("softens the light-mode readability frost, especially while replying", () => {
+  it("softens the light-mode readability frost, and removes it while replying", () => {
     const overlayRule = ruleForExactSelector(
       ".themeLight .zenAtmosphereReadabilityOverlay",
     );
@@ -35,10 +36,8 @@ describe("light-mode zen atmosphere wallpaper visibility", () => {
     const liveRule = ruleForExactSelector(
       ".themeLight\n  .messagesFrame[data-replying-live=\"true\"]\n  .zenAtmosphereReadabilityOverlay",
     );
-    assert.match(
-      liveRule,
-      /opacity:\s*calc\(var\(--zen-atmosphere-overlay-opacity,\s*0\)\s*\*\s*0\.22\)/,
-    );
+    assert.match(liveRule, /opacity:\s*0\s*;/);
+    assert.match(liveRule, /backdrop-filter:\s*none/);
   });
 
   it("does not cover light-mode wallpaper with an opaque deep plate", () => {
@@ -50,5 +49,16 @@ describe("light-mode zen atmosphere wallpaper visibility", () => {
       /color-mix\(in srgb, var\(--bg-surface\) 42%, transparent\)/,
     );
     assert.doesNotMatch(backdropRule, /var\(--bg-deep\)\s*;/);
+  });
+
+  it("keeps the light-mode chat plate transparent when atmosphere is active", () => {
+    assert.match(
+      css,
+      /data-zen-atmosphere-active="true"\]\[data-bot-gradient-active="true"/,
+    );
+    assert.match(
+      css,
+      /var\(--bot-chat-persona-fill,\s*0\)\s*\*\s*22%/,
+    );
   });
 });

@@ -28,18 +28,24 @@ export const ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH = 48;
 export const ZEN_ACTION_TEXT_LAG_MS = 320;
 const zenActionPresentationCache = new Map<string, ZenActionPresentation>();
 
+export function sentenceCaseZenActionText(action: string): string {
+  return action
+    .toLocaleLowerCase()
+    .replace(/\p{L}/u, (letter) => letter.toLocaleUpperCase());
+}
+
 export function normalizeZenActionText(action: string): string {
   let normalized = action.replace(/\s+/g, " ").trim();
   normalized = normalized.replace(/^\*+|\*+$/gu, "").trim();
   normalized = normalized.replace(/^[("'\u201c\u2018]+|[)"'\u201d\u2019]+$/gu, "").trim();
   normalized = normalized.replace(/[.!?\u2026;:,]+$/u, "").trim();
   if (Array.from(normalized).length <= MAX_ZEN_ACTION_DISPLAY_LENGTH) {
-    return normalized;
+    return sentenceCaseZenActionText(normalized);
   }
-  return `${Array.from(normalized)
+  return sentenceCaseZenActionText(`${Array.from(normalized)
     .slice(0, MAX_ZEN_ACTION_DISPLAY_LENGTH - 3)
     .join("")
-    .trimEnd()}...`;
+    .trimEnd()}...`);
 }
 
 export function classifyZenActionMotion(action: string): ZenActionMotion {

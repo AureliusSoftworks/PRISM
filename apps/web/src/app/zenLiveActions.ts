@@ -3,6 +3,7 @@ import type {
   ZenLiveActionMoodHint,
   ZenLiveActionReactionResponse,
 } from "@localai/shared";
+import { sentenceCaseZenActionText } from "./zenActions.ts";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
 export type ZenLiveBotActionState = {
@@ -170,7 +171,7 @@ export function sanitizeZenLiveBotActionText(value: unknown): string | null {
   action = action.replace(TRAILING_SPEECH_BRIDGE_RE, "").trim();
   action = action.replace(/[.!?\u2026;:,]+$/u, "").trim();
   action = compactZenLiveBotActionText(action);
-  return action || null;
+  return action ? sentenceCaseZenActionText(action) : null;
 }
 
 export function resolveZenLiveBotPresenceActionText({
@@ -191,8 +192,8 @@ export function resolveZenLiveBotPresenceActionText({
   if (replyActionText) return replyActionText;
   const actionText = sanitizeZenLiveBotActionText(action);
   if (actionText) return actionText;
-  if (isTalking) return "replying";
-  if (userActionVisible) return "notices";
+  if (isTalking) return "Replying";
+  if (userActionVisible) return "Notices";
   return null;
 }
 

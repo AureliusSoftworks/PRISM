@@ -113,14 +113,18 @@ describe("relationship-depth page integration", () => {
     assert.match(roomPresence, /data-relationship-depth-identity=/);
   });
 
-  it("uses the shared runner and restores the saved checkpoint for Back or Escape", () => {
+  it("uses the shared runner and restores the saved checkpoint for Escape", () => {
     assert.match(pageSource, /\brunRelationshipDepthTransition\b/);
     assert.match(pageSource, /\breturnFromRelationshipDepth\b/);
     assert.match(
       pageSource,
       /event\.key !== "Escape"[\s\S]{0,500}returnFromRelationshipDepth\("escape"\)/,
     );
-    assert.match(pageSource, /returnFromRelationshipDepth\("back"\)/);
+    assert.match(pageSource, /function jumpCanvasToAllBotsHome\(/);
+    assert.doesNotMatch(
+      pageSource,
+      /handleEmptyStateBackgroundClick[\s\S]{0,2500}returnFromRelationshipDepth\(/,
+    );
   });
 
   it("gates native transitions by handoff safety and keeps matched manual fallback beats", () => {
@@ -209,7 +213,7 @@ describe("relationship-depth page integration", () => {
     );
   });
 
-  it("guards relationship returns while global Home goes directly to All Bots", () => {
+  it("guards relationship returns while global Home and empty canvas go to All Bots", () => {
     const returnRoute = sourceSlice(
       "async function returnFromRelationshipDepth",
       "async function visitZenHome",
@@ -245,6 +249,16 @@ describe("relationship-depth page integration", () => {
     );
     assert.doesNotMatch(pageSource, /relationshipDepthReturnBlockedByReply/);
     assert.match(pageSource, /performShowAllBotsView\(\);\s*void openZenMode\(\)/);
+    assert.match(pageSource, /function jumpCanvasToAllBotsHome\(/);
+    assert.match(pageSource, /jumpCanvasToAllBotsHome\(\)/);
+    assert.match(
+      pageSource,
+      /Empty canvas always collapses to All Bots Home/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /handleEmptyStateBackgroundClick[\s\S]{0,2500}returnFromRelationshipDepth\(/,
+    );
     assert.match(
       pageSource,
       /className=\{styles\.hubWordmark\}\s+data-home-affordance="wordmark"/,
@@ -264,11 +278,15 @@ describe("relationship-depth page integration", () => {
     assert.doesNotMatch(restoreFocus, /focusTarget\.tabIndex = -1/);
   });
 
-  it("teaches Home depth and exact Back or Escape return semantics", () => {
+  it("teaches Home depth and exact Escape return semantics", () => {
     assert.match(tutorialSource, /heading: "Choose a relationship"/);
     assert.match(
       tutorialSource,
-      /Back or Escape returns you to the wider Library or saved group grid exactly where you left it\./,
+      /Clicking empty canvas space jumps straight back to All Bots Home/,
+    );
+    assert.match(
+      tutorialSource,
+      /Escape returns you to the wider Library or saved group grid exactly where you left it\./,
     );
     assert.match(tutorialSource, /heading: "Continue this Home"/);
     assert.match(tutorialSource, /older continuity for this Home/);

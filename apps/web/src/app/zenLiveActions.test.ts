@@ -22,7 +22,7 @@ describe("sanitizeZenLiveBotActionText", () => {
   it("strips dangling speech bridge words", () => {
     assert.equal(
       sanitizeZenLiveBotActionText("offers a warm smile and a gentle wave back, saying"),
-      "offers a warm smile"
+      "Offers a warm smile"
     );
   });
 
@@ -38,7 +38,7 @@ describe("sanitizeZenLiveBotActionText", () => {
   it("drops chained gestures even without punctuation", () => {
     assert.equal(
       sanitizeZenLiveBotActionText("offers a warm smile and a gentle wave back"),
-      "offers a warm smile"
+      "Offers a warm smile"
     );
   });
 
@@ -47,7 +47,14 @@ describe("sanitizeZenLiveBotActionText", () => {
       sanitizeZenLiveBotActionText(
         "keeps his gaze fixed on the doorway across the silent room"
       ),
-      "keeps his gaze fixed on the doorway"
+      "Keeps his gaze fixed on the doorway"
+    );
+  });
+
+  it("sentence-cases all-caps action text for the canvas", () => {
+    assert.equal(
+      sanitizeZenLiveBotActionText("SMILES GENTLY"),
+      "Smiles gently",
     );
   });
 });
@@ -77,7 +84,7 @@ describe("resolveZenLiveBotPresenceActionText", () => {
         userActionVisible: false,
         hasBot: true,
       }),
-      "smiles gently"
+      "Smiles gently"
     );
   });
 
@@ -89,7 +96,7 @@ describe("resolveZenLiveBotPresenceActionText", () => {
         userActionVisible: false,
         hasBot: true,
       }),
-      "smiles gently"
+      "Smiles gently"
     );
   });
 
@@ -101,7 +108,7 @@ describe("resolveZenLiveBotPresenceActionText", () => {
         userActionVisible: false,
         hasBot: true,
       }),
-      "replying"
+      "Replying"
     );
   });
 

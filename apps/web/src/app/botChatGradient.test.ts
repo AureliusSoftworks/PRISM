@@ -175,8 +175,17 @@ describe("selected bot chat gradient", () => {
       handlerStart,
     );
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
+    const jumpStart = pageSource.indexOf("function jumpCanvasToAllBotsHome");
+    const jumpEnd = pageSource.indexOf(
+      "function handleSandboxHeaderWordmarkClick",
+      jumpStart,
+    );
+    const jumpSource = pageSource.slice(jumpStart, jumpEnd);
 
     assert.match(handlerSource, /zenPersonaBotId !== null/);
-    assert.match(handlerSource, /resetEmptyStateBotSelection\(\)/);
+    assert.match(handlerSource, /jumpCanvasToAllBotsHome\(\)/);
+    assert.doesNotMatch(handlerSource, /returnFromRelationshipDepth\(/);
+    assert.match(jumpSource, /resetEmptyStateBotSelection\(\)/);
+    assert.match(jumpSource, /performShowAllBotsView\(null/);
   });
 });

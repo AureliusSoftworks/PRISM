@@ -74,6 +74,69 @@ describe("Chat shell header layout", () => {
     assert.match(openHomeSource, /void openZenMode\(\)/);
   });
 
+  it("keeps one full Zen toolbar across All Bots and relationship Homes", () => {
+    assert.match(
+      pageSource,
+      /const zenHeaderModelPickerActive =\s*view === "chat" && !zenFirstReplyPending;/,
+    );
+    assert.match(
+      pageSource,
+      /\{zenHeaderModelPickerActive\s*\? renderHeaderModelPicker\(\)\s*: renderVoiceModeSelector\(\)\}/,
+    );
+    assert.doesNotMatch(pageSource, /zenHeaderBotPickerActive/);
+    assert.doesNotMatch(
+      pageSource,
+      /renderHeaderModelPicker\(\{ showModelControls: false \}\)/,
+    );
+  });
+
+  it("lists saved default PRISM chats beside persona conversation groups", () => {
+    const visibleConversationsStart = pageSource.indexOf(
+      "const visibleConversations =",
+    );
+    const visibleConversationsEnd = pageSource.indexOf(
+      "const conversationGroups =",
+      visibleConversationsStart,
+    );
+    const sidebarItemsStart = pageSource.indexOf(
+      "const sidebarConversationItems =",
+    );
+    const sidebarItemsEnd = pageSource.indexOf(
+      "useEffect(() => {",
+      sidebarItemsStart,
+    );
+    assert.notEqual(visibleConversationsStart, -1);
+    assert.notEqual(visibleConversationsEnd, -1);
+    assert.notEqual(sidebarItemsStart, -1);
+    assert.notEqual(sidebarItemsEnd, -1);
+
+    const visibleConversationsSource = pageSource.slice(
+      visibleConversationsStart,
+      visibleConversationsEnd,
+    );
+    const sidebarItemsSource = pageSource.slice(
+      sidebarItemsStart,
+      sidebarItemsEnd,
+    );
+    assert.match(
+      visibleConversationsSource,
+      /conversation\.mode === "chat" &&\s*conversationGroupKey\(conversation\) ===\s*PRISM_CONVERSATION_GROUP_KEY/,
+    );
+    assert.match(
+      sidebarItemsSource,
+      /const key = conversationGroupKey\(conversation\);/,
+    );
+    assert.doesNotMatch(
+      sidebarItemsSource,
+      /key === PRISM_CONVERSATION_GROUP_KEY/,
+    );
+    assert.match(
+      pageSource,
+      /name: botId \? bot\?\.name\?\.trim\(\) \|\| "Deleted bot" : DEFAULT_ASSISTANT_NAME,/,
+    );
+    assert.match(pageSource, /: "triangle",/);
+  });
+
   it("distinguishes the account model default from Auto response routing", () => {
     assert.match(
       pageSource,
