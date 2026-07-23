@@ -1627,6 +1627,72 @@
   font: italic 1rem/1.55 Georgia, "Times New Roman", serif;
 }
 
+.handoffSources {
+  margin: 0 0 24px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--slate-s) 28%, var(--line, #25211e));
+  border-radius: 12px;
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--slate-s) 7%, transparent), transparent 45%),
+    color-mix(in srgb, var(--bg-surface, #151311) 92%, transparent);
+}
+
+.handoffSources > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg, #edf3f8);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.handoffSources > summary span {
+  display: grid;
+  min-width: 24px;
+  min-height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--fg-muted, #938b82);
+  background: color-mix(in srgb, var(--slate-s) 12%, transparent);
+  font-size: 0.62rem;
+}
+
+.handoffSources > p {
+  margin: 10px 0 0;
+  color: var(--fg-muted, #938b82);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.handoffSources > div {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.handoffSources article {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--slate-s) 16%, var(--line));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg, #0b0a09) 82%, transparent);
+}
+
+.handoffSources article > span {
+  color: color-mix(in srgb, var(--slate-s) 54%, var(--fg-muted, #938b82));
+  font-size: 0.62rem;
+}
+
+.handoffSources blockquote {
+  margin: 7px 0 0;
+  white-space: pre-wrap;
+  color: var(--fg, #edf3f8);
+  font: 0.88rem/1.55 Georgia, "Times New Roman", serif;
+}
+
 .manuscript {
   width: 100%;
   min-height: calc(100dvh - 270px);

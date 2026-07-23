@@ -10,6 +10,15 @@ const styles = readFileSync(
   new URL("./slateWorkspace.module.css", import.meta.url),
   "utf8",
 );
+const globalCompanion = readFileSync(
+  new URL("./PrismCompanion.tsx", import.meta.url),
+  "utf8",
+);
+const globalCompanionStyles = readFileSync(
+  new URL("./prismCompanion.module.css", import.meta.url),
+  "utf8",
+);
+const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Slate AI workspace controls", () => {
   it("keeps prose routing project-scoped with an explicit model picker", () => {
@@ -30,27 +39,32 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /resolveTitleSuggestion\("accepted"\)/u);
   });
 
-  it("renders a movable ephemeral Markdown Prism project companion", () => {
-    assert.match(workspace, /data-tutorial-target="slate-project-chat"/u);
-    assert.match(workspace, /onPointerDown=\{beginCompanionDrag\}/u);
-    assert.match(workspace, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
-    assert.match(workspace, /Ideas fade · the last 3 can recover after a close/u);
-    assert.match(workspace, /className=\{styles\.companionBubble\}/u);
+  it("hands safe Slate metadata to the movable global Prism companion", () => {
+    assert.match(workspace, /globalCompanionEnabled: boolean/u);
+    assert.match(workspace, /onCompanionContextChange/u);
+    assert.match(workspace, /projectId: project\.id/u);
+    assert.match(workspace, /sectionId: activeSection\?\.id \?\? null/u);
+    assert.match(workspace, /project && !globalCompanionEnabled/u);
+    assert.match(page, /globalCompanionEnabled/u);
+    assert.match(page, /onCompanionContextChange=\{setSlateCompanionContext\}/u);
+    assert.match(globalCompanion, /data-tutorial-target="prism-companion"/u);
+    assert.match(globalCompanion, /onPointerDown=\{beginDrag\}/u);
+    assert.match(globalCompanion, /<ReactMarkdown remarkPlugins=\{\[remarkGfm\]\}>/u);
+    assert.match(globalCompanion, /latest 3 recover on this surface/u);
     assert.match(
-      workspace,
-      /companionComposerBubble[\s\S]{0,3000}shouldSubmitComposerOnEnter/u,
+      globalCompanion,
+      /className=\{styles\.composer\}[\s\S]{0,3000}shouldSubmitComposerOnEnter/u,
     );
     assert.match(
-      workspace,
-      /companionComposerBubble[\s\S]{0,3000}enterKeyHint="send"/u,
+      globalCompanion,
+      /className=\{styles\.composer\}[\s\S]{0,3000}enterKeyHint="send"/u,
     );
-    assert.match(workspace, /<path d="M16 5\.2 27 25H5Z"/u);
-    assert.match(styles, /\.companionAvatar\s*\{/u);
-    assert.match(styles, /\.companionAvatar::before\s*\{/u);
-    assert.match(styles, /\.companionBubble\s*\{/u);
-    assert.match(styles, /@keyframes slateCompanionBubbleLife/u);
-    assert.match(styles, /@keyframes slateCompanionBubbleReducedLife/u);
-    assert.doesNotMatch(styles, /\.companionPanel\s*\{/u);
+    assert.match(globalCompanion, /<path d="M16 5\.2 27 25H5Z"/u);
+    assert.match(globalCompanionStyles, /\.avatar\s*\{/u);
+    assert.match(globalCompanionStyles, /\.avatar::before\s*\{/u);
+    assert.match(globalCompanionStyles, /\.bubble,/u);
+    assert.match(globalCompanionStyles, /prefers-reduced-motion: reduce/u);
+    assert.doesNotMatch(globalCompanionStyles, /\.companionPanel\s*\{/u);
   });
 
   it("renders a stoppable two-hemisphere Lux and Umbra deliberation surface", () => {

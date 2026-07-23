@@ -51,6 +51,9 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
+  normalizePrismStartupPreference,
+  normalizePrismCapabilityRevelations,
+  PRISM_CAPABILITY_IDS,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   parseStoredBotAudioVoiceProfileV1,
@@ -74,6 +77,8 @@ import {
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
   type GraphicsQuality,
+  type PrismStartupPreference,
+  type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
@@ -105,6 +110,8 @@ import {
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
+  startupPreference?: PrismStartupPreference;
+  capabilityRevelations?: PrismCapabilityRevelations;
   preferredProvider: ProviderName;
   ephemeralChatProviderPreferences?: EphemeralChatProviderPreferences;
   preferredImageProvider?: ImageProviderName;
@@ -233,6 +240,7 @@ export interface BackupSlateSnapshot {
   revisions: BackupSlateRow[];
   versions: BackupSlateRow[];
   sections: BackupSlateRow[];
+  handoffs: BackupSlateRow[];
   sectionVersions: BackupSlateRow[];
   manuscriptStates: BackupSlateRow[];
   continuitySources: BackupSlateRow[];
@@ -443,6 +451,7 @@ type SlateBackupTable =
   | "slate_revisions"
   | "slate_versions"
   | "slate_sections"
+  | "slate_handoffs"
   | "slate_section_versions"
   | "slate_manuscript_state"
   | "slate_continuity_sources"
@@ -579,6 +588,27 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "updated_at",
     ],
     deferredFields: ["parent_section_id"],
+  },
+  {
+    key: "handoffs",
+    table: "slate_handoffs",
+    primaryKey: "id",
+    columns: [
+      "id",
+      "direction",
+      "status",
+      "source_text",
+      "source_label",
+      "source_conversation_id",
+      "source_message_id",
+      "source_project_id",
+      "source_section_id",
+      "source_selection_start",
+      "source_selection_end",
+      "target_project_id",
+      "created_at",
+      "committed_at",
+    ],
   },
   {
     key: "sectionVersions",
@@ -876,6 +906,24 @@ const SLATE_REFERENCE_RULES: ReadonlyArray<{
     field: "parent_section_id",
     target: "sections",
     targetTable: "slate_sections",
+  },
+  {
+    source: "handoffs",
+    field: "source_project_id",
+    target: "projects",
+    targetTable: "slate_projects",
+  },
+  {
+    source: "handoffs",
+    field: "source_section_id",
+    target: "sections",
+    targetTable: "slate_sections",
+  },
+  {
+    source: "handoffs",
+    field: "target_project_id",
+    target: "projects",
+    targetTable: "slate_projects",
   },
   {
     source: "sectionVersions",
@@ -1314,11 +1362,17 @@ export function exportUserSnapshot(
   userId: string,
   userKey: Buffer,
 ): BackupSnapshot {
+  const livingShellState = db
+    .prepare(
+      "SELECT capability_revelations FROM living_shell_account_state WHERE user_id = ?",
+    )
+    .get(userId) as { capability_revelations?: string } | undefined;
   const user = db
     .prepare(
       `SELECT
          theme,
          graphics_quality,
+         startup_preference,
          preferred_provider,
          ephemeral_chat_provider_preferences,
          preferred_image_provider,
@@ -1380,6 +1434,7 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
+        startup_preference: string | null;
         preferred_provider: ProviderName;
         ephemeral_chat_provider_preferences: string | null;
         preferred_image_provider: ImageProviderName;
@@ -1447,6 +1502,13 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+        startupPreference: normalizePrismStartupPreference(
+          user.startup_preference,
+        ),
+        capabilityRevelations: normalizePrismCapabilityRevelations(
+          livingShellState?.capability_revelations,
+          { completedFallback: true },
+        ),
         preferredProvider: user.preferred_provider,
         ephemeralChatProviderPreferences:
           normalizeEphemeralChatProviderPreferences(
@@ -2561,12 +2623,44 @@ function importUserSnapshotWithinTransaction(
     const storedAutoFallbackChain = settings.autoFallbackChain
       ? serializeAutoFallbackChain(settings.autoFallbackChain)
       : null;
+    const currentLivingShellRow = db
+      .prepare(
+        "SELECT capability_revelations FROM living_shell_account_state WHERE user_id = ?",
+      )
+      .get(userId) as { capability_revelations?: string } | undefined;
+    const currentCapabilityRevelations = normalizePrismCapabilityRevelations(
+      currentLivingShellRow?.capability_revelations,
+    );
+    const importedCapabilityRevelations = normalizePrismCapabilityRevelations(
+      settings.capabilityRevelations,
+      { completedFallback: settings.capabilityRevelations === undefined },
+    );
+    const mergedCapabilityRevelations = Object.fromEntries(
+      PRISM_CAPABILITY_IDS.map((capability) => [
+        capability,
+        currentCapabilityRevelations[capability].revealed
+          ? currentCapabilityRevelations[capability]
+          : importedCapabilityRevelations[capability],
+      ]),
+    ) as PrismCapabilityRevelations;
+    db.prepare(
+      `UPDATE living_shell_account_state
+          SET capability_revelations = ?, updated_at = ?
+        WHERE user_id = ?`,
+    ).run(
+      JSON.stringify(
+        mergedCapabilityRevelations,
+      ),
+      new Date().toISOString(),
+      userId,
+    );
     db.prepare(
       `
       UPDATE users
       SET
         theme = ?,
         graphics_quality = ?,
+        startup_preference = ?,
         preferred_provider = ?,
         ephemeral_chat_provider_preferences = ?,
         preferred_image_provider = ?,
@@ -2635,6 +2729,7 @@ function importUserSnapshotWithinTransaction(
         ? settings.theme
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
+      normalizePrismStartupPreference(settings.startupPreference),
       settings.preferredProvider === "openai" ||
         settings.preferredProvider === "anthropic"
         ? settings.preferredProvider

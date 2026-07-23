@@ -51,6 +51,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     graphicsQuality: "high",
+    startupPreference: "home",
     preferredProvider: "local",
     ephemeralChatProviderPreferences: "{}",
     preferredImageProvider: "local",
@@ -109,6 +110,33 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     ...overrides,
   };
 }
+
+describe("resolveNextSettings — living shell startup", () => {
+  it("persists only Home, Slate, or Last workspace", () => {
+    assert.equal(
+      resolveNextSettings({ startupPreference: "slate" }, baseline())
+        .startupPreference,
+      "slate",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { startupPreference: "last_workspace" },
+        baseline(),
+      ).startupPreference,
+      "last_workspace",
+    );
+  });
+
+  it("preserves the saved value for missing or invalid patches", () => {
+    const current = baseline({ startupPreference: "slate" });
+    assert.equal(resolveNextSettings({}, current).startupPreference, "slate");
+    assert.equal(
+      resolveNextSettings({ startupPreference: "coffee" }, current)
+        .startupPreference,
+      "slate",
+    );
+  });
+});
 
 describe("resolveNextSettings — ephemeral chat providers", () => {
   it("inherits the global toggle by default and saves valid per-mode overrides", () => {

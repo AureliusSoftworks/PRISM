@@ -850,7 +850,7 @@ describe("mode tutorials", () => {
       '[data-tutorial-target="slate-structure"]',
       '[data-tutorial-target="slate-draft"]',
       '[data-tutorial-target="slate-manuscript"]',
-      '[data-tutorial-target="slate-project-chat"]',
+      '[data-tutorial-target="prism-companion"]',
       '[data-tutorial-target="slate-deliberation"]',
       '[data-tutorial-target="slate-revision"]',
     ]);

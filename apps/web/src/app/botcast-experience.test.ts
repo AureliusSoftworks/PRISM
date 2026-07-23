@@ -437,7 +437,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       pageSource,
-      /ambientSipAllowed:\s*coffeeAmbientSipSpeakerBotId === null \|\|\s*coffeeAmbientSipSpeakerBotId !== bot\.id/u,
+      /ambientSipAllowed:\s*!coffeeSipTalkGateActive &&\s*\(coffeeAmbientSipSpeakerBotId === null \|\|\s*coffeeAmbientSipSpeakerBotId !== bot\.id\)/u,
     );
     assert.match(
       source,

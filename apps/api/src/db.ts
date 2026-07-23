@@ -19,6 +19,10 @@ import type {
 import {
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
+  PRISM_ONBOARDING_VERSION,
+  createCompletedPrismOnboardingState,
+  createPrismCapabilityRevelations,
+  createPrismTutorialProgress,
   sanitizePrismMoodState,
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
@@ -170,6 +174,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
       graphics_quality TEXT NOT NULL DEFAULT 'high',
+      startup_preference TEXT NOT NULL DEFAULT 'home',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
       ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}',
       preferred_image_provider TEXT NOT NULL DEFAULT 'local',
@@ -288,6 +293,35 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user_accepted
       ON legal_acceptances(user_id, accepted_at DESC);
+    CREATE TABLE IF NOT EXISTS living_shell_account_state (
+      user_id TEXT PRIMARY KEY,
+      onboarding_version INTEGER NOT NULL DEFAULT 0,
+      onboarding_state TEXT NOT NULL DEFAULT '{}',
+      tutorial_progress TEXT NOT NULL DEFAULT '{}',
+      capability_revelations TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_handoffs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      direction TEXT NOT NULL CHECK(direction IN ('zen-to-slate', 'slate-to-zen')),
+      status TEXT NOT NULL DEFAULT 'prepared' CHECK(status IN ('prepared', 'committed')),
+      source_text TEXT NOT NULL,
+      source_label TEXT NOT NULL,
+      source_conversation_id TEXT,
+      source_message_id TEXT,
+      source_project_id TEXT,
+      source_section_id TEXT,
+      source_selection_start INTEGER NOT NULL,
+      source_selection_end INTEGER NOT NULL,
+      target_project_id TEXT,
+      created_at TEXT NOT NULL,
+      committed_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_slate_handoffs_user_project
+      ON slate_handoffs(user_id, target_project_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1642,6 +1676,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
     );
   }
+  const hasStartupPreference = userColumns.some(
+    (column) => column.name === "startup_preference",
+  );
+  if (!hasStartupPreference) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN startup_preference TEXT NOT NULL DEFAULT 'home';",
+    );
+  }
   const hasVoiceMode = userColumns.some(
     (column) => column.name === "voice_mode",
   );
@@ -2191,6 +2233,38 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     SET last_active_at = COALESCE(last_active_at, created_at)
     WHERE last_active_at IS NULL OR last_active_at = '';
   `);
+  const livingShellColumns = db
+    .prepare("PRAGMA table_info(living_shell_account_state)")
+    .all() as Array<{ name: string }>;
+  const addedCapabilityRevelations = !livingShellColumns.some(
+    (column) => column.name === "capability_revelations",
+  );
+  if (addedCapabilityRevelations) {
+    db.exec(
+      "ALTER TABLE living_shell_account_state ADD COLUMN capability_revelations TEXT NOT NULL DEFAULT '{}';",
+    );
+    db.prepare(
+      `UPDATE living_shell_account_state
+          SET capability_revelations = ?`,
+    ).run(
+      JSON.stringify(
+        createPrismCapabilityRevelations({ completed: true }),
+      ),
+    );
+  }
+  db.prepare(
+    `INSERT OR IGNORE INTO living_shell_account_state (
+       user_id, onboarding_version, onboarding_state, tutorial_progress,
+       capability_revelations, updated_at
+     )
+     SELECT id, ?, ?, ?, ?, COALESCE(last_active_at, created_at)
+       FROM users`,
+  ).run(
+    PRISM_ONBOARDING_VERSION,
+    JSON.stringify(createCompletedPrismOnboardingState()),
+    JSON.stringify(createPrismTutorialProgress("completed")),
+    JSON.stringify(createPrismCapabilityRevelations({ completed: true })),
+  );
 
   // Migrate existing DBs that predate the per-message provider / bot columns.
   const messageColumns = db

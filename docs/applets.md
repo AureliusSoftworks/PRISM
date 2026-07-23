@@ -1,8 +1,13 @@
 # Prism Applets
 
-Prism applets are experience modules: Chat, Zen, Coffee, Signal, Slate, and
-future mode surfaces. Their versions track felt product behavior, not internal
-implementation churn.
+Applet versions are the provenance catalog for versioned interactive modules.
+They no longer define PRISM's product navigation. The living shell classifies
+public surfaces as **Home**, **Experiences**, **Studios**, or **Tools**; see
+[Living Shell Architecture](./living-shell-architecture.md).
+
+Chat and Zen now belong to Home, Coffee and Signal are Experiences, and Slate
+is a Studio. Their applet versions continue to track felt product behavior, not
+internal implementation churn.
 
 Applet versions are independent from the Prism app release version. Prism can
 ship as `0.5.2` while Coffee is `v0.7`.
@@ -20,7 +25,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 - Keep each changelog entry short enough to help QA, support, roadmap planning,
   and future migration work.
 
-## Current Applets
+## Current Versioned Modules
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |

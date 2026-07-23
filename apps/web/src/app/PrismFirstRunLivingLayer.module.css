@@ -1,0 +1,353 @@
+.canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 940;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: rgba(248, 250, 255, 0.96);
+  background: #020207;
+  isolation: isolate;
+}
+
+.darkness,
+.arrivalLight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.darkness {
+  z-index: -3;
+  background:
+    radial-gradient(circle at 50% 62%, rgba(54, 43, 82, 0.18), transparent 30%),
+    linear-gradient(180deg, #000 0%, #05040a 100%);
+}
+
+.arrivalLight {
+  z-index: -2;
+  opacity: 0;
+  background: radial-gradient(
+    circle at 50% 58%,
+    rgba(255, 255, 255, 0.92) 0%,
+    rgba(113, 235, 255, 0.34) 11%,
+    rgba(203, 91, 255, 0.22) 24%,
+    rgba(12, 10, 26, 0.08) 56%,
+    transparent 74%
+  );
+  animation: illuminate 2.6s 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
+}
+
+.orb {
+  position: absolute;
+  pointer-events: none;
+  left: 50%;
+  top: 58%;
+  z-index: 2;
+  width: 78px;
+  height: 78px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translate(-50%, 58vh) scale(0.42);
+  background:
+    radial-gradient(circle at 35% 28%, #fff 0 5%, transparent 18%),
+    conic-gradient(from 210deg, #ff5c94, #ffc65c, #a9ff68, #62e7ff, #a97aff, #ff5c94);
+  box-shadow:
+    0 0 28px rgba(255, 255, 255, 0.9),
+    0 0 90px rgba(111, 222, 255, 0.62),
+    0 0 180px rgba(188, 87, 255, 0.38);
+  animation:
+    orbArrival 1.65s 0.18s cubic-bezier(0.16, 0.8, 0.2, 1) forwards,
+    orbUnfoldAway 0.72s 1.42s cubic-bezier(0.2, 0.72, 0.2, 1) forwards;
+}
+
+.canvas[data-stage="choices"] .orb {
+  top: 24%;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(0.72);
+  animation: orbChoiceHover 5.2s ease-in-out infinite;
+}
+
+.orbCore {
+  width: 50px;
+  height: 50px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  font-size: 25px;
+  font-weight: 750;
+  text-shadow: 0 0 12px #fff;
+  background: rgba(3, 3, 11, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+.awakening {
+  width: min(860px, calc(100vw - 48px));
+  display: grid;
+  grid-template-columns: minmax(230px, 0.82fr) minmax(300px, 1.18fr);
+  align-items: center;
+  gap: clamp(34px, 7vw, 88px);
+}
+
+.prismBody {
+  position: relative;
+  width: min(290px, 38vw);
+  aspect-ratio: 0.88;
+  justify-self: end;
+  opacity: 0;
+  transform: scale(0.22);
+  animation: prismUnfold 1.15s 1.46s cubic-bezier(0.16, 0.85, 0.22, 1) forwards;
+}
+
+.prismHalo {
+  position: absolute;
+  inset: -15%;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 210deg,
+    rgba(255, 82, 143, 0.34),
+    rgba(255, 199, 90, 0.3),
+    rgba(167, 255, 101, 0.28),
+    rgba(92, 228, 255, 0.34),
+    rgba(171, 117, 255, 0.34),
+    rgba(255, 82, 143, 0.34)
+  );
+  filter: blur(28px);
+}
+
+.prismGlass {
+  position: absolute;
+  inset: 0 0 13%;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 22px;
+  border-radius: 50%;
+  color: rgba(246, 250, 255, 0.96);
+  background:
+    radial-gradient(circle at 48% 42%, rgba(61, 73, 90, 0.32), transparent 34%),
+    #030508;
+  border: 11px solid rgba(137, 145, 157, 0.9);
+  box-shadow:
+    inset 0 0 54px rgba(114, 207, 255, 0.15),
+    0 0 0 2px rgba(255, 255, 255, 0.34),
+    0 26px 70px rgba(0, 0, 0, 0.7);
+}
+
+.prismEyes {
+  font-size: clamp(28px, 4vw, 43px);
+  letter-spacing: 0.32em;
+  text-shadow: 0 0 18px rgba(226, 246, 255, 0.72);
+}
+
+.prismMouth {
+  font-size: clamp(27px, 3.5vw, 39px);
+}
+
+.prismMedallion {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  transform: translateX(-50%);
+  color: white;
+  background: #090a10;
+  border: 3px solid rgba(199, 205, 217, 0.78);
+  box-shadow: 0 0 32px rgba(128, 222, 255, 0.52);
+}
+
+.awakeningCopy,
+.choiceHeading,
+.choiceField {
+  opacity: 0;
+  transform: translateY(18px);
+  animation: copyForm 0.85s 2.25s ease-out forwards;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: rgba(187, 211, 232, 0.72);
+  font-size: 0.73rem;
+  font-weight: 760;
+  letter-spacing: 0.24em;
+}
+
+.awakening h1,
+.choices h1 {
+  margin: 0;
+  font-family: var(--font-display, ui-serif, Georgia, serif);
+  font-size: clamp(2.5rem, 5.2vw, 5rem);
+  font-weight: 520;
+  letter-spacing: -0.045em;
+}
+
+.awakeningCopy p:not(.eyebrow),
+.choiceHeading p:not(.eyebrow) {
+  max-width: 570px;
+  margin: 18px 0 0;
+  color: rgba(222, 228, 239, 0.76);
+  font-size: clamp(1rem, 1.55vw, 1.2rem);
+  line-height: 1.65;
+}
+
+.primary {
+  margin-top: 30px;
+  padding: 13px 18px;
+  color: #08090e;
+  font: inherit;
+  font-weight: 760;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(248, 250, 255, 0.96);
+  cursor: pointer;
+}
+
+.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 34px rgba(139, 218, 255, 0.2);
+}
+
+.choices {
+  width: min(1040px, calc(100vw - 48px));
+  padding-top: 96px;
+}
+
+.choiceHeading {
+  text-align: center;
+  animation-delay: 0.15s;
+}
+
+.choiceHeading p:not(.eyebrow) {
+  margin-inline: auto;
+}
+
+.choiceField {
+  position: relative;
+  margin-top: 54px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  animation-delay: 0.35s;
+}
+
+.choiceRay {
+  position: absolute;
+  left: 50%;
+  top: -38px;
+  width: 76%;
+  height: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(90deg, #ff669a, #ffd06a, #a9ff72, #66e7ff, #ad7cff);
+  box-shadow: 0 0 18px rgba(183, 225, 255, 0.54);
+}
+
+.choice {
+  min-height: 190px;
+  padding: 25px;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  align-content: start;
+  gap: 10px;
+  color: inherit;
+  text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 24px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.025));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
+  cursor: pointer;
+  backdrop-filter: blur(18px);
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.choice:hover,
+.choice:focus-visible {
+  transform: translateY(-5px);
+  border-color: rgba(213, 238, 255, 0.5);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.14), rgba(113, 197, 255, 0.045));
+}
+
+.choiceGlyph {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(5, 7, 14, 0.66);
+  box-shadow: 0 0 22px rgba(129, 221, 255, 0.24);
+}
+
+.choice strong {
+  font-size: 1.16rem;
+}
+
+.choice > span:last-child {
+  color: rgba(220, 226, 238, 0.66);
+  line-height: 1.5;
+}
+
+@keyframes orbArrival {
+  0% { opacity: 0; transform: translate(-50%, 58vh) scale(0.42); }
+  52% { opacity: 1; }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes illuminate {
+  0% { opacity: 0; transform: scale(0.45); }
+  55% { opacity: 0.72; }
+  100% { opacity: 1; transform: scale(1.35); }
+}
+
+@keyframes orbUnfoldAway {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -50%) scale(4.2); }
+}
+
+@keyframes prismUnfold {
+  0% { opacity: 0; transform: scale(0.22); filter: brightness(2.4); }
+  68% { opacity: 1; transform: scale(1.04); filter: brightness(1.25); }
+  100% { opacity: 1; transform: scale(1); filter: brightness(1); }
+}
+
+@keyframes copyForm {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes orbChoiceHover {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.72); }
+  50% { transform: translate(-50%, calc(-50% - 7px)) scale(0.76); }
+}
+
+@media (max-width: 760px) {
+  .awakening { grid-template-columns: 1fr; text-align: center; }
+  .prismBody { width: 190px; justify-self: center; }
+  .awakeningCopy p:not(.eyebrow) { margin-inline: auto; }
+  .choices { padding-top: 120px; }
+  .choiceField { grid-template-columns: 1fr; max-height: 55vh; overflow-y: auto; }
+  .choiceRay { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arrivalLight,
+  .orb,
+  .prismBody,
+  .awakeningCopy,
+  .choiceHeading,
+  .choiceField {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .orb { transform: translate(-50%, -50%) scale(0.72); }
+  .canvas[data-stage="awakening"] .orb {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  .choice { transition: none; }
+}

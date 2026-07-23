@@ -630,6 +630,7 @@ type SignalErrorToast = {
 
 export interface BotcastExperienceProps {
   bots: BotcastBotSummary[];
+  initialCastBotIds?: string[];
   botGroups: readonly BotcastBotGroupSummary[];
   request: BotcastApiRequest;
   preferredProvider: "local" | "openai" | "anthropic";
@@ -718,6 +719,13 @@ export interface BotcastExperienceProps {
   renderProducerGuestComposer?: (
     state: BotcastProducerGuestComposerState,
   ) => ReactNode;
+  onCompanionContextChange?: (
+    context: {
+      showId: string;
+      episodeId: string | null;
+      botIds: string[];
+    } | null,
+  ) => void;
 }
 
 type BotcastLiveSpeech = {
@@ -1503,6 +1511,7 @@ const SignalCameraStageViewport = forwardRef<
 
 export function BotcastExperience({
   bots,
+  initialCastBotIds = [],
   botGroups,
   request,
   preferredProvider,
@@ -1532,12 +1541,20 @@ export function BotcastExperience({
   navigationHeader,
   producerName = "You",
   renderProducerGuestComposer,
+  onCompanionContextChange,
 }: BotcastExperienceProps): React.JSX.Element {
   const { closeMenu, openMenu } = usePrismMenu();
   const eligibleBots = useMemo(
     () => [...bots].sort((a, b) => a.name.localeCompare(b.name)),
     [bots],
   );
+  const initialCast = useMemo(() => {
+    const availableIds = new Set(bots.map((bot) => bot.id));
+    return Array.from(new Set(initialCastBotIds)).filter((botId) =>
+      availableIds.has(botId),
+    );
+  }, [bots, initialCastBotIds]);
+  const initialHostBotId = initialCast[0] ?? "";
   const botsById = useMemo(
     () => new Map(eligibleBots.map((bot) => [bot.id, bot])),
     [eligibleBots],
@@ -1569,14 +1586,14 @@ export function BotcastExperience({
     useState<SignalReplayRenderTarget | null>(null);
   const [replayRecordingsByEpisodeId, setReplayRecordingsByEpisodeId] =
     useState<Record<string, ReplayRecordingV1 | null>>({});
-  const [hostDraftId, setHostDraftId] = useState("");
+  const [hostDraftId, setHostDraftId] = useState(initialHostBotId);
   const [hostSearchDraft, setHostSearchDraft] = useState("");
   const [hostGroupFilterId, setHostGroupFilterId] = useState(
     SIGNAL_HOST_GROUP_FILTER_ALL,
   );
   const [showPremiseInspirationDraft, setShowPremiseInspirationDraft] =
     useState("");
-  const [guestDraftId, setGuestDraftId] = useState("");
+  const [guestDraftId, setGuestDraftId] = useState(initialCast[1] ?? "");
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const producerBriefSavedLength = signalProducerBriefSavedLength(
@@ -2445,6 +2462,26 @@ export function BotcastExperience({
   }, [episodeModelDraft, modelOptions]);
 
   const selectedShow = shows.find((show) => show.id === selectedShowId) ?? null;
+  useEffect(() => {
+    const visibleEpisode = episode ?? replayEpisode;
+    onCompanionContextChange?.(
+      selectedShow
+        ? {
+            showId: selectedShow.id,
+            episodeId: visibleEpisode?.id ?? null,
+            botIds: Array.from(
+              new Set([
+                selectedShow.hostBotId,
+                ...(visibleEpisode?.guestBotId
+                  ? [visibleEpisode.guestBotId]
+                  : []),
+              ]),
+            ),
+          }
+        : null,
+    );
+    return () => onCompanionContextChange?.(null);
+  }, [episode, onCompanionContextChange, replayEpisode, selectedShow]);
   const bookedHostBotIds = useMemo(
     () => new Set(shows.map((show) => show.hostBotId)),
     [shows],
@@ -3977,7 +4014,10 @@ export function BotcastExperience({
       try {
         const nextShows = await loadShows();
         if (!active) return;
-        const first = nextShows[0] ?? null;
+        const first =
+          nextShows.find((show) => show.hostBotId === initialHostBotId) ??
+          nextShows[0] ??
+          null;
         if (first) {
           setSelectedShowId(first.id);
           setShowNameDraft(first.name);
@@ -3992,7 +4032,7 @@ export function BotcastExperience({
     return () => {
       active = false;
     };
-  }, [loadEpisodes, loadShows]);
+  }, [initialHostBotId, loadEpisodes, loadShows]);
 
   const selectShow = useCallback(
     async (show: BotcastShow): Promise<void> => {

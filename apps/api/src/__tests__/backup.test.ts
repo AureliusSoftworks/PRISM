@@ -10,6 +10,11 @@ import {
   type BackupSnapshot,
 } from "../backup.ts";
 import {
+  createPendingLivingShellAccountProgress,
+  getLivingShellAccountProgress,
+  revealLivingShellCapability,
+} from "../living-shell-progress.ts";
+import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
   MAX_ZEN_WALLPAPER_STYLE_NOTES_LENGTH,
@@ -295,6 +300,77 @@ describe("backup graphics quality", () => {
         ) as { graphics_quality: string }).graphics_quality,
         "high",
       );
+    });
+  });
+});
+
+describe("backup living shell startup preference", () => {
+  it("round-trips saved choices and defaults legacy snapshots to Home", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        "UPDATE users SET startup_preference = 'last_workspace' WHERE id = ?",
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.startupPreference, "last_workspace");
+
+      db.prepare(
+        "UPDATE users SET startup_preference = 'slate' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("user-1") as { startup_preference: string }
+        ).startup_preference,
+        "last_workspace",
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.startupPreference;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("user-1") as { startup_preference: string }
+        ).startup_preference,
+        "home",
+      );
+    });
+  });
+});
+
+describe("backup living shell revelations", () => {
+  it("round-trips permanent capability state without importing progress patches", () => {
+    withBackupDatabase((db, userKey) => {
+      createPendingLivingShellAccountProgress(db, "user-1");
+      revealLivingShellCapability(
+        db,
+        "user-1",
+        "marketplace",
+        "bot_saved",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.settings?.capabilityRevelations?.marketplace.revealed,
+        true,
+      );
+      assert.equal(
+        snapshot.settings?.capabilityRevelations?.coffee.revealed,
+        false,
+      );
+
+      revealLivingShellCapability(db, "user-1", "coffee", "group_saved");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = getLivingShellAccountProgress(db, "user-1");
+      assert.equal(restored.capabilityRevelations.marketplace.revealed, true);
+      assert.equal(restored.capabilityRevelations.coffee.revealed, true);
     });
   });
 });
@@ -923,6 +999,7 @@ describe("backup Slate account data", () => {
         assert.equal("user_id" in rows[0]!, false, `${collection} must not carry a source tenant id`);
       }
 
+      db.prepare("DELETE FROM slate_handoffs WHERE user_id = ?").run("user-1");
       db.prepare("DELETE FROM slate_series WHERE id = ? AND user_id = ?").run(
         "slate-one-series",
         "user-1",
@@ -1097,6 +1174,7 @@ const SLATE_BACKUP_TEST_TABLES = [
   "slate_revisions",
   "slate_versions",
   "slate_sections",
+  "slate_handoffs",
   "slate_section_versions",
   "slate_manuscript_state",
   "slate_continuity_sources",
@@ -1224,6 +1302,25 @@ function seedSlateBackupFixture(
     3,
     "section-hash",
     "mutation-3",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_handoffs (
+      id, user_id, direction, status, source_text, source_label,
+      source_conversation_id, source_message_id, source_selection_start,
+      source_selection_end, target_project_id, created_at, committed_at
+    ) VALUES (?, ?, 'zen-to-slate', 'committed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-handoff`,
+    userId,
+    "The restored source.",
+    "Iris · A quiet spark",
+    `${prefix}-conversation`,
+    `${prefix}-message`,
+    0,
+    20,
+    projectId,
     now,
     now,
   );

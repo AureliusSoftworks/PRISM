@@ -106,6 +106,52 @@ describe("createDatabase English voice engine compatibility", () => {
   });
 });
 
+describe("createDatabase living shell startup preference", () => {
+  it("adds a privacy-neutral Home default without rewriting saved choices", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "prism-startup-preference-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDir = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDir, "startup-preference.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    try {
+      const db = createDatabase();
+      db.prepare(
+        "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        "startup-user",
+        "startup-user@example.com",
+        "Startup User",
+        "hash",
+        "salt",
+        "cipher",
+        "iv",
+        "tag",
+        "2026-07-22T00:00:00.000Z",
+        "2026-07-22T00:00:00.000Z",
+      );
+
+      const readPreference = (): string =>
+        (
+          db
+            .prepare("SELECT startup_preference FROM users WHERE id = ?")
+            .get("startup-user") as { startup_preference: string }
+        ).startup_preference;
+      assert.equal(readPreference(), "home");
+
+      db.prepare(
+        "UPDATE users SET startup_preference = 'slate' WHERE id = ?",
+      ).run("startup-user");
+      initializeDatabase(db);
+      assert.equal(readPreference(), "slate");
+      db.close();
+    } finally {
+      restoreEnv("DB_PATH", previousDbPath);
+      restoreEnv("LOCALAI_DATA_DIR", previousDataDir);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("createDatabase legal acceptance schema", () => {
   it("creates versioned, account-scoped clickwrap records", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "prism-legal-schema-"));

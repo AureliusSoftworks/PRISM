@@ -198,6 +198,8 @@ describe("PRISM intro sequence", () => {
     assert.match(componentSource, /id=\{visualDescriptionId\}/u);
     assert.match(componentSource, /previouslyFocused\.focus/u);
     assert.match(componentSource, /event\.key === "Escape"/u);
+    assert.match(componentSource, /onClose\("skipped"\)/u);
+    assert.match(componentSource, /onClose\("completed"\)/u);
     assert.match(componentSource, /event\.key === "ArrowRight"/u);
     assert.match(componentSource, /event\.key === "ArrowLeft"/u);
     assert.match(componentSource, /event\.key !== "Tab"/u);
@@ -218,10 +220,12 @@ describe("PRISM intro sequence", () => {
     );
   });
 
-  it("mounts globally, starts only at the fresh-install welcome, and replays from About", () => {
+  it("mounts globally, starts from account onboarding, and replays from About", () => {
     assert.match(layoutSource, /<PrismIntroSequenceProvider>/u);
-    assert.match(pageSource, /requestFirstRunPrismIntro\(\)/u);
-    assert.match(pageSource, /shouldShowFirstLaunchWelcome/u);
+    assert.match(pageSource, /requestFirstRunPrismIntro\(\{[\s\S]*?force: true/u);
+    assert.match(pageSource, /onboardingState\.stage !== "intro"/u);
+    assert.doesNotMatch(pageSource, /shouldShowFirstLaunchWelcome/u);
+    assert.match(pageSource, /shouldShowPreAuthChecklist/u);
     assert.match(pageSource, /data-prism-intro-replay="true"/u);
     assert.match(pageSource, />Watch the introduction</u);
     assert.match(pageSource, /onClick=\{watchPrismIntroduction\}/u);

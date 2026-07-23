@@ -1,3 +1,5 @@
+import { PRISM_SURFACES } from "./prismSurfaceRegistry.ts";
+
 export type PrismSurfaceView =
   | "hub"
   | "chat"
@@ -8,8 +10,9 @@ export type PrismSurfaceView =
   | "story";
 
 /**
- * Product Chat now owns the immersive canvas. Deprecated Zen/Sandbox route
- * names are compatibility aliases only; the visible switcher emits Chat/Coffee.
+ * The current `chat` route hosts All Bots, Prism Home, persona Zen Homes, and
+ * group Homes while the living shell is introduced. Deprecated Zen/Sandbox
+ * route names remain compatibility aliases only.
  */
 export function prismSurfaceViewForRouteParam(viewParam: string | null): PrismSurfaceView {
   if (viewParam === "chat" || viewParam === "zen" || viewParam === "sandbox") {
@@ -23,6 +26,11 @@ export function prismSurfaceViewForRouteParam(viewParam: string | null): PrismSu
 }
 
 export function prismHrefForSurfaceView(view: PrismSurfaceView): string {
-  if (view === "hub" || view === "sandbox" || view === "chat") return "/?view=chat";
-  return `/?view=${view}`;
+  if (view === "hub" || view === "sandbox" || view === "chat") {
+    return PRISM_SURFACES.home.href;
+  }
+  if (view === "coffee") return PRISM_SURFACES.coffee.href;
+  if (view === "botcast") return PRISM_SURFACES.signal.href;
+  if (view === "slate") return PRISM_SURFACES.slate.href;
+  return PRISM_SURFACES.story.href;
 }

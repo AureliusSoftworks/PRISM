@@ -11,6 +11,29 @@ import type {
 import type { BotPowerObserverProjectionV1 } from "./botPower.js";
 
 export {
+  PRISM_COMPANION_HANDOFF_DIRECTIONS,
+  PRISM_COMPANION_MESSAGE_MAX_LENGTH,
+  PRISM_COMPANION_RECOVERY_LIMIT,
+  PRISM_COMPANION_REFERENCE_ID_MAX_LENGTH,
+  PRISM_COMPANION_SURFACE_IDS,
+  PRISM_COMPANION_TOOL_IDS,
+  isPrismCompanionSurfaceId,
+  normalizePrismCompanionActionIntent,
+  normalizePrismCompanionActionIntents,
+  normalizePrismCompanionMessages,
+  normalizePrismCompanionRequest,
+  normalizePrismCompanionSurfaceReference,
+  type PrismCompanionActionIntent,
+  type PrismCompanionHandoffDirection,
+  type PrismCompanionMessage,
+  type PrismCompanionRequest,
+  type PrismCompanionResponse,
+  type PrismCompanionSurfaceId,
+  type PrismCompanionSurfaceReference,
+  type PrismCompanionToolId,
+} from "./prismCompanion.js";
+
+export {
   PRISM_EULA_ACCEPTANCE_ACTION,
   PRISM_EULA_ACCEPTANCE_SNAPSHOT,
   PRISM_EULA_AGREEMENT_CONFIRMATION,
@@ -2841,3 +2864,6 @@ export * from "./graphicsQuality.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";
 export * from "./replay.js";
+export * from "./livingShell.js";
+export * from "./livingShellProgress.js";
+export * from "./slateHandoff.js";

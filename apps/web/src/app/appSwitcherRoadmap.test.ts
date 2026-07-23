@@ -2,29 +2,28 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { prismPlannedRoadmapApplets } from "./appletVersions.ts";
-
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 const cssSource = readFileSync(
-  new URL("./PrismMenu.module.css", import.meta.url),
+  new URL("./page.module.css", import.meta.url),
   "utf8",
 );
 
-describe("app switcher roadmap", () => {
-  it("exposes every planned applet through the shared menu roadmap section", () => {
-    assert.ok(prismPlannedRoadmapApplets().length > 0);
-    assert.match(pageSource, /const roadmapApplets = prismPlannedRoadmapApplets\(\)/u);
-    assert.match(pageSource, /id: "roadmap-label"/u);
-    assert.match(pageSource, /label: "Roadmap"/u);
-    assert.match(pageSource, /roadmapApplets\.map\(\(applet\): PrismMenuEntry =>/u);
-    assert.match(pageSource, /disabledReason: "This applet is on the PRISM roadmap\."/u);
-    assert.match(pageSource, /<PrismMenuSurface/u);
+describe("living-shell location strip", () => {
+  it("replaces visible flat applet switching with location-aware navigation", () => {
+    assert.match(pageSource, /const renderLocationStrip =/u);
+    assert.match(pageSource, /aria-label="Current PRISM location"/u);
+    assert.match(pageSource, /aria-label="Open All Bots Home"/u);
+    assert.match(pageSource, /aria-label="Session status"/u);
+    assert.equal(pageSource.match(/renderAppSwitcher\(/gu)?.length ?? 0, 0);
+    assert.ok((pageSource.match(/renderLocationStrip\(/gu)?.length ?? 0) > 1);
   });
 
-  it("inherits the compact responsive shared-menu contract", () => {
-    assert.match(cssSource, /max-width: min\(320px, calc\(100vw - 16px\)\)/u);
-    assert.match(cssSource, /min-height: 36px/u);
-    assert.match(cssSource, /@media \(pointer: coarse\)/u);
-    assert.match(cssSource, /min-height: 44px/u);
+  it("stays compact and hides secondary status on narrow viewports", () => {
+    assert.match(cssSource, /\.locationStrip\s*\{/u);
+    assert.match(cssSource, /\.locationStripStatus\s*\{/u);
+    assert.match(
+      cssSource,
+      /@media \(max-width: 720px\)[\s\S]*\.locationStripStatus\s*\{[\s\S]*display: none/u,
+    );
   });
 });

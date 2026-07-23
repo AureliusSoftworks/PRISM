@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import type { PrismIntroResolution } from "@localai/shared";
 import {
   PRISM_INTRO_SCENES,
   clampPrismIntroSceneIndex,
@@ -26,7 +27,10 @@ import styles from "./PrismIntroSequence.module.css";
 type PrismIntroSequenceMode = "first-run" | "replay";
 
 interface PrismIntroSequenceContextValue {
-  requestFirstRunPrismIntro(): void;
+  requestFirstRunPrismIntro(options?: {
+    force?: boolean;
+    onResolved?: (resolution: Exclude<PrismIntroResolution, "pending">) => void;
+  }): void;
   replayPrismIntro(): void;
 }
 
@@ -59,14 +63,22 @@ export function PrismIntroSequenceProvider({
 }): React.JSX.Element {
   const [mode, setMode] = useState<PrismIntroSequenceMode | null>(null);
   const firstRunResolvedThisSessionRef = useRef(false);
+  const firstRunResolutionRef = useRef<
+    ((resolution: Exclude<PrismIntroResolution, "pending">) => void) | null
+  >(null);
 
-  const requestFirstRunPrismIntro = useCallback(() => {
-    if (firstRunResolvedThisSessionRef.current) return;
+  const requestFirstRunPrismIntro = useCallback((options?: {
+    force?: boolean;
+    onResolved?: (resolution: Exclude<PrismIntroResolution, "pending">) => void;
+  }) => {
+    if (firstRunResolvedThisSessionRef.current && !options?.force) return;
+    if (options?.force) firstRunResolvedThisSessionRef.current = false;
     const storage = prismIntroLocalStorage();
-    if (storage && prismIntroSequenceWasSeen(storage)) {
+    if (!options?.force && storage && prismIntroSequenceWasSeen(storage)) {
       firstRunResolvedThisSessionRef.current = true;
       return;
     }
+    firstRunResolutionRef.current = options?.onResolved ?? null;
     setMode((current) => current ?? "first-run");
   }, []);
 
@@ -74,18 +86,20 @@ export function PrismIntroSequenceProvider({
     setMode("replay");
   }, []);
 
-  const closePrismIntro = useCallback(() => {
-    setMode((current) => {
-      if (current === "first-run") {
-        firstRunResolvedThisSessionRef.current = true;
-        const storage = prismIntroLocalStorage();
-        if (storage) {
-          markPrismIntroSequenceSeen(storage);
-        }
+  const closePrismIntro = useCallback((
+    resolution: Exclude<PrismIntroResolution, "pending">,
+  ) => {
+    if (mode === "first-run") {
+      firstRunResolvedThisSessionRef.current = true;
+      const storage = prismIntroLocalStorage();
+      if (storage) {
+        markPrismIntroSequenceSeen(storage);
       }
-      return null;
-    });
-  }, []);
+      firstRunResolutionRef.current?.(resolution);
+      firstRunResolutionRef.current = null;
+    }
+    setMode(null);
+  }, [mode]);
 
   const value = useMemo(
     () => ({ requestFirstRunPrismIntro, replayPrismIntro }),
@@ -107,7 +121,9 @@ function PrismIntroSequenceDialog({
   onClose,
 }: {
   mode: PrismIntroSequenceMode;
-  onClose: () => void;
+  onClose: (
+    resolution: Exclude<PrismIntroResolution, "pending">,
+  ) => void;
 }): React.JSX.Element | null {
   const [sceneIndex, setSceneIndex] = useState(0);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -185,7 +201,7 @@ function PrismIntroSequenceDialog({
         if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
-          onClose();
+          onClose("skipped");
           return;
         }
         if (event.key === "ArrowRight") {
@@ -264,7 +280,7 @@ function PrismIntroSequenceDialog({
         <button
           type="button"
           className={styles.skipButton}
-          onClick={onClose}
+          onClick={() => onClose("skipped")}
           aria-label={
             mode === "first-run"
               ? "Skip the PRISM introduction"
@@ -330,7 +346,7 @@ function PrismIntroSequenceDialog({
             className={styles.nextButton}
             onClick={() => {
               if (isFinalScene) {
-                onClose();
+                onClose("completed");
               } else {
                 goToScene(sceneIndex + 1);
               }
