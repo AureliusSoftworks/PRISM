@@ -244,6 +244,9 @@ describe("createDatabase bot export hash migration", () => {
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
       db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
+      db.exec("ALTER TABLE users DROP COLUMN atmosphere_style;");
+      db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_id;");
+      db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_style;");
       db.exec(
         "ALTER TABLE botcast_shows DROP COLUMN fallback_studio_accent_variant;"
       );
@@ -297,6 +300,19 @@ describe("createDatabase bot export hash migration", () => {
           .prepare("SELECT graphics_quality FROM users WHERE id = ?")
           .get("user-1") as { graphics_quality: string }).graphics_quality,
         "high",
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "atmosphere_style")
+          ?.dflt_value,
+        "'prismatic'",
+      );
+      assert.ok(
+        userColumns.some((column) => column.name === "hub_atmosphere_image_id"),
+      );
+      assert.ok(
+        userColumns.some(
+          (column) => column.name === "hub_atmosphere_image_style",
+        ),
       );
       assert.ok(
         userColumns.some(
@@ -436,6 +452,12 @@ describe("createDatabase bot export hash migration", () => {
         false,
         "Avatar Details belongs to custom bots, not Default Prism settings"
       );
+      assert.ok(
+        userColumns.some(
+          (column) =>
+            column.name === "prism_default_bot_face_blink_rotation_deg",
+        ),
+      );
       assert.ok(columns.some((column) => column.name === "face_eyes_font"));
       assert.ok(columns.some((column) => column.name === "face_eye_character"));
       assert.ok(columns.some((column) => column.name === "face_eye_animation"));
@@ -464,6 +486,9 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(columns.some((column) => column.name === "face_blink_scale"));
       assert.ok(columns.some((column) => column.name === "face_blink_offset_x"));
       assert.ok(columns.some((column) => column.name === "face_blink_offset_y"));
+      assert.ok(
+        columns.some((column) => column.name === "face_blink_rotation_deg"),
+      );
       assert.ok(columns.some((column) => column.name === "face_thinking_frames"));
       assert.ok(columns.some((column) => column.name === "profile_picture_image_id"));
       const opinionColumns = reopened

@@ -7,14 +7,13 @@ import {
   claimNextReplayRecording,
   deleteReplayPremiumMedia,
   deleteReplayRecordingMedia,
-  failReplayRender,
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
   replayPremiumSegmentsForRecording,
   replayVoiceTakesForRecording,
   retryReplayPremiumProduction,
-  retryReplayRecording,
+  storeReplayFaithfulAudio,
   storeReplayPremiumTimeline,
   upsertReplayVoiceTake,
 } from "../replay-recordings.ts";
@@ -138,6 +137,29 @@ const takeSnapshot: ReplayVoiceTakeV1 = {
 };
 
 describe("durable replay recordings", () => {
+  it("stores the flattened Signal master separately from reconstructed takes", () => {
+    const db = fixture();
+    const queued = queueReplayRecording(db, "user-1", manifest, {
+      queueRender: false,
+    });
+    const stored = storeReplayFaithfulAudio(
+      db,
+      "user-1",
+      queued.id,
+      new Uint8Array([1, 2, 3, 4]),
+      "audio/webm",
+      18_420,
+    );
+    assert.equal(stored?.audioUrl, `/api/replays/${queued.id}/audio`);
+    assert.equal(stored?.audioContentType, "audio/webm");
+    assert.equal(stored?.audioSizeBytes, 4);
+    assert.equal(stored?.audioDurationMs, 18_420);
+
+    const deleted = deleteReplayRecordingMedia(db, "user-1", queued.id);
+    assert.equal(deleted?.audioUrl, null);
+    assert.equal(deleted?.audioDurationMs, null);
+  });
+
   it("archives Signal locally without exposing it to the video render queue", () => {
     const db = fixture();
     const archived = queueReplayRecording(db, "user-1", manifest, {
@@ -151,7 +173,7 @@ describe("durable replay recordings", () => {
     );
   });
 
-  it("retries a failed Premium render from its cached master without provider work", () => {
+  it("keeps a failed enhanced mix out of the video render queue", () => {
     const db = fixture();
     const archived = queueReplayRecording(db, "user-1", manifest, {
       queueRender: false,
@@ -179,7 +201,7 @@ describe("durable replay recordings", () => {
     const claimed = claimNextReplayRecording(db, "user-1", {
       surface: "signal",
     });
-    assert.equal(claimed?.renderKind, "premium");
+    assert.equal(claimed, null);
   });
 
   it("deletes only Premium media and restores the canonical local timeline", () => {
@@ -252,11 +274,14 @@ describe("durable replay recordings", () => {
     assert.equal(changed.premiumProduction?.phase, "idle");
     assert.equal(changed.premiumProduction?.masterReady, false);
     assert.equal(changed.premiumProduction?.timeline, null);
-    assert.match(changed.premiumProduction?.warning ?? "", /produce a new Premium cut/u);
+    assert.match(
+      changed.premiumProduction?.warning ?? "",
+      /create a new enhanced recording/u,
+    );
     assert.equal(replayPremiumSegmentsForRecording(db, "user-1", archived.id).length, 1);
   });
 
-  it("freezes a take, queues deterministically, and leases without any provider work", () => {
+  it("freezes a Signal take without exposing a video render lease", () => {
     const db = fixture();
     const firstTake = upsertReplayVoiceTake(
       db,
@@ -275,26 +300,19 @@ describe("durable replay recordings", () => {
     assert.equal(duplicateTake.id, firstTake.id);
     assert.equal(duplicateTake.snapshot.mode, "english");
 
-    const queued = queueReplayRecording(db, "user-1", manifest);
-    assert.equal(queued.status, "queued");
+    const queued = queueReplayRecording(db, "user-1", manifest, {
+      queueRender: false,
+    });
+    assert.equal(queued.status, "collecting");
     assert.match(queued.transcriptVttUrl ?? "", /transcript\.vtt/u);
     markPremiumMasterReady(db, queued.id);
     const claimed = claimNextReplayRecording(db, "user-1");
-    assert.ok(claimed);
-    assert.equal(claimed.renderKind, "standard");
-    assert.equal(claimed.recording.status, "preparing_audio");
-    assert.equal(claimed.takes[0]?.snapshot.requestedEngine, "builtin");
-
-    const failed = failReplayRender(
-      db,
-      "user-1",
-      claimed.recording.id,
-      claimed.renderToken,
-      "encoder unavailable",
+    assert.equal(claimed, null);
+    assert.equal(
+      getReplayRecording(db, "user-1", queued.id)?.takes[0]?.snapshot
+        .requestedEngine,
+      "builtin",
     );
-    assert.equal(failed.status, "failed");
-    const retried = retryReplayRecording(db, "user-1", failed.id);
-    assert.equal(retried?.status, "queued");
   });
 
   it("keeps recordings tenant-scoped and cascades metadata with the source", () => {
@@ -312,8 +330,11 @@ describe("durable replay recordings", () => {
 
   it("recovers stale client leases and keeps the transcript after recording deletion", () => {
     const db = fixture();
-    const queued = queueReplayRecording(db, "user-1", manifest);
-    markPremiumMasterReady(db, queued.id);
+    const queued = queueReplayRecording(db, "user-1", {
+      ...manifest,
+      surface: "coffee",
+      sourceId: "coffee-1",
+    });
     const firstClaim = claimNextReplayRecording(db, "user-1");
     assert.ok(firstClaim);
     db.prepare(
@@ -346,8 +367,7 @@ describe("durable replay recordings", () => {
       surface: "signal",
       sourceId: "episode-1",
     });
-    assert.equal(signal?.recording.surface, "signal");
-    assert.equal(signal?.recording.sourceId, "episode-1");
+    assert.equal(signal, null);
 
     const coffee = claimNextReplayRecording(db, "user-1", {
       surface: "coffee",

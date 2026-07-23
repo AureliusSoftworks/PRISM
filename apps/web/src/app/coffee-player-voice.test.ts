@@ -94,11 +94,23 @@ describe("Coffee player voice", () => {
 
   it("uses Default Prism for submitted and replayed Coffee speech", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const livePlayerVoice = source.slice(
+      source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      source.indexOf(
+        "const queueCoffeeReveal =",
+        source.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+      ),
+    );
     assert.match(source, /startCoffeePlayerVoiceForReveal\(trimmed\)/);
-    assert.match(source, /settings\.voiceMode === "mute"/);
-    assert.match(source, /const seed = `coffee-player:\$\{spokenText\}`/);
-    assert.match(source, /enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \}[\s\S]*?sourceText: spokenText/);
-    assert.match(source, /mode: settings\.voiceMode/);
+    assert.match(
+      livePlayerVoice,
+      /const voiceSelection = voicePlaybackSelectionRef\.current/,
+    );
+    assert.match(livePlayerVoice, /voiceSelection\.voiceMode === "mute"/);
+    assert.match(livePlayerVoice, /const seed = `coffee-player:\$\{spokenText\}`/);
+    assert.match(livePlayerVoice, /enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \}[\s\S]*?sourceText: spokenText/);
+    assert.match(livePlayerVoice, /mode: voiceSelection\.voiceMode/);
+    assert.doesNotMatch(livePlayerVoice, /settings\.voiceMode/);
     assert.match(
       source,
       /await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?setCoffeeUserRevealText\(trimmed\)/

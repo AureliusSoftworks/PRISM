@@ -250,6 +250,34 @@ export async function uploadReplayPremiumAudio(args: {
   return payload.recording;
 }
 
+export async function uploadReplayFaithfulAudio(args: {
+  recordingId: string;
+  bytes: ArrayBuffer;
+  contentType: string;
+  durationMs: number;
+}): Promise<ReplayRecordingV1> {
+  const response = await replayFetch(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/audio`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": args.contentType,
+        "x-prism-audio-duration-ms": String(Math.max(1, args.durationMs)),
+      },
+      body: args.bytes,
+    },
+  );
+  const payload = (await response.json().catch(() => null)) as
+    | { ok: true; recording: ReplayRecordingV1; error?: string }
+    | null;
+  if (!response.ok || !payload) {
+    throw new Error(
+      payload?.error ?? `Faithful Signal audio upload failed (${response.status}).`,
+    );
+  }
+  return payload.recording;
+}
+
 export async function storeReplayPremiumTimeline(args: {
   recordingId: string;
   timeline: ReplayTimelineV1;

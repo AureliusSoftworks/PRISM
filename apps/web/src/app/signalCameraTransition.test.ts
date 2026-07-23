@@ -7,6 +7,7 @@ import {
   signalCameraTransitionStyleForChange,
   signalCameraTransitionsShouldAnimate,
   signalLiveAutoCameraShot,
+  signalThinkingBeatCameraShot,
   writeSignalCameraTransitionMode,
 } from "./signalCameraTransition.ts";
 
@@ -137,6 +138,33 @@ describe("Signal camera transition preference", () => {
     );
   });
 
+  it("directs stable bot-thinking beats Wide most often with both close-up alternatives", () => {
+    const shots = Array.from({ length: 500 }, (_, index) =>
+      signalThinkingBeatCameraShot({
+        seed: `episode:message-${index}:guest`,
+        thinkingShot: "right",
+        nonThinkingShot: "left",
+      }),
+    );
+    const counts = {
+      wide: shots.filter((shot) => shot === "wide").length,
+      thinking: shots.filter((shot) => shot === "right").length,
+      nonThinking: shots.filter((shot) => shot === "left").length,
+    };
+    assert.ok(counts.wide > counts.thinking);
+    assert.ok(counts.wide > counts.nonThinking);
+    assert.ok(counts.thinking > 0);
+    assert.ok(counts.nonThinking > 0);
+    assert.equal(
+      signalThinkingBeatCameraShot({
+        seed: "episode:message-42:guest",
+        thinkingShot: "right",
+        nonThinkingShot: "left",
+      }),
+      shots[42],
+    );
+  });
+
   it("cuts directly to live speech and holds that shot through handoff pauses", () => {
     assert.equal(
       signalLiveAutoCameraShot({
@@ -146,6 +174,15 @@ describe("Signal camera transition preference", () => {
         producerGuestThinking: false,
       }),
       "right",
+    );
+    assert.equal(
+      signalLiveAutoCameraShot({
+        baseShot: "right",
+        thinkingShot: "wide",
+        postSpeechHoldShot: "left",
+        producerGuestThinking: false,
+      }),
+      "wide",
     );
     assert.equal(
       signalLiveAutoCameraShot({

@@ -49,6 +49,7 @@ export interface BotCustomizerSavePristine {
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
+  faceBlinkRotationDeg: number;
   faceThinkingFrames: readonly string[];
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
@@ -101,6 +102,7 @@ export interface BotCustomizerSaveCurrent {
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
+  faceBlinkRotationDeg: number;
   faceThinkingFrames: readonly string[];
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
@@ -144,6 +146,7 @@ export interface BotCustomizerSavePatch {
   faceBlinkScale?: number;
   faceBlinkOffsetX?: number;
   faceBlinkOffsetY?: number;
+  faceBlinkRotationDeg?: number;
   faceThinkingFrames?: readonly string[];
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
@@ -205,6 +208,7 @@ export function buildBotCustomizerSavePatch(
       faceBlinkScale: current.faceBlinkScale,
       faceBlinkOffsetX: current.faceBlinkOffsetX,
       faceBlinkOffsetY: current.faceBlinkOffsetY,
+      faceBlinkRotationDeg: current.faceBlinkRotationDeg,
       faceThinkingFrames: current.faceThinkingFrames,
       avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
@@ -321,6 +325,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceBlinkOffsetY !== pristine.faceBlinkOffsetY) {
     patch.faceBlinkOffsetY = current.faceBlinkOffsetY;
+  }
+  if (current.faceBlinkRotationDeg !== pristine.faceBlinkRotationDeg) {
+    patch.faceBlinkRotationDeg = current.faceBlinkRotationDeg;
   }
   if (!thinkingFramesEqual(current.faceThinkingFrames, pristine.faceThinkingFrames)) {
     patch.faceThinkingFrames = current.faceThinkingFrames;

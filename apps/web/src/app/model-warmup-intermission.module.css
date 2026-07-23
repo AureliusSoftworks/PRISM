@@ -34,12 +34,9 @@
   letter-spacing: 0.28em;
 }
 
-.prismLine {
-  width: 82px;
-  height: 3px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #ff4d6d, #ff9f1c, #b7e63a, #2fd3e3, #7b5cff);
-  box-shadow: 0 0 24px rgba(123, 92, 255, 0.38);
+.prismOrb {
+  --prism-orb-size: 62px;
+  margin: 3px 0;
 }
 
 .card h2 { margin: 4px 0 0; font: 820 clamp(1.65rem, 4vw, 3.4rem)/1.02 system-ui; letter-spacing: -0.045em; text-wrap: balance; }

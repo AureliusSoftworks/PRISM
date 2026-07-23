@@ -18,11 +18,13 @@ import {
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   type GraphicsQuality,
+  type HubAtmosphereStyle,
   type ImageProviderName,
   type EphemeralChatProviderPreferences,
   isImageProviderName,
   normalizeEphemeralChatProviderPreferences,
   normalizeGraphicsQuality,
+  normalizeHubAtmosphereStyle,
   normalizePrismStartupPreference,
   type PrismStartupPreference,
 } from "@localai/shared";
@@ -164,6 +166,7 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality | string | null;
+  atmosphereStyle: string | null;
   startupPreference: string | null;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: string | null;
@@ -232,6 +235,7 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
+  atmosphereStyle: HubAtmosphereStyle;
   startupPreference: PrismStartupPreference;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: EphemeralChatProviderPreferences;
@@ -863,6 +867,10 @@ export function resolveNextSettings(
     body.graphicsQuality,
     normalizeGraphicsQuality(current.graphicsQuality),
   );
+  const atmosphereStyle = normalizeHubAtmosphereStyle(
+    body.atmosphereStyle,
+    normalizeHubAtmosphereStyle(current.atmosphereStyle),
+  );
   const startupPreference = normalizePrismStartupPreference(
     body.startupPreference,
     normalizePrismStartupPreference(current.startupPreference),
@@ -1258,6 +1266,7 @@ export function resolveNextSettings(
     displayName,
     theme,
     graphicsQuality,
+    atmosphereStyle,
     startupPreference,
     preferredProvider,
     ephemeralChatProviderPreferences,

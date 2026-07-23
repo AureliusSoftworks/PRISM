@@ -22,6 +22,7 @@ import {
   coffeeCupSipCycleMs,
   coffeeCupSipGatedTimedProgress,
   coffeeCupSipAnimationTiming,
+  coffeeCupSipTranslationForMouth,
   coffeeCupTempoRoleForBot,
   coffeeCupShouldMirrorForSeat,
   coffeeCupShouldFinishAfterSip,
@@ -349,7 +350,7 @@ describe("coffee cup sprites", () => {
     assert.equal(afterTwoSips.frameIndex, 2);
   });
 
-  it("keeps Auto depletion moving after an explicit sip or zero-count override", () => {
+  it("holds fill at the accepted sip count while the session clock moves", () => {
     const base = {
       seed: "auto-session:bot-alice",
       sessionStartedAtMs: 0,
@@ -373,9 +374,14 @@ describe("coffee cup sprites", () => {
       sipCount: 0,
     });
 
-    assert.ok(earlyAfterOneSip.progress >= 0.1);
-    assert.ok(laterWithSameSipCount.progress > earlyAfterOneSip.progress);
-    assert.ok(zeroCountAtMidSession.progress > 0.3);
+    assert.equal(earlyAfterOneSip.progress, 0.1);
+    assert.equal(laterWithSameSipCount.progress, earlyAfterOneSip.progress);
+    assert.equal(
+      laterWithSameSipCount.frameIndex,
+      earlyAfterOneSip.frameIndex,
+    );
+    assert.equal(zeroCountAtMidSession.progress, 0);
+    assert.equal(zeroCountAtMidSession.frameIndex, 0);
   });
 
   it("counts explicit sips from the latest top-off baseline", () => {
@@ -1322,6 +1328,37 @@ describe("coffee cup sprites", () => {
     );
   });
 
+  it("lets an active sip finish when the bot starts thinking", () => {
+    const seed = "session:bot-thinking";
+    let sipWindowMs: number | null = null;
+    for (let nowMs = 0; nowMs <= 180_000; nowMs += 100) {
+      if (coffeeCupSippingActive({ seed, nowMs, progress: 0.5 })) {
+        sipWindowMs = nowMs;
+        break;
+      }
+    }
+
+    assert.notEqual(sipWindowMs, null);
+    assert.equal(
+      coffeeCupSippingActive({
+        seed,
+        nowMs: sipWindowMs!,
+        progress: 0.5,
+        thinking: true,
+      }),
+      true,
+    );
+    assert.equal(
+      buildCoffeeCupVisualState({
+        seed,
+        nowMs: sipWindowMs!,
+        progressOverride: 0.5,
+        thinking: true,
+      }).sipping,
+      true,
+    );
+  });
+
   it("keeps ambient sips inside listener windows without blocking explicit sips", () => {
     const seed = "session:bot-listener";
     let sipWindowMs: number | null = null;
@@ -1389,6 +1426,40 @@ describe("coffee cup sprites", () => {
     assert.equal(
       coffeeCupSideForSeat({ compact: false, seatIndex: 4, seatCount: 5, layoutIndex: 4 }),
       "left"
+    );
+  });
+
+  it("aligns the authored sip rim with the live mouth in both directions", () => {
+    const mouthRect = { left: 640, top: 350, width: 20, height: 16 };
+    const leftCupTranslation = coffeeCupSipTranslationForMouth({
+      cupRect: { left: 500, top: 420, width: 70, height: 82 },
+      mouthRect,
+      mirrored: false,
+    });
+    const rightCupTranslation = coffeeCupSipTranslationForMouth({
+      cupRect: { left: 700, top: 420, width: 70, height: 82 },
+      mouthRect,
+      mirrored: true,
+    });
+
+    assert.ok(leftCupTranslation);
+    assert.ok(rightCupTranslation);
+    assert.ok(leftCupTranslation.x > 0);
+    assert.ok(rightCupTranslation.x < 0);
+    assert.ok(Math.abs(leftCupTranslation.y - rightCupTranslation.y) < 0.001);
+    assert.ok(Math.abs(leftCupTranslation.x - 89.8496) < 0.001);
+    assert.ok(Math.abs(rightCupTranslation.x - -73.9296) < 0.001);
+    assert.ok(Math.abs(leftCupTranslation.y - -75.8056) < 0.001);
+  });
+
+  it("falls back when a live sip target has no rendered size", () => {
+    assert.equal(
+      coffeeCupSipTranslationForMouth({
+        cupRect: { left: 500, top: 420, width: 70, height: 82 },
+        mouthRect: { left: 640, top: 350, width: 0, height: 0 },
+        mirrored: false,
+      }),
+      null,
     );
   });
 

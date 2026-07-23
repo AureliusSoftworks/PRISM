@@ -461,6 +461,9 @@ export {
   BOT_FACE_BLINK_OFFSET_Y_MAX,
   BOT_FACE_BLINK_OFFSET_Y_MIN,
   BOT_FACE_BLINK_OFFSET_Y_STEP,
+  BOT_FACE_BLINK_ROTATION_DEG_MAX,
+  BOT_FACE_BLINK_ROTATION_DEG_MIN,
+  BOT_FACE_BLINK_ROTATION_DEG_STEP,
   BOT_FACE_BLINK_SCALE_MAX,
   BOT_FACE_BLINK_SCALE_MIN,
   BOT_FACE_BLINK_SCALE_STEP,
@@ -493,6 +496,7 @@ export {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_CHARACTER,
   DEFAULT_BOT_FACE_EYE_COUNT,
@@ -519,6 +523,7 @@ export {
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
@@ -631,6 +636,7 @@ export {
   type AskQuestionPayload,
   type CoffeeAmbientActionPayload,
   type CoffeeReplayArrivalEventPayload,
+  type CoffeeReplayBaristaDeliveryEventPayload,
   type CoffeeReplayBotDepartureEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayIdentityMirrorEventPayload,
@@ -638,6 +644,7 @@ export {
   type CoffeeReplayPowerMoodBoostEventPayload,
   type CoffeeReplayPowerMoodDrainEventPayload,
   type CoffeeReplayPlayerDepartureEventPayload,
+  type CoffeeReplayPlayerSipEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeUserActionPayload,
@@ -707,6 +714,15 @@ export {
   GROUP_ROOM_WALLPAPER_VARIATION_SEED_MAX_LENGTH,
   type GroupRoomWallpaperImageGenerationRequest,
 } from "./groupRoomWallpaper.js";
+
+export {
+  DEFAULT_HUB_ATMOSPHERE_STYLE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_STYLES,
+  composeHubAtmospherePrompt,
+  normalizeHubAtmosphereStyle,
+  type HubAtmosphereStyle,
+} from "./hubAtmosphere.js";
 
 export {
   OPENAI_IMAGE_MODEL_IDS,
@@ -2051,7 +2067,12 @@ export {
   coffeeRouterTemperature,
   normalizeCoffeeSessionSettings,
   type CoffeeCrossTalkLevel,
+  type CoffeeBarDeliveryStatus,
   type CoffeeBarDrink,
+  type CoffeeBarDrinkReactionStatus,
+  type CoffeeBarGeneratedDrink,
+  type CoffeeBarOrderChoice,
+  type CoffeeBarOrderStatus,
   type CoffeeBarRole,
   type CoffeeBarRitualState,
   type CoffeeBarServiceBotSnapshot,
@@ -2855,6 +2876,7 @@ export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
 export * from "./botcast.js";
+export * from "./signalPickles.js";
 export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";
 export * from "./listenerReaction.js";

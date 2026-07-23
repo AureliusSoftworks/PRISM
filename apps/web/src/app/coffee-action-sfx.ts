@@ -1,4 +1,5 @@
 import { extractStageDirectionCues } from "./botMention.ts";
+import { routeAudioElementToPrismOutput } from "./signalAudioMasterCapture.ts";
 
 export type CoffeeActionSfxKind =
   | "cup_set_down"
@@ -277,6 +278,7 @@ const preparedClips = new Map<CoffeeActionSfxKind, Blob>();
 const pendingClips = new Map<CoffeeActionSfxKind, Promise<void>>();
 let activeAudio: HTMLAudioElement | null = null;
 let activeAudioUrl: string | null = null;
+let activeAudioOutputCleanup: (() => void) | null = null;
 
 export function prefetchCoffeeActionSfx(args: {
   kind: CoffeeActionSfxKind;
@@ -330,12 +332,36 @@ export function resolveBundledCoffeeActionSfxPlayback(
   return { source, playbackRate };
 }
 
+function stableActionSfxUnit(seed: string, index: number): number {
+  let hash = 2166136261;
+  const value = `${seed}:${index}`;
+  for (let offset = 0; offset < value.length; offset += 1) {
+    hash ^= value.charCodeAt(offset);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff;
+}
+
+export function bundledCoffeeActionSfxPlaybackForSeed(
+  kind: BundledCoffeeActionSfxKind,
+  seed: string,
+): { source: string; playbackRate: number } {
+  let index = 0;
+  return resolveBundledCoffeeActionSfxPlayback(
+    kind,
+    () => stableActionSfxUnit(seed, index++),
+  );
+}
+
 export async function playPreparedCoffeeActionSfx(args: {
   kind: CoffeeActionSfxKind;
   voiceVolume: number;
+  seed?: string;
 }): Promise<boolean> {
   const bundledPlayback = isBundledCoffeeActionSfxKind(args.kind)
-    ? resolveBundledCoffeeActionSfxPlayback(args.kind)
+    ? args.seed
+      ? bundledCoffeeActionSfxPlaybackForSeed(args.kind, args.seed)
+      : resolveBundledCoffeeActionSfxPlayback(args.kind)
     : null;
   const clip = bundledPlayback ? null : preparedClips.get(args.kind);
   if (
@@ -348,6 +374,8 @@ export async function playPreparedCoffeeActionSfx(args: {
   stopCoffeeActionSfx();
   const url = clip ? URL.createObjectURL(clip) : bundledPlayback!.source;
   const audio = new Audio(url);
+  const outputCleanup = routeAudioElementToPrismOutput(audio);
+  activeAudioOutputCleanup = outputCleanup;
   activeAudio = audio;
   activeAudioUrl = clip ? url : null;
   audio.preload = "auto";
@@ -363,6 +391,10 @@ export async function playPreparedCoffeeActionSfx(args: {
   }
   const release = (): void => {
     if (activeAudio === audio) activeAudio = null;
+    outputCleanup?.();
+    if (activeAudioOutputCleanup === outputCleanup) {
+      activeAudioOutputCleanup = null;
+    }
     if (clip) {
       if (activeAudioUrl === url) activeAudioUrl = null;
       URL.revokeObjectURL(url);
@@ -382,6 +414,8 @@ export async function playPreparedCoffeeActionSfx(args: {
 export function stopCoffeeActionSfx(): void {
   activeAudio?.pause();
   activeAudio = null;
+  activeAudioOutputCleanup?.();
+  activeAudioOutputCleanup = null;
   if (activeAudioUrl) URL.revokeObjectURL(activeAudioUrl);
   activeAudioUrl = null;
 }

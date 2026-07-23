@@ -26,6 +26,7 @@ import {
   listReplayRecordingDirectoryIds,
   removeReplayFile,
   removeReplayRecordingDirectory,
+  replayFaithfulAudioRelativePath,
   replayUploadRelativePath,
   replayPremiumAudioRelativePath,
   replayPremiumVideoRelativePath,
@@ -58,6 +59,10 @@ type ReplayRecordingRow = {
   render_token: string | null;
   upload_rel_path: string | null;
   video_rel_path: string | null;
+  audio_rel_path: string | null;
+  audio_content_type: string | null;
+  audio_size_bytes: number | null;
+  audio_duration_ms: number | null;
   codec: string | null;
   content_type: string | null;
   width: number;
@@ -256,6 +261,10 @@ function mapRecordingRow(db: DatabaseSync, row: ReplayRecordingRow): ReplayRecor
   const hasVideo = Boolean(
     row.video_rel_path && existsSync(resolveAbsoluteUnderDataRoot(row.video_rel_path)),
   );
+  const hasFaithfulAudio = Boolean(
+    row.audio_rel_path &&
+      existsSync(resolveAbsoluteUnderDataRoot(row.audio_rel_path)),
+  );
   const premiumProduction = mapPremiumProductionRow(
     premiumProductionRow(db, row.user_id, row.id),
     row,
@@ -276,6 +285,12 @@ function mapRecordingRow(db: DatabaseSync, row: ReplayRecordingRow): ReplayRecor
     codec: row.codec,
     contentType: row.content_type,
     videoUrl: hasVideo ? `/api/replays/${encodeURIComponent(row.id)}/video` : null,
+    audioUrl: hasFaithfulAudio
+      ? `/api/replays/${encodeURIComponent(row.id)}/audio`
+      : null,
+    audioContentType: hasFaithfulAudio ? row.audio_content_type : null,
+    audioSizeBytes: hasFaithfulAudio ? row.audio_size_bytes : null,
+    audioDurationMs: hasFaithfulAudio ? row.audio_duration_ms : null,
     transcriptVttUrl: row.manifest_json
       ? `/api/replays/${encodeURIComponent(row.id)}/transcript.vtt`
       : null,
@@ -533,6 +548,43 @@ export function storeReplayVoiceTakeAudio(
   );
 }
 
+export function storeReplayFaithfulAudio(
+  db: DatabaseSync,
+  userId: string,
+  recordingId: string,
+  bytes: Uint8Array,
+  contentType: string,
+  durationMs: number,
+): ReplayRecordingV1 | null {
+  const row = recordingRow(db, userId, recordingId);
+  if (!row || row.surface !== "signal") return null;
+  const relativePath = replayFaithfulAudioRelativePath({
+    userId,
+    recordingId,
+    contentType,
+  });
+  writeReplayBytesAtomically(relativePath, bytes);
+  if (row.audio_rel_path && row.audio_rel_path !== relativePath) {
+    removeReplayFile(row.audio_rel_path);
+  }
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE replay_recordings
+        SET audio_rel_path = ?, audio_content_type = ?,
+            audio_size_bytes = ?, audio_duration_ms = ?, updated_at = ?
+      WHERE id = ? AND user_id = ? AND surface = 'signal'`,
+  ).run(
+    relativePath,
+    contentType,
+    bytes.byteLength,
+    Math.max(1, Math.min(4 * 60 * 60 * 1_000, Math.round(durationMs))),
+    now,
+    recordingId,
+    userId,
+  );
+  return mapRecordingRow(db, recordingRow(db, userId, recordingId)!);
+}
+
 export function queueReplayRecording(
   db: DatabaseSync,
   userId: string,
@@ -579,7 +631,7 @@ export function queueReplayRecording(
               render_token = NULL, upload_rel_path = NULL,
               video_rel_path = NULL, codec = NULL, content_type = NULL,
               duration_ms = NULL, size_bytes = NULL,
-              warning = 'Replay changed; produce a new Premium cut.', error = NULL,
+              warning = 'Replay changed; create a new enhanced recording.', error = NULL,
               updated_at = ?
         WHERE recording_id = ? AND user_id = ?`,
     ).run(now, recording.id, userId);
@@ -621,12 +673,12 @@ export async function startReplayPremiumProduction(args: {
   const row = recordingRow(db, userId, recordingId);
   const manifest = parseJson<ReplayManifestV1>(row?.manifest_json ?? null);
   if (!row || row.surface !== "signal" || !manifest) {
-    throw new Error("A completed Signal replay is required for Premium production.");
+    throw new Error("A completed Signal replay is required for audio enhancement.");
   }
   const takes = replayVoiceTakesForRecording(db, userId, recordingId);
   const planned = planReplayPremiumSegments(manifest, takes);
   if (planned.length === 0) {
-    throw new Error("This Signal replay has no audible dialogue to master.");
+    throw new Error("This Signal replay has no audible dialogue to enhance.");
   }
   const inputHash = replayPremiumInputHash(planned);
   const existingProduction = premiumProductionRow(db, userId, recordingId);
@@ -760,7 +812,7 @@ export async function startReplayPremiumProduction(args: {
         WHERE recording_id = ? AND user_id = ?`,
     ).run(
       boundedMessage(error instanceof Error ? error.message : error, 1_000) ??
-        "Premium voice mastering failed.",
+        "Voice enhancement failed.",
       new Date().toISOString(),
       recordingId,
       userId,
@@ -795,8 +847,8 @@ export function storeReplayPremiumAudio(
   const now = new Date().toISOString();
   db.prepare(
     `UPDATE replay_premium_productions
-        SET audio_rel_path = ?, phase = 'rendering_studio',
-            progress = MAX(progress, 0.52), error = NULL, updated_at = ?
+        SET audio_rel_path = ?, phase = 'mixing_episode',
+            progress = MAX(progress, 0.82), error = NULL, updated_at = ?
       WHERE recording_id = ? AND user_id = ?`,
   ).run(relativePath, now, recordingId, userId);
   return mapRecordingRow(db, recordingRow(db, userId, recordingId)!);
@@ -819,14 +871,26 @@ export function storeReplayPremiumTimeline(
   ) return null;
   const timelineJson = JSON.stringify(timeline);
   if (Buffer.byteLength(timelineJson) > REPLAY_MANIFEST_MAX_BYTES) {
-    throw new Error("Premium replay timeline is too large.");
+    throw new Error("Enhanced replay timeline is too large.");
   }
   const now = new Date().toISOString();
+  const ready = Boolean(
+    production.audio_rel_path &&
+      existsSync(resolveAbsoluteUnderDataRoot(production.audio_rel_path)),
+  );
   db.prepare(
     `UPDATE replay_premium_productions
-        SET timeline_json = ?, updated_at = ?
+        SET timeline_json = ?, phase = ?, progress = ?,
+            warning = NULL, error = NULL, updated_at = ?
       WHERE recording_id = ? AND user_id = ?`,
-  ).run(timelineJson, now, recordingId, userId);
+  ).run(
+    timelineJson,
+    ready ? "ready" : "mixing_episode",
+    ready ? 1 : Math.max(0.82, production.progress),
+    now,
+    recordingId,
+    userId,
+  );
   return mapRecordingRow(db, recordingRow(db, userId, recordingId)!);
 }
 
@@ -965,7 +1029,8 @@ export function claimNextReplayRecording(
   const standardCandidate = db
     .prepare(
       `SELECT * FROM replay_recordings
-        WHERE user_id = ? AND status = 'queued' AND manifest_json IS NOT NULL
+        WHERE user_id = ? AND status = 'queued' AND surface = 'coffee'
+          AND manifest_json IS NOT NULL
           AND (? IS NULL OR surface = ?)
           AND (? IS NULL OR source_id = ?)
         ORDER BY updated_at, rowid LIMIT 1`,
@@ -977,51 +1042,19 @@ export function claimNextReplayRecording(
       filters.sourceId ?? null,
       filters.sourceId ?? null,
     ) as ReplayRecordingRow | undefined;
-  const premiumCandidate = standardCandidate
-    ? undefined
-    : (db
-        .prepare(
-          `SELECT recording.* FROM replay_recordings recording
-             JOIN replay_premium_productions premium
-               ON premium.recording_id = recording.id
-              AND premium.user_id = recording.user_id
-            WHERE recording.user_id = ?
-              AND recording.manifest_json IS NOT NULL
-              AND premium.phase = 'mixing_episode'
-              AND premium.master_ready = 1
-              AND premium.render_token IS NULL
-              AND (? IS NULL OR recording.surface = ?)
-              AND (? IS NULL OR recording.source_id = ?)
-            ORDER BY premium.updated_at, recording.rowid LIMIT 1`,
-        )
-        .get(
-          userId,
-          filters.surface ?? null,
-          filters.surface ?? null,
-          filters.sourceId ?? null,
-          filters.sourceId ?? null,
-        ) as ReplayRecordingRow | undefined);
-  const candidate = standardCandidate ?? premiumCandidate;
+  const candidate = standardCandidate;
   if (!candidate) return null;
-  const renderKind: ReplayRenderKindV1 = standardCandidate ? "standard" : "premium";
+  const renderKind: ReplayRenderKindV1 = "standard";
   const renderToken = randomBytes(18).toString("hex");
   const uploadRelativePath = replayUploadRelativePath(userId, candidate.id, renderToken);
   const now = new Date().toISOString();
-  const result = renderKind === "standard"
-    ? db.prepare(
-        `UPDATE replay_recordings
-            SET status = 'preparing_audio', progress = 0.01, render_token = ?,
-                upload_rel_path = ?, error = NULL, updated_at = ?
-          WHERE id = ? AND user_id = ? AND status = 'queued'`,
-      ).run(renderToken, uploadRelativePath, now, candidate.id, userId)
-    : db.prepare(
-        `UPDATE replay_premium_productions
-            SET phase = 'rendering_studio', progress = MAX(0.52, progress),
-                render_token = ?, upload_rel_path = ?, error = NULL, updated_at = ?
-          WHERE recording_id = ? AND user_id = ?
-            AND phase = 'mixing_episode' AND master_ready = 1
-            AND render_token IS NULL`,
-      ).run(renderToken, uploadRelativePath, now, candidate.id, userId);
+  const result = db.prepare(
+    `UPDATE replay_recordings
+        SET status = 'preparing_audio', progress = 0.01, render_token = ?,
+            upload_rel_path = ?, error = NULL, updated_at = ?
+      WHERE id = ? AND user_id = ? AND status = 'queued'
+        AND surface = 'coffee'`,
+  ).run(renderToken, uploadRelativePath, now, candidate.id, userId);
   if (Number(result.changes ?? 0) === 0) return null;
   return {
     recording: mapRecordingRow(db, recordingRow(db, userId, candidate.id)!),
@@ -1308,6 +1341,8 @@ export function deleteReplayRecordingMedia(
       `UPDATE replay_recordings
           SET status = 'collecting', progress = 0, render_token = NULL,
               upload_rel_path = NULL, video_rel_path = NULL, codec = NULL,
+              audio_rel_path = NULL, audio_content_type = NULL,
+              audio_size_bytes = NULL, audio_duration_ms = NULL,
               content_type = NULL, duration_ms = NULL, size_bytes = NULL,
               warning = 'Recording deleted. The saved transcript can rebuild it.',
               error = NULL, updated_at = ?
@@ -1319,6 +1354,22 @@ export function deleteReplayRecordingMedia(
     throw error;
   }
   return mapRecordingRow(db, recordingRow(db, userId, recordingId)!);
+}
+
+export function replayFaithfulAudioFile(
+  db: DatabaseSync,
+  userId: string,
+  recordingId: string,
+): { absolutePath: string; contentType: string; sizeBytes: number } | null {
+  const row = recordingRow(db, userId, recordingId);
+  if (!row?.audio_rel_path || !row.audio_content_type) return null;
+  const absolutePath = resolveAbsoluteUnderDataRoot(row.audio_rel_path);
+  if (!existsSync(absolutePath)) return null;
+  return {
+    absolutePath,
+    contentType: row.audio_content_type,
+    sizeBytes: statSync(absolutePath).size,
+  };
 }
 
 export function replayVideoFile(

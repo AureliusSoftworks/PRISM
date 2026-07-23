@@ -31,6 +31,10 @@ export interface SessionAtmosphereLayerProps {
   onAmbientBotVocalization?: (
     cue: SessionAmbientBotVocalizationCue,
   ) => boolean;
+  onCoffeeCupFoley?: (
+    cue: "coffeeSip" | "coffeeCupPlace",
+    cup: HTMLElement,
+  ) => void;
   coffeeCupRootRef?: RefObject<HTMLElement | null>;
   controllerHandleRef?: RefObject<SessionAtmosphereController | null>;
 }
@@ -52,6 +56,7 @@ export function SessionAtmosphereLayer({
   ambientBotVocalizations = false,
   ambientBotVocalizationProfile,
   onAmbientBotVocalization,
+  onCoffeeCupFoley,
   coffeeCupRootRef,
   controllerHandleRef,
 }: SessionAtmosphereLayerProps): null {
@@ -61,6 +66,7 @@ export function SessionAtmosphereLayer({
   const volumeRef = useRef(volume);
   const mixRef = useRef(mix);
   const ambientBotVocalizationRef = useRef(onAmbientBotVocalization);
+  const coffeeCupFoleyRef = useRef(onCoffeeCupFoley);
   useEffect(() => {
     deferFoleyRef.current = deferFoley;
   }, [deferFoley]);
@@ -70,6 +76,9 @@ export function SessionAtmosphereLayer({
   useEffect(() => {
     ambientBotVocalizationRef.current = onAmbientBotVocalization;
   }, [onAmbientBotVocalization]);
+  useEffect(() => {
+    coffeeCupFoleyRef.current = onCoffeeCupFoley;
+  }, [onCoffeeCupFoley]);
   useEffect(() => {
     volumeRef.current = volume;
     mixRef.current = mix;
@@ -100,7 +109,11 @@ export function SessionAtmosphereLayer({
     controllerRef.current = controller;
     if (controllerHandleRef) controllerHandleRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
-      ? attachCoffeeCupFoley(coffeeCupRootRef.current, controller)
+      ? attachCoffeeCupFoley(
+          coffeeCupRootRef.current,
+          controller,
+          (cue, cup) => coffeeCupFoleyRef.current?.(cue, cup),
+        )
       : null;
     return () => {
       detachCupFoley?.();

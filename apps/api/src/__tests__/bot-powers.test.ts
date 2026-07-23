@@ -704,6 +704,43 @@ test("compiler deterministically distinguishes larger and smaller physical forms
   ]);
 });
 
+test("compiler turns a terse prompt-authored size edit into a deterministic smaller avatar", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Pocket Prism",
+    powers: [{
+      version: 1,
+      id: "small-form",
+      authoringMode: "prompt",
+      name: "Prism Echoes",
+      sigil: "prism",
+      intent: "Very small in size.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  const power = result.powers[0];
+  assert.equal(calls, 0);
+  assert.equal(power?.compileStatus, "ready");
+  assert.equal(power?.name, "Diminished Form");
+  assert.equal(power?.sigil, "prism");
+  assert.deepEqual(power?.compiled?.effects, [
+    { type: "avatar_scale", mode: "smaller" },
+  ]);
+  assert.deepEqual(power?.compiled?.ruleLabels, ["Smaller avatar"]);
+  assert.match(power?.compiled?.selfCue ?? "", /noticeably smaller/u);
+});
+
 test("compiler does not confuse microscopic or tiny perception with physical size", async () => {
   let calls = 0;
   const provider: LlmProvider = {

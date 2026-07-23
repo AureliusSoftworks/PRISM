@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   canvasBackgroundShouldZoomOutFocusedBot,
   canvasBotDirectoryIsInteractive,
+  focusedCanvasBotId,
   resolveCanvasBotMarqueeSelection,
   resolveInactiveCanvasBotMarqueeSelection,
 } from "./botCanvasMarqueeSelection.ts";
@@ -13,6 +14,28 @@ function ids(set: ReadonlySet<string>): string[] {
 }
 
 describe("bot canvas marquee selection", () => {
+  it("gives fresh Chat canvas focus exclusively to the active Zen persona", () => {
+    assert.equal(
+      focusedCanvasBotId({
+        view: "chat",
+        sandboxGridSelectedBotId: "previous-bot",
+        zenPersonaBotId: "next-bot",
+      }),
+      "next-bot",
+    );
+  });
+
+  it("keeps Sandbox canvas focus on its explicit grid selection", () => {
+    assert.equal(
+      focusedCanvasBotId({
+        view: "sandbox",
+        sandboxGridSelectedBotId: "sandbox-bot",
+        zenPersonaBotId: "zen-bot",
+      }),
+      "sandbox-bot",
+    );
+  });
+
   it("replaces the current selection for plain marquee drags", () => {
     const selected = resolveCanvasBotMarqueeSelection({
       mode: "replace",

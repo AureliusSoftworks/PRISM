@@ -67,18 +67,25 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("keeps screen ink and bounded accessory recipes independently editable", () => {
+  it("uses user-authored saved ink instead of a canned accessory catalog", () => {
     assert.match(editorSource, /<strong>Screen editor<\/strong>/);
-    assert.match(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
-    assert.doesNotMatch(editorSource, /AvatarStampAdjustments/);
+    assert.match(editorSource, /<strong>Saved ink<\/strong>/);
+    assert.match(editorSource, /createAvatarDetailInkTemplate\(/);
+    assert.match(editorSource, /applyAvatarDetailInkTemplate\(/);
+    assert.match(editorSource, /saveAvatarDetailInkTemplates\(/);
+    assert.match(editorSource, /Place as editable ink/);
+    assert.match(editorSource, /Undo or erase it normally/);
+    assert.match(editorSource, /Convert to ink/);
+    assert.doesNotMatch(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
+    assert.doesNotMatch(editorSource, /toggleAvatarDetailStamp\(/);
+    assert.doesNotMatch(editorSource, /removeAvatarDetailStamp\(/);
+    assert.doesNotMatch(editorSource, /Round glasses/);
+    assert.doesNotMatch(editorSource, /Handlebar/);
     assert.doesNotMatch(editorSource, /Reset details/);
     assert.match(editorSource, /avatarDetailsWithPaintColorMap\(/);
     assert.match(editorSource, /aria-label="Randomize ink recipe"/);
-    assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} X offset`\}/);
-    assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} Y offset`\}/);
-    assert.match(editorSource, /aria-label=\{`Randomize \$\{definition\.label\} scale`\}/);
-    assert.match(editorSource, /aria-label=\{`Remove \$\{definition\.label\} stamp`\}/);
-    assert.match(editorSource, /removeAvatarDetailStamp\(/);
+    assert.match(pageSource, /templateOwnerId=\{avatarInkTemplateOwnerId\}/);
+    assert.match(pageSource, /avatarInkTemplateOwnerId=\{user\?\.id \?\? "local"\}/);
   });
 
   it("uses compact icon tools without losing labels or selected state", () => {
@@ -151,7 +158,10 @@ describe("Avatar Details Studio integration", () => {
       editorCss,
       /\.editor\[data-editor-theme="light"\] \.canvasFrame\s*\{[\s\S]*?background-color:\s*#ffffff/,
     );
-    assert.match(editorSource, /BOT_AVATAR_DETAILS_FACE_PLACEMENT\.yPct/);
+    assert.match(
+      editorSource,
+      /\.\.\.BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
+    );
     assert.match(
       pageSource,
       /"--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
@@ -162,10 +172,9 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /rasterizeAvatarDetailsSemanticRgba\(/);
     assert.match(editorSource, /className=\{styles\.canvasViewport\}/);
     assert.match(editorCss, /\.canvasViewport[\s\S]*transform:\s*scale\(1\.36\)/);
-    assert.match(editorSource, /const AVATAR_DETAILS_EDITOR_ZOOM = 1\.36/);
     assert.match(
-      editorSource,
-      /BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO \* AVATAR_DETAILS_EDITOR_ZOOM \* 100/,
+      editorCss,
+      /\.canvasViewport\s*\{[\s\S]*--zen-live-bot-body-frame-size:\s*100cqw/,
     );
     const faceGuideIndex = editorSource.indexOf(
       "data-avatar-details-face-guide=\"true\"",
@@ -174,7 +183,13 @@ describe("Avatar Details Studio integration", () => {
       "<div className={styles.canvasViewport}>",
     );
     assert.ok(faceGuideIndex > 0);
-    assert.ok(zoomedCanvasIndex > faceGuideIndex);
+    assert.ok(zoomedCanvasIndex > 0);
+    assert.ok(faceGuideIndex > zoomedCanvasIndex);
+    assert.doesNotMatch(editorSource, /zoomedFaceYPct/);
+    assert.match(
+      editorSource,
+      /"--coffee-plate-emoji-nudge-y": "clamp\(-5px, -2\.6%, -2px\)"/,
+    );
   });
 
   it("keeps the editable face guide crisp instead of compositing the live CRT glow", () => {
@@ -434,20 +449,22 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
     assert.match(
       maskCss,
-      /\.halo[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)/,
+      /\.halo[\s\S]*opacity:\s*calc\(var\(--avatar-details-speech-opacity, 1\) \* 0\.14\)/,
     );
     assert.match(
       maskCss,
-      /\.halo[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
+      /\.halo[\s\S]*0 0 4px[\s\S]*0 0 8px[\s\S]*0 0 12px/,
+    );
+    assert.doesNotMatch(maskCss, /\.halo[\s\S]*0 0 21px/);
+    assert.match(
+      maskCss,
+      /\.bloom[\s\S]*opacity:\s*calc\(var\(--avatar-details-speech-opacity, 1\) \* 0\.56\)/,
     );
     assert.match(
       maskCss,
-      /\.bloom[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)/,
+      /\.bloom[\s\S]*0 0 0\.55px[\s\S]*0 0 1\.1px[\s\S]*0 0 2\.4px[\s\S]*0 0 5px[\s\S]*0 0 9px/,
     );
-    assert.match(
-      maskCss,
-      /\.bloom[\s\S]*0 0 0\.72px[\s\S]*0 0 1\.5px[\s\S]*0 0 3px[\s\S]*0 0 6px[\s\S]*0 0 12px[\s\S]*0 0 21px/,
-    );
+    assert.doesNotMatch(maskCss, /\.bloom[\s\S]*0 0 21px/);
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(
       maskCss,
@@ -463,7 +480,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /\.core[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*brightness\(1\.07\) contrast\(1\.02\)[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+      /\.core[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*brightness\(1\.02\) contrast\(1\.02\)[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
     );
     assert.match(
       pageCss,

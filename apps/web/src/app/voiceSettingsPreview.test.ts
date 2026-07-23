@@ -622,12 +622,35 @@ describe("voice settings preview", () => {
         pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
       ),
     );
+    assert.match(
+      coffeeVoiceStart,
+      /const voiceSelection = voicePlaybackSelectionRef\.current/,
+    );
     assert.match(coffeeVoiceStart, /enqueueRobotVoiceMode\(\{/);
-    assert.match(coffeeVoiceStart, /mode: settings\.voiceMode/);
+    assert.match(coffeeVoiceStart, /mode: voiceSelection\.voiceMode/);
     assert.match(coffeeVoiceStart, /targetDurationMs: fallbackDuration/);
     assert.match(
       coffeeVoiceStart,
-      /if \(\s*settings\.voiceMode === "bottish" \|\|\s*settings\.voiceMode === "babble"\s*\)[\s\S]*?enqueueRobotVoiceMode/,
+      /if \(\s*voiceSelection\.voiceMode === "bottish" \|\|\s*voiceSelection\.voiceMode === "babble"\s*\)[\s\S]*?enqueueRobotVoiceMode/,
+    );
+    assert.doesNotMatch(coffeeVoiceStart, /settings\.voiceMode/);
+  });
+
+  it("makes a newly selected voice authoritative for queued Coffee turns", () => {
+    const selectionHandler = pageSource.slice(
+      pageSource.indexOf("async function selectGlobalVoiceChoice"),
+      pageSource.indexOf(
+        "async function saveVoiceSettings",
+        pageSource.indexOf("async function selectGlobalVoiceChoice"),
+      ),
+    );
+    assert.match(
+      selectionHandler,
+      /voicePlaybackSelectionRef\.current = nextSettings;[\s\S]*?setSettings/,
+    );
+    assert.match(
+      selectionHandler,
+      /catch \(err\) \{[\s\S]*?voicePlaybackSelectionRef\.current = \{[\s\S]*?voiceMode: previousMode,[\s\S]*?englishVoiceEngine: previousEnglishVoiceEngine/,
     );
   });
 

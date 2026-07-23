@@ -40,7 +40,7 @@ function lossyWebpDimensions(image: Buffer): {
 }
 
 describe("PRISM intro sequence", () => {
-  it("preserves the eight-beat threshold poem and brings PRISM online last", () => {
+  it("preserves the eight-beat threshold poem around the triangle orb", () => {
     assert.deepEqual(
       PRISM_INTRO_SCENES.map((scene) => scene.id),
       [
@@ -55,19 +55,22 @@ describe("PRISM intro sequence", () => {
       ],
     );
     assert.match(PRISM_INTRO_SCENES[0]!.title, /border between art and logic/u);
-    assert.equal(PRISM_INTRO_SCENES[4]!.title, "You brought it.");
-    assert.match(
-      PRISM_INTRO_SCENES.at(-1)?.title ?? "",
-      /PRISM came online/u,
+    assert.equal(
+      PRISM_INTRO_SCENES[4]!.title,
+      "You touched the orb. It answered in white.",
     );
+    assert.equal(PRISM_INTRO_SCENES.at(-1)?.title, "The threshold opened.");
     assert.equal(
       PRISM_INTRO_SCENES.at(-1)?.body,
       "You are the light. Prism reveals the spectrum. One light. Many colors.",
     );
     assert.match(PRISM_INTRO_SCENES[2]!.title, /multitude waited/u);
-    assert.match(
-      PRISM_INTRO_SCENES[2]!.imageAlt,
-      /powered-off PRISM bot frames/u,
+    assert.match(PRISM_INTRO_SCENES[2]!.imageAlt, /glass orb/u);
+    assert.match(PRISM_INTRO_SCENES[3]!.imageAlt, /dormant glass orb/u);
+    assert.match(PRISM_INTRO_SCENES[4]!.imageAlt, /white ray enters/u);
+    assert.deepEqual(
+      PRISM_INTRO_SCENES.slice(2).map((scene) => scene.lightTarget.kind),
+      ["orb", "orb", "orb", "orb", "orb", "orb"],
     );
     assert.match(
       PRISM_INTRO_SCENES[5]!.imageAlt,
@@ -75,50 +78,23 @@ describe("PRISM intro sequence", () => {
     );
     assert.match(
       PRISM_INTRO_SCENES[5]!.imageAlt,
-      /rose heart, amber winding-path, lime diamond, cyan sunburst, and violet four-point-sparkle phosphor eyes/u,
+      /rose, amber, lime, cyan, and violet light upward/u,
     );
-    assert.match(
-      PRISM_INTRO_SCENES[5]!.imageAlt,
-      /black-glass CRTs/u,
-    );
-    assert.match(
-      PRISM_INTRO_SCENES[5]!.imageAlt,
-      /primary frame remains powered off/u,
-    );
-    assert.match(PRISM_INTRO_SCENES[5]!.imageAlt, /same-sized/u);
     assert.match(
       PRISM_INTRO_SCENES[6]!.imageAlt,
       /Pia, Rowan, Iris, Sol, and Mira/u,
     );
-    assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /black CRT glass/u);
-    assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /same-sized/u);
-    assert.match(
-      PRISM_INTRO_SCENES[6]!.imageAlt,
-      /five narrow rose, amber, lime, cyan, and violet rays converge/u,
-    );
-    assert.match(
-      PRISM_INTRO_SCENES[6]!.imageAlt,
-      /remains dark for one final moment/u,
-    );
-    assert.match(
-      PRISM_INTRO_SCENES[7]!.imageAlt,
-      /Pia, Rowan, Iris, Sol, and Mira/u,
-    );
-    assert.match(
-      PRISM_INTRO_SCENES[7]!.imageAlt,
-      /Five narrow colored rays/u,
-    );
-    assert.match(
-      PRISM_INTRO_SCENES[7]!.imageAlt,
-      /converge on the triangle medallion/u,
-    );
-    assert.match(
-      PRISM_INTRO_SCENES[7]!.imageAlt,
-      /comes online with a white face on black CRT glass/u,
+    assert.match(PRISM_INTRO_SCENES[6]!.imageAlt, /colored motes/u);
+    assert.match(PRISM_INTRO_SCENES[7]!.imageAlt, /radiant glass orb/u);
+    assert.doesNotMatch(
+      PRISM_INTRO_SCENES.slice(2)
+        .map((scene) => `${scene.title} ${scene.body} ${scene.imageAlt}`)
+        .join(" "),
+      /default PRISM bot|primary frame|triangle medallion|came online with a white face/iu,
     );
     assert.equal(
       PRISM_INTRO_SCENES[6]!.body,
-      "You decided what belonged. Their five colors carried your light toward the one still dark.",
+      "From their interplay came words, images, worlds, and paths.",
     );
   });
 
@@ -181,12 +157,12 @@ describe("PRISM intro sequence", () => {
       });
       assert.ok(
         statSync(assetUrl).size < 600_000,
-        `${scene.id} should stay below the local slideshow size budget`,
+        `${scene.id} should stay below the local cinematic size budget`,
       );
     }
   });
 
-  it("is a user-paced, keyboard-operable modal with restored focus", () => {
+  it("uses the player's light instead of slideshow navigation", () => {
     assert.match(componentSource, /createPortal\(/u);
     assert.match(componentSource, /role="dialog"/u);
     assert.match(componentSource, /aria-modal="true"/u);
@@ -205,6 +181,15 @@ describe("PRISM intro sequence", () => {
     assert.match(componentSource, /event\.key !== "Tab"/u);
     assert.match(componentSource, /active === rootRef\.current/u);
     assert.match(componentSource, /new window\.Image\(\)/u);
+    assert.match(componentSource, /onPointerMove=/u);
+    assert.match(componentSource, /--prism-intro-light-x/u);
+    assert.match(componentSource, /className=\{styles\.lightTarget\}/u);
+    assert.match(componentSource, /scene\.lightTarget\.hint/u);
+    assert.match(componentSource, /createPrismIntroAudioController/u);
+    assert.match(componentSource, /audioControllerRef\.current\?\.showScene\(scene\.id\)/u);
+    assert.match(componentSource, /data-prism-intro-audio-toggle="true"/u);
+    assert.match(componentSource, /aria-pressed=\{audioIsActive\}/u);
+    assert.doesNotMatch(componentSource, /progressDots|sceneCount|>Previous<|>Continue</u);
     assert.doesNotMatch(componentSource, /setInterval|autoAdvance/iu);
     assert.match(
       cssSource,

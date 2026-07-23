@@ -89,9 +89,19 @@
   grid-row: 2;
   min-height: 100%;
   display: grid;
-  place-items: center;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
   margin: 0;
   color: var(--fg-muted, #938b82);
+}
+
+.loadingOrb {
+  --prism-orb-size: 54px;
+}
+
+.loading p {
+  margin: 0;
 }
 
 .error {

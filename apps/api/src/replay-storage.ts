@@ -65,6 +65,21 @@ export function replayPremiumAudioRelativePath(args: {
   return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/premium/master.${extension}`;
 }
 
+export function replayFaithfulAudioRelativePath(args: {
+  userId: string;
+  recordingId: string;
+  contentType: string;
+}): string {
+  const extension = args.contentType.includes("ogg")
+    ? "ogg"
+    : args.contentType.includes("mp4")
+      ? "m4a"
+      : args.contentType.includes("wav")
+        ? "wav"
+        : "webm";
+  return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/faithful-master.${extension}`;
+}
+
 export function replayUploadRelativePath(
   userId: string,
   recordingId: string,

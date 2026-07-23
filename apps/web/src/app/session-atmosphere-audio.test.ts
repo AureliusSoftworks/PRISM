@@ -747,12 +747,13 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
       allowMixBoost: true,
       ambientFoley: false,
     });
-    assert.equal(gains.length, 2);
+    assert.equal(gains.length, 3);
     assert.equal(gains[0]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
     assert.equal(
       gains[1]?.gain.value,
       DEFAULT_SESSION_ATMOSPHERE_MIX.background,
     );
+    assert.equal(gains[2]?.gain.value, 1);
     assert.equal(
       compressors[0]?.threshold.value,
       SESSION_ATMOSPHERE_LOOP_COMPRESSOR.threshold,
@@ -794,9 +795,9 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
     );
 
     controller.playCue("coffeeCupPlace");
-    assert.equal(gains.length, 3);
+    assert.equal(gains.length, 4);
     assert.equal(
-      gains[2]?.gain.value,
+      gains[3]?.gain.value,
       DEFAULT_SESSION_ATMOSPHERE_MIX.foley * 1.0625,
     );
 
@@ -806,7 +807,8 @@ test("loop leveler recovers very quiet ambience before applying the mix bus", ()
     });
     assert.equal(gains[0]?.gain.value, SESSION_ATMOSPHERE_LOOP_PRE_GAIN);
     assert.equal(gains[1]?.gain.value, 0.1);
-    assert.equal(gains[2]?.gain.value, 1.0625);
+    assert.equal(gains[2]?.gain.value, 1);
+    assert.equal(gains[3]?.gain.value, 1.0625);
     controller.stop();
   } finally {
     if (originalAudio) {

@@ -91,13 +91,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.27",
+    version: "2.28",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.53",
+    version: "1.54",
     status: "active",
   },
   feed: {
@@ -116,7 +116,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     id: "story",
     name: "Story",
     version: "0.26",
-    status: "preview",
+    status: "planned",
   },
   gym: {
     id: "gym",
@@ -234,7 +234,7 @@ export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModeP
   botcast: "enforced",
   feed: "required_before_activation",
   games: "required_before_activation",
-  story: "enforced",
+  story: "required_before_activation",
   gym: "required_before_activation",
   slate: "not_applicable",
   pseudo: "required_before_activation",

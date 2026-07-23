@@ -43,6 +43,7 @@ function isRenderJob(value: unknown): value is ReplayRenderChildJob {
     typeof job.sessionToken === "string" &&
     typeof job.recordingId === "string" &&
     typeof job.sourceId === "string" &&
+    (job.surface === "signal" || job.surface === "coffee") &&
     typeof job.renderToken === "string" &&
     (job.renderKind === "standard" || job.renderKind === "premium") &&
     typeof job.webOrigin === "string"
@@ -158,40 +159,56 @@ async function runCommand(command: string, args: string[]): Promise<void> {
   });
 }
 
-function renderUrl(job: ReplayRenderChildJob): string {
+export function renderUrl(job: ReplayRenderChildJob): string {
   const url = new URL("/", job.webOrigin);
-  url.searchParams.set("view", "botcast");
+  url.searchParams.set("view", job.surface === "signal" ? "botcast" : "coffee");
   url.searchParams.set("prismRenderRecording", job.recordingId);
   url.searchParams.set("prismRenderSource", job.sourceId);
   url.searchParams.set("prismRenderKind", job.renderKind);
+  url.searchParams.set("prismRenderSurface", job.surface);
   return url.toString();
 }
 
 async function waitForRenderState(
   page: Page,
+  surface: ReplayRenderChildJob["surface"],
   accepted: readonly string[],
   timeout: number,
 ): Promise<string> {
+  const selector =
+    surface === "signal"
+      ? "[data-signal-background-render]"
+      : "[data-coffee-background-render]";
   await page.waitForFunction(
-    (states) => {
-      const root = document.querySelector<HTMLElement>(
-        "[data-signal-background-render]",
-      );
-      const state = root?.dataset.signalBackgroundRenderState ?? "";
+    ({ states, selector, surface }) => {
+      const root = document.querySelector<HTMLElement>(selector);
+      const state =
+        surface === "signal"
+          ? root?.dataset.signalBackgroundRenderState ?? ""
+          : root?.dataset.coffeeBackgroundRenderState ?? "";
       return states.includes(state) || state === "failed";
     },
-    accepted,
+    { states: accepted, selector, surface },
     { timeout },
   );
-  const snapshot = await page.locator("[data-signal-background-render]").evaluate(
-    (element) => ({
+  const snapshot = await page.locator(selector).evaluate(
+    (element, surface) => ({
       state:
-        (element as HTMLElement).dataset.signalBackgroundRenderState ?? "",
-      error: (element as HTMLElement).dataset.signalBackgroundRenderError ?? "",
+        surface === "signal"
+          ? (element as HTMLElement).dataset.signalBackgroundRenderState ?? ""
+          : (element as HTMLElement).dataset.coffeeBackgroundRenderState ?? "",
+      error:
+        surface === "signal"
+          ? (element as HTMLElement).dataset.signalBackgroundRenderError ?? ""
+          : (element as HTMLElement).dataset.coffeeBackgroundRenderError ?? "",
     }),
+    surface,
   );
   if (snapshot.state === "failed") {
-    throw new Error(snapshot.error || "Signal background render failed.");
+    throw new Error(
+      snapshot.error ||
+        `${surface === "signal" ? "Signal" : "Coffee"} background render failed.`,
+    );
   }
   return snapshot.state;
 }
@@ -257,7 +274,7 @@ async function replayJson(
 }
 
 async function runReplay(job: ReplayRenderChildJob): Promise<void> {
-  const workDirectory = await mkdtemp(join(tmpdir(), "prism-signal-render-"));
+  const workDirectory = await mkdtemp(join(tmpdir(), "prism-replay-render-"));
   const visualPath = join(workDirectory, "visual.webm");
   const outputPath = join(workDirectory, "episode.webm");
   const audioPath = resolveAbsoluteUnderDataRoot(
@@ -295,7 +312,7 @@ async function runReplay(job: ReplayRenderChildJob): Promise<void> {
       waitUntil: "domcontentloaded",
       timeout: 90_000,
     });
-    await waitForRenderState(page, ["ready"], 5 * 60_000);
+    await waitForRenderState(page, job.surface, ["ready"], 5 * 60_000);
     await access(audioPath, fsConstants.R_OK);
 
     await page.screencast.start({
@@ -304,20 +321,35 @@ async function runReplay(job: ReplayRenderChildJob): Promise<void> {
       quality: 90,
     });
     screencastStarted = true;
-    const started = await page.evaluate(() =>
-      window.__PRISM_SIGNAL_BACKGROUND_RENDER__?.start() ?? false,
+    const started = await page.evaluate(
+      (surface) =>
+        surface === "signal"
+          ? window.__PRISM_SIGNAL_BACKGROUND_RENDER__?.start() ?? false
+          : window.__PRISM_COFFEE_BACKGROUND_RENDER__?.start() ?? false,
+      job.surface,
     );
-    if (!started) throw new Error("Signal studio did not start its render clock.");
+    if (!started) {
+      throw new Error(
+        `${job.surface === "signal" ? "Signal studio" : "Coffee table"} did not start its render clock.`,
+      );
+    }
     await waitForRenderState(
       page,
+      job.surface,
       ["complete"],
       Math.max(10 * 60_000, job.durationMs * 2 + 5 * 60_000),
     );
-    const result = await page.evaluate(
-      () => window.__PRISM_SIGNAL_BACKGROUND_RENDER__?.result() ?? null,
-    ) as BrowserRenderResult | null;
+    const result = (await page.evaluate(
+      (surface) =>
+        surface === "signal"
+          ? window.__PRISM_SIGNAL_BACKGROUND_RENDER__?.result() ?? null
+          : window.__PRISM_COFFEE_BACKGROUND_RENDER__?.result() ?? null,
+      job.surface,
+    )) as BrowserRenderResult | null;
     if (!result?.timeline || !Number.isFinite(result.durationMs)) {
-      throw new Error("Signal studio returned an invalid render result.");
+      throw new Error(
+        `${job.surface === "signal" ? "Signal studio" : "Coffee table"} returned an invalid render result.`,
+      );
     }
     await page.screencast.stop();
     screencastStarted = false;
@@ -330,7 +362,7 @@ async function runReplay(job: ReplayRenderChildJob): Promise<void> {
         audioPath,
         outputPath,
         durationMs: result.durationMs,
-        title: `PRISM Signal ${job.recordingId}`,
+        title: `PRISM ${job.surface === "signal" ? "Signal" : "Coffee"} ${job.recordingId}`,
       }),
     );
     await replayJson(
@@ -394,6 +426,10 @@ process.on("disconnect", () => process.removeAllListeners("message"));
 declare global {
   interface Window {
     __PRISM_SIGNAL_BACKGROUND_RENDER__?: {
+      start: () => boolean;
+      result: () => BrowserRenderResult | null;
+    };
+    __PRISM_COFFEE_BACKGROUND_RENDER__?: {
       start: () => boolean;
       result: () => BrowserRenderResult | null;
     };

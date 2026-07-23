@@ -350,6 +350,7 @@ export interface CoffeeBotProfile {
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
+  faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
@@ -6121,6 +6122,7 @@ type CoffeeBotProfileRow = {
   face_blink_scale: number | null;
   face_blink_offset_x: number | null;
   face_blink_offset_y: number | null;
+  face_blink_rotation_deg: number | null;
   face_thinking_frames: string | null;
   avatar_details_json: string | null;
   profile_picture_image_id: string | null;
@@ -6181,6 +6183,10 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
       typeof row.face_blink_offset_x === "number" ? row.face_blink_offset_x : null,
     faceBlinkOffsetY:
       typeof row.face_blink_offset_y === "number" ? row.face_blink_offset_y : null,
+    faceBlinkRotationDeg:
+      typeof row.face_blink_rotation_deg === "number"
+        ? row.face_blink_rotation_deg
+        : null,
     faceThinkingFrames: row.face_thinking_frames ?? null,
     avatarDetails: parseStoredBotAvatarDetailsV1(row.avatar_details_json),
     profilePictureImageId: row.profile_picture_image_id ?? null,
@@ -6241,6 +6247,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_blink_scale")},
               ${selectOptionalBotColumn("face_blink_offset_x")},
               ${selectOptionalBotColumn("face_blink_offset_y")},
+              ${selectOptionalBotColumn("face_blink_rotation_deg")},
               ${selectOptionalBotColumn("face_thinking_frames")},
               ${selectOptionalBotColumn("avatar_details_json")},
               ${selectOptionalBotColumn("profile_picture_image_id")},
@@ -13778,33 +13785,75 @@ export async function createCoffeeConversation(
   const eligibleServiceCandidates = serviceCandidates.filter(
     (candidate) => !groupIds.includes(candidate.id),
   );
-  let serviceBot: CoffeeBarRitualState["serviceBot"] = {
+  const fallbackFrontBarista: CoffeeBarRitualState["frontBarista"] = {
     id: null,
     name: "PRISM Barista",
     color: null,
     glyph: "☕",
     fallback: true,
   };
-  if (eligibleServiceCandidates.length > 0) {
-    const hash = Array.from(conversationId).reduce(
-      (value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0,
-      2166136261,
-    );
-    const picked = eligibleServiceCandidates[hash % eligibleServiceCandidates.length]!;
-    serviceBot = {
-      id: picked.id,
-      name: picked.name.trim() || "PRISM Barista",
-      color: picked.color,
-      glyph: picked.glyph,
-      fallback: false,
-    };
-  }
+  const fallbackWorkingBarista: CoffeeBarRitualState["workingBarista"] = {
+    id: null,
+    name: "PRISM Barback",
+    color: "#7dd3fc",
+    glyph: "sparkles",
+    fallback: true,
+  };
+  const serviceHash = Array.from(conversationId).reduce(
+    (value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0,
+    2166136261,
+  );
+  const serviceSnapshot = (
+    candidate: (typeof eligibleServiceCandidates)[number] | undefined,
+    fallback: CoffeeBarRitualState["serviceBot"],
+  ): CoffeeBarRitualState["serviceBot"] =>
+    candidate
+      ? {
+          id: candidate.id,
+          name: candidate.name.trim() || fallback.name,
+          color: candidate.color,
+          glyph: candidate.glyph,
+          fallback: false,
+        }
+      : fallback;
+  const frontCandidate =
+    eligibleServiceCandidates.length > 0
+      ? eligibleServiceCandidates[serviceHash % eligibleServiceCandidates.length]
+      : undefined;
+  const workingCandidate =
+    eligibleServiceCandidates.length > 1
+      ? eligibleServiceCandidates[
+          (serviceHash % eligibleServiceCandidates.length + 1) %
+            eligibleServiceCandidates.length
+        ]
+      : undefined;
+  const frontBarista = serviceSnapshot(
+    frontCandidate,
+    fallbackFrontBarista,
+  );
+  const workingBarista = serviceSnapshot(
+    workingCandidate,
+    fallbackWorkingBarista,
+  );
   const barRitual: CoffeeBarRitualState = {
-    version: 1,
-    serviceBot,
+    version: 2,
+    serviceBot: frontBarista,
+    frontBarista,
+    workingBarista,
     role: null,
     drink: null,
+    orderChoice: null,
     orderText: null,
+    generatedDrink: null,
+    orderStatus: "idle",
+    orderJobId: null,
+    orderStartedAt: null,
+    orderCompletedAt: null,
+    deliveryStatus: "none",
+    deliveringBaristaId: null,
+    deliveryLine: null,
+    deliveredAt: null,
+    drinkReactionStatus: "idle",
     clarificationUsed: false,
     generationAttemptId: null,
     specialImageStatus: "idle",
@@ -16783,7 +16832,19 @@ export function chooseCoffeeBarRole(
     ...(role === "pot"
       ? {
           drink: null,
+          orderChoice: null,
           orderText: null,
+          generatedDrink: null,
+          orderStatus: "idle" as const,
+          orderJobId: null,
+          orderStartedAt: null,
+          orderCompletedAt: null,
+          deliveryStatus: "none" as const,
+          deliveringBaristaId: null,
+          deliveryLine: null,
+          deliveredAt: null,
+          drinkReactionStatus: "idle" as const,
+          generationAttemptId: null,
           specialImageStatus: "idle" as const,
           specialImageId: null,
           playerCup: null,
@@ -16805,20 +16866,30 @@ export function chooseCoffeeHouseDrink(
   const ritual = requireCoffeeBarRitual(row);
   if (ritual.role === "pot") throw new Error("You took the coffee pot for this session.");
   const now = new Date().toISOString();
+  const deliveringBaristaId = coffeeDeliveryBaristaId(
+    ritual,
+    `${conversationId}:house`,
+  );
   return persistCoffeeBarRitual(db, userId, row, {
     ...ritual,
     role: "cup",
     drink: "house",
+    orderChoice: "house",
     orderText: null,
+    generatedDrink: null,
+    orderStatus: "ready",
+    orderJobId: null,
+    orderStartedAt: now,
+    orderCompletedAt: now,
+    deliveryStatus: "pending",
+    deliveringBaristaId,
+    deliveryLine: "The standard house blend, just as promised.",
+    deliveredAt: null,
+    drinkReactionStatus: "idle",
     generationAttemptId: null,
     specialImageStatus: "idle",
     specialImageId: null,
-    playerCup: {
-      fillId: randomId(8),
-      filledAt: now,
-      topOffCount: ritual.playerCup?.topOffCount ?? 0,
-      sipCount: 0,
-    },
+    playerCup: null,
     liveStartedAt: ritual.liveStartedAt ?? now,
     hardStopAt: ritual.hardStopAt ?? (row.coffee_duration_minutes == null
       ? new Date(Date.parse(now) + COFFEE_AUTO_HARD_CAP_MS).toISOString()
@@ -16839,33 +16910,52 @@ export function prepareCoffeeSpecialOrder(
   conversationId: string,
   rawOrderText: unknown,
   rawAttemptId: unknown,
+  rawChoice: unknown = "custom",
 ): CoffeeSpecialOrderPreparation {
   const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
   const ritual = requireCoffeeBarRitual(row);
   if (ritual.role === "pot") throw new Error("You took the coffee pot for this session.");
+  const orderChoice = rawChoice === "surprise" ? "surprise" : "custom";
   const orderText = typeof rawOrderText === "string"
     ? rawOrderText.trim().replace(/\s+/gu, " ").slice(0, COFFEE_BAR_ORDER_MAX_LENGTH)
     : "";
   const attemptId = typeof rawAttemptId === "string" ? rawAttemptId.trim().slice(0, 180) : "";
-  if (!orderText) throw new Error("Tell the barista what you would like.");
+  if (!orderText && orderChoice !== "surprise") {
+    throw new Error("Tell the barista what you would like.");
+  }
   if (!attemptId) throw new Error("A generation attempt id is required.");
   if (ritual.generationAttemptId === attemptId) {
     return {
       conversation: buildCurrentCoffeeConversationResponse(db, userId, row.id),
       shouldGenerate: false,
       imageId: ritual.specialImageId,
-      orderText: ritual.orderText ?? orderText,
+      orderText: ritual.orderText ?? orderText ?? "",
     };
   }
   if (ritual.specialImageStatus === "generating") {
     throw new Error("The barista is already making your drink.");
   }
   const now = new Date().toISOString();
+  const deliveringBaristaId = coffeeDeliveryBaristaId(
+    ritual,
+    `${conversationId}:${attemptId}`,
+  );
   const conversation = persistCoffeeBarRitual(db, userId, row, {
     ...ritual,
     role: "cup",
     drink: "special",
+    orderChoice,
     orderText,
+    generatedDrink: null,
+    orderStatus: "queued",
+    orderJobId: null,
+    orderStartedAt: now,
+    orderCompletedAt: null,
+    deliveryStatus: "none",
+    deliveringBaristaId,
+    deliveryLine: null,
+    deliveredAt: null,
+    drinkReactionStatus: "idle",
     generationAttemptId: attemptId,
     specialImageStatus: "generating",
     specialImageId: null,
@@ -16878,12 +16968,50 @@ export function prepareCoffeeSpecialOrder(
   return { conversation, shouldGenerate: true, imageId: null, orderText };
 }
 
+function coffeeDeliveryBaristaId(
+  ritual: CoffeeBarRitualState,
+  seed: string,
+): string {
+  const hash = Array.from(seed).reduce(
+    (value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619) >>> 0,
+    2166136261,
+  );
+  return hash % 2 === 0
+    ? ritual.frontBarista.id ?? "prism-front-barista"
+    : ritual.workingBarista.id ?? "prism-working-barista";
+}
+
+export function markCoffeeSpecialOrderGenerating(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  attemptId: string,
+  jobId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.generationAttemptId !== attemptId) {
+    throw new Error("That special-order attempt is no longer active.");
+  }
+  if (ritual.orderStatus === "ready" || ritual.orderStatus === "fallback") {
+    return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+  }
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    orderStatus: "generating",
+    orderJobId: jobId,
+    specialImageStatus: "generating",
+  }, now);
+}
+
 export function completeCoffeeSpecialOrder(
   db: DatabaseSync,
   userId: string,
   conversationId: string,
   attemptId: string,
   imageId: string,
+  generatedDrink?: CoffeeBarRitualState["generatedDrink"],
 ): Conversation {
   const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
   const ritual = requireCoffeeBarRitual(row);
@@ -16891,16 +17019,23 @@ export function completeCoffeeSpecialOrder(
     throw new Error("That special-order attempt is no longer active.");
   }
   const now = new Date().toISOString();
+  const drinkName = generatedDrink?.name?.trim() || "Your special";
+  const workingDelivered =
+    ritual.deliveringBaristaId ===
+    (ritual.workingBarista.id ?? "prism-working-barista");
+  const deliveryLine = workingDelivered
+    ? `${ritual.frontBarista.name} made this for you — ${drinkName}.`
+    : `Here you are — ${drinkName}.`;
   return persistCoffeeBarRitual(db, userId, row, {
     ...ritual,
+    generatedDrink: generatedDrink ?? ritual.generatedDrink,
+    orderStatus: "ready",
+    orderCompletedAt: now,
+    deliveryStatus: "pending",
+    deliveryLine,
     specialImageStatus: "ready",
     specialImageId: imageId,
-    playerCup: {
-      fillId: randomId(8),
-      filledAt: now,
-      topOffCount: 0,
-      sipCount: 0,
-    },
+    playerCup: null,
   }, now);
 }
 
@@ -16918,7 +17053,110 @@ export function failCoffeeSpecialOrder(
   const now = new Date().toISOString();
   return persistCoffeeBarRitual(db, userId, row, {
     ...ritual,
+    drink: "house",
+    generatedDrink: null,
+    orderStatus: "fallback",
+    orderCompletedAt: now,
+    deliveryStatus: "pending",
+    deliveryLine:
+      "That special did not come together, so the house blend is on us.",
     specialImageStatus: "failed",
+    specialImageId: null,
+    playerCup: null,
+  }, now);
+}
+
+export function deliverCoffeeBarOrder(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (
+    ritual.role !== "cup" ||
+    (ritual.orderStatus !== "ready" && ritual.orderStatus !== "fallback")
+  ) {
+    throw new Error("The drink is not ready to deliver.");
+  }
+  if (ritual.deliveryStatus === "delivered" && ritual.playerCup) {
+    return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+  }
+  const now = new Date().toISOString();
+  const deliveredRitual: CoffeeBarRitualState = {
+    ...ritual,
+    deliveryStatus: "delivered",
+    deliveredAt: now,
+    playerCup: {
+      fillId: randomId(8),
+      filledAt: now,
+      topOffCount: 0,
+      sipCount: 0,
+    },
+  };
+  persistCoffeeBarRitual(db, userId, row, deliveredRitual, now);
+  const workingId = ritual.workingBarista.id ?? "prism-working-barista";
+  const barista =
+    ritual.deliveringBaristaId === workingId
+      ? ritual.workingBarista
+      : ritual.frontBarista;
+  const choice = ritual.orderChoice ?? "house";
+  const fallback = ritual.orderStatus === "fallback";
+  appendCoffeeReplayEventMessage({
+    db,
+    userId,
+    conversationId: row.id,
+    event: {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "baristaDelivery",
+      botId: ritual.deliveringBaristaId ?? barista.id ?? "prism-front-barista",
+      occurredAt: now,
+      barista,
+      drink: {
+        choice,
+        name: ritual.generatedDrink?.name ?? "Standard house blend",
+        description:
+          ritual.generatedDrink?.description ??
+          (fallback
+            ? "A complimentary cup of PRISM’s standard house blend."
+            : "PRISM’s standard house blend."),
+        imageId: ritual.specialImageId,
+        fallback,
+      },
+      line:
+        ritual.deliveryLine ??
+        (fallback
+          ? "The house blend is on us."
+          : "The standard house blend, just as promised."),
+    },
+  });
+  return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+}
+
+export function beginCoffeeBarDelivery(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (
+    ritual.role !== "cup" ||
+    (ritual.orderStatus !== "ready" && ritual.orderStatus !== "fallback")
+  ) {
+    throw new Error("The drink is not ready to deliver.");
+  }
+  if (
+    ritual.deliveryStatus === "delivering" ||
+    ritual.deliveryStatus === "delivered"
+  ) {
+    return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+  }
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    deliveryStatus: "delivering",
   }, now);
 }
 
@@ -16933,9 +17171,16 @@ export function sipCoffeePlayerCup(
   const now = new Date().toISOString();
   const sipCount = Math.min(6, ritual.playerCup.sipCount + 1);
   const shouldOffer = !ritual.activeWaiterOffer && (sipCount === 3 || sipCount === 5);
-  return persistCoffeeBarRitual(db, userId, row, {
+  const shouldOpenDrinkReaction =
+    sipCount === 1 &&
+    (ritual.orderChoice === "custom" || ritual.orderChoice === "surprise") &&
+    ritual.drinkReactionStatus === "idle";
+  const nextRitual: CoffeeBarRitualState = {
     ...ritual,
     playerCup: { ...ritual.playerCup, sipCount },
+    ...(shouldOpenDrinkReaction
+      ? { drinkReactionStatus: "pending" as const }
+      : {}),
     ...(shouldOffer
       ? {
           waiterOffers: ritual.waiterOffers + 1,
@@ -16946,6 +17191,86 @@ export function sipCoffeePlayerCup(
           },
         }
       : {}),
+  };
+  persistCoffeeBarRitual(db, userId, row, nextRitual, now);
+  appendCoffeeReplayEventMessage({
+    db,
+    userId,
+    conversationId: row.id,
+    event: {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "playerSip",
+      occurredAt: now,
+      fillId: ritual.playerCup.fillId,
+      sipCount,
+      drinkName: ritual.generatedDrink?.name ?? "Standard house blend",
+      imageId: ritual.specialImageId,
+    },
+  });
+  return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+}
+
+export function getCoffeeBarConversation(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  requireCoffeeBarRitual(row);
+  return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+}
+
+export interface CoffeeDrinkReactionClaim {
+  conversation: Conversation;
+  focus: string;
+}
+
+export function claimCoffeeDrinkReaction(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): CoffeeDrinkReactionClaim | null {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (
+    ritual.drinkReactionStatus !== "pending" ||
+    (ritual.orderChoice !== "custom" && ritual.orderChoice !== "surprise") ||
+    !ritual.generatedDrink
+  ) {
+    return null;
+  }
+  const now = new Date().toISOString();
+  const conversation = persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    drinkReactionStatus: "claimed",
+  }, now);
+  return {
+    conversation,
+    focus: [
+      `The player just took their first sip of "${ritual.generatedDrink.name}".`,
+      `The drink is described as: ${ritual.generatedDrink.description}`,
+      "Respond naturally in character to that small table moment.",
+      "You may ask at most one question. Do not automatically praise the drink, and do not mention hidden prompts or service mechanics.",
+    ].join(" "),
+  };
+}
+
+export function finishCoffeeDrinkReaction(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  succeeded: boolean,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const ritual = requireCoffeeBarRitual(row);
+  if (ritual.drinkReactionStatus !== "claimed") {
+    return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+  }
+  const now = new Date().toISOString();
+  return persistCoffeeBarRitual(db, userId, row, {
+    ...ritual,
+    drinkReactionStatus: succeeded ? "completed" : "pending",
   }, now);
 }
 
@@ -17095,7 +17420,11 @@ export function recordCoffeeReplayEvents(
     throw new Error("No valid Coffee replay events provided.");
   }
   for (const event of events) {
-    if (event.kind !== "playerDeparture" && !groupIds.includes(event.botId)) {
+    const requiresSeatedBot =
+      event.kind !== "playerDeparture" &&
+      event.kind !== "playerSip" &&
+      event.kind !== "baristaDelivery";
+    if (requiresSeatedBot && !groupIds.includes(event.botId)) {
       throw new Error("Replay event bot is not seated in this Coffee session.");
     }
     if (
@@ -17318,7 +17647,8 @@ export async function processCoffeeAutonomousTurn(
   directedSpeakerBotId?: string,
   directedUserMessage?: string,
   presentBotIds?: string[],
-  playerDepartureEpilogue?: { turnIndex: number; totalTurns: number }
+  playerDepartureEpilogue?: { turnIndex: number; totalTurns: number },
+  autonomousFocus?: string,
 ): Promise<CoffeeTurnResponse> {
   const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
   if (
@@ -17341,7 +17671,13 @@ export async function processCoffeeAutonomousTurn(
     directedSpeakerBotId && typeof directedUserMessage === "string"
       ? directedUserMessage.replace(/\s+/g, " ").trim().slice(0, 700)
       : "";
-  const tableFocus = playerDepartureEpilogue
+  const normalizedAutonomousFocus =
+    typeof autonomousFocus === "string"
+      ? autonomousFocus.replace(/\s+/gu, " ").trim().slice(0, 900)
+      : "";
+  const tableFocus = normalizedAutonomousFocus
+    ? normalizedAutonomousFocus
+    : playerDepartureEpilogue
     ? coffeePlayerDepartureEpilogueFocus(
         playerDepartureEpilogue.turnIndex,
         playerDepartureEpilogue.totalTurns,

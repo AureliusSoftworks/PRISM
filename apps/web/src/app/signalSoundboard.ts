@@ -7,6 +7,7 @@ import type {
   SessionAtmosphereController,
   SessionAtmosphereFoleyPlaybackOptions,
 } from "./session-atmosphere-audio.ts";
+import { routeAudioElementToPrismOutput } from "./signalAudioMasterCapture.ts";
 
 export interface SignalSoundboardCueDefinition {
   kind: BotcastSoundboardCueKind;
@@ -125,6 +126,10 @@ export interface SignalSoundboardPlaybackOptions {
 
 const SIGNAL_SOUNDBOARD_FOLEY_TAG = "signal-soundboard";
 const activeSoundboardAudio = new Set<SignalSoundboardAudio>();
+const soundboardAudioOutputCleanup = new WeakMap<
+  SignalSoundboardAudio,
+  () => void
+>();
 
 function cueDefinition(
   kind: BotcastSoundboardCueKind,
@@ -174,6 +179,8 @@ export function signalSoundboardNextVariantIndex(
 
 function releaseSoundboardAudio(audio: SignalSoundboardAudio): void {
   activeSoundboardAudio.delete(audio);
+  soundboardAudioOutputCleanup.get(audio)?.();
+  soundboardAudioOutputCleanup.delete(audio);
   audio.pause();
   audio.currentTime = 0;
 }
@@ -198,6 +205,12 @@ export function playSignalSoundboardCue(
   }
   const createAudio = options.createAudio ?? ((src: string) => new Audio(src));
   const audio = createAudio(plan.src);
+  if (!options.createAudio) {
+    const cleanup = routeAudioElementToPrismOutput(
+      audio as unknown as HTMLMediaElement,
+    );
+    if (cleanup) soundboardAudioOutputCleanup.set(audio, cleanup);
+  }
   audio.preload = "auto";
   audio.volume = plan.trim;
   audio.playbackRate = plan.playbackRate;

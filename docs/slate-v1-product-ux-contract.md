@@ -21,12 +21,13 @@ Slate and Story remain separate experiences:
 - **Slate:** "Let's turn this into something good." An editorial production
   workspace.
 
-Story remains a preview applet while Slate is built. Story earns graduation only
-when choices materially alter later events; current-run character memory and
-world facts remain coherent; consequences persist; players can discover moments
-they would not have outlined; and playing a scene feels meaningfully different
-from asking Slate to write one. Do not remove Story or fold its player experience
-into Slate during Slate V1.
+Story's early implementation remains separate but disabled from release while
+it matures. Story earns preview status only when choices materially alter later
+events; current-run character memory and world facts remain coherent;
+consequences persist; players can discover moments they would not have outlined;
+and playing a scene feels meaningfully different from asking Slate to write one.
+Do not remove Story's implementation or fold its player experience into Slate
+during Slate V1.
 
 ## V1 scope
 
@@ -215,7 +216,8 @@ silently synchronize or rewrite content across applets.
 
 ### Stage 1 — Slate standalone foundation
 
-Ship the V1 vertical slice above. Story remains unchanged and separately usable.
+Ship the V1 vertical slice above. Story remains separate and disabled until it
+earns preview status.
 
 ### Stage 2 — Story to Slate: `Develop in Slate`
 

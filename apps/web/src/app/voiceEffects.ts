@@ -22,6 +22,7 @@ import {
   voicePitchCorrectionCentsAt,
   type VoicePitchCorrectionPlan,
 } from "./voicePitchCorrection.ts";
+import { prismAudioOutputNode } from "./signalAudioMasterCapture.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -492,16 +493,46 @@ interface ActiveVoiceChannelState {
   resolve: (() => void) | null;
   progress: VoicePlaybackProgressController | null;
   roomConnection: RoomAcousticsConnection | null;
+  outputGain: GainNode | null;
+  releaseTimer: number | null;
 }
 
 const activeVoiceChannels: Record<
   VoicePlaybackChannel,
   ActiveVoiceChannelState
 > = {
-  primary: { nodes: [], resolve: null, progress: null, roomConnection: null },
-  presence: { nodes: [], resolve: null, progress: null, roomConnection: null },
-  reaction: { nodes: [], resolve: null, progress: null, roomConnection: null },
-  crosstalk: { nodes: [], resolve: null, progress: null, roomConnection: null },
+  primary: {
+    nodes: [],
+    resolve: null,
+    progress: null,
+    roomConnection: null,
+    outputGain: null,
+    releaseTimer: null,
+  },
+  presence: {
+    nodes: [],
+    resolve: null,
+    progress: null,
+    roomConnection: null,
+    outputGain: null,
+    releaseTimer: null,
+  },
+  reaction: {
+    nodes: [],
+    resolve: null,
+    progress: null,
+    roomConnection: null,
+    outputGain: null,
+    releaseTimer: null,
+  },
+  crosstalk: {
+    nodes: [],
+    resolve: null,
+    progress: null,
+    roomConnection: null,
+    outputGain: null,
+    releaseTimer: null,
+  },
 };
 
 const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
@@ -594,12 +625,13 @@ export async function playPreSpeechBreath(args: {
   active.roomConnection = connectRoomAcoustics({
     context,
     input: gain,
-    destination: context.destination,
+    destination: prismAudioOutputNode(context),
     send: args.roomAcoustics,
     stereoPan: args.stereoPan,
   });
   const scheduled: AudioScheduledSourceNode[] = [source];
   active.nodes = scheduled;
+  active.outputGain = gain;
 
   await new Promise<void>((resolve) => {
     let resolved = false;
@@ -622,6 +654,7 @@ export async function playPreSpeechBreath(args: {
         try { node.disconnect(); } catch { /* already disconnected */ }
       }
       if (active.nodes === scheduled) active.nodes = [];
+      if (active.outputGain === gain) active.outputGain = null;
       releaseVoice();
     };
     const cancel = () => finish();
@@ -649,6 +682,10 @@ export function stopRealtimeVoiceAudio(
   channel: VoicePlaybackChannel = "primary",
 ): void {
   const active = activeVoiceChannels[channel];
+  if (active.releaseTimer !== null) {
+    window.clearTimeout(active.releaseTimer);
+    active.releaseTimer = null;
+  }
   active.progress?.cancel();
   active.progress = null;
   for (const node of active.nodes) {
@@ -658,10 +695,60 @@ export function stopRealtimeVoiceAudio(
     try { node.disconnect(); } catch { /* already disconnected */ }
   }
   active.nodes = [];
+  active.outputGain = null;
   active.roomConnection?.disconnect();
   active.roomConnection = null;
   active.resolve?.();
   active.resolve = null;
+}
+
+export function voiceReleaseGainAt(
+  startGain: number,
+  progress: number,
+): number {
+  const normalizedGain = Math.max(0, startGain);
+  const normalizedProgress = Math.max(0, Math.min(1, progress));
+  return normalizedGain * Math.cos((normalizedProgress * Math.PI) / 2);
+}
+
+/** Releases an audible channel without snapping the waveform off. The
+ * lifecycle is cancelled immediately, while the device output gets a short
+ * equal-power tail before the channel is fully disconnected. */
+export function releaseRealtimeVoiceAudio(
+  channel: VoicePlaybackChannel = "primary",
+  fadeOutMs = 160,
+): void {
+  const active = activeVoiceChannels[channel];
+  active.progress?.cancel();
+  active.progress = null;
+  if (active.releaseTimer !== null) return;
+  const gain = active.outputGain;
+  const durationMs = Math.max(0, Math.round(fadeOutMs));
+  if (!gain || active.nodes.length === 0 || durationMs === 0) {
+    stopRealtimeVoiceAudio(channel);
+    return;
+  }
+  const startedAt = gain.context.currentTime;
+  const startGain = Math.max(0.0001, gain.gain.value);
+  const curve = Float32Array.from({ length: 32 }, (_, index) =>
+    Math.max(
+      0.0001,
+      voiceReleaseGainAt(startGain, index / 31),
+    ),
+  );
+  gain.gain.cancelScheduledValues(startedAt);
+  gain.gain.setValueCurveAtTime(
+    curve,
+    startedAt,
+    durationMs / 1_000,
+  );
+  const nodes = active.nodes;
+  active.releaseTimer = window.setTimeout(() => {
+    active.releaseTimer = null;
+    if (active.nodes === nodes && active.outputGain === gain) {
+      stopRealtimeVoiceAudio(channel);
+    }
+  }, durationMs);
 }
 
 export function stopReactionVoiceAudio(): void {
@@ -872,7 +959,7 @@ export async function playRealtimeVoiceBytes(args: {
   const roomConnection = connectRoomAcoustics({
     context,
     input: limiter,
-    destination: context.destination,
+    destination: prismAudioOutputNode(context),
     send: args.roomAcoustics,
     stereoPan: args.stereoPan,
   });
@@ -1042,6 +1129,7 @@ export async function playRealtimeVoiceBytes(args: {
   }
   active.nodes = scheduled;
   active.roomConnection = roomConnection;
+  active.outputGain = outputGain;
   await new Promise<void>((resolve) => {
     let progress: VoicePlaybackProgressController | null = null;
     let endTimer: number | null = null;
@@ -1063,7 +1151,13 @@ export async function playRealtimeVoiceBytes(args: {
           /* no-op */
         }
       }
-      if (active.nodes === scheduled) active.nodes = [];
+      const ownsChannel = active.nodes === scheduled;
+      if (ownsChannel) active.nodes = [];
+      if (active.outputGain === outputGain) active.outputGain = null;
+      if (active.releaseTimer !== null && ownsChannel) {
+        window.clearTimeout(active.releaseTimer);
+        active.releaseTimer = null;
+      }
       if (completed) {
         // Completed speech is no longer interruptible. Detach its released
         // room return from the active channel so the next natural turn can

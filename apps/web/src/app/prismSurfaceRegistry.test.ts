@@ -78,6 +78,14 @@ describe("PRISM living-shell surface registry", () => {
     );
   });
 
+  it("keeps Story dormant until it is ready for release", () => {
+    assert.equal(PRISM_SURFACES.story.status, "planned");
+    assert.equal(
+      prismRestorableWorkspaceLocation("/?view=story"),
+      null,
+    );
+  });
+
   it("preserves the exact origin checkpoint for contextual surfaces", () => {
     const checkpoint: PrismSurfaceCheckpoint = {
       surfaceId: "group-home",

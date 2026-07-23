@@ -6,6 +6,7 @@ import {
   type ReplayTimelineV1,
 } from "@localai/shared";
 import {
+  signalReplayBookendAt,
   signalReplayVideoEventElapsedMs,
   signalReplayVideoFrameState,
 } from "./signalReplayVideoFrame.ts";
@@ -89,6 +90,12 @@ const timeline: ReplayTimelineV1 = {
 };
 
 describe("Signal replay video frames", () => {
+  it("keeps the branded intro and outro on the replay picture timeline", () => {
+    assert.equal(signalReplayBookendAt(timeline, 1_000)?.kind, "intro");
+    assert.equal(signalReplayBookendAt(timeline, 7_000), null);
+    assert.equal(signalReplayBookendAt(timeline, 11_000)?.kind, "outro");
+  });
+
   it("maps frozen voice timing onto the episode director clock per message", () => {
     const director = botcastReplayTimeline(episode.messages, episode.events);
     const mapped = signalReplayVideoEventElapsedMs({

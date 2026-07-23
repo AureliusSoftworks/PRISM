@@ -36,6 +36,22 @@ export function prismCompanionPositionStorageKey(accountKey: string): string {
   return `prism_companion_position_v1:${safeStoragePart(accountKey)}`;
 }
 
+export function prismCompanionSpeechStorageKey(accountKey: string): string {
+  return `prism_companion_speech_v1:${safeStoragePart(accountKey)}`;
+}
+
+export function parsePrismCompanionSpeechEnabled(
+  value: string | null,
+): boolean {
+  return value !== "false";
+}
+
+export function prismCompanionDismissesOnExternalInteraction(
+  surface: PrismCompanionSurfaceReference,
+): boolean {
+  return surface.surfaceId === "zen" || surface.surfaceId === "prism-home";
+}
+
 export function parsePrismCompanionRecovery(
   value: string | null,
 ): PrismCompanionMessage[] {
@@ -57,13 +73,19 @@ export function retainPrismCompanionRecovery(
 
 export function isPrismCompanionShortcut(input: {
   key: string;
+  code?: string;
   altKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
   shiftKey: boolean;
   platform: string;
 }): boolean {
-  if (input.key !== " " || input.metaKey || input.shiftKey) return false;
+  const spacePressed =
+    input.code === "Space" ||
+    input.key === " " ||
+    input.key === "\u00a0" ||
+    input.key === "Spacebar";
+  if (!spacePressed || input.metaKey || input.shiftKey) return false;
   const mac = /Mac|iPhone|iPad/u.test(input.platform);
   return mac
     ? input.altKey && !input.ctrlKey

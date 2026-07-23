@@ -6,8 +6,6 @@ import { initializeDatabase } from "../db.ts";
 import {
   createPendingLivingShellAccountProgress,
   getLivingShellAccountProgress,
-  revealLivingShellCapability,
-  revealSignalAfterZenReplyMilestone,
   updateLivingShellAccountProgress,
 } from "../living-shell-progress.ts";
 
@@ -38,8 +36,6 @@ describe("living-shell account progress persistence", () => {
     assert.equal(progress.onboardingVersion, 0);
     assert.equal(progress.onboardingState.stage, "intro");
     assert.equal(progress.tutorialProgress.zen.status, "pending");
-    assert.equal(progress.capabilityRevelations.slate.revealed, true);
-    assert.equal(progress.capabilityRevelations.marketplace.revealed, false);
     db.close();
   });
 
@@ -48,7 +44,6 @@ describe("living-shell account progress persistence", () => {
     const progress = getLivingShellAccountProgress(db, userId);
     assert.equal(progress.onboardingState.stage, "complete");
     assert.equal(progress.tutorialProgress.slate.status, "completed");
-    assert.equal(progress.capabilityRevelations.coffee.revealed, true);
     db.close();
   });
 
@@ -94,66 +89,4 @@ describe("living-shell account progress persistence", () => {
     db.close();
   });
 
-  it("reveals capabilities monotonically without accepting them in progress patches", () => {
-    const { db, userId } = accountDb();
-    createPendingLivingShellAccountProgress(db, userId);
-    const revealed = revealLivingShellCapability(
-      db,
-      userId,
-      "marketplace",
-      "bot_saved",
-      "2026-07-22T01:00:00.000Z",
-    );
-    assert.equal(revealed.capabilityRevelations.marketplace.reason, "bot_saved");
-    updateLivingShellAccountProgress(db, userId, {
-      capabilityRevelations: { marketplace: { revealed: false } },
-    });
-    const persisted = getLivingShellAccountProgress(db, userId);
-    assert.equal(persisted.capabilityRevelations.marketplace.revealed, true);
-    db.close();
-  });
-
-  it("reveals Signal after replies from two distinct Zen bots", () => {
-    const { db, userId } = accountDb();
-    createPendingLivingShellAccountProgress(db, userId);
-    for (const botId of ["bot-a", "bot-b"]) {
-      db.prepare(
-        `INSERT INTO bots (
-           id, user_id, name, system_prompt, created_at, updated_at
-         ) VALUES (?, ?, ?, '', ?, ?)`,
-      ).run(
-        botId,
-        userId,
-        botId,
-        "2026-07-22T00:00:00.000Z",
-        "2026-07-22T00:00:00.000Z",
-      );
-      db.prepare(
-        `INSERT INTO conversations (
-           id, user_id, title, conversation_mode, bot_id, created_at, updated_at
-         ) VALUES (?, ?, ?, 'zen', ?, ?, ?)`,
-      ).run(
-        `conversation-${botId}`,
-        userId,
-        botId,
-        botId,
-        "2026-07-22T00:00:00.000Z",
-        "2026-07-22T00:00:00.000Z",
-      );
-      db.prepare(
-        `INSERT INTO messages (
-           id, conversation_id, user_id, role, content, bot_id, created_at
-         ) VALUES (?, ?, ?, 'assistant', 'Hello', ?, ?)`,
-      ).run(
-        `message-${botId}`,
-        `conversation-${botId}`,
-        userId,
-        botId,
-        "2026-07-22T00:00:00.000Z",
-      );
-      const progress = revealSignalAfterZenReplyMilestone(db, userId);
-      assert.equal(progress.capabilityRevelations.signal.revealed, botId === "bot-b");
-    }
-    db.close();
-  });
 });

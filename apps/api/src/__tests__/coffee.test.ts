@@ -59,9 +59,12 @@ import {
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
+  beginCoffeeBarDelivery,
+  claimCoffeeDrinkReaction,
   chooseCoffeeBarRole,
   chooseCoffeeHouseDrink,
   completeCoffeeSpecialOrder,
+  deliverCoffeeBarOrder,
   createCoffeePoll,
   createCoffeePreset,
   createCoffeeTeamsForSession,
@@ -136,6 +139,7 @@ import {
   kickoffCoffeeMeetingSummaryRefresh,
   topOffCoffeeCupForBot,
   failCoffeeSpecialOrder,
+  finishCoffeeDrinkReaction,
   stripCoffeeSpeakerPrefix,
   coffeeTextMentionsInternalAccountMetadata,
   undoLatestCoffeeDebugMessage,
@@ -1495,24 +1499,57 @@ async function createCoffeeConversationWithId(
 }
 
 describe("Coffee bar ritual", () => {
-  it("freezes one eligible service bot and locks the chosen player role", async () => {
+  it("freezes two distinct non-roster baristas and delivers a house cup", async () => {
     const db = createCoffeeTestDb();
     const userId = "coffee-bar-user";
     db.prepare("INSERT INTO users (id) VALUES (?)").run(userId);
-    for (const bot of [ALICE, BORIS, CARA]) seedCoffeeBot(db, userId, bot);
+    for (const bot of [ALICE, BORIS, CARA, DANTE])
+      seedCoffeeBot(db, userId, bot);
 
     const created = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
       initialTopic: "At the bar",
     });
     const ritual = created.conversation.coffeeSettings?.barRitual;
-    assert.equal(ritual?.serviceBot.id, CARA.id);
+    assert.equal(ritual?.version, 2);
+    assert.ok(ritual?.frontBarista.id);
+    assert.ok(ritual?.workingBarista.id);
+    assert.notEqual(ritual?.frontBarista.id, ritual?.workingBarista.id);
+    assert.equal(
+      [ALICE.id, BORIS.id].includes(ritual?.frontBarista.id ?? ""),
+      false,
+    );
+    assert.equal(
+      [ALICE.id, BORIS.id].includes(ritual?.workingBarista.id ?? ""),
+      false,
+    );
+    assert.deepEqual(ritual?.serviceBot, ritual?.frontBarista);
     assert.equal(ritual?.role, null);
 
     const withHouse = chooseCoffeeHouseDrink(db, userId, created.conversation.id);
     assert.equal(withHouse.coffeeSettings?.barRitual?.role, "cup");
     assert.equal(withHouse.coffeeSettings?.barRitual?.drink, "house");
-    assert.equal(withHouse.coffeeSettings?.barRitual?.playerCup?.sipCount, 0);
+    assert.equal(withHouse.coffeeSettings?.barRitual?.playerCup, null);
+    assert.equal(withHouse.coffeeSettings?.barRitual?.deliveryStatus, "pending");
+    const delivering = beginCoffeeBarDelivery(
+      db,
+      userId,
+      created.conversation.id,
+    );
+    assert.equal(
+      delivering.coffeeSettings?.barRitual?.deliveryStatus,
+      "delivering",
+    );
+    const delivered = deliverCoffeeBarOrder(
+      db,
+      userId,
+      created.conversation.id,
+    );
+    assert.equal(
+      delivered.coffeeSettings?.barRitual?.deliveryStatus,
+      "delivered",
+    );
+    assert.equal(delivered.coffeeSettings?.barRitual?.playerCup?.sipCount, 0);
     assert.ok(withHouse.coffeeSettings?.barRitual?.hardStopAt);
     assert.throws(
       () => chooseCoffeeBarRole(db, userId, created.conversation.id, "pot"),
@@ -1546,7 +1583,19 @@ describe("Coffee bar ritual", () => {
       "attempt-1",
     );
     assert.equal(duplicate.shouldGenerate, false);
-    failCoffeeSpecialOrder(db, userId, created.conversation.id, "attempt-1");
+    const failed = failCoffeeSpecialOrder(
+      db,
+      userId,
+      created.conversation.id,
+      "attempt-1",
+    );
+    assert.equal(failed.coffeeSettings?.barRitual?.orderStatus, "fallback");
+    assert.equal(failed.coffeeSettings?.barRitual?.drink, "house");
+    assert.equal(failed.coffeeSettings?.barRitual?.deliveryStatus, "pending");
+    assert.match(
+      failed.coffeeSettings?.barRitual?.deliveryLine ?? "",
+      /house blend is on us/u,
+    );
     const retry = prepareCoffeeSpecialOrder(
       db,
       userId,
@@ -1561,11 +1610,18 @@ describe("Coffee bar ritual", () => {
       created.conversation.id,
       "attempt-2",
       "coffee-image-1",
+      {
+        name: "Maple Prism Cortado",
+        description: "Maple, oat milk, and espresso with a bright finish.",
+        visualBrief: "espresso crema with maple amber and oat foam",
+      },
     );
     assert.equal(completed.coffeeSettings?.barRitual?.specialImageId, "coffee-image-1");
     assert.equal(completed.coffeeSettings?.barRitual?.specialImageStatus, "ready");
 
-    let sipped = completed;
+    assert.equal(completed.coffeeSettings?.barRitual?.playerCup, null);
+    beginCoffeeBarDelivery(db, userId, created.conversation.id);
+    let sipped = deliverCoffeeBarOrder(db, userId, created.conversation.id);
     for (let index = 0; index < 3; index += 1) {
       sipped = sipCoffeePlayerCup(db, userId, created.conversation.id);
     }
@@ -1582,6 +1638,27 @@ describe("Coffee bar ritual", () => {
     assert.equal(
       refilled.coffeeSettings?.barRitual?.specialImageId,
       "coffee-image-1",
+    );
+    const reaction = claimCoffeeDrinkReaction(
+      db,
+      userId,
+      created.conversation.id,
+    );
+    assert.ok(reaction);
+    assert.match(reaction.focus, /Maple Prism Cortado/u);
+    const reacted = finishCoffeeDrinkReaction(
+      db,
+      userId,
+      created.conversation.id,
+      true,
+    );
+    assert.equal(
+      reacted.coffeeSettings?.barRitual?.drinkReactionStatus,
+      "completed",
+    );
+    assert.equal(
+      claimCoffeeDrinkReaction(db, userId, created.conversation.id),
+      null,
     );
   });
 });
@@ -12500,6 +12577,11 @@ describe("normalizeCoffeeSessionSettings", () => {
     });
     assert.equal(settings.barRitual?.orderText, "maple cortado");
     assert.equal(settings.barRitual?.playerCup?.sipCount, 2);
+    assert.equal(settings.barRitual?.version, 2);
+    assert.equal(settings.barRitual?.frontBarista.name, "Boris");
+    assert.equal(settings.barRitual?.serviceBot.name, "Boris");
+    assert.equal(settings.barRitual?.workingBarista.name, "PRISM Barback");
+    assert.equal(settings.barRitual?.deliveryStatus, "delivered");
     assert.equal(
       settings.barRitual?.visitStartedAtByBotId["bot-alice"],
       "2026-07-22T00:00:01.000Z",

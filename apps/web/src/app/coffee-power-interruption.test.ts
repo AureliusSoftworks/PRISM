@@ -96,6 +96,19 @@ test("Coffee turns a live bot cutoff into prepared two-voice crosstalk", () => {
   assert.match(interruption, /buildBotCrosstalkListenerReactionPlanV1/u);
   assert.match(interruption, /prepareCoffeeCrosstalkRef\.current\(crosstalkPlan\)/u);
   assert.match(interruption, /playCoffeeListenerReactionRef\.current\(crosstalkPlan\)/u);
+  assert.match(interruption, /COFFEE_BOT_INTERRUPTION_OVERLAP_MS/u);
+  assert.match(
+    interruption,
+    /releaseVoicePlaybackPreservingPreparedMode\([\s\S]{0,120}COFFEE_BOT_INTERRUPTION_RELEASE_MS/u,
+  );
+  assert.ok(
+    interruption.indexOf(
+      "playCoffeeListenerReactionRef.current(crosstalkPlan)",
+    ) <
+      interruption.indexOf(
+        "releaseVoicePlaybackPreservingPreparedMode(",
+      ),
+  );
   assert.match(interruption, /interrupterCue: crosstalkPlan\.spokenCue/u);
   assert.match(
     interruption,

@@ -10,6 +10,7 @@ import {
   resolveElevenLabsVoiceEffectPlan,
   resolveVoiceEffectPlan,
   resolveVoiceTexture,
+  voiceReleaseGainAt,
   voiceLiltDetuneCents,
 } from "./voiceEffects.ts";
 
@@ -48,6 +49,12 @@ describe("voice textures", () => {
 });
 
 describe("engine-agnostic voice effects", () => {
+  it("uses an equal-power release curve for interrupted primary speech", () => {
+    assert.equal(voiceReleaseGainAt(0.8, 0), 0.8);
+    assert.ok(voiceReleaseGainAt(0.8, 0.5) > 0.5);
+    assert.ok(voiceReleaseGainAt(0.8, 1) < 0.000_001);
+  });
+
   it("uses the portable profile effect when a playback lane does not override it", () => {
     const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     assert.match(

@@ -42,11 +42,16 @@ function fixture(): DatabaseSync {
       purpose TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      hub_atmosphere_image_id TEXT
+    );
     CREATE TABLE bots (user_id TEXT NOT NULL, profile_picture_image_id TEXT);
     CREATE TABLE conversations (
       user_id TEXT NOT NULL,
       zen_wallpaper_image_id TEXT,
-      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]'
+      zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
+      coffee_settings TEXT
     );
     CREATE TABLE messages (
       user_id TEXT NOT NULL,
@@ -63,6 +68,7 @@ function fixture(): DatabaseSync {
       transcript_json TEXT
     );
   `);
+  db.prepare("INSERT INTO users VALUES (?, NULL)").run("user-1");
   return db;
 }
 
@@ -145,7 +151,9 @@ describe("image asset cleanup preview", () => {
       seedImage(db, "other-user-unused", { userId: "user-2" });
 
       db.prepare("INSERT INTO bots VALUES (?, ?)").run("user-1", "profile-image");
-      db.prepare("INSERT INTO conversations VALUES (?, ?, ?)").run(
+      db.prepare(
+        "INSERT INTO conversations (user_id, zen_wallpaper_image_id, zen_wallpaper_history) VALUES (?, ?, ?)",
+      ).run(
         "user-1",
         "zen-current",
         JSON.stringify([{ imageId: "zen-history" }]),
@@ -215,11 +223,31 @@ describe("image asset cleanup preview", () => {
     }
   });
 
+  it("protects the current Home atmosphere cache", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "home-atmosphere", {
+        origin: "hub_atmosphere",
+        purpose: "hub_atmosphere",
+      });
+      db.prepare(
+        "UPDATE users SET hub_atmosphere_image_id = ? WHERE id = ?",
+      ).run("home-atmosphere", "user-1");
+
+      const preview = previewUnreferencedImageAssets(db, "user-1");
+      assert.equal(preview.candidates.length, 0);
+      assert.equal(preview.protectedByReferenceCount, 1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("allows only orphaned PRISM-managed applet origins", () => {
     const db = fixture();
     try {
       for (const origin of [
         "botcast",
+        "hub_atmosphere",
         "slate_cover",
         "zen_wallpaper",
         "bot_profile_picture",
@@ -244,9 +272,10 @@ describe("image asset cleanup preview", () => {
       assert.deepEqual(
         preview.candidates.map((candidate) => candidate.origin).sort(),
         [
-          "bot_profile_picture",
-          "botcast",
-          "slate_cover",
+        "bot_profile_picture",
+        "botcast",
+        "hub_atmosphere",
+        "slate_cover",
           "zen_wallpaper",
         ],
       );

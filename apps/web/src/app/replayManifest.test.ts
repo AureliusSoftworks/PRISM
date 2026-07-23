@@ -5,6 +5,7 @@ import type { BotcastEpisode, BotcastShow } from "@localai/shared";
 import {
   buildCoffeeReplayManifestV1,
   buildSignalReplayManifestV1,
+  COFFEE_REPLAY_RENDER_CONTRACT,
 } from "./replayManifest.ts";
 
 describe("replay manifests", () => {
@@ -33,9 +34,31 @@ describe("replay manifests", () => {
             createdAt: "2026-07-21T00:00:02.000Z",
             provider: "local",
           },
+          {
+            id: "departure-1",
+            role: "system",
+            content: "Aster departs.",
+            createdAt: "2026-07-21T00:00:03.000Z",
+            coffeeReplayEvents: [{ kind: "botDeparture" }],
+          },
         ],
       },
-      bots: [{ id: "bot-1", name: "Aster", color: "#8844ff", glyph: "✦" }],
+      bots: [
+        {
+          id: "bot-1",
+          name: "Aster",
+          color: "#8844ff",
+          glyph: "✦",
+          replayVisualSnapshot: {
+            v: 1,
+            faceStyle: { eyes: "dot", mouth: "flat" },
+            avatarDetails: null,
+            voicePreset: "alto",
+            screenMaterialSeed: "aster-screen",
+            frameMaterialSeed: "aster-frame",
+          } as never,
+        },
+      ],
       playerName: "Jared",
       prismColor: "#55ddff",
       prismGlyph: "△",
@@ -44,10 +67,30 @@ describe("replay manifests", () => {
     assert.equal(manifest.surface, "coffee");
     assert.equal(manifest.visual.metadata?.playerPerspective, "third-person-prism");
     assert.equal(
+      manifest.visual.metadata?.renderContract,
+      COFFEE_REPLAY_RENDER_CONTRACT,
+    );
+    assert.equal(
+      (
+        manifest.participants.find((participant) => participant.id === "bot-1")
+          ?.metadata?.visualSnapshot as { screenMaterialSeed?: string }
+      )?.screenMaterialSeed,
+      "aster-screen",
+    );
+    assert.equal(
       manifest.participants.find((participant) => participant.id === "prism-player")?.kind,
       "prism",
     );
     assert.equal(manifest.utterances[0]?.speakerId, "prism-player");
+    assert.deepEqual(
+      {
+        text: manifest.utterances[2]?.text,
+        audible: manifest.utterances[2]?.audible,
+        visible: manifest.utterances[2]?.visible,
+        stateOnly: manifest.utterances[2]?.metadata?.stateOnly,
+      },
+      { text: "", audible: false, visible: false, stateOnly: true },
+    );
   });
 
   it("keeps Prism in Signal's control room when the guest is a bot", () => {
@@ -105,6 +148,23 @@ describe("replay manifests", () => {
       ],
       producerName: "Jared",
       theme: "dark",
+      audioEnabled: true,
+      audioVolume: 0.72,
+      capturedReplayEvents: [
+        {
+          id: "local-soundboard",
+          episodeId: "signal-1",
+          sequence: 1,
+          kind: "soundboard_cue",
+          payload: {
+            kind: "applause",
+            atMs: 1_200,
+            variantIndex: 2,
+            gain: 0.31,
+          },
+          occurredAt: "2026-07-21T00:00:01.000Z",
+        },
+      ],
     });
     assert.equal(
       manifest.participants.find((participant) => participant.role === "producer")?.id,
@@ -130,6 +190,17 @@ describe("replay manifests", () => {
       grain: 0,
       foley: 1,
       filmGrain: 0.65,
+    });
+    assert.deepEqual(manifest.visual.metadata?.signalAudioMix, {
+      v: 1,
+      enabled: true,
+      masterVolume: 0.72,
+    });
+    assert.deepEqual(manifest.events[0]?.payload, {
+      kind: "applause",
+      atMs: 1_200,
+      variantIndex: 2,
+      gain: 0.31,
     });
     assert.deepEqual(manifest.visual.metadata?.studioGlowTuning, {
       dark: { opacity: 0.78, blendMode: "screen" },
@@ -171,7 +242,7 @@ describe("replay implementation contracts", () => {
     assert.match(source, /videoBitrate: replayVideoBitrateForFilmGrain/u);
   });
 
-  it("exposes seeking, downloads, retry, and recording-only deletion", () => {
+  it("keeps Coffee video tools while Signal exposes audio enhancement", () => {
     const source = readFileSync(
       new URL("ReplayRecordingPanel.tsx", import.meta.url),
       "utf8",
@@ -185,16 +256,16 @@ describe("replay implementation contracts", () => {
     assert.match(source, /playsInline/u);
     assert.match(source, /preview\?: ReactNode/u);
     assert.match(source, /if \(surface === "signal"\)/u);
-    assert.match(source, /Export video/u);
-    assert.match(source, /Export Premium video/u);
-    assert.match(source, /Retry Premium video from cached audio/u);
-    assert.match(source, /Delete Premium media/u);
+    assert.doesNotMatch(source, /Export Premium video|Export video/u);
+    assert.match(source, /Enhance recording/u);
+    assert.match(source, /Download enhanced audio/u);
+    assert.match(source, /Delete enhanced audio/u);
     assert.match(source, /surface === "coffee" && transcriptBeats\.length > 0/u);
     assert.doesNotMatch(source, /interactive episode/u);
     assert.doesNotMatch(source, /<track/u);
   });
 
-  it("renders both Signal exports from the real Studio DOM in background Chromium", () => {
+  it("renders Signal and Coffee from their authentic DOM stages in background Chromium", () => {
     const coordinator = readFileSync(
       new URL("ReplayRenderCoordinator.tsx", import.meta.url),
       "utf8",
@@ -211,6 +282,7 @@ describe("replay implementation contracts", () => {
       new URL("../../../api/src/replay-render-worker-client.ts", import.meta.url),
       "utf8",
     );
+    const coffee = readFileSync(new URL("page.tsx", import.meta.url), "utf8");
     const audioEncoder = readFileSync(
       new URL("replayAudioEncoder.worker.ts", import.meta.url),
       "utf8",
@@ -218,9 +290,11 @@ describe("replay implementation contracts", () => {
     assert.match(coordinator, /surface = "coffee"/u);
     assert.match(coordinator, /claimReplayRecording\(\{ surface, sourceId \}\)/u);
     assert.match(coordinator, /prismRenderRecording/u);
-    assert.match(workerClient, /surface: "signal"/u);
+    assert.match(workerClient, /claimNextReplayRecording\(request\.db, request\.userId\)/u);
+    assert.doesNotMatch(workerClient, /surface: "signal"/u);
     assert.match(child, /chromium\.launch/u);
     assert.match(child, /page\.screencast\.start/u);
+    assert.match(child, /job\.surface === "signal" \? "botcast" : "coffee"/u);
     assert.match(child, /"-c:a",\s*"copy"/u);
     assert.match(audioEncoder, /new WebMOutputFormat/u);
     assert.match(audioEncoder, /getFirstEncodableAudioCodec\(\["opus"\]/u);
@@ -230,6 +304,10 @@ describe("replay implementation contracts", () => {
     assert.match(signal, /replayRenderCapture\.frame\.shot/u);
     assert.match(signal, /data-signal-background-render-state/u);
     assert.match(signal, /__PRISM_SIGNAL_BACKGROUND_RENDER__/u);
+    assert.match(coffee, /data-coffee-background-render-state/u);
+    assert.match(coffee, /__PRISM_COFFEE_BACKGROUND_RENDER__/u);
+    assert.match(coffee, /waitForCoffeeReplayRenderAssets/u);
+    assert.match(coffee, /coffeeReplayVideoFrameState/u);
     assert.match(
       signal,
       /replayRenderTarget &&[\s\S]{0,100}replayRenderCapture &&[\s\S]{0,800}currentEpisode: replayRenderTarget\.episode/u,

@@ -3,17 +3,8 @@ import {
   BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
   BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_VERSION,
-  BOT_AVATAR_DETAIL_OFFSET_MAX,
-  BOT_AVATAR_DETAIL_OFFSET_MIN,
-  BOT_AVATAR_DETAIL_SCALE_MAX,
-  BOT_AVATAR_DETAIL_SCALE_MIN,
-  BOT_AVATAR_DETAIL_STAMP_CATALOG,
   encodeBotAvatarDetailsPaintColorMap,
-  isBotAvatarDetailStampTransformInsideCanvas,
   isBotAvatarDetailsWritablePixel,
-  type BotAvatarDetailStampCategory,
-  type BotAvatarDetailStampId,
-  type BotAvatarDetailStampV1,
   type BotAvatarDetailsV1,
 } from "./botAvatarDetails.ts";
 import {
@@ -112,7 +103,6 @@ export interface BotGeneratedInkStrokeV1 {
 }
 
 export interface BotGeneratedAvatarDetailsInputV1 {
-  stamps: BotAvatarDetailStampV1[];
   ink: BotGeneratedInkStrokeV1[];
 }
 
@@ -197,52 +187,6 @@ function normalizeGeneratedProfile(value: unknown, botName: string): BotProfileF
   return parseStoredBotPrompt(
     serializeStoredBotPrompt(candidate as unknown as BotProfileFields, botName),
   ).fields;
-}
-
-function normalizeGeneratedStamps(value: unknown): BotAvatarDetailStampV1[] {
-  if (!Array.isArray(value)) return [];
-  const catalog = new Map(
-    BOT_AVATAR_DETAIL_STAMP_CATALOG.map((stamp) => [stamp.id, stamp]),
-  );
-  const categoryCounts: Record<BotAvatarDetailStampCategory, number> = {
-    eyewear: 0,
-    "facial-hair": 0,
-    marking: 0,
-  };
-  const stamps: BotAvatarDetailStampV1[] = [];
-  for (const candidate of value) {
-    if (!isRecord(candidate) || typeof candidate.id !== "string") continue;
-    const definition = catalog.get(candidate.id as BotAvatarDetailStampId);
-    if (!definition) continue;
-    const categoryLimit = definition.category === "marking" ? 2 : 1;
-    if (categoryCounts[definition.category] >= categoryLimit) continue;
-    const stamp: BotAvatarDetailStampV1 = {
-      id: definition.id as BotAvatarDetailStampId,
-      offsetX: clampedInteger(
-        candidate.offsetX,
-        0,
-        BOT_AVATAR_DETAIL_OFFSET_MIN,
-        BOT_AVATAR_DETAIL_OFFSET_MAX,
-      ),
-      offsetY: clampedInteger(
-        candidate.offsetY,
-        0,
-        BOT_AVATAR_DETAIL_OFFSET_MIN,
-        BOT_AVATAR_DETAIL_OFFSET_MAX,
-      ),
-      scalePct: clampedInteger(
-        candidate.scalePct,
-        100,
-        BOT_AVATAR_DETAIL_SCALE_MIN,
-        BOT_AVATAR_DETAIL_SCALE_MAX,
-      ),
-    };
-    if (!isBotAvatarDetailStampTransformInsideCanvas(definition, stamp)) continue;
-    categoryCounts[definition.category] += 1;
-    stamps.push(stamp);
-    if (stamps.length >= 4) break;
-  }
-  return stamps;
 }
 
 function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
@@ -344,7 +288,6 @@ function paintGeneratedInkStroke(
 
 function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | null {
   const record = isRecord(value) ? value : {};
-  const stamps = normalizeGeneratedStamps(record.stamps);
   const strokes = Array.isArray(record.ink)
     ? record.ink.map(normalizeInkStroke).filter((stroke): stroke is BotGeneratedInkStrokeV1 => stroke !== null).slice(0, 8)
     : [];
@@ -353,11 +296,11 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
   for (const stroke of strokes) {
     paintGeneratedInkStroke(colorMap, stroke, paintState);
   }
-  if (stamps.length === 0 && paintState.painted === 0) return null;
+  if (paintState.painted === 0) return null;
   return {
     version: BOT_AVATAR_DETAILS_VERSION,
     screen: {
-      stamps,
+      stamps: [],
       paintMaskBase64: null,
       ...(paintState.painted > 0
         ? { paintColorMapBase64: encodeBotAvatarDetailsPaintColorMap(colorMap) }
@@ -391,6 +334,7 @@ function normalizeGeneratedVoice(
     systemVoiceName: _systemVoiceName,
     elevenLabsVoiceIdOverride: _elevenLabsVoiceIdOverride,
     avatarSfx: _avatarSfx,
+    avatarSfxMuted: _avatarSfxMuted,
     ...portable
   } = normalized;
   return portable;

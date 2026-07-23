@@ -174,6 +174,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
       graphics_quality TEXT NOT NULL DEFAULT 'high',
+      atmosphere_style TEXT NOT NULL DEFAULT 'prismatic',
+      hub_atmosphere_image_id TEXT,
+      hub_atmosphere_image_style TEXT,
       startup_preference TEXT NOT NULL DEFAULT 'home',
       preferred_provider TEXT NOT NULL DEFAULT 'local',
       ephemeral_chat_provider_preferences TEXT NOT NULL DEFAULT '{}',
@@ -241,6 +244,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_blink_scale REAL,
       prism_default_bot_face_blink_offset_x REAL,
       prism_default_bot_face_blink_offset_y REAL,
+      prism_default_bot_face_blink_rotation_deg REAL,
       prism_default_bot_face_thinking_frames TEXT,
       prism_default_bot_temperature REAL,
       prism_default_bot_max_tokens INTEGER,
@@ -1041,6 +1045,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_blink_scale REAL,
       face_blink_offset_x REAL,
       face_blink_offset_y REAL,
+      face_blink_rotation_deg REAL,
       face_thinking_frames TEXT,
       authored_audio_voice_profile TEXT,
       audio_voice_profile_override TEXT,
@@ -1393,6 +1398,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       render_token TEXT,
       upload_rel_path TEXT,
       video_rel_path TEXT,
+      audio_rel_path TEXT,
+      audio_content_type TEXT,
+      audio_size_bytes INTEGER,
+      audio_duration_ms INTEGER,
       codec TEXT,
       content_type TEXT,
       width INTEGER NOT NULL DEFAULT 1920,
@@ -1526,6 +1535,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
   `);
+  const replayRecordingColumns = new Set(
+    (db.prepare("PRAGMA table_info(replay_recordings)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  const addReplayRecordingColumn = (
+    name: string,
+    definition: string,
+  ): void => {
+    if (replayRecordingColumns.has(name)) return;
+    db.exec(`ALTER TABLE replay_recordings ADD COLUMN ${name} ${definition};`);
+    replayRecordingColumns.add(name);
+  };
+  addReplayRecordingColumn("audio_rel_path", "TEXT");
+  addReplayRecordingColumn("audio_content_type", "TEXT");
+  addReplayRecordingColumn("audio_size_bytes", "INTEGER");
+  addReplayRecordingColumn("audio_duration_ms", "INTEGER");
   const replayPremiumProductionColumns = new Set(
     (db.prepare("PRAGMA table_info(replay_premium_productions)").all() as Array<{
       name: string;
@@ -1675,6 +1701,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     db.exec(
       "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
     );
+  }
+  const hasAtmosphereStyle = userColumns.some(
+    (column) => column.name === "atmosphere_style",
+  );
+  if (!hasAtmosphereStyle) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN atmosphere_style TEXT NOT NULL DEFAULT 'prismatic';",
+    );
+  }
+  const hasHubAtmosphereImageId = userColumns.some(
+    (column) => column.name === "hub_atmosphere_image_id",
+  );
+  if (!hasHubAtmosphereImageId) {
+    db.exec("ALTER TABLE users ADD COLUMN hub_atmosphere_image_id TEXT;");
+  }
+  const hasHubAtmosphereImageStyle = userColumns.some(
+    (column) => column.name === "hub_atmosphere_image_style",
+  );
+  if (!hasHubAtmosphereImageStyle) {
+    db.exec("ALTER TABLE users ADD COLUMN hub_atmosphere_image_style TEXT;");
   }
   const hasStartupPreference = userColumns.some(
     (column) => column.name === "startup_preference",
@@ -2132,6 +2178,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_blink_scale", "REAL"],
     ["prism_default_bot_face_blink_offset_x", "REAL"],
     ["prism_default_bot_face_blink_offset_y", "REAL"],
+    ["prism_default_bot_face_blink_rotation_deg", "REAL"],
     ["prism_default_bot_face_thinking_frames", "TEXT"],
     ["prism_default_bot_temperature", "REAL"],
     ["prism_default_bot_max_tokens", "INTEGER"],
@@ -2942,6 +2989,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceBlinkOffsetYColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_offset_y REAL;");
+  }
+  const hasBotFaceBlinkRotationDegColumn = botColumns.some(
+    (column) => column.name === "face_blink_rotation_deg",
+  );
+  if (!hasBotFaceBlinkRotationDegColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_rotation_deg REAL;");
   }
   const hasBotFaceThinkingFramesColumn = botColumns.some(
     (column) => column.name === "face_thinking_frames",

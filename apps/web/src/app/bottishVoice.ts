@@ -11,7 +11,9 @@ import {
   playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
+  releaseRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  voiceReleaseGainAt,
   voiceLiltDetuneCents,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
@@ -419,6 +421,7 @@ export function encodeBottishPlanWave(
 
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
+let activeMediaFadeTimer: number | null = null;
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let activeTimer: number | null = null;
@@ -484,6 +487,10 @@ function beginMediaUnlock(): void {
 
 function releaseActiveMedia(keepElement = false): void {
   const media = activeMedia;
+  if (activeMediaFadeTimer !== null && typeof window !== "undefined") {
+    window.clearTimeout(activeMediaFadeTimer);
+    activeMediaFadeTimer = null;
+  }
   if (media) {
     media.pause();
     media.removeAttribute("src");
@@ -516,6 +523,51 @@ export function stopBottishVoice(
   stopScheduledNodes();
   if (!options.preservePreparedMedia) releasePreparedMedia();
   queue = Promise.resolve();
+}
+
+export function releaseBottishVoice(
+  options: {
+    fadeOutMs?: number;
+    preservePreparedMedia?: boolean;
+  } = {},
+): void {
+  generation += 1;
+  const fadeOutMs = Math.max(0, Math.round(options.fadeOutMs ?? 160));
+  releaseRealtimeVoiceAudio("primary", fadeOutMs);
+  stopRealtimeVoiceAudio("presence");
+  const media = activeMedia;
+  if (!media) {
+    if (!options.preservePreparedMedia) releasePreparedMedia();
+    return;
+  }
+  if (activeMediaFadeTimer !== null) {
+    window.clearTimeout(activeMediaFadeTimer);
+    activeMediaFadeTimer = null;
+  }
+  const startVolume = media.volume;
+  const startedAt = Date.now();
+  const finish = (): void => {
+    if (activeMedia !== media) return;
+    const resolve = activeResolve;
+    if (resolve) resolve();
+    else releaseActiveMedia(options.preservePreparedMedia === true);
+    if (!options.preservePreparedMedia) releasePreparedMedia();
+  };
+  if (fadeOutMs === 0 || media.paused || startVolume <= 0) {
+    finish();
+    return;
+  }
+  const step = (): void => {
+    if (activeMedia !== media) return;
+    const progress = (Date.now() - startedAt) / fadeOutMs;
+    media.volume = voiceReleaseGainAt(startVolume, progress);
+    if (progress >= 1) {
+      finish();
+      return;
+    }
+    activeMediaFadeTimer = window.setTimeout(step, 16);
+  };
+  step();
 }
 
 async function playPlanWithMedia(

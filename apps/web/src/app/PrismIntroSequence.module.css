@@ -1,4 +1,6 @@
 .backdrop {
+  --prism-intro-light-x: 50vw;
+  --prism-intro-light-y: 52vh;
   position: fixed;
   inset: 0;
   z-index: 2200;
@@ -6,28 +8,10 @@
   min-height: 100dvh;
   overflow: hidden;
   isolation: isolate;
-  background: #070707;
+  background: #050505;
   color: #f5f3ef;
   font-family: var(--font-ui-sans), system-ui, sans-serif;
   outline: none;
-}
-
-.backdrop::after {
-  content: "";
-  position: absolute;
-  inset: auto 0 0;
-  z-index: 4;
-  height: 2px;
-  background: linear-gradient(
-    90deg,
-    #ff4d6d,
-    #ff9f1c,
-    #b7e63a,
-    #2fd3e3,
-    #7b5cff
-  );
-  opacity: 0.72;
-  pointer-events: none;
 }
 
 .imageLayer,
@@ -40,34 +24,41 @@
 .imageLayer {
   z-index: 0;
   overflow: hidden;
-  background: #090909;
+  background: #080808;
 }
 
 .sceneImage {
   object-fit: cover;
   object-position: var(--prism-intro-image-position, center center);
-  transform: scale(1.025);
-  filter: contrast(1.02) saturate(0.97);
+  filter: contrast(1.03) saturate(0.98);
+  transform: scale(1.02);
   animation: sceneArrival 1.15s cubic-bezier(0.2, 0.72, 0.18, 1) both,
-    sceneDrift 18s ease-out both;
+    sceneDrift 18s 1.15s ease-out both;
+  transition: opacity 460ms ease, filter 460ms ease, transform 700ms ease;
   user-select: none;
+}
+
+.backdrop[data-transitioning="true"] .sceneImage {
+  opacity: 0.18;
+  filter: contrast(1.12) saturate(0.72) brightness(1.35) blur(3px);
+  transform: scale(1.055);
 }
 
 .imageScrim {
   background:
     linear-gradient(
       90deg,
-      rgba(3, 3, 3, 0.96) 0%,
-      rgba(3, 3, 3, 0.82) 25%,
-      rgba(3, 3, 3, 0.46) 49%,
-      rgba(3, 3, 3, 0.08) 76%
+      rgba(3, 3, 3, 0.94) 0%,
+      rgba(3, 3, 3, 0.73) 24%,
+      rgba(3, 3, 3, 0.28) 49%,
+      rgba(3, 3, 3, 0.04) 78%
     ),
     linear-gradient(
       0deg,
-      rgba(3, 3, 3, 0.86) 0%,
-      rgba(3, 3, 3, 0.3) 28%,
-      rgba(3, 3, 3, 0.08) 62%,
-      rgba(3, 3, 3, 0.44) 100%
+      rgba(3, 3, 3, 0.74) 0%,
+      rgba(3, 3, 3, 0.22) 27%,
+      rgba(3, 3, 3, 0.06) 65%,
+      rgba(3, 3, 3, 0.38) 100%
     );
 }
 
@@ -77,92 +68,128 @@
       96deg,
       transparent 0,
       transparent 13px,
-      rgba(255, 255, 255, 0.015) 14px,
+      rgba(255, 255, 255, 0.014) 14px,
       transparent 15px
     ),
     radial-gradient(
       circle at 20% 35%,
-      rgba(255, 255, 255, 0.055),
+      rgba(255, 255, 255, 0.05),
       transparent 31%
     );
   mix-blend-mode: soft-light;
-  opacity: 0.52;
+  opacity: 0.48;
   pointer-events: none;
+}
+
+.cursorLight {
+  position: fixed;
+  z-index: 3;
+  left: var(--prism-intro-light-x);
+  top: var(--prism-intro-light-y);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  opacity: 0.72;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  box-shadow:
+    0 0 8px 2px rgba(255, 255, 255, 0.92),
+    0 0 32px 12px rgba(225, 242, 255, 0.4),
+    0 0 90px 36px rgba(205, 225, 255, 0.18),
+    0 0 180px 76px rgba(255, 255, 255, 0.07);
+  mix-blend-mode: screen;
+  pointer-events: none;
+  transition: width 360ms ease, height 360ms ease, opacity 220ms ease,
+    box-shadow 360ms ease;
+  animation: cursorWake 1.4s ease-out both;
+}
+
+.backdrop[data-light-active="true"] .cursorLight {
+  opacity: 1;
+}
+
+.backdrop[data-transitioning="true"] .cursorLight {
+  width: 54px;
+  height: 54px;
+  opacity: 0;
+  box-shadow:
+    0 0 18px 9px #fff,
+    0 0 86px 38px rgba(226, 243, 255, 0.76),
+    0 0 220px 100px rgba(255, 255, 255, 0.32);
 }
 
 .topRail {
   position: absolute;
   inset: max(22px, env(safe-area-inset-top))
-    max(28px, env(safe-area-inset-right)) auto
-    max(28px, env(safe-area-inset-left));
-  z-index: 5;
+    max(28px, env(safe-area-inset-right)) auto auto;
+  z-index: 7;
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
+  align-items: center;
+  gap: 14px;
+  pointer-events: none;
 }
 
-.sceneCount {
-  display: flex;
-  align-items: baseline;
-  gap: 13px;
-  color: rgba(245, 243, 239, 0.76);
-  font-size: 0.72rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.sceneCount span {
-  font-weight: 800;
-  letter-spacing: 0.27em;
-}
-
-.sceneCount strong {
-  color: rgba(245, 243, 239, 0.52);
-  font-family: var(--font-geist-mono), monospace;
-  font-size: 0.68rem;
-  font-weight: 550;
-  letter-spacing: 0.12em;
-}
-
+.audioButton,
 .skipButton,
-.backButton,
-.nextButton,
-.progressDot {
+.lightTarget {
   appearance: none;
   border: 0;
   font: inherit;
-  cursor: pointer;
 }
 
+.audioButton,
 .skipButton {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.17);
-  border-radius: 999px;
-  background: rgba(7, 7, 7, 0.44);
-  color: rgba(245, 243, 239, 0.76);
-  padding: 8px 13px 8px 15px;
-  font-size: 0.75rem;
+  gap: 8px;
+  padding: 6px;
+  background: transparent;
+  color: rgba(245, 243, 239, 0.58);
+  font-size: 0.72rem;
   font-weight: 680;
-  letter-spacing: 0.045em;
-  backdrop-filter: blur(14px);
-  transition: color 160ms ease, border-color 160ms ease,
-    background 160ms ease, transform 160ms ease;
+  letter-spacing: 0.06em;
+  pointer-events: auto;
+  transition: color 160ms ease, transform 160ms ease;
 }
 
-.skipButton span {
-  color: #fff;
-  font-size: 1.08rem;
-  font-weight: 350;
-  line-height: 0.75;
+.audioButton {
+  gap: 7px;
+  color: rgba(245, 243, 239, 0.5);
 }
 
+.audioIndicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(225, 242, 255, 0.88);
+  box-shadow: 0 0 12px rgba(205, 225, 255, 0.58);
+}
+
+.audioButton[data-audio-state="blocked"] .audioIndicator {
+  background: #ffcc76;
+  box-shadow: 0 0 12px rgba(255, 184, 82, 0.52);
+}
+
+.audioButton[data-audio-state="muted"] .audioIndicator {
+  background: rgba(245, 243, 239, 0.28);
+  box-shadow: none;
+}
+
+.skipButton kbd {
+  border: 1px solid rgba(255, 255, 255, 0.21);
+  border-radius: 5px;
+  padding: 2px 5px;
+  background: rgba(5, 5, 5, 0.38);
+  color: rgba(255, 255, 255, 0.7);
+  font: inherit;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+}
+
+.audioButton:hover,
+.audioButton:focus-visible,
 .skipButton:hover,
 .skipButton:focus-visible {
-  border-color: rgba(255, 255, 255, 0.42);
-  background: rgba(7, 7, 7, 0.68);
   color: #fff;
   outline: none;
   transform: translateY(-1px);
@@ -170,57 +197,53 @@
 
 .copyStage {
   position: absolute;
-  z-index: 3;
-  left: max(6vw, env(safe-area-inset-left));
-  bottom: clamp(118px, 17vh, 188px);
-  width: min(760px, 68vw);
+  z-index: 5;
+  left: max(5.5vw, env(safe-area-inset-left));
+  bottom: clamp(84px, 13vh, 142px);
+  width: min(650px, 49vw);
   text-wrap: balance;
+  pointer-events: none;
+  transition: opacity 320ms ease, transform 460ms ease, filter 320ms ease;
 }
 
-.brandMark {
-  width: clamp(62px, 6vw, 88px);
-  height: auto;
-  margin: 0 0 clamp(16px, 2vh, 24px);
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 22px;
-  background: rgba(245, 243, 239, 0.92);
-  padding: 9px;
-  box-shadow: 0 18px 58px rgba(0, 0, 0, 0.4);
-  animation: markArrival 900ms cubic-bezier(0.2, 0.74, 0.18, 1) both;
+.backdrop[data-transitioning="true"] .copyStage {
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateY(-9px);
 }
 
 .eyebrow {
-  margin: 0 0 13px;
-  color: rgba(245, 243, 239, 0.62);
-  font-size: clamp(0.68rem, 0.72vw, 0.78rem);
+  margin: 0 0 11px;
+  color: rgba(245, 243, 239, 0.58);
+  font-size: clamp(0.64rem, 0.68vw, 0.74rem);
   font-weight: 760;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.23em;
 }
 
 .copyStage h1 {
-  max-width: 14.5em;
+  max-width: 16em;
   margin: 0;
   color: #f8f6f1;
   font-family: var(--font-formal-serif), Georgia, serif;
-  font-size: clamp(2.4rem, 4.75vw, 5.25rem);
+  font-size: clamp(2rem, 3.65vw, 4rem);
   font-weight: 500;
-  letter-spacing: -0.042em;
-  line-height: 0.98;
-  text-shadow: 0 4px 28px rgba(0, 0, 0, 0.58);
-  animation: copyArrival 740ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
+  letter-spacing: -0.038em;
+  line-height: 1.01;
+  text-shadow: 0 4px 28px rgba(0, 0, 0, 0.62);
+  animation: copyArrival 760ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .bodyCopy {
-  max-width: 37rem;
-  margin: clamp(16px, 2.4vh, 25px) 0 0;
-  color: rgba(245, 243, 239, 0.8);
+  max-width: 35rem;
+  margin: clamp(14px, 2vh, 21px) 0 0;
+  color: rgba(245, 243, 239, 0.77);
   font-family: var(--font-chat-serif), Georgia, serif;
-  font-size: clamp(1rem, 1.38vw, 1.3rem);
+  font-size: clamp(0.94rem, 1.18vw, 1.14rem);
   font-weight: 400;
   line-height: 1.5;
   text-wrap: pretty;
-  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.72);
-  animation: copyArrival 740ms 90ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.76);
+  animation: copyArrival 760ms 90ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
 .visualDescription {
@@ -233,176 +256,147 @@
   white-space: nowrap;
 }
 
-.bottomRail {
+.lightTarget {
   position: absolute;
-  z-index: 5;
-  right: max(28px, env(safe-area-inset-right));
-  bottom: max(26px, env(safe-area-inset-bottom));
-  left: max(28px, env(safe-area-inset-left));
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.progressDots {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.progressDot {
-  position: relative;
-  width: 28px;
-  height: 22px;
-  border-radius: 999px;
-  background: transparent;
-}
-
-.progressDot::after {
-  content: "";
-  position: absolute;
-  top: 9px;
-  right: 0;
-  left: 0;
-  height: 2px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.24);
-  transition: background 180ms ease, box-shadow 180ms ease,
-    transform 180ms ease;
-}
-
-.progressDot[data-active="true"]::after {
-  background: linear-gradient(
-    90deg,
-    #ff4d6d,
-    #ff9f1c,
-    #b7e63a,
-    #2fd3e3,
-    #7b5cff
+  z-index: 6;
+  left: var(--prism-intro-target-x);
+  top: var(--prism-intro-target-y);
+  width: min(var(--prism-intro-target-size), 42vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  padding: 0;
+  background: radial-gradient(
+    circle,
+    rgba(255, 255, 255, 0.075),
+    rgba(225, 240, 255, 0.025) 46%,
+    transparent 72%
   );
-  box-shadow: 0 0 14px rgba(205, 209, 255, 0.22);
-  transform: scaleY(1.5);
+  transform: translate(-50%, -50%);
+  transition: opacity 260ms ease, transform 240ms ease, filter 240ms ease;
 }
 
-.progressDot:hover::after,
-.progressDot:focus-visible::after {
-  background: rgba(255, 255, 255, 0.68);
+.lightTarget:disabled {
+  pointer-events: none;
 }
 
-.progressDot:focus-visible {
-  outline: 1px solid rgba(255, 255, 255, 0.7);
-  outline-offset: 2px;
+.targetFocus {
+  position: absolute;
+  inset: 15%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 25px rgba(255, 255, 255, 0.045),
+    0 0 28px rgba(221, 240, 255, 0.08);
+  opacity: 0.54;
+  transition: border-color 220ms ease, box-shadow 220ms ease,
+    opacity 220ms ease, transform 220ms ease;
+  animation: targetBreath 3.2s ease-in-out infinite;
 }
 
-.navigation {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.lightTarget[data-kind="threshold"] .targetFocus {
+  inset: 34%;
 }
 
-.backButton,
-.nextButton {
-  display: inline-flex;
-  min-height: 42px;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  border-radius: 999px;
-  padding: 10px 17px;
-  font-size: 0.82rem;
-  font-weight: 720;
-  letter-spacing: 0.035em;
-  transition: transform 160ms ease, border-color 160ms ease,
-    background 160ms ease, color 160ms ease, box-shadow 160ms ease;
-}
-
-.backButton {
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(5, 5, 5, 0.4);
-  color: rgba(245, 243, 239, 0.75);
-  backdrop-filter: blur(14px);
-}
-
-.backButton:disabled {
-  visibility: hidden;
-}
-
-.nextButton {
-  min-width: 128px;
-  border: 1px solid rgba(255, 255, 255, 0.78);
-  background: rgba(246, 244, 240, 0.94);
-  color: #141414;
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
-}
-
-.backButton:hover:not(:disabled),
-.backButton:focus-visible,
-.nextButton:hover,
-.nextButton:focus-visible {
+.lightTarget:hover,
+.lightTarget:focus-visible {
   outline: none;
-  transform: translateY(-1px);
+  filter: brightness(1.28);
+  transform: translate(-50%, -50%) scale(1.025);
 }
 
-.backButton:hover:not(:disabled),
-.backButton:focus-visible {
-  border-color: rgba(255, 255, 255, 0.42);
-  background: rgba(10, 10, 10, 0.7);
+.lightTarget:hover .targetFocus,
+.lightTarget:focus-visible .targetFocus {
+  border-color: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 0 35px rgba(255, 255, 255, 0.12),
+    0 0 48px rgba(226, 242, 255, 0.3),
+    0 0 96px rgba(255, 255, 255, 0.14);
+  opacity: 1;
+  transform: scale(0.92);
+}
+
+.backdrop[data-transitioning="true"] .lightTarget {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1.34);
+}
+
+.interactionHint {
+  position: absolute;
+  z-index: 7;
+  right: 24px;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: 24px;
+  margin: 0;
+  color: rgba(245, 243, 239, 0.62);
+  font-size: clamp(0.66rem, 0.72vw, 0.75rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-align: center;
+  text-transform: uppercase;
+  text-shadow: 0 2px 18px #000;
+  pointer-events: none;
+  animation: hintArrival 900ms 820ms ease-out both;
+  transition: color 180ms ease, opacity 220ms ease;
+}
+
+.interactionHint span {
+  color: rgba(245, 243, 239, 0.36);
+  font-weight: 560;
+}
+
+.lightTarget:hover + .interactionHint,
+.lightTarget:focus-visible + .interactionHint {
   color: #fff;
 }
 
-.nextButton:hover,
-.nextButton:focus-visible {
-  border-color: #fff;
-  background: #fff;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.36);
-}
-
-.nextButton span,
-.backButton span {
-  font-size: 1rem;
-  line-height: 1;
+.backdrop[data-transitioning="true"] .interactionHint {
+  opacity: 0;
 }
 
 @keyframes sceneArrival {
   from {
     opacity: 0;
-    filter: contrast(0.94) saturate(0.85) blur(5px);
+    filter: contrast(0.94) saturate(0.82) brightness(1.2) blur(7px);
+    transform: scale(1.055);
   }
   to {
     opacity: 1;
-    filter: contrast(1.02) saturate(0.97) blur(0);
+    filter: contrast(1.03) saturate(0.98) brightness(1) blur(0);
+    transform: scale(1.028);
   }
 }
 
 @keyframes sceneDrift {
-  from {
-    transform: scale(1.045) translate3d(-0.25%, 0.15%, 0);
-  }
-  to {
-    transform: scale(1.015) translate3d(0.2%, -0.1%, 0);
-  }
+  from { transform: scale(1.028) translate3d(-0.18%, 0.1%, 0); }
+  to { transform: scale(1.012) translate3d(0.16%, -0.08%, 0); }
 }
 
 @keyframes copyArrival {
-  from {
-    opacity: 0;
-    transform: translateY(15px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(13px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes markArrival {
-  from {
-    opacity: 0;
-    transform: scale(0.9) rotate(-2deg);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) rotate(0);
+@keyframes cursorWake {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  to { opacity: 0.72; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes targetBreath {
+  0%, 100% { opacity: 0.38; transform: scale(0.97); }
+  50% { opacity: 0.72; transform: scale(1.025); }
+}
+
+@keyframes hintArrival {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .backdrop,
+  .audioButton,
+  .skipButton,
+  .lightTarget {
+    cursor: none;
   }
 }
 
@@ -411,164 +405,96 @@
     background:
       linear-gradient(
         0deg,
-        rgba(3, 3, 3, 0.96) 0%,
-        rgba(3, 3, 3, 0.68) 47%,
-        rgba(3, 3, 3, 0.12) 78%
+        rgba(3, 3, 3, 0.95) 0%,
+        rgba(3, 3, 3, 0.68) 43%,
+        rgba(3, 3, 3, 0.08) 74%
       ),
-      linear-gradient(90deg, rgba(3, 3, 3, 0.38), transparent 80%);
+      linear-gradient(90deg, rgba(3, 3, 3, 0.32), transparent 82%);
   }
 
   .topRail {
-    inset: max(16px, env(safe-area-inset-top))
-      max(16px, env(safe-area-inset-right)) auto
-      max(16px, env(safe-area-inset-left));
-  }
-
-  .skipButton {
-    padding-inline: 12px;
-  }
-
-  .skipButton:not(:focus-visible) {
-    font-size: 0;
-    gap: 0;
-  }
-
-  .skipButton span {
-    font-size: 1.12rem;
+    inset: max(14px, env(safe-area-inset-top))
+      max(14px, env(safe-area-inset-right)) auto auto;
   }
 
   .copyStage {
     right: max(20px, env(safe-area-inset-right));
-    bottom: 132px;
+    bottom: 72px;
     left: max(20px, env(safe-area-inset-left));
     width: auto;
   }
 
   .copyStage h1 {
-    max-width: 17em;
-    font-size: clamp(2rem, 9.4vw, 3.25rem);
-    line-height: 1;
+    max-width: 18em;
+    font-size: clamp(1.8rem, 8.4vw, 3rem);
   }
 
   .bodyCopy {
     max-width: 31rem;
-    font-size: 0.98rem;
+    font-size: 0.94rem;
     line-height: 1.42;
   }
 
-  .brandMark {
-    width: 58px;
-    border-radius: 17px;
-    padding: 7px;
+  .lightTarget {
+    left: clamp(22%, var(--prism-intro-target-x), 78%);
+    top: clamp(18%, var(--prism-intro-target-y), 66%);
+    width: min(var(--prism-intro-target-size), 48vw);
   }
 
-  .bottomRail {
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(15px, env(safe-area-inset-bottom));
-    left: max(16px, env(safe-area-inset-left));
-    display: grid;
-    gap: 9px;
+  .interactionHint {
+    bottom: max(17px, env(safe-area-inset-bottom));
   }
 
-  .progressDots {
-    justify-content: center;
-    gap: 3px;
-  }
-
-  .progressDot {
-    width: 22px;
-  }
-
-  .navigation {
-    justify-content: flex-end;
-  }
-
-  .backButton,
-  .nextButton {
-    min-height: 40px;
-    padding: 9px 14px;
-    font-size: 0.77rem;
+  .interactionHint span {
+    display: none;
   }
 }
 
-@media (max-height: 680px) and (min-width: 761px) {
+@media (max-height: 660px) and (min-width: 761px) {
   .copyStage {
-    bottom: 92px;
-    width: min(720px, 66vw);
+    bottom: 66px;
+    width: min(610px, 48vw);
   }
 
   .copyStage h1 {
-    font-size: clamp(2rem, 4.2vw, 3.9rem);
+    font-size: clamp(1.8rem, 3.15vw, 3.2rem);
   }
 
   .bodyCopy {
-    margin-top: 13px;
+    margin-top: 12px;
   }
 
-  .brandMark {
-    width: 56px;
-    margin-bottom: 12px;
-    border-radius: 16px;
-    padding: 7px;
+  .interactionHint {
+    bottom: 15px;
   }
 }
 
 @media (max-width: 760px) and (max-height: 520px) {
-  .topRail {
-    inset: max(10px, env(safe-area-inset-top))
-      max(14px, env(safe-area-inset-right)) auto
-      max(14px, env(safe-area-inset-left));
-  }
-
   .copyStage {
     right: max(16px, env(safe-area-inset-right));
-    bottom: 64px;
+    bottom: 42px;
     left: max(16px, env(safe-area-inset-left));
   }
 
   .eyebrow {
     margin-bottom: 6px;
-    font-size: 0.58rem;
+    font-size: 0.57rem;
   }
 
   .copyStage h1 {
     max-width: 19em;
-    font-size: clamp(1.45rem, 5.4vw, 2rem);
-    line-height: 1;
+    font-size: clamp(1.35rem, 4.9vw, 1.9rem);
   }
 
   .bodyCopy {
-    margin-top: 8px;
-    font-size: 0.78rem;
-    line-height: 1.3;
+    margin-top: 7px;
+    font-size: 0.75rem;
+    line-height: 1.28;
   }
 
-  .brandMark {
-    width: 38px;
-    margin-bottom: 6px;
-    border-radius: 11px;
-    padding: 4px;
-  }
-
-  .bottomRail {
-    right: max(14px, env(safe-area-inset-right));
-    bottom: max(8px, env(safe-area-inset-bottom));
-    left: max(14px, env(safe-area-inset-left));
-    display: flex;
-  }
-
-  .progressDots {
-    display: none;
-  }
-
-  .navigation {
-    margin-left: auto;
-  }
-
-  .backButton,
-  .nextButton {
-    min-height: 34px;
-    padding: 7px 11px;
+  .interactionHint {
+    bottom: 8px;
+    font-size: 0.58rem;
   }
 }
 
@@ -576,16 +502,30 @@
   .sceneImage,
   .copyStage h1,
   .bodyCopy,
-  .brandMark {
+  .cursorLight,
+  .targetFocus,
+  .interactionHint {
     animation: none;
-    transform: none;
   }
 
+  .sceneImage,
+  .copyStage,
+  .cursorLight,
+  .audioButton,
   .skipButton,
-  .progressDot::after,
-  .backButton,
-  .nextButton {
+  .lightTarget,
+  .targetFocus,
+  .interactionHint {
     transition: none;
+  }
+
+  .cursorLight {
+    display: none;
+  }
+
+  .sceneImage {
+    filter: none;
+    transform: none;
   }
 }
 
@@ -600,8 +540,13 @@
   }
 
   .skipButton,
-  .backButton,
-  .nextButton {
+  .audioButton,
+  .lightTarget,
+  .targetFocus {
     border: 1px solid ButtonText;
+  }
+
+  .cursorLight {
+    background: Highlight;
   }
 }

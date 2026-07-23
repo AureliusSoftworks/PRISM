@@ -142,22 +142,14 @@ export function createPrismCapabilityRevelations(
 ): PrismCapabilityRevelations {
   const now = options.now ?? new Date().toISOString();
   return Object.fromEntries(
-    PRISM_CAPABILITY_IDS.map((id) => {
-      const revealed =
-        options.completed === true || id === "slate" || id === "zen";
-      return [
-        id,
-        {
-          revealed,
-          revealedAt: revealed ? now : null,
-          reason: revealed
-            ? options.completed
-              ? "existing_account"
-              : "available"
-            : null,
-        },
-      ];
-    }),
+    PRISM_CAPABILITY_IDS.map((id) => [
+      id,
+      {
+        revealed: true,
+        revealedAt: now,
+        reason: options.completed ? "existing_account" : "available",
+      },
+    ]),
   ) as PrismCapabilityRevelations;
 }
 
@@ -169,9 +161,6 @@ export function normalizePrismCapabilityRevelations(
   const record = isRecord(parsed) ? parsed : {};
   const fallback = createPrismCapabilityRevelations({
     completed: options.completedFallback,
-    now: options.now,
-  });
-  const explicitPending = createPrismCapabilityRevelations({
     now: options.now,
   });
   return Object.fromEntries(
@@ -186,11 +175,11 @@ export function normalizePrismCapabilityRevelations(
                 revealedAt: options.now ?? new Date().toISOString(),
                 reason: "restored" as const,
               }
-            : explicitPending[id],
+            : fallback[id],
         ];
       }
       if (!isRecord(raw)) return [id, fallback[id]];
-      if (raw.revealed !== true) return [id, explicitPending[id]];
+      if (raw.revealed !== true) return [id, fallback[id]];
       const revealedAt =
         typeof raw.revealedAt === "string" &&
         Number.isFinite(Date.parse(raw.revealedAt))
@@ -209,19 +198,6 @@ export function normalizePrismCapabilityRevelations(
       return [id, { revealed: true, revealedAt, reason }];
     }),
   ) as PrismCapabilityRevelations;
-}
-
-export function revealPrismCapability(
-  current: PrismCapabilityRevelations,
-  capability: PrismCapabilityId,
-  reason: PrismCapabilityRevelationReason,
-  now = new Date().toISOString(),
-): PrismCapabilityRevelations {
-  if (current[capability].revealed) return current;
-  return {
-    ...current,
-    [capability]: { revealed: true, revealedAt: now, reason },
-  };
 }
 
 export function normalizePrismTutorialProgress(

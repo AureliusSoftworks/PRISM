@@ -16,14 +16,27 @@ const storage = readFileSync(
   "utf8",
 );
 
-describe("Signal background replay renderer", () => {
-  it("serializes Signal leases behind an isolated Chromium child", () => {
+describe("background replay renderer", () => {
+  it("serializes Signal and Coffee leases behind an isolated Chromium child", () => {
     assert.match(client, /private active = false/u);
     assert.match(client, /if \(this\.active \|\| this\.disposed\) return/u);
-    assert.match(client, /claimNextReplayRecording[\s\S]*surface: "signal"/u);
+    assert.match(
+      client,
+      /claimNextReplayRecording\(request\.db, request\.userId\)/u,
+    );
+    assert.doesNotMatch(client, /surface: "signal"/u);
     assert.match(client, /fork\(workerUrl/u);
     assert.match(child, /chromium\.launch/u);
     assert.match(child, /page\.screencast\.start/u);
+    assert.match(
+      child,
+      /job\.surface === "signal" \? "botcast" : "coffee"/u,
+    );
+    assert.match(child, /__PRISM_COFFEE_BACKGROUND_RENDER__/u);
+    assert.doesNotMatch(
+      server,
+      /recording\.surface === "signal"[\s\S]{0,120}recording\.status === "queued"/u,
+    );
   });
 
   it("keeps the lease secret out of the render URL and sends it as a header", () => {

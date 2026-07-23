@@ -7678,6 +7678,21 @@ describe("buildAskQuestionFallback", () => {
       ),
       undefined
     );
+    assert.equal(
+      buildAskQuestionFallback(
+        "As we begin, what's one rumor or piece of history you've always found intriguing that you'd like to explore further?"
+      ),
+      undefined
+    );
+  });
+
+  it("keeps explicit choices after conversational framing", () => {
+    assert.deepEqual(
+      buildAskQuestionFallback(
+        "As we begin, would you prefer rumor or history?"
+      )?.options.map((option) => option.label),
+      ["Rumor", "History"]
+    );
   });
 });
 

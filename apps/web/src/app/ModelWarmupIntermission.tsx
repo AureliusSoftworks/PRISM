@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import type { ModelPreparationFailure } from "@localai/shared";
 import { modelPreparationFailureMessage } from "./modelPreparation";
+import { PrismOrb } from "./PrismOrb";
+import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./model-warmup-intermission.module.css";
 
 export type ModelWarmupIntermissionPhase =
@@ -51,11 +53,14 @@ export function ModelWarmupIntermission(props: {
       aria-live={failed ? "assertive" : "polite"}
       aria-atomic="true"
     >
+      <PrismCompanionPresenceBoundary
+        reason={`${props.experience}-model-warmup`}
+      />
       <div className={styles.card}>
         <span className={styles.eyebrow}>
           {props.experience === "coffee" ? "TABLE HELD" : "STUDIO HELD"}
         </span>
-        <span className={styles.prismLine} aria-hidden="true" />
+        <PrismOrb className={styles.prismOrb} />
         <h2>
           {failed
             ? "The local model couldn’t get ready"

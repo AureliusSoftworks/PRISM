@@ -25,7 +25,7 @@ function scopedRule(
   return match[2] ?? "";
 }
 
-test("finished Coffee review renders the synopsis and blocks replay while the table wraps", () => {
+test("finished Coffee review renders the synopsis and keeps replay behind the review header", () => {
   assert.match(
     pageSource,
     /const synopsisMessages = coffeeSessionPhase === "finished" && !coffeeReplayActive \? messages\.filter\([\s\S]*coffeeSystemSynopsisIsDisplayable\(message\.content\)/,
@@ -33,11 +33,12 @@ test("finished Coffee review renders the synopsis and blocks replay while the ta
   assert.match(pageSource, /"Preparing session synopsis\.\.\."/);
   assert.match(
     pageSource,
-    /"Session ended\. The table is wrapping up before replay\."/,
+    /className=\{`\$\{styles\.coffeeStageHeader\} \$\{styles\.coffeeReviewHeader\}`\}/,
   );
-  assert.match(pageSource, /"Wrapping table\.\.\."/);
-  assert.match(pageSource, /className=\{styles\.coffeeFinishedRecapCaption\}/);
-  assert.match(pageSource, /className=\{styles\.coffeeFinishedRecapControls\}/);
+  assert.match(pageSource, /<span className=\{styles\.sectionLabel\}>Session complete<\/span>/);
+  assert.match(pageSource, /data-primary="true"/);
+  assert.match(pageSource, /"View replay"/);
+  assert.match(pageSource, /coffeeFinishedControlsVisible =[\s\S]*coffeeReplayActive/);
   assert.match(pageSource, /styles\.coffeeReplayComposerControls/);
   assert.match(pageSource, /className=\{styles\.coffeeTranscriptStatus\}/);
 });

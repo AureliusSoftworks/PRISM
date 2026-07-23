@@ -300,6 +300,41 @@ export interface CoffeeReplayIdentityMirrorEventPayload {
   state: BotIdentityMirrorStateV1;
 }
 
+export interface CoffeeReplayBaristaDeliveryEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "baristaDelivery";
+  botId: string;
+  occurredAt: string;
+  barista: {
+    id: string | null;
+    name: string;
+    color: string | null;
+    glyph: string | null;
+    fallback: boolean;
+  };
+  drink: {
+    choice: "house" | "custom" | "surprise";
+    name: string;
+    description: string;
+    imageId: string | null;
+    fallback: boolean;
+  };
+  line: string;
+  voiceTakeId?: string;
+}
+
+export interface CoffeeReplayPlayerSipEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "playerSip";
+  occurredAt: string;
+  fillId: string;
+  sipCount: number;
+  drinkName: string;
+  imageId: string | null;
+}
+
 export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
@@ -311,7 +346,9 @@ export type CoffeeReplayEventPayload =
   | CoffeeReplayBotDepartureEventPayload
   | CoffeeReplayListenerReactionEventPayload
   | CoffeeReplayPerceptionOverlapEventPayload
-  | CoffeeReplayIdentityMirrorEventPayload;
+  | CoffeeReplayIdentityMirrorEventPayload
+  | CoffeeReplayBaristaDeliveryEventPayload
+  | CoffeeReplayPlayerSipEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
 
@@ -841,6 +878,111 @@ export function normalizeCoffeeReplayEventPayload(
       name: "coffeeReplayEvent",
       kind: "playerDeparture",
       occurredAt,
+    };
+  }
+  if (row.kind === "playerSip") {
+    const fillId = typeof row.fillId === "string" ? row.fillId.trim().slice(0, 120) : "";
+    const sipCount =
+      typeof row.sipCount === "number" && Number.isInteger(row.sipCount)
+        ? Math.min(6, Math.max(1, row.sipCount))
+        : 0;
+    const drinkName =
+      typeof row.drinkName === "string"
+        ? row.drinkName.replace(/\s+/gu, " ").trim().slice(0, 100)
+        : "";
+    const imageId =
+      typeof row.imageId === "string" && row.imageId.trim()
+        ? row.imageId.trim().slice(0, 180)
+        : null;
+    if (!fillId || sipCount < 1 || !drinkName) return undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "playerSip",
+      occurredAt,
+      fillId,
+      sipCount,
+      drinkName,
+      imageId,
+    };
+  }
+  if (row.kind === "baristaDelivery") {
+    const botId = normalizeCoffeeReplayBotId(row.botId);
+    const baristaRow =
+      row.barista && typeof row.barista === "object"
+        ? row.barista as Record<string, unknown>
+        : null;
+    const drinkRow =
+      row.drink && typeof row.drink === "object"
+        ? row.drink as Record<string, unknown>
+        : null;
+    const baristaName =
+      typeof baristaRow?.name === "string"
+        ? baristaRow.name.replace(/\s+/gu, " ").trim().slice(0, 100)
+        : "";
+    const drinkName =
+      typeof drinkRow?.name === "string"
+        ? drinkRow.name.replace(/\s+/gu, " ").trim().slice(0, 100)
+        : "";
+    const description =
+      typeof drinkRow?.description === "string"
+        ? drinkRow.description.replace(/\s+/gu, " ").trim().slice(0, 280)
+        : "";
+    const line =
+      typeof row.line === "string"
+        ? row.line.replace(/\s+/gu, " ").trim().slice(0, 240)
+        : "";
+    const choice =
+      drinkRow?.choice === "custom" || drinkRow?.choice === "surprise"
+        ? drinkRow.choice
+        : drinkRow?.choice === "house"
+          ? "house"
+          : undefined;
+    if (!botId || !baristaRow || !drinkRow || !baristaName || !drinkName || !line || !choice) {
+      return undefined;
+    }
+    const baristaId =
+      typeof baristaRow.id === "string" && baristaRow.id.trim()
+        ? baristaRow.id.trim().slice(0, 180)
+        : null;
+    const color =
+      typeof baristaRow.color === "string" && baristaRow.color.trim()
+        ? baristaRow.color.trim().slice(0, 40)
+        : null;
+    const glyph =
+      typeof baristaRow.glyph === "string" && baristaRow.glyph.trim()
+        ? baristaRow.glyph.trim().slice(0, 40)
+        : null;
+    const imageId =
+      typeof drinkRow.imageId === "string" && drinkRow.imageId.trim()
+        ? drinkRow.imageId.trim().slice(0, 180)
+        : null;
+    const voiceTakeId =
+      typeof row.voiceTakeId === "string" && row.voiceTakeId.trim()
+        ? row.voiceTakeId.trim().slice(0, 180)
+        : undefined;
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "baristaDelivery",
+      botId,
+      occurredAt,
+      barista: {
+        id: baristaId,
+        name: baristaName,
+        color,
+        glyph,
+        fallback: baristaRow.fallback === true,
+      },
+      drink: {
+        choice,
+        name: drinkName,
+        description,
+        imageId,
+        fallback: drinkRow.fallback === true,
+      },
+      line,
+      ...(voiceTakeId ? { voiceTakeId } : {}),
     };
   }
   const botId = normalizeCoffeeReplayBotId(row.botId);

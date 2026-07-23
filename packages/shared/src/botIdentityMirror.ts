@@ -76,6 +76,8 @@ export function botIdentityMirrorFaceV1(
     faceBlinkScale: row.blinkScale ?? row.faceBlinkScale,
     faceBlinkOffsetX: row.blinkOffsetX ?? row.faceBlinkOffsetX,
     faceBlinkOffsetY: row.blinkOffsetY ?? row.faceBlinkOffsetY,
+    faceBlinkRotationDeg:
+      row.blinkRotationDeg ?? row.faceBlinkRotationDeg,
     faceThinkingFrames: row.thinkingFrames ?? row.faceThinkingFrames,
   });
 }

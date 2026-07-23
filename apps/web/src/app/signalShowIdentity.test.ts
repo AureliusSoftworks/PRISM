@@ -25,6 +25,12 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
       }),
     },
     dashboardBlurbs: ["Already written."],
+    hostRecoveryQuestions: [
+      "Which example would actually test that claim?",
+      "Which consequence matters, and who bears it?",
+      "Where does that become a real choice?",
+      "What evidence would make you reconsider?",
+    ],
     dayAtmosphere: { imageUrl: "/day.png" } as BotcastShow["dayAtmosphere"],
     nightAtmosphere: {
       imageUrl: "/night.png",
@@ -92,6 +98,7 @@ describe("signalShowMagicManifest", () => {
     const manifest = signalShowMagicManifest(
       show({
         dashboardBlurbs: [],
+        hostRecoveryQuestions: [],
         dayAtmosphere: { imageUrl: null } as BotcastShow["dayAtmosphere"],
         atmosphereAudio: {
           source: "bundled",
@@ -153,5 +160,14 @@ describe("signalShowMagicManifest", () => {
       needsAudioPackage: false,
       complete: true,
     });
+  });
+
+  it("treats a speaking host's missing recovery questions as unfinished text identity", () => {
+    const manifest = signalShowMagicManifest(
+      show({ hostRecoveryQuestions: [] }),
+    );
+
+    assert.equal(manifest.needsTextIdentity, true);
+    assert.equal(manifest.complete, false);
   });
 });

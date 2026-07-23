@@ -140,6 +140,105 @@ test("replay timeline is deterministic and honors captured durations and overlap
   );
 });
 
+test("Signal live-master timing keeps the intro, speech, dead air, and outro verbatim", () => {
+  const capturedManifest: ReplayManifestV1 = {
+    ...manifest,
+    events: [
+      ...manifest.events,
+      {
+        id: "start-one",
+        kind: "capture_timing",
+        sourceMessageId: "message-1",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_start",
+          messageId: "message-1",
+          atMs: 4_380,
+        },
+      },
+      {
+        id: "end-one",
+        kind: "capture_timing",
+        sourceMessageId: "message-1",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_end",
+          messageId: "message-1",
+          atMs: 7_910,
+        },
+      },
+      {
+        id: "start-two",
+        kind: "capture_timing",
+        sourceMessageId: "message-2",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_start",
+          messageId: "message-2",
+          atMs: 12_240,
+        },
+      },
+      {
+        id: "end-two",
+        kind: "capture_timing",
+        sourceMessageId: "message-2",
+        occurredAt: manifest.createdAt,
+        payload: {
+          phase: "speech_end",
+          messageId: "message-2",
+          atMs: 15_600,
+        },
+      },
+      {
+        id: "outro",
+        kind: "capture_timing",
+        sourceMessageId: null,
+        occurredAt: manifest.completedAt,
+        payload: { phase: "outro_start", atMs: 16_900 },
+      },
+      {
+        id: "capture-end",
+        kind: "capture_timing",
+        sourceMessageId: null,
+        occurredAt: manifest.completedAt,
+        payload: { phase: "capture_end", atMs: 20_750 },
+      },
+    ],
+  };
+  const timeline = compileReplayTimelineV1(capturedManifest);
+  const title = timeline.beats.find((beat) => beat.kind === "title");
+  const utterances = timeline.beats.filter(
+    (beat) => beat.kind === "utterance",
+  );
+  const end = timeline.beats.find((beat) => beat.kind === "end");
+  assert.equal(title?.endMs, 4_380);
+  assert.deepEqual(
+    utterances.map((beat) => [beat.startMs, beat.endMs]),
+    [
+      [4_380, 7_910],
+      [12_240, 15_600],
+    ],
+  );
+  assert.equal(end?.startMs, 16_900);
+  assert.equal(end?.endMs, 20_750);
+  assert.equal(timeline.durationMs, 20_750);
+
+  const skippedIntroTimeline = compileReplayTimelineV1({
+    ...capturedManifest,
+    events: capturedManifest.events.map((event) =>
+      event.kind === "capture_timing" &&
+      event.payload.phase === "speech_start" &&
+      event.payload.messageId === "message-1"
+        ? { ...event, payload: { ...event.payload, atMs: 1_100 } }
+        : event,
+    ),
+  });
+  assert.equal(
+    skippedIntroTimeline.beats.find((beat) => beat.kind === "title")?.endMs,
+    1_100,
+  );
+});
+
 test("replay transcript exports use the same deterministic timeline", () => {
   const timeline = compileReplayTimelineV1(manifest);
   const vtt = replayTimelineToWebVttV1(timeline);

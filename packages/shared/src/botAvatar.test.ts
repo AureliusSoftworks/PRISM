@@ -12,6 +12,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
@@ -33,6 +34,7 @@ import {
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
@@ -160,6 +162,7 @@ describe("bot avatar face style", () => {
       blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
       blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
       blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+      blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
       thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
     });
     assert.deepEqual(resolveBotFaceStyle({}, null), {
@@ -184,6 +187,7 @@ describe("bot avatar face style", () => {
       blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
       blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
       blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+      blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
       thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
     });
   });
@@ -213,6 +217,7 @@ describe("bot avatar face style", () => {
           faceBlinkScale: 1.18,
           faceBlinkOffsetX: -0.071,
           faceBlinkOffsetY: 0.071,
+          faceBlinkRotationDeg: -47,
           faceThinkingFrames: ["·", "*", "✦", "*"],
         },
         "formal"
@@ -239,6 +244,7 @@ describe("bot avatar face style", () => {
         blinkScale: 1.2,
         blinkOffsetX: -0.08,
         blinkOffsetY: 0.08,
+        blinkRotationDeg: -45,
         thinkingFrames: ["·", "*", "✦", "*"],
       }
     );
@@ -263,13 +269,15 @@ describe("bot avatar face style", () => {
     );
   });
 
-  it("locks built-in eyes and mouths to default horizontal placement", () => {
+  it("preserves two-axis placement for built-in eyes, mouths, and blinking", () => {
     const style = resolveBotFaceStyle(
       {
         faceEyeOffsetX: 0.12,
         faceEyeOffsetY: -0.08,
         faceMouthOffsetX: -0.12,
         faceMouthOffsetY: 0.08,
+        faceBlinkOffsetX: 0.16,
+        faceBlinkOffsetY: -0.16,
       },
       null
     );
@@ -277,12 +285,15 @@ describe("bot avatar face style", () => {
     assert.equal(style.eyeCharacter, null);
     assert.equal(style.eyeCount, DEFAULT_BOT_FACE_EYE_COUNT);
     assert.equal(style.eyeAnimation, DEFAULT_BOT_FACE_GLYPH_ANIMATION);
-    assert.equal(style.eyeOffsetX, DEFAULT_BOT_FACE_EYE_OFFSET_X);
+    assert.equal(style.eyeOffsetX, 0.12);
     assert.equal(style.eyeOffsetY, -0.08);
     assert.equal(style.mouthCharacter, DEFAULT_BOT_FACE_MOUTH_CHARACTER);
     assert.equal(style.mouthAnimation, DEFAULT_BOT_FACE_GLYPH_ANIMATION);
-    assert.equal(style.mouthOffsetX, DEFAULT_BOT_FACE_MOUTH_OFFSET_X);
+    assert.equal(style.mouthOffsetX, -0.12);
     assert.equal(style.mouthOffsetY, 0.08);
+    assert.equal(style.blinkBar, DEFAULT_BOT_FACE_BLINK_BAR);
+    assert.equal(style.blinkOffsetX, 0.16);
+    assert.equal(style.blinkOffsetY, -0.16);
   });
 
   it("defaults custom eye rotation to plate-relative zero", () => {
@@ -336,13 +347,20 @@ describe("bot avatar face style", () => {
     );
   });
 
-  it("clamps and steps custom blink scale and placement", () => {
+  it("clamps and steps blink scale and placement", () => {
     assert.equal(normalizeBotFaceBlinkScale(1.18), 1.2);
     assert.equal(normalizeBotFaceBlinkScale(2), 1.3);
     assert.equal(normalizeBotFaceBlinkOffsetX(-0.071), -0.08);
     assert.equal(normalizeBotFaceBlinkOffsetY(0.071), 0.08);
     assert.equal(normalizeBotFaceBlinkOffsetX(-2), -0.18);
     assert.equal(normalizeBotFaceBlinkOffsetY(2), 0.18);
+  });
+
+  it("clamps and steps blink rotation", () => {
+    assert.equal(normalizeBotFaceBlinkRotationDeg(47), 45);
+    assert.equal(normalizeBotFaceBlinkRotationDeg(-999), -180);
+    assert.equal(normalizeBotFaceBlinkRotationDeg(999), 180);
+    assert.equal(normalizeBotFaceBlinkRotationDeg("45"), null);
   });
 
   it("normalizes thinking frames from arrays and pasted strings", () => {
@@ -448,6 +466,10 @@ describe("bot avatar face style", () => {
     assert.equal(style.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y);
     assert.equal(style.mouthRotationDeg, DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG);
     assert.equal(style.blinkBar, DEFAULT_BOT_FACE_BLINK_BAR);
+    assert.equal(
+      style.blinkRotationDeg,
+      DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
+    );
     assert.deepEqual(style.thinkingFrames, DEFAULT_BOT_FACE_THINKING_FRAMES);
   });
 

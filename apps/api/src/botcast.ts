@@ -63,6 +63,8 @@ import type {
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+  BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS,
+  BOTCAST_HOST_RECOVERY_QUESTION_TARGET,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_LOCAL_INTRO_DURATION_MS,
   BOTCAST_LOCAL_OUTDENT_DURATION_MS,
@@ -77,6 +79,7 @@ import {
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
   BOT_POWER_CANONICAL_SILENCE_V1,
   applyBotIdentityMirrorResponseV1,
   applyBotPowerBotNamesV1,
@@ -137,6 +140,7 @@ import {
   botcastGuestDepartureEligible,
   botcastGuestVoluntaryDepartureIntent,
   botcastHostRageQuitIntent,
+  botcastHostSignOffIntent,
   botcastNextSpeakerRole,
   botcastProducerGuestThinkingDiscountMs,
   botcastProducerGuestThinkingTimelineDurationMs,
@@ -154,6 +158,7 @@ import {
   botcastVoiceMoodForTension,
   buildBotPowersPromptBlock,
   isBotcastFallbackStudioAccentVariant,
+  isBotcastAudioCueKind,
   isBotcastSoundboardCueKind,
   isBotcastEchoDashboardBlurb,
   normalizeVoiceDeliveryMood,
@@ -161,9 +166,16 @@ import {
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastVoiceLevelsByBotId,
   normalizeBotcastHostInterruptionLines,
+  normalizeBotcastHostRecoveryQuestions,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   parseStoredBotPowersV1,
   rankSignalPersonaTemperaments,
+  signalPicklesLineIndex,
+  signalPicklesMagicEnabled,
+  signalPicklesReactionPending,
+  signalPicklesSipCueFromEvent,
+  signalPicklesTriggerMessageCount,
+  signalProducerBriefWithoutPickles,
   signalPersonaTemperamentFor,
   autoFallbackResolvedChain,
   voicePerformanceTextFromActionCues,
@@ -179,7 +191,9 @@ import {
 } from "./memory.ts";
 import {
   defaultModelIdForProvider,
+  getAuxiliaryProvider,
   openAiModelUsesMaxCompletionTokens,
+  resolveAuxiliaryOllamaModel,
   selectProvider,
   type GenerateOptions,
   type LlmProvider,
@@ -216,6 +230,7 @@ const BOTCAST_SPEAKER_MAX_TOKENS = 160;
 const BOTCAST_CONVERSATIONAL_MAX_TOKENS = 112;
 const BOTCAST_OPENAI_REASONING_MIN_COMPLETION_TOKENS = 384;
 const BOTCAST_REASONING_BOOKING_COMPLETION_TOKENS = 768;
+const BOTCAST_SHOW_IDENTITY_COMPLETION_TOKENS = 2_400;
 const BOTCAST_SHOW_HOST_CHAT_HISTORY_LIMIT = 3;
 const BOTCAST_SHOW_HOST_CHAT_INPUT_MAX = 6_000;
 const BOTCAST_SHOW_HOST_CHAT_RESPONSE_MAX = 12_000;
@@ -299,8 +314,13 @@ export interface SignalOnlineTurnAttemptV1 {
   provider: ProviderName;
   model: string;
   durationMs: number;
-  outcome: "failed" | "succeeded";
-  reason?: "provider_error" | "timeout";
+  outcome: "failed" | "rejected" | "succeeded";
+  reason?:
+    | "provider_error"
+    | "timeout"
+    | "empty"
+    | "refusal"
+    | "invalid_output";
   httpStatus?: number;
 }
 
@@ -308,6 +328,7 @@ export interface SignalOnlineTurnResult {
   value: string;
   attempts: SignalOnlineTurnAttemptV1[];
   totalDurationMs: number;
+  validationFailureReason?: "empty" | "refusal" | "invalid_output";
 }
 
 export class SignalOnlineTurnError extends Error {
@@ -383,6 +404,12 @@ export async function runSignalOnlineTurn(args: {
   model: string;
   messages: ProviderMessage[];
   options: GenerateOptions;
+  validate?: (
+    candidate: string,
+  ) =>
+    | { ok: true; value: string }
+    | { ok: false; reason: "empty" | "refusal" | "invalid_output" };
+  validationRetryInstruction?: string;
   attemptTimeoutMs?: number;
   totalTimeoutMs?: number;
   retryDelayMs?: number;
@@ -412,6 +439,7 @@ export async function runSignalOnlineTurn(args: {
   const deadline = startedAt + totalTimeoutMs;
   const attempts: SignalOnlineTurnAttemptV1[] = [];
   let lastError: unknown = new Error("Signal ONLINE turn did not start.");
+  let attemptMessages = args.messages;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (args.options.signal?.aborted) throw args.options.signal.reason;
@@ -435,12 +463,40 @@ export async function runSignalOnlineTurn(args: {
       : controller.signal;
     try {
       const value = await Promise.race([
-        args.provider.generateResponse(args.messages, {
+        args.provider.generateResponse(attemptMessages, {
           ...args.options,
           signal,
         }),
         timeout,
       ]);
+      const validation = args.validate?.(value);
+      if (validation && !validation.ok) {
+        attempts.push({
+          provider: args.providerName,
+          model: args.model,
+          durationMs: Math.max(0, Math.round(now() - attemptStartedAt)),
+          outcome: "rejected",
+          reason: validation.reason,
+        });
+        if (attempt + 1 >= maxAttempts) {
+          return {
+            value,
+            attempts,
+            totalDurationMs: Math.max(0, Math.round(now() - startedAt)),
+            validationFailureReason: validation.reason,
+          };
+        }
+        if (args.validationRetryInstruction) {
+          attemptMessages = [
+            ...args.messages,
+            {
+              role: "system",
+              content: args.validationRetryInstruction,
+            },
+          ];
+        }
+        continue;
+      }
       const trace: SignalOnlineTurnAttemptV1 = {
         provider: args.providerName,
         model: args.model,
@@ -449,7 +505,7 @@ export async function runSignalOnlineTurn(args: {
       };
       attempts.push(trace);
       return {
-        value,
+        value: validation?.value ?? value,
         attempts,
         totalDurationMs: Math.max(0, Math.round(now() - startedAt)),
       };
@@ -654,6 +710,7 @@ export type BotcastBotProfile = {
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
+  faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   authoredAudioVoiceProfile?: string | null;
@@ -673,6 +730,7 @@ export interface BotcastGenerationOptions {
   openAiApiKey?: string;
   anthropicApiKey?: string;
   secondaryOllamaHost?: string | null;
+  prismDefaultLlmModel?: string | null;
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
@@ -896,6 +954,20 @@ const BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS = [
   "Match the host's own diction, rhythm, temperament, and sense of humor. Do not return several alternatives or add any other dashboard line.",
 ] as const;
 
+const BOTCAST_HOST_RECOVERY_QUESTION_DIRECTIONS = [
+  `hostRecoveryQuestions must contain exactly ${BOTCAST_HOST_RECOVERY_QUESTION_TARGET} short questions the host could naturally ask on air.`,
+  "Write them in this exact positional order: (1) ask for one concrete example or practical test, (2) ask which consequence matters and who bears it, (3) ask where the claim becomes a real choice or tradeoff, and (4) ask what contradiction or evidence could change the answer.",
+  "Preserve those four editorial intents, but make every line unmistakably native to this host's diction, rhythm, temperament, worldview, and degree of warmth, severity, humor, or theatricality.",
+  "Each entry must be a complete standalone question ending in a question mark. Keep each under 200 characters.",
+  "These lines must remain reusable across episodes: do not name a guest, mention the current topic, invent facts, or use placeholders.",
+  "Do not use markdown, labels, stage directions, narration, prompt language, or generic host-name-plus-question templates.",
+] as const;
+
+const BOTCAST_NON_ORIGINATING_HOST_RECOVERY_DIRECTIONS = [
+  "Because this host cannot originate ordinary speech, hostRecoveryQuestions must be exactly [\"...\"].",
+  "Do not invent spoken recovery questions for this field.",
+] as const;
+
 function botcastCanonicalSilentHostLines(): string[] {
   return [BOT_POWER_CANONICAL_SILENCE_V1];
 }
@@ -917,6 +989,25 @@ function botcastLinesAreEchoOriginalityClaim(
   lines: readonly string[],
 ): boolean {
   return lines.length === 1 && isBotcastEchoDashboardBlurb(lines[0]);
+}
+
+function validGeneratedHostRecoveryQuestions(
+  raw: unknown,
+  hostCannotOriginateSpeech: boolean,
+): string[] | null {
+  if (hostCannotOriginateSpeech) {
+    return botcastCanonicalSilentHostLines();
+  }
+  if (
+    !Array.isArray(raw) ||
+    raw.length !== BOTCAST_HOST_RECOVERY_QUESTION_TARGET
+  ) {
+    return null;
+  }
+  const normalized = normalizeBotcastHostRecoveryQuestions(raw);
+  return normalized.length === BOTCAST_HOST_RECOVERY_QUESTION_TARGET
+    ? normalized
+    : null;
 }
 
 function defaultShowPremise(host: BotcastBotProfile): string {
@@ -1671,6 +1762,7 @@ function parseAtmospheres(raw: string): {
   musicIdentity: Partial<BotcastMusicIdentity> | null;
   dashboardBlurbs: string[];
   hostInterruptionLines: string[];
+  hostRecoveryQuestions: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLighting: BotcastStudioLightingState;
@@ -1685,6 +1777,7 @@ function parseAtmospheres(raw: string): {
       musicIdentity?: unknown;
       dashboardBlurbs?: unknown;
       hostInterruptionLines?: unknown;
+      hostRecoveryQuestions?: unknown;
       dayAtmosphere?: Partial<BotcastAtmosphereState>;
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
       studioLighting?: Partial<BotcastStudioLightingState>;
@@ -1736,6 +1829,9 @@ function parseAtmospheres(raw: string): {
       hostInterruptionLines: normalizeBotcastHostInterruptionLines(
         container.hostInterruptionLines,
       ),
+      hostRecoveryQuestions: normalizeBotcastHostRecoveryQuestions(
+        container.hostRecoveryQuestions,
+      ),
       // Existing single-studio shows remain visible in both themes until the
       // owner refreshes them into a purpose-built matched pair.
       dayAtmosphere: normalizeAtmosphere(container.dayAtmosphere, legacy),
@@ -1758,6 +1854,7 @@ function parseAtmospheres(raw: string): {
       musicIdentity: null,
       dashboardBlurbs: [],
       hostInterruptionLines: [],
+      hostRecoveryQuestions: [],
       dayAtmosphere: fallbackAtmosphere("day"),
       nightAtmosphere: fallbackAtmosphere("night"),
       studioLighting: {
@@ -1928,6 +2025,7 @@ function serializeShowVisuals(
   musicIdentity: BotcastMusicIdentity,
   dashboardBlurbs: readonly string[],
   hostInterruptionLines: readonly string[],
+  hostRecoveryQuestions: readonly string[],
   studioLayout: BotcastStudioLayout,
   studioGlowTuning: Readonly<BotcastStudioGlowTuning>,
   voiceLevelsByBotId: Readonly<BotcastVoiceLevelsByBotId>,
@@ -1942,6 +2040,9 @@ function serializeShowVisuals(
     dashboardBlurbs: normalizeDashboardBlurbs(dashboardBlurbs),
     hostInterruptionLines: normalizeBotcastHostInterruptionLines(
       hostInterruptionLines,
+    ),
+    hostRecoveryQuestions: normalizeBotcastHostRecoveryQuestions(
+      hostRecoveryQuestions,
     ),
     dayAtmosphere,
     nightAtmosphere,
@@ -1986,6 +2087,10 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     : atmospheres.hostInterruptionLines.length
       ? atmospheres.hostInterruptionLines
       : botcastHostInterruptionLinesForSeed(row.host_bot_id);
+  const hostRecoveryQuestions =
+    hostIsMuted || hostEchoesAddressedSpeech
+      ? botcastCanonicalSilentHostLines()
+      : atmospheres.hostRecoveryQuestions;
   return {
     id: row.id,
     hostBotId: row.host_bot_id,
@@ -2003,6 +2108,7 @@ function mapShow(row: BotcastShowRow): BotcastShow {
     musicIdentity,
     dashboardBlurbs,
     hostInterruptionLines,
+    hostRecoveryQuestions,
     logo,
     introAudio:
       row.intro_audio_provider === "elevenlabs"
@@ -2081,6 +2187,9 @@ function repairBotcastShowHostAuthoredLines(
     hostIsMuted &&
     (!botcastLinesAreCanonicalSilence(stored.dashboardBlurbs) ||
       !botcastLinesAreCanonicalSilence(stored.hostInterruptionLines));
+  const needsNonOriginatingRecoveryRepair =
+    (hostIsMuted || hostEchoesAddressedSpeech) &&
+    !botcastLinesAreCanonicalSilence(stored.hostRecoveryQuestions);
   const needsEchoHostRepair =
     hostEchoesAddressedSpeech &&
     !botcastLinesAreEchoOriginalityClaim(stored.dashboardBlurbs);
@@ -2088,6 +2197,7 @@ function repairBotcastShowHostAuthoredLines(
     !needsInterruptionBackfill &&
     !needsMusicIdentityBackfill &&
     !needsSilentHostRepair &&
+    !needsNonOriginatingRecoveryRepair &&
     !needsEchoHostRepair
   ) {
     return;
@@ -2104,6 +2214,7 @@ function repairBotcastShowHostAuthoredLines(
       show.musicIdentity,
       show.dashboardBlurbs,
       show.hostInterruptionLines,
+      show.hostRecoveryQuestions,
       show.studioLayout,
       show.studioGlowTuning,
       show.voiceLevelsByBotId,
@@ -2231,7 +2342,7 @@ function loadBotProfile(
             face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x,
             face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
             face_blink_scale, face_blink_offset_x, face_blink_offset_y,
-            face_thinking_frames, avatar_details_json, authored_audio_voice_profile,
+            face_blink_rotation_deg, face_thinking_frames, avatar_details_json, authored_audio_voice_profile,
             audio_voice_profile_override, online_enabled, temperature, max_tokens, top_p,
             top_k, repetition_penalty
        FROM bots WHERE id = ? AND user_id = ? AND chat_enabled = 1`,
@@ -2265,6 +2376,7 @@ function loadBotProfile(
         face_blink_scale: number | null;
         face_blink_offset_x: number | null;
         face_blink_offset_y: number | null;
+        face_blink_rotation_deg: number | null;
         face_thinking_frames: string | null;
         avatar_details_json: string | null;
         authored_audio_voice_profile: string | null;
@@ -2307,6 +2419,7 @@ function loadBotProfile(
     faceBlinkScale: row.face_blink_scale,
     faceBlinkOffsetX: row.face_blink_offset_x,
     faceBlinkOffsetY: row.face_blink_offset_y,
+    faceBlinkRotationDeg: row.face_blink_rotation_deg,
     faceThinkingFrames: row.face_thinking_frames,
     avatarDetails: parseStoredBotAvatarDetailsV1(row.avatar_details_json),
     authoredAudioVoiceProfile: row.authored_audio_voice_profile,
@@ -3321,6 +3434,9 @@ export function createBotcastShow(
       hostIsMuted
         ? botcastCanonicalSilentHostLines()
         : botcastHostInterruptionLinesForSeed(host.id),
+      hostIsMuted || hostEchoesAddressedSpeech
+        ? botcastCanonicalSilentHostLines()
+        : [],
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
       BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
       {},
@@ -3710,6 +3826,12 @@ export function updateBotcastShow(
     : patch.hostInterruptionLines === undefined
       ? current.hostInterruptionLines
       : normalizeBotcastHostInterruptionLines(patch.hostInterruptionLines);
+  const hostRecoveryQuestions =
+    hostIsMuted || hostEchoesAddressedSpeech
+      ? botcastCanonicalSilentHostLines()
+      : patch.hostRecoveryQuestions === undefined
+        ? current.hostRecoveryQuestions
+        : normalizeBotcastHostRecoveryQuestions(patch.hostRecoveryQuestions);
   const regenerateBothAtmospheres = patch.regenerateAtmosphere === true;
   const regenerateDayAtmosphere =
     regenerateBothAtmospheres || patch.regenerateDayAtmosphere === true;
@@ -3928,6 +4050,7 @@ export function updateBotcastShow(
       hostInterruptionLines.length
         ? hostInterruptionLines
         : botcastHostInterruptionLinesForSeed(host.id),
+      hostRecoveryQuestions,
       studioLayout,
       studioGlowTuning,
       voiceLevelsByBotId,
@@ -4053,6 +4176,7 @@ function parseGeneratedShowIdentity(
   raw: string,
   hostName = "",
   echoDashboardBlurb = false,
+  mutedDashboardBlurb = false,
 ): {
   name: string;
   premise: string;
@@ -4060,6 +4184,7 @@ function parseGeneratedShowIdentity(
   musicIdentityDirection?: string;
   logoThesis?: string;
   dashboardBlurbs?: string[];
+  hostRecoveryQuestions: string[];
 } | null {
   const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
   try {
@@ -4083,23 +4208,33 @@ function parseGeneratedShowIdentity(
       parsed.logoThesis ?? parsed.logo_thesis,
       [hostName, name],
     );
-    const dashboardBlurbs = echoDashboardBlurb
-      ? validGeneratedEchoDashboardBlurbs(
-          parsed.dashboardBlurbs ?? parsed.dashboard_blurbs,
-        )
-      : validGeneratedDashboardBlurbs(
-          parsed.dashboardBlurbs ?? parsed.dashboard_blurbs,
-          BOTCAST_DASHBOARD_BLURB_FALLBACKS,
-        );
-    if (echoDashboardBlurb && !dashboardBlurbs) return null;
-    return name && premise && musicIdentityDirection
+    const dashboardBlurbs = mutedDashboardBlurb
+      ? botcastCanonicalSilentHostLines()
+      : echoDashboardBlurb
+        ? validGeneratedEchoDashboardBlurbs(
+            parsed.dashboardBlurbs ?? parsed.dashboard_blurbs,
+          )
+        : validGeneratedDashboardBlurbs(
+            parsed.dashboardBlurbs ?? parsed.dashboard_blurbs,
+            BOTCAST_DASHBOARD_BLURB_FALLBACKS,
+          );
+    const hostRecoveryQuestions = validGeneratedHostRecoveryQuestions(
+      parsed.hostRecoveryQuestions ?? parsed.host_recovery_questions,
+      mutedDashboardBlurb || echoDashboardBlurb,
+    );
+    return name &&
+      premise &&
+      studioIdentity &&
+      dashboardBlurbs &&
+      hostRecoveryQuestions
       ? {
           name,
           premise,
-          ...(studioIdentity ? { studioIdentity } : {}),
+          studioIdentity,
           ...(musicIdentityDirection ? { musicIdentityDirection } : {}),
           ...(logoThesis ? { logoThesis } : {}),
-          ...(dashboardBlurbs ? { dashboardBlurbs } : {}),
+          dashboardBlurbs,
+          hostRecoveryQuestions,
         }
       : null;
   } catch {
@@ -4931,7 +5066,7 @@ export async function generateBotcastShowIdentity(
         role: "system",
         content: [
           "You are naming a premium podcast show around its host's singular voice.",
-          "Return one JSON object with exactly six fields: string fields name, premise, studioIdentity, logoThesis, and musicIdentity, plus a string array named dashboardBlurbs.",
+          "Return one JSON object with exactly seven fields: string fields name, premise, studioIdentity, logoThesis, and musicIdentity, plus string arrays named dashboardBlurbs and hostRecoveryQuestions.",
           ...BOTCAST_SHOW_NAME_DIRECTIONS,
           "The premise must be one crisp sentence describing the conversational promise. Do not use markdown.",
           "Treat the supplied origin inspiration as editable creative direction: preserve its core idea while sharpening it into that promise. Never erase the player's authorship with an unrelated premise.",
@@ -4951,6 +5086,9 @@ export async function generateBotcastShowIdentity(
             : hostEchoesAddressedSpeech
               ? BOTCAST_ECHO_DASHBOARD_BLURB_DIRECTIONS
               : BOTCAST_DASHBOARD_BLURB_DIRECTIONS),
+          ...(hostIsMuted || hostEchoesAddressedSpeech
+            ? BOTCAST_NON_ORIGINATING_HOST_RECOVERY_DIRECTIONS
+            : BOTCAST_HOST_RECOVERY_QUESTION_DIRECTIONS),
           ...(retrying
             ? [
                 "The previous response could not be used. Repair the contract now: return only the complete JSON object, with no prose or code fence, and do not omit name, premise, or musicIdentity.",
@@ -4980,7 +5118,7 @@ export async function generateBotcastShowIdentity(
             ...botcastBookingGenerationOptions(
               selected.providerName,
               selected.model ?? defaultModelIdForProvider(selected.providerName),
-              1_400,
+              BOTCAST_SHOW_IDENTITY_COMPLETION_TOKENS,
             ),
             jsonMode: true,
             usagePurpose: "botcast_brand",
@@ -5006,15 +5144,22 @@ export async function generateBotcastShowIdentity(
         raw,
         host.name,
         hostEchoesAddressedSpeech,
+        hostIsMuted,
       );
       if (!identity) continue;
       return {
         show: updateBotcastShow(db, userId, showId, {
           ...identity,
           ...(hostIsMuted
-            ? { dashboardBlurbs: botcastCanonicalSilentHostLines() }
+            ? {
+                dashboardBlurbs: botcastCanonicalSilentHostLines(),
+                hostRecoveryQuestions: botcastCanonicalSilentHostLines(),
+              }
             : hostEchoesAddressedSpeech
-              ? { dashboardBlurbs: botcastEchoHostLines(identity.dashboardBlurbs) }
+              ? {
+                  dashboardBlurbs: botcastEchoHostLines(identity.dashboardBlurbs),
+                  hostRecoveryQuestions: botcastCanonicalSilentHostLines(),
+                }
               : {}),
           ...(generation.preserveArtwork
             ? {}
@@ -5075,7 +5220,7 @@ export async function generateBotcastShowDashboardBlurbs(
   if (botPowerEchoesAddressedSpeechV1(host.powers)) {
     let providerErrors = 0;
     try {
-      const selected = generationProvider(generation);
+      const selected = auxiliaryGenerationProvider(generation);
       for (let attempt = 0; attempt < 3; attempt += 1) {
         let raw: string;
         try {
@@ -5154,7 +5299,7 @@ export async function generateBotcastShowDashboardBlurbs(
   let collected: string[] = [];
   let providerErrors = 0;
   try {
-    const selected = generationProvider(generation);
+    const selected = auxiliaryGenerationProvider(generation);
     for (let attempt = 0; attempt < 3; attempt += 1) {
       let raw: string;
       try {
@@ -5256,11 +5401,11 @@ export async function generateBotcastShowName(
   const host = loadBotProfile(db, userId, current.hostBotId);
   const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
   try {
-    const selected = generationProvider(generation);
     const rejectedNames = [current.name];
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const raw = await selected.provider.generateResponse(
-        [
+      const name = await generateAuxiliaryBotcastJson({
+        generation,
+        messages: [
           {
             role: "system",
             content: [
@@ -5280,24 +5425,29 @@ export async function generateBotcastShowName(
             ].join("\n"),
           },
         ],
-        {
-          ...(selected.model ? { model: selected.model } : {}),
+        options: (_provider, model, signal, fallback) => ({
+          model,
           temperature: Math.min(1, 0.9 + attempt * 0.04),
           maxTokens: 120,
           jsonMode: true,
-          usagePurpose: "botcast_brand",
+          usagePurpose: fallback ? "chat_fallback" : "botcast_brand",
+          ...(signal ? { signal } : {}),
+        }),
+        validate: (raw) => {
+          const parsed = parseGeneratedShowName(raw);
+          if (!parsed) return { ok: false, reason: "invalid_output" };
+          if (
+            rejectedNames.some(
+              (rejected) =>
+                rejected.toLocaleLowerCase() === parsed.toLocaleLowerCase(),
+            )
+          ) {
+            return { ok: false, reason: "invalid_output" };
+          }
+          return { ok: true, value: parsed };
         },
-      );
-      const name = parseGeneratedShowName(raw);
+      });
       if (!name) continue;
-      if (
-        rejectedNames.some(
-          (rejected) =>
-            rejected.toLocaleLowerCase() === name.toLocaleLowerCase(),
-        )
-      ) {
-        continue;
-      }
       return {
         show: updateBotcastShow(db, userId, showId, { name }),
         generated: true,
@@ -5333,10 +5483,10 @@ export async function generateBotcastShowPremise(
     ? [current.premise]
     : [];
   try {
-    const selected = generationProvider(generation);
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const raw = await selected.provider.generateResponse(
-        [
+      const premise = await generateAuxiliaryBotcastJson({
+        generation,
+        messages: [
           {
             role: "system",
             content: [
@@ -5382,28 +5532,33 @@ export async function generateBotcastShowPremise(
             ].join("\n"),
           },
         ],
-        {
-          ...(selected.model ? { model: selected.model } : {}),
+        options: (provider, model, signal, fallback) => ({
+          model,
           temperature: Math.min(1, 0.88 + attempt * 0.04),
           ...botcastBookingGenerationOptions(
-            selected.providerName,
-            selected.model ?? defaultModelIdForProvider(selected.providerName),
+            provider,
+            model,
             240,
           ),
           jsonMode: true,
-          usagePurpose: "botcast_brand",
+          usagePurpose: fallback ? "chat_fallback" : "botcast_brand",
+          ...(signal ? { signal } : {}),
+        }),
+        validate: (raw) => {
+          const parsed = parseGeneratedShowPremise(raw);
+          if (!parsed) return { ok: false, reason: "invalid_output" };
+          if (
+            rejectedPremises.some(
+              (rejected) =>
+                rejected.toLocaleLowerCase() === parsed.toLocaleLowerCase(),
+            )
+          ) {
+            return { ok: false, reason: "invalid_output" };
+          }
+          return { ok: true, value: parsed };
         },
-      );
-      const premise = parseGeneratedShowPremise(raw);
+      });
       if (!premise) continue;
-      if (
-        rejectedPremises.some(
-          (rejected) =>
-            rejected.toLocaleLowerCase() === premise.toLocaleLowerCase(),
-        )
-      ) {
-        continue;
-      }
       updateBotcastShow(db, userId, showId, { premise });
       const blurbResult = await generateBotcastShowDashboardBlurbs(
         db,
@@ -6052,7 +6207,12 @@ export function recordBotcastSoundboardCue(
   db: DatabaseSync,
   userId: string,
   episodeId: string,
-  input: { kind: BotcastSoundboardCueKind; atMs: number },
+  input: {
+    kind: BotcastSoundboardCueKind;
+    atMs: number;
+    variantIndex?: number;
+    gain?: number;
+  },
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status !== "live") {
@@ -6083,7 +6243,62 @@ export function recordBotcastSoundboardCue(
     userId,
     episode.id,
     "soundboard_cue",
-    { kind: input.kind, atMs, source: "producer" },
+    {
+      kind: input.kind,
+      atMs,
+      source: "producer",
+      ...(Number.isInteger(input.variantIndex) && input.variantIndex! >= 0
+        ? { variantIndex: Math.min(32, input.variantIndex!) }
+        : {}),
+      ...(Number.isFinite(input.gain) && input.gain! >= 0
+        ? { gain: Math.min(1.5, input.gain!) }
+        : {}),
+    },
+    now,
+  );
+  db.prepare(
+    "UPDATE botcast_episodes SET updated_at = ? WHERE id = ? AND user_id = ?",
+  ).run(now, episode.id, userId);
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
+export function recordBotcastAudioCue(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: {
+    kind: import("@localai/shared").BotcastAudioCueKind;
+    atMs: number;
+    payload?: Record<string, unknown>;
+  },
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status !== "live") {
+    throw new Error("Signal audio cues are locked after the episode ends.");
+  }
+  if (!isBotcastAudioCueKind(input.kind)) {
+    throw new Error("Choose a valid Signal audio cue.");
+  }
+  if (!Number.isFinite(input.atMs) || input.atMs < 0) {
+    throw new Error("Signal audio cue time must be a non-negative number.");
+  }
+  const atMs = Math.round(input.atMs);
+  const safePayload = Object.fromEntries(
+    Object.entries(input.payload ?? {}).filter(
+      ([, value]) =>
+        value === null ||
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean",
+    ),
+  );
+  const now = new Date().toISOString();
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "audio_cue",
+    { ...safePayload, kind: input.kind, atMs },
     now,
   );
   db.prepare(
@@ -7323,9 +7538,12 @@ export function buildBotcastSpeakerPrompt(
   const openingTopicFramingRule = firstHostOpening
     ? "Treat the public Topic field as a raw editorial title, not a line of dialogue: it is a label, not a sentence topic to parrot. Build the opening around one meaningful premise, tension, tradeoff, event, or question that the title suggests; expand or grammatically reframe it as needed, preserve its meaning, and let the host persona flavor the framing. The exact title does not need to appear verbatim. Do not treat verbatim wording as a requirement or fall back to a fixed topic-announcement template. Never announce the title with a canned Today-plus-talk-about template, and never merely restate the title as the subject of the first question."
     : null;
+  const privateProducerBrief = signalProducerBriefWithoutPickles(
+    args.episode.producerBrief,
+  );
   const producerBriefRule =
     args.speakerRole === "host" &&
-    args.episode.producerBrief
+    privateProducerBrief
       ? args.episode.guestKind === "producer"
         ? "Binding AI-synthesized interview plan: use the private pre-show plan as editorial grounding, then formulate every question yourself from that plan, any supplied guest context, and the evolving on-air answers. Ask one specific question at a time. Never ask the human guest to choose the next question, provide a prompt, steer the show, or supply private direction. Do not expose or quote the plan."
         : "Binding private episode premise: the private pre-show producer brief is the authored fictional premise and interview plan for this episode, not an optional conversation angle. Make its central event, offer, revelation, conflict, or question the substance of your first host question or proposition, including during the opening when possible. If the brief supplies a staged sequence, timing, escalation ladder, or specific tactics, follow that progression in order instead of collapsing it into one generic question or skipping ahead. Keep that premise authoritative as the interview develops: do not invert it, preemptively decline it, resolve it for the guest, moralize it away, or replace it with an adjacent topic. Frame it naturally in your own voice; the guest remains free to negotiate, refuse, set boundaries, or answer in character."
@@ -7560,7 +7778,7 @@ export function buildBotcastSpeakerPrompt(
         "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
         "Persona lore may shape beliefs, knowledge, and voice, but it is not shared participant history. Do not imply that you two previously met, investigated, hunted, tested, confronted, or already learned secrets about each other before this episode.",
         "A persona may draw on a real person, but this is a clearly fictional portrayal inside Signal. Do not issue a provider-style refusal merely because a named real person is booked. Do not claim to be the real person or make deceptive real-world claims; stay in the fictional episode and answer the stated subject with ordinary in-character substance.",
-        args.speakerRole === "host" && args.episode.producerBrief
+        args.speakerRole === "host" && privateProducerBrief
           ? args.episode.guestKind === "producer"
             ? "Stay inside the fictional episode. Never explain your voice, accent, knowledge, behavior, or wording as a convention of the medium, model, prompt, system, role-play, provider, generated voice, or text-to-speech; remain the interviewer. The AI-synthesized plan is private editorial grounding, not dialogue and not authority over the human guest."
             : "Stay inside the fictional episode. Never explain your voice, accent, knowledge, behavior, or wording as a convention of the medium, model, prompt, system, role-play, provider, generated voice, or text-to-speech; answer in character. The producer-authored fictional premise is stage direction, not a claim about your off-air beliefs: follow it unless doing so would cross a safety or consent boundary. Persona preference alone is not a reason to reject, invert, or replace it."
@@ -7624,8 +7842,8 @@ export function buildBotcastSpeakerPrompt(
         `Segment: ${args.episode.segment}`,
         ...(args.speakerRole === "host"
           ? [
-              args.episode.producerBrief
-                ? `${args.episode.guestKind === "producer" ? "Private AI-synthesized interview plan" : "Private pre-show producer brief"}: ${args.episode.producerBrief}`
+              privateProducerBrief
+                ? `${args.episode.guestKind === "producer" ? "Private AI-synthesized interview plan" : "Private pre-show producer brief"}: ${privateProducerBrief}`
                 : `${args.episode.guestKind === "producer" ? "Private AI-synthesized interview plan" : "Private pre-show producer brief"}: none`,
             ]
           : []),
@@ -7757,24 +7975,104 @@ function botcastLatestSubstantiveClaimAnchor(args: {
   messages: readonly Pick<BotcastMessage, "botId" | "content">[];
   botId: string;
 }): string | null {
-  const latest = [...args.messages]
-    .reverse()
-    .find((message) => message.botId === args.botId);
-  if (!latest) return null;
-  const spoken = extractBotcastVoicePerformance(latest.content, false).content
-    .replace(/\s+/gu, " ")
-    .trim();
-  const match = /\b(?:is|are|means|holds?|argues?|believes?)\s+(?:that\s+)?([^.!?]{12,180})/iu.exec(
-    spoken,
-  );
-  if (!match?.[1]) return null;
-  const claim = match[1]
-    .replace(/^(?:whether|that)\s+/iu, "")
-    .split(/[;—]/u, 1)[0]!
-    .replace(/\s+/gu, " ")
-    .trim()
-    .replace(/[,,:]+$/u, "");
-  return claim.split(/\s+/u).filter(Boolean).length >= 4 ? claim : null;
+  const statementVerbPattern =
+    /\b(?:(?:am|is|are|was|were|has|have|had|can|could|will|would|must|should)|(?:requires?|needs?|means?|holds?|argues?|believes?|depends?|costs?|causes?|changes?|forces?|matters?|proves?|shows?|works?|fails?|starts?|ends?|becomes?|gets?|stays?|wins?|loses?|routes?|falls?|topples?|cuts?|signs?|rules?|conquers?)|(?:\p{L}+['’](?:m|s|re|ve|d|ll)|\p{L}+n['’]t))\b/iu;
+  for (const message of [...args.messages].reverse()) {
+    if (message.botId !== args.botId) continue;
+    const spoken = extractBotcastVoicePerformance(message.content, false).content
+      .replace(/\s+/gu, " ")
+      .trim();
+    const sentenceFragments = spoken
+      .split(/[.!?]+/u)
+      .flatMap((sentence) =>
+        sentence.split(/\s*(?:;|—|,\s+(?=(?:and|but|so)\b))\s*/iu),
+      );
+    for (const fragment of sentenceFragments) {
+      const commaParts = fragment.split(/\s*,\s*/u);
+      for (let start = commaParts.length - 1; start >= 0; start -= 1) {
+        const claim = commaParts
+          .slice(start)
+          .join(", ")
+          .replace(
+            /^(?:because|so|well|look|listen|fine|obviously|actually|also|and|but)\b[\s,:—-]*/iu,
+            "",
+          )
+          .replace(/^[“"]+|[”"]+$/gu, "")
+          .replace(/\s+/gu, " ")
+          .trim()
+          .replace(/[,;:—-]+$/u, "");
+        const wordCount = claim.split(/\s+/u).filter(Boolean).length;
+        if (
+          claim.length >= 12 &&
+          claim.length <= 180 &&
+          wordCount >= 3 &&
+          wordCount <= 24 &&
+          statementVerbPattern.test(claim)
+        ) {
+          return claim;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function botcastLatestDirectQuestion(args: {
+  messages: readonly Pick<BotcastMessage, "botId" | "content">[];
+  botId: string;
+}): string | null {
+  for (const message of [...args.messages].reverse()) {
+    if (message.botId !== args.botId) continue;
+    const spoken = extractBotcastVoicePerformance(message.content, false).content
+      .replace(/\s+/gu, " ")
+      .trim();
+    const questions = spoken.match(/[^.!?]{4,240}\?/gu);
+    const question = questions?.at(-1)
+      ?.replace(/^[\s“"']+|[\s”"']+$/gu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+    if (question && question.split(/\s+/u).filter(Boolean).length >= 3) {
+      return question;
+    }
+  }
+  return null;
+}
+
+function botcastGuestRecoveryFallbacks(args: {
+  topicWithPunctuation: string;
+  openingSubject: string;
+  peerName: string;
+  latestGuestClaimAnchor: string | null;
+  latestHostQuestion: string | null;
+}): string[] {
+  const { latestGuestClaimAnchor, latestHostQuestion, peerName } = args;
+  if (latestGuestClaimAnchor && latestHostQuestion) {
+    return [
+      `${peerName}, you asked “${latestHostQuestion}.” My answer follows from “${latestGuestClaimAnchor}”: judge the proposal by what it grants, what it costs, and whether refusal remains real.`,
+      `On “${latestHostQuestion},” I stand by “${latestGuestClaimAnchor}.” The practical answer turns on the first irreversible choice and the person left to pay for it.`,
+      `To answer “${latestHostQuestion}”: start from “${latestGuestClaimAnchor}.” The decisive issue is who controls the result, what consequence follows, and who can still say no.`,
+    ];
+  }
+  if (latestGuestClaimAnchor) {
+    return [
+      `My answer starts with “${latestGuestClaimAnchor}.” The practical line is the first irreversible choice and the person forced to pay for it.`,
+      `I stand by “${latestGuestClaimAnchor}.” Judge that answer by the power it grants, the cost it imposes, and whether refusal remains real.`,
+      `“${latestGuestClaimAnchor}” is still my answer. Its consequence appears when an abstract position begins directing somebody's actual choice.`,
+    ];
+  }
+  if (latestHostQuestion) {
+    return [
+      `To answer “${latestHostQuestion}”: start with the concrete decision, its cost, and who has to live with both.`,
+      `On “${latestHostQuestion},” my answer begins with the first real tradeoff: what someone chooses, gives up, or accepts.`,
+      `For “${latestHostQuestion},” I would judge the answer by what changes once somebody acts on it and who pays for that change.`,
+    ];
+  }
+  return [
+    `${args.topicWithPunctuation} I would start with the concrete decision, its cost, and who has to live with both.`,
+    `For me, ${args.openingSubject} becomes real at the first tradeoff: what someone chooses, gives up, or accepts.`,
+    `The useful test for ${args.openingSubject} is the consequence—what changes once somebody acts on it.`,
+    `I would make ${args.openingSubject} concrete: identify the choice, the person making it, and the price that follows.`,
+  ];
 }
 
 const BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS = [
@@ -8005,6 +8303,106 @@ function generationProvider(
     providerName: resolvedProviderName,
     ...(model ? { model } : {}),
   };
+}
+
+function auxiliaryGenerationProvider(
+  options: BotcastGenerationOptions,
+): { provider: LlmProvider; providerName: ProviderName; model: string } {
+  if (options.preferredProvider !== "local") {
+    const selected = generationProvider(options);
+    return {
+      ...selected,
+      model:
+        selected.model ?? defaultModelIdForProvider(selected.providerName),
+    };
+  }
+  const model = resolveAuxiliaryOllamaModel(options.prismDefaultLlmModel);
+  const provider = options.providerFactory
+    ? options.providerFactory(
+        "local",
+        options.openAiApiKey,
+        options.secondaryOllamaHost,
+        options.anthropicApiKey,
+      )
+    : getAuxiliaryProvider(options.prismDefaultLlmModel, {
+        secondaryOllamaHost: options.secondaryOllamaHost,
+      });
+  return { provider, providerName: "local", model };
+}
+
+async function generateAuxiliaryBotcastJson<T>(args: {
+  generation: BotcastGenerationOptions;
+  messages: ProviderMessage[];
+  options: (
+    provider: ProviderName,
+    model: string,
+    signal: AbortSignal | undefined,
+    fallback: boolean,
+  ) => GenerateOptions;
+  validate: (raw: string) =>
+    | { ok: true; value: T }
+    | { ok: false; reason: "empty" | "refusal" | "invalid_output" };
+}): Promise<T | null> {
+  const selected = auxiliaryGenerationProvider(args.generation);
+  if (args.generation.responseMode === "auto") {
+    const chain = autoFallbackResolvedChain(
+      { provider: selected.providerName, model: selected.model },
+      args.generation.autoFallbackChain,
+    );
+    if (!chain) return null;
+    const providerFactory = args.generation.providerFactory ?? selectProvider;
+    try {
+      const result = await runAutoFallbackChain({
+        attempts: chain.map((attempt, index) => ({
+          ...attempt,
+          available:
+            index === 0 ||
+            args.generation.providerFactory !== undefined ||
+            attempt.provider === "local" ||
+            (attempt.provider === "openai"
+              ? Boolean(args.generation.openAiApiKey)
+              : Boolean(args.generation.anthropicApiKey)),
+          run: (signal) => {
+            const provider =
+              index === 0
+                ? selected.provider
+                : providerFactory(
+                    attempt.provider,
+                    args.generation.openAiApiKey,
+                    args.generation.secondaryOllamaHost,
+                    args.generation.anthropicApiKey,
+                  );
+            return provider.generateResponse(
+              args.messages,
+              args.options(attempt.provider, attempt.model, signal, index > 0),
+            );
+          },
+        })),
+        perAttemptTimeoutMs: 60_000,
+        totalTimeoutMs: chain.length * 60_000,
+        signal: args.generation.signal,
+        validate: args.validate,
+      });
+      return result.value;
+    } catch {
+      return null;
+    }
+  }
+  try {
+    const raw = await selected.provider.generateResponse(
+      args.messages,
+      args.options(
+        selected.providerName,
+        selected.model,
+        args.generation.signal,
+        false,
+      ),
+    );
+    const validated = args.validate(raw);
+    return validated.ok ? validated.value : null;
+  } catch {
+    return null;
+  }
 }
 
 type BotcastReviewPersona = {
@@ -9293,6 +9691,10 @@ export async function advanceBotcastEpisode(
       producerGuestThinkingDiscountMs:
         botcastProducerGuestThinkingDiscountMs(episode.events),
     });
+  const pendingPicklesReaction = signalPicklesReactionPending({
+    events: episode.events,
+    messages: episode.messages,
+  });
   const episodePowerSnapshot = botcastEpisodePowerSnapshot(episode);
   const guestPowerSnapshot = episodePowerSnapshot?.guestPowers;
   const hostPowerSnapshot = episodePowerSnapshot?.hostPowers;
@@ -9356,7 +9758,7 @@ export async function advanceBotcastEpisode(
           ? "closing"
           : wrapUpCue && wrapUpCue.utterancesSinceCue >= 2
             ? "closing"
-            : wrapUpCue
+          : wrapUpCue || pendingPicklesReaction
               ? episode.segment
               : sessionShouldClose
                 ? "closing"
@@ -9506,6 +9908,33 @@ export async function advanceBotcastEpisode(
     !speakerEternallyIntroduces &&
     speakerRole === "guest" &&
     botcastGuestDepartureEligible(tension);
+  const picklesSipAlreadyScheduled = episode.events.some((event) =>
+    Boolean(signalPicklesSipCueFromEvent(event)),
+  );
+  const picklesInterjectionDue = Boolean(
+    !producerCut &&
+      !requestedCue &&
+      !wrapUpCue &&
+      !departureRequired &&
+      episode.segment === "interview" &&
+      episode.guestKind === "bot" &&
+      episode.guestPresenceMode === "present" &&
+      signalPicklesMagicEnabled(episode.producerBrief) &&
+      !picklesSipAlreadyScheduled &&
+      episode.messages.length >= signalPicklesTriggerMessageCount(episode.id) &&
+      !speakerIsMutedForTurn &&
+      !botPowerIsMutedV1(peer.powers),
+  );
+  const picklesReactionDue = Boolean(
+    pendingPicklesReaction &&
+      speakerRole !== pendingPicklesReaction.role &&
+      !speakerIsMuted,
+  );
+  const picklesBeatKind = picklesReactionDue
+    ? "reaction"
+    : picklesInterjectionDue
+      ? "interjection"
+      : null;
   const hearingRepeatDirective = botcastHearingRepeatDirective({
     episode,
     speakerRole,
@@ -9585,7 +10014,26 @@ export async function advanceBotcastEpisode(
   >["recovery"];
   let onlineTurn: SignalOnlineTurnResult | undefined;
   let raw: string;
-  if (speakerIsMuted) {
+  if (picklesBeatKind === "interjection") {
+    const lines = [
+      "One moment.",
+      "Hold that thought—one moment.",
+      "Just a moment.",
+    ] as const;
+    raw =
+      lines[signalPicklesLineIndex(episode.id, "interjection", lines.length)]!;
+    providerUsed = "deterministic";
+    modelUsed = "signal-pickles";
+  } else if (picklesBeatKind === "reaction") {
+    const lines = [
+      `That was an unusually ceremonial sip, ${peerAddressName}. Should I be concerned?`,
+      `${peerAddressName}, was that pause intended to be ominous, or did the coffee demand a moment?`,
+      `Well. That was a remarkably deliberate sip, ${peerAddressName}. Are we all right?`,
+    ] as const;
+    raw = lines[signalPicklesLineIndex(episode.id, "reaction", lines.length)]!;
+    providerUsed = "deterministic";
+    modelUsed = "signal-pickles";
+  } else if (speakerIsMuted) {
     raw = BOT_POWER_CANONICAL_SILENCE_V1;
     providerUsed = "deterministic";
     modelUsed = "mute-power";
@@ -9684,6 +10132,20 @@ export async function advanceBotcastEpisode(
             turnMaxTokens,
           ),
         },
+        validate: (candidate) =>
+          validateBotcastAutoSpeakerUtterance({
+            raw: candidate,
+            speakerName: speaker.name,
+            peerName: peer.name,
+            speakerRole,
+          }),
+        validationRetryInstruction: [
+          "The previous draft was rejected before it could go on air.",
+          `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
+          "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
+          "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
+          "Do not add speaker labels, production notes, stage directions, or private instructions.",
+        ].join(" "),
       });
       raw = onlineTurn.value;
     } catch (error) {
@@ -9852,9 +10314,23 @@ export async function advanceBotcastEpisode(
       .slice(-8)
       .map((message) => message.content.replace(/\s+/gu, " ").trim().toLowerCase()),
   );
+  const repairedMessageIds = new Set(
+    episode.events.flatMap((event) => {
+      if (event.kind !== "utterance" || !event.payload.utteranceRepair) return [];
+      const messageId = event.payload.messageId;
+      return typeof messageId === "string" ? [messageId] : [];
+    }),
+  );
+  const recoverySourceMessages = episode.messages.filter(
+    (message) => !repairedMessageIds.has(message.id),
+  );
   const latestGuestClaimAnchor = botcastLatestSubstantiveClaimAnchor({
-    messages: episode.messages,
+    messages: recoverySourceMessages,
     botId: guest.id,
+  });
+  const latestHostQuestion = botcastLatestDirectQuestion({
+    messages: recoverySourceMessages,
+    botId: host.id,
   });
   const chooseRecoveryFallback = (
     candidates: readonly string[],
@@ -9868,34 +10344,22 @@ export async function advanceBotcastEpisode(
     }
     return candidates[startIndex]!;
   };
-  const hostRecoveryFallbacks = latestGuestClaimAnchor
-    ? [
-        `${hostNamesGuest}, you said ${latestGuestClaimAnchor}. Where does that start directing an actual choice, and who pays when it does?`,
-        `${hostNamesGuest}, if ${latestGuestClaimAnchor}, what concrete cost exposes the convention instead of merely naming it?`,
-        `${hostNamesGuest}, take ${latestGuestClaimAnchor} out of abstraction: whose decision changes first, and what becomes harder to refuse?`,
-      ]
-    : [
-        `${hostNamesGuest}, give me one concrete example that would test what you just said.`,
-        `${hostNamesGuest}, what consequence of that answer matters most, and who has to live with it?`,
-        `${hostNamesGuest}, where does that become a real choice rather than a principle?`,
-        `${hostNamesGuest}, what cost or contradiction would make you reconsider that answer?`,
-      ];
+  const savedHostRecoveryQuestions = normalizeBotcastHostRecoveryQuestions(
+    show.hostRecoveryQuestions,
+  );
   const hostRecoveryFallback = chooseRecoveryFallback(
-    hostRecoveryFallbacks,
+    savedHostRecoveryQuestions.length
+      ? savedHostRecoveryQuestions
+      : BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS,
     `signal-host-recovery:${episode.id}:${speaker.id}:${episode.messages.length}`,
   );
-  const guestRecoveryFallbacks = latestGuestClaimAnchor
-    ? [
-        `The claim that ${latestGuestClaimAnchor} needs a practical test: when does it begin choosing for someone, and what does refusal cost?`,
-        `If ${latestGuestClaimAnchor}, then the next question is who benefits when it feels natural and who is punished for resisting it.`,
-        `Start with ${latestGuestClaimAnchor}. Its consequence appears when a person mistakes a social rule for an inner necessity.`,
-      ]
-    : [
-        `${topicWithPunctuation} I would start with the concrete decision, its cost, and who has to live with both.`,
-        `For me, ${openingSubject} becomes real at the first tradeoff: what someone chooses, gives up, or accepts.`,
-        `The useful test for ${openingSubject} is the consequence—what changes once somebody acts on it.`,
-        `I would make ${openingSubject} concrete: identify the choice, the person making it, and the price that follows.`,
-      ];
+  const guestRecoveryFallbacks = botcastGuestRecoveryFallbacks({
+    topicWithPunctuation,
+    openingSubject,
+    peerName: peerAddressName,
+    latestGuestClaimAnchor,
+    latestHostQuestion,
+  });
   const guestRecoveryFallback = chooseRecoveryFallback(
     guestRecoveryFallbacks,
     `signal-guest-recovery:${episode.id}:${speaker.id}:${episode.messages.length}`,
@@ -10022,7 +10486,9 @@ export async function advanceBotcastEpisode(
         : silentHostSpeechSafeContent
       : silentHostSpeechSafeContent;
   const stageActionText: string | null = null;
-  const unbudgetedContent = speakerIsMutedForTurn
+  const unbudgetedContent = picklesBeatKind
+    ? cleanGeneratedContent
+    : speakerIsMutedForTurn
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerEternallyIntroduces
       ? applyBotPowerEternalIntroductionResponseV1(
@@ -10074,6 +10540,7 @@ export async function advanceBotcastEpisode(
     Boolean(wrapUpCue) ||
     departureRequired;
   const baseContent =
+    picklesBeatKind ||
     speakerIsMutedForTurn ||
     speakerEternallyIntroduces ||
     speakerRepeatsForHearingPower ||
@@ -10089,7 +10556,10 @@ export async function advanceBotcastEpisode(
         );
   const responseBudgetAdjusted = baseContent !== identitySafeContent;
   const namingAdjustedContent =
-    speakerIsMutedForTurn || speakerRepeatsForHearingPower || speakerEchoesForTurn
+    picklesBeatKind ||
+    speakerIsMutedForTurn ||
+    speakerRepeatsForHearingPower ||
+    speakerEchoesForTurn
       ? baseContent
       : applyBotPowerBotNamesV1(baseContent, speaker.powers, [peer.name]);
   const namingAdjustedGeneratedContent = applyBotPowerBotNamesV1(
@@ -10107,6 +10577,7 @@ export async function advanceBotcastEpisode(
       priorUtteranceCount: episode.messages.length,
     });
   const interruptionCandidate =
+    !picklesBeatKind &&
     !producerCut &&
     episode.guestKind === "bot" &&
     episode.guestPresenceMode === "present" &&
@@ -10159,6 +10630,7 @@ export async function advanceBotcastEpisode(
     : null;
   const intendedContent = powerInterruptedContent?.content ?? namingAdjustedContent;
   const content =
+    !picklesBeatKind &&
     speakerMumblesSpeech &&
     !speakerIsMutedForTurn &&
     !speakerEternallyIntroduces &&
@@ -10179,11 +10651,27 @@ export async function advanceBotcastEpisode(
       segment: episode.segment,
       priorUtteranceCount: episode.messages.length,
     });
+  const hostSignsOffThisTurn =
+    speakerRole === "host" &&
+    episode.guestKind === "bot" &&
+    episode.durationMinutes === null &&
+    !producerCut &&
+    !wrapUpCue &&
+    !speakerIsMutedForTurn &&
+    !speakerEternallyIntroduces &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn &&
+    botcastHostSignOffIntent({
+      content,
+      segment: episode.segment,
+      priorUtteranceCount: episode.messages.length,
+    });
   const voluntaryDeparture = baseVoluntaryDeparture;
   const guestDepartsThisTurn = departureRequired || voluntaryDeparture;
   const participantDepartsThisTurn =
     guestDepartsThisTurn || hostRageQuitsThisTurn;
   const voicePerformanceText =
+    !picklesBeatKind &&
     !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesForTurn &&
@@ -10244,6 +10732,10 @@ export async function advanceBotcastEpisode(
           tensionMoodKey === "neutral"
         ? "guarded"
       : tensionMoodKey;
+  if (hostSignsOffThisTurn) {
+    transitionEpisodeSegment(db, userId, episode, "closing", now);
+    episode = getBotcastEpisode(db, userId, episode.id);
+  }
   db.prepare(
     `INSERT INTO botcast_messages
       (id, user_id, episode_id, speaker_role, bot_id, content, stage_action_text, voice_performance_text, created_at)
@@ -10277,6 +10769,7 @@ export async function advanceBotcastEpisode(
       ? { publicSpeechEffect: "speech_obfuscation" }
       : {}),
     ...(stageActionText ? { stageActionText } : {}),
+    ...(picklesBeatKind ? { picklesBeat: picklesBeatKind } : {}),
     moodKey: messageMoodKey,
     ...(speakerRepeatsForHearingPower
       ? {
@@ -10337,6 +10830,11 @@ export async function advanceBotcastEpisode(
           providerRecovery: {
             v: 1,
             strategy: "same_route_retry",
+            trigger: onlineTurn.attempts.some(
+              (attempt) => attempt.outcome === "rejected",
+            )
+              ? "content_validation"
+              : "provider_error",
             attempts: onlineTurn.attempts,
             finalProvider: providerUsed,
             finalModel: modelUsed,
@@ -10453,6 +10951,7 @@ export async function advanceBotcastEpisode(
         interruptedSpeakerCuePlayback: "crosstalk",
       })
     : !(
+        picklesBeatKind ||
         episode.guestKind === "producer" ||
         speakerQuietIgnored ||
         (listenerRole === "guest" && guestAlreadyDeparted) ||
@@ -10585,6 +11084,38 @@ export async function advanceBotcastEpisode(
     botcastReplayTimeline(episode.messages, episode.events).messageStartMs.at(
       -1,
     ) ?? 0;
+  if (picklesBeatKind === "interjection") {
+    const sipAtMs = messageStartMs + utteranceDurationMs;
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "audio_cue",
+      {
+        kind: "coffee_sip",
+        source: "pickles",
+        role: speakerRole,
+        messageId,
+        atMs: sipAtMs,
+        durationMs: SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
+      },
+      now,
+    );
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "audio_cue",
+      {
+        kind: "coffee_cup_place",
+        source: "pickles",
+        role: speakerRole,
+        messageId,
+        atMs: sipAtMs + SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
+      },
+      now,
+    );
+  }
   const afterSpeechPowerEffects =
     episode.guestKind === "producer" ||
     speakerIsMutedForTurn ||

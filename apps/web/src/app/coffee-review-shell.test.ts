@@ -8,7 +8,7 @@ const cssSource = readFileSync(new URL("./page.module.css", import.meta.url), "u
 test("completed Coffee sessions enter read-only review before replay starts", () => {
   assert.match(
     pageSource,
-    /const coffeeFinishedControlsVisible = shellPolicy\.reviewActive;/,
+    /const coffeeFinishedControlsVisible =\s*coffeeChromePolicy\.reviewActive && coffeeReplayActive;/,
   );
   assert.match(
     pageSource,
@@ -17,7 +17,7 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
   assert.match(pageSource, /onClick=\{toggleCoffeeReplayPlayback\}/);
   assert.match(
     pageSource,
-    /coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*shellPolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer/,
+    /coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*coffeeChromePolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer/,
   );
   assert.match(
     pageSource,
@@ -29,14 +29,46 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
   );
 });
 
+test("completed Coffee review keeps the table clear behind a Signal-like header", () => {
+  assert.equal(
+    pageSource.match(/<ReplayRecordingPanel\s+surface="coffee"/gu)?.length,
+    1,
+  );
+  assert.match(
+    pageSource,
+    /className=\{`\$\{styles\.coffeeStageHeader\} \$\{styles\.coffeeReviewHeader\}`\}/,
+  );
+  assert.match(pageSource, /className=\{styles\.coffeeReviewVideoDisclosure\}/);
+  assert.match(
+    pageSource,
+    /coffeeReviewVideoDisclosure[\s\S]{0,1800}<ReplayRecordingPanel\s+surface="coffee"/,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /coffeeFinishedRecap[\s\S]{0,500}<ReplayRecordingPanel\s+surface="coffee"/,
+  );
+  assert.match(cssSource, /\.coffeeReviewHeader\s*\{/);
+  assert.match(cssSource, /\.coffeeReviewVideoBackdrop\s*\{/);
+});
+
+test("Coffee review copies transcripts instead of exporting transcript files", () => {
+  assert.doesNotMatch(pageSource, /exportCoffeeSession/u);
+  assert.doesNotMatch(pageSource, /Download Session/u);
+  assert.match(
+    pageSource,
+    /coffeeReplayUtilityControls[\s\S]{0,1000}copyCoffeeTranscriptToClipboard/u,
+  );
+  assert.match(pageSource, /data-copy-state=/u);
+});
+
 test("replay renders Default Prism in a reserved bottom table seat", () => {
   assert.match(
     pageSource,
-    /\{coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\) \? \(\s*<div\s*className=\{styles\.coffeeReplayPlayerSeat\}/,
+    /\{\(coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)\)[\s\S]{0,260}\? \(\s*<div\s*className=\{styles\.coffeeReplayPlayerSeat\}/,
   );
   assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerSeat\}/);
   assert.match(pageSource, /glyph=\{zenDefaultPrismGlyph\}/);
-  assert.match(pageSource, /faceStyle=\{zenDefaultPrismFaceStyle\}/);
+  assert.match(pageSource, /faceStyle=\{coffeePlayerSipFaceStyle\}/);
   assert.match(
     pageSource,
     /showThinkingSpinner=\{coffeeReplayPlayerThinking\}/,
@@ -68,7 +100,7 @@ test("review stops live audio and cannot start replay while the closing wrap is 
     pageSource,
     /const startCoffeeReplay = \(\) => \{[\s\S]*?coffeeReviewPreparingSessionId === coffeeConversation\.id[\s\S]*?return;/,
   );
-  assert.match(pageSource, /"Wrapping table\.\.\."/);
+  assert.match(pageSource, /"Wrapping…"/);
   assert.match(
     pageSource,
     /coffeeSynopsisRequestIdsRef\.current\.delete\(response\.conversation\.id\);\s*setCoffeeReviewPreparingSessionId\(response\.conversation\.id\);/,

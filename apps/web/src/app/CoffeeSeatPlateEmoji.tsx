@@ -18,6 +18,7 @@ import {
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
@@ -244,6 +245,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
+  faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | string[] | null;
   forceBlinkPhase?: CoffeeSeatBlinkPhase | null;
   /** Reports the final displayed phase so adjacent persistent ink can follow it. */
@@ -320,6 +322,7 @@ export function CoffeeSeatPlateEmoji({
   faceBlinkScale,
   faceBlinkOffsetX,
   faceBlinkOffsetY,
+  faceBlinkRotationDeg,
   faceThinkingFrames,
   forceBlinkPhase,
   onBlinkPhaseChange,
@@ -360,10 +363,6 @@ export function CoffeeSeatPlateEmoji({
   const customBlinkBarActive = !BOT_FACE_BLINK_BAR_VALUES.some(
     (blinkBar) => blinkBar === normalizedFaceBlinkBar,
   );
-  const faceBlinkRotationCssDeg =
-    customBlinkBarActive && normalizedFaceEyeCount === 2
-      ? DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG
-      : 0;
   const forcedBlinkPhase =
     forceBlinkPhase === "open" || forceBlinkPhase === "closed"
       ? forceBlinkPhase
@@ -555,21 +554,25 @@ export function CoffeeSeatPlateEmoji({
       ? undefined
       : (normalizeBotFaceEyeOffsetY(faceEyeOffsetY) ?? undefined);
   const normalizedFaceEyeRotationDeg =
-    thinkingSpinnerActive || questionGlyphActive || !normalizedFaceEyeCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceEyeRotationDeg(faceEyeRotationDeg) ?? undefined);
   const normalizedFaceBlinkScale =
-    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
       ? undefined
       : (normalizeBotFaceBlinkScale(faceBlinkScale) ?? undefined);
   const normalizedFaceBlinkOffsetX =
-    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
       ? undefined
       : (normalizeBotFaceBlinkOffsetX(faceBlinkOffsetX) ?? undefined);
   const normalizedFaceBlinkOffsetY =
-    thinkingSpinnerActive || questionGlyphActive || !customBlinkBarActive
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
       ? undefined
       : (normalizeBotFaceBlinkOffsetY(faceBlinkOffsetY) ?? undefined);
+  const normalizedFaceBlinkRotationDeg =
+    thinkingSpinnerActive || questionGlyphActive || faceBlinkDisabled
+      ? undefined
+      : (normalizeBotFaceBlinkRotationDeg(faceBlinkRotationDeg) ?? 0);
   const normalizedFaceMouthScale =
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
@@ -583,20 +586,27 @@ export function CoffeeSeatPlateEmoji({
       ? undefined
       : (normalizeBotFaceMouthOffsetY(faceMouthOffsetY) ?? undefined);
   const normalizedFaceMouthRotationDeg =
-    thinkingSpinnerActive || questionGlyphActive || !renderedFaceMouthCharacter
+    thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
   const faceMouthRotationCssDeg =
     normalizedFaceMouthRotationDeg === undefined
       ? undefined
-      : screenRelativeFacePartRotationDeg(
-          normalizedFaceMouthRotationDeg,
-          rotateDeg,
-        );
+      : normalizedFaceMouthCharacter
+        ? screenRelativeFacePartRotationDeg(
+            normalizedFaceMouthRotationDeg,
+            rotateDeg,
+          )
+        : normalizedFaceMouthRotationDeg;
   const faceEyeRotationCssDeg =
     normalizedFaceEyeRotationDeg === undefined
       ? undefined
       : normalizedFaceEyeRotationDeg;
+  const faceBlinkRotationCssDeg =
+    (normalizedFaceBlinkRotationDeg ?? 0) +
+    (customBlinkBarActive && normalizedFaceEyeCount === 2
+      ? DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG
+      : 0);
   const faceEyeOffset = rotatedFaceOffset(
     normalizedFaceEyeOffsetX,
     normalizedFaceEyeOffsetY,
@@ -660,6 +670,7 @@ export function CoffeeSeatPlateEmoji({
         normalizedFaceBlinkScale ||
         normalizedFaceBlinkOffsetX ||
         normalizedFaceBlinkOffsetY ||
+        normalizedFaceBlinkRotationDeg ||
         normalizedFaceMouthScale ||
         normalizedFaceMouthOffsetX ||
         normalizedFaceMouthOffsetY ||
@@ -705,7 +716,10 @@ export function CoffeeSeatPlateEmoji({
               ? undefined
               : `${faceEyeRotationCssDeg}deg`,
           ["--bot-face-blink-scale" as string]: normalizedFaceBlinkScale,
-          ["--bot-face-blink-rotation" as string]: `${faceBlinkRotationCssDeg}deg`,
+          ["--bot-face-blink-rotation" as string]:
+            normalizedFaceBlinkRotationDeg === undefined
+              ? undefined
+              : `${faceBlinkRotationCssDeg}deg`,
           ["--bot-face-blink-offset-x" as string]:
             faceBlinkOffset === null ? undefined : `${faceBlinkOffset.x}em`,
           ["--bot-face-blink-offset-y" as string]:
@@ -720,7 +734,7 @@ export function CoffeeSeatPlateEmoji({
               ? undefined
               : `${faceMouthRotationCssDeg}deg`,
           ["--bot-face-mouth-spin-turn-duration" as string]: `${ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
-          transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
+          transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y, 0px)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
         } as CSSProperties
       }
       aria-hidden="true"

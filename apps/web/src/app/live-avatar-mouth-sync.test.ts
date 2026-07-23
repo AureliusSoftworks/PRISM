@@ -29,10 +29,29 @@ describe("live avatar mouth synchronization", () => {
       signalSource.indexOf("const avatar = ("),
       signalSource.indexOf("const hostAvatar ="),
     );
+    assert.match(
+      avatar,
+      /primarySpeaking[\s\S]{0,160}args\.replay[\s\S]{0,180}speechReveal\?\.text/u,
+    );
+    assert.match(
+      avatar,
+      /signalVoicePerformanceTranscriptText\(args\.activeMessage\)/u,
+    );
+    assert.match(
+      avatar,
+      /const mouthSpeechAlignment = primarySpeaking[\s\S]{0,80}speechReveal\?\.alignment/u,
+    );
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
-    assert.match(avatar, /alignment: speechReveal\?\.alignment/u);
+    assert.match(avatar, /alignment: mouthSpeechAlignment/u);
     assert.match(avatar, /voiceMode === "bottish"/u);
     assert.match(avatar, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
+  });
+
+  it("uses the exact primary playback text for Signal reveal and mouth timing", () => {
+    assert.match(
+      signalSource,
+      /const transcriptText =\s*signalVoicePerformanceTranscriptText\(playbackMessage\)/u,
+    );
   });
 
   it("drives Zen visemes from its audio timeline instead of canvas reveal", () => {

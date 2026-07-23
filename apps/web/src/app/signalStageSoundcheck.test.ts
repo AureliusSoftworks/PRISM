@@ -47,6 +47,20 @@ test("Signal stage soundcheck creates a private host and guest voice exchange", 
   );
 });
 
+test("Signal stage soundcheck never asks a host to level check with itself", () => {
+  assert.deepEqual(
+    signalStageSoundcheckMessages({
+      showId: "show-1",
+      hostBotId: "host-1",
+      hostName: "Mira",
+      guestBotId: "host-1",
+      guestName: "Mira",
+      runId: 8,
+    }),
+    [],
+  );
+});
+
 test("ordinary saved Signal messages are never treated as ephemeral soundchecks", () => {
   assert.equal(
     signalStageSoundcheckMessageIsEphemeral({

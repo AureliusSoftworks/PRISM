@@ -20,6 +20,12 @@ describe("PrismBlockingLoader", () => {
     assert.match(css, /position:\s*fixed;[\s\S]{0,80}inset:\s*0/iu);
   });
 
+  it("embeds Prism without leaving the floating assistant visible", () => {
+    assert.match(source, /<PrismCompanionPresenceBoundary reason="blocking-loader"/u);
+    assert.match(source, /<PrismOrb className=\{styles\.prismOrb\}/u);
+    assert.doesNotMatch(source, /styles\.prismMark|styles\.lightCore/u);
+  });
+
   it("communicates determinate and indeterminate PRISM progress accessibly", () => {
     assert.match(source, /role="progressbar"/u);
     assert.match(source, /aria-valuenow=\{progressPercent \?\? undefined\}/u);
@@ -27,6 +33,15 @@ describe("PrismBlockingLoader", () => {
     assert.match(css, /var\(--prism-p\)[\s\S]*var\(--prism-r\)[\s\S]*var\(--prism-i\)[\s\S]*var\(--prism-s\)[\s\S]*var\(--prism-m\)/u);
     assert.match(css, /prefers-reduced-motion:\s*reduce/iu);
     assert.match(css, /\.backdrop\[data-theme="light"\]/u);
+  });
+
+  it("keeps Signal's light copy as the default while allowing contextual handoffs", () => {
+    assert.match(source, /footer\?: string/u);
+    assert.match(
+      source,
+      /footer = "Keep this window open while the light takes shape\."/u,
+    );
+    assert.match(source, /<small>\{footer\}<\/small>/u);
   });
 
   it("offers explicit click and keyboard cancellation only when supported", () => {

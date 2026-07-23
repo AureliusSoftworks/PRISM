@@ -47,7 +47,15 @@ compatible while each consumer moves to the shared surface registry.
 The same Prism identity follows the player through every authenticated surface.
 Full Prism contracts into the movable rainbow orb; the orb opens an ephemeral
 conversation in place. Players can click it or press **Option Space** on macOS
-and **Control Space** on Windows or Linux.
+and **Control Space** on Windows or Linux. The orb has bounded, weighted drag
+momentum and glides to a stop after release; reduced-motion mode keeps placement
+direct. Full-size Zen bots remain directly positioned and stop on release.
+
+Opening the companion softly blurs and dims the app behind it while Prism, its
+messages, and composer remain sharp. The newest two messages stay crisp; older
+recovered lines use the original blur-and-fade lifecycle to recede. In Zen and
+Prism Home, returning focus or pointer interaction to the bot canvas folds the
+ephemeral panel away while leaving the orb available.
 
 Companion recovery is scoped to the account and exact surface. At most the
 latest three messages survive in the current app session. This is short crash
@@ -59,6 +67,14 @@ tenant-scoped context from those identifiers and may expose names and session
 metadata, but never manuscript prose, transcripts, memories, secrets, system
 prompts, or Continuity. LOCAL mode always uses the local provider, including
 when the current Studio has an online preference.
+
+That authoritative context includes a semantic map of the current screen. It
+distinguishes the floating **Ask Prism** composer from activity controls such as
+Zen's **Action / What you do** and **Say something** fields, identifies the
+active bot or workspace, and explains the role of visible controls. It sends no
+screenshot or DOM snapshot, so ordinary screen awareness requires no vision
+model. Future image-reading support remains an optional capability instead of a
+first-run dependency.
 
 Prism can propose only allowlisted actions: navigate to Home or Slate, open an
 approved Tool, begin bot creation, export an owned bot, or begin an explicit
@@ -104,18 +120,14 @@ Home, are skipped without trapping the player. All movement and scrolling
 honor reduced-motion preferences, and highlighted controls receive the active
 caption through `aria-describedby`.
 
-## Guided revelation
+## Alpha capability access
 
-Capability revelations are permanent, account-owned presentation state. They
-never grant or revoke permission: direct links, restored checkpoints, and an
-explicit request to Prism remain valid before a capability is introduced.
-Slate and Zen are visible immediately, while migrated accounts begin with every
-current capability revealed.
+Every current capability is visible and available throughout alpha. Marketplace,
+Signal, and Coffee do not wait for bot saves, group saves, conversation
+milestones, or requests to Prism. This keeps the alpha useful for broad testing
+and avoids hiding product surfaces before their discovery model is mature.
 
-Marketplace is revealed after a new bot or a meaningful identity, profile,
-appearance, or voice save. Signal is revealed after completed Zen replies from
-two distinct non-Prism bots. Coffee is revealed after a saved group contains at
-least two available bots. Mentioning Marketplace, Signal, or Coffee to the
-global companion reveals it immediately. Revelation writes are monotonic, so
-deleting the source bot, conversation, or group cannot reverse them, and the
-state travels in account backup and restore.
+The legacy account-owned revelation record remains backup-compatible, but
+pending values normalize to available and do not gate navigation or controls.
+Progressive capability discovery can be reconsidered after alpha without
+retroactively blocking alpha accounts.

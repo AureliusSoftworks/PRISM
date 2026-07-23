@@ -7,6 +7,7 @@ import {
   connectRoomAcoustics,
   type RoomAcousticsSend,
 } from "./roomAcoustics.ts";
+import { prismAudioOutputNode } from "./signalAudioMasterCapture.ts";
 
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
@@ -325,7 +326,7 @@ function levelSessionAtmosphereNode(
     const roomConnection = connectRoomAcoustics({
       context,
       input: busGain,
-      destination: context.destination,
+      destination: prismAudioOutputNode(context),
       send: bus === "foley" ? foleyRoomAcoustics : null,
       stereoPan: oneShotOptions?.stereoPan,
     });
@@ -364,7 +365,7 @@ function levelSessionAtmosphereNode(
     compressor.connect(lowShelf);
     lowShelf.connect(highShelf);
     highShelf.connect(busGain);
-    busGain.connect(context.destination);
+    busGain.connect(prismAudioOutputNode(context));
     return {
       busGain,
       disconnect() {
@@ -378,7 +379,7 @@ function levelSessionAtmosphereNode(
     };
   }
   compressor.connect(busGain);
-  busGain.connect(context.destination);
+  busGain.connect(prismAudioOutputNode(context));
   return {
     busGain,
     disconnect() {
@@ -914,6 +915,7 @@ export function coffeeCupFoleyCueForTransition(
 export function attachCoffeeCupFoley(
   root: HTMLElement,
   controller: SessionAtmosphereController,
+  onCue?: (cue: SessionAtmosphereCue, cup: HTMLElement) => void,
 ): () => void {
   const sippingByCup = new WeakMap<HTMLElement, boolean>();
   const cupSelector = "[data-cup-frame]";
@@ -924,13 +926,19 @@ export function attachCoffeeCupFoley(
     sippingByCup.set(cup, sipping);
     if (!announce) return;
     const cue = coffeeCupFoleyCueForTransition(previous, sipping);
-    if (cue) controller.playCue(cue);
+    if (cue) {
+      controller.playCue(cue);
+      onCue?.(cue, cup);
+    }
   };
   const inspectRemovedCup = (cup: HTMLElement): void => {
     const previous = sippingByCup.get(cup);
     sippingByCup.set(cup, false);
     const cue = coffeeCupFoleyCueForTransition(previous, false);
-    if (cue) controller.playCue(cue);
+    if (cue) {
+      controller.playCue(cue);
+      onCue?.(cue, cup);
+    }
   };
 
   root

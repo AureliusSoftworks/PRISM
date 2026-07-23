@@ -6,7 +6,6 @@ import {
   chatWithPrismCompanion,
   parsePrismCompanionModelOutput,
   prismCompanionDirectActionIntents,
-  prismCompanionRequestedCapabilities,
   prismCompanionSystemPrompt,
   resolvePrismCompanionProvider,
 } from "../prism-companion.ts";
@@ -53,6 +52,35 @@ test("builds tenant-safe metadata context without source material", () => {
   assert.doesNotMatch(prismCompanionSystemPrompt(context), /SECRET MANUSCRIPT|SECRET PROSE/u);
 });
 
+test("explains the current screen controls without needing pixels or DOM", () => {
+  const db = fixture();
+  const context = buildPrismCompanionAuthoritativeContext(
+    db,
+    "u1",
+    "Jared",
+    { surfaceId: "zen", botIds: ["owned"], conversationId: "c1" },
+  );
+  const prompt = prismCompanionSystemPrompt(context);
+  assert.match(prompt, /Screen: Lux Home, a one-to-one Zen conversation with Lux/u);
+  assert.match(prompt, /You are not Lux/u);
+  assert.match(prompt, /floating "Ask Prism…" composer sends a private request to you/u);
+  assert.match(prompt, /"ACTION · What you do…" field is the player's optional physical or nonverbal stage direction for Lux/u);
+  assert.match(prompt, /not a command or request to Prism/u);
+  assert.match(prompt, /"Say something…" field is what the player says directly to Lux/u);
+  assert.match(prompt, /not a screenshot or DOM capture/u);
+});
+
+test("keeps full Prism and the orb one identity on Prism Home", () => {
+  const db = fixture();
+  const prompt = prismCompanionSystemPrompt(
+    buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+      surfaceId: "prism-home",
+    }),
+  );
+  assert.match(prompt, /full-size Prism and the floating orb are one identity/u);
+  assert.match(prompt, /What you do….*active Zen conversation/u);
+});
+
 test("strips malformed and disallowed model actions", () => {
   assert.deepEqual(
     parsePrismCompanionModelOutput(
@@ -85,16 +113,6 @@ test("recognizes explicit safe commands without executing them", () => {
     prismCompanionDirectActionIntents("Delete this bot.", context),
     [],
   );
-});
-
-test("mentions request early capability revelations", () => {
-  assert.deepEqual(
-    prismCompanionRequestedCapabilities(
-      "What are Coffee and Signal, and can you show me the Marketplace?",
-    ),
-    ["marketplace", "signal", "coffee"],
-  );
-  assert.deepEqual(prismCompanionRequestedCapabilities("Open Settings"), []);
 });
 
 test("keeps every companion surface local when the account is in LOCAL mode", () => {

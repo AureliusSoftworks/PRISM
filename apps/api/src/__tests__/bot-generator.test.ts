@@ -87,6 +87,7 @@ function rawDraft(voiceId: string | null = null): Record<string, unknown> {
       faceBlinkScale: 1,
       faceBlinkOffsetX: 0,
       faceBlinkOffsetY: 0,
+      faceBlinkRotationDeg: 0,
       faceThinkingFrames: ["|", "/", "-", "\\"],
     },
     avatarDetails: {
@@ -179,6 +180,7 @@ describe("PRISM bot generator", () => {
     assert.equal(parsed.face.eyeCount, 1);
     assert.equal(parsed.face.eyeRotationDeg, 0);
     assert.equal(parsed.face.mouthCoffeePucker, false);
+    assert.deepEqual(parsed.avatarDetails?.screen.stamps, []);
     assert.ok(parsed.avatarDetails?.screen.paintColorMapBase64);
   });
 
@@ -209,8 +211,11 @@ describe("PRISM bot generator", () => {
     assert.equal(capturedOptions?.jsonMode, true);
     assert.equal(capturedOptions?.jsonSchemaName, "prism_bot_generated_draft_v1");
     assert.ok(capturedOptions?.jsonSchema);
+    assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /"stamps"/u);
+    assert.deepEqual(result.draft.avatarDetails?.screen.stamps, []);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /No ElevenLabs catalog is available/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create memories/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or accessories/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
       /faceMouthCoffeePucker true by default/u,

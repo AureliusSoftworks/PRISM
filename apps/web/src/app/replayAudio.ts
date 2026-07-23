@@ -1,22 +1,37 @@
 import {
   applyVoiceDeliveryMoodToProfile,
   compileReplayTimelineV1,
+  normalizeBotAudioVoiceProfileV1,
   resolveVoicePlaybackTransform,
   type ReplayRecordingV1,
   type ReplayPremiumSegmentV1,
   type ReplayTimelineV1,
   type ReplayVoiceTakeRecordV1,
+  type SignalMusicProfile,
 } from "@localai/shared";
+import { bundledCoffeeActionSfxPlaybackForSeed } from "./coffee-action-sfx";
 import { readEnglishVoiceSynthesisClip } from "./englishVoice";
+import { resolvePreSpeechBreathPlan } from "./preSpeechBreath";
 import {
   replayFetch,
   storeCapturedReplayVoiceAudio,
   updateCapturedReplayVoiceTake,
 } from "./replayClient";
 import {
+  SIGNAL_STUDIO_FOLEY_ROOM_SEND,
   SIGNAL_STUDIO_VOICE_ROOM_SEND,
   connectRoomAcoustics,
 } from "./roomAcoustics";
+import {
+  SESSION_FOLEY_URLS,
+  SIGNAL_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
+  sessionAtmosphereBusVolume,
+} from "./session-atmosphere-audio";
+import {
+  buildSignalSynthIdentPlan,
+  buildSignalSynthOutdentPlan,
+  encodeSignalSynthIdentWave,
+} from "./signalIntroAudio";
 import {
   SIGNAL_SOUNDBOARD_CUES,
   signalSoundboardPlaybackPlan,
@@ -278,19 +293,59 @@ function syntheticEventTimeMs(
     const beat = timeline.beats.find(
       (candidate) => candidate.sourceMessageId === event.sourceMessageId,
     );
-    if (beat) return beat.startMs + Math.min(500, (beat.endMs - beat.startMs) * 0.22);
+    if (beat) {
+      return event.kind === "audio_cue" &&
+        event.payload.kind === "action_sfx"
+        ? beat.startMs
+        : beat.startMs + Math.min(500, (beat.endMs - beat.startMs) * 0.22);
+    }
   }
   const runtimeMs = finiteMetadataNumber(
     recording.manifest?.visual.metadata?.runtimeMs,
   );
   const atMs = finiteMetadataNumber(event.payload.atMs);
   const endStart = timeline.beats.find((beat) => beat.kind === "end")?.startMs ?? timeline.durationMs;
+  const contentStart =
+    timeline.beats.find((beat) => beat.kind === "title")?.endMs ?? 2_100;
   if (runtimeMs && atMs !== null) {
-    return 2_100 + Math.max(0, Math.min(1, atMs / runtimeMs)) * Math.max(0, endStart - 2_100);
+    return contentStart +
+      Math.max(0, Math.min(1, atMs / runtimeMs)) *
+        Math.max(0, endStart - contentStart);
   }
   const index = recording.manifest?.events.indexOf(event) ?? 0;
   const count = Math.max(1, recording.manifest?.events.length ?? 1);
-  return 2_100 + ((index + 1) / (count + 1)) * Math.max(0, endStart - 2_100);
+  return (
+    contentStart +
+    ((index + 1) / (count + 1)) * Math.max(0, endStart - contentStart)
+  );
+}
+
+function signalReplayAudioMix(recording: ReplayRecordingV1): {
+  enabled: boolean;
+  masterVolume: number;
+  atmosphereMix: Record<string, unknown>;
+} {
+  const metadata = recording.manifest?.visual.metadata ?? {};
+  const stored =
+    metadata.signalAudioMix &&
+    typeof metadata.signalAudioMix === "object" &&
+    !Array.isArray(metadata.signalAudioMix)
+      ? (metadata.signalAudioMix as Record<string, unknown>)
+      : {};
+  const masterVolume = Math.max(
+    0,
+    Math.min(1, Number(stored.masterVolume ?? 1)),
+  );
+  return {
+    enabled: stored.enabled !== false && masterVolume > 0,
+    masterVolume,
+    atmosphereMix:
+      metadata.atmosphereMix &&
+      typeof metadata.atmosphereMix === "object" &&
+      !Array.isArray(metadata.atmosphereMix)
+        ? (metadata.atmosphereMix as Record<string, unknown>)
+        : {},
+  };
 }
 
 export async function prepareReplayAudio(
@@ -317,6 +372,41 @@ export async function prepareReplayAudio(
         warnings: recording.premiumProduction.warning
           ? [recording.premiumProduction.warning]
           : [],
+      };
+    }
+  }
+  if (recording.surface === "signal" && recording.audioUrl) {
+    const response = await replayFetch(recording.audioUrl);
+    if (response.ok) {
+      const audioBuffer = await decodeAudio(await response.arrayBuffer());
+      const savedTimeline =
+        recording.timeline ??
+        compileReplayTimelineV1(recording.manifest, initialTakes);
+      const durationMs = Math.max(
+        savedTimeline.durationMs,
+        recording.audioDurationMs ?? 0,
+        Math.round(audioBuffer.duration * 1_000),
+      );
+      const timeline: ReplayTimelineV1 = {
+        ...savedTimeline,
+        durationMs,
+        beats: savedTimeline.beats.map((beat) =>
+          beat.kind === "end"
+            ? {
+                ...beat,
+                endMs: Math.max(beat.endMs, durationMs),
+              }
+            : beat,
+        ),
+      };
+      return {
+        audioBuffer,
+        timeline,
+        takes: initialTakes.map((take) => ({
+          ...take,
+          snapshot: { ...take.snapshot },
+        })),
+        warnings: [],
       };
     }
   }
@@ -397,8 +487,19 @@ export async function prepareReplayAudio(
     buffer: AudioBuffer;
     startMs: number;
   }> = [];
+  const primaryTakeByMessageId = new Map(
+    takes
+      .filter(
+        (take) =>
+          take.snapshot.channel === "primary" &&
+          take.snapshot.sourceMessageId,
+      )
+      .map((take) => [take.snapshot.sourceMessageId as string, take]),
+  );
   if (options.premiumSegments?.length) {
-    let cursorMs = 2_360;
+    let cursorMs =
+      (timeline.beats.find((beat) => beat.kind === "title")?.endMs ?? 2_100) +
+      260;
     const timingByMessageId = new Map<string, { startMs: number; endMs: number }>();
     for (const segment of [...options.premiumSegments].sort((a, b) => a.index - b.index)) {
       const response = await replayFetch(segment.audioUrl);
@@ -434,26 +535,81 @@ export async function prepareReplayAudio(
     startMs: number;
     gain: number;
     loop?: boolean;
+    stopMs?: number;
+    playbackRate?: number;
+    lowCutHz?: number;
+    highCutHz?: number;
+    stereoPan?: number;
+    room?: "voice" | "foley";
+    fadeOutMs?: number;
   }> = [];
   if (recording.surface === "signal" && options.includeProductionAssets !== false) {
     const metadata = recording.manifest.visual.metadata ?? {};
-    const [intro, outdent, atmosphere] = await Promise.all([
+    const audioMix = signalReplayAudioMix(recording);
+    const atmosphereMix =
+      audioMix.atmosphereMix as Parameters<
+        typeof sessionAtmosphereBusVolume
+      >[0]["mix"];
+    const foleyGain = sessionAtmosphereBusVolume({
+      volume: audioMix.masterVolume,
+      mix: atmosphereMix,
+      bus: "foley",
+    });
+    const [initialIntro, initialOutdent, atmosphere] = await Promise.all([
       replayAssetBuffer(metadata.introAudioUrl),
       replayAssetBuffer(metadata.outdentAudioUrl),
       replayAssetBuffer(metadata.atmosphereAudioUrl),
     ]);
-    if (intro) scheduledAssets.push({ buffer: intro, startMs: 0, gain: 0.82 });
+    let intro = initialIntro;
+    let outdent = initialOutdent;
+    const musicProfile =
+      metadata.musicProfile &&
+      typeof metadata.musicProfile === "object" &&
+      !Array.isArray(metadata.musicProfile)
+        ? (metadata.musicProfile as SignalMusicProfile)
+        : null;
+    const musicSeed =
+      typeof metadata.musicSeed === "string" ? metadata.musicSeed : null;
+    if (metadata.introAudioSource === "local" && musicProfile && musicSeed) {
+      intro = await decodeAudio(
+        encodeSignalSynthIdentWave(
+          buildSignalSynthIdentPlan({ profile: musicProfile, seed: musicSeed }),
+        ),
+      );
+      outdent = await decodeAudio(
+        encodeSignalSynthIdentWave(
+          buildSignalSynthOutdentPlan({ profile: musicProfile, seed: musicSeed }),
+        ),
+      );
+    }
+    if (audioMix.enabled && intro) {
+      scheduledAssets.push({
+        buffer: intro,
+        startMs: 0,
+        gain: audioMix.masterVolume,
+      });
+    }
     if (outdent) {
       const endStart = timeline.beats.find((beat) => beat.kind === "end")?.startMs ?? timeline.durationMs - 2_000;
-      scheduledAssets.push({ buffer: outdent, startMs: Math.max(0, endStart), gain: 0.78 });
+      if (audioMix.enabled) {
+        scheduledAssets.push({
+          buffer: outdent,
+          startMs: Math.max(0, endStart),
+          gain: audioMix.masterVolume * 0.9,
+        });
+      }
     }
-    if (atmosphere) {
-      const mix = metadata.atmosphereMix as Record<string, unknown> | undefined;
+    if (audioMix.enabled && atmosphere) {
       scheduledAssets.push({
         buffer: atmosphere,
         startMs: 0,
-        gain: Math.max(0.04, Math.min(0.28, Number(mix?.background ?? 0.12))),
+        gain: sessionAtmosphereBusVolume({
+          volume: audioMix.masterVolume,
+          mix: atmosphereMix,
+          bus: "background",
+        }),
         loop: true,
+        stopMs: timeline.durationMs,
       });
     }
     const soundboardCueCountByKind = new Map<
@@ -466,8 +622,16 @@ export async function prepareReplayAudio(
         (candidate) => candidate.kind === event.payload.kind,
       );
       if (!cue) continue;
-      const variantIndex = soundboardCueCountByKind.get(cue.kind) ?? 0;
-      soundboardCueCountByKind.set(cue.kind, variantIndex + 1);
+      const fallbackVariantIndex =
+        soundboardCueCountByKind.get(cue.kind) ?? 0;
+      const savedVariantIndex = finiteMetadataNumber(
+        event.payload.variantIndex,
+      );
+      const variantIndex = savedVariantIndex ?? fallbackVariantIndex;
+      soundboardCueCountByKind.set(
+        cue.kind,
+        Math.max(fallbackVariantIndex + 1, variantIndex + 1),
+      );
       const plan = signalSoundboardPlaybackPlan(cue.kind, variantIndex);
       if (!plan) continue;
       const buffer = await replayAssetBuffer(plan.src);
@@ -478,7 +642,214 @@ export async function prepareReplayAudio(
       scheduledAssets.push({
         buffer,
         startMs: syntheticEventTimeMs(recording, timeline, event),
-        gain: plan.trim,
+        gain:
+          finiteMetadataNumber(event.payload.gain) ??
+          sessionAtmosphereBusVolume({
+            volume: audioMix.masterVolume,
+            mix: atmosphereMix,
+            bus: "foley",
+            trim: plan.trim,
+          }),
+        playbackRate: plan.playbackRate,
+        lowCutHz: plan.lowCutHz,
+        highCutHz: plan.highCutHz,
+        stereoPan: plan.stereoPan,
+        room: "foley",
+      });
+    }
+    for (const event of recording.manifest.events) {
+      if (event.kind !== "audio_cue") continue;
+      const cueKind = event.payload.kind;
+      let src: string | null = null;
+      let gain = foleyGain;
+      let playbackRate = 1;
+      if (cueKind === "coffee_sip") {
+        src = SESSION_FOLEY_URLS.coffeeSip;
+        gain = sessionAtmosphereBusVolume({
+          volume: audioMix.masterVolume,
+          mix: atmosphereMix,
+          bus: "foley",
+          trim: 1.25,
+        });
+      } else if (cueKind === "coffee_cup_place") {
+        src = SESSION_FOLEY_URLS.coffeeCupPlace;
+        gain = sessionAtmosphereBusVolume({
+          volume: audioMix.masterVolume,
+          mix: atmosphereMix,
+          bus: "foley",
+          trim: 1.0625,
+        });
+      } else if (
+        cueKind === "ambient_vocalization" &&
+        typeof event.payload.url === "string" &&
+        event.payload.url.startsWith("/audio/")
+      ) {
+        src = event.payload.url;
+        gain = sessionAtmosphereBusVolume({
+          volume: audioMix.masterVolume,
+          mix: atmosphereMix,
+          bus: "foley",
+          trim: SIGNAL_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE.trim,
+        });
+      } else if (
+        cueKind === "action_sfx" &&
+        typeof event.payload.actionKind === "string"
+      ) {
+        const actionKind = event.payload.actionKind;
+        if (
+          actionKind !== "fart" &&
+          actionKind !== "burp" &&
+          actionKind !== "cough"
+        ) {
+          continue;
+        }
+        const plan = bundledCoffeeActionSfxPlaybackForSeed(
+          actionKind,
+          typeof event.payload.seed === "string"
+            ? event.payload.seed
+            : event.id,
+        );
+        src = plan.source;
+        playbackRate = plan.playbackRate;
+        gain = Math.min(0.48, audioMix.masterVolume * 0.42);
+      }
+      const savedGain = finiteMetadataNumber(event.payload.gain);
+      if (savedGain !== null) gain = Math.min(1.5, savedGain);
+      if (!src || gain <= 0) continue;
+      const buffer = await replayAssetBuffer(src);
+      if (!buffer) {
+        warnings.push(`A saved Signal ${String(cueKind).replaceAll("_", " ")} cue was unavailable.`);
+        continue;
+      }
+      scheduledAssets.push({
+        buffer,
+        startMs: syntheticEventTimeMs(recording, timeline, event),
+        gain,
+        playbackRate,
+        room: cueKind !== "action_sfx" ? "foley" : undefined,
+      });
+    }
+    if (foleyGain > 0) {
+      for (const participant of recording.manifest.participants) {
+        const visual = participant.metadata?.visualSnapshot;
+        if (!visual || typeof visual !== "object" || Array.isArray(visual)) continue;
+        const avatarSfx = (visual as Record<string, unknown>).avatarSfx;
+        if (
+          !avatarSfx ||
+          typeof avatarSfx !== "object" ||
+          Array.isArray(avatarSfx)
+        ) continue;
+        const sfx = avatarSfx as Record<string, unknown>;
+        const src =
+          typeof sfx.audioDataUrl === "string" ? sfx.audioDataUrl : "";
+        const configuredVolume = Number(sfx.volume);
+        if (!src || !Number.isFinite(configuredVolume) || configuredVolume <= 0) {
+          continue;
+        }
+        const buffer = await replayAssetBuffer(src);
+        if (!buffer) {
+          warnings.push(`${participant.name}: saved avatar effect was unavailable.`);
+          continue;
+        }
+        const pan = participant.seatIndex === 0 ? -0.32 : participant.seatIndex === 1 ? 0.32 : 0;
+        const utteranceBeats = timeline.beats.filter(
+          (beat) => beat.kind === "utterance",
+        );
+        const firstUtterance = utteranceBeats[0];
+        const lastUtterance = utteranceBeats.at(-1);
+        if (!firstUtterance || !lastUtterance) continue;
+        const states = {
+          idle: sfx.playWhileIdle === true,
+          talking: sfx.playWhileTalking === true,
+          thinking: sfx.playWhileThinking === true,
+        } as const;
+        const boundaries = Array.from(
+          new Set([
+            firstUtterance.startMs,
+            lastUtterance.endMs,
+            ...utteranceBeats.flatMap((beat) => [
+              beat.startMs,
+              beat.endMs,
+            ]),
+          ]),
+        ).sort((left, right) => left - right);
+        for (let index = 0; index < boundaries.length - 1; index += 1) {
+          const startMs = boundaries[index]!;
+          const stopMs = boundaries[index + 1]!;
+          const activeBeat = timeline.beats.find(
+            (beat) =>
+              beat.kind === "utterance" &&
+              beat.speakerId === participant.id &&
+              startMs >= beat.startMs &&
+              startMs < beat.endMs,
+          );
+          const nextBeat = activeBeat
+            ? null
+            : utteranceBeats.find((beat) => beat.startMs >= stopMs);
+          const state = activeBeat
+            ? "talking"
+            : nextBeat?.speakerId === participant.id
+              ? "thinking"
+              : "idle";
+          if (!states[state] || stopMs - startMs < 50) continue;
+          scheduledAssets.push({
+            buffer,
+            startMs,
+            stopMs,
+            loop: true,
+            gain: Math.min(1, configuredVolume) * foleyGain,
+            stereoPan: pan,
+          });
+        }
+      }
+    }
+    for (const beat of timeline.beats) {
+      if (beat.kind !== "utterance" || !beat.sourceMessageId) continue;
+      const take = primaryTakeByMessageId.get(beat.sourceMessageId);
+      if (
+        !take ||
+        take.snapshot.speakerId === "prism-player" ||
+        take.snapshot.effectsEnabled === false
+      ) {
+        continue;
+      }
+      const profile = normalizeBotAudioVoiceProfileV1(take.snapshot.profile);
+      const plan = resolvePreSpeechBreathPlan({
+        seed: take.snapshot.seed,
+        text: take.snapshot.spokenText,
+        surface: "signal",
+        mood: take.snapshot.moodKey,
+        authoredPerformanceText: [
+          take.snapshot.performanceText,
+          profile.elevenLabsDirection,
+        ]
+          .filter(Boolean)
+          .join(" "),
+        enabled: true,
+      });
+      if (!plan) continue;
+      const buffer = await replayAssetBuffer(plan.url);
+      if (!buffer) {
+        warnings.push(
+          `${take.snapshot.speakerName}: saved mic-ready breath was unavailable.`,
+        );
+        continue;
+      }
+      const durationMs = Math.max(1, Math.round(buffer.duration * 1_000));
+      scheduledAssets.push({
+        buffer,
+        startMs: Math.max(
+          0,
+          beat.startMs - Math.max(0, durationMs - plan.voiceOverlapMs),
+        ),
+        gain:
+          Math.min(1.25, Math.max(0, Number(profile.volume ?? 1))) *
+          plan.gain,
+        lowCutHz: 90,
+        highCutHz: 12_000,
+        stereoPan: take.snapshot.stereoPan,
+        room: "voice",
+        fadeOutMs: durationMs,
       });
     }
   }
@@ -494,19 +865,11 @@ export async function prepareReplayAudio(
   compressor.attack.value = 0.008;
   compressor.release.value = 0.22;
   compressor.connect(context.destination);
-  const takeByMessageId = new Map(
-    takes
-      .filter(
-        (take) =>
-          take.snapshot.sourceMessageId && take.snapshot.channel === "primary",
-      )
-      .map((take) => [take.snapshot.sourceMessageId as string, take]),
-  );
   for (const utterance of recording.manifest.utterances) {
     if (
       utterance.audible &&
       !premiumMessageIds.has(utterance.sourceMessageId) &&
-      !takeByMessageId.has(utterance.sourceMessageId) &&
+      !primaryTakeByMessageId.has(utterance.sourceMessageId) &&
       !fallbackBuffersByMessageId.has(utterance.sourceMessageId)
     ) {
       const speaker = recording.manifest.participants.find(
@@ -519,7 +882,7 @@ export async function prepareReplayAudio(
   }
   for (const beat of timeline.beats) {
     if (beat.kind !== "utterance" || !beat.sourceMessageId) continue;
-    const take = takeByMessageId.get(beat.sourceMessageId);
+    const take = primaryTakeByMessageId.get(beat.sourceMessageId);
     if (premiumMessageIds.has(beat.sourceMessageId)) continue;
     const buffer = take
       ? buffers.get(take.id)
@@ -564,13 +927,59 @@ export async function prepareReplayAudio(
     source.start(beat.startMs / 1_000);
   }
   for (const premium of premiumBuffers) {
-    const source = context.createBufferSource();
-    source.buffer = premium.buffer;
-    const gain = context.createGain();
-    gain.gain.value = 1;
-    source.connect(gain);
-    gain.connect(compressor);
-    source.start(premium.startMs / 1_000);
+    const timings = premium.segment.timings.filter(
+      (timing) => timing.endMs > timing.startMs,
+    );
+    if (timings.length === 0) {
+      const source = context.createBufferSource();
+      source.buffer = premium.buffer;
+      source.connect(compressor);
+      source.start(premium.startMs / 1_000);
+      continue;
+    }
+    for (const timing of timings) {
+      const offsetSeconds = Math.max(
+        0,
+        Math.min(premium.buffer.duration, timing.startMs / 1_000),
+      );
+      const durationSeconds = Math.max(
+        0,
+        Math.min(
+          premium.buffer.duration - offsetSeconds,
+          (timing.endMs - timing.startMs) / 1_000,
+        ),
+      );
+      if (durationSeconds <= 0) continue;
+      const take = primaryTakeByMessageId.get(timing.sourceMessageId);
+      const profileVolume =
+        take && "volume" in take.snapshot.profile
+          ? take.snapshot.profile.volume
+          : 1;
+      const source = context.createBufferSource();
+      source.buffer = premium.buffer;
+      const gain = context.createGain();
+      gain.gain.value = Math.max(
+        0,
+        Math.min(1.5, (take?.snapshot.gain ?? 1) * profileVolume),
+      );
+      source.connect(gain);
+      connectRoomAcoustics({
+        context,
+        input: gain,
+        destination: compressor,
+        send:
+          recording.surface === "signal" &&
+          (take?.snapshot.effectsEnabled ?? true)
+            ? SIGNAL_STUDIO_VOICE_ROOM_SEND
+            : null,
+        stereoPan: take?.snapshot.stereoPan ?? 0,
+      });
+      source.start(
+        (premium.startMs + timing.startMs) / 1_000,
+        offsetSeconds,
+        durationSeconds,
+      );
+    }
   }
   for (const take of takes) {
     if (take.snapshot.channel === "primary" || !take.snapshot.sourceMessageId) {
@@ -622,12 +1031,64 @@ export async function prepareReplayAudio(
     const source = context.createBufferSource();
     source.buffer = asset.buffer;
     source.loop = asset.loop === true;
+    source.playbackRate.value = Math.max(
+      0.85,
+      Math.min(1.15, asset.playbackRate ?? 1),
+    );
+    source.detune.value = 0;
     const gain = context.createGain();
-    gain.gain.value = asset.gain;
-    source.connect(gain);
-    gain.connect(compressor);
+    const assetStartSeconds = asset.startMs / 1_000;
+    gain.gain.setValueAtTime(asset.gain, assetStartSeconds);
+    if (asset.fadeOutMs) {
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        assetStartSeconds + Math.max(1, asset.fadeOutMs) / 1_000,
+      );
+    }
+    let output: AudioNode = source;
+    if (asset.lowCutHz) {
+      const highpass = context.createBiquadFilter();
+      highpass.type = "highpass";
+      highpass.frequency.value = asset.lowCutHz;
+      output.connect(highpass);
+      output = highpass;
+    }
+    if (asset.highCutHz) {
+      const lowpass = context.createBiquadFilter();
+      lowpass.type = "lowpass";
+      lowpass.frequency.value = asset.highCutHz;
+      output.connect(lowpass);
+      output = lowpass;
+    }
+    output.connect(gain);
+    if (asset.room) {
+      connectRoomAcoustics({
+        context,
+        input: gain,
+        destination: compressor,
+        send:
+          asset.room === "foley"
+            ? SIGNAL_STUDIO_FOLEY_ROOM_SEND
+            : SIGNAL_STUDIO_VOICE_ROOM_SEND,
+        stereoPan: asset.stereoPan ?? 0,
+      });
+    } else if (asset.stereoPan) {
+      const panner = context.createStereoPanner();
+      panner.pan.value = asset.stereoPan;
+      gain.connect(panner);
+      panner.connect(compressor);
+    } else {
+      gain.connect(compressor);
+    }
     source.start(asset.startMs / 1_000);
-    if (source.loop) source.stop(timeline.durationMs / 1_000);
+    if (source.loop || asset.stopMs !== undefined) {
+      source.stop(
+        Math.max(
+          asset.startMs + 1,
+          Math.min(timeline.durationMs, asset.stopMs ?? timeline.durationMs),
+        ) / 1_000,
+      );
+    }
   }
   return {
     audioBuffer: await context.startRendering(),

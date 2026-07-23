@@ -22,6 +22,38 @@ export interface SignalReplayVideoFrameState {
   hostDeparted: boolean;
 }
 
+export type SignalReplayBookendState =
+  | { kind: "intro"; startMs: number; endMs: number }
+  | { kind: "outro"; startMs: number; endMs: number }
+  | null;
+
+export function signalReplayBookendAt(
+  timeline: ReplayTimelineV1,
+  elapsedMs: number,
+): SignalReplayBookendState {
+  const boundedElapsedMs = Math.max(
+    0,
+    Math.min(timeline.durationMs, elapsedMs),
+  );
+  const title = timeline.beats.find((beat) => beat.kind === "title");
+  if (
+    title &&
+    boundedElapsedMs >= title.startMs &&
+    boundedElapsedMs < title.endMs
+  ) {
+    return { kind: "intro", startMs: title.startMs, endMs: title.endMs };
+  }
+  const end = timeline.beats.find((beat) => beat.kind === "end");
+  if (
+    end &&
+    boundedElapsedMs >= end.startMs &&
+    boundedElapsedMs <= end.endMs
+  ) {
+    return { kind: "outro", startMs: end.startMs, endMs: end.endMs };
+  }
+  return null;
+}
+
 function videoContentBounds(timeline: ReplayTimelineV1): {
   startMs: number;
   endMs: number;

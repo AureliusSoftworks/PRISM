@@ -119,7 +119,7 @@ export const PRISM_SURFACES: Record<PrismSurfaceId, PrismSurfaceDefinition> = {
     id: "story",
     name: "Story",
     classification: "experience",
-    status: "preview",
+    status: "planned",
     startupEligible: false,
     entryRequirement: { kind: "selected_bots_or_group", minimumSelectedBots: 1 },
     returnBehavior: "restore_origin_checkpoint",
@@ -239,6 +239,9 @@ export function prismRestorableWorkspaceLocation(
     if (parsed.searchParams.has("mode")) return null;
     const viewParam = parsed.searchParams.get("view");
     if (!viewParam || !PRISM_RESTORABLE_WORKSPACE_VIEW_PARAMS.has(viewParam)) {
+      return null;
+    }
+    if (viewParam === "story" && PRISM_SURFACES.story.status === "planned") {
       return null;
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;

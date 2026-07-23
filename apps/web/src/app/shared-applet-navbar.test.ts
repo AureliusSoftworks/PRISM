@@ -46,6 +46,10 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   );
   assert.match(
     navbarHelper,
+    /renderAppSwitcher\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
+  );
+  assert.match(
+    navbarHelper,
     /options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:[\s\S]*disabledNavbarActions\.voice[\s\S]*tutorialTarget: "botcast-voice-mode"/,
   );
   assert.match(pageSource, /data-tutorial-target=\{options\.tutorialTarget\}/);

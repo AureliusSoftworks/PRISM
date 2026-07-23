@@ -6,6 +6,7 @@ export type ImageOrigin =
   | "slate_cover"
   | "bot_group_room"
   | "bot_group_room_import"
+  | "hub_atmosphere"
   | "coffee_bar"
   | "zen_wallpaper"
   | "bot_profile_picture";
@@ -52,6 +53,7 @@ export function imageOriginForGenerate(args: {
   requestedOrigin: unknown;
 }): ImageOrigin {
   if (args.purpose === "group-room-wallpaper") return "bot_group_room";
+  if (args.purpose === "hub_atmosphere") return "hub_atmosphere";
   if (args.purpose === "bot_profile_picture") return "bot_profile_picture";
   return args.requestedOrigin === "botcast" ? "botcast" : "images_panel";
 }

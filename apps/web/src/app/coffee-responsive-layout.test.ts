@@ -19,7 +19,10 @@ test("first-person Coffee fills the stage with a bottom-anchored table and narro
     css,
     /@container \(max-width: 980px\)[\s\S]*?--coffee-table-prose-inline-size:\s*min\(38cqw,\s*400px\)/,
   );
-  assert.match(css, /min-height:\s*clamp\(620px,\s*82dvh,\s*920px\)/);
+  assert.match(
+    css,
+    /\.coffeeStage\[data-coffee-perspective="first-person"\]\[data-phase="live"\] \.coffeeTableScene,[\s\S]*?height:\s*100%;\s*min-height:\s*0/,
+  );
   assert.match(css, /--coffee-canvas-y:\s*clamp\(-70px,\s*-6vh,\s*-42px\)/);
 });
 
@@ -47,7 +50,36 @@ test("four-seat first-person Coffee keeps its upper pair below the stage edge", 
   }
 });
 
-test("Coffee resets the workspace scroll when session or replay state changes", () => {
+test("first-person Coffee distributes every bot around the player's open seat", () => {
+  const expectedPositions = [
+    [2, 0, 22, 58],
+    [2, 1, 78, 58],
+    [3, 0, 50, 38],
+    [3, 1, 18, 72],
+    [3, 2, 82, 72],
+    [4, 0, 18, 48],
+    [4, 1, 82, 48],
+    [4, 2, 80, 76],
+    [4, 3, 20, 76],
+    [5, 0, 50, 45],
+    [5, 1, 14, 58],
+    [5, 2, 86, 58],
+    [5, 3, 16, 80],
+    [5, 4, 84, 80],
+  ] as const;
+
+  for (const [seatCount, layoutSeat, left, top] of expectedPositions) {
+    assert.match(
+      css,
+      new RegExp(
+        String.raw`\[data-seat-count="${seatCount}"\]\[data-layout-seat="${layoutSeat}"\]\s*\{\s*left:\s*${left}%;[\s\S]*?top:\s*(?:max\(\s*)?calc\(${top}% - var\(--coffee-experimental-seat-lift\)`,
+      ),
+      `${seatCount}-bot layout seat ${layoutSeat} should follow the balanced table arc`,
+    );
+  }
+});
+
+test("Coffee locks live sessions to the available workspace instead of scrolling", () => {
   assert.match(
     pageSource,
     /const coffeeWorkspaceRef = useRef<HTMLDivElement \| null>\(null\)/,
@@ -60,7 +92,32 @@ test("Coffee resets the workspace scroll when session or replay state changes", 
     pageSource,
     /ref=\{coffeeWorkspaceRef\}[\s\S]*?data-mode=\{coffeeWorkspaceMode\}/,
   );
-  assert.match(css, /\.coffeeWorkspace\s*\{[\s\S]*?overflow-anchor:\s*none/);
+  assert.match(
+    css,
+    /\.coffeeWorkspace\[data-mode="session"\]\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\);[\s\S]*?overflow-y:\s*hidden;[\s\S]*?scrollbar-gutter:\s*auto/,
+  );
+  assert.match(
+    css,
+    /\.coffeeWorkspace\[data-mode="session"\] \.coffeeStage,[\s\S]*?\.coffeeWorkspace\[data-mode="session"\] \.coffeeTableCanvas\s*\{[\s\S]*?height:\s*100%;[\s\S]*?min-height:\s*0/,
+  );
+});
+
+test("live Coffee stretches its stage row to the composer", () => {
+  assert.match(
+    css,
+    /\.coffeeWorkspace\[data-mode="session"\]\s*\{[\s\S]*?align-content:\s*stretch;[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\);/,
+  );
+  assert.match(
+    css,
+    /\.coffeeMain\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto;[\s\S]*?gap:\s*12px/,
+  );
+});
+
+test("first-person Coffee lifts the participant ring behind live status chrome", () => {
+  assert.match(
+    css,
+    /\.coffeeStage\[data-coffee-perspective="first-person"\]\[data-autoplay-dock="true"\]\[data-phase="live"\],\s*\.coffeeStage\[data-coffee-perspective="first-person"\]\[data-autoplay-dock="true"\]\[data-phase="arriving"\]\s*\{[\s\S]*?--coffee-canvas-y:\s*clamp\(-180px,\s*-12vh,\s*-112px\);/,
+  );
 });
 
 test("light first-person Coffee uses a readable light prose surface", () => {

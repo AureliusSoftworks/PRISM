@@ -90,6 +90,10 @@ export const DEFAULT_BOT_FACE_BLINK_OFFSET_Y = 0;
 export const BOT_FACE_BLINK_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_BLINK_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_BLINK_OFFSET_Y_STEP = 0.02;
+export const DEFAULT_BOT_FACE_BLINK_ROTATION_DEG = 0;
+export const BOT_FACE_BLINK_ROTATION_DEG_MIN = -180;
+export const BOT_FACE_BLINK_ROTATION_DEG_MAX = 180;
+export const BOT_FACE_BLINK_ROTATION_DEG_STEP = 5;
 export const BOT_FACE_THINKING_FRAME_COUNT = 4;
 export type BotFaceThinkingFrames = readonly [string, string, string, string];
 export const DEFAULT_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
@@ -128,6 +132,7 @@ export interface BotFaceStyle {
   blinkScale: number;
   blinkOffsetX: number;
   blinkOffsetY: number;
+  blinkRotationDeg: number;
   thinkingFrames: BotFaceThinkingFrames;
 }
 
@@ -153,6 +158,7 @@ export interface BotFaceStyleInput {
   faceBlinkScale?: unknown;
   faceBlinkOffsetX?: unknown;
   faceBlinkOffsetY?: unknown;
+  faceBlinkRotationDeg?: unknown;
   faceThinkingFrames?: unknown;
 }
 
@@ -343,6 +349,15 @@ export function normalizeBotFaceBlinkOffsetY(value: unknown): number | null {
   );
 }
 
+export function normalizeBotFaceBlinkRotationDeg(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_BLINK_ROTATION_DEG_MIN,
+    BOT_FACE_BLINK_ROTATION_DEG_MAX,
+    BOT_FACE_BLINK_ROTATION_DEG_STEP
+  );
+}
+
 type BotFaceGraphemeSegment = {
   segment: string;
 };
@@ -477,10 +492,8 @@ export function resolveBotFaceStyle(
       normalizeBotFaceEyeScale(input.faceEyeScale) ??
       DEFAULT_BOT_FACE_EYE_SCALE,
     eyeOffsetX:
-      eyeCharacter !== null
-        ? normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
-          DEFAULT_BOT_FACE_EYE_OFFSET_X
-        : DEFAULT_BOT_FACE_EYE_OFFSET_X,
+      normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
+      DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY:
       normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
       DEFAULT_BOT_FACE_EYE_OFFSET_Y,
@@ -491,10 +504,8 @@ export function resolveBotFaceStyle(
       normalizeBotFaceMouthScale(input.faceMouthScale) ??
       DEFAULT_BOT_FACE_MOUTH_SCALE,
     mouthOffsetX:
-      mouthCharacter !== null
-        ? normalizeBotFaceMouthOffsetX(input.faceMouthOffsetX) ??
-          DEFAULT_BOT_FACE_MOUTH_OFFSET_X
-        : DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
+      normalizeBotFaceMouthOffsetX(input.faceMouthOffsetX) ??
+      DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
     mouthOffsetY:
       normalizeBotFaceMouthOffsetY(input.faceMouthOffsetY) ??
       DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
@@ -513,6 +524,9 @@ export function resolveBotFaceStyle(
     blinkOffsetY:
       normalizeBotFaceBlinkOffsetY(input.faceBlinkOffsetY) ??
       DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+    blinkRotationDeg:
+      normalizeBotFaceBlinkRotationDeg(input.faceBlinkRotationDeg) ??
+      DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
     thinkingFrames:
       normalizeBotFaceThinkingFrames(input.faceThinkingFrames) ??
       DEFAULT_BOT_FACE_THINKING_FRAMES,
@@ -573,6 +587,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
     blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
     blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+    blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
     thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
   };
 }

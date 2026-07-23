@@ -199,6 +199,11 @@ export interface ReplayRecordingV1 {
   codec: string | null;
   contentType: string | null;
   videoUrl: string | null;
+  /** Flattened live Signal output. This is the canonical faithful recording. */
+  audioUrl?: string | null;
+  audioContentType?: string | null;
+  audioSizeBytes?: number | null;
+  audioDurationMs?: number | null;
   transcriptVttUrl: string | null;
   transcriptMarkdownUrl: string | null;
   warning: string | null;
@@ -209,6 +214,7 @@ export interface ReplayRecordingV1 {
 }
 
 const REPLAY_TITLE_CARD_MS = 2_100;
+const REPLAY_SIGNAL_INTRO_CARD_MS = 4_200;
 const REPLAY_END_CARD_MS = 2_000;
 const REPLAY_BETWEEN_UTTERANCES_MS = 420;
 const REPLAY_MIN_UTTERANCE_MS = 1_200;
@@ -256,6 +262,36 @@ export function compileReplayTimelineV1(
   manifest: ReplayManifestV1,
   takes: readonly ReplayVoiceTakeRecordV1[] = [],
 ): ReplayTimelineV1 {
+  const capturedSpeechTimingByMessageId = new Map<
+    string,
+    { startMs?: number; endMs?: number }
+  >();
+  let capturedOutroStartMs: number | null = null;
+  let capturedEndMs: number | null = null;
+  for (const event of manifest.events) {
+    if (event.kind !== "capture_timing") continue;
+    const phase = event.payload.phase;
+    const atMs = Number(event.payload.atMs);
+    if (!Number.isFinite(atMs) || atMs < 0) continue;
+    const roundedAtMs = Math.round(atMs);
+    if (phase === "outro_start") {
+      capturedOutroStartMs = roundedAtMs;
+      continue;
+    }
+    if (phase === "capture_end") {
+      capturedEndMs = roundedAtMs;
+      continue;
+    }
+    const messageId =
+      typeof event.payload.messageId === "string"
+        ? event.payload.messageId.trim()
+        : "";
+    if (!messageId) continue;
+    const timing = capturedSpeechTimingByMessageId.get(messageId) ?? {};
+    if (phase === "speech_start") timing.startMs = roundedAtMs;
+    if (phase === "speech_end") timing.endMs = roundedAtMs;
+    capturedSpeechTimingByMessageId.set(messageId, timing);
+  }
   const takeByMessageId = new Map(
     takes
       .filter(
@@ -267,12 +303,30 @@ export function compileReplayTimelineV1(
   const participantById = new Map(
     manifest.participants.map((participant) => [participant.id, participant]),
   );
+  const savedIntroPresentationMs = Number(
+    manifest.visual.metadata?.introPresentationDurationMs,
+  );
+  const firstCapturedSpeechStartMs = Math.min(
+    ...[...capturedSpeechTimingByMessageId.values()].flatMap((timing) =>
+      typeof timing.startMs === "number" ? [timing.startMs] : [],
+    ),
+  );
+  const titleCardMs = Number.isFinite(firstCapturedSpeechStartMs)
+    ? Math.max(0, Math.round(firstCapturedSpeechStartMs))
+    : manifest.surface === "signal"
+      ? Math.max(
+          REPLAY_SIGNAL_INTRO_CARD_MS,
+          Number.isFinite(savedIntroPresentationMs)
+            ? Math.round(savedIntroPresentationMs)
+            : 0,
+        )
+      : REPLAY_TITLE_CARD_MS;
   const beats: ReplayTimelineBeatV1[] = [
     {
       id: "title",
       kind: "title",
       startMs: 0,
-      endMs: REPLAY_TITLE_CARD_MS,
+      endMs: titleCardMs,
       utteranceId: null,
       sourceMessageId: null,
       speakerId: null,
@@ -281,7 +335,7 @@ export function compileReplayTimelineV1(
       channel: null,
     },
   ];
-  let cursorMs = REPLAY_TITLE_CARD_MS + 260;
+  let cursorMs = titleCardMs + 260;
   let previousUtteranceBeat: ReplayTimelineBeatV1 | null = null;
   for (const utterance of manifest.utterances) {
     const take = takeByMessageId.get(utterance.sourceMessageId);
@@ -301,20 +355,30 @@ export function compileReplayTimelineV1(
       manifest,
       utterance.sourceMessageId,
     );
+    const capturedTiming = capturedSpeechTimingByMessageId.get(
+      utterance.sourceMessageId,
+    );
     const startMs =
-      overlapRatio !== null && previousUtteranceBeat
+      typeof capturedTiming?.startMs === "number"
+        ? capturedTiming.startMs
+        : overlapRatio !== null && previousUtteranceBeat
         ? Math.round(
             previousUtteranceBeat.startMs +
               (previousUtteranceBeat.endMs - previousUtteranceBeat.startMs) *
                 overlapRatio,
           )
         : cursorMs;
+    const endMs =
+      typeof capturedTiming?.endMs === "number" &&
+      capturedTiming.endMs > startMs
+        ? capturedTiming.endMs
+        : startMs + durationMs;
     const participant = participantById.get(utterance.speakerId);
     const beat: ReplayTimelineBeatV1 = {
       id: `utterance:${utterance.id}`,
       kind: "utterance",
       startMs,
-      endMs: startMs + durationMs,
+      endMs,
       utteranceId: utterance.id,
       sourceMessageId: utterance.sourceMessageId,
       speakerId: utterance.speakerId,
@@ -326,12 +390,18 @@ export function compileReplayTimelineV1(
     previousUtteranceBeat = beat;
     cursorMs = Math.max(cursorMs, beat.endMs + REPLAY_BETWEEN_UTTERANCES_MS);
   }
-  const endStartMs = Math.max(cursorMs + 240, REPLAY_TITLE_CARD_MS + 1_000);
+  const endStartMs =
+    capturedOutroStartMs ??
+    Math.max(cursorMs + 240, titleCardMs + 1_000);
+  const endEndMs =
+    capturedEndMs !== null && capturedEndMs > endStartMs
+      ? capturedEndMs
+      : endStartMs + REPLAY_END_CARD_MS;
   beats.push({
     id: "end",
     kind: "end",
     startMs: endStartMs,
-    endMs: endStartMs + REPLAY_END_CARD_MS,
+    endMs: endEndMs,
     utteranceId: null,
     sourceMessageId: null,
     speakerId: null,
@@ -341,7 +411,7 @@ export function compileReplayTimelineV1(
   });
   return {
     v: REPLAY_MANIFEST_VERSION,
-    durationMs: beats.at(-1)?.endMs ?? REPLAY_TITLE_CARD_MS + REPLAY_END_CARD_MS,
+    durationMs: beats.at(-1)?.endMs ?? titleCardMs + REPLAY_END_CARD_MS,
     beats,
   };
 }

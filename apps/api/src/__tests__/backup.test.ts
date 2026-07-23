@@ -11,8 +11,6 @@ import {
 } from "../backup.ts";
 import {
   createPendingLivingShellAccountProgress,
-  getLivingShellAccountProgress,
-  revealLivingShellCapability,
 } from "../living-shell-progress.ts";
 import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
@@ -304,6 +302,40 @@ describe("backup graphics quality", () => {
   });
 });
 
+describe("backup atmosphere style", () => {
+  it("round-trips the global style and invalidates the derived Home image cache", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `UPDATE users
+            SET atmosphere_style = 'dreamscape',
+                hub_atmosphere_image_id = 'old-atmosphere',
+                hub_atmosphere_image_style = 'minimal'
+          WHERE id = ?`,
+      ).run("user-1");
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.atmosphereStyle, "dreamscape");
+
+      db.prepare("UPDATE users SET atmosphere_style = 'minimal' WHERE id = ?").run(
+        "user-1",
+      );
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT atmosphere_style, hub_atmosphere_image_id, hub_atmosphere_image_style
+             FROM users WHERE id = ?`,
+        )
+        .get("user-1") as {
+        atmosphere_style: string;
+        hub_atmosphere_image_id: string | null;
+        hub_atmosphere_image_style: string | null;
+      };
+      assert.equal(restored.atmosphere_style, "dreamscape");
+      assert.equal(restored.hub_atmosphere_image_id, null);
+      assert.equal(restored.hub_atmosphere_image_style, null);
+    });
+  });
+});
+
 describe("backup living shell startup preference", () => {
   it("round-trips saved choices and defaults legacy snapshots to Home", () => {
     withBackupDatabase((db, userKey) => {
@@ -347,14 +379,20 @@ describe("backup living shell startup preference", () => {
 });
 
 describe("backup living shell revelations", () => {
-  it("round-trips permanent capability state without importing progress patches", () => {
+  it("opens legacy capability state throughout alpha", () => {
     withBackupDatabase((db, userKey) => {
       createPendingLivingShellAccountProgress(db, "user-1");
-      revealLivingShellCapability(
-        db,
+      db.prepare(
+        `UPDATE living_shell_account_state
+            SET capability_revelations = ?
+          WHERE user_id = ?`,
+      ).run(
+        JSON.stringify({
+          marketplace: { revealed: false },
+          signal: { revealed: false },
+          coffee: { revealed: false },
+        }),
         "user-1",
-        "marketplace",
-        "bot_saved",
       );
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(
@@ -363,14 +401,19 @@ describe("backup living shell revelations", () => {
       );
       assert.equal(
         snapshot.settings?.capabilityRevelations?.coffee.revealed,
-        false,
+        true,
       );
 
-      revealLivingShellCapability(db, "user-1", "coffee", "group_saved");
       importUserSnapshot(db, "user-1", snapshot, userKey);
-      const restored = getLivingShellAccountProgress(db, "user-1");
-      assert.equal(restored.capabilityRevelations.marketplace.revealed, true);
-      assert.equal(restored.capabilityRevelations.coffee.revealed, true);
+      const restored = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        restored.settings?.capabilityRevelations?.marketplace.revealed,
+        true,
+      );
+      assert.equal(
+        restored.settings?.capabilityRevelations?.signal.revealed,
+        true,
+      );
     });
   });
 });
@@ -510,10 +553,10 @@ describe("backup bot avatar face style", () => {
           face_mouth_coffee_pucker, face_font_weight,
           face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count,
           face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg,
-          face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
+          face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg,
           face_thinking_frames,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         "bot-1",
         "user-1",
@@ -544,6 +587,7 @@ describe("backup bot avatar face style", () => {
         1.2,
         -0.08,
         0.06,
+        -40,
         '["·","*","✦","*"]',
         "2026-01-01T00:00:00.000Z",
         "2026-01-01T00:00:00.000Z"
@@ -607,6 +651,7 @@ describe("backup bot avatar face style", () => {
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
+        faceBlinkRotationDeg: -40,
         faceThinkingFrames: ["·", "*", "✦", "*"],
           authoredAudioVoiceProfile: {
             v: 2,
@@ -639,14 +684,14 @@ describe("backup bot avatar face style", () => {
       });
 
       db.prepare(
-        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_thinking_frames = NULL WHERE id = ?"
+        "UPDATE bots SET name_pronunciation = '', self_referral = '', voice_preview_line = NULL, avatar_details_json = NULL, face_eyes_font = NULL, face_eye_character = NULL, face_eye_animation = NULL, face_mouth_font = NULL, face_mouth_character = NULL, face_mouth_animation = NULL, face_mouth_coffee_pucker = 0, face_font_weight = NULL, face_eye_scale = NULL, face_eye_offset_x = NULL, face_eye_offset_y = NULL, face_eye_rotation_deg = NULL, face_eye_count = 1, face_mouth_scale = NULL, face_mouth_offset_x = NULL, face_mouth_offset_y = NULL, face_mouth_rotation_deg = NULL, face_blink_bar = NULL, face_blink_scale = NULL, face_blink_offset_x = NULL, face_blink_offset_y = NULL, face_blink_rotation_deg = NULL, face_thinking_frames = NULL WHERE id = ?"
       ).run("bot-1");
 
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restored = db
         .prepare(
-          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
+          "SELECT name_pronunciation, self_referral, voice_preview_line, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id FROM bots WHERE id = ?"
         )
         .get("bot-1") as {
         name_pronunciation: string;
@@ -674,6 +719,7 @@ describe("backup bot avatar face style", () => {
         face_blink_scale: number | null;
         face_blink_offset_x: number | null;
         face_blink_offset_y: number | null;
+        face_blink_rotation_deg: number | null;
         face_thinking_frames: string | null;
         profile_picture_image_id: string | null;
       };
@@ -705,6 +751,7 @@ describe("backup bot avatar face style", () => {
       assert.equal(restored.face_blink_scale, 1.2);
       assert.equal(restored.face_blink_offset_x, -0.08);
       assert.equal(restored.face_blink_offset_y, 0.06);
+      assert.equal(restored.face_blink_rotation_deg, -40);
       assert.equal(restored.face_thinking_frames, '["·","*","✦","*"]');
       assert.equal(restored.profile_picture_image_id, null);
 

@@ -11,7 +11,14 @@ export interface PrismIntroScene {
   imageSrc: string;
   imageAlt: string;
   imagePosition: string;
-  showBrandMark?: boolean;
+  lightTarget: {
+    xPercent: number;
+    yPercent: number;
+    diameterVmin: number;
+    kind: "threshold" | "orb";
+    label: string;
+    hint: string;
+  };
 }
 
 export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
@@ -25,6 +32,14 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     imageAlt:
       "A charcoal coast where a black forest meets a gray ocean beneath a colossal pyramid marked by one spectral seam.",
     imagePosition: "center center",
+    lightTarget: {
+      xPercent: 64.5,
+      yPercent: 46,
+      diameterVmin: 12,
+      kind: "threshold",
+      label: "Follow the spectral seam to the pyramid door",
+      hint: "Guide your light to the door",
+    },
   },
   {
     id: "threshold",
@@ -35,70 +50,123 @@ export const PRISM_INTRO_SCENES: readonly PrismIntroScene[] = [
     imageAlt:
       "A tiny open door cut into the weathered pyramid, with a small prism inset glowing at its edge.",
     imagePosition: "center center",
+    lightTarget: {
+      xPercent: 62,
+      yPercent: 51,
+      diameterVmin: 13,
+      kind: "threshold",
+      label: "Cross the open threshold",
+      hint: "Cross the threshold",
+    },
   },
   {
     id: "sanctum",
     eyebrow: "THE ARCHIVE",
     title: "Inside, a multitude waited in the dark.",
     body:
-      "Round frames lay in a great pile—black glass, silent voices, dormant possibilities.",
+      "At their center hung a glass orb—empty, silent, without a will of its own.",
     imageSrc: "/prism-intro/03-instruments.webp",
     imageAlt:
-      "A minimal triangular chamber is dominated by a vast pile of powered-off PRISM bot frames, each a round metal ring with black glass and a dark lower medallion.",
-    imagePosition: "center center",
+      "A glass orb holding a faint hollow triangle hangs beside a vast pile of powered-off round black-glass devices.",
+    imagePosition: "42% center",
+    lightTarget: {
+      xPercent: 18.5,
+      yPercent: 31.5,
+      diameterVmin: 20,
+      kind: "orb",
+      label: "Approach the sleeping triangle orb",
+      hint: "Find the sleeping orb",
+    },
   },
   {
     id: "source",
     eyebrow: "THE SOURCE",
-    title:
-      "They waited for the one thing the pyramid could never manufacture.",
-    body: "A light of its own.",
+    title: "The instrument waited for what it could never manufacture.",
+    body: "A purpose. A touch. Yours.",
     imageSrc: "/prism-intro/04-waiting-light.webp",
     imageAlt:
-      "A white beam enters a bare chamber of black-screened PRISM bot frames, where one clean triangle-marked frame waits dark beneath a suspended prism.",
-    imagePosition: "center center",
+      "A dormant glass orb containing a hollow triangle hangs before a heap of dark round devices while cold light grazes the chamber.",
+    imagePosition: "60% center",
+    lightTarget: {
+      xPercent: 71.5,
+      yPercent: 49,
+      diameterVmin: 30,
+      kind: "orb",
+      label: "Bring your light to the triangle orb",
+      hint: "Bring your light to the orb",
+    },
   },
   {
     id: "refraction",
     eyebrow: "THE REFRACTION",
-    title: "You brought it.",
-    body: PRISM_BRAND_COPY.foundationalTruth,
+    title: "You touched the orb. It answered in white.",
+    body: "PRISM held your light, then revealed the colors hidden inside it.",
     imageSrc: "/prism-intro/05-refraction.webp",
     imageAlt:
-      "A white beam enters scratched glass and emerges as five hand-painted PRISM rays.",
-    imagePosition: "center center",
+      "A white ray enters a suspended glass triangle orb and emerges as five rose, amber, lime, cyan, and violet rays.",
+    imagePosition: "60% center",
+    lightTarget: {
+      xPercent: 71.5,
+      yPercent: 49,
+      diameterVmin: 30,
+      kind: "orb",
+      label: "Awaken the refracting orb",
+      hint: "Awaken the spectrum",
+    },
   },
   {
     id: "inhabitants",
     eyebrow: "THE INHABITANTS",
-    title: "Across the heap, the inhabitants woke.",
-    body: "Different voices met, challenged, and changed one another.",
+    title: "Across the heap, five inhabitants woke.",
+    body: "Rose, amber, lime, cyan, and violet—one light, finding five voices.",
     imageSrc: "/prism-intro/06-inhabitants.webp",
     imageAlt:
-      "The Prism Originals Pia, Rowan, Iris, Sol, and Mira wake on black-glass CRTs with rose heart, amber winding-path, lime diamond, cyan sunburst, and violet four-point-sparkle phosphor eyes amid a much larger pile of dark frames; a same-sized, triangle-marked primary frame remains powered off within the pile.",
+      "A white triangle orb fans rose, amber, lime, cyan, and violet light upward into the waking black-glass faces of Pia, Rowan, Iris, Sol, and Mira amid a much larger dormant heap.",
     imagePosition: "center center",
+    lightTarget: {
+      xPercent: 58,
+      yPercent: 68,
+      diameterVmin: 17,
+      kind: "orb",
+      label: "Let the orb awaken the five inhabitants",
+      hint: "Let the light find its voices",
+    },
   },
   {
     id: "interplay",
     eyebrow: "THE INTERPLAY",
-    title: "From their interplay came words, images, worlds, and paths.",
-    body:
-      "You decided what belonged. Their five colors carried your light toward the one still dark.",
+    title: "They met, challenged, and changed one another.",
+    body: "From their interplay came words, images, worlds, and paths.",
     imageSrc: "/prism-intro/07-interplay.webp",
     imageAlt:
-      "Pia, Rowan, Iris, Sol, and Mira glow on black CRT glass as five narrow rose, amber, lime, cyan, and violet rays converge across the creative table on the triangle medallion of a same-sized main PRISM bot, which remains dark for one final moment; a vast pile of dormant frames fills the chamber behind them.",
+      "Pia, Rowan, Iris, Sol, and Mira gather around a white triangle orb as colored motes, waveforms, and sketch traces mingle above a creative table.",
     imagePosition: "center center",
+    lightTarget: {
+      xPercent: 50,
+      yPercent: 59,
+      diameterVmin: 15,
+      kind: "orb",
+      label: "Join the inhabitants around the living orb",
+      hint: "Enter the interplay",
+    },
   },
   {
     id: "invitation",
-    eyebrow: "PRISM ONLINE",
-    title: "At the center, PRISM came online.",
+    eyebrow: "ENTER PRISM",
+    title: "The threshold opened.",
     body: `${PRISM_BRAND_COPY.coreBelief} ${PRISM_BRAND_COPY.slogan}`,
     imageSrc: "/prism-intro/08-enter.webp",
     imageAlt:
-      "Five narrow colored rays from Pia, Rowan, Iris, Sol, and Mira converge on the triangle medallion of the same-sized main PRISM bot as it comes online with a white face on black CRT glass and small colored side lights; a vast pile of dormant frames fills the chamber behind them.",
-    imagePosition: "center center",
-    showBrandMark: true,
+      "A radiant glass orb containing an open white triangle waits in the foreground while five colorful inhabitants watch from a creative table behind it.",
+    imagePosition: "65% center",
+    lightTarget: {
+      xPercent: 80,
+      yPercent: 55,
+      diameterVmin: 34,
+      kind: "orb",
+      label: "Enter PRISM through the radiant orb",
+      hint: "Enter PRISM",
+    },
   },
 ] as const;
 

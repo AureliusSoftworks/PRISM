@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { statSync } from "node:fs";
 import test from "node:test";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -6,8 +7,14 @@ import {
 } from "@localai/shared";
 import {
   GENERATED_BOT_THINKING_SFX_PROMPT,
+  PRISM_BOT_THINKING_SFX_FALLBACK_URLS,
   botAudioVoiceProfileWithThinkingSfx,
   botAvatarSfxShouldPlay,
+  botAvatarSfxStereoPanForRect,
+  connectBotAvatarSfxSpatialAudio,
+  effectiveBotAvatarSfxPlayback,
+  prismBotThinkingSfxFallback,
+  prismBotThinkingSfxFallbackIndex,
   requestElevenLabsAvatarSfxLoop,
   stopBotAvatarSfxAudio,
   syncBotAvatarSfxAudio,
@@ -23,6 +30,70 @@ const sfx: BotAvatarSfxV1 = {
   playWhileThinking: true,
   volume: 0.5,
 };
+
+test("bot thinking SFX is downmixed to mono before spatial placement", () => {
+  class FakeNode {
+    readonly connections: FakeNode[] = [];
+    connect<T extends FakeNode>(node: T): T {
+      this.connections.push(node);
+      return node;
+    }
+  }
+  class FakeGain extends FakeNode {
+    channelCount = 2;
+    channelCountMode: ChannelCountMode = "max";
+    channelInterpretation: ChannelInterpretation = "speakers";
+    gain = { value: 1 };
+  }
+  class FakeStereoPanner extends FakeNode {
+    pan = { value: 0 };
+  }
+
+  const source = new FakeNode();
+  const mono = new FakeGain();
+  const panner = new FakeStereoPanner();
+  const output = new FakeGain();
+  const destination = new FakeNode();
+  let gainCreateCount = 0;
+  const connection = connectBotAvatarSfxSpatialAudio(
+    {
+      createMediaElementSource: () =>
+        source as unknown as MediaElementAudioSourceNode,
+      createGain: (() => {
+        gainCreateCount += 1;
+        return (gainCreateCount === 1 ? mono : output) as unknown as GainNode;
+      }) as AudioContext["createGain"],
+      createStereoPanner: () =>
+        panner as unknown as StereoPannerNode,
+      destination: destination as unknown as AudioDestinationNode,
+    },
+    {} as HTMLMediaElement,
+  );
+
+  assert.equal(connection.mono.channelCount, 1);
+  assert.equal(connection.mono.channelCountMode, "explicit");
+  assert.equal(connection.mono.channelInterpretation, "speakers");
+  assert.equal(source.connections[0], mono);
+  assert.equal(mono.connections[0], panner);
+  assert.equal(panner.connections[0], output);
+  assert.equal(output.connections[0], destination);
+});
+
+test("bot thinking SFX follows the rendered bot's horizontal location", () => {
+  assert.equal(botAvatarSfxStereoPanForRect({ left: 0, width: 0 }, 1_000), -1);
+  assert.equal(
+    botAvatarSfxStereoPanForRect({ left: 450, width: 100 }, 1_000),
+    0,
+  );
+  assert.equal(
+    botAvatarSfxStereoPanForRect({ left: 700, width: 100 }, 1_000),
+    0.5,
+  );
+  assert.equal(
+    botAvatarSfxStereoPanForRect({ left: 1_200, width: 100 }, 1_000),
+    1,
+  );
+});
 
 test("avatar SFX maps the editor demos to distinct playback states", () => {
   assert.equal(botAvatarSfxShouldPlay(sfx, "talking"), true);
@@ -54,6 +125,55 @@ test("automatic bot thinking SFX uses the exact prompt and thinking-only playbac
   assert.equal(profile.avatarSfx?.playWhileTalking, false);
   assert.equal(profile.avatarSfx?.playWhileIdle, false);
   assert.equal(profile.avatarSfx?.playWhileThinking, true);
+});
+
+test("bots without selected audio use one of four stable PRISM thinking fallbacks", () => {
+  assert.equal(PRISM_BOT_THINKING_SFX_FALLBACK_URLS.length, 4);
+  assert.equal(new Set(PRISM_BOT_THINKING_SFX_FALLBACK_URLS).size, 4);
+  const first = prismBotThinkingSfxFallback("bot-alpha");
+  const repeated = prismBotThinkingSfxFallback("bot-alpha");
+  assert.deepEqual(repeated, first);
+  assert.equal(
+    first.audioDataUrl,
+    PRISM_BOT_THINKING_SFX_FALLBACK_URLS[
+      prismBotThinkingSfxFallbackIndex("bot-alpha")
+    ],
+  );
+  assert.equal(first.playWhileTalking, false);
+  assert.equal(first.playWhileIdle, false);
+  assert.equal(first.playWhileThinking, true);
+  assert.equal(first.volume, 0.45);
+  for (const publicUrl of PRISM_BOT_THINKING_SFX_FALLBACK_URLS) {
+    const asset = statSync(new URL(`../../public${publicUrl}`, import.meta.url));
+    assert.ok(asset.isFile());
+    assert.ok(asset.size > 32_000, `${publicUrl} should contain a real MP3`);
+  }
+});
+
+test("custom avatar audio wins over the fallback and explicit mute wins over both", () => {
+  assert.equal(
+    effectiveBotAvatarSfxPlayback(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, "bot-a")
+      ?.audioDataUrl.startsWith("/audio/avatar/prism-calculating-"),
+    true,
+  );
+  assert.equal(
+    effectiveBotAvatarSfxPlayback(
+      { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, avatarSfx: sfx },
+      "bot-a",
+    )?.audioDataUrl,
+    sfx.audioDataUrl,
+  );
+  assert.equal(
+    effectiveBotAvatarSfxPlayback(
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        avatarSfx: sfx,
+        avatarSfxMuted: true,
+      },
+      "bot-a",
+    ),
+    null,
+  );
 });
 
 test("automatic and manual avatar loops share the guarded ElevenLabs request", async () => {

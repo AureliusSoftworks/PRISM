@@ -92,6 +92,9 @@ export function restoreFactoryDefaultsInDatabase(
         SET
           theme = 'system',
           graphics_quality = 'high',
+          atmosphere_style = 'prismatic',
+          hub_atmosphere_image_id = NULL,
+          hub_atmosphere_image_style = NULL,
           startup_preference = 'home',
           preferred_provider = 'local',
           ephemeral_chat_provider_preferences = '{}',
@@ -157,6 +160,7 @@ export function restoreFactoryDefaultsInDatabase(
           prism_default_bot_face_blink_scale = NULL,
           prism_default_bot_face_blink_offset_x = NULL,
           prism_default_bot_face_blink_offset_y = NULL,
+          prism_default_bot_face_blink_rotation_deg = NULL,
           prism_default_bot_face_thinking_frames = NULL,
           prism_default_bot_audio_voice_profile = NULL,
           prism_default_bot_temperature = NULL,

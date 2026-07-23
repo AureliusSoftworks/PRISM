@@ -63,6 +63,29 @@ function signalCameraShotIsBotCloseup(
   return shot === "left" || shot === "right";
 }
 
+function stableSignalCameraSeed(seed: string): number {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+/**
+ * Gives a bot-thinking beat stable editorial coverage. Wide owns three of the
+ * five buckets; the other two split evenly between thinker and scene partner.
+ */
+export function signalThinkingBeatCameraShot(args: {
+  seed: string;
+  thinkingShot: Exclude<SignalDirectedCameraShot, "wide">;
+  nonThinkingShot: Exclude<SignalDirectedCameraShot, "wide">;
+}): SignalDirectedCameraShot {
+  const bucket = stableSignalCameraSeed(args.seed) % 5;
+  if (bucket < 3) return "wide";
+  return bucket === 3 ? args.thinkingShot : args.nonThinkingShot;
+}
+
 /**
  * Resolves the motion for one committed shot change. Smart uses a stable
  * cadence for lively variety; direct bot-to-bot cutaways never pan the room.
@@ -104,12 +127,14 @@ export function signalLiveAutoCameraShot(args: {
   bookendWide?: boolean;
   listenerReactionShot?: SignalDirectedCameraShot | null;
   speakingShot?: SignalDirectedCameraShot | null;
+  thinkingShot?: SignalDirectedCameraShot | null;
   postSpeechHoldShot?: SignalDirectedCameraShot | null;
   producerGuestThinking: boolean;
 }): SignalDirectedCameraShot {
   if (args.bookendWide) return "wide";
   if (args.listenerReactionShot) return args.listenerReactionShot;
   if (args.speakingShot) return args.speakingShot;
+  if (args.thinkingShot) return args.thinkingShot;
   if (args.postSpeechHoldShot) return args.postSpeechHoldShot;
   if (args.producerGuestThinking) return "right";
   return args.baseShot;

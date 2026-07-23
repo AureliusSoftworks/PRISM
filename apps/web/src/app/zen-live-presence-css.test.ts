@@ -911,9 +911,9 @@ describe("Zen live presence CSS", () => {
       "--zen-live-bot-idle-face-glow-filter-high"
     );
     assert.match(glyphPartRule, /--zen-live-bot-idle-face-glow-filter-high:/);
-    assert.match(glyphPartRule, /--crt-face-screen-wash-near-opacity:\s*24%\s*;/);
-    assert.match(glyphPartRule, /--crt-face-screen-wash-mid-opacity:\s*11%\s*;/);
-    assert.match(glyphPartRule, /--crt-face-screen-wash-far-opacity:\s*5%\s*;/);
+    assert.match(glyphPartRule, /--crt-face-screen-wash-near-opacity:\s*10%\s*;/);
+    assert.match(glyphPartRule, /--crt-face-screen-wash-mid-opacity:\s*4%\s*;/);
+    assert.match(glyphPartRule, /--crt-face-screen-wash-far-opacity:\s*1\.5%\s*;/);
     assert.match(glyphPartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/);
     assert.doesNotMatch(glyphPartRule, /zenLiveBotIdleLightBreath/);
 
@@ -1492,9 +1492,9 @@ describe("Zen live presence CSS", () => {
     assert.match(talkingGlyphPartRule, /--zen-live-bot-talking-face-glow-filter-high:/);
     assert.match(talkingGlyphPartRule, /--zen-live-bot-talking-face-glow-filter-mid:/);
     assert.match(talkingGlyphPartRule, /--zen-live-bot-talking-face-glow-filter-low:/);
-    assert.match(talkingGlyphPartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
-    assert.match(talkingGlyphPartRule, /--crt-bloom-radius:\s*2px\s*;/);
-    assert.match(talkingGlyphPartRule, /--crt-bloom-wide-radius:\s*12px\s*;/);
+    assert.match(talkingGlyphPartRule, /--crt-bloom-opacity:\s*0\.12\s*;/);
+    assert.match(talkingGlyphPartRule, /--crt-bloom-radius:\s*1\.55px\s*;/);
+    assert.match(talkingGlyphPartRule, /--crt-bloom-wide-radius:\s*7px\s*;/);
     assert.match(talkingGlyphPartRule, /opacity:\s*1\s*;/);
     assert.match(talkingGlyphPartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
     assert.match(talkingGlyphPartRule, /filter:\s*none\s*;/);
@@ -2181,82 +2181,30 @@ describe("Zen live presence CSS", () => {
     );
   });
 
-  it("redirects live bot momentum down the visible Zen prose hill", () => {
+  it("keeps directly placed live bots clear of the visible Zen prose hill", () => {
     assert.match(
       pageSource,
       /const ZEN_LIVE_BOT_PROSE_HILL_SELECTOR = "\[data-zen-live-prose-target='true'\]";/
     );
     assert.match(pageSource, /const ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX = 34;/);
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_ACCELERATION_PX_PER_SEC = 1600;/
-    );
-    assert.match(pageSource, /const ZEN_LIVE_BOT_PROSE_HILL_MAX_SIDE_SPEED = 960;/);
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_INERTIA_DAMPING_PER_FRAME = 0\.955;/
-    );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_DAMPING_PER_FRAME = 0\.88;/
-    );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_ROLLING_FRICTION_PER_FRAME = 0\.972;/
-    );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_SIDE_WALL_RESTITUTION = 0\.34;/
-    );
     assert.match(pageSource, /function collectZenLiveBotProseHillRect\(/);
     assert.match(
       pageSource,
       /querySelectorAll<HTMLElement>\(ZEN_LIVE_BOT_PROSE_HILL_SELECTOR\)/
     );
     assert.match(pageSource, /function resolveZenLiveBotAvatarProseHillPosition\(/);
-    assert.match(pageSource, /function resolveZenLiveBotAvatarProseHillMotion\(/);
     assert.match(pageSource, /Math\.min\(320,\s*bounds\.width \* 1\.18\)/);
-    assert.match(pageSource, /const hillStrength = Math\.max\(0\.22,\s*distanceRatio\);/);
-    assert.match(pageSource, /Math\.abs\(velocity\.x\) > 42/);
-    assert.match(pageSource, /const avatarProseHillRollingRef = useRef\(false\);/);
     assert.match(
       pageSource,
-      /const inertiaDamping = Math\.pow\(\s*ZEN_LIVE_BOT_PROSE_HILL_INERTIA_DAMPING_PER_FRAME,/
-    );
-    assert.match(pageSource, /velocity\.y \* verticalDamping/);
-    assert.match(
-      pageSource,
-      /speed < ZEN_LIVE_BOT_AVATAR_FLING_MIN_SPEED[\s\S]*const hillMotion = resolveZenLiveBotAvatarProseHillMotion\([\s\S]*const restingMotion = chromeMotion\.affected \? chromeMotion : hillMotion;[\s\S]*initialVelocity = restingMotion\.velocity;/
+      /const preferredSide =\s+currentRect\.centerX < proseHillRect\.centerX/
     );
     assert.match(
       pageSource,
-      /const hillMotion = resolveZenLiveBotAvatarProseHillMotion\(\s*current\s*,\s*avatarVelocityRef\.current\s*,[\s\S]*dt\s*,?\s*\);/
+      /const proseSettled = avoidChrome[\s\S]*?resolveZenLiveBotAvatarProseHillPosition\([\s\S]*?const settled = avoidChrome[\s\S]*?resolveZenLiveBotAvatarChromeAvoidancePosition\(\s*proseSettled,/
     );
-    assert.match(
-      pageSource,
-      /let nextVx = chromeMotion\.velocity\.x;\s+let nextVy = chromeMotion\.velocity\.y;\s+let nextX = current\.x \+ nextVx \* dt;/
-    );
-    assert.match(
-      pageSource,
-      /const hillRolling =\s+hillMotion\.affected \|\| chromeMotion\.affected \|\| avatarProseHillRollingRef\.current;/
-    );
-    assert.match(
-      pageSource,
-      /hillRolling[\s\S]*\? ZEN_LIVE_BOT_PROSE_HILL_SIDE_WALL_RESTITUTION[\s\S]*: ZEN_LIVE_BOT_AVATAR_WALL_RESTITUTION/
-    );
-    assert.match(
-      pageSource,
-      /hillRolling && !hillMotion\.affected[\s\S]*ZEN_LIVE_BOT_PROSE_HILL_ROLLING_FRICTION_PER_FRAME/
-    );
-    assert.match(pageSource, /persistAvatarPositionIfUserRelocated\(next\);/);
-    assert.doesNotMatch(pageSource, /ZEN_LIVE_BOT_PROSE_HILL_SLIDE_MS/);
-    assert.doesNotMatch(pageSource, /ZEN_LIVE_BOT_PROSE_HILL_MIN_SIDE_SPEED/);
-    assert.doesNotMatch(pageSource, /startAvatarProseHillSlide/);
-    assert.doesNotMatch(pageSource, /settleAvatarAwayFromProseHill/);
-    assert.doesNotMatch(
-      pageSource,
-      /setAvatarFlinging\(false\);\s+settleAvatarAwayFromProseHill\(true\);/
-    );
+    assert.doesNotMatch(pageSource, /resolveZenLiveBotAvatarProseHillMotion/);
+    assert.doesNotMatch(pageSource, /startAvatarMomentum/);
+    assert.doesNotMatch(pageSource, /data-flinging/);
     assert.match(
       pageSource,
       /resolveZenLiveBotActionCopyPlacement\([\s\S]*collectZenLiveBotProseHillRect/
@@ -2525,47 +2473,12 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /safeAreaInsets\.bottom/);
   });
 
-  it("slides the resting live bot away from marked chrome", () => {
+  it("keeps the resting live bot away from marked chrome without momentum", () => {
     assert.match(pageSource, /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_SELECTOR = \[/);
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_ACCELERATION_PX_PER_SEC = 980;/
-    );
-    assert.match(pageSource, /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED = 620;/);
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_MIN_LARGE_AVATAR_SPEED = 280;/
-    );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_INERTIA_DAMPING_PER_FRAME = 0\.9;/
-    );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_PERPENDICULAR_DAMPING_PER_FRAME = 0\.62;/
-    );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_LARGE_AVATAR_SOFTENING = 0\.48;/
-    );
     assert.match(pageSource, /function collectZenLiveBotChromeAvoidanceRects\(/);
-    assert.match(pageSource, /function resolveZenLiveBotAvatarChromeAvoidanceMotion\(/);
-    assert.match(pageSource, /const avatarSize = Math\.max\(bounds\.width, bounds\.height\);/);
-    assert.match(pageSource, /const largeAvatarProgress = Math\.max\(/);
-    assert.match(
-      pageSource,
-      /largeAvatarProgress \* ZEN_LIVE_BOT_CHROME_AVOIDANCE_LARGE_AVATAR_SOFTENING/
-    );
-    assert.match(pageSource, /bounds\.width \* 1\.35/);
-    assert.match(
-      pageSource,
-      /const avoidanceStrength = Math\.max\(0\.16,\s*distanceRatio\) \* largeAvatarSoftening;/
-    );
-    assert.match(
-      pageSource,
-      /const maxAvoidanceSpeed = Math\.max\(\s*ZEN_LIVE_BOT_CHROME_AVOIDANCE_MIN_LARGE_AVATAR_SPEED,\s*ZEN_LIVE_BOT_CHROME_AVOIDANCE_MAX_SPEED \* largeAvatarSoftening/
-    );
-    assert.match(pageSource, /-maxAvoidanceSpeed \* 0\.18/);
+    assert.match(pageSource, /function resolveZenLiveBotAvatarChromeAvoidancePosition\(/);
+    assert.match(pageSource, /const overlappingRects = inflatedRects\.filter/);
+    assert.match(pageSource, /overlapArea \* 120/);
     assert.match(pageSource, /data-zen-live-bot-chrome-avoid="true"/);
     assert.match(
       pageSource,
@@ -2575,7 +2488,7 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /setAvatarPositionClamped\(\s*current\s*,\s*persist\s*,\s*avatarDragRef\.current === null\s*,?\s*\);/
     );
-    assert.match(pageSource, /const chromeMotion = resolveZenLiveBotAvatarChromeAvoidanceMotion\(/);
+    assert.doesNotMatch(pageSource, /resolveZenLiveBotAvatarChromeAvoidanceMotion/);
   });
 
   it("hides the canvas wordmark while the left sidebar is open", () => {
@@ -2613,7 +2526,7 @@ describe("Zen live presence CSS", () => {
     );
   });
 
-  it("uses the wordmark as the reversible Zen zoom toggle", () => {
+  it("keeps the Chat wordmark as static branding", () => {
     assert.match(
       pageSource,
       /const \[zenZoomedOutConversationId, setZenZoomedOutConversationId\]\s*=\s*useState<\s*string \| null\s*>\(null\);/
@@ -2622,44 +2535,14 @@ describe("Zen live presence CSS", () => {
       pageSource,
       /if \(view === "chat" && conversationForDisplay\.mode === "zen"\) \{\s*setZenZoomedOutConversationId\(null\);/
     );
-
-    const zoomOutStart = pageSource.indexOf("function zoomOutFromActiveZenConversation()");
-    const zoomInStart = pageSource.indexOf("async function zoomIntoActiveZenConversation()");
-    assert.notEqual(zoomOutStart, -1);
-    assert.notEqual(zoomInStart, -1);
-    const zoomOutSource = pageSource.slice(zoomOutStart, zoomInStart);
-    const zoomInSource = pageSource.slice(
-      zoomInStart,
-      pageSource.indexOf("function handleChatHeaderWordmarkClick", zoomInStart)
-    );
-    assert.match(zoomOutSource, /setZenZoomedOutConversationId\(activeZenConversationId\);/);
-    assert.match(zoomOutSource, /performShowAllBotsView\(null, \{ suppressChatAutoRestore: true \}\);/);
-    assert.match(zoomInSource, /setForceNewConversationOnNextSend\(false\);/);
-    assert.match(zoomInSource, /await refreshConversation\(returnConversationId\);/);
-    assert.match(zoomInSource, /setChatAutoRestoreSuppressed\(true\);/);
-
-    const wordmarkStart = pageSource.indexOf("function handleChatHeaderWordmarkClick");
-    const wordmarkSource = pageSource.slice(
-      wordmarkStart,
-      pageSource.indexOf("function handleSandboxHeaderWordmarkClick", wordmarkStart)
-    );
-    assert.match(
-      wordmarkSource,
-      /if \(zenCanZoomIntoActiveConversation\) \{\s*void zoomIntoActiveZenConversation\(\);\s*return;\s*\}/
-    );
-    assert.match(
-      wordmarkSource,
-      /if \(zenCanZoomOutToAllBots\) \{\s*zoomOutFromActiveZenConversation\(\);\s*return;\s*\}/
-    );
     assert.match(
       pageSource,
-      /const zenWordmarkActionLabel = relationshipDepthReturnBlockedByReply/
+      /className=\{styles\.hubWordmark\}\s+data-home-affordance="wordmark"/
     );
-    assert.match(
-      pageSource,
-      /relationshipDepthReturnDepth > 0[\s\S]{0,180}zenCanZoomOutToAllBots/
-    );
-    assert.match(pageSource, /aria-label=\{zenWordmarkActionLabel\}/);
+    assert.match(css, /\.hubWordmark\s*\{/);
+    assert.doesNotMatch(pageSource, /handleChatHeaderWordmarkClick/);
+    assert.doesNotMatch(pageSource, /zenWordmarkActionLabel/);
+    assert.doesNotMatch(pageSource, /zoomIntoActiveZenConversation/);
     assert.doesNotMatch(pageSource, /function renderZenZoomNavigationButton\(\)/);
     assert.doesNotMatch(pageSource, /function renderZenZoomReturnButton\(\)/);
     assert.doesNotMatch(css, /\.zenZoomNavigationButton\b/);

@@ -209,7 +209,7 @@ describe("relationship-depth page integration", () => {
     );
   });
 
-  it("blocks ordinary Home navigation but settles active work before a room return", () => {
+  it("guards relationship returns while global Home goes directly to All Bots", () => {
     const returnRoute = sourceSlice(
       "async function returnFromRelationshipDepth",
       "async function visitZenHome",
@@ -243,13 +243,11 @@ describe("relationship-depth page integration", () => {
       returnRoute,
       /applyActiveAssistantRevealInterruption/,
     );
+    assert.doesNotMatch(pageSource, /relationshipDepthReturnBlockedByReply/);
+    assert.match(pageSource, /performShowAllBotsView\(\);\s*void openZenMode\(\)/);
     assert.match(
       pageSource,
-      /relationshipDepthReturnBlockedByReply[\s\S]{0,240}!relationshipDepthCanInterruptActiveTurn/,
-    );
-    assert.match(
-      pageSource,
-      /disabled=\{relationshipDepthReturnBlockedByReply\}/,
+      /className=\{styles\.hubWordmark\}\s+data-home-affordance="wordmark"/,
     );
   });
 

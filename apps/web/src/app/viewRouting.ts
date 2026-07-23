@@ -21,7 +21,12 @@ export function prismSurfaceViewForRouteParam(viewParam: string | null): PrismSu
   if (viewParam === "coffee") return "coffee";
   if (viewParam === "botcast") return "botcast";
   if (viewParam === "slate") return "slate";
-  if (viewParam === "story") return "story";
+  if (
+    viewParam === "story" &&
+    PRISM_SURFACES.story.status !== "planned"
+  ) {
+    return "story";
+  }
   return "chat";
 }
 
@@ -32,5 +37,8 @@ export function prismHrefForSurfaceView(view: PrismSurfaceView): string {
   if (view === "coffee") return PRISM_SURFACES.coffee.href;
   if (view === "botcast") return PRISM_SURFACES.signal.href;
   if (view === "slate") return PRISM_SURFACES.slate.href;
-  return PRISM_SURFACES.story.href;
+  if (view === "story" && PRISM_SURFACES.story.status !== "planned") {
+    return PRISM_SURFACES.story.href;
+  }
+  return PRISM_SURFACES.home.href;
 }

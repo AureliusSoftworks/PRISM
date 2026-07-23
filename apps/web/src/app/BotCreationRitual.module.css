@@ -178,35 +178,19 @@
   transform-origin: right center;
 }
 
-.prism {
+.prismOrb {
+  --prism-orb-size: 66px;
   position: absolute;
   top: 50%;
   left: 47%;
-  width: 78px;
-  aspect-ratio: 1;
-  border: 1px solid rgba(229, 239, 255, 0.64);
-  clip-path: polygon(50% 2%, 98% 88%, 2% 88%);
-  background:
-    linear-gradient(138deg, rgba(255, 255, 255, 0.18), transparent 43%),
-    linear-gradient(315deg, rgba(146, 111, 255, 0.12), transparent 62%);
-  filter: drop-shadow(0 0 11px rgba(190, 220, 255, 0.2));
-  transform: translate(-50%, -50%) rotate(3deg);
-  animation: prismBreathe 3.2s ease-in-out infinite;
-}
-
-.prism::after {
-  content: "";
-  position: absolute;
-  inset: 17px 22px 20px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.72);
-  filter: blur(10px);
+  margin-top: calc(var(--prism-orb-size) / -2);
+  margin-left: calc(var(--prism-orb-size) / -2);
 }
 
 .colorBeam {
   position: absolute;
   top: 50%;
-  left: 58%;
+  left: 60%;
   width: 88%;
   height: 2px;
   opacity: 0.54;
@@ -568,11 +552,6 @@
   48% { opacity: 0.9; transform: translateX(calc(var(--word-offset) + 7px)); }
 }
 
-@keyframes prismBreathe {
-  0%, 100% { opacity: 0.64; filter: drop-shadow(0 0 8px rgba(190, 220, 255, 0.16)); }
-  50% { opacity: 1; filter: drop-shadow(0 0 16px rgba(190, 220, 255, 0.34)); }
-}
-
 @keyframes beamPulse {
   0%, 100% { opacity: 0.28; }
   50% { opacity: 0.76; }
@@ -637,8 +616,8 @@
     display: none;
   }
 
-  .prism {
-    width: 60px;
+  .prismOrb {
+    --prism-orb-size: 56px;
   }
 
   .assemblyRig {
@@ -688,9 +667,9 @@
     min-width: 0;
   }
 
-  .prism {
+  .prismOrb {
+    --prism-orb-size: 38px;
     left: 45%;
-    width: 38px;
   }
 
   .colorBeam {
@@ -728,7 +707,7 @@
 @media (prefers-reduced-motion: reduce) {
   .ambient,
   .sourceWord,
-  .prism,
+  .prismOrb,
   .colorBeam,
   .assemblyRig::before,
   .orbit,

@@ -14,6 +14,7 @@ export function clearFirstRunSetupCompletion(storage: {
 
 export type FirstRunSetupStepId =
   | "place"
+  | "atmosphere"
   | "provider"
   | "openai"
   | "anthropic"
@@ -32,19 +33,48 @@ export interface FirstRunSetupStep {
 
 export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   { id: "place", title: "Welcome home", shortTitle: "Welcome", optional: false },
-  { id: "provider", title: "Choose your chat home base", shortTitle: "Chat privacy", optional: false },
+  {
+    id: "atmosphere",
+    title: "Choose your atmosphere",
+    shortTitle: "Atmosphere",
+    optional: false,
+  },
+  {
+    id: "provider",
+    title: "Choose your chat home base",
+    shortTitle: "Chat privacy",
+    optional: false,
+  },
   { id: "openai", title: "Connect OpenAI", shortTitle: "OpenAI", optional: true },
   { id: "anthropic", title: "Connect Anthropic", shortTitle: "Anthropic", optional: true },
   { id: "elevenlabs", title: "Connect ElevenLabs", shortTitle: "Voice", optional: true },
-  { id: "local-model", title: "Pick your local default", shortTitle: "Local model", optional: true },
-  { id: "online-model", title: "Pick your online default", shortTitle: "Online model", optional: true },
-  { id: "auto-models", title: "Meet Auto recovery", shortTitle: "Auto", optional: true },
+  {
+    id: "local-model",
+    title: "Pick your local default",
+    shortTitle: "Local model",
+    optional: true,
+  },
+  {
+    id: "online-model",
+    title: "Pick your online default",
+    shortTitle: "Online model",
+    optional: true,
+  },
+  {
+    id: "auto-models",
+    title: "Meet Auto recovery",
+    shortTitle: "Auto",
+    optional: true,
+  },
   { id: "ready", title: "Your place is ready", shortTitle: "Ready", optional: false },
 ] as const;
 
 export function clampFirstRunSetupStepIndex(index: number): number {
   if (!Number.isFinite(index)) return 0;
-  return Math.max(0, Math.min(FIRST_RUN_SETUP_STEPS.length - 1, Math.floor(index)));
+  return Math.max(
+    0,
+    Math.min(FIRST_RUN_SETUP_STEPS.length - 1, Math.floor(index)),
+  );
 }
 
 export function firstRunSetupStepAt(index: number): FirstRunSetupStep {

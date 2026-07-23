@@ -52,8 +52,11 @@ describe("living-shell first run", () => {
     assert.match(firstRunSource, />Meet the spectrum</u);
     assert.match(firstRunSource, />Show me around</u);
     assert.match(firstRunSource, /data-stage=\{stage\}/u);
+    assert.match(firstRunSource, /function PrismOrbVisual/u);
+    assert.match(firstRunSource, /className=\{styles\.orbStage\}/u);
+    assert.doesNotMatch(firstRunSource, /prismBody|prismEyes|prismMouth/u);
     assert.match(firstRunCss, /@keyframes orbArrival/u);
-    assert.match(firstRunCss, /@keyframes prismUnfold/u);
+    assert.doesNotMatch(firstRunCss, /@keyframes prismUnfold/u);
     assert.match(firstRunCss, /pointer-events:\s*none/u);
     assert.match(firstRunCss, /@media \(prefers-reduced-motion: reduce\)/u);
   });

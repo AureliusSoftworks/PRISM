@@ -13,7 +13,9 @@ import {
 } from "react";
 import type { BotFaceStyle } from "@localai/shared";
 import {
+  BookmarkPlus,
   Brush,
+  Check,
   Circle,
   Dices,
   Eraser,
@@ -33,11 +35,6 @@ import {
   AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
   AVATAR_DETAILS_INK_ROLE_COLORS,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
-  AVATAR_DETAIL_OFFSET_MAX,
-  AVATAR_DETAIL_OFFSET_MIN,
-  AVATAR_DETAIL_SCALE_MAX,
-  AVATAR_DETAIL_SCALE_MIN,
-  AVATAR_DETAIL_STAMP_DEFINITIONS,
   avatarDetailsCirclePoints,
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
@@ -48,15 +45,13 @@ import {
   avatarDetailsWritablePixel,
   cloneAvatarDetails,
   decodeAvatarDetailsPaintColorMap,
+  flattenLegacyAvatarDetailStampsToInk,
   interpolateAvatarDetailsGridLine,
   moveAvatarDetailsPaintColorMap,
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
   paintAvatarDetailsColorMap,
   recolorAvatarDetailsPaintColorRegion,
-  removeAvatarDetailStamp,
-  toggleAvatarDetailStamp,
-  updateAvatarDetailStamp,
   rasterizeAvatarDetailsSemanticRgba,
   type AvatarDetailsBrushSize,
   type AvatarDetailsGridPoint,
@@ -66,9 +61,23 @@ import {
   type AvatarDetailsV1,
 } from "./avatar-details";
 import {
+  AVATAR_DETAIL_INK_TEMPLATE_LIMIT,
+  AVATAR_DETAIL_INK_TEMPLATE_NAME_MAX_LENGTH,
+  AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX,
+  AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN,
+  AVATAR_DETAIL_INK_TEMPLATE_SCALE_MAX,
+  AVATAR_DETAIL_INK_TEMPLATE_SCALE_MIN,
+  applyAvatarDetailInkTemplate,
+  createAvatarDetailInkTemplate,
+  loadAvatarDetailInkTemplates,
+  rasterizeAvatarDetailInkTemplateRgba,
+  renameAvatarDetailInkTemplate,
+  saveAvatarDetailInkTemplates,
+  type AvatarDetailInkTemplateV1,
+} from "./avatar-detail-ink-templates";
+import {
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-  BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
-  BOT_AVATAR_DETAILS_FACE_PLACEMENT,
+  BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
 } from "./bot-avatar-render-geometry";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
@@ -82,8 +91,6 @@ import styles from "./avatar-details-editor.module.css";
 import pageStyles from "./page.module.css";
 
 const AVATAR_DETAILS_NEUTRAL_FACE = zenLiveActionPlateFace("neutral", "closed");
-const AVATAR_DETAILS_EDITOR_ZOOM = 1.36;
-const AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT = 45;
 const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
   role: AvatarDetailsInkRole;
   label: string;
@@ -117,6 +124,7 @@ export interface AvatarDetailsEditorHandle {
 
 export interface AvatarDetailsEditorProps {
   value: AvatarDetailsV1 | null | undefined;
+  templateOwnerId: string;
   accentColor: string;
   faceStyle: BotFaceStyle;
   theme: "light" | "dark";
@@ -150,12 +158,41 @@ function pointerGridPoint(
   );
 }
 
+function AvatarDetailInkTemplatePreview({
+  template,
+}: {
+  template: AvatarDetailInkTemplateV1;
+}): React.JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d", { alpha: true });
+    if (!canvas || !context) return;
+    const imageData = context.createImageData(
+      AVATAR_DETAILS_CANVAS_SIZE,
+      AVATAR_DETAILS_CANVAS_SIZE,
+    );
+    imageData.data.set(rasterizeAvatarDetailInkTemplateRgba(template));
+    context.imageSmoothingEnabled = false;
+    context.putImageData(imageData, 0, 0);
+  }, [template]);
+  return (
+    <canvas
+      ref={canvasRef}
+      width={AVATAR_DETAILS_CANVAS_SIZE}
+      height={AVATAR_DETAILS_CANVAS_SIZE}
+      aria-hidden="true"
+    />
+  );
+}
+
 const AvatarDetailsEditorSession = forwardRef<
   AvatarDetailsEditorHandle,
   AvatarDetailsEditorProps
 >(function AvatarDetailsEditorSession(
   {
     value,
+    templateOwnerId,
     accentColor,
     faceStyle,
     theme,
@@ -167,10 +204,12 @@ const AvatarDetailsEditorSession = forwardRef<
   },
   ref,
 ): React.JSX.Element {
-  const normalizedSource = useMemo(
-    () => normalizeAvatarDetails(value),
-    [value],
+  const normalizedValue = useMemo(() => normalizeAvatarDetails(value), [value]);
+  const legacyFlattenResult = useMemo(
+    () => flattenLegacyAvatarDetailStampsToInk(normalizedValue, faceStyle),
+    [faceStyle, normalizedValue],
   );
+  const normalizedSource = legacyFlattenResult.details;
   const [working, setWorking] = useState<AvatarDetailsV1>(() =>
     cloneAvatarDetails(normalizedSource),
   );
@@ -187,6 +226,18 @@ const AvatarDetailsEditorSession = forwardRef<
   const [limitReached, setLimitReached] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+  const [inkTemplates, setInkTemplates] = useState<
+    AvatarDetailInkTemplateV1[]
+  >([]);
+  const [templateName, setTemplateName] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    null,
+  );
+  const [selectedTemplateName, setSelectedTemplateName] = useState("");
+  const [templateOffsetX, setTemplateOffsetX] = useState(0);
+  const [templateOffsetY, setTemplateOffsetY] = useState(0);
+  const [templateScalePct, setTemplateScalePct] = useState(100);
+  const [templateStatus, setTemplateStatus] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenGuideRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStrokeRef = useRef<AvatarDetailsPointerStroke | null>(null);
@@ -205,16 +256,9 @@ const AvatarDetailsEditorSession = forwardRef<
   const coveragePercent =
     avatarDetailsPaintColorCoveragePercent(paintColorMap);
   const guideInk = theme === "light" ? "#050608" : "#ffffff";
-  const zoomedFaceYPct =
-    AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT +
-    (BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct -
-      AVATAR_DETAILS_EDITOR_ZOOM_ORIGIN_Y_PCT) *
-      AVATAR_DETAILS_EDITOR_ZOOM;
   const faceGuideStyle = {
-    "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,
-    "--zen-live-bot-face-y": `${zoomedFaceYPct}%`,
-    "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
-    "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * AVATAR_DETAILS_EDITOR_ZOOM * 100}cqw`,
+    ...BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+    "--coffee-plate-emoji-nudge-y": "clamp(-5px, -2.6%, -2px)",
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-facing-scale-x": "1",
     "--zen-live-bot-face-ink": guideInk,
@@ -226,6 +270,29 @@ const AvatarDetailsEditorSession = forwardRef<
   const runtimeColorPreviewStyle = {
     backgroundColor: normalizedAccentColor,
   } as CSSProperties;
+  const selectedTemplate =
+    inkTemplates.find((template) => template.id === selectedTemplateId) ?? null;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const loaded = loadAvatarDetailInkTemplates(
+      templateOwnerId,
+      window.localStorage,
+    );
+    setInkTemplates(loaded);
+    setSelectedTemplateId((current) =>
+      current && loaded.some((template) => template.id === current)
+        ? current
+        : (loaded[0]?.id ?? null),
+    );
+  }, [templateOwnerId]);
+
+  useEffect(() => {
+    setSelectedTemplateName(selectedTemplate?.name ?? "");
+    setTemplateOffsetX(0);
+    setTemplateOffsetY(0);
+    setTemplateScalePct(100);
+  }, [selectedTemplate?.id, selectedTemplate?.name]);
 
   const drawWorkingCanvas = useCallback(
     (details: AvatarDetailsV1): void => {
@@ -387,6 +454,126 @@ const AvatarDetailsEditorSession = forwardRef<
     },
     [applyHistoryTransition],
   );
+
+  const persistInkTemplates = useCallback(
+    (nextTemplates: readonly AvatarDetailInkTemplateV1[]): boolean => {
+      if (typeof window === "undefined") return false;
+      try {
+        setInkTemplates(
+          saveAvatarDetailInkTemplates(
+            templateOwnerId,
+            nextTemplates,
+            window.localStorage,
+          ),
+        );
+        return true;
+      } catch {
+        setTemplateStatus("This device could not save the ink library.");
+        return false;
+      }
+    },
+    [templateOwnerId],
+  );
+
+  const saveCurrentInkTemplate = (): void => {
+    if (inkTemplates.length >= AVATAR_DETAIL_INK_TEMPLATE_LIMIT) {
+      setTemplateStatus(
+        `The ink library can hold ${AVATAR_DETAIL_INK_TEMPLATE_LIMIT} templates.`,
+      );
+      return;
+    }
+    const template = createAvatarDetailInkTemplate(
+      workingRef.current,
+      templateName,
+    );
+    if (!template) {
+      setTemplateStatus(
+        templateName.trim()
+          ? "Draw some ink before saving a template."
+          : "Name this ink before saving it.",
+      );
+      return;
+    }
+    if (!persistInkTemplates([...inkTemplates, template])) return;
+    setTemplateName("");
+    setSelectedTemplateId(template.id);
+    setTemplateStatus(`Saved “${template.name}” to your ink library.`);
+  };
+
+  const applySelectedInkTemplate = (): void => {
+    if (!selectedTemplate) return;
+    const result = applyAvatarDetailInkTemplate(
+      workingRef.current,
+      selectedTemplate,
+      {
+        offsetX: templateOffsetX,
+        offsetY: templateOffsetY,
+        scalePct: templateScalePct,
+      },
+    );
+    setLimitReached(result.limitReached);
+    if (result.limitReached) {
+      setTemplateStatus("Erase some ink before placing this template.");
+      return;
+    }
+    if (!result.changed) {
+      setTemplateStatus("That ink is already present at this position.");
+      return;
+    }
+    onEditStart?.();
+    commitMutation(result.details);
+    setTemplateStatus(
+      `Placed “${selectedTemplate.name}” as editable ink. Undo or erase it normally.`,
+    );
+  };
+
+  const saveSelectedTemplateName = (): void => {
+    if (!selectedTemplate) return;
+    const renamed = renameAvatarDetailInkTemplate(
+      selectedTemplate,
+      selectedTemplateName,
+    );
+    if (
+      !persistInkTemplates(
+        inkTemplates.map((template) =>
+          template.id === renamed.id ? renamed : template,
+        ),
+      )
+    ) {
+      return;
+    }
+    setSelectedTemplateName(renamed.name);
+    setTemplateStatus(`Renamed the template to “${renamed.name}”.`);
+  };
+
+  const deleteSelectedInkTemplate = (): void => {
+    if (!selectedTemplate) return;
+    const nextTemplates = inkTemplates.filter(
+      (template) => template.id !== selectedTemplate.id,
+    );
+    if (!persistInkTemplates(nextTemplates)) return;
+    setSelectedTemplateId(nextTemplates[0]?.id ?? null);
+    setTemplateStatus(`Removed “${selectedTemplate.name}” from your library.`);
+  };
+
+  const convertLegacyDetailsToInk = (): void => {
+    const result = flattenLegacyAvatarDetailStampsToInk(
+      workingRef.current,
+      faceStyle,
+    );
+    if (result.limitReached) {
+      setTemplateStatus(
+        "Erase some authored ink before converting the older decoration.",
+      );
+      return;
+    }
+    if (!result.flattened) return;
+    onEditStart?.();
+    commitMutation(result.details);
+    setTemplateStatus(
+      "Converted the older decoration to ordinary editable ink.",
+    );
+  };
 
   const undo = useCallback((): boolean => {
     const current = {
@@ -736,24 +923,6 @@ const AvatarDetailsEditorSession = forwardRef<
     commitMutation(avatarDetailsWithPaintColorMap(workingRef.current, colorMap));
   };
 
-  const updateStamp = (
-    stamp: AvatarDetailsV1["screen"]["stamps"][number],
-    patch: Partial<AvatarDetailsV1["screen"]["stamps"][number]>,
-  ): void => {
-    onEditStart?.();
-    commitMutation(updateAvatarDetailStamp(workingRef.current, { ...stamp, ...patch }));
-  };
-
-  const differentInteger = (
-    current: number,
-    min: number,
-    max: number,
-  ): number => {
-    const count = max - min + 1;
-    const currentIndex = current - min;
-    return min + ((currentIndex + 1 + Math.floor(Math.random() * (count - 1))) % count);
-  };
-
   const canvasInstruction =
     paintMode === "move"
       ? "Drag to move the illustration."
@@ -967,45 +1136,46 @@ const AvatarDetailsEditorSession = forwardRef<
         </div>
 
         <div className={styles.canvasFrame}>
-          <span
-            className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
-            style={faceGuideStyle}
-            data-avatar-details-face-guide="true"
-            data-visible={faceGuideVisible ? "true" : "false"}
-            aria-hidden="true"
-          >
-            <CoffeeSeatPlateEmoji
-              enabled={false}
-              isTalking={false}
-              scheduleKey="avatar-details-neutral-guide"
-              baseText={AVATAR_DETAILS_NEUTRAL_FACE.text}
-              rotateDeg={AVATAR_DETAILS_NEUTRAL_FACE.rotateDeg}
-              voicePreset="warm"
-              faceEyesFont={faceStyle.eyesFont}
-              faceEyeCharacter={faceStyle.eyeCharacter}
-              faceMouthFont={faceStyle.mouthFont}
-              faceMouthCharacter={faceStyle.mouthCharacter}
-              faceMouthAnimation={faceStyle.mouthAnimation}
-              faceFontWeight={faceStyle.weight}
-              faceEyeScale={faceStyle.eyeScale}
-              faceEyeOffsetX={faceStyle.eyeOffsetX}
-              faceEyeOffsetY={faceStyle.eyeOffsetY}
-              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
-              faceEyeCount={faceStyle.eyeCount}
-              faceMouthScale={faceStyle.mouthScale}
-              faceMouthOffsetX={faceStyle.mouthOffsetX}
-              faceMouthOffsetY={faceStyle.mouthOffsetY}
-              faceMouthRotationDeg={faceStyle.mouthRotationDeg}
-              faceBlinkBar={faceStyle.blinkBar}
-              faceBlinkScale={faceStyle.blinkScale}
-              faceBlinkOffsetX={faceStyle.blinkOffsetX}
-              faceBlinkOffsetY={faceStyle.blinkOffsetY}
-              faceThinkingFrames={faceStyle.thinkingFrames}
-              forceBlinkPhase="open"
-              className={`${pageStyles.coffeeSeatPlateEmoji} ${pageStyles.zenLiveBotPresenceFaceGlyph} ${styles.faceGuideGlyph}`}
-            />
-          </span>
           <div className={styles.canvasViewport}>
+            <span
+              className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
+              style={faceGuideStyle}
+              data-avatar-details-face-guide="true"
+              data-visible={faceGuideVisible ? "true" : "false"}
+              aria-hidden="true"
+            >
+              <CoffeeSeatPlateEmoji
+                enabled={false}
+                isTalking={false}
+                scheduleKey="avatar-details-neutral-guide"
+                baseText={AVATAR_DETAILS_NEUTRAL_FACE.text}
+                rotateDeg={AVATAR_DETAILS_NEUTRAL_FACE.rotateDeg}
+                voicePreset="warm"
+                faceEyesFont={faceStyle.eyesFont}
+                faceEyeCharacter={faceStyle.eyeCharacter}
+                faceMouthFont={faceStyle.mouthFont}
+                faceMouthCharacter={faceStyle.mouthCharacter}
+                faceMouthAnimation={faceStyle.mouthAnimation}
+                faceFontWeight={faceStyle.weight}
+                faceEyeScale={faceStyle.eyeScale}
+                faceEyeOffsetX={faceStyle.eyeOffsetX}
+                faceEyeOffsetY={faceStyle.eyeOffsetY}
+                faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+                faceEyeCount={faceStyle.eyeCount}
+                faceMouthScale={faceStyle.mouthScale}
+                faceMouthOffsetX={faceStyle.mouthOffsetX}
+                faceMouthOffsetY={faceStyle.mouthOffsetY}
+                faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+                faceBlinkBar={faceStyle.blinkBar}
+                faceBlinkScale={faceStyle.blinkScale}
+                faceBlinkOffsetX={faceStyle.blinkOffsetX}
+                faceBlinkOffsetY={faceStyle.blinkOffsetY}
+                faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+                faceThinkingFrames={faceStyle.thinkingFrames}
+                forceBlinkPhase="open"
+                className={`${pageStyles.coffeeSeatPlateEmoji} ${pageStyles.zenLiveBotPresenceFaceGlyph} ${styles.faceGuideGlyph}`}
+              />
+            </span>
             <canvas
               ref={screenGuideRef}
               className={styles.screenBoundary}
@@ -1059,103 +1229,192 @@ const AvatarDetailsEditorSession = forwardRef<
         </div>
       </section>
 
-      <section className={styles.stampSection} aria-label="Avatar detail stamps">
+      <section
+        className={styles.templateSection}
+        aria-label="Saved ink templates"
+      >
         <header>
-          <strong>Stamps</strong>
-          <small>Accessories stay editable independently from ink.</small>
+          <strong>Saved ink</strong>
+          <small>
+            Reuse your own drawings. Placed templates become ordinary ink.
+          </small>
         </header>
-        <div className={styles.stampPalette} role="group" aria-label="Detail stamp catalog">
-          {AVATAR_DETAIL_STAMP_DEFINITIONS.map((definition) => {
-            const selected = working.screen.stamps.some(
-              (stamp) => stamp.id === definition.id,
-            );
-            return (
-              <button
-                key={definition.id}
-                type="button"
-                data-selected={selected ? "true" : undefined}
-                aria-pressed={selected}
-                onClick={() => {
-                  onEditStart?.();
-                  commitMutation(toggleAvatarDetailStamp(workingRef.current, definition.id));
-                }}
-              >
-                {definition.label}
-              </button>
-            );
-          })}
+        <div className={styles.templateSaveRow}>
+          <input
+            type="text"
+            value={templateName}
+            maxLength={AVATAR_DETAIL_INK_TEMPLATE_NAME_MAX_LENGTH}
+            placeholder="Name this drawing"
+            aria-label="Ink template name"
+            onChange={(event) => {
+              setTemplateName(event.currentTarget.value);
+              setTemplateStatus(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              saveCurrentInkTemplate();
+            }}
+          />
+          <button
+            type="button"
+            onClick={saveCurrentInkTemplate}
+            disabled={
+              paintedPixels === 0 ||
+              !templateName.trim() ||
+              inkTemplates.length >= AVATAR_DETAIL_INK_TEMPLATE_LIMIT
+            }
+          >
+            <BookmarkPlus size={13} aria-hidden="true" />
+            Save current ink
+          </button>
         </div>
         {working.screen.stamps.length > 0 ? (
-          <div className={styles.stampTransforms}>
-            {working.screen.stamps.map((stamp) => {
-              const definition = AVATAR_DETAIL_STAMP_DEFINITIONS.find(
-                (candidate) => candidate.id === stamp.id,
-              )!;
-              const siblingIds = AVATAR_DETAIL_STAMP_DEFINITIONS
-                .filter(
-                  (candidate) =>
-                    candidate.category === definition.category &&
-                    !working.screen.stamps.some(
-                      (selected) =>
-                        selected.id !== stamp.id && selected.id === candidate.id,
-                    ),
-                )
-                .map((candidate) => candidate.id);
-              return (
-                <article key={stamp.id} className={styles.stampTransformCard}>
-                  <header>
-                    <strong>{definition.label}</strong>
-                    <span className={styles.stampTransformActions}>
-                      <button
-                        type="button"
-                        aria-label={`Randomize ${definition.label} stamp`}
-                        title={`Randomize ${definition.label} stamp`}
-                        onClick={() => {
-                          const alternatives = siblingIds.filter((id) => id !== stamp.id);
-                          const nextId = alternatives[Math.floor(Math.random() * alternatives.length)];
-                          if (nextId) updateStamp(stamp, { id: nextId });
-                        }}
-                        disabled={siblingIds.length < 2}
-                      >
-                        <Dices size={13} aria-hidden="true" />
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Remove ${definition.label} stamp`}
-                        title={`Remove ${definition.label}`}
-                        onClick={() => {
-                          onEditStart?.();
-                          commitMutation(
-                            removeAvatarDetailStamp(
-                              workingRef.current,
-                              stamp.id,
-                            ),
-                          );
-                        }}
-                      >
-                        <Trash2 size={13} aria-hidden="true" />
-                      </button>
-                    </span>
-                  </header>
-                  <label>
-                    <span>X <button type="button" aria-label={`Randomize ${definition.label} X offset`} onClick={() => updateStamp(stamp, { offsetX: differentInteger(stamp.offsetX, AVATAR_DETAIL_OFFSET_MIN, AVATAR_DETAIL_OFFSET_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>
-                    <input type="range" min={AVATAR_DETAIL_OFFSET_MIN} max={AVATAR_DETAIL_OFFSET_MAX} step={1} value={stamp.offsetX} onChange={(event) => updateStamp(stamp, { offsetX: Number(event.currentTarget.value) })} />
-                    <output>{stamp.offsetX}</output>
-                  </label>
-                  <label>
-                    <span>Y <button type="button" aria-label={`Randomize ${definition.label} Y offset`} onClick={() => updateStamp(stamp, { offsetY: differentInteger(stamp.offsetY, AVATAR_DETAIL_OFFSET_MIN, AVATAR_DETAIL_OFFSET_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>
-                    <input type="range" min={AVATAR_DETAIL_OFFSET_MIN} max={AVATAR_DETAIL_OFFSET_MAX} step={1} value={stamp.offsetY} onChange={(event) => updateStamp(stamp, { offsetY: Number(event.currentTarget.value) })} />
-                    <output>{stamp.offsetY}</output>
-                  </label>
-                  <label>
-                    <span>Scale <button type="button" aria-label={`Randomize ${definition.label} scale`} onClick={() => updateStamp(stamp, { scalePct: differentInteger(stamp.scalePct, AVATAR_DETAIL_SCALE_MIN, AVATAR_DETAIL_SCALE_MAX) })}><Dices size={12} aria-hidden="true" /></button></span>
-                    <input type="range" min={AVATAR_DETAIL_SCALE_MIN} max={AVATAR_DETAIL_SCALE_MAX} step={1} value={stamp.scalePct} onChange={(event) => updateStamp(stamp, { scalePct: Number(event.currentTarget.value) })} />
-                    <output>{stamp.scalePct}%</output>
-                  </label>
-                </article>
-              );
-            })}
+          <div className={styles.legacyTemplateNotice} role="status">
+            <span>
+              This older face contains a retired decoration. Convert it to ink
+              before editing it.
+            </span>
+            <button type="button" onClick={convertLegacyDetailsToInk}>
+              Convert to ink
+            </button>
           </div>
+        ) : null}
+        {inkTemplates.length > 0 ? (
+          <div
+            className={styles.templateLibrary}
+            role="listbox"
+            aria-label="Personal ink library"
+          >
+            {inkTemplates.map((template) => (
+              <button
+                key={template.id}
+                type="button"
+                role="option"
+                aria-selected={selectedTemplateId === template.id}
+                data-selected={
+                  selectedTemplateId === template.id ? "true" : undefined
+                }
+                onClick={() => {
+                  setSelectedTemplateId(template.id);
+                  setTemplateStatus(null);
+                }}
+              >
+                <AvatarDetailInkTemplatePreview template={template} />
+                <span>
+                  <strong>{template.name}</strong>
+                  <small>{template.pixelCount.toLocaleString()} pixels</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className={styles.emptyTemplateLibrary}>
+            Your personal ink library is empty. Draw something above, name it,
+            and save it for another bot.
+          </p>
+        )}
+        {selectedTemplate ? (
+          <div className={styles.templateControls}>
+            <div className={styles.templateNameRow}>
+              <input
+                type="text"
+                value={selectedTemplateName}
+                maxLength={AVATAR_DETAIL_INK_TEMPLATE_NAME_MAX_LENGTH}
+                aria-label="Rename selected ink template"
+                onChange={(event) =>
+                  setSelectedTemplateName(event.currentTarget.value)
+                }
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  saveSelectedTemplateName();
+                }}
+              />
+              <button
+                type="button"
+                aria-label="Save ink template name"
+                title="Save name"
+                disabled={
+                  !selectedTemplateName.trim() ||
+                  selectedTemplateName.trim() === selectedTemplate.name
+                }
+                onClick={saveSelectedTemplateName}
+              >
+                <Check size={13} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label={`Delete ${selectedTemplate.name} ink template`}
+                title="Delete template"
+                onClick={deleteSelectedInkTemplate}
+              >
+                <Trash2 size={13} aria-hidden="true" />
+              </button>
+            </div>
+            <div className={styles.templateTransformGrid}>
+              <label>
+                <span>
+                  X <output>{templateOffsetX}</output>
+                </span>
+                <input
+                  type="range"
+                  aria-label="Ink template horizontal offset"
+                  min={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN}
+                  max={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX}
+                  step={1}
+                  value={templateOffsetX}
+                  onChange={(event) =>
+                    setTemplateOffsetX(Number(event.currentTarget.value))
+                  }
+                />
+              </label>
+              <label>
+                <span>
+                  Y <output>{templateOffsetY}</output>
+                </span>
+                <input
+                  type="range"
+                  aria-label="Ink template vertical offset"
+                  min={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN}
+                  max={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX}
+                  step={1}
+                  value={templateOffsetY}
+                  onChange={(event) =>
+                    setTemplateOffsetY(Number(event.currentTarget.value))
+                  }
+                />
+              </label>
+              <label>
+                <span>
+                  Scale <output>{templateScalePct}%</output>
+                </span>
+                <input
+                  type="range"
+                  aria-label="Ink template scale"
+                  min={AVATAR_DETAIL_INK_TEMPLATE_SCALE_MIN}
+                  max={AVATAR_DETAIL_INK_TEMPLATE_SCALE_MAX}
+                  step={5}
+                  value={templateScalePct}
+                  onChange={(event) =>
+                    setTemplateScalePct(Number(event.currentTarget.value))
+                  }
+                />
+              </label>
+            </div>
+            <button
+              type="button"
+              className={styles.placeTemplateButton}
+              onClick={applySelectedInkTemplate}
+            >
+              Place as editable ink
+            </button>
+          </div>
+        ) : null}
+        {templateStatus ? (
+          <p className={styles.templateStatus} role="status">
+            {templateStatus}
+          </p>
         ) : null}
       </section>
 
@@ -1203,7 +1462,7 @@ export const AvatarDetailsEditor = forwardRef<
 >(function AvatarDetailsEditor(props, ref): React.JSX.Element {
   return (
     <AvatarDetailsEditorSession
-      key={avatarDetailsKey(props.value)}
+      key={`${props.templateOwnerId}:${avatarDetailsKey(props.value)}`}
       {...props}
       ref={ref}
     />

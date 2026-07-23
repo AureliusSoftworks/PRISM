@@ -1,5 +1,6 @@
 import {
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
+  BOTCAST_HOST_RECOVERY_QUESTION_TARGET,
   BOT_POWER_CANONICAL_SILENCE_V1,
   type BotcastShow,
 } from "@localai/shared";
@@ -23,6 +24,7 @@ export function signalShowMagicManifest(
   show: Pick<
     BotcastShow,
     | "dashboardBlurbs"
+    | "hostRecoveryQuestions"
     | "studioIdentity"
     | "dayAtmosphere"
     | "nightAtmosphere"
@@ -48,6 +50,9 @@ export function signalShowMagicManifest(
     /^Canonical persona-first set bible for\b/u.test(show.studioIdentity);
   const needsTextIdentity =
     show.dashboardBlurbs.length === 0 ||
+    ((!hasOnlyCanonicalSilence && !hasOnlyCanonicalEchoBlurb) &&
+      show.hostRecoveryQuestions.length !==
+        BOTCAST_HOST_RECOVERY_QUESTION_TARGET) ||
     ((hasOnlyCanonicalSilence || hasOnlyCanonicalEchoBlurb) &&
       usesFallbackStudioIdentity);
   const needsAudioPackage =

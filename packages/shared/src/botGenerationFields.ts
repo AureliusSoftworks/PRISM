@@ -105,10 +105,10 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "face.thinking.frame3": bounded("string"),
 
   "details.inkRecipe": bounded("string"),
-  "details.stamp.id": bounded("string"),
-  "details.stamp.offsetX": bounded("number", { integer: true }),
-  "details.stamp.offsetY": bounded("number", { integer: true }),
-  "details.stamp.scalePct": bounded("number", { integer: true }),
+  "details.stamp.id": excluded("Avatar detail stamps are manual-only and never generated."),
+  "details.stamp.offsetX": excluded("Avatar detail stamps are manual-only and never generated."),
+  "details.stamp.offsetY": excluded("Avatar detail stamps are manual-only and never generated."),
+  "details.stamp.scalePct": excluded("Avatar detail stamps are manual-only and never generated."),
 
   "voice.baseVoice": bounded("string"),
   "voice.effect": bounded("string"),

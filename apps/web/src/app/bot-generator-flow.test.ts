@@ -143,7 +143,9 @@ test("the creation ritual refracts prompt words and reveals the generated identi
   assert.match(ritualSource, /completedDraft\?\.color/u);
   assert.match(ritualSource, /completedDraft\?\.face\.eyeCharacter/u);
   assert.match(ritualSource, /completedDraft\?\.face\.mouthCharacter/u);
-  assert.match(ritualCssSource, /\.prism\s*\{/u);
+  assert.match(ritualSource, /<PrismOrb className=\{styles\.prismOrb\}/u);
+  assert.match(ritualCssSource, /\.prismOrb\s*\{/u);
+  assert.doesNotMatch(ritualCssSource, /\.prism\s*\{/u);
   assert.match(ritualCssSource, /\.colorBeam\[data-color="cyan"\]/u);
   assert.match(ritualCssSource, /\.botForm\s*\{/u);
   assert.match(ritualCssSource, /@media \(prefers-reduced-motion: reduce\)/u);

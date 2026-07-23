@@ -16,6 +16,7 @@ import {
   retryReplayRecording,
 } from "./replayClient";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
+import { COFFEE_REPLAY_RENDER_CONTRACT } from "./replayManifest";
 import styles from "./replayRecording.module.css";
 
 function statusLabel(recording: ReplayRecordingV1): string {
@@ -40,19 +41,19 @@ function statusLabel(recording: ReplayRecordingV1): string {
 function premiumStatusLabel(recording: ReplayRecordingV1): string {
   switch (recording.premiumProduction?.phase) {
     case "mastering_voices":
-      return "Mastering voices";
+      return "Enhancing voices";
     case "mixing_episode":
-      return "Mixing episode";
+      return "Mixing the recording";
     case "rendering_studio":
-      return "Rendering studio";
+      return "Finishing the recording";
     case "finalizing":
       return "Finalizing";
     case "ready":
-      return "Premium video ready";
+      return "Enhanced recording ready";
     case "failed":
-      return "Premium needs attention";
+      return "Enhancement needs attention";
     default:
-      return "Premium available";
+      return "Enhancement available";
   }
 }
 
@@ -96,7 +97,11 @@ export function ReplayRecordingStatusBadge({
   }, [onRecordingChange, sourceId, surface]);
   return recording ? (
     <span className={styles.badge} data-replay-status={recording.status}>
-      {statusLabel(recording)}
+      {surface === "signal"
+        ? recording.premiumProduction?.phase === "ready"
+          ? "Recording · Enhanced"
+          : "Recording ready"
+        : statusLabel(recording)}
     </span>
   ) : null;
 }
@@ -106,23 +111,24 @@ export function ReplayRecordingPanel({
   sourceId,
   preview,
   preferredProvider,
-  onExportVideo,
-  onExportPremium,
-  onRetryPremium,
+  onRebuildVideo,
+  onEnhanceAudio,
+  onDownloadFaithfulAudio,
 }: {
   surface: "signal" | "coffee";
   sourceId: string;
   preview?: ReactNode;
   preferredProvider?: "local" | "openai" | "anthropic";
-  onExportVideo?: () => Promise<void>;
-  onExportPremium?: (regenerate: boolean) => Promise<void>;
-  onRetryPremium?: () => Promise<void>;
+  onRebuildVideo?: () => Promise<void>;
+  onEnhanceAudio?: (regenerate: boolean) => Promise<void>;
+  onDownloadFaithfulAudio?: () => void;
 }): React.JSX.Element | null {
   const [recording, setRecording] = useState<ReplayRecordingV1 | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const enhancedAudioRef = useRef<HTMLAudioElement | null>(null);
   const refresh = useCallback(async () => {
     const next = await replayRecordingForSource(surface, sourceId).catch(() => null);
     setRecording(next);
@@ -143,7 +149,10 @@ export function ReplayRecordingPanel({
     };
   }, [recording?.status, refresh]);
   const transcriptBeats = useMemo(
-    () => recording?.timeline?.beats.filter((beat) => beat.kind === "utterance") ?? [],
+    () =>
+      recording?.timeline?.beats.filter(
+        (beat) => beat.kind === "utterance" && beat.text.trim().length > 0,
+      ) ?? [],
     [recording?.timeline?.beats],
   );
   if (!recording) {
@@ -167,61 +176,28 @@ export function ReplayRecordingPanel({
     ) : null;
   }
   if (surface === "signal") {
-    // Standard and Premium exports are independent jobs with independent media.
     const premium = recording.premiumProduction;
-    const videoReady =
-      (recording.status === "ready" || recording.status === "ready_with_warnings") &&
-      recording.videoUrl;
-    const videoProducing =
-      recording.status === "queued" ||
-      recording.status === "preparing_audio" ||
-      recording.status === "rendering";
-    const premiumReady = premium?.phase === "ready" && premium.videoUrl;
+    const premiumReady = premium?.phase === "ready" && premium.audioUrl;
     const premiumProducing =
       premium?.phase === "mastering_voices" ||
       premium?.phase === "mixing_episode" ||
       premium?.phase === "rendering_studio" ||
       premium?.phase === "finalizing";
-    const exportVideo = async (): Promise<void> => {
-      if (!onExportVideo) return;
-      setBusy(true);
-      setActionError(null);
-      try {
-        await onExportVideo();
-        await refresh();
-      } catch (error) {
-        setActionError(
-          error instanceof Error ? error.message : "Video export failed.",
-        );
-      } finally {
-        setBusy(false);
-      }
-    };
-    const exportPremium = async (regenerate: boolean): Promise<void> => {
-      if (!onExportPremium) return;
+    const enhanceAudio = async (regenerate: boolean): Promise<void> => {
+      if (!onEnhanceAudio) return;
       const confirmed = window.confirm(
-        `${regenerate ? "Regenerate" : "Export"} this Premium video? The exact spoken transcript and selected voice IDs will be sent to ElevenLabs and may consume credits.`,
+        `${regenerate ? "Enhance this recording again" : "Enhance this recording"} with ElevenLabs v3 dialogue? The exact spoken transcript and selected voice IDs will be sent to ElevenLabs and may consume credits. The faithful recording will remain unchanged.`,
       );
       if (!confirmed) return;
       setBusy(true);
       setActionError(null);
       try {
-        await onExportPremium(regenerate);
+        await onEnhanceAudio(regenerate);
         await refresh();
       } catch (error) {
         setActionError(
-          error instanceof Error ? error.message : "Premium production failed.",
+          error instanceof Error ? error.message : "Audio enhancement failed.",
         );
-      } finally {
-        setBusy(false);
-      }
-    };
-    const retryPremium = async (): Promise<void> => {
-      if (!onRetryPremium) return;
-      setBusy(true);
-      try {
-        await onRetryPremium();
-        await refresh();
       } finally {
         setBusy(false);
       }
@@ -229,7 +205,7 @@ export function ReplayRecordingPanel({
     const removePremium = async (): Promise<void> => {
       if (
         !window.confirm(
-          "Delete the Premium audio and video? The episode and local replay will remain.",
+          "Delete the enhanced recording? The faithful recording and transcript will remain.",
         )
       ) return;
       setBusy(true);
@@ -243,94 +219,87 @@ export function ReplayRecordingPanel({
       <section className={styles.panel} data-replay-status={recording.status}>
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>Video export</p>
+            <p className={styles.eyebrow}>Episode recording</p>
             <h3>{recording.manifest?.title ?? "Signal episode"}</h3>
           </div>
           <span className={styles.status} aria-live="polite">
-            {busy && !videoProducing && !premiumProducing
-              ? "Starting export"
-              : videoProducing || videoReady
-                ? statusLabel(recording)
-                : "Ready to export"}
+            {busy
+              ? "Enhancing recording"
+              : premiumProducing
+                ? premiumStatusLabel(recording)
+                : "Faithful recording ready"}
           </span>
         </header>
-        {videoProducing ? (
-          <div className={styles.progress} aria-label={statusLabel(recording)}>
-            <span style={{ width: `${Math.max(4, recording.progress * 100)}%` }} />
-          </div>
-        ) : null}
-        {videoReady ? (
-          <>
-            <div className={styles.screen}>
-              <video
-                ref={videoRef}
-                className={styles.video}
-                controls
-                playsInline
-                preload="metadata"
-                src={recording.videoUrl ?? undefined}
-              />
-            </div>
-            <div className={styles.actions}>
-              <a href={`${recording.videoUrl}?download=1`} download>
-                Download video
+        <div className={styles.pending}>
+          <p>
+            The replay above uses the canonical live master: the same flattened
+            Signal output heard on air, with every overlapping voice, effect,
+            room layer, ident, and fader move already captured in place.
+          </p>
+          <div className={styles.actions}>
+            {onDownloadFaithfulAudio ? (
+              <button type="button" onClick={onDownloadFaithfulAudio}>
+                Download faithful audio
+              </button>
+            ) : null}
+            {recording.transcriptMarkdownUrl ? (
+              <a href={`${recording.transcriptMarkdownUrl}?download=1`} download>
+                Download transcript
               </a>
-            </div>
-          </>
-        ) : (
-          <div className={styles.pending}>
-            <p>
-              {actionError ??
-                recording.error ??
-                recording.warning ??
-                (videoProducing
-                  ? "PRISM is rendering the studio visuals in the background and adding the captured episode audio."
-                  : "Export the recorded episode as a video. This uses the captured audio and makes no new voice call.")}
-            </p>
-            <button
-              type="button"
-              disabled={busy || videoProducing}
-              onClick={() => void exportVideo()}
-              aria-busy={busy && !premiumProducing}
-            >
-              {recording.status === "failed" ? "Retry export" : "Export video"}
-            </button>
+            ) : null}
+            {recording.transcriptVttUrl ? (
+              <a href={`${recording.transcriptVttUrl}?download=1`} download>
+                Download captions
+              </a>
+            ) : null}
           </div>
-        )}
+        </div>
         <div className={styles.pending} data-premium-status={premium?.phase ?? "idle"}>
           <p>
             <strong>{premiumStatusLabel(recording)}.</strong>{" "}
             {premiumReady
-              ? "This version uses the cached ElevenLabs dialogue master."
+              ? "ElevenLabs v3 re-performed the spoken transcript, then PRISM mixed those voices against the same saved studio effects. The faithful recording is still untouched."
               : premiumProducing
-                ? "PRISM is preparing the ElevenLabs voice master and Premium studio cut."
-                : "Optionally remaster the voices with ElevenLabs and export a separate Premium video."}
+                ? "PRISM is creating a separate ElevenLabs v3 dialogue performance and mixing it against the saved production bed."
+                : "Enhance creates a separate, more expressive ElevenLabs v3 dialogue master. It does not rewrite the transcript or replace the faithful recording."}
           </p>
+          {actionError ? <p role="alert">{actionError}</p> : null}
           {premiumProducing ? (
             <div className={styles.progress} aria-label={premiumStatusLabel(recording)}>
               <span style={{ width: `${Math.max(4, (premium?.progress ?? 0) * 100)}%` }} />
             </div>
           ) : null}
           {premiumReady ? (
-            <div className={styles.actions}>
-              <a href={premium.videoUrl ?? undefined}>Watch Premium video</a>
-              <a href={`${premium.videoUrl}?download=1`} download>
-                Download Premium video
+            <>
+              <audio
+                ref={enhancedAudioRef}
+                className={styles.audio}
+                controls
+                preload="metadata"
+                src={premium.audioUrl ?? undefined}
+                onTimeUpdate={(event) =>
+                  setCurrentTimeMs(event.currentTarget.currentTime * 1_000)
+                }
+              />
+              <div className={styles.actions}>
+              <a href={`${premium.audioUrl}?download=1`} download>
+                Download enhanced audio
               </a>
               <button
                 type="button"
                 disabled={busy || preferredProvider === "local"}
-                onClick={() => void exportPremium(true)}
+                onClick={() => void enhanceAudio(true)}
               >
-                Export Premium video again
+                Enhance again
               </button>
               <button type="button" disabled={busy} onClick={() => void removePremium()}>
-                Delete Premium media
+                Delete enhanced audio
               </button>
-            </div>
+              </div>
+            </>
           ) : premium?.phase === "failed" && premium.masterReady ? (
-            <button type="button" disabled={busy} onClick={() => void retryPremium()}>
-              Retry Premium video from cached audio
+            <button type="button" disabled={busy} onClick={() => void enhanceAudio(false)}>
+              Finish enhanced recording
             </button>
           ) : (
             <button
@@ -338,30 +307,73 @@ export function ReplayRecordingPanel({
               disabled={busy || premiumProducing || preferredProvider === "local"}
               title={
                 preferredProvider === "local"
-                  ? "Switch to ONLINE mode to use ElevenLabs Premium export."
+                  ? "Switch to ONLINE mode to use ElevenLabs enhancement."
                   : undefined
               }
-              onClick={() => void exportPremium(false)}
-              aria-busy={busy && !videoProducing}
+              onClick={() => void enhanceAudio(false)}
+              aria-busy={busy}
             >
-              Export Premium video
+              Enhance recording
             </button>
           )}
-            {preferredProvider === "local" ? (
-            <small>Switch to ONLINE to export with your ElevenLabs key.</small>
-            ) : null}
+          {preferredProvider === "local" ? (
+            <small>Switch to ONLINE to enhance with your ElevenLabs key.</small>
+          ) : null}
         </div>
+        {premiumReady && (premium.timeline?.beats.length ?? 0) > 0 ? (
+          <div className={styles.transcript} aria-label="Enhanced synchronized transcript">
+            {premium.timeline!.beats
+              .filter(
+                (beat) =>
+                  beat.kind === "utterance" && beat.text.trim().length > 0,
+              )
+              .map((beat) => {
+                const active =
+                  currentTimeMs >= beat.startMs && currentTimeMs < beat.endMs;
+                return (
+                  <button
+                    key={beat.id}
+                    type="button"
+                    data-active={active || undefined}
+                    onClick={() => {
+                      if (!enhancedAudioRef.current) return;
+                      enhancedAudioRef.current.currentTime = beat.startMs / 1_000;
+                      void enhancedAudioRef.current.play();
+                    }}
+                  >
+                    <span>{formatDuration(beat.startMs)}</span>
+                    <strong>{beat.speakerName ?? "Speaker"}</strong>
+                    <p>{beat.text}</p>
+                  </button>
+                );
+              })}
+          </div>
+        ) : null}
       </section>
     );
   }
+  const currentCoffeeRenderContract =
+    surface !== "coffee" ||
+    recording.manifest?.visual.metadata?.renderContract ===
+      COFFEE_REPLAY_RENDER_CONTRACT;
   const ready =
     (recording.status === "ready" || recording.status === "ready_with_warnings") &&
-    recording.videoUrl;
+    recording.videoUrl &&
+    currentCoffeeRenderContract;
+  const legacyCoffeeVideo =
+    surface === "coffee" &&
+    Boolean(recording.videoUrl) &&
+    !currentCoffeeRenderContract;
   const retry = async () => {
     setBusy(true);
+    setActionError(null);
     try {
       setRecording(await retryReplayRecording(recording.id));
       window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Video retry failed.",
+      );
     } finally {
       setBusy(false);
     }
@@ -375,6 +387,23 @@ export function ReplayRecordingPanel({
       setBusy(false);
     }
   };
+  const rebuild = async () => {
+    if (!onRebuildVideo) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await onRebuildVideo();
+      await refresh();
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Coffee video rebuild failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <section className={styles.panel} data-replay-status={recording.status}>
       <header className={styles.header}>
@@ -383,7 +412,7 @@ export function ReplayRecordingPanel({
           <h3>{recording.manifest?.title ?? "Replay video"}</h3>
         </div>
         <span className={styles.status}>
-          {statusLabel(recording)}
+          {legacyCoffeeVideo ? "Faithful rebuild available" : statusLabel(recording)}
         </span>
       </header>
       {(recording.status === "rendering" || recording.status === "preparing_audio") && (
@@ -410,11 +439,6 @@ export function ReplayRecordingPanel({
             <a href={`${recording.videoUrl}?download=1`} download>
               Download video
             </a>
-            {recording.transcriptMarkdownUrl && (
-              <a href={recording.transcriptMarkdownUrl} download>
-                Download transcript
-              </a>
-            )}
             {recording.status === "ready_with_warnings" && (
               <button type="button" disabled={busy} onClick={() => void retry()}>
                 Retry
@@ -430,11 +454,19 @@ export function ReplayRecordingPanel({
           {preview ? <div className={styles.screen}>{preview}</div> : null}
           <div className={styles.pending}>
           <p>
-            {recording.error ??
+            {actionError ??
+              (legacyCoffeeVideo
+                ? "This is the earlier abstract cut. Rebuild it to capture the saved Coffee table, avatars, movement, and synchronized dialogue."
+                : null) ??
+              recording.error ??
               recording.warning ??
-              "PRISM will finish this replay while a capable client is open."}
+              "PRISM is rendering the saved Coffee table in the background."}
           </p>
-          {(recording.status === "failed" ||
+          {legacyCoffeeVideo && onRebuildVideo ? (
+            <button type="button" disabled={busy} onClick={() => void rebuild()}>
+              Rebuild faithful video
+            </button>
+          ) : (recording.status === "failed" ||
             (recording.status === "collecting" && recording.manifest)) && (
             <button type="button" disabled={busy} onClick={() => void retry()}>
               {recording.status === "collecting" ? "Rebuild video" : "Retry"}

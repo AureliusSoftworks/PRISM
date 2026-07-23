@@ -81,6 +81,8 @@ import type {
   SlateHemisphereSettingsUpdate,
 } from "./slateHemisphereSettings";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
+import { PrismOrb } from "./PrismOrb";
+import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./slateWorkspace.module.css";
 
 interface SlateWorkspaceProps {
@@ -2239,9 +2241,13 @@ export default function SlateWorkspace({
   if (loading) {
     return (
       <main className={`${styles.shell} ${className}`} data-theme={theme}>
+        <PrismCompanionPresenceBoundary reason="slate-loading" />
         <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
         <div className={styles.mainNavigation}>{navigationHeader}</div>
-        <p className={styles.loading}>Opening the writing desk…</p>
+        <div className={styles.loading} role="status" aria-live="polite">
+          <PrismOrb className={styles.loadingOrb} />
+          <p>Opening the writing desk…</p>
+        </div>
       </main>
     );
   }

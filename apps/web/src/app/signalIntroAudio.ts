@@ -6,11 +6,13 @@ import {
   type SignalMusicProfile,
   type SignalPersonaTemperament,
 } from "@localai/shared";
+import { routeAudioElementToPrismOutput } from "./signalAudioMasterCapture.ts";
 
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
 export const SIGNAL_SYNTH_OUTDENT_DURATION_MS =
   BOTCAST_LOCAL_OUTDENT_DURATION_MS;
 export const SIGNAL_EPISODE_INTRO_LEAD_IN_MS = 180;
+export const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 4_200;
 export const SIGNAL_AUDIO_STOP_FADE_MS = 320;
 
 export type SignalSynthNote = {
@@ -772,6 +774,7 @@ export function encodeSignalSynthIdentWave(
 type ActiveSignalAudio = {
   audio: HTMLAudioElement;
   objectUrl: string | null;
+  disconnectOutput: (() => void) | null;
   resolve: () => void;
   startTimer: number | null;
   watchdogTimer: number | null;
@@ -809,6 +812,8 @@ function releaseSignalAudio(state: ActiveSignalAudio): void {
   } catch {
     // The promise still settles if a browser has already released the element.
   }
+  state.disconnectOutput?.();
+  state.disconnectOutput = null;
   if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
   state.resolve();
 }
@@ -867,6 +872,7 @@ function playSignalAudio(args: {
   const state: ActiveSignalAudio = {
     audio: args.audio,
     objectUrl: args.objectUrl,
+    disconnectOutput: routeAudioElementToPrismOutput(args.audio),
     resolve: settle,
     startTimer: null,
     watchdogTimer: null,

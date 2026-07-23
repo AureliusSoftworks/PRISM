@@ -1,4 +1,41 @@
 import type { DatabaseSync } from "node:sqlite";
+import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
+
+export interface ImageGenerateModelPreferenceSource {
+  preferredLocalImageModel: string | null | undefined;
+  preferredOpenAiImageModel: string | null | undefined;
+  preferredZenWallpaperLocalImageModel: string | null | undefined;
+  preferredZenWallpaperOpenAiImageModel: string | null | undefined;
+}
+
+/**
+ * Group rooms intentionally share Zen's wallpaper model lane. Other Images
+ * purposes, including Home Atmosphere, follow the account image lane.
+ */
+export function resolveImageGenerateModelPreferences(
+  purpose: string,
+  source: ImageGenerateModelPreferenceSource,
+): {
+  preferredLocalImageModel: string;
+  preferredOpenAiImageModel: string;
+} {
+  const useZenWallpaperModelLane =
+    purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE;
+  return {
+    preferredLocalImageModel:
+      (useZenWallpaperModelLane
+        ? source.preferredZenWallpaperLocalImageModel?.trim()
+        : "") ||
+      source.preferredLocalImageModel?.trim() ||
+      "",
+    preferredOpenAiImageModel:
+      (useZenWallpaperModelLane
+        ? source.preferredZenWallpaperOpenAiImageModel?.trim()
+        : "") ||
+      source.preferredOpenAiImageModel?.trim() ||
+      "",
+  };
+}
 
 export type ConversationImageGateRow =
   | { ok: true; lockedBotId: string | null }

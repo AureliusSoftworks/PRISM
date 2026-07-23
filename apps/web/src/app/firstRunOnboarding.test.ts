@@ -19,6 +19,7 @@ describe("first-run onboarding", () => {
       FIRST_RUN_SETUP_STEPS.map((step) => step.id),
       [
         "place",
+        "atmosphere",
         "provider",
         "openai",
         "anthropic",
@@ -29,6 +30,19 @@ describe("first-run onboarding", () => {
         "ready",
       ]
     );
+  });
+
+  it("chooses the workspace atmosphere before connection setup", () => {
+    const atmosphereIndex = FIRST_RUN_SETUP_STEPS.findIndex(
+      (step) => step.id === "atmosphere",
+    );
+    assert.ok(atmosphereIndex > 0);
+    assert.ok(
+      atmosphereIndex <
+        FIRST_RUN_SETUP_STEPS.findIndex((step) => step.id === "openai"),
+    );
+    assert.match(pageSource, /Your first Home scene starts rendering quietly/u);
+    assert.match(pageSource, /Reveal it from the Atmosphere symbol/u);
   });
 
   it("marks credentials and model choices as skippable", () => {

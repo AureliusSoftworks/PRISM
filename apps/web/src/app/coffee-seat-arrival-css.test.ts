@@ -319,7 +319,7 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("threads custom blink bars through Coffee face rendering", () => {
+  it("threads fully transformable blink bars through Coffee face rendering", () => {
     assert.match(coffeeSeatPlateEmojiSource, /faceBlinkBar\?: BotFaceBlinkBar \| null/);
     assert.match(coffeeSeatPlateEmojiSource, /forceBlinkPhase\?: CoffeeSeatBlinkPhase \| null/);
     assert.match(
@@ -327,17 +327,22 @@ describe("Coffee seat arrival CSS", () => {
       /faceThinkingFrames\?: BotFaceThinkingFrames \| string\[\] \| null/
     );
     assert.match(coffeeSeatPlateEmojiSource, /faceMouthRotationDeg\?: number \| null/);
+    assert.match(coffeeSeatPlateEmojiSource, /faceBlinkRotationDeg\?: number \| null/);
     assert.match(
       coffeeSeatPlateEmojiSource,
       /const normalizedFaceBlinkBar =\s+normalizeBotFaceBlinkBar\(faceBlinkBar\) \?\? DEFAULT_BOT_FACE_BLINK_BAR;/
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const faceBlinkRotationCssDeg =\s+customBlinkBarActive && normalizedFaceEyeCount === 2\s+\? DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG\s+: 0;/
+      /const normalizedFaceBlinkRotationDeg =\s+thinkingSpinnerActive \|\| questionGlyphActive \|\| faceBlinkDisabled[\s\S]{0,180}normalizeBotFaceBlinkRotationDeg\(faceBlinkRotationDeg\) \?\? 0/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /\["--bot-face-blink-rotation" as string\]: `\$\{faceBlinkRotationCssDeg\}deg`/,
+      /const faceBlinkRotationCssDeg =[\s\S]{0,220}DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /\["--bot-face-blink-rotation" as string\]:[\s\S]{0,140}`\$\{faceBlinkRotationCssDeg\}deg`/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -348,6 +353,14 @@ describe("Coffee seat arrival CSS", () => {
       /const thinkingSpinnerActive =\s+enabled &&\s+showThinkingSpinner &&\s+!isTalking &&\s+!botFaceThinkingSpinnerDisabled\(normalizedThinkingFrames\);/,
     );
     assert.match(coffeeSeatPlateEmojiSource, /const faceBlinkDisabled = normalizedFaceBlinkBar === "none";/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const normalizedFaceBlinkScale =\s+thinkingSpinnerActive \|\| questionGlyphActive \|\| faceBlinkDisabled/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const normalizedFaceBlinkOffsetX =\s+thinkingSpinnerActive \|\| questionGlyphActive \|\| faceBlinkDisabled/,
+    );
     assert.match(
       coffeeSeatPlateEmojiSource,
       /blinkBar: normalizedFaceBlinkBar,/
@@ -367,7 +380,11 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const normalizedFaceMouthRotationDeg =\s+thinkingSpinnerActive \|\| questionGlyphActive \|\| !renderedFaceMouthCharacter/
+      /const normalizedFaceMouthRotationDeg =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const normalizedFaceEyeRotationDeg =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -380,6 +397,10 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-mouth-rotation"/);
     assert.match(coffeeSeatPlateEmojiSource, /`\$\{faceMouthRotationCssDeg\}deg`/);
     assert.match(pageSource, /faceBlinkBar=\{faceStyle\.blinkBar\}/);
+    assert.match(
+      pageSource,
+      /faceBlinkRotationDeg=\{faceStyle\.blinkRotationDeg\}/,
+    );
     assert.match(pageSource, /faceMouthRotationDeg=\{faceStyle\.mouthRotationDeg\}/);
     assert.match(pageSource, /faceThinkingFrames=\{faceStyle\.thinkingFrames\}/);
     assert.doesNotMatch(coffeeSeatPlateEmojiSource, /phase: "half"/);
@@ -775,48 +796,28 @@ describe("Coffee seat arrival CSS", () => {
 
     const liveFaceGlyphRule = ruleForExactSelector(".zenLiveBotPresenceFaceGlyph");
     assert.match(liveFaceGlyphRule, /--crt-face-edge-color:\s*var\(/);
-    assert.match(
-      liveFaceGlyphRule,
-      /0 0 calc\(0\.08em \* var\(--crt-face-glow-radius-scale,\s*1\)\)\s*color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 68%,\s*transparent\)/
-    );
-    assert.match(
-      liveFaceGlyphRule,
-      /0 0 calc\(0\.18em \* var\(--crt-face-glow-radius-scale,\s*1\)\)\s*color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 44%,\s*transparent\)/
-    );
-    assert.match(
-      liveFaceGlyphRule,
-      /0 0 calc\(0\.62em \* var\(--crt-face-glow-radius-scale,\s*1\)\)\s*color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 16%,\s*transparent\)/
-    );
+    assert.match(liveFaceGlyphRule, /text-shadow:\s*none\s*;/);
 
     const customizerFaceGlyphRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] .zenLiveBotPresenceFaceGlyph'
     );
-    assert.match(
-      customizerFaceGlyphRule,
-      /0 0 calc\(0\.06em \* var\(--crt-face-glow-radius-scale,\s*1\)\)\s*color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 58%,\s*transparent\)/
-    );
-    assert.match(
-      customizerFaceGlyphRule,
-      /0 0 calc\(0\.32em \* var\(--crt-face-glow-radius-scale,\s*1\)\)\s*color-mix\(in srgb,\s*var\(--crt-face-edge-color\) 18%,\s*transparent\)/
-    );
+    assert.match(customizerFaceGlyphRule, /text-shadow:\s*none\s*;/);
 
     const facePartRule = ruleForSelectorNeedlesWithBody(
       [".zenLiveBotPresenceFaceGlyph", "[data-coffee-plate-emoji-part]"],
       "--zen-live-bot-idle-face-glow-filter"
     );
     assert.match(facePartRule, /--zen-live-bot-idle-face-glow-filter:/);
-    assert.match(facePartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
-    assert.match(facePartRule, /--crt-bloom-radius:\s*2px\s*;/);
-    assert.match(facePartRule, /--crt-bloom-wide-radius:\s*12px\s*;/);
-    assert.match(facePartRule, /--crt-face-screen-wash-near-opacity:\s*24%\s*;/);
-    assert.match(facePartRule, /--crt-face-screen-wash-mid-opacity:\s*11%\s*;/);
-    assert.match(facePartRule, /--crt-face-screen-wash-far-opacity:\s*5%\s*;/);
-    assert.match(facePartRule, /drop-shadow\(0 0 calc\(0\.72px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
-    assert.match(facePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
-    assert.match(
-      facePartRule,
-      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
-    );
+    assert.match(facePartRule, /--crt-bloom-opacity:\s*0\.09\s*;/);
+    assert.match(facePartRule, /--crt-bloom-radius:\s*1\.35px\s*;/);
+    assert.match(facePartRule, /--crt-bloom-wide-radius:\s*6px\s*;/);
+    assert.match(facePartRule, /--crt-face-screen-wash-near-opacity:\s*10%\s*;/);
+    assert.match(facePartRule, /--crt-face-screen-wash-mid-opacity:\s*4%\s*;/);
+    assert.match(facePartRule, /--crt-face-screen-wash-far-opacity:\s*1\.5%\s*;/);
+    assert.match(facePartRule, /calc\(0\.58px \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.match(facePartRule, /calc\(1\.2px \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.match(facePartRule, /calc\(14px \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.doesNotMatch(facePartRule, /calc\(21px \*/);
     assert.match(facePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/);
     assert.match(facePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(facePartRule, /animation:\s*zenLiveBotIdleLightBreath/);
@@ -830,16 +831,14 @@ describe("Coffee seat arrival CSS", () => {
       "--zen-live-bot-idle-face-glow-filter"
     );
     assert.match(liveFacePartRule, /--zen-live-bot-idle-face-glow-filter:/);
-    assert.match(liveFacePartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
-    assert.match(liveFacePartRule, /--crt-bloom-radius:\s*2px\s*;/);
-    assert.match(liveFacePartRule, /--crt-bloom-wide-radius:\s*12px\s*;/);
+    assert.match(liveFacePartRule, /--crt-bloom-opacity:\s*0\.09\s*;/);
+    assert.match(liveFacePartRule, /--crt-bloom-radius:\s*1\.35px\s*;/);
+    assert.match(liveFacePartRule, /--crt-bloom-wide-radius:\s*6px\s*;/);
     assert.match(liveFacePartRule, /--crt-face-edge-color:\s*var\(/);
-    assert.match(liveFacePartRule, /drop-shadow\(0 0 calc\(0\.72px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
-    assert.match(liveFacePartRule, /drop-shadow\(0 0 calc\(1\.5px \* var\(--crt-face-glow-radius-scale,\s*1\)\) var\(--crt-face-edge-color\)\)/);
-    assert.match(
-      liveFacePartRule,
-      /drop-shadow\(0 0 calc\(21px \* var\(--crt-face-glow-radius-scale,\s*1\)\) color-mix\(in srgb,\s*var\(--crt-face-edge-color\) var\(--crt-face-screen-wash-far-opacity,\s*22%\),\s*transparent\)\)/
-    );
+    assert.match(liveFacePartRule, /calc\(0\.58px \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.match(liveFacePartRule, /calc\(1\.2px \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.match(liveFacePartRule, /calc\(14px \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.doesNotMatch(liveFacePartRule, /calc\(21px \*/);
     assert.match(
       liveFacePartRule,
       /--crt-face-glow-filter:\s*var\(--zen-live-bot-idle-face-glow-filter-high\)\s*;/
@@ -874,20 +873,20 @@ describe("Coffee seat arrival CSS", () => {
       ".zenLiveBotPresenceFaceGlyph",
       "[data-coffee-plate-emoji-part]"
     );
-    assert.match(talkingFacePartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
-    assert.match(talkingFacePartRule, /--crt-bloom-radius:\s*2px\s*;/);
-    assert.match(talkingFacePartRule, /--crt-bloom-wide-radius:\s*12px\s*;/);
+    assert.match(talkingFacePartRule, /--crt-bloom-opacity:\s*0\.12\s*;/);
+    assert.match(talkingFacePartRule, /--crt-bloom-radius:\s*1\.55px\s*;/);
+    assert.match(talkingFacePartRule, /--crt-bloom-wide-radius:\s*7px\s*;/);
     assert.match(talkingFacePartRule, /--crt-chromatic-offset:\s*0\.42px\s*;/);
     assert.match(talkingFacePartRule, /--crt-chromatic-opacity:\s*0\.042\s*;/);
     assert.match(talkingFacePartRule, /--zen-live-bot-talking-face-glow-filter-high:/);
     assert.match(talkingFacePartRule, /--zen-live-bot-talking-face-glow-filter-mid:/);
     assert.match(talkingFacePartRule, /--zen-live-bot-talking-face-glow-filter-low:/);
     assert.match(talkingFacePartRule, /--crt-face-edge-color:\s*var\(/);
-    assert.match(talkingFacePartRule, /var\(--crt-face-edge-color\) 78%,\s*transparent/);
+    assert.match(talkingFacePartRule, /var\(--crt-face-edge-color\) 62%,\s*transparent/);
     assert.doesNotMatch(talkingFacePartRule, /#ffffff 46%,\s*currentColor 54%/);
-    assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.52em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
-    assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.42em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
     assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.34em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.28em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
+    assert.match(talkingFacePartRule, /drop-shadow\(0 0 calc\(0\.22em \* var\(--crt-face-glow-radius-scale,\s*1\)\)/);
     assert.match(talkingFacePartRule, /--crt-face-glow-filter:\s*var\(--zen-live-bot-talking-face-glow-filter-high\)\s*;/);
     assert.match(talkingFacePartRule, /filter:\s*none\s*;/);
     assert.doesNotMatch(talkingFacePartRule, /animation:/);
@@ -909,7 +908,7 @@ describe("Coffee seat arrival CSS", () => {
       "[data-coffee-plate-emoji-part]"
     );
     assert.match(coffeeTalkingFacePartRule, /--zen-live-bot-talking-face-glow-filter-high:/);
-    assert.match(coffeeTalkingFacePartRule, /--crt-bloom-opacity:\s*0\.16\s*;/);
+    assert.match(coffeeTalkingFacePartRule, /--crt-bloom-opacity:\s*0\.12\s*;/);
     assert.doesNotMatch(coffeeTalkingFacePartRule, /animation:/);
 
     const partRule = ruleForExactSelector(
@@ -1509,6 +1508,50 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(lightReadyButtonRule, /var\(--coffee-group-gradient\)/);
   });
 
+  it("uses the full-screen PRISM loader only while creating Coffee Groups", () => {
+    const selectionCreationSource = pageSource.slice(
+      pageSource.indexOf("const createCoffeeGroupFromSelection"),
+      pageSource.indexOf("const createCoffeeGroupFromCurrentSession"),
+    );
+    const sessionCreationSource = pageSource.slice(
+      pageSource.indexOf("const createCoffeeGroupFromCurrentSession"),
+      pageSource.indexOf("const startCoffeeSessionFromGroup"),
+    );
+    assert.match(pageSource, /import \{ PrismBlockingLoader \}/u);
+    assert.match(
+      pageSource,
+      /useState<CoffeeGroupCreationOperation \| null>\(null\)/u,
+    );
+    assert.match(
+      selectionCreationSource,
+      /title: "Creating your Coffee Group"[\s\S]*stepLabel: "Reading the table"/u,
+    );
+    assert.match(
+      sessionCreationSource,
+      /title: "Saving this Coffee Group"[\s\S]*stepLabel: "Gathering the table"/u,
+    );
+    assert.match(
+      selectionCreationSource,
+      /finally \{\s*setCoffeeGroupCreationOperation\(null\);\s*setCoffeeBusy\(false\);/u,
+    );
+    assert.match(
+      sessionCreationSource,
+      /finally \{\s*setCoffeeGroupCreationOperation\(null\);\s*setCoffeeBusy\(false\);/u,
+    );
+    assert.match(
+      pageSource,
+      /<PrismBlockingLoader[\s\S]*open=\{coffeeGroupCreationOperation !== null\}[\s\S]*theme=\{resolvedTheme\}/u,
+    );
+    assert.match(
+      pageSource,
+      /footer="Keep this window open while the table takes shape\."/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /<PrismBlockingLoader[\s\S]{0,160}open=\{coffeeBusy\}/u,
+    );
+  });
+
   it("uses a larger live table with clear action anchors, spatial nameplates, and bigger mugs", () => {
     const liveStageRule = ruleForExactSelector('.coffeeStage[data-phase="arriving"]');
     assert.match(liveStageRule, /--coffee-canvas-y:\s*clamp\(64px,\s*7vh,\s*80px\)\s*;/);
@@ -1672,13 +1715,25 @@ describe("Coffee seat arrival CSS", () => {
 
     const mugRule = ruleForExactSelector(".coffeeCup");
     assert.match(mugRule, /--coffee-cup-side-offset:\s*clamp\(-16px,\s*-1\.35vw,\s*-8px\)\s*;/);
-    assert.match(mugRule, /--coffee-cup-sip-x:\s*clamp\(-54px,\s*-4\.2vw,\s*-40px\)\s*;/);
-    assert.match(mugRule, /--coffee-cup-sip-y:\s*clamp\(-82px,\s*-6vw,\s*-60px\)\s*;/);
+    assert.match(mugRule, /--coffee-cup-sip-x:\s*clamp\(-36px,\s*-2\.7vw,\s*-24px\)\s*;/);
+    assert.match(mugRule, /--coffee-cup-sip-y:\s*clamp\(-10px,\s*-0\.75vw,\s*-6px\)\s*;/);
     assert.match(mugRule, /width:\s*clamp\(52px,\s*6vw,\s*70px\)\s*;/);
     assert.match(mugRule, /height:\s*clamp\(60px,\s*6\.9vw,\s*82px\)\s*;/);
 
     const leftMugRule = ruleForExactSelector('.coffeeCup[data-cup-side="left"]');
-    assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(40px,\s*4\.2vw,\s*54px\)\s*;/);
+    assert.match(leftMugRule, /--coffee-cup-sip-x:\s*clamp\(24px,\s*2\.7vw,\s*36px\)\s*;/);
+    assert.match(
+      pageSource,
+      /coffeeCupSipTranslationForMouth\(\{[\s\S]{0,280}cupRect:\s*node\.getBoundingClientRect\(\)[\s\S]{0,180}mouthRect:\s*mouth\.getBoundingClientRect\(\)/,
+    );
+    assert.match(
+      pageSource,
+      /querySelector<HTMLElement>\(\s*'\[data-coffee-plate-emoji-part="mouth"\]'/,
+    );
+    assert.match(
+      pageSource,
+      /node\.style\.setProperty\(\s*"--coffee-cup-sip-x"[\s\S]{0,220}node\.style\.setProperty\(\s*"--coffee-cup-sip-y"/,
+    );
   });
 
   it("selects first-person Coffee automatically while keeping current Coffee settings discoverable", () => {
@@ -1880,7 +1935,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /coffeeConversationRef\.current = args\.conversation;\s+setCoffeeConversation\(args\.conversation\);/);
   });
 
-  it("lets thinking finish a sip while blocking refusal, pot filling, and pending speech", () => {
+  it("puts the cup down before showing thinking while blocking refusal, pot filling, and pending speech", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
     assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeCupClockMs;/);
     assert.match(
@@ -1899,6 +1954,18 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(
       pageSource,
       /data-cup-sip-duration-ms=\{\s*coffeeCupVisual\.sipAnimationMs\s*\}/,
+    );
+    assert.match(
+      pageSource,
+      /const seatThinkingVisualActive =\s*seatIsThinkingThisSeat && !coffeeCupVisual\.sipping;/,
+    );
+    assert.match(
+      pageSource,
+      /avatarSfxState=\{[\s\S]{0,180}: seatThinkingVisualActive\s*\? "thinking"/,
+    );
+    assert.match(
+      pageSource,
+      /showThinkingSpinner=\{seatThinkingVisualActive\}/,
     );
   });
 

@@ -934,6 +934,7 @@ function deterministicAvatarScalePower(
       /\b(?:makes?|renders?|keeps?)\s+(?:(?:the\s+)?bot|them|it|him|her)?\s*(?:physically\s+)?(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
       /\b(?:physically|visibly|literally)\s+(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\b/u,
       /\b(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\s+(?:body|form|size|stature|bot|character|person)\b/u,
+      /\b(?:(?:very|extremely|exceptionally|noticeably|unusually)\s+)?(?:small(?:er)?|tiny|miniature|minuscule|diminutive|shrunken|undersized)\s+in\s+(?:physical\s+)?(?:size|stature)\b/u,
       /\bsmall(?:er)?\s+than\s+(?:the\s+)?(?:other|average|normal)\b/u,
       /\b(?:shrinks?|shrinking|shrank|shrunk|shrunken|miniaturiz(?:e|es|ed|ing))\b/u,
     ].some((pattern) => pattern.test(intent));
@@ -946,6 +947,7 @@ function deterministicAvatarScalePower(
         /\b(?:makes?|renders?|keeps?)\s+(?:(?:the\s+)?bot|them|it|him|her)?\s*(?:physically\s+)?(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
         /\b(?:physically|visibly|literally)\s+(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\b/u,
         /\b(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\s+(?:body|form|size|stature|bot|character|person)\b/u,
+        /\b(?:(?:very|extremely|exceptionally|noticeably|unusually)\s+)?(?:large|larger|big|bigger|huge|massive|giant|gigantic|colossal|oversized|towering)\s+in\s+(?:physical\s+)?(?:size|stature)\b/u,
         /\b(?:larger|bigger)\s+than\s+(?:the\s+)?(?:other|average|normal)\b/u,
         /\b(?:grow(?:s|ing)?|enlarge(?:s|d|ment|ing)?)\s+(?:physically|in\s+size|their\s+(?:body|form))\b/u,
       ].some((pattern) => pattern.test(intent))
@@ -1531,6 +1533,12 @@ function promptPowerDisplayName(
   if (types.has("mood_boost")) return "Radiant Wake";
   if (types.has("mood_drain")) return "Gravitic Gloom";
   if (types.has("response_budget")) return "Measured Tongue";
+  const avatarScale = compiled.effects.find(
+    (effect) => effect.type === "avatar_scale",
+  );
+  if (avatarScale?.type === "avatar_scale") {
+    return avatarScale.mode === "smaller" ? "Diminished Form" : "Titan Form";
+  }
   const words = power.intent.match(/[A-Za-z0-9]+/gu)?.slice(0, 3) ?? [];
   const candidate = words
     .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1).toLowerCase()}`)
@@ -1652,7 +1660,11 @@ export async function compileBotPowers(args: {
   if (modelDrafts.length === 0) {
     return finalizeCompiledPowers(
       drafts.map((power) =>
-        readyCompiledPower(power, deterministic.get(power.id)!, args.targetBots),
+        readyCompiledPower(
+          power.authoringMode === "prompt" ? { ...power, name: "" } : power,
+          deterministic.get(power.id)!,
+          args.targetBots,
+        ),
       ),
     );
   }
@@ -1780,9 +1792,14 @@ export async function compileBotPowers(args: {
   }
 
   return finalizeCompiledPowers(drafts.map((power) => {
-    const compiled = deterministic.get(power.id) ?? compiledById.get(power.id);
+    const deterministicCompiled = deterministic.get(power.id);
+    const compiled = deterministicCompiled ?? compiledById.get(power.id);
     const decoration = decorations.get(power.id);
-    const decorated = decoration ? { ...power, ...decoration } : power;
+    const decorated = deterministicCompiled && power.authoringMode === "prompt"
+      ? { ...power, name: "" }
+      : decoration
+        ? { ...power, ...decoration }
+        : power;
     return compiled
       ? readyCompiledPower(decorated, compiled, args.targetBots)
       : {

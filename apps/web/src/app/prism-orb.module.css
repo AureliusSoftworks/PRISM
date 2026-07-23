@@ -1,0 +1,98 @@
+.orb {
+  --prism-orb-size: 58px;
+  --prism-orb-p: var(--companion-p, #ff756c);
+  --prism-orb-r: var(--companion-r, #ffba5c);
+  --prism-orb-i: var(--companion-i, #6fe3ff);
+  --prism-orb-s: var(--companion-s, #9d8cff);
+  --prism-orb-m: var(--companion-m, #e978d7);
+  position: relative;
+  z-index: 0;
+  width: var(--prism-orb-size);
+  height: var(--prism-orb-size);
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  isolation: isolate;
+  background:
+    radial-gradient(
+      circle at var(--prism-orb-glare-x, 35%)
+        var(--prism-orb-glare-y, 24%),
+      #ffffff42,
+      transparent 26%
+    ) padding-box,
+    radial-gradient(circle at 50% 52%, #15202b 0 32%, #080b13ed 70%) padding-box,
+    conic-gradient(
+      from 205deg,
+      var(--prism-orb-p),
+      var(--prism-orb-r),
+      var(--prism-orb-i),
+      var(--prism-orb-s),
+      var(--prism-orb-m),
+      var(--prism-orb-p)
+    ) border-box;
+  box-shadow:
+    0 0 0 5px color-mix(in srgb, var(--prism-orb-m) 9%, transparent),
+    0 0 24px color-mix(in srgb, var(--prism-orb-i) 40%, transparent),
+    inset 0 0 18px color-mix(in srgb, var(--prism-orb-i) 25%, transparent),
+    inset 0 -10px 20px #0008;
+  animation: prismOrbBreathe 2.8s ease-in-out infinite;
+  transition:
+    transform 420ms cubic-bezier(.2, .9, .2, 1),
+    filter 420ms ease;
+}
+
+.aura::before {
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: inherit;
+  content: "";
+  background: conic-gradient(
+    from 10deg,
+    var(--prism-orb-p),
+    var(--prism-orb-r),
+    var(--prism-orb-i),
+    var(--prism-orb-s),
+    var(--prism-orb-m),
+    var(--prism-orb-p)
+  );
+  filter: blur(9px);
+  opacity: 0.68;
+  animation: prismOrbAuraTurn 8s linear infinite;
+}
+
+.orb svg {
+  width: 50%;
+  height: 50%;
+  overflow: visible;
+  fill: #ffffff14;
+  stroke: #fff;
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+  filter:
+    drop-shadow(0 0 4px #fff)
+    drop-shadow(0 0 10px color-mix(in srgb, var(--prism-orb-i) 80%, transparent));
+}
+
+@keyframes prismOrbAuraTurn {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes prismOrbBreathe {
+  0%, 100% { transform: translateY(0) scale(.98); }
+  50% { transform: translateY(-2px) scale(1.03); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb,
+  .aura::before {
+    animation: none;
+  }
+
+  .orb {
+    transition-duration: 1ms;
+  }
+}

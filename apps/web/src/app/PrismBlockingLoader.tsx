@@ -7,6 +7,8 @@ import {
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
+import { PrismOrb } from "./PrismOrb";
+import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./prism-blocking-loader.module.css";
 
 export interface PrismBlockingLoaderProps {
@@ -18,6 +20,7 @@ export interface PrismBlockingLoaderProps {
   theme?: "light" | "dark";
   onCancel?: () => void;
   cancelLabel?: string;
+  footer?: string;
 }
 
 function normalizedProgress(progress: number | null | undefined): number | null {
@@ -34,6 +37,7 @@ export function PrismBlockingLoader({
   theme = "dark",
   onCancel,
   cancelLabel = "Cancel operation",
+  footer = "Keep this window open while the light takes shape.",
 }: PrismBlockingLoaderProps): React.JSX.Element | null {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -76,72 +80,76 @@ export function PrismBlockingLoader({
     "--prism-blocking-progress": `${progressPercent ?? 38}%`,
   } as CSSProperties;
 
-  return createPortal(
-    <div
-      ref={rootRef}
-      className={styles.backdrop}
-      data-prism-blocking-loader="true"
-      data-theme={theme}
-      role="dialog"
-      aria-modal="true"
-      aria-busy="true"
-      aria-labelledby={titleId}
-      aria-describedby={detailId}
-      tabIndex={-1}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          onCancel?.();
-        } else if (event.key === "Tab") {
-          event.preventDefault();
-          (cancelButtonRef.current ?? rootRef.current)?.focus({ preventScroll: true });
-        }
-      }}
-    >
-      <section className={styles.card} role="status" aria-live="polite">
-        {onCancel ? (
-          <button
-            ref={cancelButtonRef}
-            type="button"
-            className={styles.cancelButton}
-            onClick={onCancel}
-            aria-label={cancelLabel}
-            title={cancelLabel}
-          >
-            <span aria-hidden="true">×</span>
-          </button>
-        ) : null}
-        <div className={styles.prismMark} aria-hidden="true">
-          <span className={styles.lightCore} />
-          <span className={styles.rayPink} />
-          <span className={styles.rayOrange} />
-          <span className={styles.rayLime} />
-          <span className={styles.rayCyan} />
-          <span className={styles.rayViolet} />
-        </div>
-        <span className={styles.eyebrow}>PRISM is working</span>
-        <h2 id={titleId}>{title}</h2>
-        <p id={detailId}>{detail}</p>
-        <div className={styles.progressBlock} style={progressStyle}>
-          <div className={styles.progressMeta}>
-            <span>{stepLabel}</span>
-            <strong>{progressPercent === null ? "Working" : `${progressPercent}%`}</strong>
-          </div>
-          <div
-            className={styles.progressTrack}
-            data-indeterminate={progressPercent === null ? "true" : undefined}
-            role="progressbar"
-            aria-label={stepLabel}
-            aria-valuemin={progressPercent === null ? undefined : 0}
-            aria-valuemax={progressPercent === null ? undefined : 100}
-            aria-valuenow={progressPercent ?? undefined}
-          >
-            <span className={styles.progressFill} />
-          </div>
-        </div>
-        <small>Keep this window open while the light takes shape.</small>
-      </section>
-    </div>,
-    document.body,
+  return (
+    <>
+      <PrismCompanionPresenceBoundary reason="blocking-loader" />
+      {createPortal(
+        <div
+          ref={rootRef}
+          className={styles.backdrop}
+          data-prism-blocking-loader="true"
+          data-theme={theme}
+          role="dialog"
+          aria-modal="true"
+          aria-busy="true"
+          aria-labelledby={titleId}
+          aria-describedby={detailId}
+          tabIndex={-1}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              onCancel?.();
+            } else if (event.key === "Tab") {
+              event.preventDefault();
+              (cancelButtonRef.current ?? rootRef.current)?.focus({
+                preventScroll: true,
+              });
+            }
+          }}
+        >
+          <section className={styles.card} role="status" aria-live="polite">
+            {onCancel ? (
+              <button
+                ref={cancelButtonRef}
+                type="button"
+                className={styles.cancelButton}
+                onClick={onCancel}
+                aria-label={cancelLabel}
+                title={cancelLabel}
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            ) : null}
+            <PrismOrb className={styles.prismOrb} />
+            <span className={styles.eyebrow}>PRISM is working</span>
+            <h2 id={titleId}>{title}</h2>
+            <p id={detailId}>{detail}</p>
+            <div className={styles.progressBlock} style={progressStyle}>
+              <div className={styles.progressMeta}>
+                <span>{stepLabel}</span>
+                <strong>
+                  {progressPercent === null ? "Working" : `${progressPercent}%`}
+                </strong>
+              </div>
+              <div
+                className={styles.progressTrack}
+                data-indeterminate={
+                  progressPercent === null ? "true" : undefined
+                }
+                role="progressbar"
+                aria-label={stepLabel}
+                aria-valuemin={progressPercent === null ? undefined : 0}
+                aria-valuemax={progressPercent === null ? undefined : 100}
+                aria-valuenow={progressPercent ?? undefined}
+              >
+                <span className={styles.progressFill} />
+              </div>
+            </div>
+            <small>{footer}</small>
+          </section>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

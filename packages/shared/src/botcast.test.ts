@@ -32,6 +32,7 @@ import {
   botcastHostInterruptionLineAt,
   botcastHostInterruptionLinesForSeed,
   botcastHostRageQuitIntent,
+  botcastHostSignOffIntent,
   botcastInterruptedGuestContent,
   botcastInterruptionBridgeMessageId,
   botcastMessageIsEphemeralInterruptionBridge,
@@ -58,6 +59,7 @@ import {
   normalizeBotcastStudioLayout,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastStudioGlowTuning,
+  normalizeBotcastHostRecoveryQuestions,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
   swapBotcastStudioLayoutSeats,
@@ -148,6 +150,33 @@ describe("Signal fallback studio accents", () => {
       botcastMessageIsEphemeralInterruptionBridge({ id }),
       true,
     );
+  });
+
+  it("keeps only a complete, distinct set of reusable host recovery questions", () => {
+    assert.deepEqual(
+      normalizeBotcastHostRecoveryQuestions([
+        "Show me one example that would actually test that claim?",
+        "Which consequence matters, and who gets handed the bill?",
+        "Where does that become a choice rather than a slogan?",
+        "What evidence would force you to revise the answer?",
+        "A fifth question should not survive?",
+      ]),
+      [
+        "Show me one example that would actually test that claim?",
+        "Which consequence matters, and who gets handed the bill?",
+        "Where does that become a choice rather than a slogan?",
+        "What evidence would force you to revise the answer?",
+      ],
+    );
+    assert.deepEqual(
+      normalizeBotcastHostRecoveryQuestions([
+        "Question: What happened?",
+        "[leans in] What happened?",
+        "This is not a question.",
+      ]),
+      [],
+    );
+    assert.deepEqual(normalizeBotcastHostRecoveryQuestions(["..."]), ["..."]);
   });
 
   it("reads only valid saved listener reactions for the requested message", () => {
@@ -881,6 +910,47 @@ describe("Botcast episode state", () => {
       content: "I'm ending this interview now.",
       segment: "closing",
       priorUtteranceCount: 8,
+    }), false);
+  });
+
+  it("recognizes an earned host sign-off without closing on descriptive or conditional wording", () => {
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Verdict: memory beats mush; that's the podcast, go watch something with consequences.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Episode's over, verdict stands, and no, drink in your own dimension.",
+      segment: "interview",
+      priorUtteranceCount: 14,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "And that's the show, folks—consequences matter and cutaways don't.",
+      segment: "interview",
+      priorUtteranceCount: 16,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content: "That's the show I wanted to make, but we still have more to discuss.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "If the episode's over, we never reach the difficult question.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "That's the podcast, everyone.",
+      segment: "interview",
+      priorUtteranceCount: 4,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "That's the podcast, everyone.",
+      segment: "closing",
+      priorUtteranceCount: 12,
     }), false);
   });
 

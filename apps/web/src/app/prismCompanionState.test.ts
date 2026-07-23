@@ -3,7 +3,10 @@ import test from "node:test";
 import {
   isPrismCompanionShortcut,
   parsePrismCompanionRecovery,
+  parsePrismCompanionSpeechEnabled,
+  prismCompanionDismissesOnExternalInteraction,
   prismCompanionRecoveryStorageKey,
+  prismCompanionSpeechStorageKey,
   retainPrismCompanionRecovery,
 } from "./prismCompanionState.ts";
 
@@ -24,6 +27,31 @@ test("scopes companion recovery to account and exact surface", () => {
       slateProjectId: "project-1",
     }),
   );
+});
+
+test("collapses the ephemeral panel when focus returns to a Zen bot", () => {
+  assert.equal(
+    prismCompanionDismissesOnExternalInteraction({ surfaceId: "zen" }),
+    true,
+  );
+  assert.equal(
+    prismCompanionDismissesOnExternalInteraction({ surfaceId: "prism-home" }),
+    true,
+  );
+  assert.equal(
+    prismCompanionDismissesOnExternalInteraction({ surfaceId: "slate" }),
+    false,
+  );
+});
+
+test("keeps the companion voice choice device-local and enabled by default", () => {
+  assert.notEqual(
+    prismCompanionSpeechStorageKey("u1"),
+    prismCompanionSpeechStorageKey("u2"),
+  );
+  assert.equal(parsePrismCompanionSpeechEnabled(null), true);
+  assert.equal(parsePrismCompanionSpeechEnabled("true"), true);
+  assert.equal(parsePrismCompanionSpeechEnabled("false"), false);
 });
 
 test("recovers only the latest three valid messages", () => {
@@ -65,4 +93,20 @@ test("uses Option Space on Apple platforms and Control Space elsewhere", () => {
     isPrismCompanionShortcut({ ...base, ctrlKey: true, platform: "MacIntel" }),
     false,
   );
+});
+
+test("recognizes the physical Space key when Option changes its key value", () => {
+  const base = {
+    code: "Space",
+    altKey: true,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+    platform: "MacIntel",
+  };
+  assert.equal(
+    isPrismCompanionShortcut({ ...base, key: "\u00a0" }),
+    true,
+  );
+  assert.equal(isPrismCompanionShortcut({ ...base, key: "Dead" }), true);
 });

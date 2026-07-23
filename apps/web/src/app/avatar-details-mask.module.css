@@ -64,14 +64,24 @@
 }
 
 .halo {
-  opacity: var(--avatar-details-speech-opacity, 1);
+  /* Keep a hint of light in the glass without letting broad bloom become the
+     shape. The core and near bloom carry the authored stroke. */
+  opacity: calc(var(--avatar-details-speech-opacity, 1) * 0.14);
   mix-blend-mode: screen;
-  --zen-live-bot-crt-flicker-base-filter: blur(1.35px) saturate(1.28)
+  --zen-live-bot-crt-flicker-base-filter: blur(0.8px) saturate(1.08)
     drop-shadow(
-      0 0 6px
+      0 0 4px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 58%,
+          var(--avatar-details-phosphor-glow-color) 22%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 8px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 9%,
           transparent
         )
     )
@@ -79,15 +89,7 @@
       0 0 12px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 36%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 21px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
+          var(--avatar-details-phosphor-glow-color) 3%,
           transparent
         )
     );
@@ -95,29 +97,19 @@
 }
 
 .bloom {
-  opacity: var(--avatar-details-speech-opacity, 1);
+  opacity: calc(var(--avatar-details-speech-opacity, 1) * 0.56);
   mix-blend-mode: screen;
-  --zen-live-bot-crt-flicker-base-filter: blur(0.32px) saturate(1.18)
-    drop-shadow(0 0 0.72px var(--avatar-details-phosphor-glow-color))
-    drop-shadow(0 0 1.5px var(--avatar-details-phosphor-glow-color))
+  --zen-live-bot-crt-flicker-base-filter: blur(0.22px) saturate(1.08)
     drop-shadow(
-      0 0 3px
+      0 0 0.55px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 82%,
+          var(--avatar-details-phosphor-glow-color) 70%,
           transparent
         )
     )
     drop-shadow(
-      0 0 6px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 58%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 12px
+      0 0 1.1px
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 36%,
@@ -125,10 +117,26 @@
         )
     )
     drop-shadow(
-      0 0 21px
+      0 0 2.4px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 22%,
+          var(--avatar-details-phosphor-glow-color) 15%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 5px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 6%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 9px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 2%,
           transparent
         )
     );
@@ -139,8 +147,8 @@
   opacity: var(--avatar-details-speech-opacity, 1);
   mix-blend-mode: screen;
   --zen-live-bot-crt-flicker-base-filter: drop-shadow(
-    0 0 0.45px rgba(255, 255, 255, 0.82)
+    0 0 0.3px rgba(255, 255, 255, 0.46)
   );
-  filter: brightness(1.07) contrast(1.02)
+  filter: brightness(1.02) contrast(1.02)
     var(--zen-live-bot-crt-flicker-base-filter);
 }

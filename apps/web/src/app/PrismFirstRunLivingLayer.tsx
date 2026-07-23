@@ -10,6 +10,17 @@ export const PRISM_AUTHORED_WELCOME =
 
 export type PrismFirstRunChoice = "slate" | "spectrum" | "tour";
 
+function PrismOrbVisual({ className }: { className: string }): React.JSX.Element {
+  return (
+    <div className={className} aria-hidden="true">
+      <span className={styles.orbHalo} />
+      <span className={styles.orbGlass}>
+        <span className={styles.orbCore}>△</span>
+      </span>
+    </div>
+  );
+}
+
 function useModalCanvas(rootRef: RefObject<HTMLDivElement | null>): void {
   useEffect(() => {
     const root = rootRef.current;
@@ -86,20 +97,10 @@ export default function PrismFirstRunLivingLayer({
     >
       <div className={styles.darkness} aria-hidden="true" />
       <div className={styles.arrivalLight} aria-hidden="true" />
-      <div className={styles.orb} aria-hidden="true">
-        <span className={styles.orbCore}>△</span>
-      </div>
 
       {stage === "awakening" ? (
         <section className={styles.awakening}>
-          <div className={styles.prismBody} aria-hidden="true">
-            <span className={styles.prismHalo} />
-            <span className={styles.prismGlass}>
-              <span className={styles.prismEyes}>◜ ◝</span>
-              <span className={styles.prismMouth}>⌣</span>
-            </span>
-            <span className={styles.prismMedallion}>△</span>
-          </div>
+          <PrismOrbVisual className={styles.orbStage} />
           <div className={styles.awakeningCopy} aria-live="polite">
             <p className={styles.eyebrow}>PRISM AWAKE</p>
             <h1 id={headingId}>
@@ -113,6 +114,7 @@ export default function PrismFirstRunLivingLayer({
         </section>
       ) : (
         <section className={styles.choices}>
+          <PrismOrbVisual className={styles.choiceOrbStage} />
           <div className={styles.choiceHeading}>
             <p className={styles.eyebrow}>WHERE SHALL WE BEGIN?</p>
             <h1 id={headingId}>Your spectrum is waiting.</h1>

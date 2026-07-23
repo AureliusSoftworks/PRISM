@@ -81,6 +81,7 @@ function completeDraft(): Record<string, unknown> {
       faceBlinkScale: 1,
       faceBlinkOffsetX: 0,
       faceBlinkOffsetY: 0,
+      faceBlinkRotationDeg: 0,
       faceThinkingFrames: ["·", "✦", "*", "✧"],
     },
     avatarDetails: {
@@ -123,7 +124,7 @@ function completeDraft(): Record<string, unknown> {
 }
 
 describe("normalizeBotGeneratedDraftV1", () => {
-  it("normalizes a complete generated bot into Avatar Studio fields", () => {
+  it("normalizes a complete generated bot while dropping deprecated accessory stamps", () => {
     const draft = normalizeBotGeneratedDraftV1(completeDraft(), {
       availableElevenLabsVoiceIds: ["voice-premium-nyx"],
     });
@@ -136,7 +137,7 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
     assert.equal(draft.face.eyeRotationDeg, -90);
-    assert.equal(draft.avatarDetails?.screen.stamps.length, 3);
+    assert.deepEqual(draft.avatarDetails?.screen.stamps, []);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
     assert.deepEqual(draft.powers, []);

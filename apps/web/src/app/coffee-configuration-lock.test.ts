@@ -7,7 +7,7 @@ const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 test("active Coffee centrally locks configuration while preserving End Session", () => {
   assert.match(
     pageSource,
-    /coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"/u,
+    /const coffeeConfigurationLocked = coffeeChromePolicy\.liveSessionActive/u,
   );
   assert.match(
     pageSource,
@@ -23,11 +23,23 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /disabledActions:\s*shellPolicy\.disabledNavbarActions/u,
+    /disabledActions:\s*coffeeChromePolicy\.disabledNavbarActions/u,
   );
   assert.match(
     pageSource,
-    /disabledActionTooltips:\s*shellPolicy\.disabledNavbarActionTooltips/u,
+    /disabledActionTooltips:\s*coffeeChromePolicy\.disabledNavbarActionTooltips/u,
+  );
+  assert.match(
+    pageSource,
+    /buildSharedWorkspaceMenuEntries\(\{[\s\S]*?disabledActions:\s*coffeeChromePolicy\.disabledNavbarActions,[\s\S]*?disabledActionTooltips:\s*coffeeChromePolicy\.disabledNavbarActionTooltips,[\s\S]*?importBots:\s*true,[\s\S]*?\}\)/u,
+  );
+  assert.match(
+    pageSource,
+    /function buildSharedWorkspaceMenuEntries[\s\S]*?disabledActions\?:\s*UniversalNavbarDisabledMap;[\s\S]*?disabledActionTooltips\?:\s*UniversalNavbarTooltipMap;[\s\S]*?disabled:\s*actionDisabled\("promptCenter"\)[\s\S]*?disabled:\s*actionDisabled\("usage"\)[\s\S]*?disabled:\s*actionDisabled\("memories"\)[\s\S]*?disabled:\s*actionDisabled\("images"\)[\s\S]*?disabled:\s*actionDisabled\("theme"\)/u,
+  );
+  assert.match(
+    pageSource,
+    /function renderCoffeeBotContextMenu[\s\S]*?coffeeChromePolicy\.disabledNavbarActions\[action\][\s\S]*?disabled:\s*botActionsDisabled[\s\S]*?disabled:\s*memoriesDisabled[\s\S]*?disabled:\s*imagesDisabled[\s\S]*?disabled:\s*botActionsDisabled \|\| protectedBot/u,
   );
   assert.doesNotMatch(pageSource, /Favorites unavailable in Coffee/u);
   assert.match(
@@ -46,11 +58,11 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /shellPolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderLocationStrip\(\)/u,
+    /coffeeChromePolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderLocationStrip\(\)/u,
   );
   assert.match(pageSource, />\s*End session\s*</iu);
   assert.match(
     pageSource,
-    /data-live-session-locked=\{[\s\S]*shellPolicy\.liveSessionActive/u,
+    /data-live-session-locked=\{[\s\S]*coffeeChromePolicy\.liveSessionActive/u,
   );
 });

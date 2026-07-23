@@ -20,6 +20,14 @@ test("Coffee uses a brief mood-aware aside without cancelling the slow turn", ()
   );
   assert.match(thinkingDelaySlice, /setCoffeeDeadAirAside\(plan\)/u);
   assert.match(thinkingDelaySlice, /playCoffeeDeadAirAsideRef\.current\(plan\)/u);
+  assert.match(
+    thinkingDelaySlice,
+    /coffeeActiveTurnJob\.phase !== "thinking"[\s\S]{0,120}setCoffeeDeadAirAside\(null\)/u,
+  );
+  assert.doesNotMatch(
+    thinkingDelaySlice,
+    /coffeeActiveTurnJob\.phase !== "thinking"[\s\S]{0,240}stopReactionVoiceAudio\(\)/u,
+  );
   assert.doesNotMatch(thinkingDelaySlice, /turn-jobs[^\n]*interrupt/u);
   assert.doesNotMatch(thinkingDelaySlice, /interruption-pause/u);
   assert.match(source, /data-dead-air-aside=/u);

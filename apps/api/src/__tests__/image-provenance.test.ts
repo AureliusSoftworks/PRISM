@@ -43,5 +43,12 @@ describe("image provenance", () => {
       }),
       "bot_group_room",
     );
+    assert.equal(
+      imageOriginForGenerate({
+        purpose: "hub_atmosphere",
+        requestedOrigin: "botcast",
+      }),
+      "hub_atmosphere",
+    );
   });
 });

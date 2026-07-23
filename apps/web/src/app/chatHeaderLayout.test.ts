@@ -38,6 +38,42 @@ describe("Chat shell header layout", () => {
     );
   });
 
+  it("keeps Home as the location strip's only navigation affordance", () => {
+    const locationStripStart = pageSource.indexOf(
+      "const renderLocationStrip =",
+    );
+    const locationStripEnd = pageSource.indexOf(
+      "const renderAppSwitcher =",
+      locationStripStart,
+    );
+    assert.notEqual(locationStripStart, -1);
+    assert.notEqual(locationStripEnd, -1);
+
+    const locationStripSource = pageSource.slice(
+      locationStripStart,
+      locationStripEnd,
+    );
+    assert.match(locationStripSource, /className=\{styles\.locationStripHome\}/);
+    assert.match(locationStripSource, /onClick=\{openLivingShellHome\}/);
+    assert.match(locationStripSource, /aria-label="Open All Bots Home"/);
+    assert.equal(locationStripSource.match(/<button\b/g)?.length, 1);
+    assert.doesNotMatch(locationStripSource, /locationStripBack/);
+    assert.doesNotMatch(locationStripSource, /aria-label="Back"/);
+
+    const openHomeStart = pageSource.indexOf(
+      "const openLivingShellHome =",
+    );
+    const openHomeEnd = pageSource.indexOf(
+      "const livingShellLocation =",
+      openHomeStart,
+    );
+    const openHomeSource = pageSource.slice(openHomeStart, openHomeEnd);
+    assert.match(openHomeSource, /setChatAutoRestoreSuppressed\(true\)/);
+    assert.match(openHomeSource, /setForceNewConversationOnNextSend\(true\)/);
+    assert.match(openHomeSource, /performShowAllBotsView\(\)/);
+    assert.match(openHomeSource, /void openZenMode\(\)/);
+  });
+
   it("distinguishes the account model default from Auto response routing", () => {
     assert.match(
       pageSource,
@@ -107,6 +143,17 @@ describe("Chat shell header layout", () => {
     assert.match(
       cssSource,
       /\.emptyStateTitleLead\s*\{[\s\S]*overflow-wrap:\s*anywhere;[\s\S]*white-space:\s*normal;/,
+    );
+  });
+
+  it("keeps structured bot titles separated before collapsed Zen styles apply", () => {
+    assert.match(
+      cssSource,
+      /\.emptyStateTitle\[data-zen-title-with-hero="true"\]\s*\{[^}]*display:\s*inline-flex;[^}]*gap:/,
+    );
+    assert.match(
+      cssSource,
+      /\.emptyStateTitle\[data-zen-title-with-hero="true"\]\s+\.emptyStateTitlePhrase\s*\{[^}]*display:\s*inline-flex;[^}]*gap:/,
     );
   });
 });

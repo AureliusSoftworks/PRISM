@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { DISABLED_MODEL_CHOICE } from "@localai/shared";
+import {
+  DEFAULT_HUB_ATMOSPHERE_STYLE,
+  DISABLED_MODEL_CHOICE,
+} from "@localai/shared";
 import {
   DEFAULT_ZEN_CANVAS_TYPING_SPEED,
   DEFAULT_ZEN_FRESH_START_GAP_MS,
@@ -51,6 +54,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     graphicsQuality: "high",
+    atmosphereStyle: DEFAULT_HUB_ATMOSPHERE_STYLE,
     startupPreference: "home",
     preferredProvider: "local",
     ephemeralChatProviderPreferences: "{}",
@@ -134,6 +138,23 @@ describe("resolveNextSettings — living shell startup", () => {
       resolveNextSettings({ startupPreference: "coffee" }, current)
         .startupPreference,
       "slate",
+    );
+  });
+});
+
+describe("resolveNextSettings — atmosphere style", () => {
+  it("persists known global styles and preserves the current style for invalid patches", () => {
+    assert.equal(
+      resolveNextSettings({ atmosphereStyle: "sanctuary" }, baseline())
+        .atmosphereStyle,
+      "sanctuary",
+    );
+    assert.equal(
+      resolveNextSettings(
+        { atmosphereStyle: "custom prompt injection" },
+        baseline({ atmosphereStyle: "minimal" }),
+      ).atmosphereStyle,
+      "minimal",
     );
   });
 });

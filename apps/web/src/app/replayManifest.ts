@@ -2,33 +2,56 @@ import {
   botcastMessageIsAudibleToAudienceV1,
   botcastSnapshotPowersForRoleV1,
   botPowerResponseIsSilentV1,
+  buildSignalMusicProfile,
   voiceSpokenText,
   type BotcastEpisode,
+  type BotcastReplayEvent,
   type BotcastShow,
   type BotAvatarDetailsV1,
+  type BotAvatarSfxV1,
   type BotFaceStyle,
   type BotVoicePreset,
+  type SignalPersonaTemperament,
   type ReplayEventV1,
   type ReplayManifestV1,
   type ReplayParticipantSnapshotV1,
   type ReplayUtteranceV1,
 } from "@localai/shared";
+import {
+  SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
+  SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
+  SIGNAL_SYNTH_IDENT_DURATION_MS,
+} from "./signalIntroAudio.ts";
 
-export interface SignalReplayBotVisualSnapshotV1 {
+export const COFFEE_REPLAY_RENDER_CONTRACT =
+  "coffee-table-playwright-v1" as const;
+
+export interface ReplayBotVisualSnapshotV1 {
   v: 1;
   faceStyle: BotFaceStyle;
   avatarDetails: BotAvatarDetailsV1 | null;
   voicePreset: BotVoicePreset;
   screenMaterialSeed: string;
   frameMaterialSeed: string;
+  avatarSfx?: Pick<
+    BotAvatarSfxV1,
+    | "audioDataUrl"
+    | "playWhileIdle"
+    | "playWhileTalking"
+    | "playWhileThinking"
+    | "volume"
+  > | null;
 }
+
+export type SignalReplayBotVisualSnapshotV1 = ReplayBotVisualSnapshotV1;
 
 export interface ReplayBotSnapshotInput {
   id: string;
   name: string;
   color?: string | null;
   glyph?: string | null;
-  replayVisualSnapshot?: SignalReplayBotVisualSnapshotV1 | null;
+  personaTemperament?: SignalPersonaTemperament;
+  replayVisualSnapshot?: ReplayBotVisualSnapshotV1 | null;
 }
 
 export function buildSignalReplayManifestV1(args: {
@@ -37,6 +60,9 @@ export function buildSignalReplayManifestV1(args: {
   bots: readonly ReplayBotSnapshotInput[];
   producerName: string;
   theme: "light" | "dark";
+  audioEnabled?: boolean;
+  audioVolume?: number;
+  capturedReplayEvents?: readonly BotcastReplayEvent[];
 }): ReplayManifestV1 {
   const botsById = new Map(args.bots.map((bot) => [bot.id, bot]));
   const host = botsById.get(args.episode.hostBotId);
@@ -111,7 +137,38 @@ export function buildSignalReplayManifestV1(args: {
       audienceDelivery: message.audienceDelivery ?? null,
     },
   }));
-  const events: ReplayEventV1[] = args.episode.events.map((event) => ({
+  const episodeEvents = [...args.episode.events];
+  const capturedEventSignature = (event: BotcastReplayEvent): string =>
+    event.kind === "soundboard_cue"
+      ? `soundboard:${String(event.payload.kind)}:${Number(event.payload.atMs)}`
+      : event.kind === "capture_timing"
+        ? `capture:${String(event.payload.phase)}:${String(event.payload.messageId ?? "")}:${Number(event.payload.atMs)}`
+        : `audio:${String(event.payload.kind)}:${Number(event.payload.atMs)}:${String(event.payload.role ?? "")}:${String(event.payload.messageId ?? "")}`;
+  const capturedEventSignatures = new Set(
+    episodeEvents
+      .filter(
+        (event) =>
+          event.kind === "audio_cue" ||
+          event.kind === "soundboard_cue" ||
+          event.kind === "capture_timing",
+      )
+      .map(capturedEventSignature),
+  );
+  for (const event of args.capturedReplayEvents ?? []) {
+    if (
+      event.episodeId !== args.episode.id ||
+      (event.kind !== "audio_cue" &&
+        event.kind !== "soundboard_cue" &&
+        event.kind !== "capture_timing")
+    ) {
+      continue;
+    }
+    const signature = capturedEventSignature(event);
+    if (capturedEventSignatures.has(signature)) continue;
+    capturedEventSignatures.add(signature);
+    episodeEvents.push(event);
+  }
+  const events: ReplayEventV1[] = episodeEvents.map((event) => ({
     id: event.id,
     kind: event.kind,
     sourceMessageId:
@@ -125,6 +182,24 @@ export function buildSignalReplayManifestV1(args: {
   }));
   const atmosphere =
     args.theme === "light" ? args.show.dayAtmosphere : args.show.nightAtmosphere;
+  const musicIdentity = args.show.musicIdentity;
+  const musicSeed = `${args.show.hostBotId}:${args.show.id}:music:${musicIdentity?.revision ?? 0}`;
+  const musicProfile = buildSignalMusicProfile({
+    temperament: host?.personaTemperament ?? "neutral",
+    seed: musicSeed,
+    identity: musicIdentity?.profile,
+    premise: args.show.premise,
+    hostingStyle: args.show.hostingStyle,
+    studioIdentity: args.show.studioIdentity,
+  });
+  const masterVolume =
+    typeof args.audioVolume === "number" && Number.isFinite(args.audioVolume)
+      ? Math.max(0, Math.min(1, args.audioVolume))
+      : 1;
+  const introDurationMs =
+    args.show.introAudio?.source === "elevenlabs"
+      ? Math.max(3_000, args.show.introAudio.durationMs)
+      : SIGNAL_SYNTH_IDENT_DURATION_MS;
   return {
     v: 1,
     surface: "signal",
@@ -155,11 +230,23 @@ export function buildSignalReplayManifestV1(args: {
         runtimeMs: args.episode.runtimeMs,
         introAudioUrl: args.show.introAudio?.audioUrl ?? null,
         introAudioDurationMs: args.show.introAudio?.durationMs ?? null,
+        introPresentationDurationMs: Math.max(
+          SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
+          SIGNAL_EPISODE_INTRO_LEAD_IN_MS + introDurationMs,
+        ),
         outdentAudioUrl: args.show.introAudio?.outdentAudioUrl ?? null,
         outdentAudioDurationMs: args.show.introAudio?.outdentDurationMs ?? null,
         atmosphereAudioUrl: args.show.atmosphereAudio?.audioUrl ?? null,
         atmosphereAudioDurationMs: args.show.atmosphereAudio?.durationMs ?? null,
         atmosphereMix: args.show.atmosphereMix,
+        signalAudioMix: {
+          v: 1,
+          enabled: args.audioEnabled !== false && masterVolume > 0,
+          masterVolume,
+        },
+        introAudioSource: args.show.introAudio?.source ?? "local",
+        musicProfile,
+        musicSeed,
         studioLighting: args.show.studioLighting,
         fallbackStudioAccentVariant: args.show.fallbackStudioAccentVariant,
         renderContract: "signal-studio-playwright-v1",
@@ -220,6 +307,7 @@ export function buildCoffeeReplayManifestV1(args: {
         visible: true,
         metadata: {
           powers: args.conversation.coffeePowerPlan?.bots?.[botId] ?? null,
+          visualSnapshot: bot?.replayVisualSnapshot ?? null,
         },
       };
     }),
@@ -237,29 +325,48 @@ export function buildCoffeeReplayManifestV1(args: {
   const utterances: ReplayUtteranceV1[] = args.conversation.messages
     .filter(
       (message) =>
-        (message.role === "assistant" || message.role === "user") &&
-        message.content.trim().length > 0,
+        ((message.role === "assistant" || message.role === "user") &&
+          message.content.trim().length > 0) ||
+        Boolean(
+          message.coffeeReplayEvents?.length ||
+            message.coffeeAmbientAction ||
+            message.coffeeUserAction,
+        ),
     )
-    .map((message) => ({
-      id: message.id,
-      sourceMessageId: message.id,
-      speakerId:
-        message.role === "user" ? "prism-player" : message.botId ?? message.botName ?? "bot",
-      speakerRole: message.role === "user" ? "player" : "table-guest",
-      text: message.content,
-      spokenText: voiceSpokenText(message.content),
-      moodKey: message.moodKey ?? "neutral",
-      audible:
-        message.coffeeObserverProjection?.audible !== false &&
-        voiceSpokenText(message.content).length > 0 &&
-        message.content.trim() !== "...",
-      visible: message.coffeeObserverProjection?.visible !== false,
-      createdAt: message.createdAt,
-      metadata: {
-        botColor: message.botColor ?? null,
-        botGlyph: message.botGlyph ?? null,
-      },
-    }));
+    .map((message) => {
+      const stateOnly = message.role === "system";
+      return {
+        id: message.id,
+        sourceMessageId: message.id,
+        speakerId:
+          message.role === "user"
+            ? "prism-player"
+            : message.botId ?? message.botName ?? "table",
+        speakerRole:
+          message.role === "user"
+            ? "player"
+            : stateOnly
+              ? "table-event"
+              : "table-guest",
+        text: stateOnly ? "" : message.content,
+        spokenText: stateOnly ? "" : voiceSpokenText(message.content),
+        moodKey: message.moodKey ?? "neutral",
+        audible:
+          !stateOnly &&
+          message.coffeeObserverProjection?.audible !== false &&
+          voiceSpokenText(message.content).length > 0 &&
+          message.content.trim() !== "...",
+        visible:
+          !stateOnly &&
+          message.coffeeObserverProjection?.visible !== false,
+        createdAt: message.createdAt,
+        metadata: {
+          botColor: message.botColor ?? null,
+          botGlyph: message.botGlyph ?? null,
+          stateOnly,
+        },
+      };
+    });
   const events: ReplayEventV1[] = args.conversation.messages.flatMap(
     (message) => {
       const replayEvents = (message.coffeeReplayEvents ?? []).map(
@@ -325,7 +432,10 @@ export function buildCoffeeReplayManifestV1(args: {
       theme: args.theme,
       accentColor: args.prismColor,
       atmosphereImageUrl: null,
-      metadata: { playerPerspective: "third-person-prism" },
+      metadata: {
+        playerPerspective: "third-person-prism",
+        renderContract: COFFEE_REPLAY_RENDER_CONTRACT,
+      },
     },
   };
 }

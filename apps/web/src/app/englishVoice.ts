@@ -13,7 +13,9 @@ import {
   playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
+  releaseRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
+  voiceReleaseGainAt,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
@@ -233,6 +235,7 @@ export function scaleEnglishVoiceAlignmentForPlayback(
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
 let activeMediaStartTimer: number | null = null;
+let activeMediaFadeTimer: number | null = null;
 let activeMediaResolve: (() => void) | null = null;
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
@@ -310,6 +313,10 @@ function beginMediaUnlock(): void {
 
 function releaseActiveMedia(keepElement = false): void {
   const media = activeMedia;
+  if (activeMediaFadeTimer !== null) {
+    window.clearTimeout(activeMediaFadeTimer);
+    activeMediaFadeTimer = null;
+  }
   if (activeMedia) {
     activeMedia.pause();
     activeMedia.removeAttribute("src");
@@ -338,6 +345,51 @@ export function stopEnglishVoice(
   activeMediaResolve?.();
   activeMediaResolve = null;
   queue = Promise.resolve();
+}
+
+export function releaseEnglishVoice(
+  options: {
+    fadeOutMs?: number;
+    preservePreparedMedia?: boolean;
+  } = {},
+): void {
+  generation += 1;
+  const fadeOutMs = Math.max(0, Math.round(options.fadeOutMs ?? 160));
+  releaseRealtimeVoiceAudio("primary", fadeOutMs);
+  stopRealtimeVoiceAudio("presence");
+  const media = activeMedia;
+  if (!media) {
+    if (!options.preservePreparedMedia) releasePreparedMedia();
+    return;
+  }
+  if (activeMediaFadeTimer !== null) {
+    window.clearTimeout(activeMediaFadeTimer);
+    activeMediaFadeTimer = null;
+  }
+  const startVolume = media.volume;
+  const startedAt = Date.now();
+  const finish = (): void => {
+    if (activeMedia !== media) return;
+    const resolve = activeMediaResolve;
+    if (resolve) resolve();
+    else releaseActiveMedia(options.preservePreparedMedia === true);
+    if (!options.preservePreparedMedia) releasePreparedMedia();
+  };
+  if (fadeOutMs === 0 || media.paused || startVolume <= 0) {
+    finish();
+    return;
+  }
+  const step = (): void => {
+    if (activeMedia !== media) return;
+    const progress = (Date.now() - startedAt) / fadeOutMs;
+    media.volume = voiceReleaseGainAt(startVolume, progress);
+    if (progress >= 1) {
+      finish();
+      return;
+    }
+    activeMediaFadeTimer = window.setTimeout(step, 16);
+  };
+  step();
 }
 
 async function playBytesWithMedia(

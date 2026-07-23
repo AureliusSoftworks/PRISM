@@ -13,6 +13,10 @@ test("Avatar Studio field registry covers every creative surface and explicit sa
   }
   assert.equal(botGenerationFieldDefinitionV1("power.prompt").policy, "semantic");
   assert.equal(botGenerationFieldDefinitionV1("power.sigil").policy, "bounded");
+  assert.equal(botGenerationFieldDefinitionV1("details.stamp.id").policy, "excluded");
+  assert.equal(botGenerationFieldDefinitionV1("details.stamp.offsetX").policy, "excluded");
+  assert.equal(botGenerationFieldDefinitionV1("details.stamp.offsetY").policy, "excluded");
+  assert.equal(botGenerationFieldDefinitionV1("details.stamp.scalePct").policy, "excluded");
   assert.equal(botGenerationFieldDefinitionV1("voice.externalVoiceId").policy, "excluded");
   assert.equal(botGenerationFieldDefinitionV1("routing.provider").policy, "excluded");
   assert.equal(botGenerationFieldDefinitionV1("privacy.onlineEnabled").policy, "excluded");

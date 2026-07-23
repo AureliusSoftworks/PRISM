@@ -6,9 +6,11 @@ import {
   type CoffeeAmbientActionPayload,
   type CoffeeUserActionPayload,
   type CoffeeCupTopOffSnapshot,
+  type CoffeeReplayBaristaDeliveryEventPayload,
   type CoffeeReplayBotDepartureEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayPlayerDepartureEventPayload,
+  type CoffeeReplayPlayerSipEventPayload,
   type CoffeeReplaySocialSnapshotPayload,
   type CoffeeReplayTopOffEventPayload,
   type CoffeeSessionSettings,
@@ -190,6 +192,10 @@ export interface CoffeeReplayState {
   playerPresent: boolean;
   playerDeparting: boolean;
   playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null;
+  latestBaristaDelivery: CoffeeReplayBaristaDeliveryEventPayload | null;
+  activeBaristaDelivery: CoffeeReplayBaristaDeliveryEventPayload | null;
+  playerSipCount: number;
+  activePlayerSip: CoffeeReplayPlayerSipEventPayload | null;
   identityMirrorByHolderBotId: Record<string, BotIdentityMirrorStateV1>;
 }
 
@@ -247,6 +253,12 @@ export function coffeeReplayCompletionHoldMs(
   }
   if (events.some((event) => event.kind === "playerDeparture")) {
     return reducedMotion ? 120 : 1_280;
+  }
+  if (events.some((event) => event.kind === "baristaDelivery")) {
+    return reducedMotion ? 140 : 2_400;
+  }
+  if (events.some((event) => event.kind === "playerSip")) {
+    return reducedMotion ? 120 : 900;
   }
   if (message.coffeeUserAction) {
     return reducedMotion ? 120 : 1_100;
@@ -485,6 +497,10 @@ export function coffeeReplayStateAt(
   let playerPresent = true;
   let playerDeparting = false;
   let playerDepartureEvent: CoffeeReplayPlayerDepartureEventPayload | null = null;
+  let latestBaristaDelivery: CoffeeReplayBaristaDeliveryEventPayload | null = null;
+  let activeBaristaDelivery: CoffeeReplayBaristaDeliveryEventPayload | null = null;
+  let playerSipCount = 0;
+  let activePlayerSip: CoffeeReplayPlayerSipEventPayload | null = null;
   const identityMirrorByHolderBotId: Record<string, BotIdentityMirrorStateV1> = {};
 
   for (let index = 0; index < messages.length && index <= clampedIndex; index += 1) {
@@ -523,6 +539,12 @@ export function coffeeReplayStateAt(
         } else {
           playerPresent = false;
         }
+      } else if (event.kind === "baristaDelivery") {
+        latestBaristaDelivery = event;
+        if (isCurrentMessage) activeBaristaDelivery = event;
+      } else if (event.kind === "playerSip") {
+        playerSipCount = event.sipCount;
+        if (isCurrentMessage) activePlayerSip = event;
       } else if (event.kind === "identityMirror") {
         identityMirrorByHolderBotId[event.state.holderBotId] = event.state;
       }
@@ -544,6 +566,10 @@ export function coffeeReplayStateAt(
     playerPresent,
     playerDeparting,
     playerDepartureEvent,
+    latestBaristaDelivery,
+    activeBaristaDelivery,
+    playerSipCount,
+    activePlayerSip,
     identityMirrorByHolderBotId,
   };
 }
@@ -653,6 +679,12 @@ function coffeeReviewReplayEventLine(
 ): string {
   if (event.kind === "playerDeparture") {
     return `- ${event.occurredAt} playerDeparture: player left the table early`;
+  }
+  if (event.kind === "playerSip") {
+    return `- ${event.occurredAt} playerSip: ${event.drinkName} sip ${event.sipCount}/6 (fill=${event.fillId}, image=${event.imageId ?? "none"})`;
+  }
+  if (event.kind === "baristaDelivery") {
+    return `- ${event.occurredAt} baristaDelivery: ${event.barista.name} delivered ${event.drink.name} (${event.drink.choice}, image=${event.drink.imageId ?? "none"}, fallback=${event.drink.fallback ? "yes" : "no"})`;
   }
   const bot = coffeeReviewBotLabel(event.botId, botNameById);
   if (event.kind === "arrival") {

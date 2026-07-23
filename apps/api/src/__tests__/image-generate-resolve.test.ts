@@ -2,14 +2,62 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+} from "@localai/shared";
+import {
   botBelongsToUser,
   conversationHasAssistantWithBotId,
   imageContextIncludesOfflineOnlyBot,
   resolveConversationForSandboxImageGenerate,
+  resolveImageGenerateModelPreferences,
   resolveImageGeneratePersistence,
   resolveSandboxImageBotAttribution,
   resolveStandaloneBotImageForGenerate,
 } from "../image-generate-resolve.ts";
+
+describe("resolveImageGenerateModelPreferences", () => {
+  const source = {
+    preferredLocalImageModel: "local-general",
+    preferredOpenAiImageModel: "gpt-image-1",
+    preferredZenWallpaperLocalImageModel: "local-zen",
+    preferredZenWallpaperOpenAiImageModel: "gpt-image-1-mini",
+  };
+
+  it("keeps group-room generation on the Zen wallpaper model lane", () => {
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(
+        GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+        source,
+      ),
+      {
+        preferredLocalImageModel: "local-zen",
+        preferredOpenAiImageModel: "gpt-image-1-mini",
+      },
+    );
+  });
+
+  it("keeps Home atmosphere on the account image lane", () => {
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredZenWallpaperLocalImageModel: "disabled",
+        preferredZenWallpaperOpenAiImageModel: "disabled",
+      }),
+      {
+        preferredLocalImageModel: "local-general",
+        preferredOpenAiImageModel: "gpt-image-1",
+      },
+    );
+    assert.equal(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredOpenAiImageModel: "disabled",
+      }).preferredOpenAiImageModel,
+      "disabled",
+    );
+  });
+});
 
 function makeConversationDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");

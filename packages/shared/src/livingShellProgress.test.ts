@@ -9,7 +9,6 @@ import {
   normalizePrismCapabilityRevelations,
   normalizePrismTutorialProgress,
   prismTutorialShouldRun,
-  revealPrismCapability,
 } from "./livingShellProgress.ts";
 
 describe("living-shell account progress", () => {
@@ -49,35 +48,24 @@ describe("living-shell account progress", () => {
 });
 
 describe("capability revelations", () => {
-  it("starts with Slate and Zen visible and reveals milestones permanently", () => {
+  it("keeps every capability available during alpha", () => {
     const initial = createPrismCapabilityRevelations({
       now: "2026-07-22T00:00:00.000Z",
     });
-    assert.equal(initial.slate.revealed, true);
-    assert.equal(initial.zen.revealed, true);
-    assert.equal(initial.marketplace.revealed, false);
-    const revealed = revealPrismCapability(
-      initial,
-      "marketplace",
-      "bot_saved",
-      "2026-07-22T01:00:00.000Z",
-    );
-    const attemptedReplacement = revealPrismCapability(
-      revealed,
-      "marketplace",
-      "prism_requested",
-      "2026-07-22T02:00:00.000Z",
-    );
-    assert.equal(attemptedReplacement, revealed);
-    assert.equal(revealed.marketplace.reason, "bot_saved");
+    for (const capability of Object.values(initial)) {
+      assert.equal(capability.revealed, true);
+      assert.equal(capability.reason, "available");
+    }
   });
 
-  it("normalizes legacy and existing-account revelation state", () => {
+  it("opens legacy pending state instead of restoring alpha blocks", () => {
     const restored = normalizePrismCapabilityRevelations(
-      { marketplace: true },
+      { marketplace: true, coffee: false, signal: { revealed: false } },
       { now: "2026-07-22T00:00:00.000Z" },
     );
     assert.equal(restored.marketplace.reason, "restored");
+    assert.equal(restored.coffee.revealed, true);
+    assert.equal(restored.signal.revealed, true);
     const existing = normalizePrismCapabilityRevelations(null, {
       completedFallback: true,
       now: "2026-07-22T00:00:00.000Z",

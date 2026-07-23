@@ -12,6 +12,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+  DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
@@ -21,6 +22,7 @@ import {
   normalizeBotFaceBlinkBar,
   normalizeBotFaceBlinkOffsetX,
   normalizeBotFaceBlinkOffsetY,
+  normalizeBotFaceBlinkRotationDeg,
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
@@ -51,6 +53,7 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
+  normalizeHubAtmosphereStyle,
   normalizePrismStartupPreference,
   normalizePrismCapabilityRevelations,
   PRISM_CAPABILITY_IDS,
@@ -77,6 +80,7 @@ import {
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
   type GraphicsQuality,
+  type HubAtmosphereStyle,
   type PrismStartupPreference,
   type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
@@ -110,6 +114,7 @@ import {
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
+  atmosphereStyle?: HubAtmosphereStyle;
   startupPreference?: PrismStartupPreference;
   capabilityRevelations?: PrismCapabilityRevelations;
   preferredProvider: ProviderName;
@@ -217,6 +222,7 @@ export interface BackupBotSnapshot {
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
+  faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
@@ -1403,6 +1409,7 @@ export function exportUserSnapshot(
          zen_wallpaper_text_mask_enabled,
          zen_wallpaper_grayscale_enabled,
          zen_wallpaper_blurred_edges_enabled,
+         atmosphere_style,
          zen_wallpaper_style_notes,
          zen_message_font_min_px,
          zen_message_font_max_px,
@@ -1434,6 +1441,7 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
+        atmosphere_style: string | null;
         startup_preference: string | null;
         preferred_provider: ProviderName;
         ephemeral_chat_provider_preferences: string | null;
@@ -1502,6 +1510,7 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+        atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
         startupPreference: normalizePrismStartupPreference(
           user.startup_preference,
         ),
@@ -1699,6 +1708,7 @@ export function exportUserSnapshot(
          face_blink_scale,
          face_blink_offset_x,
          face_blink_offset_y,
+         face_blink_rotation_deg,
          face_thinking_frames,
          authored_audio_voice_profile,
          audio_voice_profile_override,
@@ -1757,6 +1767,7 @@ export function exportUserSnapshot(
     face_blink_scale: number | null;
     face_blink_offset_x: number | null;
     face_blink_offset_y: number | null;
+    face_blink_rotation_deg: number | null;
     face_thinking_frames: string | null;
     authored_audio_voice_profile: string | null;
     audio_voice_profile_override: string | null;
@@ -2097,6 +2108,9 @@ export function exportUserSnapshot(
         faceBlinkOffsetY:
           normalizeBotFaceBlinkOffsetY(bot.face_blink_offset_y) ??
           DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+        faceBlinkRotationDeg:
+          normalizeBotFaceBlinkRotationDeg(bot.face_blink_rotation_deg) ??
+          DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
         faceThinkingFrames:
           parseStoredBotFaceThinkingFrames(bot.face_thinking_frames) ??
           DEFAULT_BOT_FACE_THINKING_FRAMES,
@@ -2660,6 +2674,9 @@ function importUserSnapshotWithinTransaction(
       SET
         theme = ?,
         graphics_quality = ?,
+        atmosphere_style = ?,
+        hub_atmosphere_image_id = NULL,
+        hub_atmosphere_image_style = NULL,
         startup_preference = ?,
         preferred_provider = ?,
         ephemeral_chat_provider_preferences = ?,
@@ -2729,6 +2746,7 @@ function importUserSnapshotWithinTransaction(
         ? settings.theme
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
+      normalizeHubAtmosphereStyle(settings.atmosphereStyle),
       normalizePrismStartupPreference(settings.startupPreference),
       settings.preferredProvider === "openai" ||
         settings.preferredProvider === "anthropic"
@@ -2907,6 +2925,7 @@ function importUserSnapshotWithinTransaction(
         face_blink_scale,
         face_blink_offset_x,
         face_blink_offset_y,
+        face_blink_rotation_deg,
         face_thinking_frames,
         authored_audio_voice_profile,
         audio_voice_profile_override,
@@ -2914,7 +2933,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
@@ -3000,6 +3019,8 @@ function importUserSnapshotWithinTransaction(
           DEFAULT_BOT_FACE_BLINK_OFFSET_X,
         normalizeBotFaceBlinkOffsetY(bot.faceBlinkOffsetY) ??
           DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+        normalizeBotFaceBlinkRotationDeg(bot.faceBlinkRotationDeg) ??
+          DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
         serializeBotFaceThinkingFrames(bot.faceThinkingFrames),
         serializeBotAudioVoiceProfileV1(bot.authoredAudioVoiceProfile),
         bot.audioVoiceProfileOverride === null ||

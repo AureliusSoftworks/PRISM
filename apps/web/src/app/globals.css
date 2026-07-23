@@ -59,6 +59,32 @@ html[data-prism-visual-lifecycle="suspended"]
   animation-play-state: paused !important;
 }
 
+/* Opening the global Prism conversation is a stronger, modal pause than an
+   ordinary background-tab suspension. Freeze every authored CSS timeline in
+   the app tree; the two companion portal layers opt out so Prism remains live. */
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"]),
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"]) *,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])::before,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])::after,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])
+  *::before,
+html[data-prism-system-paused="true"]
+  body
+  > :not([data-prism-system-pause-exempt="true"])
+  *::after {
+  animation-play-state: paused !important;
+}
+
 /* Player-selected graphics ceilings. High intentionally adds no overrides and
    preserves today's adaptive rendering. Medium bounds expensive scene paint;
    Low also freezes explicitly decorative motion and drops authored GPU filters.

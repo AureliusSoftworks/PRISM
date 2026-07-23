@@ -63,7 +63,7 @@ describe("mode tutorials", () => {
     );
     assert.equal(
       modeTutorialStep("botcast", 99).heading,
-      "Replay or export video",
+      "Replay or enhance audio",
     );
     assert.equal(
       modeTutorialStep("slate", 99).heading,
@@ -71,21 +71,51 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("teaches local replay and explicit retry-safe Premium production", () => {
+  it("teaches that Prism steps out during live Signal and Coffee sessions", () => {
+    const coffeeLiveCopy = MODE_TUTORIALS.coffee.steps.at(-1)?.body ?? "";
+    const signalLiveCopy = MODE_TUTORIALS.botcast.steps[7]?.body ?? "";
+    assert.match(
+      coffeeLiveCopy,
+      /Prism's floating assistant steps out once the live Coffee Session begins/u,
+    );
+    assert.match(coffeeLiveCopy, /returns for setup, review, and replay/u);
+    assert.match(
+      signalLiveCopy,
+      /Prism's floating assistant steps out for the full live episode/u,
+    );
+    assert.match(signalLiveCopy, /returns on the show dashboard and in replay/u);
+  });
+
+  it("teaches the full-screen Coffee Group creation handoff", () => {
+    const groupCreationCopy = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
+    assert.match(
+      groupCreationCopy,
+      /Creating a new Coffee Group opens a full-screen PRISM handoff/u,
+    );
+    assert.match(groupCreationCopy, /name and conversation starters take shape/u);
+  });
+
+  it("teaches faithful audio replay and separate Eleven v3 enhancement", () => {
     const coffeeCopy = MODE_TUTORIALS.coffee.steps.at(-1)?.body ?? "";
     const signalCopy = MODE_TUTORIALS.botcast.steps.at(-1)?.body ?? "";
-    assert.match(coffeeCopy, /third-person video automatically/u);
+    assert.match(coffeeCopy, /faithful third-person cut of the saved Coffee table automatically/u);
+    assert.match(coffeeCopy, /frozen bot appearances and voices/u);
+    assert.match(coffeeCopy, /isolated background renderer/u);
     assert.match(coffeeCopy, /adds no AI conversation turn/u);
-    assert.match(signalCopy, /never asks an AI to recreate/u);
-    assert.match(signalCopy, /opens its local replay immediately/u);
-    assert.match(signalCopy, /no future LLM or ElevenLabs call/u);
-    assert.match(signalCopy, /records that visual performance silently/u);
-    assert.match(signalCopy, /adds the voice takes and studio audio captured with the episode/u);
-    assert.match(signalCopy, /Local replay remains available before and after export/u);
+    assert.match(coffeeCopy, /Signal-like header/u);
+    assert.match(coffeeCopy, /copies the full transcript to your clipboard/u);
+    assert.match(coffeeCopy, /instead of exporting a transcript file/u);
+    assert.match(signalCopy, /flattened live master/u);
+    assert.match(signalCopy, /verbatim instead of being reconstructed/u);
+    assert.match(signalCopy, /same branded intro/u);
+    assert.match(signalCopy, /opens its replay immediately/u);
+    assert.match(signalCopy, /with honest loading feedback/u);
+    assert.match(signalCopy, /Video export is disabled/u);
+    assert.match(signalCopy, /compatibility fallback/u);
     assert.match(signalCopy, /explicit ONLINE action/u);
     assert.match(signalCopy, /may be sent to ElevenLabs and consume credits/u);
-    assert.match(signalCopy, /cached audio without another paid voice generation/u);
-    assert.match(signalCopy, /without replacing the standard export/u);
+    assert.match(signalCopy, /Eleven v3 Text to Dialogue/u);
+    assert.match(signalCopy, /never overwrites the faithful recording/u);
   });
 
   it("explains that Coffee cross-talk controls audible backchannels", () => {
@@ -101,6 +131,7 @@ describe("mode tutorials", () => {
       joinCopy,
       /one bot cuts off another.*interrupter speaks a short hold-on.*interrupted bot takes a brief processing beat.*annoyed, abandoned ending/u,
     );
+    assert.match(joinCopy, /hold-on over the outgoing voice before that voice releases/u);
     assert.match(joinCopy, /sparse mic-ready breath/u);
   });
 
@@ -108,12 +139,20 @@ describe("mode tutorials", () => {
     const copy = MODE_TUTORIALS.coffee.steps.map((step) => step.body).join(" ");
     assert.match(copy, /Have something made/u);
     assert.match(copy, /Make the rounds/u);
+    assert.match(copy, /persona-shaped greeting asks whether you'd like coffee/u);
     assert.match(copy, /LOCAL/u);
     assert.match(copy, /hidden 30-minute ceiling/u);
     assert.match(copy, /two or three table replies/u);
     assert.match(copy, /invisible visit clock/u);
     assert.match(copy, /tops off an eligible bot/u);
     assert.match(copy, /outside the transcript, turn count, and memory/u);
+    assert.match(copy, /two distinct Library bots as staff/u);
+    assert.match(copy, /I’ll take the…/u);
+    assert.match(copy, /Surprise me/u);
+    assert.match(copy, /Standard house blend/u);
+    assert.match(copy, /prepares them in the background/u);
+    assert.match(copy, /first sip.*real, replayable response/u);
+    assert.match(copy, /ten quiet seconds/u);
   });
 
   it("explains shared mic-ready breaths without adding a setup gate", () => {
@@ -562,7 +601,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /tied character sound loop is forced on for audition at its real Master × Foley level/u,
+      /sound loops respect their saved Play when checkboxes at the real Master × Foley level/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /always-on layers remain audible while thinking-only loops stay quiet until the bot thinks/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Opening another show clears tonight’s guest, topic, private comments, model override, and duration/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -618,11 +665,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /never cuts ahead to the next bot merely because its response is preparing/u,
+      /Wide most often, sometimes the thinking bot, and sometimes the other bot/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /moves to the bot only when speech begins/u,
+      /Once speech begins, Auto prioritizes the speaker/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -646,7 +693,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /Whenever either bot reaches for coffee, Auto takes the full studio for the complete lift, sip, and return/u,
+      /Cup motion never steers or overrides Auto/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      /random off-turn sip simply plays in whichever shot the director already chose/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -686,15 +737,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /arrives early in the host’s own line[\s\S]*break off and redirect on mic[\s\S]*pivot lands a little awkwardly/u,
+      /Producer cues always wait for the host’s next turn[\s\S]*never cut off whoever is speaking on their own/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Once most of the point is already out[\s\S]*stays queued for the host’s next turn/u,
+      /Interrupt now is the only cue action that cuts in[\s\S]*during a host line[\s\S]*audience-heard prefix[\s\S]*redirects immediately/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*guest takes a brief processing beat before the annoyed cutoff retort[\s\S]*unheard remainder of the guest’s line is discarded/u,
+      /guest has the mic or is next[\s\S]*saved short interjections[\s\S]*brief processing beat before the annoyed cutoff retort[\s\S]*unheard remainder of an interrupted line is discarded/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -798,11 +849,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-      /episode card shows each export's progress independently/u,
+      /Video export is disabled/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-      /Local replay remains available before and after export/u,
+      /same saved effects and transcript timing/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -855,6 +906,10 @@ describe("mode tutorials", () => {
       '[data-tutorial-target="slate-deliberation"]',
       '[data-tutorial-target="slate-revision"]',
     ]);
+    assert.match(
+      MODE_TUTORIALS.slate.steps[6]?.body ?? "",
+      /Voice on[\s\S]*pace of its voice[\s\S]*mute the widget/i,
+    );
     assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
     assert.match(
       MODE_TUTORIALS.slate.steps[0]?.body ?? "",
@@ -895,7 +950,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
-      /fade/i,
+      /newest two messages remain readable/i,
+    );
+    assert.match(
+      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
+      /app softens behind the open panel/i,
+    );
+    assert.match(
+      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
+      /glides to a stop/i,
     );
     assert.match(
       MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
@@ -1098,11 +1161,12 @@ describe("mode tutorials", () => {
     const automaticThinkingSfx = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Hear each bot think",
     );
-    assert.match(automaticThinkingSfx?.body ?? "", /AI-generated and Marketplace bots/);
+    assert.match(automaticThinkingSfx?.body ?? "", /one of four built-in PRISM/);
     assert.match(automaticThinkingSfx?.body ?? "", /Computer calculating/);
-    assert.match(automaticThinkingSfx?.body ?? "", /assign it only to thinking/);
-    assert.match(automaticThinkingSfx?.body ?? "", /LOCAL privacy/);
-    assert.match(automaticThinkingSfx?.body ?? "", /still completes/);
+    assert.match(automaticThinkingSfx?.body ?? "", /while thinking/);
+    assert.match(automaticThinkingSfx?.body ?? "", /ElevenLabs is connected and ONLINE/);
+    assert.match(automaticThinkingSfx?.body ?? "", /manual, AI-generated, or Marketplace/);
+    assert.match(automaticThinkingSfx?.body ?? "", /restore the PRISM default, or mute it/);
     assert.match(routing?.body ?? "", /non-neutral mood/);
     assert.match(routing?.body ?? "", /neutral speech stays untagged/);
   });
@@ -1134,6 +1198,7 @@ describe("mode tutorials", () => {
 
     assert.match(coffee?.body ?? "", /dead air/);
     assert.match(coffee?.body ?? "", /without stealing the slow bot’s turn/);
+    assert.match(coffee?.body ?? "", /begin answering over the aside’s natural ending/);
     assert.match(coffee?.body ?? "", /Ambient sips continue through quiet beats and listening moments/);
     assert.match(coffee?.body ?? "", /active speaker keeps their cup down/);
     assert.match(coffee?.body ?? "", /cup-return sounds stay synchronized/);
@@ -1142,7 +1207,10 @@ describe("mode tutorials", () => {
       signal?.body ?? "",
       /awkward dead air|brief mood-aware aside/u,
     );
-    assert.match(signal?.body ?? "", /Bot ambient sips land only while the other bot is talking/);
+    assert.match(signal?.body ?? "", /Bot ambient sips happen randomly in any camera shot while that bot is off-turn/);
+    assert.match(signal?.body ?? "", /keeps its cup down while speaking, preparing, or holding the next turn/);
+    assert.match(signal?.body ?? "", /standalone magic word PICKLES/);
+    assert.match(signal?.body ?? "", /the other bot comments on the strange pause/);
     assert.match(signal?.body ?? "", /your cup moves only after you click Sip coffee/);
     assert.match(signal?.body ?? "", /cup-return sounds stay synchronized/);
   });

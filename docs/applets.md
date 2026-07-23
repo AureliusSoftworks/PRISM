@@ -31,12 +31,13 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | --- | --- | --- | --- |
 | Chat | v1.27 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Zen | v1.26 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.27 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and soft recipient reactions. |
-| Signal | v1.53 | Active | One compact identity row plus a coordinated visual-and-sonic Atmosphere pass, with non-modal background progress. |
+| Coffee | v2.28 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and a persona-shaped bar greeting. |
+| Signal | v1.54 | Active | Show-scoped bookings, distinct-cast soundchecks, and trigger-accurate character sound loops. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
+| Story | v0.26 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
 | Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
@@ -88,6 +89,15 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-07-22
+
+- Bumped `Signal` to `v1.54` so changing shows clears the full episode setup,
+  stage placement can never level-check a host against itself, thinking-only
+  avatar loops stay quiet while idle, and always-on character sounds use the
+  booked bot’s frozen visual/audio snapshot.
+
+- Bumped `Coffee` to `v2.28` so the selected bar bot floats and glows beside a
+  compact persona blurb, then directly asks whether the player would like
+  coffee before the cup-or-pot choice.
 
 - Bumped `Coffee` to `v2.27` and `Signal` to `v1.53` so Identity Crisis
   recognizes bounded sentence-leading vocatives such as `So Ian—...` and

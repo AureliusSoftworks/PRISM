@@ -1,5 +1,4 @@
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
-import type { PrismCapabilityId } from "./livingShellProgress.js";
 
 export const PRISM_COMPANION_RECOVERY_LIMIT = 3;
 export const PRISM_COMPANION_MESSAGE_MAX_LENGTH = 4_000;
@@ -77,7 +76,6 @@ export interface PrismCompanionResponse {
   actions: PrismCompanionActionIntent[];
   provider: EphemeralChatResolvedProvider;
   model: string | null;
-  revealedCapabilities: PrismCapabilityId[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

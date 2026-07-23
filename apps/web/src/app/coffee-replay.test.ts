@@ -434,6 +434,68 @@ describe("coffee replay helpers", () => {
     });
   });
 
+  it("replays the frozen delivery image and exact player sip count", () => {
+    const messages = [
+      {
+        role: "system",
+        content: "",
+        coffeeReplayEvents: [
+          {
+            v: 1 as const,
+            name: "coffeeReplayEvent" as const,
+            kind: "baristaDelivery" as const,
+            botId: "barista-1",
+            occurredAt: "2026-07-02T15:00:00.000Z",
+            barista: {
+              id: "barista-1",
+              name: "Casey",
+              color: "#88aaff",
+              glyph: "sparkles",
+              fallback: false,
+            },
+            drink: {
+              choice: "custom" as const,
+              name: "Maple Prism Cortado",
+              description: "Maple oat foam over espresso.",
+              imageId: "coffee-image-1",
+              fallback: false,
+            },
+            line: "Here you are — Maple Prism Cortado.",
+          },
+        ],
+      },
+      {
+        role: "system",
+        content: "",
+        coffeeReplayEvents: [
+          {
+            v: 1 as const,
+            name: "coffeeReplayEvent" as const,
+            kind: "playerSip" as const,
+            occurredAt: "2026-07-02T15:00:05.000Z",
+            fillId: "fill-1",
+            sipCount: 1,
+            drinkName: "Maple Prism Cortado",
+            imageId: "coffee-image-1",
+          },
+        ],
+      },
+    ];
+    const delivery = coffeeReplayStateAt(messages, 0);
+    assert.equal(delivery.activeBaristaDelivery?.barista.name, "Casey");
+    assert.equal(
+      delivery.latestBaristaDelivery?.drink.imageId,
+      "coffee-image-1",
+    );
+    assert.equal(coffeeReplayCompletionHoldMs(messages[0], false), 2_400);
+
+    const sip = coffeeReplayStateAt(messages, 1);
+    assert.equal(sip.latestBaristaDelivery?.drink.name, "Maple Prism Cortado");
+    assert.equal(sip.playerSipCount, 1);
+    assert.equal(sip.activePlayerSip?.imageId, "coffee-image-1");
+    assert.equal(coffeeReplayCompletionHoldMs(messages[1], false), 900);
+  });
+
   it("replays persisted mirror targets and hands voice over only after the trigger", () => {
     const first = createBotIdentityMirrorStateV1({
       surface: "coffee",

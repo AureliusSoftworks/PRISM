@@ -5,6 +5,7 @@ export interface PrismVisualLifecycleSnapshot {
   visible: boolean;
   focused: boolean;
   pageHidden: boolean;
+  systemPaused: boolean;
   reducedMotion: boolean;
   revision: number;
 }
@@ -15,6 +16,7 @@ export type PrismVisualLifecycleEvent =
   | { type: "blur" }
   | { type: "pagehide" }
   | { type: "pageshow"; hidden: boolean; focused: boolean }
+  | { type: "system-pause"; active: boolean }
   | { type: "reduced-motion"; matches: boolean };
 
 type Listener = () => void;
@@ -23,8 +25,12 @@ export function resolvePrismVisualLifecycle(options: {
   hidden: boolean;
   focused: boolean;
   pageHidden: boolean;
+  systemPaused?: boolean;
 }): PrismVisualLifecycle {
-  return options.hidden || !options.focused || options.pageHidden
+  return options.hidden ||
+    !options.focused ||
+    options.pageHidden ||
+    options.systemPaused
     ? "suspended"
     : "foreground";
 }
@@ -37,17 +43,21 @@ export class PrismVisualLifecycleController {
     focused: boolean;
     reducedMotion: boolean;
     pageHidden?: boolean;
+    systemPaused?: boolean;
   }) {
     const pageHidden = options.pageHidden ?? false;
+    const systemPaused = options.systemPaused ?? false;
     this.snapshotValue = {
       lifecycle: resolvePrismVisualLifecycle({
         hidden: options.hidden,
         focused: options.focused,
         pageHidden,
+        systemPaused,
       }),
       visible: !options.hidden,
       focused: options.focused,
       pageHidden,
+      systemPaused,
       reducedMotion: options.reducedMotion,
       revision: 0,
     };
@@ -61,6 +71,7 @@ export class PrismVisualLifecycleController {
     let hidden = !this.snapshotValue.visible;
     let focused = this.snapshotValue.focused;
     let pageHidden = this.snapshotValue.pageHidden;
+    let systemPaused = this.snapshotValue.systemPaused;
     let reducedMotion = this.snapshotValue.reducedMotion;
 
     switch (event.type) {
@@ -83,6 +94,9 @@ export class PrismVisualLifecycleController {
         hidden = event.hidden;
         focused = event.focused;
         break;
+      case "system-pause":
+        systemPaused = event.active;
+        break;
       case "reduced-motion":
         reducedMotion = event.matches;
         break;
@@ -92,12 +106,14 @@ export class PrismVisualLifecycleController {
       hidden,
       focused,
       pageHidden,
+      systemPaused,
     });
     const next = {
       lifecycle,
       visible: !hidden,
       focused,
       pageHidden,
+      systemPaused,
       reducedMotion,
       revision: this.snapshotValue.revision + 1,
     } satisfies PrismVisualLifecycleSnapshot;
@@ -111,13 +127,16 @@ const SERVER_SNAPSHOT: PrismVisualLifecycleSnapshot = {
   visible: false,
   focused: false,
   pageHidden: true,
+  systemPaused: false,
   reducedMotion: false,
   revision: 0,
 };
 
 const listeners = new Set<Listener>();
+const systemPauseReasons = new Set<string>();
 let currentSnapshot = SERVER_SNAPSHOT;
 let releaseBrowserListeners: (() => void) | null = null;
+let publishSystemPause: ((active: boolean) => void) | null = null;
 let browserOwnerCount = 0;
 
 function emit(snapshot: PrismVisualLifecycleSnapshot): void {
@@ -125,6 +144,11 @@ function emit(snapshot: PrismVisualLifecycleSnapshot): void {
   if (typeof document !== "undefined") {
     document.documentElement.dataset.prismVisualLifecycle =
       snapshot.lifecycle;
+    if (snapshot.systemPaused) {
+      document.documentElement.dataset.prismSystemPaused = "true";
+    } else {
+      document.documentElement.removeAttribute("data-prism-system-paused");
+    }
     document.documentElement.dataset.prismReducedMotion = snapshot.reducedMotion
       ? "true"
       : "false";
@@ -141,6 +165,7 @@ function attachBrowserListeners(): () => void {
     hidden: document.hidden,
     focused: document.hasFocus(),
     reducedMotion: reducedMotion.matches,
+    systemPaused: systemPauseReasons.size > 0,
   });
   emit(controller.snapshot);
 
@@ -160,6 +185,9 @@ function attachBrowserListeners(): () => void {
     });
   const handleReducedMotion = (event: MediaQueryListEvent): void =>
     publish({ type: "reduced-motion", matches: event.matches });
+  publishSystemPause = (active: boolean): void => {
+    publish({ type: "system-pause", active });
+  };
 
   document.addEventListener("visibilitychange", handleVisibility);
   window.addEventListener("focus", handleFocus);
@@ -175,7 +203,9 @@ function attachBrowserListeners(): () => void {
     window.removeEventListener("pagehide", handlePageHide);
     window.removeEventListener("pageshow", handlePageShow);
     reducedMotion.removeEventListener("change", handleReducedMotion);
+    publishSystemPause = null;
     document.documentElement.removeAttribute("data-prism-visual-lifecycle");
+    document.documentElement.removeAttribute("data-prism-system-paused");
     document.documentElement.removeAttribute("data-prism-reduced-motion");
     currentSnapshot = SERVER_SNAPSHOT;
   };
@@ -205,6 +235,22 @@ export function getPrismVisualLifecycleServerSnapshot(): PrismVisualLifecycleSna
   return SERVER_SNAPSHOT;
 }
 
+export function getPrismSystemPausedSnapshot(): boolean {
+  return currentSnapshot.systemPaused;
+}
+
+export function getPrismSystemPausedServerSnapshot(): boolean {
+  return false;
+}
+
+export function setPrismSystemPause(reason: string, active: boolean): void {
+  const wasPaused = systemPauseReasons.size > 0;
+  if (active) systemPauseReasons.add(reason);
+  else systemPauseReasons.delete(reason);
+  const isPaused = systemPauseReasons.size > 0;
+  if (wasPaused !== isPaused) publishSystemPause?.(isPaused);
+}
+
 export function subscribePrismVisualLifecycle(listener: Listener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
@@ -215,5 +261,6 @@ export function resetPrismVisualLifecycleForTests(): void {
   releaseBrowserListeners = null;
   browserOwnerCount = 0;
   currentSnapshot = SERVER_SNAPSHOT;
+  systemPauseReasons.clear();
   listeners.clear();
 }

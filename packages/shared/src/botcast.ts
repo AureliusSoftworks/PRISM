@@ -10,12 +10,14 @@ import {
   type ListenerReactionPlanV1,
 } from "./listenerReaction.ts";
 import {
+  BOT_POWER_CANONICAL_SILENCE_V1,
   botPowerAvatarVisibilityModeV1,
   botPowerResponseIsSilentV1,
   type BotPowerAvatarVisibilityModeV1,
   type BotPowerObserverPerspectiveV1,
   type BotPowerObserverVisibilityV1,
 } from "./botPower.ts";
+import { signalPicklesSipCueFromEvent } from "./signalPickles.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
 export type BotcastEpisodeStatus = "live" | "completed";
@@ -73,6 +75,18 @@ export const BOTCAST_HOST_INTERRUPTION_LINE_FALLBACKS = [
   "Sorry, one moment—",
   "Hold that thought—",
 ] as const;
+export const BOTCAST_HOST_RECOVERY_QUESTION_TARGET = 4;
+export const BOTCAST_HOST_RECOVERY_QUESTION_MAX_LENGTH = 200;
+/**
+ * Legacy safety net only. Newly completed shows persist persona-authored
+ * equivalents in the same positional order.
+ */
+export const BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS = [
+  "Make that concrete for me: what is one example that would test the claim?",
+  "What consequence matters most here, and who has to live with it?",
+  "Where does this become a real choice, and what does that choice cost?",
+  "What contradiction or evidence would make you reconsider that answer?",
+] as const;
 export const BOTCAST_EPHEMERAL_INTERRUPTION_BRIDGE_ID_PREFIX =
   "signal-interruption-bridge:";
 
@@ -93,6 +107,40 @@ export function normalizeBotcastHostInterruptionLines(raw: unknown): string[] {
     if (lines.length >= BOTCAST_HOST_INTERRUPTION_LINE_TARGET) break;
   }
   return lines;
+}
+
+export function normalizeBotcastHostRecoveryQuestions(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  if (
+    raw.length === 1 &&
+    raw[0] === BOT_POWER_CANONICAL_SILENCE_V1
+  ) {
+    return [BOT_POWER_CANONICAL_SILENCE_V1];
+  }
+  const seen = new Set<string>();
+  const questions: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const question = value.replace(/\s+/gu, " ").trim();
+    const key = question.toLocaleLowerCase();
+    if (
+      !question.endsWith("?") ||
+      question.length < 12 ||
+      question.length > BOTCAST_HOST_RECOVERY_QUESTION_MAX_LENGTH ||
+      /^(?:host|guest|question|fallback|template)\s*:/iu.test(question) ||
+      /^(?:\[|\(|\*)/u.test(question) ||
+      /\b(?:as an ai|language model|fallback template|placeholder)\b/iu.test(
+        question,
+      ) ||
+      seen.has(key)
+    ) {
+      continue;
+    }
+    seen.add(key);
+    questions.push(question);
+    if (questions.length >= BOTCAST_HOST_RECOVERY_QUESTION_TARGET) break;
+  }
+  return questions;
 }
 
 export function botcastHostInterruptionLinesForSeed(seed: string): string[] {
@@ -742,6 +790,11 @@ export interface BotcastShow {
   dashboardBlurbs: string[];
   /** Prewritten host bridges available before a live redirect model returns. */
   hostInterruptionLines: string[];
+  /**
+   * Persona-authored, show-scoped recovery questions used verbatim when a
+   * generated host follow-up cannot safely air.
+   */
+  hostRecoveryQuestions: string[];
   dayAtmosphere: BotcastAtmosphereState;
   nightAtmosphere: BotcastAtmosphereState;
   studioLighting: BotcastStudioLightingState;
@@ -917,8 +970,26 @@ export type BotcastReplayEventKind =
   | "camera_suggestion"
   | "listener_reaction"
   | "soundboard_cue"
+  | "audio_cue"
+  | "capture_timing"
   | "guest_thinking"
   | "episode_completed";
+
+export const BOTCAST_AUDIO_CUE_KINDS = [
+  "coffee_sip",
+  "coffee_cup_place",
+  "ambient_vocalization",
+  "action_sfx",
+] as const;
+
+export type BotcastAudioCueKind =
+  (typeof BOTCAST_AUDIO_CUE_KINDS)[number];
+
+export function isBotcastAudioCueKind(
+  value: unknown,
+): value is BotcastAudioCueKind {
+  return BOTCAST_AUDIO_CUE_KINDS.some((kind) => kind === value);
+}
 
 export interface BotcastReplayEvent {
   id: string;
@@ -1639,6 +1710,8 @@ export interface BotcastShowPatchRequest {
   musicIdentityDirection?: string;
   dashboardBlurbs?: string[];
   hostInterruptionLines?: string[];
+  /** Internal persona-authored recovery package supplied by identity generation. */
+  hostRecoveryQuestions?: string[];
   atmosphereImageUrl?: string | null;
   atmosphereImageId?: string | null;
   dayAtmosphereImageUrl?: string | null;
@@ -1963,6 +2036,38 @@ export function botcastHostRageQuitIntent(args: {
       ...BOTCAST_HOST_RAGE_QUIT_PATTERNS,
       ...BOTCAST_VOLUNTARY_DEPARTURE_PATTERNS,
     ].some((pattern) => {
+      const match = pattern.exec(clause);
+      if (!match) return false;
+      const prefix = clause.slice(0, match.index);
+      return !/\b(?:if|unless)\b/iu.test(prefix);
+    }),
+  );
+}
+
+const BOTCAST_HOST_SIGN_OFF_PATTERNS = [
+  /\b(?:and\s+)?that(?:'s| is)\s+(?:the|our|this)\s+(?:show|podcast|episode|interview|broadcast)\b(?=\s*(?:$|[,.!?:;—]|\b(?:folks|everyone|everybody|listeners)\b))/iu,
+  /\b(?:(?:this|the)\s+)?(?:show|podcast|episode|interview|broadcast)(?:'s| is)\s+(?:over|done|finished)\b/iu,
+  /\bthis\s+has\s+been\s+[^.!?]{1,80}\b(?:show|podcast|broadcast)\b(?=\s*(?:$|[,.!?:;—]))/iu,
+] as const;
+
+/**
+ * Recognizes an earned, unmistakable host sign-off so Auto cannot hand the mic
+ * back to the guest after the host has already ended the broadcast.
+ */
+export function botcastHostSignOffIntent(args: {
+  content: string;
+  segment: BotcastEpisodeSegment;
+  priorUtteranceCount: number;
+}): boolean {
+  if (
+    args.segment !== "interview" ||
+    args.priorUtteranceCount < BOTCAST_AUTO_MIN_EXCHANGES * 2 - 1
+  ) {
+    return false;
+  }
+  const clauses = args.content.split(/[.!?;—]+/u);
+  return clauses.some((clause) =>
+    BOTCAST_HOST_SIGN_OFF_PATTERNS.some((pattern) => {
       const match = pattern.exec(clause);
       if (!match) return false;
       const prefix = clause.slice(0, match.index);
@@ -2298,6 +2403,7 @@ export function botcastReplayTimeline(
   thinkingRanges: BotcastReplayThinkingRange[];
 } {
   const thinkingDurationByMessageId = new Map<string, number>();
+  const picklesSipHoldEndByMessageId = new Map<string, number>();
   const perceptionOverlapByMessageId = new Map(
     botcastPerceptionOverlapEventsV1(events).map((overlap) => [
       overlap.overlappingMessageId,
@@ -2305,6 +2411,13 @@ export function botcastReplayTimeline(
     ] as const),
   );
   for (const event of events) {
+    const picklesSip = signalPicklesSipCueFromEvent(event);
+    if (picklesSip) {
+      picklesSipHoldEndByMessageId.set(
+        picklesSip.messageId,
+        picklesSip.atMs + picklesSip.durationMs,
+      );
+    }
     if (event.kind !== "guest_thinking") continue;
     const messageId = event.payload.messageId;
     if (typeof messageId !== "string" || !messageId) continue;
@@ -2344,9 +2457,15 @@ export function botcastReplayTimeline(
           (messageStartMs[precedingIndex] ?? 0)) * overlap.startRatio
       : cursorMs;
     const twoVoiceFloorMs = index >= 2 ? messageEndMs[index - 2] ?? 0 : 0;
-    const startMs = overlap && precedingIndex === index - 1
-      ? Math.max(overlapStartMs, twoVoiceFloorMs)
-      : cursorMs;
+    const priorMessageId = index > 0 ? messages[index - 1]?.id ?? "" : "";
+    const priorPicklesHoldEndMs =
+      picklesSipHoldEndByMessageId.get(priorMessageId) ?? 0;
+    const startMs = Math.max(
+      overlap && precedingIndex === index - 1
+        ? Math.max(overlapStartMs, twoVoiceFloorMs)
+        : cursorMs,
+      priorPicklesHoldEndMs,
+    );
     const endMs = startMs + durationMs;
     messageStartMs.push(Math.round(startMs));
     messageEndMs.push(Math.round(endMs));

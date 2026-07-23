@@ -149,6 +149,7 @@ const IMAGE_FILE_URL_PATTERN = /\/api\/images\/([^/\s?#]+)\/(?:file|thumb)\b/giu
 const SYSTEM_MANAGED_IMAGE_ORIGINS = new Set([
   "botcast",
   "coffee_bar",
+  "hub_atmosphere",
   "slate_cover",
   "zen_wallpaper",
   "bot_profile_picture",
@@ -261,6 +262,9 @@ function modeLabelForImage(row: ImageAssetRow): string {
   const origin = row.origin?.trim().toLowerCase() ?? "";
   const purpose = row.purpose?.trim().toLowerCase() ?? "";
   if (origin === "botcast") return "Signal";
+  if (origin === "hub_atmosphere" || purpose === "hub_atmosphere") {
+    return "Home";
+  }
   if (origin === "zen_wallpaper" || purpose === "wallpaper") return "Zen";
   if (origin === "bot_profile_picture" || purpose === "bot_profile_picture") {
     return "Bot profile";
@@ -351,6 +355,13 @@ function buildImageAssetCleanupGraph(
     userId,
   )) {
     addExactReference(row.profile_picture_image_id, "Bot profile picture");
+  }
+  for (const row of readRows<{ hub_atmosphere_image_id: string | null }>(
+    db,
+    "SELECT hub_atmosphere_image_id FROM users WHERE id = ?",
+    userId,
+  )) {
+    addExactReference(row.hub_atmosphere_image_id, "Current Home atmosphere");
   }
   for (const row of readRows<{
     zen_wallpaper_image_id: string | null;

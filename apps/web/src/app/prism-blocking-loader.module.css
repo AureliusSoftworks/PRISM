@@ -91,42 +91,10 @@
 }
 .cancelButton:focus-visible { outline: 2px solid var(--prism-s); outline-offset: 3px; }
 
-.prismMark {
-  position: relative;
-  width: 92px;
-  height: 72px;
+.prismOrb {
+  --prism-orb-size: 72px;
   margin-bottom: 3px;
-  filter: drop-shadow(0 13px 24px color-mix(in srgb, var(--prism-m) 26%, transparent));
 }
-
-.lightCore {
-  position: absolute;
-  top: 29px;
-  left: 9px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 10px #fff, 0 0 26px rgba(255, 255, 255, .74);
-  animation: blockingLightPulse 1.8s ease-in-out infinite;
-}
-
-.prismMark > span:not(.lightCore) {
-  position: absolute;
-  left: 28px;
-  top: 34px;
-  width: 58px;
-  height: 7px;
-  border-radius: 99px;
-  transform-origin: left center;
-  animation: blockingRayBreathe 1.8s ease-in-out infinite;
-}
-
-.rayPink { background: var(--prism-p); transform: rotate(-29deg); }
-.rayOrange { background: var(--prism-r); transform: rotate(-14deg); }
-.rayLime { background: var(--prism-i); transform: rotate(0); }
-.rayCyan { background: var(--prism-s); transform: rotate(14deg); }
-.rayViolet { background: var(--prism-m); transform: rotate(29deg); }
 
 .eyebrow {
   color: color-mix(in srgb, var(--loader-ink) 62%, var(--prism-m));
@@ -219,24 +187,12 @@
   100% { transform: translateX(275%); }
 }
 
-@keyframes blockingLightPulse {
-  0%, 100% { transform: scale(.88); opacity: .78; }
-  50% { transform: scale(1.08); opacity: 1; }
-}
-
-@keyframes blockingRayBreathe {
-  0%, 100% { opacity: .62; filter: saturate(.9); }
-  50% { opacity: 1; filter: saturate(1.2); }
-}
-
 @media (max-width: 620px) {
   .card { border-radius: 22px; padding: 28px 20px; }
-  .prismMark { transform: scale(.88); margin-block: -4px; }
+  .prismOrb { --prism-orb-size: 64px; margin-block: -4px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lightCore,
-  .prismMark > span:not(.lightCore),
   .progressTrack[data-indeterminate="true"] .progressFill {
     animation: none;
   }

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { BotGeneratedDraftV1 } from "@localai/shared";
+import { PrismOrb } from "./PrismOrb";
 import styles from "./BotCreationRitual.module.css";
 
 const CREATION_STAGES = [
@@ -151,7 +152,7 @@ export function BotCreationRitual({
 
         <div className={styles.refractionField}>
           <span className={styles.inputBeam} />
-          <span className={styles.prism} />
+          <PrismOrb className={styles.prismOrb} />
           <span className={styles.colorBeam} data-color="rose" />
           <span className={styles.colorBeam} data-color="amber" />
           <span className={styles.colorBeam} data-color="cyan" />

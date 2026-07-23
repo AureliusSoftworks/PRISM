@@ -1,6 +1,6 @@
 import { fork, type ChildProcess } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
-import type { ReplayRenderKindV1 } from "@localai/shared";
+import type { ReplayRenderKindV1, ReplaySurfaceV1 } from "@localai/shared";
 import {
   claimNextReplayRecording,
   failReplayRender,
@@ -18,6 +18,7 @@ export interface ReplayRenderChildJob {
   sessionToken: string;
   recordingId: string;
   sourceId: string;
+  surface: ReplaySurfaceV1;
   renderToken: string;
   renderKind: ReplayRenderKindV1;
   webOrigin: string;
@@ -88,9 +89,9 @@ function renderTimeoutMs(durationMs: number): number {
 }
 
 /**
- * Serializes Signal video rendering behind one child process. Chromium and
- * FFmpeg never run in the API process, so live Signal traffic keeps its own
- * event loop and the foreground page never owns the render lease.
+ * Serializes authentic replay video rendering behind one child process.
+ * Chromium and FFmpeg never run in the API process, so live product traffic
+ * keeps its own event loop and the foreground page never owns the render lease.
  */
 export class ReplayRenderWorkerClient {
   private readonly workerUrl: URL;
@@ -130,9 +131,7 @@ export class ReplayRenderWorkerClient {
     if (!next) return;
     const [key, request] = next;
     this.pending.delete(key);
-    const claim = claimNextReplayRecording(request.db, request.userId, {
-      surface: "signal",
-    });
+    const claim = claimNextReplayRecording(request.db, request.userId);
     if (!claim) {
       queueMicrotask(() => void this.pump());
       return;
@@ -150,6 +149,7 @@ export class ReplayRenderWorkerClient {
       sessionToken: request.sessionToken,
       recordingId: claim.recording.id,
       sourceId: claim.recording.sourceId,
+      surface: claim.recording.surface,
       renderToken: claim.renderToken,
       renderKind: claim.renderKind,
       webOrigin: this.webOrigin,

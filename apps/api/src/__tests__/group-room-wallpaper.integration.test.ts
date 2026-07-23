@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import sharp from "sharp";
 import { getAppConfig } from "@localai/config";
-import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
+import {
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+} from "@localai/shared";
 import {
   createFetchRecorder,
   createTestDatabase,
@@ -262,6 +265,84 @@ describe("group-room wallpaper image generation route", () => {
       ),
       undefined
     );
+  });
+
+  it("routes Home atmosphere through the account image lane instead of the Zen wallpaper lane", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "home-atmosphere-provider@example.com",
+        password: "home-atmosphere-provider-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'local',
+              preferred_image_provider = 'openai',
+              preferred_openai_image_model = 'gpt-image-1',
+              preferred_zen_wallpaper_openai_image_model = 'disabled'
+        WHERE id = ?`,
+    ).run(userId);
+
+    const callStart = fetchRecorder.calls.length;
+    const response = await client.request(
+      "/api/images/generate",
+      jsonInit({
+        purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
+        atmosphereStyle: "dreamscape",
+      }),
+    );
+    const payload = await json(response);
+    assert.equal(response.status, 200, JSON.stringify(payload));
+    assert.equal(payload.image.origin, "hub_atmosphere");
+    assert.equal(payload.image.purpose, HUB_ATMOSPHERE_IMAGE_PURPOSE);
+    assert.match(payload.composedPrompt, /Atmosphere style: dreamscape/u);
+
+    const providerCalls = fetchRecorder.calls.slice(callStart);
+    assert.equal(providerCalls.length, 1);
+    const providerBody = JSON.parse(
+      String(providerCalls[0]!.init?.body),
+    ) as { model: string; prompt: string };
+    assert.equal(providerBody.model, "gpt-image-1");
+    assert.equal(providerBody.prompt, payload.composedPrompt);
+
+    const saved = db
+      .prepare(
+        `SELECT preferred_provider, hub_atmosphere_image_id, hub_atmosphere_image_style
+           FROM users WHERE id = ?`,
+      )
+      .get(userId) as {
+      preferred_provider: string;
+      hub_atmosphere_image_id: string | null;
+      hub_atmosphere_image_style: string | null;
+    };
+    assert.equal(saved.preferred_provider, "local");
+    assert.equal(saved.hub_atmosphere_image_id, payload.image.id);
+    assert.equal(saved.hub_atmosphere_image_style, "dreamscape");
+
+    db.prepare(
+      `UPDATE users
+          SET preferred_openai_image_model = 'disabled',
+              preferred_zen_wallpaper_openai_image_model = 'gpt-image-1-mini'
+        WHERE id = ?`,
+    ).run(userId);
+    const unavailableCallStart = fetchRecorder.calls.length;
+    const unavailable = await client.request(
+      "/api/images/generate",
+      jsonInit({
+        purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
+        atmosphereStyle: "sanctuary",
+      }),
+    );
+    assert.equal(unavailable.status, 400);
+    assert.match(
+      (await json(unavailable)).error,
+      /Online image generation is disabled/u,
+    );
+    assert.equal(fetchRecorder.calls.length, unavailableCallStart);
   });
 
   it("rejects bot or conversation attribution and cross-account member IDs before generation", async () => {

@@ -1515,6 +1515,92 @@ export function rasterizeAvatarDetailsAlpha(
   return alpha;
 }
 
+export interface FlattenLegacyAvatarDetailStampsResult {
+  details: AvatarDetailsV1;
+  flattened: boolean;
+  limitReached: boolean;
+  addedPixelCount: number;
+}
+
+/**
+ * Converts the retired structured accessory catalog into ordinary effect ink.
+ * The conversion is all-or-nothing so opening an older bot can never leave a
+ * clipped half-accessory behind when the authored-ink coverage cap is full.
+ */
+export function flattenLegacyAvatarDetailStampsToInk(
+  details: AvatarDetailsV1 | null | undefined,
+  faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null,
+): FlattenLegacyAvatarDetailStampsResult {
+  const normalized = normalizeAvatarDetails(details);
+  if (normalized.screen.stamps.length === 0) {
+    return {
+      details: cloneAvatarDetails(normalized),
+      flattened: false,
+      limitReached: false,
+      addedPixelCount: 0,
+    };
+  }
+  const destination =
+    decodeAvatarDetailsPaintColorMap(
+      normalized.screen.paintColorMapBase64,
+    ) ?? new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  const stampOnly: AvatarDetailsV1 = {
+    version: AVATAR_DETAILS_VERSION,
+    screen: {
+      stamps: normalized.screen.stamps.map((stamp) => ({ ...stamp })),
+      paintMaskBase64: null,
+    },
+  };
+  const stampAlpha = rasterizeAvatarDetailsAlpha(
+    stampOnly,
+    faceGeometry,
+    "effect",
+  );
+  let addedPixelCount = 0;
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const alphaIndex = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+      if (
+        (stampAlpha[alphaIndex] ?? 0) > 0 &&
+        avatarDetailsInkRoleAt(destination, x, y) === null
+      ) {
+        addedPixelCount += 1;
+      }
+    }
+  }
+  if (
+    avatarDetailsPaintColorPixelCount(destination) + addedPixelCount >
+    AVATAR_DETAILS_MAX_PAINT_PIXELS
+  ) {
+    return {
+      details: cloneAvatarDetails(normalized),
+      flattened: false,
+      limitReached: true,
+      addedPixelCount,
+    };
+  }
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const alphaIndex = y * AVATAR_DETAILS_CANVAS_SIZE + x;
+      if ((stampAlpha[alphaIndex] ?? 0) > 0) {
+        setAvatarDetailsInkRole(destination, x, y, "effect");
+      }
+    }
+  }
+  return {
+    details: avatarDetailsWithPaintColorMap(
+      {
+        ...normalized,
+        screen: { ...normalized.screen, stamps: [] },
+      },
+      destination,
+    ),
+    flattened: true,
+    limitReached: false,
+    addedPixelCount,
+  };
+}
+
 export function normalizeAvatarDetailsColor(
   color: string | null | undefined,
 ): string {

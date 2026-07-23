@@ -15,6 +15,23 @@ export type CoffeeMemoryCallbacks = "now" | "this-session" | "recent";
 export type CoffeeBarRole = "cup" | "pot";
 export type CoffeeBarDrink = "house" | "special";
 export type CoffeeBarSpecialImageStatus = "idle" | "generating" | "ready" | "failed";
+export type CoffeeBarOrderChoice = "house" | "custom" | "surprise";
+export type CoffeeBarOrderStatus =
+  | "idle"
+  | "queued"
+  | "generating"
+  | "ready"
+  | "fallback";
+export type CoffeeBarDeliveryStatus =
+  | "none"
+  | "pending"
+  | "delivering"
+  | "delivered";
+export type CoffeeBarDrinkReactionStatus =
+  | "idle"
+  | "pending"
+  | "claimed"
+  | "completed";
 export type CoffeeFarewellFuseKind = "empty-cup" | "no-vessel";
 
 export interface CoffeeBarServiceBotSnapshot {
@@ -23,6 +40,12 @@ export interface CoffeeBarServiceBotSnapshot {
   color: string | null;
   glyph: string | null;
   fallback: boolean;
+}
+
+export interface CoffeeBarGeneratedDrink {
+  name: string;
+  description: string;
+  visualBrief: string;
 }
 
 export interface CoffeePlayerCupState {
@@ -57,11 +80,25 @@ export interface CoffeeFarewellFuseState {
 
 /** Session-only persisted Coffee ritual and physical pacing state. */
 export interface CoffeeBarRitualState {
-  version: 1;
+  version: 2;
+  /** Legacy alias retained while existing waiter/top-off code migrates. */
   serviceBot: CoffeeBarServiceBotSnapshot;
+  frontBarista: CoffeeBarServiceBotSnapshot;
+  workingBarista: CoffeeBarServiceBotSnapshot;
   role: CoffeeBarRole | null;
   drink: CoffeeBarDrink | null;
+  orderChoice: CoffeeBarOrderChoice | null;
   orderText: string | null;
+  generatedDrink: CoffeeBarGeneratedDrink | null;
+  orderStatus: CoffeeBarOrderStatus;
+  orderJobId: string | null;
+  orderStartedAt: string | null;
+  orderCompletedAt: string | null;
+  deliveryStatus: CoffeeBarDeliveryStatus;
+  deliveringBaristaId: string | null;
+  deliveryLine: string | null;
+  deliveredAt: string | null;
+  drinkReactionStatus: CoffeeBarDrinkReactionStatus;
   clarificationUsed: boolean;
   generationAttemptId: string | null;
   specialImageStatus: CoffeeBarSpecialImageStatus;
@@ -152,18 +189,86 @@ function isoString(value: unknown): string | null {
 function normalizeCoffeeBarRitual(value: unknown): CoffeeBarRitualState | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
-  const serviceRaw = raw.serviceBot && typeof raw.serviceBot === "object" && !Array.isArray(raw.serviceBot)
-    ? raw.serviceBot as Record<string, unknown>
-    : {};
-  const serviceBot: CoffeeBarServiceBotSnapshot = {
-    id: compactText(serviceRaw.id, 180) || null,
-    name: compactText(serviceRaw.name, 100) || "PRISM Barista",
-    color: compactText(serviceRaw.color, 40) || null,
-    glyph: compactText(serviceRaw.glyph, 80) || null,
-    fallback: serviceRaw.fallback === true,
+  const normalizeBarista = (
+    source: unknown,
+    fallback: CoffeeBarServiceBotSnapshot,
+  ): CoffeeBarServiceBotSnapshot => {
+    const row = source && typeof source === "object" && !Array.isArray(source)
+      ? source as Record<string, unknown>
+      : {};
+    return {
+      id: compactText(row.id, 180) || fallback.id,
+      name: compactText(row.name, 100) || fallback.name,
+      color: compactText(row.color, 40) || fallback.color,
+      glyph: compactText(row.glyph, 80) || fallback.glyph,
+      fallback: row.fallback === true || (!compactText(row.id, 180) && fallback.fallback),
+    };
   };
+  const defaultFront: CoffeeBarServiceBotSnapshot = {
+    id: null,
+    name: "PRISM Barista",
+    color: null,
+    glyph: "☕",
+    fallback: true,
+  };
+  const defaultWorker: CoffeeBarServiceBotSnapshot = {
+    id: null,
+    name: "PRISM Barback",
+    color: "#7dd3fc",
+    glyph: "sparkles",
+    fallback: true,
+  };
+  const serviceBot = normalizeBarista(raw.serviceBot, defaultFront);
+  const frontBarista = normalizeBarista(raw.frontBarista, serviceBot);
+  const workingBarista = normalizeBarista(raw.workingBarista, defaultWorker);
   const role = raw.role === "cup" || raw.role === "pot" ? raw.role : null;
   const drink = raw.drink === "house" || raw.drink === "special" ? raw.drink : null;
+  const orderChoice =
+    raw.orderChoice === "house" ||
+    raw.orderChoice === "custom" ||
+    raw.orderChoice === "surprise"
+      ? raw.orderChoice
+      : drink === "house"
+        ? "house"
+        : drink === "special"
+          ? "custom"
+          : null;
+  const generatedRaw =
+    raw.generatedDrink &&
+    typeof raw.generatedDrink === "object" &&
+    !Array.isArray(raw.generatedDrink)
+      ? raw.generatedDrink as Record<string, unknown>
+      : null;
+  const generatedDrink =
+    generatedRaw &&
+    compactText(generatedRaw.name, 80) &&
+    compactText(generatedRaw.description, 280) &&
+    compactText(generatedRaw.visualBrief, 600)
+      ? {
+          name: compactText(generatedRaw.name, 80),
+          description: compactText(generatedRaw.description, 280),
+          visualBrief: compactText(generatedRaw.visualBrief, 600),
+        }
+      : null;
+  const orderStatus =
+    raw.orderStatus === "queued" ||
+    raw.orderStatus === "generating" ||
+    raw.orderStatus === "ready" ||
+    raw.orderStatus === "fallback"
+      ? raw.orderStatus
+      : drink === "house"
+        ? "ready"
+        : raw.specialImageStatus === "ready"
+          ? "ready"
+          : raw.specialImageStatus === "generating"
+            ? "generating"
+            : "idle";
+  const drinkReactionStatus =
+    raw.drinkReactionStatus === "pending" ||
+    raw.drinkReactionStatus === "claimed" ||
+    raw.drinkReactionStatus === "completed"
+      ? raw.drinkReactionStatus
+      : "idle";
   const specialImageStatus = raw.specialImageStatus === "generating" ||
     raw.specialImageStatus === "ready" || raw.specialImageStatus === "failed"
     ? raw.specialImageStatus
@@ -179,6 +284,16 @@ function normalizeCoffeeBarRitual(value: unknown): CoffeeBarRitualState | undefi
         sipCount: Math.max(0, Math.min(100, Math.floor(Number(playerCupRaw.sipCount) || 0))),
       }
     : null;
+  const deliveryStatus =
+    raw.deliveryStatus === "pending" ||
+    raw.deliveryStatus === "delivering" ||
+    raw.deliveryStatus === "delivered"
+      ? raw.deliveryStatus
+      : playerCup
+        ? "delivered"
+        : orderStatus === "ready" || orderStatus === "fallback"
+          ? "pending"
+          : "none";
   const waiterRaw = raw.activeWaiterOffer && typeof raw.activeWaiterOffer === "object" && !Array.isArray(raw.activeWaiterOffer)
     ? raw.activeWaiterOffer as Record<string, unknown>
     : null;
@@ -237,11 +352,24 @@ function normalizeCoffeeBarRitual(value: unknown): CoffeeBarRitualState | undefi
     };
   }
   return {
-    version: 1,
-    serviceBot,
+    version: 2,
+    serviceBot: frontBarista,
+    frontBarista,
+    workingBarista,
     role,
     drink,
+    orderChoice,
     orderText: compactText(raw.orderText, COFFEE_BAR_ORDER_MAX_LENGTH) || null,
+    generatedDrink,
+    orderStatus,
+    orderJobId: compactText(raw.orderJobId, 180) || null,
+    orderStartedAt: isoString(raw.orderStartedAt),
+    orderCompletedAt: isoString(raw.orderCompletedAt),
+    deliveryStatus,
+    deliveringBaristaId: compactText(raw.deliveringBaristaId, 180) || null,
+    deliveryLine: compactText(raw.deliveryLine, 240) || null,
+    deliveredAt: isoString(raw.deliveredAt),
+    drinkReactionStatus,
     clarificationUsed: raw.clarificationUsed === true,
     generationAttemptId: compactText(raw.generationAttemptId, 180) || null,
     specialImageStatus,

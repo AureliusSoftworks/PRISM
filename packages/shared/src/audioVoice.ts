@@ -232,6 +232,8 @@ export interface BotAudioVoiceProfileV2 {
   texture: BotVoiceTextureV1;
   /** Optional looping avatar sound that follows the bot's visible state. */
   avatarSfx?: BotAvatarSfxV1;
+  /** Deliberately suppresses both a custom loop and PRISM's built-in fallback. */
+  avatarSfxMuted?: boolean;
 }
 
 export const BOT_AVATAR_SFX_MAX_BYTES = 4 * 1024 * 1024;
@@ -763,6 +765,9 @@ export function normalizeBotAudioVoiceProfileV1(
     record.avatarSfx,
     fallbackProfile.avatarSfx ?? null,
   );
+  const avatarSfxMuted = record.avatarSfxMuted === undefined
+    ? fallbackProfile.avatarSfxMuted === true
+    : record.avatarSfxMuted === true;
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -792,12 +797,17 @@ export function normalizeBotAudioVoiceProfileV1(
     // compatibility, but always resolve old and new profiles to clean audio.
     texture: botVoiceTextureForPreset("clean"),
     ...(avatarSfx ? { avatarSfx } : {}),
+    ...(avatarSfxMuted ? { avatarSfxMuted: true } : {}),
   };
 }
 
 function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
   if (value.v === 2) {
-    const { avatarSfx: rawAvatarSfx, ...voiceProfile } = value;
+    const {
+      avatarSfx: rawAvatarSfx,
+      avatarSfxMuted: rawAvatarSfxMuted,
+      ...voiceProfile
+    } = value;
     const elevenLabsDirection = normalizeElevenLabsVoiceDirection(value.elevenLabsDirection);
     const elevenLabsStability = value.elevenLabsStability === undefined
       ? undefined
@@ -815,6 +825,7 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
       gainDb: normalizeBotVoiceGainDb(value.gainDb),
       texture: botVoiceTextureForPreset("clean"),
       ...(avatarSfx ? { avatarSfx } : {}),
+      ...(rawAvatarSfxMuted === true ? { avatarSfxMuted: true } : {}),
     };
   }
   return {

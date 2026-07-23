@@ -248,6 +248,25 @@ describe("audio voice normalization", () => {
     assert.equal(BOT_AVATAR_SFX_MAX_BYTES, 4 * 1024 * 1024);
   });
 
+  it("round-trips an explicit avatar SFX mute independently of uploaded audio", () => {
+    const muted = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      avatarSfxMuted: true,
+    });
+    assert.equal(muted.avatarSfx, undefined);
+    assert.equal(muted.avatarSfxMuted, true);
+    assert.equal(
+      parseStoredBotAudioVoiceProfileV1(serializeBotAudioVoiceProfileV1(muted))
+        ?.avatarSfxMuted,
+      true,
+    );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({ ...muted, avatarSfxMuted: false })
+        .avatarSfxMuted,
+      undefined,
+    );
+  });
+
   it("rejects non-audio and oversized avatar SFX data URLs", () => {
     assert.equal(
       normalizeBotAvatarSfxV1({

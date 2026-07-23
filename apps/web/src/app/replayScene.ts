@@ -54,10 +54,18 @@ function replayEventTimeMs(args: {
   const runtimeMs = Number(args.manifest.visual.metadata?.runtimeMs);
   const atMs = Number(event.payload.atMs);
   const endStart = args.timeline.beats.find((beat) => beat.kind === "end")?.startMs ?? args.timeline.durationMs;
+  const contentStart =
+    args.timeline.beats.find((beat) => beat.kind === "title")?.endMs ?? 2_100;
   if (Number.isFinite(runtimeMs) && runtimeMs > 0 && Number.isFinite(atMs) && atMs >= 0) {
-    return 2_100 + Math.max(0, Math.min(1, atMs / runtimeMs)) * Math.max(0, endStart - 2_100);
+    return contentStart +
+      Math.max(0, Math.min(1, atMs / runtimeMs)) *
+        Math.max(0, endStart - contentStart);
   }
-  return 2_100 + ((args.eventIndex + 1) / (args.manifest.events.length + 1)) * Math.max(0, endStart - 2_100);
+  return (
+    contentStart +
+    ((args.eventIndex + 1) / (args.manifest.events.length + 1)) *
+      Math.max(0, endStart - contentStart)
+  );
 }
 
 export class ReplayPixiScene {

@@ -11,6 +11,32 @@
   height: 68px;
   transform: translate(-50%, -50%);
   pointer-events: none;
+  will-change: left, top;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 854;
+  background: rgba(3, 4, 8, 0);
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(0) saturate(1) brightness(1);
+  -webkit-backdrop-filter: blur(0) saturate(1) brightness(1);
+  transition:
+    opacity 220ms ease,
+    background 260ms ease,
+    backdrop-filter 280ms ease,
+    -webkit-backdrop-filter 280ms ease;
+  will-change: opacity, backdrop-filter;
+}
+
+.backdrop[data-open="true"] {
+  background: rgba(3, 4, 8, 0.24);
+  opacity: 1;
+  pointer-events: auto;
+  backdrop-filter: blur(14px) saturate(0) brightness(0.78);
+  -webkit-backdrop-filter: blur(14px) saturate(0) brightness(0.78);
 }
 
 .light {
@@ -72,36 +98,12 @@
 .avatar:active { cursor: grabbing; }
 
 .orb {
-  position: relative;
-  width: 58px;
-  height: 58px;
-  display: grid;
-  place-items: center;
-  border: 2px solid transparent;
-  border-radius: 50%;
-  background:
-    radial-gradient(circle at 35% 24%, #ffffff42, transparent 26%) padding-box,
-    radial-gradient(circle at 50% 52%, #15202b 0 32%, #080b13ed 70%) padding-box,
-    conic-gradient(from 205deg, var(--companion-p), var(--companion-r), var(--companion-i), var(--companion-s), var(--companion-m), var(--companion-p)) border-box;
-  box-shadow: 0 0 0 5px #e978d717, 0 0 24px #6fe3ff66, inset 0 0 18px #6fe3ff40, inset 0 -10px 20px #0008;
-  animation: orbBreathe 2.8s ease-in-out infinite;
-  transition: transform 420ms cubic-bezier(.2,.9,.2,1), filter 420ms ease;
+  --prism-orb-size: 58px;
 }
 
 .anchor[data-open="true"] .orb {
   transform: scale(1.12) rotate(60deg);
   filter: brightness(1.22);
-}
-
-.orb svg {
-  width: 29px;
-  height: 29px;
-  overflow: visible;
-  fill: #ffffff14;
-  stroke: #fff;
-  stroke-width: 2.2;
-  stroke-linejoin: round;
-  filter: drop-shadow(0 0 4px #fff) drop-shadow(0 0 10px #6fe3ffcc);
 }
 
 .shortcut {
@@ -157,8 +159,9 @@
   pointer-events: auto;
 }
 
-.bubble { animation: bubbleLife 34s cubic-bezier(.2,.72,.22,1) both; }
-.bubble[data-role="user"] { animation-duration: 18s; }
+.bubble[data-recent="true"] { animation: bubbleArrive 240ms ease-out both; }
+.bubble:not([data-recent="true"]) { animation: bubbleLife 34s cubic-bezier(.2,.72,.22,1) both; }
+.bubble[data-role="user"]:not([data-recent="true"]) { animation-duration: 18s; }
 .thinking { animation: bubbleArrive 240ms ease-out both; }
 
 .bubble[data-role="assistant"], .thinking { justify-self: start; border-radius: 22px 22px 22px 7px; }
@@ -173,6 +176,29 @@
 .markdown :where(ul, ol) { padding-left: 1.35em; }
 .markdown a { color: #8bdfff; }
 .markdown code { padding: .08em .28em; border-radius: .35em; background: #ffffff12; font: .88em ui-monospace, monospace; }
+.bubble[data-speech-preparing="true"] .markdown { min-height: 1.2em; }
+.bubble[data-speech-preparing="true"] .markdown::after {
+  display: inline-block;
+  width: 22px;
+  height: 4px;
+  border-radius: 999px;
+  content: "";
+  background: linear-gradient(90deg, #8bdfff33, #8bdfffcc, #e978d766);
+  background-size: 200% 100%;
+  animation: speechPrepare 1s ease-in-out infinite;
+}
+.bubble[data-speaking="true"] .markdown::after {
+  display: inline-block;
+  width: 4px;
+  height: .82em;
+  margin-left: 3px;
+  border-radius: 999px;
+  content: "";
+  background: #9ceaff;
+  box-shadow: 0 0 8px #6fe3ffaa;
+  animation: speechCursor 680ms ease-in-out infinite;
+  vertical-align: -.08em;
+}
 
 .actions { display: flex; flex-wrap: wrap; gap: 7px; justify-self: start; pointer-events: auto; }
 .actions button { padding: 7px 11px; border: 1px solid #8bdfff35; border-radius: 999px; color: var(--fg, #edf3f8); background: #111924df; font: 720 .64rem/1.2 system-ui, sans-serif; cursor: pointer; }
@@ -198,13 +224,39 @@
 .composer textarea { width: 100%; resize: none; padding: 8px 9px; border: 0; outline: 0; color: var(--fg, #edf3f8); background: transparent; font: .76rem/1.45 system-ui, sans-serif; }
 .composer textarea::placeholder { color: var(--fg-muted, #aaa4a0); }
 .composer footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.composer small { color: var(--fg-subtle, #77716d); font: .56rem/1.3 system-ui, sans-serif; }
+.composer small { flex: 1 1 auto; color: var(--fg-subtle, #77716d); font: .56rem/1.3 system-ui, sans-serif; }
 .composer button { padding: 7px 12px; border: 0; border-radius: 999px; color: #071013; background: #9ceaff; font: 780 .65rem/1 system-ui, sans-serif; cursor: pointer; }
 .composer button:disabled { cursor: default; opacity: .42; }
+.composer .voiceToggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border: 1px solid #ffffff1c;
+  color: var(--fg-muted, #aaa4a0);
+  background: #ffffff09;
+  font-size: .57rem;
+}
+.composer .voiceToggle[data-enabled="true"] {
+  border-color: #8bdfff42;
+  color: #bcefff;
+  background: #6fe3ff10;
+}
+.composer .voiceToggle:hover {
+  border-color: #8bdfff72;
+  color: var(--fg, #edf3f8);
+}
+.composer .voiceToggle:focus-visible,
+.composer .sendButton:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
 
 @keyframes auraTurn { to { transform: rotate(1turn); } }
-@keyframes orbBreathe { 0%, 100% { transform: translateY(0) scale(.98); } 50% { transform: translateY(-2px) scale(1.03); } }
 @keyframes bubbleArrive { from { opacity: 0; transform: translateY(7px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes speechPrepare { 50% { background-position: 100% 0; opacity: .6; } }
+@keyframes speechCursor { 50% { opacity: .3; } }
 @keyframes bubbleLife {
   0% { opacity: 0; transform: translateY(7px) scale(.98); }
   2%, 86% { opacity: 1; transform: translateY(0) scale(1); }
@@ -216,13 +268,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .avatar::before, .orb, .thinking, .composer { animation: none; }
-  .bubble { animation-name: bubbleReducedLife; }
-  .light, .orb { transition-duration: 1ms; }
+  .avatar::before, .orb, .bubble[data-recent="true"], .thinking, .composer,
+  .bubble[data-speech-preparing="true"] .markdown::after,
+  .bubble[data-speaking="true"] .markdown::after { animation: none; }
+  .bubble:not([data-recent="true"]) { animation-name: bubbleReducedLife; }
+  .backdrop, .light, .orb { transition-duration: 1ms; }
 }
 
 @media (max-width: 720px) {
   .anchor { width: 60px; height: 60px; }
-  .orb { width: 52px; height: 52px; }
+  .orb { --prism-orb-size: 52px; }
   .conversation { width: min(390px, calc(100vw - 16px)); }
 }

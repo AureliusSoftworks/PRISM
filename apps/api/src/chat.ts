@@ -3981,10 +3981,21 @@ function stripAskQuestionOpenEndedPreface(question: string): string {
     .trim();
 }
 
-function extractAlternativeAskQuestionOptions(question: string): string[] {
-  const core = stripKnownAskQuestionPrefixes(stripAskQuestionCandidateLine(question))
-    .replace(/[?!.]+$/u, "")
+function stripAskQuestionConversationalLeadIn(question: string): string {
+  return question
+    .replace(
+      /^[^,]{1,80},\s+(?=(?:who|what|when|where|why|how|which|do|does|did|would|could|should|can|is|are|will|have|has|may|might)\b)/i,
+      ""
+    )
     .trim();
+}
+
+function extractAlternativeAskQuestionOptions(question: string): string[] {
+  const core = stripAskQuestionConversationalLeadIn(
+    stripKnownAskQuestionPrefixes(stripAskQuestionCandidateLine(question))
+      .replace(/[?!.]+$/u, "")
+      .trim()
+  );
   if (!core) return [];
 
   const colonIdx = core.lastIndexOf(":");

@@ -93,8 +93,44 @@ function zenLiveMouthHashText(text: string): number {
   return hash >>> 0;
 }
 
-function normalizedCrtSpeechCharacters(text: string): string[] {
-  return Array.from(text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase());
+type NormalizedCrtSpeechCharacter = {
+  character: string;
+  sourceStart: number;
+  sourceEnd: number;
+};
+
+const ENGLISH_CRT_COMPATIBILITY_EXPANSIONS: Readonly<Record<string, string>> = {
+  æ: "ae",
+  ð: "th",
+  ł: "l",
+  ø: "o",
+  œ: "oe",
+  ß: "ss",
+  þ: "th",
+};
+
+/**
+ * Normalizes one Unicode code point at a time so source offsets continue to
+ * match Array.from(text), provider alignment, and streamed reveal cursors.
+ */
+function normalizedCrtSpeechCharacters(
+  text: string,
+): NormalizedCrtSpeechCharacter[] {
+  const normalized: NormalizedCrtSpeechCharacter[] = [];
+  for (const [sourceStart, sourceCharacter] of Array.from(text).entries()) {
+    const lower = sourceCharacter.toLocaleLowerCase("en-US");
+    const expanded =
+      ENGLISH_CRT_COMPATIBILITY_EXPANSIONS[lower] ??
+      lower.normalize("NFKD").replace(/\p{M}/gu, "");
+    for (const character of Array.from(expanded)) {
+      normalized.push({
+        character,
+        sourceStart,
+        sourceEnd: sourceStart + 1,
+      });
+    }
+  }
+  return normalized;
 }
 
 export type EnglishCrtVisemeBeat = {
@@ -132,8 +168,8 @@ const ENGLISH_CRT_DIGIT_PRONUNCIATIONS = [
 ] as const;
 const ENGLISH_CRT_SHORT_FINAL_E_WORDS = new Set([
   "above",
-  "are",
   "come",
+  "does",
   "done",
   "give",
   "gone",
@@ -157,6 +193,7 @@ const ENGLISH_CRT_PRONOUNCED_FINAL_E_WORDS = new Set([
 const ENGLISH_CRT_OH_UH_WORDS = new Set([
   "above",
   "come",
+  "does",
   "done",
   "go",
   "love",
@@ -167,6 +204,217 @@ const ENGLISH_CRT_OH_UH_WORDS = new Set([
   "so",
   "some",
 ]);
+const ENGLISH_CRT_LONG_E_WORDS = new Set([
+  "be",
+  "he",
+  "me",
+  "recipe",
+  "she",
+  "we",
+]);
+const ENGLISH_CRT_SHORT_OO_WORDS = new Set([
+  "book",
+  "brook",
+  "cook",
+  "foot",
+  "good",
+  "hood",
+  "hook",
+  "look",
+  "nook",
+  "shook",
+  "stood",
+  "took",
+  "wood",
+  "wool",
+]);
+const ENGLISH_CRT_SHORT_EA_WORDS = new Set([
+  "bread",
+  "breakfast",
+  "breast",
+  "breath",
+  "dead",
+  "deaf",
+  "death",
+  "dread",
+  "head",
+  "health",
+  "heaven",
+  "heavy",
+  "instead",
+  "meadow",
+  "meant",
+  "pleasant",
+  "ready",
+  "spread",
+  "steady",
+  "sweat",
+  "thread",
+  "threat",
+  "wealth",
+  "weapon",
+  "weather",
+]);
+const ENGLISH_CRT_LONG_IE_WORDS = new Set([
+  "belief",
+  "brief",
+  "chief",
+  "field",
+  "fiend",
+  "grief",
+  "niece",
+  "piece",
+  "priest",
+  "relief",
+  "retrieve",
+  "shield",
+  "thief",
+  "yield",
+]);
+const ENGLISH_CRT_LONG_EY_WORDS = new Set([
+  "donkey",
+  "honey",
+  "journey",
+  "key",
+  "money",
+  "monkey",
+  "turkey",
+  "valley",
+]);
+const ENGLISH_CRT_LONG_O_OW_WORDS = new Set([
+  "blow",
+  "bowl",
+  "crow",
+  "flow",
+  "glow",
+  "grow",
+  "know",
+  "low",
+  "mow",
+  "own",
+  "show",
+  "slow",
+  "snow",
+  "throw",
+  "window",
+  "yellow",
+]);
+const ENGLISH_CRT_LONG_A_EY_WORDS = new Set([
+  "convey",
+  "grey",
+  "obey",
+  "prey",
+  "survey",
+  "they",
+  "whey",
+]);
+
+/**
+ * Small, high-value exception lexicon for spellings that no deterministic
+ * grapheme rules can infer. Values are intentionally readable pseudo-spelling,
+ * not IPA, so they pass through the same local viseme engine.
+ */
+const ENGLISH_CRT_PRONUNCIATION_OVERRIDES: Readonly<
+  Record<string, string>
+> = {
+  "can't": "kant",
+  "couldn't": "cudent",
+  "doesn't": "duzent",
+  "don't": "dohnt",
+  "he's": "heez",
+  "i'd": "eyed",
+  "i'll": "eyel",
+  "i'm": "eyem",
+  "i've": "eyev",
+  "she's": "sheez",
+  "shouldn't": "shudent",
+  "they'll": "thayl",
+  "they're": "thair",
+  "they've": "thayv",
+  "we'll": "weel",
+  "we're": "weer",
+  "we've": "weev",
+  "won't": "wohnt",
+  "you'll": "yool",
+  "you're": "yor",
+  "you've": "yoov",
+  any: "enee",
+  answer: "anser",
+  bear: "bair",
+  break: "brayk",
+  bury: "beree",
+  business: "biznes",
+  busy: "bizee",
+  calm: "kahm",
+  colonel: "kernel",
+  cough: "coff",
+  could: "cud",
+  enough: "enuff",
+  four: "fawr",
+  friend: "frend",
+  great: "grayt",
+  half: "haff",
+  heart: "hart",
+  honest: "onest",
+  hour: "our",
+  island: "iland",
+  many: "menee",
+  of: "uv",
+  once: "wuns",
+  one: "wun",
+  people: "peepul",
+  pretty: "pritee",
+  queue: "cue",
+  rough: "ruff",
+  said: "sed",
+  says: "sez",
+  should: "shud",
+  steak: "stayk",
+  sure: "shur",
+  sword: "sord",
+  talk: "tawk",
+  the: "thuh",
+  their: "thair",
+  there: "thair",
+  though: "thoh",
+  thought: "thawt",
+  through: "thoo",
+  tough: "tuff",
+  two: "too",
+  walk: "wawk",
+  was: "wuz",
+  wear: "wair",
+  were: "wur",
+  who: "hoo",
+  whole: "hole",
+  whom: "hoom",
+  whose: "hooz",
+  woman: "wumun",
+  women: "wimin",
+  wont: "wohnt",
+  would: "wud",
+  yacht: "yot",
+  your: "yor",
+};
+
+function englishCrtWordSetHas(
+  words: ReadonlySet<string>,
+  word: string,
+): boolean {
+  if (words.has(word)) return true;
+  const candidates: string[] = [];
+  if (word.endsWith("s") && word.length > 2) {
+    candidates.push(word.slice(0, -1));
+  }
+  if (word.endsWith("ed") && word.length > 3) {
+    candidates.push(word.slice(0, -2), word.slice(0, -1));
+  }
+  if (word.endsWith("ing") && word.length > 4) {
+    const withoutIng = word.slice(0, -3);
+    candidates.push(withoutIng, `${withoutIng}e`);
+  }
+  return candidates.some((candidate) => words.has(candidate));
+}
 
 function englishCrtVisemeStep(
   shape: ZenLiveBotMouthShape,
@@ -180,19 +428,28 @@ function englishCrtRestDurationUnits(character: string): number {
   if (/\s/u.test(character)) return 0.34;
   if (/[.!?…]/u.test(character)) return 1.45;
   if (/[,;:]/u.test(character)) return 0.92;
-  if (/[—–-]/u.test(character)) return 0.78;
+  if (/[—–]/u.test(character)) return 0.78;
+  if (character === "-") return 0.22;
   return 0.5;
 }
 
 function englishCrtSilentFinalEIndex(word: string): number | null {
+  let candidateIndex = word.endsWith("e")
+    ? word.length - 1
+    : word.length >= 4 && /e[ds]$/u.test(word)
+      ? word.length - 2
+      : -1;
+  if (candidateIndex < 0 || word.length <= 2) return null;
+
+  const baseWord = word.slice(0, candidateIndex + 1);
+  if (ENGLISH_CRT_PRONOUNCED_FINAL_E_WORDS.has(baseWord)) return null;
   if (
-    !word.endsWith("e") ||
-    word.length <= 2 ||
-    ENGLISH_CRT_PRONOUNCED_FINAL_E_WORDS.has(word)
+    word.endsWith("ed") &&
+    /[td]/u.test(word[candidateIndex - 1] ?? "")
   ) {
-    return null;
+    candidateIndex = -1;
   }
-  return word.length - 1;
+  return candidateIndex >= 0 ? candidateIndex : null;
 }
 
 function englishCrtMagicELeadIndex(
@@ -201,7 +458,9 @@ function englishCrtMagicELeadIndex(
 ): number | null {
   if (
     silentFinalEIndex === null ||
-    ENGLISH_CRT_SHORT_FINAL_E_WORDS.has(word)
+    ENGLISH_CRT_SHORT_FINAL_E_WORDS.has(
+      word.slice(0, silentFinalEIndex + 1),
+    )
   ) {
     return null;
   }
@@ -257,6 +516,9 @@ function englishCrtVowelRuleAt(
   const transition = (shape: ZenLiveBotMouthShape) =>
     englishCrtVisemeStep(shape, 0.92, "vowel");
 
+  if (options.wordText === "i" && index === 0) {
+    return { length: 1, steps: [wide, transition("narrow")] };
+  }
   if (index === options.magicELeadIndex) {
     if (current === "a" || current === "i") {
       return { length: 1, steps: [wide, transition("narrow")] };
@@ -271,14 +533,57 @@ function englishCrtVowelRuleAt(
   if (triple === "igh") {
     return { length: 3, steps: [wide, transition("narrow")] };
   }
-  if (/^(ai|ay|ey|ie)$/u.test(pair)) {
+  if (triple === "air") {
+    return { length: 3, steps: [wide, transition("narrow")] };
+  }
+  if (/^(ai|ay)$/u.test(pair)) {
     return { length: 2, steps: [wide, transition("narrow")] };
   }
+  if (pair === "ey") {
+    return englishCrtWordSetHas(
+      ENGLISH_CRT_LONG_A_EY_WORDS,
+      options.wordText,
+    )
+      ? { length: 2, steps: [wide, transition("narrow")] }
+      : englishCrtWordSetHas(
+            ENGLISH_CRT_LONG_EY_WORDS,
+            options.wordText,
+          ) ||
+          options.wordText.endsWith("ey")
+        ? { length: 2, steps: [narrow] }
+        : { length: 2, steps: [wide, transition("narrow")] };
+  }
+  if (pair === "ie") {
+    return englishCrtWordSetHas(
+      ENGLISH_CRT_LONG_IE_WORDS,
+      options.wordText,
+    )
+      ? { length: 2, steps: [narrow] }
+      : { length: 2, steps: [wide, transition("narrow")] };
+  }
   if (/^(ou|ow)$/u.test(pair)) {
+    if (
+      pair === "ow" &&
+      englishCrtWordSetHas(
+        ENGLISH_CRT_LONG_O_OW_WORDS,
+        options.wordText,
+      )
+    ) {
+      return { length: 2, steps: [smallRound, transition("dot")] };
+    }
     return { length: 2, steps: [wide, transition("dot")] };
   }
   if (/^(oi|oy)$/u.test(pair)) {
     return { length: 2, steps: [broadRound, transition("narrow")] };
+  }
+  if (
+    pair === "ea" &&
+    englishCrtWordSetHas(ENGLISH_CRT_SHORT_EA_WORDS, options.wordText)
+  ) {
+    return { length: 2, steps: [wide] };
+  }
+  if (pair === "ei" && /^eigh/u.test(word.slice(index).join(""))) {
+    return { length: 4, steps: [wide, transition("narrow")] };
   }
   if (/^(ee|ea|ei)$/u.test(pair)) {
     return {
@@ -287,6 +592,12 @@ function englishCrtVowelRuleAt(
         englishCrtVisemeStep("narrow", 2.15, "vowel"),
       ],
     };
+  }
+  if (
+    pair === "oo" &&
+    englishCrtWordSetHas(ENGLISH_CRT_SHORT_OO_WORDS, options.wordText)
+  ) {
+    return { length: 2, steps: [smallRound] };
   }
   if (/^(oo|ue|ui|ew)$/u.test(pair)) {
     return {
@@ -316,6 +627,9 @@ function englishCrtVowelRuleAt(
       steps: [englishCrtVisemeStep("open-round", 2.05, "vowel")],
     };
   }
+  if (pair === "oh") {
+    return { length: 2, steps: [smallRound, transition("dot")] };
+  }
   if (/^(er|ir|ur)$/u.test(pair)) {
     return {
       length: 2,
@@ -330,13 +644,23 @@ function englishCrtVowelRuleAt(
   }
 
   if (current === "a") return { length: 1, steps: [wide] };
-  if (current === "e") return { length: 1, steps: [wide] };
+  if (current === "e") {
+    return {
+      length: 1,
+      steps: [
+        englishCrtWordSetHas(ENGLISH_CRT_LONG_E_WORDS, options.wordText) &&
+        index === word.length - 1
+          ? narrow
+          : wide,
+      ],
+    };
+  }
   if (current === "i") return { length: 1, steps: [narrow] };
   if (current === "o") {
     return {
       length: 1,
       steps: [
-        ENGLISH_CRT_OH_UH_WORDS.has(options.wordText)
+        englishCrtWordSetHas(ENGLISH_CRT_OH_UH_WORDS, options.wordText)
           ? smallRound
           : broadRound,
       ],
@@ -352,7 +676,8 @@ function englishCrtVowelRuleAt(
 function appendEnglishCrtRule(
   target: EnglishCrtVisemeBeat[],
   rule: EnglishCrtGraphemeRule,
-  sourceStart: number,
+  word: readonly NormalizedCrtSpeechCharacter[],
+  wordIndex: number,
 ): void {
   for (let index = 0; index < rule.steps.length; index += 1) {
     const step = rule.steps[index]!;
@@ -360,12 +685,17 @@ function appendEnglishCrtRule(
       rule.length - 1,
       Math.floor((index * rule.length) / rule.steps.length),
     );
+    const sourceCharacter = word[wordIndex + sourceOffset];
+    const lastSourceCharacter =
+      word[
+        wordIndex +
+          (rule.steps.length === 1 ? rule.length - 1 : sourceOffset)
+      ] ?? sourceCharacter;
+    if (!sourceCharacter || !lastSourceCharacter) continue;
     target.push({
       ...step,
-      sourceStart: sourceStart + sourceOffset,
-      sourceEnd:
-        sourceStart +
-        (rule.steps.length === 1 ? rule.length : sourceOffset + 1),
+      sourceStart: sourceCharacter.sourceStart,
+      sourceEnd: lastSourceCharacter.sourceEnd,
     });
   }
 }
@@ -383,11 +713,43 @@ function englishCrtNextVowelShape(
 }
 
 function englishCrtWordVisemeBeats(
-  word: readonly string[],
-  sourceStart: number,
+  word: readonly NormalizedCrtSpeechCharacter[],
+  allowPronunciationOverride = true,
+  pronunciationLookupText?: string,
 ): EnglishCrtVisemeBeat[] {
   const beats: EnglishCrtVisemeBeat[] = [];
-  const wordText = word.join("");
+  const wordCharacters = word.map(({ character }) => character);
+  const wordText = wordCharacters.join("");
+  const normalizedPronunciationLookupText = pronunciationLookupText?.replace(
+    /’/gu,
+    "'",
+  );
+  const pronunciationOverride = allowPronunciationOverride
+    ? ENGLISH_CRT_PRONUNCIATION_OVERRIDES[
+        normalizedPronunciationLookupText ?? wordText
+      ] ?? ENGLISH_CRT_PRONUNCIATION_OVERRIDES[wordText]
+    : undefined;
+  if (pronunciationOverride && word.length > 0) {
+    const pronunciationCharacters =
+      normalizedCrtSpeechCharacters(pronunciationOverride);
+    const lastWordIndex = word.length - 1;
+    const lastPronunciationIndex = pronunciationCharacters.length - 1;
+    const remappedPronunciation = pronunciationCharacters.map(
+      ({ character }, index) => {
+        const sourceIndex =
+          lastPronunciationIndex <= 0
+            ? 0
+            : Math.round((index * lastWordIndex) / lastPronunciationIndex);
+        const sourceCharacter = word[sourceIndex] ?? word[0]!;
+        return {
+          character,
+          sourceStart: sourceCharacter.sourceStart,
+          sourceEnd: sourceCharacter.sourceEnd,
+        };
+      },
+    );
+    return englishCrtWordVisemeBeats(remappedPronunciation, false);
+  }
   const silentFinalEIndex = englishCrtSilentFinalEIndex(wordText);
   const options = {
     magicELeadIndex: englishCrtMagicELeadIndex(
@@ -403,27 +765,32 @@ function englishCrtWordVisemeBeats(
       index += 1;
       continue;
     }
-    const vowelRule = englishCrtVowelRuleAt(word, index, options);
+    const vowelRule = englishCrtVowelRuleAt(wordCharacters, index, options);
     if (vowelRule) {
-      appendEnglishCrtRule(beats, vowelRule, sourceStart + index);
+      appendEnglishCrtRule(beats, vowelRule, word, index);
       index += vowelRule.length;
       continue;
     }
 
-    const current = word[index] ?? "";
-    const pair = `${current}${word[index + 1] ?? ""}`;
+    const currentSourceCharacter = word[index];
+    if (!currentSourceCharacter) break;
+    const current = currentSourceCharacter.character;
+    const pair = `${current}${wordCharacters[index + 1] ?? ""}`;
     const digit = Number.parseInt(current, 10);
     if (/\d/u.test(current) && Number.isInteger(digit)) {
       const pronunciation = ENGLISH_CRT_DIGIT_PRONUNCIATIONS[digit] ?? "";
       const digitBeats = englishCrtWordVisemeBeats(
-        Array.from(pronunciation),
-        sourceStart + index,
+        normalizedCrtSpeechCharacters(pronunciation).map((entry) => ({
+          ...entry,
+          sourceStart: currentSourceCharacter.sourceStart,
+          sourceEnd: currentSourceCharacter.sourceEnd,
+        })),
       );
       beats.push(
         ...digitBeats.map((beat) => ({
           ...beat,
-          sourceStart: sourceStart + index,
-          sourceEnd: sourceStart + index + 1,
+          sourceStart: currentSourceCharacter.sourceStart,
+          sourceEnd: currentSourceCharacter.sourceEnd,
         })),
       );
       index += 1;
@@ -435,8 +802,8 @@ function englishCrtWordVisemeBeats(
           CRT_SPEECH_FALLBACK_SHAPES[
             zenLiveMouthHashText(current) % CRT_SPEECH_FALLBACK_SHAPES.length
           ]!,
-        sourceStart: sourceStart + index,
-        sourceEnd: sourceStart + index + 1,
+        sourceStart: currentSourceCharacter.sourceStart,
+        sourceEnd: currentSourceCharacter.sourceEnd,
         durationUnits: 1,
         kind: "vowel",
       });
@@ -447,6 +814,22 @@ function englishCrtWordVisemeBeats(
     let length = 1;
     let shape: ZenLiveBotMouthShape;
     let durationUnits = ENGLISH_CRT_CONSONANT_HOLD_UNITS;
+    if (
+      index === 0 &&
+      /^(kn|wr|gn|ps|pn|pt)$/u.test(pair)
+    ) {
+      index += 1;
+      continue;
+    }
+    if (
+      (pair === "gh" && index > 0) ||
+      (current === "b" &&
+        index === word.length - 1 &&
+        wordCharacters[index - 1] === "m")
+    ) {
+      index += pair === "gh" ? 2 : 1;
+      continue;
+    }
     if (pair === "th") {
       length = 2;
       shape = "at";
@@ -459,10 +842,14 @@ function englishCrtWordVisemeBeats(
       length = 2;
       shape = "dot";
       durationUnits = 0.82;
-    } else if (/^(sh|ch|zh|ng|ck|gh)$/u.test(pair)) {
+    } else if (/^(sh|ch|zh|ng|ck)$/u.test(pair)) {
       length = 2;
       shape =
-        englishCrtNextVowelShape(word, index + length, options) ??
+        englishCrtNextVowelShape(
+          wordCharacters,
+          index + length,
+          options,
+        ) ??
         "open-small";
     } else if (/[bmp]/u.test(current)) {
       shape = "speech-closed";
@@ -481,13 +868,16 @@ function englishCrtWordVisemeBeats(
       durationUnits = 0.76;
     } else {
       shape =
-        englishCrtNextVowelShape(word, index + 1, options) ?? "open-small";
+        englishCrtNextVowelShape(wordCharacters, index + 1, options) ??
+        "open-small";
       if (current === "h") durationUnits = 0.48;
     }
+    const lastSourceCharacter =
+      word[index + length - 1] ?? currentSourceCharacter;
     beats.push({
       shape,
-      sourceStart: sourceStart + index,
-      sourceEnd: sourceStart + index + length,
+      sourceStart: currentSourceCharacter.sourceStart,
+      sourceEnd: lastSourceCharacter.sourceEnd,
       durationUnits,
       kind: "consonant",
     });
@@ -508,26 +898,41 @@ export function englishCrtVisemeTimeline(
   const characters = normalizedCrtSpeechCharacters(text);
   const beats: EnglishCrtVisemeBeat[] = [];
   for (let index = 0; index < characters.length; ) {
-    const current = characters[index] ?? "";
-    if (/[\p{L}\p{N}]/u.test(current)) {
+    const current = characters[index];
+    if (!current) break;
+    if (/[\p{L}\p{N}]/u.test(current.character)) {
       let end = index + 1;
       while (
         end < characters.length &&
-        /[\p{L}\p{N}]/u.test(characters[end] ?? "")
+        (/[\p{L}\p{N}]/u.test(characters[end]?.character ?? "") ||
+          (/[’']/u.test(characters[end]?.character ?? "") &&
+            /[\p{L}\p{N}]/u.test(
+              characters[end + 1]?.character ?? "",
+            )))
       ) {
         end += 1;
       }
+      const wordSourceCharacters = characters.slice(index, end);
       beats.push(
-        ...englishCrtWordVisemeBeats(characters.slice(index, end), index),
+        ...englishCrtWordVisemeBeats(
+          wordSourceCharacters
+            .filter(({ character }) => /[\p{L}\p{N}]/u.test(character)),
+          true,
+          wordSourceCharacters.map(({ character }) => character).join(""),
+        ),
       );
       index = end;
       continue;
     }
+    if (/[’']/u.test(current.character)) {
+      index += 1;
+      continue;
+    }
     beats.push({
       shape: "closed",
-      sourceStart: index,
-      sourceEnd: index + 1,
-      durationUnits: englishCrtRestDurationUnits(current),
+      sourceStart: current.sourceStart,
+      sourceEnd: current.sourceEnd,
+      durationUnits: englishCrtRestDurationUnits(current.character),
       kind: "rest",
     });
     index += 1;
@@ -565,30 +970,48 @@ function englishCrtVisemeShapeAtUnit(
 export function crtSpeechMouthShapeAtTextCursor({
   text,
   cursorIndex,
+  cursorProgress = 0,
 }: {
   text: string;
   cursorIndex: number;
+  cursorProgress?: number;
 }): ZenLiveBotMouthShape {
   const characters = normalizedCrtSpeechCharacters(text);
   if (characters.length === 0) return "closed";
+  const sourceCharacterCount = Array.from(text).length;
   const safeCursorIndex = Math.max(
     0,
     Math.min(
-      characters.length - 1,
+      Math.max(0, sourceCharacterCount - 1),
       Math.floor(Number.isFinite(cursorIndex) ? cursorIndex : 0),
     ),
   );
   const beats = englishCrtVisemeTimeline(text);
-  const coveringBeat = beats.find(
+  const coveringBeats = beats.filter(
     (beat) =>
       safeCursorIndex >= beat.sourceStart && safeCursorIndex < beat.sourceEnd,
   );
-  if (coveringBeat) return coveringBeat.shape;
+  if (coveringBeats.length > 0) {
+    const safeCursorProgress = Math.min(
+      0.999_999,
+      Math.max(
+        0,
+        Number.isFinite(cursorProgress) ? cursorProgress : 0,
+      ),
+    );
+    return englishCrtVisemeShapeAtUnit(
+      coveringBeats,
+      safeCursorProgress *
+        englishCrtVisemeTimelineDurationUnits(coveringBeats),
+    );
+  }
   for (let index = beats.length - 1; index >= 0; index -= 1) {
     const beat = beats[index]!;
     if (beat.sourceEnd <= safeCursorIndex + 1) return beat.shape;
   }
-  return "closed";
+  return (
+    beats.find((beat) => beat.sourceStart >= safeCursorIndex)?.shape ?? "closed"
+  );
 }
 
 export function crtSpeechMouthShapeFromVisibleTextProgress({
@@ -609,7 +1032,12 @@ export function crtSpeechMouthShapeFromVisibleTextProgress({
     ),
   );
   if (safeVisibleLength <= 0) return "closed";
-  const safeCharactersPerPhase = Math.max(1, Math.floor(charactersPerPhase));
+  const safeCharactersPerPhase = Math.max(
+    1,
+    Math.floor(
+      Number.isFinite(charactersPerPhase) ? charactersPerPhase : 1,
+    ),
+  );
   const cursorIndex =
     Math.floor((safeVisibleLength - 1) / safeCharactersPerPhase) *
     safeCharactersPerPhase;
@@ -639,10 +1067,14 @@ export function crtSpeechMouthShapeAtElapsedMs({
     Number.isFinite(durationMs) &&
     durationMs > 0
   ) {
+    if (safeElapsedMs >= durationMs) return "closed";
     const progress = Math.min(0.999_999, safeElapsedMs / durationMs);
     return englishCrtVisemeShapeAtUnit(beats, progress * durationUnits);
   }
-  const safePhaseMs = Math.max(1, phaseMs);
+  const safePhaseMs = Math.max(
+    1,
+    Number.isFinite(phaseMs) ? phaseMs : ZEN_LIVE_MOUTH_PHASE_MS,
+  );
   return englishCrtVisemeShapeAtUnit(beats, safeElapsedMs / safePhaseMs);
 }
 
@@ -678,27 +1110,47 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
     return fallback();
   }
 
+  const characters: string[] = [];
+  const characterStartTimesSeconds: number[] = [];
+  const characterEndTimesSeconds: number[] = [];
   let previousStart = 0;
-  let previousEnd = 0;
+  let alignmentEndSeconds = 0;
   for (let index = 0; index < count; index += 1) {
+    const characterChunk = alignment.characters[index];
     const start = alignment.characterStartTimesSeconds[index];
     const end = alignment.characterEndTimesSeconds[index];
     if (
+      typeof characterChunk !== "string" ||
+      Array.from(characterChunk).length === 0 ||
       typeof start !== "number" ||
       typeof end !== "number" ||
       !Number.isFinite(start) ||
       !Number.isFinite(end) ||
       start < 0 ||
       end < start ||
-      start < previousStart ||
-      end < previousEnd
+      start < previousStart
     ) {
       return fallback();
     }
+    const chunkCharacters = Array.from(characterChunk);
+    for (const [chunkIndex, character] of chunkCharacters.entries()) {
+      const chunkStart =
+        start + ((end - start) * chunkIndex) / chunkCharacters.length;
+      const chunkEnd =
+        start + ((end - start) * (chunkIndex + 1)) / chunkCharacters.length;
+      characters.push(character);
+      characterStartTimesSeconds.push(chunkStart);
+      characterEndTimesSeconds.push(chunkEnd);
+    }
     previousStart = start;
-    previousEnd = end;
+    alignmentEndSeconds = Math.max(alignmentEndSeconds, end);
   }
-  if (previousEnd <= 0 || !Number.isFinite(durationMs) || durationMs <= 0) {
+  if (
+    characters.length === 0 ||
+    alignmentEndSeconds <= 0 ||
+    !Number.isFinite(durationMs) ||
+    durationMs <= 0
+  ) {
     return fallback();
   }
 
@@ -707,14 +1159,21 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
     Number.isFinite(elapsedMs) ? elapsedMs : 0,
   );
   const providerElapsedSeconds =
-    (Math.min(durationMs, safeElapsedMs) / durationMs) * previousEnd;
+    (Math.min(durationMs, safeElapsedMs) / durationMs) *
+    alignmentEndSeconds;
+  if (
+    providerElapsedSeconds <
+    (characterStartTimesSeconds[0] ?? Number.POSITIVE_INFINITY)
+  ) {
+    return "closed";
+  }
   let low = 0;
-  let high = count;
+  let high = characters.length;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
     if (
-      (alignment.characterStartTimesSeconds[middle] ??
-        Number.POSITIVE_INFINITY) <= providerElapsedSeconds
+      (characterStartTimesSeconds[middle] ?? Number.POSITIVE_INFINITY) <=
+      providerElapsedSeconds
     ) {
       low = middle + 1;
     } else {
@@ -724,14 +1183,24 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
   const cursorIndex = Math.max(0, low - 1);
   if (
     safeElapsedMs >= durationMs ||
-    providerElapsedSeconds >
-      (alignment.characterEndTimesSeconds[cursorIndex] ?? previousEnd)
+    providerElapsedSeconds >=
+      (characterEndTimesSeconds[cursorIndex] ?? alignmentEndSeconds)
   ) {
     return "closed";
   }
+  const characterStartSeconds =
+    characterStartTimesSeconds[cursorIndex] ?? providerElapsedSeconds;
+  const characterEndSeconds =
+    characterEndTimesSeconds[cursorIndex] ?? characterStartSeconds;
+  const cursorProgress =
+    characterEndSeconds > characterStartSeconds
+      ? (providerElapsedSeconds - characterStartSeconds) /
+        (characterEndSeconds - characterStartSeconds)
+      : 0;
   return crtSpeechMouthShapeAtTextCursor({
-    text: alignment.characters.join(""),
+    text: characters.join(""),
     cursorIndex,
+    cursorProgress,
   });
 }
 
@@ -801,7 +1270,12 @@ export function zenLiveBotMouthShapeFromVisibleTextProgress({
     ),
   );
   if (safeVisibleLength <= 0) return "closed";
-  const safeCharactersPerPhase = Math.max(1, Math.floor(charactersPerPhase));
+  const safeCharactersPerPhase = Math.max(
+    1,
+    Math.floor(
+      Number.isFinite(charactersPerPhase) ? charactersPerPhase : 1,
+    ),
+  );
   const phaseIndex = Math.floor(
     (safeVisibleLength - 1) / safeCharactersPerPhase,
   );
