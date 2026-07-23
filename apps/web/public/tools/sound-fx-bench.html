@@ -4,96 +4,997 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sound FX Bench · PRISM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Raleway:wght@300;500&display=swap" rel="stylesheet">
   <style>
-    :root { color-scheme: dark; --bg:#101116; --panel:#191b23; --line:#323642; --ink:#f3f1ea; --muted:#9b9da8; --accent:#b8f36b; --accent-ink:#11150d; }
-    * { box-sizing:border-box; }
-    body { margin:0; height:100vh; overflow:hidden; background:radial-gradient(circle at 20% 0%,#252a3a 0,#101116 42rem); color:var(--ink); font:15px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    main { width:min(1180px,calc(100% - 32px)); height:100vh; margin:0 auto; padding:32px 0 24px; overflow:hidden; }
-    header { display:flex; align-items:end; justify-content:space-between; gap:24px; margin-bottom:30px; }
-    h1 { margin:0; font-size:clamp(2rem,5vw,4.2rem); letter-spacing:-.06em; line-height:.95; }
-    .eyebrow { margin:0 0 10px; color:var(--accent); font-size:.75rem; font-weight:700; letter-spacing:.16em; text-transform:uppercase; }
-    .intro { max-width:500px; color:var(--muted); margin:10px 0 0; }
-    .generator { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; align-items:center; margin:20px 0 18px; }
-    .generator input { min-width:0; background:#111218; border:1px solid var(--line); border-radius:9px; color:var(--ink); padding:10px 12px; }
-    .generator select { background:#252934; border:1px solid var(--line); border-radius:9px; color:var(--ink); padding:10px 12px; }
-    .candidate { display:none; grid-column:1/-1; align-items:center; gap:10px; color:var(--muted); }
-    .candidate.show { display:flex; }
-    .player-bar { display:grid; grid-template-columns:minmax(0,1fr) minmax(280px,420px); gap:12px; align-items:center; margin:18px 0 10px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#111218; }
-    .player-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:.86rem; }
-    .player-label strong { color:var(--ink); }
-    .player-bar audio { width:100%; height:34px; }
-    .candidate-name { color:var(--ink); font-weight:700; }
-    .editor { display:grid; gap:10px; margin:0 0 12px; padding:12px; border:1px solid #4b5362; border-radius:12px; background:#202532; }
-    .editor[hidden] { display:none; }
-    .editor-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .editor-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .editor-note { color:var(--muted); font-size:.8rem; margin:0; }
-    .editor input[type="text"] { min-width:0; width:100%; background:#111218; border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:8px 10px; }
-    .editor-controls { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
-    .editor-control { display:grid; gap:3px; color:var(--muted); font-size:.78rem; }
-    .editor-control output { color:var(--ink); font-variant-numeric:tabular-nums; }
-    .editor-control input[type="range"] { width:100%; accent-color:var(--accent); }
-    .editor-check { display:flex; align-items:center; gap:7px; color:var(--ink); font-size:.82rem; }
-    .editor-actions { display:flex; flex-wrap:wrap; gap:7px; }
-    .deleted { opacity:.48; }
-    .deleted .sound-name::after { content:" · disabled"; color:#ffb0b0; font-size:.78rem; }
-    .grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); gap:18px; height:calc(100vh - 285px); min-height:0; }
-    .panel { display:flex; flex-direction:column; min-height:0; overflow:hidden; background:color-mix(in srgb,var(--panel) 94%,transparent); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 16px 60px #0003; }
-    .panel h2 { margin:0 0 4px; font-size:1.05rem; }
-    .hint { color:var(--muted); font-size:.88rem; margin:0 0 16px; }
-    .library { display:grid; flex:1; min-height:0; gap:6px; overflow:auto; padding-right:4px; }
-    .sound { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; border:1px solid var(--line); border-radius:10px; padding:7px 10px; background:#111218; }
-    .sound:hover { border-color:#646a7a; }
-    .sound-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .sound-path { display:block; color:var(--muted); font-size:.7rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .sound-actions { display:flex; align-items:center; justify-content:flex-end; gap:5px; min-width:0; }
-    .sound-actions button { padding:5px 8px; }
-    .sound-actions .remove { padding:3px 7px; }
-    button, select, input { font:inherit; }
-    button { border:1px solid var(--line); border-radius:9px; background:#252934; color:var(--ink); padding:8px 12px; cursor:pointer; }
-    button:hover { border-color:var(--accent); color:var(--accent); }
-    button.primary { border-color:var(--accent); background:var(--accent); color:var(--accent-ink); font-weight:750; }
-    button.remove { padding:2px 8px; color:#ff9a9a; }
-    .assignments { display:grid; flex:1; min-height:0; gap:8px; overflow:auto; padding:2px 6px 4px 0; }
-    .assignment { border:1px solid var(--line); border-radius:10px; padding:9px; }
-    .assignment-top { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:9px; }
-    .assignment-name { font-weight:700; }
-    .assignment select { width:100%; min-width:0; background:#111218; border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:8px; }
-    .picker { position:relative; }
-    .picker-button { width:100%; text-align:left; }
-    .picker-menu { display:none; position:absolute; z-index:5; left:0; right:0; top:calc(100% + 5px); max-height:260px; overflow:auto; padding:6px; border:1px solid var(--line); border-radius:10px; background:#20232d; box-shadow:0 14px 32px #0008; }
-    .picker.open .picker-menu { display:grid; gap:3px; }
-    .picker-option { width:100%; border:0; background:transparent; text-align:left; }
-    .picker-option:hover { background:#303645; }
-    .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
-    .chip { background:#282d38; border-radius:999px; color:#d7d9df; font-size:.76rem; padding:4px 8px; }
-    .empty { color:var(--muted); border:1px dashed var(--line); border-radius:12px; padding:18px; text-align:center; }
-    .toolbar { display:flex; flex-wrap:nowrap; gap:9px; margin:18px 0 0; }
-    .status { min-height:1.4em; color:var(--accent); font-size:.85rem; margin:12px 0 0; }
-    code { color:#d5d7df; }
-    .raw-guard { display:none; position:fixed; inset:0; z-index:99; align-items:center; justify-content:center; padding:24px; background:#050507; color:#f3f1ea; text-align:center; }
-    .raw-guard-card { width:min(620px,100%); border:1px solid #3b3e4b; border-radius:18px; padding:34px; background:repeating-linear-gradient(135deg,#111218 0,#111218 12px,#181a22 12px,#181a22 24px); box-shadow:0 24px 90px #000; }
-    .raw-guard-label { margin:0 0 12px; color:#ff7777; font-size:.75rem; font-weight:800; letter-spacing:.18em; text-transform:uppercase; }
-    .raw-guard h1 { margin:0 0 12px; font-size:clamp(1.8rem,5vw,3.2rem); }
-    .raw-guard p { margin:0 auto 20px; max-width:480px; color:#b5b7c1; }
-    .raw-guard pre { margin:0; padding:14px 18px; border:1px solid #444856; border-radius:10px; background:#050507; color:var(--accent); text-align:left; overflow:auto; }
-    .raw-mode .raw-guard { display:flex; }
-    .raw-mode main { display:none; }
-    @media (max-width:900px) { .editor-controls { grid-template-columns:repeat(2,minmax(0,1fr)); } .player-bar { grid-template-columns:1fr; } }
-    @media (max-width:760px) { body{height:auto; min-height:100vh; overflow:auto} main{height:auto; min-height:100vh; padding-top:28px; overflow:visible}.grid{grid-template-columns:1fr; height:auto} header{display:block}.panel{overflow:visible}.library,.assignments{height:440px}.sound-actions { flex-wrap:wrap; } }
+    :root {
+      color-scheme: dark;
+      --prism-p: #ff4d6d;
+      --prism-r: #ff9f1c;
+      --prism-i: #b7e63a;
+      --prism-s: #2fd3e3;
+      --prism-m: #7b5cff;
+      --bg: #0b0a09;
+      --bg-deep: #060504;
+      --bg-surface: #151311;
+      --bg-elevated: #1b1816;
+      --bg-hover: #211e1b;
+      --fg: #edf3f8;
+      --fg-muted: #93a2af;
+      --fg-subtle: #667684;
+      --line: rgba(255, 255, 255, 0.1);
+      --line-strong: rgba(255, 255, 255, 0.16);
+      --panel: rgba(23, 24, 35, 0.72);
+      --panel-soft: rgba(255, 255, 255, 0.045);
+      --field: rgba(15, 16, 24, 0.86);
+      --accent: var(--prism-s);
+      --accent-ink: #071014;
+      --danger: #f57a8b;
+      --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4);
+      --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.55);
+      --font-ui: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-title: "Raleway", var(--font-ui);
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --ease: cubic-bezier(0.22, 0.7, 0.18, 1);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      color: var(--fg);
+      font: 15px/1.45 var(--font-ui);
+      background: var(--bg-deep);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection {
+      background: color-mix(in srgb, var(--prism-s) 34%, transparent);
+      color: inherit;
+    }
+
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { width: 0; height: 0; }
+
+    /* ── Atmosphere ── */
+    .atmosphere {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+      background:
+        radial-gradient(ellipse at 12% -8%, color-mix(in srgb, var(--prism-m) 22%, transparent), transparent 42%),
+        radial-gradient(ellipse at 88% 8%, color-mix(in srgb, var(--prism-s) 16%, transparent), transparent 38%),
+        radial-gradient(ellipse at 48% 108%, color-mix(in srgb, var(--prism-p) 12%, transparent), transparent 46%),
+        radial-gradient(ellipse at 70% 60%, color-mix(in srgb, var(--prism-r) 7%, transparent), transparent 40%),
+        linear-gradient(165deg, #0d0c11 0%, var(--bg-deep) 48%, #08070a 100%);
+    }
+
+    .atmosphere::before,
+    .atmosphere::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(60px);
+      opacity: 0.55;
+      mix-blend-mode: screen;
+      animation: drift 18s var(--ease) infinite alternate;
+    }
+
+    .atmosphere::before {
+      width: 42vw;
+      height: 42vw;
+      top: -12%;
+      left: -8%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--prism-m) 40%, transparent), transparent 70%);
+    }
+
+    .atmosphere::after {
+      width: 36vw;
+      height: 36vw;
+      right: -10%;
+      bottom: 8%;
+      background: radial-gradient(circle, color-mix(in srgb, var(--prism-s) 36%, transparent), transparent 70%);
+      animation-duration: 22s;
+      animation-delay: -4s;
+    }
+
+    .spectrum-veil {
+      position: absolute;
+      inset: auto 0 0;
+      height: 3px;
+      background: linear-gradient(
+        90deg,
+        var(--prism-p),
+        var(--prism-r),
+        var(--prism-i),
+        var(--prism-s),
+        var(--prism-m)
+      );
+      opacity: 0.72;
+      box-shadow:
+        0 0 24px color-mix(in srgb, var(--prism-m) 40%, transparent),
+        0 0 48px color-mix(in srgb, var(--prism-s) 24%, transparent);
+    }
+
+    @keyframes drift {
+      from { transform: translate3d(0, 0, 0) scale(1); }
+      to { transform: translate3d(4%, 6%, 0) scale(1.08); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .atmosphere::before,
+      .atmosphere::after { animation: none; }
+    }
+
+    /* ── Shell ── */
+    main {
+      position: relative;
+      z-index: 1;
+      width: min(1280px, calc(100% - 40px));
+      height: 100vh;
+      margin: 0 auto;
+      padding: 28px 0 22px;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 16px;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 22px;
+      align-items: end;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .brand-emblem {
+      width: 52px;
+      height: 52px;
+      flex-shrink: 0;
+      filter:
+        drop-shadow(0 0 9px rgba(255, 159, 28, 0.18))
+        drop-shadow(0 0 16px rgba(47, 211, 227, 0.14));
+    }
+
+    .brand-copy { min-width: 0; }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--fg-muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    .wordmark {
+      display: inline-flex;
+      gap: 0.02em;
+      margin: 0;
+      font-family: var(--font-title);
+      font-weight: 300;
+      font-size: clamp(2rem, 4.6vw, 3.4rem);
+      letter-spacing: 0.14em;
+      line-height: 0.95;
+      text-transform: uppercase;
+    }
+
+    .wordmark span:nth-child(1) { color: var(--prism-p); }
+    .wordmark span:nth-child(2) { color: var(--prism-r); }
+    .wordmark span:nth-child(3) { color: var(--prism-i); }
+    .wordmark span:nth-child(4) { color: var(--prism-s); }
+    .wordmark span:nth-child(5) { color: var(--prism-m); }
+
+    .title-block h1 {
+      margin: 0;
+      font-family: var(--font-title);
+      font-weight: 300;
+      font-size: clamp(1.55rem, 3.2vw, 2.35rem);
+      letter-spacing: -0.03em;
+      line-height: 1.05;
+      color: var(--fg);
+    }
+
+    .intro {
+      max-width: 420px;
+      margin: 8px 0 0;
+      color: var(--fg-muted);
+      font-size: 0.92rem;
+    }
+
+    .header-meta {
+      display: grid;
+      gap: 8px;
+      justify-items: end;
+      text-align: right;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--panel-soft) 80%, transparent);
+      color: var(--fg-muted);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    .pill-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--prism-i);
+      box-shadow: 0 0 10px color-mix(in srgb, var(--prism-i) 70%, transparent);
+    }
+
+    .slogan {
+      margin: 0;
+      color: var(--fg-subtle);
+      font-size: 0.78rem;
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Stage: player + generate ── */
+    .stage {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .glass {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background:
+        linear-gradient(180deg, color-mix(in srgb, #fff 4.5%, transparent), transparent 42%),
+        var(--panel);
+      box-shadow: var(--shadow-lg);
+      backdrop-filter: blur(22px) saturate(1.15);
+      -webkit-backdrop-filter: blur(22px) saturate(1.15);
+    }
+
+    .player-bar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 440px);
+      gap: 16px;
+      align-items: center;
+      padding: 14px 18px;
+    }
+
+    .player-label {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      color: var(--fg-muted);
+      font-size: 0.86rem;
+    }
+
+    .player-kicker {
+      color: var(--prism-m);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .player-label strong {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--fg);
+      font-size: 1rem;
+      font-weight: 650;
+    }
+
+    .player-label #playerLabel {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .player-bar audio {
+      width: 100%;
+      height: 36px;
+      border-radius: 999px;
+      filter: saturate(0.9);
+    }
+
+    .generator {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 10px;
+      align-items: center;
+      padding: 14px;
+    }
+
+    .generator input,
+    .generator select,
+    .editor input[type="text"],
+    .assignment select {
+      min-width: 0;
+      width: 100%;
+      background: var(--field);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      color: var(--fg);
+      padding: 11px 13px;
+      outline: none;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .generator input:focus,
+    .generator select:focus,
+    .editor input[type="text"]:focus {
+      border-color: color-mix(in srgb, var(--prism-s) 55%, var(--line));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--prism-s) 18%, transparent);
+    }
+
+    .candidate {
+      display: none;
+      grid-column: 1 / -1;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 2px;
+      padding: 12px 14px;
+      border: 1px solid color-mix(in srgb, var(--prism-i) 35%, var(--line));
+      border-radius: var(--radius-md);
+      background:
+        linear-gradient(90deg, color-mix(in srgb, var(--prism-i) 10%, transparent), transparent 55%),
+        var(--panel-soft);
+      color: var(--fg-muted);
+    }
+
+    .candidate.show { display: flex; }
+
+    .candidate-name {
+      color: var(--fg);
+      font-weight: 700;
+    }
+
+    /* ── Workspace ── */
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.85fr);
+      gap: 16px;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .panel {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+      padding: 18px;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-family: var(--font-title);
+      font-weight: 300;
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+    }
+
+    .panel-count {
+      color: var(--fg-subtle);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .hint {
+      color: var(--fg-muted);
+      font-size: 0.86rem;
+      margin: 0 0 14px;
+    }
+
+    /* ── Editor ── */
+    .editor {
+      display: grid;
+      gap: 12px;
+      margin: 0 0 14px;
+      padding: 14px;
+      border: 1px solid color-mix(in srgb, var(--prism-m) 28%, var(--line));
+      border-radius: var(--radius-md);
+      background:
+        radial-gradient(circle at 0% 0%, color-mix(in srgb, var(--prism-m) 14%, transparent), transparent 48%),
+        color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+      box-shadow: var(--shadow-md);
+    }
+
+    .editor[hidden] { display: none; }
+
+    .editor-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .editor-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .editor-note {
+      color: var(--fg-muted);
+      font-size: 0.8rem;
+      margin: 0;
+    }
+
+    .editor-controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .editor-control {
+      display: grid;
+      gap: 4px;
+      color: var(--fg-muted);
+      font-size: 0.76rem;
+    }
+
+    .editor-control output {
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .editor-control input[type="range"] {
+      width: 100%;
+      accent-color: var(--prism-s);
+    }
+
+    .editor-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--fg);
+      font-size: 0.84rem;
+    }
+
+    .editor-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    /* ── Library / assignments scroll regions ── */
+    .library,
+    .assignments {
+      display: grid;
+      flex: 1;
+      gap: 8px;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 2px 6px 6px 0;
+      align-content: start;
+    }
+
+    .sound {
+      --row-accent: var(--prism-s);
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(140px, 1fr) auto;
+      gap: 10px 14px;
+      align-items: center;
+      border: 1px solid transparent;
+      border-radius: 13px;
+      padding: 10px 12px 10px 16px;
+      background: transparent;
+      transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .sound::before {
+      content: "";
+      position: absolute;
+      top: 12px;
+      bottom: 12px;
+      left: 5px;
+      width: 2px;
+      border-radius: 999px;
+      background: var(--row-accent);
+      box-shadow: 0 0 12px color-mix(in srgb, var(--row-accent) 40%, transparent);
+      opacity: 0;
+      transition: opacity 160ms ease;
+    }
+
+    .sound:hover,
+    .sound:focus-within {
+      background: linear-gradient(90deg, color-mix(in srgb, var(--row-accent) 10%, var(--panel-soft)), var(--panel-soft));
+      border-color: color-mix(in srgb, var(--row-accent) 25%, var(--line));
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    }
+
+    .sound:hover::before,
+    .sound:focus-within::before { opacity: 1; }
+
+    .sound[data-folder="avatar"] { --row-accent: var(--prism-m); }
+    .sound[data-folder="coffee"] { --row-accent: var(--prism-r); }
+    .sound[data-folder="ui-asmr"] { --row-accent: var(--prism-s); }
+    .sound[data-folder="signal"] { --row-accent: var(--prism-p); }
+    .sound[data-folder="session-atmosphere"] { --row-accent: var(--prism-i); }
+    .sound[data-folder="prism-companion"] { --row-accent: var(--prism-m); }
+    .sound[data-folder="voice-presence"] { --row-accent: #e978d7; }
+    .sound[data-folder="generated"] { --row-accent: var(--prism-i); }
+
+    .sound-meta { min-width: 0; display: grid; gap: 3px; }
+
+    .sound-name {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .sound-path {
+      display: block;
+      color: var(--fg-subtle);
+      font-size: 0.68rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      letter-spacing: 0.02em;
+    }
+
+    .sound-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .sound-actions button {
+      padding: 5px 9px;
+      font-size: 0.78rem;
+      white-space: nowrap;
+    }
+
+    .sound-actions .remove { padding: 3px 8px; }
+
+    .deleted { opacity: 0.48; }
+    .deleted .sound-name::after {
+      content: " · disabled";
+      color: #ffb0b0;
+      font-size: 0.78rem;
+      font-weight: 500;
+    }
+
+    .assignment {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      background: var(--panel-soft);
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .assignment:hover {
+      border-color: color-mix(in srgb, var(--prism-m) 30%, var(--line));
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+    }
+
+    .assignment-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .assignment-name { font-weight: 700; }
+
+    .assignment .hint {
+      margin: 0 0 6px;
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--fg-subtle);
+    }
+
+    .picker { position: relative; }
+
+    .picker-button {
+      width: 100%;
+      text-align: left;
+      font-weight: 650;
+    }
+
+    .picker-menu {
+      display: none;
+      position: absolute;
+      z-index: 8;
+      left: 0;
+      right: 0;
+      top: calc(100% + 6px);
+      max-height: 260px;
+      overflow: auto;
+      padding: 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: color-mix(in srgb, #171824 94%, transparent);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .picker.open .picker-menu {
+      display: grid;
+      gap: 2px;
+    }
+
+    .picker-option {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      border-radius: 8px;
+    }
+
+    .picker-option:hover {
+      background: color-mix(in srgb, var(--prism-m) 16%, transparent);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: color-mix(in srgb, var(--prism-s) 12%, #282d38);
+      border: 1px solid color-mix(in srgb, var(--prism-s) 22%, transparent);
+      border-radius: 999px;
+      color: #d7d9df;
+      font-size: 0.74rem;
+      padding: 4px 8px 4px 10px;
+    }
+
+    .empty {
+      color: var(--fg-muted);
+      border: 1px dashed var(--line);
+      border-radius: var(--radius-md);
+      padding: 28px 18px;
+      text-align: center;
+      background: color-mix(in srgb, var(--panel-soft) 70%, transparent);
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .status {
+      min-height: 1.35em;
+      color: var(--prism-i);
+      font-size: 0.84rem;
+      margin: 10px 0 0;
+      text-shadow: 0 0 18px color-mix(in srgb, var(--prism-i) 35%, transparent);
+    }
+
+    code { color: #d5d7df; }
+
+    /* ── Controls ── */
+    button, select, input { font: inherit; }
+
+    button {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.055);
+      color: var(--fg);
+      padding: 8px 13px;
+      cursor: pointer;
+      transition: border-color 140ms ease, color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+
+    button:hover {
+      border-color: color-mix(in srgb, var(--prism-s) 45%, var(--line));
+      color: color-mix(in srgb, var(--prism-s) 70%, #fff);
+      background: color-mix(in srgb, var(--prism-s) 10%, transparent);
+    }
+
+    button:active { transform: translateY(1px); }
+
+    button.primary {
+      border: 0;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 38%, var(--prism-i) 78%, var(--prism-s));
+      color: #17131d;
+      font-weight: 800;
+      box-shadow: 0 10px 26px rgba(123, 92, 255, 0.16);
+    }
+
+    button.primary:hover {
+      color: #17131d;
+      filter: brightness(1.05);
+      border-color: transparent;
+    }
+
+    button.remove {
+      padding: 2px 8px;
+      color: #ff9a9a;
+    }
+
+    button.remove:hover {
+      border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 12%, transparent);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Raw-file guard ── */
+    .raw-guard {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 99;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 50% 30%, color-mix(in srgb, var(--prism-m) 14%, transparent), transparent 40%),
+        #050507;
+      color: var(--fg);
+      text-align: center;
+    }
+
+    .raw-guard-card {
+      width: min(620px, 100%);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-lg);
+      padding: 36px;
+      background:
+        linear-gradient(135deg, color-mix(in srgb, var(--prism-m) 8%, transparent), transparent 40%),
+        repeating-linear-gradient(135deg, #111218 0, #111218 12px, #181a22 12px, #181a22 24px);
+      box-shadow: 0 24px 90px #000;
+      backdrop-filter: blur(18px);
+    }
+
+    .raw-guard-label {
+      margin: 0 0 12px;
+      color: var(--danger);
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+
+    .raw-guard h1 {
+      margin: 0 0 12px;
+      font-family: var(--font-title);
+      font-weight: 300;
+      font-size: clamp(1.8rem, 5vw, 3rem);
+    }
+
+    .raw-guard p {
+      margin: 0 auto 20px;
+      max-width: 480px;
+      color: var(--fg-muted);
+    }
+
+    .raw-guard pre {
+      margin: 0;
+      padding: 14px 18px;
+      border: 1px solid #444856;
+      border-radius: 10px;
+      background: #050507;
+      color: var(--prism-i);
+      text-align: left;
+      overflow: auto;
+    }
+
+    .raw-mode .raw-guard { display: flex; }
+    .raw-mode main,
+    .raw-mode .atmosphere { display: none; }
+
+    @media (max-width: 980px) {
+      .editor-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .player-bar { grid-template-columns: 1fr; }
+      header {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+          "brand meta"
+          "title title";
+      }
+      .brand { grid-area: brand; }
+      .title-block { grid-area: title; }
+      .header-meta {
+        grid-area: meta;
+        justify-items: end;
+        text-align: right;
+        align-self: start;
+      }
+      .sound {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+      .sound-actions { justify-content: flex-start; }
+    }
+
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+      .library, .assignments {
+        height: min(42vh, 420px);
+        max-height: min(42vh, 420px);
+      }
+    }
+
+    @media (max-width: 760px) {
+      body { height: auto; min-height: 100vh; overflow: auto; }
+      main {
+        height: auto;
+        min-height: 100vh;
+        width: min(100% - 24px, 1280px);
+        padding-top: 22px;
+        overflow: visible;
+        grid-template-rows: auto;
+      }
+      .grid { overflow: visible; }
+      .panel { overflow: visible; }
+      .library, .assignments {
+        height: 380px;
+        max-height: min(50vh, 420px);
+      }
+      header { grid-template-columns: 1fr; }
+      .header-meta { justify-items: start; text-align: left; }
+      .generator { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <div id="rawGuard" class="raw-guard" role="alert"><div class="raw-guard-card"><p class="raw-guard-label">Access blocked</p><h1>Sound FX Bench needs PRISM</h1><p>This tool was opened as a raw HTML file, so its local server and ElevenLabs connection are unavailable. Start it from the repository with:</p><pre><code>prism sound</code></pre></div></div>
+  <div class="atmosphere" aria-hidden="true" data-prism-decorative-motion="true">
+    <div class="spectrum-veil"></div>
+  </div>
+  <div id="rawGuard" class="raw-guard" role="alert">
+    <div class="raw-guard-card">
+      <p class="raw-guard-label">Access blocked</p>
+      <h1>Sound FX Bench needs PRISM</h1>
+      <p>This tool was opened as a raw HTML file, so its local server and ElevenLabs connection are unavailable. Start it from the repository with:</p>
+      <pre><code>prism sound</code></pre>
+    </div>
+  </div>
   <main>
     <header>
-      <div><p class="eyebrow">PRISM / tools</p><h1>Sound FX Bench</h1><p class="intro">Audition local sounds in real time, generate candidates, build action pools, and copy the finished assignment map.</p></div>
+      <div class="brand">
+        <img class="brand-emblem" src="/refraction-emblem.svg" alt="" width="52" height="52">
+        <div class="brand-copy">
+          <p class="eyebrow">Tools · Sound atelier</p>
+          <p class="wordmark" aria-label="PRISM"><span>P</span><span>R</span><span>I</span><span>S</span><span>M</span></p>
+        </div>
+      </div>
+      <div class="title-block">
+        <h1>Sound FX Bench</h1>
+        <p class="intro">Audition local sounds, generate candidates, shape action pools, and copy the finished assignment map — all inside the sanctum.</p>
+      </div>
+      <div class="header-meta">
+        <span class="pill"><span class="pill-dot" aria-hidden="true"></span> Local session</span>
+        <p class="slogan">One light. Many colors.</p>
+      </div>
     </header>
-    <div class="player-bar"><span id="playerLabel" class="player-label"><strong>Sound player</strong> · choose Play to load a sound</span><audio id="player" controls preload="metadata" aria-label="Sound player"></audio></div>
-    <form id="generator" class="generator"><input id="prompt" required maxlength="450" placeholder="Describe a sound to generate…" aria-label="Sound effect description"><select id="duration" aria-label="Sound duration"><option value="0.8">0.8 sec</option><option value="1.2" selected>1.2 sec</option><option value="2">2 sec</option><option value="3">3 sec</option></select><button class="primary" type="submit">Generate with ElevenLabs</button><div id="candidate" class="candidate"><span>Candidate:</span><span id="candidateName" class="candidate-name"></span><button id="candidatePlay" type="button">Play candidate</button><button id="keep" type="button" class="primary">Keep</button><button id="toss" type="button">Toss</button></div></form>
+
+    <section class="stage" aria-label="Playback and generation">
+      <div class="player-bar glass">
+        <div class="player-label">
+          <span class="player-kicker">Now playing</span>
+          <span id="playerLabel"><strong>Sound player</strong> · choose Play to load a sound</span>
+        </div>
+        <audio id="player" controls preload="metadata" aria-label="Sound player"></audio>
+      </div>
+      <form id="generator" class="generator glass">
+        <input id="prompt" required maxlength="450" placeholder="Describe a sound to generate…" aria-label="Sound effect description">
+        <select id="duration" aria-label="Sound duration">
+          <option value="0.8">0.8 sec</option>
+          <option value="1.2" selected>1.2 sec</option>
+          <option value="2">2 sec</option>
+          <option value="3">3 sec</option>
+        </select>
+        <button class="primary" type="submit">Generate with ElevenLabs</button>
+        <div id="candidate" class="candidate">
+          <span>Candidate:</span>
+          <span id="candidateName" class="candidate-name"></span>
+          <button id="candidatePlay" type="button">Play candidate</button>
+          <button id="keep" type="button" class="primary">Keep</button>
+          <button id="toss" type="button">Toss</button>
+        </div>
+      </form>
+    </section>
+
     <div class="grid">
-      <section class="panel"><h2>Sound library</h2><p class="hint">Use Play to load a sound into the player above. Edit, rename, assign, or disable it inline.</p><div id="editor" class="editor" hidden><div class="editor-heading"><strong id="editorTitle" class="editor-title"></strong><button id="editCancel" type="button">Cancel</button></div><p class="editor-note">Edits run locally in your browser. Try a description, then fine-tune the controls.</p><input id="editDescriptor" type="text" placeholder="Try: fade it out a little, reduce the high-end, invert it…" aria-label="Describe a sound edit"><div class="editor-controls"><label class="editor-control">Volume <output id="editGainValue">0 dB</output><input id="editGain" type="range" min="-12" max="12" step="1" value="0"></label><label class="editor-control">High-end <output id="editHighEndValue">0 dB</output><input id="editHighEnd" type="range" min="-18" max="6" step="1" value="0"></label><label class="editor-control">Fade out <output id="editFadeValue">None</output><input id="editFade" type="range" min="0" max="0.8" step="0.05" value="0"></label><label class="editor-control">Speed <output id="editSpeedValue">1×</output><input id="editSpeed" type="range" min="0.75" max="1.25" step="0.01" value="1"></label></div><label class="editor-check"><input id="editInvert" type="checkbox"> Invert polarity</label><div class="editor-actions"><button id="editPreview" type="button">Preview edit</button><button id="editSave" type="button" class="primary">Save edited copy</button></div></div><div id="library" class="library"></div></section>
-      <section class="panel"><h2>Action assignments</h2><p class="hint">Choose what the sound means in plain English. PRISM shows the matching implementation key underneath. Add one or more sounds; several sounds on one action become a random pool.</p><div id="assignments" class="assignments"></div><div class="toolbar"><button id="addAction">+ Add action</button><button id="copy" class="primary">Copy assignment map</button></div><p id="status" class="status" role="status"></p></section>
+      <section class="panel glass">
+        <div class="panel-head">
+          <h2>Sound library</h2>
+          <span id="libraryCount" class="panel-count">0 sounds</span>
+        </div>
+        <p class="hint">Play loads into the stage above. Edit, rename, assign, or disable inline.</p>
+        <div id="editor" class="editor" hidden>
+          <div class="editor-heading">
+            <strong id="editorTitle" class="editor-title"></strong>
+            <button id="editCancel" type="button">Cancel</button>
+          </div>
+          <p class="editor-note">Edits run locally in your browser. Try a description, then fine-tune the controls.</p>
+          <input id="editDescriptor" type="text" placeholder="Try: fade it out a little, reduce the high-end, invert it…" aria-label="Describe a sound edit">
+          <div class="editor-controls">
+            <label class="editor-control">Volume <output id="editGainValue">0 dB</output><input id="editGain" type="range" min="-12" max="12" step="1" value="0"></label>
+            <label class="editor-control">High-end <output id="editHighEndValue">0 dB</output><input id="editHighEnd" type="range" min="-18" max="6" step="1" value="0"></label>
+            <label class="editor-control">Fade out <output id="editFadeValue">None</output><input id="editFade" type="range" min="0" max="0.8" step="0.05" value="0"></label>
+            <label class="editor-control">Speed <output id="editSpeedValue">1×</output><input id="editSpeed" type="range" min="0.75" max="1.25" step="0.01" value="1"></label>
+          </div>
+          <label class="editor-check"><input id="editInvert" type="checkbox"> Invert polarity</label>
+          <div class="editor-actions">
+            <button id="editPreview" type="button">Preview edit</button>
+            <button id="editSave" type="button" class="primary">Save edited copy</button>
+          </div>
+        </div>
+        <div id="library" class="library"></div>
+      </section>
+
+      <section class="panel glass">
+        <div class="panel-head">
+          <h2>Action assignments</h2>
+          <span id="assignmentCount" class="panel-count">0 actions</span>
+        </div>
+        <p class="hint">Pick what the sound means in plain English. Several sounds on one action become a random pool.</p>
+        <div id="assignments" class="assignments"></div>
+        <div class="toolbar">
+          <button id="addAction" type="button">+ Add action</button>
+          <button id="copy" type="button" class="primary">Copy assignment map</button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+      </section>
     </div>
   </main>
   <script>
@@ -118,6 +1019,11 @@
     const actionFor = (key) => ({ label: actionOptions.find(([label, value]) => value === key)?.[0] || "Custom action", key });
     const $ = (id) => document.getElementById(id);
     const label = (path) => path.split("/").pop().replace(/\.[^.]+$/, "").replace(/[-_]/g, " ");
+    const folderFor = (item) => {
+      if (item.generated || String(item.path || "").startsWith("data:")) return "generated";
+      const parts = String(item.path || "").split("/").filter(Boolean);
+      return parts[1] || parts[0] || "library";
+    };
     const existingAssignments = {
       "bot-hover": ["/audio/ui-asmr/bot-hover-01.mp3","/audio/ui-asmr/bot-hover-02.mp3","/audio/ui-asmr/bot-hover-03.mp3","/audio/ui-asmr/bot-hover-04.mp3","/audio/ui-asmr/bot-hover-05.mp3","/audio/ui-asmr/bot-hover-07.mp3","/audio/ui-asmr/bot-hover-08.mp3"],
       "bot-select": ["/audio/ui-asmr/bot-select-01.mp3","/audio/ui-asmr/bot-select-02.mp3","/audio/ui-asmr/bot-select-03.mp3","/audio/ui-asmr/bot-select-04.mp3"],
@@ -150,28 +1056,289 @@
     function soundIndexForPath(path) { return entries().findIndex((item) => item.path === path || item.id === path); }
     function isDisabled(item) { return committedDisabledIds.has(item.id) || pendingDisabledIds.has(item.id); }
     function playbackPath(path) { return path.startsWith("data:") || path.startsWith("blob:") ? path : location.protocol === "file:" ? `../${path.replace(/^\//, "")}` : path; }
-    function loadPlayer(path, name, autoplay = false, sourceId = "") { const player = $("player"); player.src = playbackPath(path); player.dataset.sourceId = sourceId; $("playerLabel").innerHTML = `<strong>${escapeHtml(name)}</strong>`; player.load(); if (autoplay) player.play().catch(() => setStatus("Press play in the sound player to audition this sound.")); }
+    function updateCounts() {
+      const visible = libraryEntries().filter((item) => !committedDisabledIds.has(item.id)).length;
+      const libraryCount = $("libraryCount");
+      const assignmentCount = $("assignmentCount");
+      if (libraryCount) libraryCount.textContent = `${visible} sound${visible === 1 ? "" : "s"}`;
+      if (assignmentCount) assignmentCount.textContent = `${assignments.length} action${assignments.length === 1 ? "" : "s"}`;
+    }
+    function loadPlayer(path, name, autoplay = false, sourceId = "") {
+      const player = $("player");
+      player.src = playbackPath(path);
+      player.dataset.sourceId = sourceId;
+      $("playerLabel").innerHTML = `<strong>${escapeHtml(name)}</strong>`;
+      player.load();
+      if (autoplay) player.play().catch(() => setStatus("Press play in the sound player to audition this sound."));
+    }
     function play(item) { loadPlayer(item.path, displayName(item), true, item.id); }
-    function clearPlayerFor(sourceId) { const player = $("player"); if (player.dataset.sourceId !== sourceId) return; player.removeAttribute("src"); player.removeAttribute("data-source-id"); player.load(); $("playerLabel").innerHTML = "<strong>Sound player</strong> · choose Play to load a sound"; }
-    function setStatus(message) { $("status").textContent = message; window.clearTimeout(setStatus.timer); setStatus.timer = window.setTimeout(() => $("status").textContent = "", 3000); }
-    function renderLibrary() { $("library").innerHTML = libraryEntries().map((item) => { if (committedDisabledIds.has(item.id)) return ""; const disabled = pendingDisabledIds.has(item.id); const id = encodeURIComponent(item.id); return `<div class="sound${disabled ? " deleted" : ""}"><span class="sound-name">${escapeHtml(displayName(item))}</span><div class="sound-actions">${disabled ? `<button data-undo="${id}">Undo</button>` : `<button data-play="${id}">Play</button><button data-edit="${id}">Edit</button><button data-rename="${id}">Rename</button><div class="picker"><button data-picker="library:${id}">Assign</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-library-action="${id}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-delete="${id}" aria-label="Disable sound">×</button>`}</div></div>`; }).join(""); }
-    function renderAssignments() { const available = libraryEntries().map((item) => ({ item, i: soundIndexForId(item.id) })).filter(({ item }) => !committedDisabledIds.has(item.id)); $("assignments").innerHTML = assignments.length ? assignments.map((action, i) => `<div class="assignment"><div class="assignment-top"><div class="picker action-picker"><button class="picker-button" data-picker="action:${i}" aria-haspopup="menu">${escapeHtml(action.label)}</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-action-choice="${i}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-remove="${i}" aria-label="Remove action">×</button></div><span class="hint">Add sound to this action</span><div class="picker sound-picker"><button class="picker-button" data-picker="sound:${i}" aria-haspopup="menu">Choose a sound…</button><div class="picker-menu">${available.map(({ item, i: soundIndex }) => `<button class="picker-option" data-sound-choice="${i}:${soundIndex}">${escapeHtml(displayName(item))}</button>`).join("")}</div></div><div class="chips">${action.sounds.length ? action.sounds.map((soundIndex, chipIndex) => `<span class="chip${isDisabled(entry(soundIndex)) ? " deleted" : ""}">${escapeHtml(entry(soundIndex) ? displayName(entry(soundIndex)) : "Unknown sound")} <button class="remove" data-chip="${i}:${chipIndex}" aria-label="Remove sound">×</button></span>`).join("") : `<span class="hint">No sounds assigned yet.</span>`}</div></div>`).join("") : `<div class="empty">Add an action to start building the map.</div>`; }
-    function persistChanges() { const disabledIds = [...new Set([...committedDisabledIds, ...pendingDisabledIds])]; generatedSounds = generatedSounds.filter((item) => !pendingDisabledIds.has(item.id)); try { localStorage.setItem(storageKey, JSON.stringify({ generatedSounds, disabledIds, customNames })); } catch { /* Private file tabs may deny localStorage. */ } }
-    function dataUrlForBlob(blob) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); }); }
+    function clearPlayerFor(sourceId) {
+      const player = $("player");
+      if (player.dataset.sourceId !== sourceId) return;
+      player.removeAttribute("src");
+      player.removeAttribute("data-source-id");
+      player.load();
+      $("playerLabel").innerHTML = "<strong>Sound player</strong> · choose Play to load a sound";
+    }
+    function setStatus(message) {
+      $("status").textContent = message;
+      window.clearTimeout(setStatus.timer);
+      setStatus.timer = window.setTimeout(() => $("status").textContent = "", 3000);
+    }
+    function renderLibrary() {
+      $("library").innerHTML = libraryEntries().map((item) => {
+        if (committedDisabledIds.has(item.id)) return "";
+        const disabled = pendingDisabledIds.has(item.id);
+        const id = encodeURIComponent(item.id);
+        const folder = folderFor(item);
+        const pathLabel = item.generated ? "generated · session" : String(item.path || "").replace(/^\/audio\//, "");
+        return `<div class="sound${disabled ? " deleted" : ""}" data-folder="${escapeHtml(folder)}"><span class="sound-meta"><span class="sound-name">${escapeHtml(displayName(item))}</span><span class="sound-path">${escapeHtml(pathLabel)}</span></span><div class="sound-actions">${disabled ? `<button data-undo="${id}">Undo</button>` : `<button data-play="${id}">Play</button><button data-edit="${id}">Edit</button><button data-rename="${id}">Rename</button><div class="picker"><button data-picker="library:${id}">Assign</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-library-action="${id}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-delete="${id}" aria-label="Disable sound">×</button>`}</div></div>`;
+      }).join("");
+      updateCounts();
+    }
+    function renderAssignments() {
+      const available = libraryEntries().map((item) => ({ item, i: soundIndexForId(item.id) })).filter(({ item }) => !committedDisabledIds.has(item.id));
+      $("assignments").innerHTML = assignments.length ? assignments.map((action, i) => `<div class="assignment"><div class="assignment-top"><div class="picker action-picker"><button class="picker-button" data-picker="action:${i}" aria-haspopup="menu">${escapeHtml(action.label)}</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-action-choice="${i}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-remove="${i}" aria-label="Remove action">×</button></div><span class="hint">Add sound to this action</span><div class="picker sound-picker"><button class="picker-button" data-picker="sound:${i}" aria-haspopup="menu">Choose a sound…</button><div class="picker-menu">${available.map(({ item, i: soundIndex }) => `<button class="picker-option" data-sound-choice="${i}:${soundIndex}">${escapeHtml(displayName(item))}</button>`).join("")}</div></div><div class="chips">${action.sounds.length ? action.sounds.map((soundIndex, chipIndex) => `<span class="chip${isDisabled(entry(soundIndex)) ? " deleted" : ""}">${escapeHtml(entry(soundIndex) ? displayName(entry(soundIndex)) : "Unknown sound")} <button class="remove" data-chip="${i}:${chipIndex}" aria-label="Remove sound">×</button></span>`).join("") : `<span class="hint">No sounds assigned yet.</span>`}</div></div>`).join("") : `<div class="empty">Add an action to start building the map.</div>`;
+      updateCounts();
+    }
+    function persistChanges() {
+      const disabledIds = [...new Set([...committedDisabledIds, ...pendingDisabledIds])];
+      generatedSounds = generatedSounds.filter((item) => !pendingDisabledIds.has(item.id));
+      try { localStorage.setItem(storageKey, JSON.stringify({ generatedSounds, disabledIds, customNames })); } catch { /* Private file tabs may deny localStorage. */ }
+    }
+    function dataUrlForBlob(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
     function dbToGain(db) { return 10 ** (db / 20); }
-    function updateEditorOutputs() { $("editGainValue").textContent = `${editorSettings.gainDb > 0 ? "+" : ""}${editorSettings.gainDb} dB`; $("editHighEndValue").textContent = `${editorSettings.highEndDb > 0 ? "+" : ""}${editorSettings.highEndDb} dB`; $("editFadeValue").textContent = editorSettings.fadeOut ? `${Math.round(editorSettings.fadeOut * 100)}%` : "None"; $("editSpeedValue").textContent = `${Number(editorSettings.playbackRate).toFixed(2).replace(/0$/, "")}×`; }
-    function syncEditorControls() { $("editGain").value = editorSettings.gainDb; $("editHighEnd").value = editorSettings.highEndDb; $("editFade").value = editorSettings.fadeOut; $("editSpeed").value = editorSettings.playbackRate; $("editInvert").checked = editorSettings.invert; updateEditorOutputs(); }
-    function applyEditDescriptor(text) { const value = text.trim().toLowerCase(); const next = { ...editorSettings }; if (/\b(invert|reverse polarity|flip polarity)\b/.test(value)) next.invert = true; if (/\b(uninvert|normal polarity)\b/.test(value)) next.invert = false; if (/\bfade(?: it)? out\b|\bfade out\b/.test(value)) next.fadeOut = /\b(a lot|heavily|quickly|strong)\b/.test(value) ? 0.6 : 0.25; if (/\b(reduce|lower|cut|lessen)\b.{0,24}\b(high[ -]?end|treble|top end)\b|\b(sharp|harsh|bright)\b/.test(value)) next.highEndDb = /\b(a lot|heavily|strong|too)\b/.test(value) ? -10 : -6; if (/\b(boost|raise|increase)\b.{0,24}\b(high[ -]?end|treble|top end)\b|\bbrighter\b/.test(value)) next.highEndDb = 4; if (/\b(quieter|softer|lower volume)\b/.test(value)) next.gainDb = -3; if (/\b(louder|stronger|higher volume)\b/.test(value)) next.gainDb = 3; if (/\bslower\b|\blower pitch\b/.test(value)) next.playbackRate = 0.9; if (/\bfaster\b|\bhigher pitch\b/.test(value)) next.playbackRate = 1.1; editorSettings = next; syncEditorControls(); }
-    async function renderAudioEdit(item, settings) { const AudioContextClass = window.AudioContext || window.webkitAudioContext; const OfflineAudioContextClass = window.OfflineAudioContext || window.webkitOfflineAudioContext; if (!AudioContextClass || !OfflineAudioContextClass) throw new Error("This browser does not support local audio editing."); const response = await fetch(playbackPath(item.path)); if (!response.ok) throw new Error("The sound could not be loaded for editing."); const context = new AudioContextClass(); let decoded; try { decoded = await context.decodeAudioData(await response.arrayBuffer()); } finally { await context.close(); } const rate = Math.max(0.75, Math.min(1.25, Number(settings.playbackRate) || 1)); const duration = decoded.duration / rate; const length = Math.max(1, Math.ceil(duration * decoded.sampleRate)); const offline = new OfflineAudioContextClass(decoded.numberOfChannels, length, decoded.sampleRate); const source = offline.createBufferSource(); source.buffer = decoded; source.playbackRate.value = rate; const filter = offline.createBiquadFilter(); filter.type = "highshelf"; filter.frequency.value = 4200; filter.gain.value = Number(settings.highEndDb) || 0; const gain = offline.createGain(); const level = dbToGain(Number(settings.gainDb) || 0); gain.gain.setValueAtTime(level, 0); if (settings.fadeOut > 0) { const fadeStart = duration * (1 - Number(settings.fadeOut)); gain.gain.setValueAtTime(level, fadeStart); gain.gain.linearRampToValueAtTime(0.0001, duration); } source.connect(filter); filter.connect(gain); gain.connect(offline.destination); source.start(0); const rendered = await offline.startRendering(); if (settings.invert) for (let channel = 0; channel < rendered.numberOfChannels; channel += 1) { const samples = rendered.getChannelData(channel); for (let i = 0; i < samples.length; i += 1) samples[i] = -samples[i]; } return audioBufferToWavBlob(rendered); }
-    function audioBufferToWavBlob(buffer) { const channels = buffer.numberOfChannels; const sampleRate = buffer.sampleRate; const frameCount = buffer.length; const dataSize = frameCount * channels * 2; const bytes = new ArrayBuffer(44 + dataSize); const view = new DataView(bytes); const write = (offset, value) => { for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i)); }; write(0, "RIFF"); view.setUint32(4, 36 + dataSize, true); write(8, "WAVE"); write(12, "fmt "); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true); view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * channels * 2, true); view.setUint16(32, channels * 2, true); view.setUint16(34, 16, true); write(36, "data"); view.setUint32(40, dataSize, true); let offset = 44; for (let i = 0; i < frameCount; i += 1) for (let channel = 0; channel < channels; channel += 1) { const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i])); view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true); offset += 2; } return new Blob([bytes], { type: "audio/wav" }); }
-    function openEditor(id) { const item = entryById(id); if (!item) return; editorItemId = id; editorSettings = { gainDb: 0, highEndDb: 0, fadeOut: 0, playbackRate: 1, invert: false }; $("editorTitle").textContent = `Edit: ${displayName(item)}`; $("editDescriptor").value = ""; syncEditorControls(); $("editor").hidden = false; $("editor").scrollIntoView({ block: "nearest" }); }
-    function closeEditor() { $("editor").hidden = true; editorItemId = null; }
-    async function previewEdit() { const item = entryById(editorItemId); if (!item) return; const button = $("editPreview"); button.disabled = true; button.textContent = "Rendering…"; try { const blob = await renderAudioEdit(item, editorSettings); loadPlayer(await dataUrlForBlob(blob), `${displayName(item)} · edited preview`, true, "editor-preview"); setStatus("Edited preview ready in the player above."); } catch (error) { setStatus(error instanceof Error ? error.message : "The edit could not be rendered."); } finally { button.disabled = false; button.textContent = "Preview edit"; } }
-    async function saveEditedCopy() { const item = entryById(editorItemId); if (!item) return; const button = $("editSave"); button.disabled = true; button.textContent = "Saving…"; try { const blob = await renderAudioEdit(item, editorSettings); const id = `edited-${Date.now()}`; const dataUrl = await dataUrlForBlob(blob); generatedSounds.push({ id, path: dataUrl, name: `${displayName(item)} (edited)`, generated: true }); renderLibrary(); renderAssignments(); loadPlayer(dataUrl, `${displayName(item)} (edited)`, false, id); closeEditor(); setStatus("Saved the edited copy in the sound library."); } catch (error) { setStatus(error instanceof Error ? error.message : "The edited copy could not be saved."); } finally { button.disabled = false; button.textContent = "Save edited copy"; } }
-    function discardCandidate() { if (!candidate) return; clearPlayerFor(candidate.id); URL.revokeObjectURL(candidate.objectUrl); candidate = null; $("candidate").classList.remove("show"); }
+    function updateEditorOutputs() {
+      $("editGainValue").textContent = `${editorSettings.gainDb > 0 ? "+" : ""}${editorSettings.gainDb} dB`;
+      $("editHighEndValue").textContent = `${editorSettings.highEndDb > 0 ? "+" : ""}${editorSettings.highEndDb} dB`;
+      $("editFadeValue").textContent = editorSettings.fadeOut ? `${Math.round(editorSettings.fadeOut * 100)}%` : "None";
+      $("editSpeedValue").textContent = `${Number(editorSettings.playbackRate).toFixed(2).replace(/0$/, "")}×`;
+    }
+    function syncEditorControls() {
+      $("editGain").value = editorSettings.gainDb;
+      $("editHighEnd").value = editorSettings.highEndDb;
+      $("editFade").value = editorSettings.fadeOut;
+      $("editSpeed").value = editorSettings.playbackRate;
+      $("editInvert").checked = editorSettings.invert;
+      updateEditorOutputs();
+    }
+    function applyEditDescriptor(text) {
+      const value = text.trim().toLowerCase();
+      const next = { ...editorSettings };
+      if (/\b(invert|reverse polarity|flip polarity)\b/.test(value)) next.invert = true;
+      if (/\b(uninvert|normal polarity)\b/.test(value)) next.invert = false;
+      if (/\bfade(?: it)? out\b|\bfade out\b/.test(value)) next.fadeOut = /\b(a lot|heavily|quickly|strong)\b/.test(value) ? 0.6 : 0.25;
+      if (/\b(reduce|lower|cut|lessen)\b.{0,24}\b(high[ -]?end|treble|top end)\b|\b(sharp|harsh|bright)\b/.test(value)) next.highEndDb = /\b(a lot|heavily|strong|too)\b/.test(value) ? -10 : -6;
+      if (/\b(boost|raise|increase)\b.{0,24}\b(high[ -]?end|treble|top end)\b|\bbrighter\b/.test(value)) next.highEndDb = 4;
+      if (/\b(quieter|softer|lower volume)\b/.test(value)) next.gainDb = -3;
+      if (/\b(louder|stronger|higher volume)\b/.test(value)) next.gainDb = 3;
+      if (/\bslower\b|\blower pitch\b/.test(value)) next.playbackRate = 0.9;
+      if (/\bfaster\b|\bhigher pitch\b/.test(value)) next.playbackRate = 1.1;
+      editorSettings = next;
+      syncEditorControls();
+    }
+    async function renderAudioEdit(item, settings) {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const OfflineAudioContextClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!AudioContextClass || !OfflineAudioContextClass) throw new Error("This browser does not support local audio editing.");
+      const response = await fetch(playbackPath(item.path));
+      if (!response.ok) throw new Error("The sound could not be loaded for editing.");
+      const context = new AudioContextClass();
+      let decoded;
+      try { decoded = await context.decodeAudioData(await response.arrayBuffer()); } finally { await context.close(); }
+      const rate = Math.max(0.75, Math.min(1.25, Number(settings.playbackRate) || 1));
+      const duration = decoded.duration / rate;
+      const length = Math.max(1, Math.ceil(duration * decoded.sampleRate));
+      const offline = new OfflineAudioContextClass(decoded.numberOfChannels, length, decoded.sampleRate);
+      const source = offline.createBufferSource();
+      source.buffer = decoded;
+      source.playbackRate.value = rate;
+      const filter = offline.createBiquadFilter();
+      filter.type = "highshelf";
+      filter.frequency.value = 4200;
+      filter.gain.value = Number(settings.highEndDb) || 0;
+      const gain = offline.createGain();
+      const level = dbToGain(Number(settings.gainDb) || 0);
+      gain.gain.setValueAtTime(level, 0);
+      if (settings.fadeOut > 0) {
+        const fadeStart = duration * (1 - Number(settings.fadeOut));
+        gain.gain.setValueAtTime(level, fadeStart);
+        gain.gain.linearRampToValueAtTime(0.0001, duration);
+      }
+      source.connect(filter);
+      filter.connect(gain);
+      gain.connect(offline.destination);
+      source.start(0);
+      const rendered = await offline.startRendering();
+      if (settings.invert) for (let channel = 0; channel < rendered.numberOfChannels; channel += 1) {
+        const samples = rendered.getChannelData(channel);
+        for (let i = 0; i < samples.length; i += 1) samples[i] = -samples[i];
+      }
+      return audioBufferToWavBlob(rendered);
+    }
+    function audioBufferToWavBlob(buffer) {
+      const channels = buffer.numberOfChannels;
+      const sampleRate = buffer.sampleRate;
+      const frameCount = buffer.length;
+      const dataSize = frameCount * channels * 2;
+      const bytes = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(bytes);
+      const write = (offset, value) => { for (let i = 0; i < value.length; i += 1) view.setUint8(offset + i, value.charCodeAt(i)); };
+      write(0, "RIFF");
+      view.setUint32(4, 36 + dataSize, true);
+      write(8, "WAVE");
+      write(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, channels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * channels * 2, true);
+      view.setUint16(32, channels * 2, true);
+      view.setUint16(34, 16, true);
+      write(36, "data");
+      view.setUint32(40, dataSize, true);
+      let offset = 44;
+      for (let i = 0; i < frameCount; i += 1) for (let channel = 0; channel < channels; channel += 1) {
+        const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
+        view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+        offset += 2;
+      }
+      return new Blob([bytes], { type: "audio/wav" });
+    }
+    function openEditor(id) {
+      const item = entryById(id);
+      if (!item) return;
+      editorItemId = id;
+      editorSettings = { gainDb: 0, highEndDb: 0, fadeOut: 0, playbackRate: 1, invert: false };
+      $("editorTitle").textContent = `Edit: ${displayName(item)}`;
+      $("editDescriptor").value = "";
+      syncEditorControls();
+      $("editor").hidden = false;
+      $("editor").scrollIntoView({ block: "nearest" });
+    }
+    function closeEditor() {
+      $("editor").hidden = true;
+      editorItemId = null;
+    }
+    async function previewEdit() {
+      const item = entryById(editorItemId);
+      if (!item) return;
+      const button = $("editPreview");
+      button.disabled = true;
+      button.textContent = "Rendering…";
+      try {
+        const blob = await renderAudioEdit(item, editorSettings);
+        loadPlayer(await dataUrlForBlob(blob), `${displayName(item)} · edited preview`, true, "editor-preview");
+        setStatus("Edited preview ready in the player above.");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "The edit could not be rendered.");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Preview edit";
+      }
+    }
+    async function saveEditedCopy() {
+      const item = entryById(editorItemId);
+      if (!item) return;
+      const button = $("editSave");
+      button.disabled = true;
+      button.textContent = "Saving…";
+      try {
+        const blob = await renderAudioEdit(item, editorSettings);
+        const id = `edited-${Date.now()}`;
+        const dataUrl = await dataUrlForBlob(blob);
+        generatedSounds.push({ id, path: dataUrl, name: `${displayName(item)} (edited)`, generated: true });
+        renderLibrary();
+        renderAssignments();
+        loadPlayer(dataUrl, `${displayName(item)} (edited)`, false, id);
+        closeEditor();
+        setStatus("Saved the edited copy in the sound library.");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "The edited copy could not be saved.");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Save edited copy";
+      }
+    }
+    function discardCandidate() {
+      if (!candidate) return;
+      clearPlayerFor(candidate.id);
+      URL.revokeObjectURL(candidate.objectUrl);
+      candidate = null;
+      $("candidate").classList.remove("show");
+    }
     let assignments = Object.entries(existingAssignments).map(([key, paths]) => ({ ...actionFor(key), sounds: paths.map(soundIndexForPath).filter((index) => index >= 0) }));
-    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[char])); }
-    $("library").addEventListener("click", (event) => { const picker = event.target.closest("[data-picker]"); const playButton = event.target.closest("[data-play]"); const editButton = event.target.closest("[data-edit]"); const renameButton = event.target.closest("[data-rename]"); const deleteButton = event.target.closest("[data-delete]"); const undoButton = event.target.closest("[data-undo]"); const libraryAction = event.target.closest("[data-library-action]"); if (picker) { event.stopPropagation(); const current = picker.parentElement; document.querySelectorAll(".picker.open").forEach((item) => { if (item !== current) item.classList.remove("open"); }); current.classList.toggle("open"); return; } if (libraryAction) { const id = decodeURIComponent(libraryAction.dataset.libraryAction.split(":")[0]); const key = libraryAction.dataset.libraryAction.slice(libraryAction.dataset.libraryAction.indexOf(":") + 1); const soundIndex = soundIndexForId(id); const actionIndex = assignments.findIndex((action) => action.key === key); if (actionIndex >= 0) assignments[actionIndex].sounds.push(soundIndex); else assignments.push({ ...actionFor(key), sounds: [soundIndex] }); renderAssignments(); renderLibrary(); setStatus(`Assigned ${displayName(entry(soundIndex))} to ${actionFor(key).label}.`); return; } if (playButton) { const item = entryById(decodeURIComponent(playButton.dataset.play)); if (item) play(item); return; } if (editButton) { openEditor(decodeURIComponent(editButton.dataset.edit)); return; } if (renameButton) { const item = entryById(decodeURIComponent(renameButton.dataset.rename)); const nextName = window.prompt("Rename sound", displayName(item)); if (nextName?.trim()) { customNames[item.id] = nextName.trim(); renderLibrary(); renderAssignments(); setStatus("Renamed and resorted alphabetically."); } return; } if (deleteButton) { const id = decodeURIComponent(deleteButton.dataset.delete); clearPlayerFor(id); pendingDisabledIds.add(id); renderLibrary(); renderAssignments(); setStatus("Sound disabled for this session. Undo it before closing to restore it."); } if (undoButton) { pendingDisabledIds.delete(decodeURIComponent(undoButton.dataset.undo)); renderLibrary(); renderAssignments(); } });
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[char]));
+    }
+    $("library").addEventListener("click", (event) => {
+      const picker = event.target.closest("[data-picker]");
+      const playButton = event.target.closest("[data-play]");
+      const editButton = event.target.closest("[data-edit]");
+      const renameButton = event.target.closest("[data-rename]");
+      const deleteButton = event.target.closest("[data-delete]");
+      const undoButton = event.target.closest("[data-undo]");
+      const libraryAction = event.target.closest("[data-library-action]");
+      if (picker) {
+        event.stopPropagation();
+        const current = picker.parentElement;
+        document.querySelectorAll(".picker.open").forEach((item) => { if (item !== current) item.classList.remove("open"); });
+        current.classList.toggle("open");
+        return;
+      }
+      if (libraryAction) {
+        const id = decodeURIComponent(libraryAction.dataset.libraryAction.split(":")[0]);
+        const key = libraryAction.dataset.libraryAction.slice(libraryAction.dataset.libraryAction.indexOf(":") + 1);
+        const soundIndex = soundIndexForId(id);
+        const actionIndex = assignments.findIndex((action) => action.key === key);
+        if (actionIndex >= 0) assignments[actionIndex].sounds.push(soundIndex);
+        else assignments.push({ ...actionFor(key), sounds: [soundIndex] });
+        renderAssignments();
+        renderLibrary();
+        setStatus(`Assigned ${displayName(entry(soundIndex))} to ${actionFor(key).label}.`);
+        return;
+      }
+      if (playButton) {
+        const item = entryById(decodeURIComponent(playButton.dataset.play));
+        if (item) play(item);
+        return;
+      }
+      if (editButton) {
+        openEditor(decodeURIComponent(editButton.dataset.edit));
+        return;
+      }
+      if (renameButton) {
+        const item = entryById(decodeURIComponent(renameButton.dataset.rename));
+        const nextName = window.prompt("Rename sound", displayName(item));
+        if (nextName?.trim()) {
+          customNames[item.id] = nextName.trim();
+          renderLibrary();
+          renderAssignments();
+          setStatus("Renamed and resorted alphabetically.");
+        }
+        return;
+      }
+      if (deleteButton) {
+        const id = decodeURIComponent(deleteButton.dataset.delete);
+        clearPlayerFor(id);
+        pendingDisabledIds.add(id);
+        renderLibrary();
+        renderAssignments();
+        setStatus("Sound disabled for this session. Undo it before closing to restore it.");
+      }
+      if (undoButton) {
+        pendingDisabledIds.delete(decodeURIComponent(undoButton.dataset.undo));
+        renderLibrary();
+        renderAssignments();
+      }
+    });
     $("editDescriptor").addEventListener("input", (event) => applyEditDescriptor(event.target.value));
     $("editGain").addEventListener("input", (event) => { editorSettings.gainDb = Number(event.target.value); updateEditorOutputs(); });
     $("editHighEnd").addEventListener("input", (event) => { editorSettings.highEndDb = Number(event.target.value); updateEditorOutputs(); });
@@ -181,16 +1348,111 @@
     $("editPreview").addEventListener("click", previewEdit);
     $("editSave").addEventListener("click", saveEditedCopy);
     $("editCancel").addEventListener("click", closeEditor);
-    $("assignments").addEventListener("click", (event) => { const picker = event.target.closest("[data-picker]"); if (picker) { event.stopImmediatePropagation(); const current = picker.parentElement; document.querySelectorAll(".picker.open").forEach((item) => { if (item !== current) item.classList.remove("open"); }); current.classList.toggle("open"); return; } const actionChoice = event.target.closest("[data-action-choice]"); if (actionChoice) { event.stopImmediatePropagation(); const [index, key] = actionChoice.dataset.actionChoice.split(":"); assignments[Number(index)] = { ...actionFor(key), sounds: assignments[Number(index)].sounds }; renderAssignments(); return; } const soundChoice = event.target.closest("[data-sound-choice]"); if (soundChoice) { event.stopImmediatePropagation(); const [actionIndex, soundIndex] = soundChoice.dataset.soundChoice.split(":").map(Number); assignments[actionIndex].sounds.push(soundIndex); renderAssignments(); return; } });
-    $("assignments").addEventListener("click", (event) => { const remove = event.target.closest("[data-remove]"); const chip = event.target.closest("[data-chip]"); if (remove) assignments.splice(Number(remove.dataset.remove), 1); if (chip) { const [actionIndex, chipIndex] = chip.dataset.chip.split(":").map(Number); assignments[actionIndex].sounds.splice(chipIndex, 1); } renderAssignments(); });
-    $("addAction").addEventListener("click", () => { assignments.push({ ...actionFor("custom-action"), sounds: [] }); renderAssignments(); });
-    $("copy").addEventListener("click", async () => { const output = { soundFx: Object.fromEntries(assignments.map((action) => [action.key, action.sounds.map((index) => { const item = entry(index); return item.generated ? { name: displayName(item), source: "elevenlabs-generated", audioDataUrl: item.path } : item.path; })])) }; try { await navigator.clipboard.writeText(JSON.stringify(output, null, 2)); setStatus("Assignment map copied to clipboard."); } catch { setStatus("Clipboard access was blocked. Copy the map from the browser console if needed."); console.log(JSON.stringify(output, null, 2)); } });
-    $("generator").addEventListener("submit", async (event) => { event.preventDefault(); const prompt = $("prompt").value.trim(); if (!prompt) return; const button = event.submitter; discardCandidate(); button.disabled = true; button.textContent = "Generating…"; setStatus("Asking ElevenLabs for a candidate…"); try { const endpoint = location.protocol === "file:" ? "http://127.0.0.1:18787/api/dev/sound-fx-bench/generate" : "/api/dev/sound-fx-bench/generate"; const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, durationSeconds: Number($("duration").value) }) }); if (!response.ok) throw new Error((await response.text()).replace(/[{}\"]/g, "").slice(0, 220)); const blob = await response.blob(); const objectUrl = URL.createObjectURL(blob); candidate = { prompt, id: `candidate-${Date.now()}`, name: prompt.slice(0, 54), objectUrl, dataUrl: await dataUrlForBlob(blob) }; $("candidateName").textContent = candidate.name; loadPlayer(objectUrl, candidate.name, true, candidate.id); $("candidate").classList.add("show"); setStatus("Candidate ready. Keep it or toss it."); } catch (error) { setStatus(error instanceof Error ? error.message : "Generation failed. Start PRISM with ELEVENLABS_API_KEY loaded."); } finally { button.disabled = false; button.textContent = "Generate with ElevenLabs"; } });
+    $("assignments").addEventListener("click", (event) => {
+      const picker = event.target.closest("[data-picker]");
+      if (picker) {
+        event.stopImmediatePropagation();
+        const current = picker.parentElement;
+        document.querySelectorAll(".picker.open").forEach((item) => { if (item !== current) item.classList.remove("open"); });
+        current.classList.toggle("open");
+        return;
+      }
+      const actionChoice = event.target.closest("[data-action-choice]");
+      if (actionChoice) {
+        event.stopImmediatePropagation();
+        const [index, key] = actionChoice.dataset.actionChoice.split(":");
+        assignments[Number(index)] = { ...actionFor(key), sounds: assignments[Number(index)].sounds };
+        renderAssignments();
+        return;
+      }
+      const soundChoice = event.target.closest("[data-sound-choice]");
+      if (soundChoice) {
+        event.stopImmediatePropagation();
+        const [actionIndex, soundIndex] = soundChoice.dataset.soundChoice.split(":").map(Number);
+        assignments[actionIndex].sounds.push(soundIndex);
+        renderAssignments();
+        return;
+      }
+    });
+    $("assignments").addEventListener("click", (event) => {
+      const remove = event.target.closest("[data-remove]");
+      const chip = event.target.closest("[data-chip]");
+      if (remove) assignments.splice(Number(remove.dataset.remove), 1);
+      if (chip) {
+        const [actionIndex, chipIndex] = chip.dataset.chip.split(":").map(Number);
+        assignments[actionIndex].sounds.splice(chipIndex, 1);
+      }
+      renderAssignments();
+    });
+    $("addAction").addEventListener("click", () => {
+      assignments.push({ ...actionFor("custom-action"), sounds: [] });
+      renderAssignments();
+    });
+    $("copy").addEventListener("click", async () => {
+      const output = {
+        soundFx: Object.fromEntries(assignments.map((action) => [action.key, action.sounds.map((index) => {
+          const item = entry(index);
+          return item.generated ? { name: displayName(item), source: "elevenlabs-generated", audioDataUrl: item.path } : item.path;
+        })]))
+      };
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(output, null, 2));
+        setStatus("Assignment map copied to clipboard.");
+      } catch {
+        setStatus("Clipboard access was blocked. Copy the map from the browser console if needed.");
+        console.log(JSON.stringify(output, null, 2));
+      }
+    });
+    $("generator").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const prompt = $("prompt").value.trim();
+      if (!prompt) return;
+      const button = event.submitter;
+      discardCandidate();
+      button.disabled = true;
+      button.textContent = "Generating…";
+      setStatus("Asking ElevenLabs for a candidate…");
+      try {
+        const endpoint = location.protocol === "file:" ? "http://127.0.0.1:18787/api/dev/sound-fx-bench/generate" : "/api/dev/sound-fx-bench/generate";
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ prompt, durationSeconds: Number($("duration").value) })
+        });
+        if (!response.ok) throw new Error((await response.text()).replace(/[{}\"]/g, "").slice(0, 220));
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        candidate = { prompt, id: `candidate-${Date.now()}`, name: prompt.slice(0, 54), objectUrl, dataUrl: await dataUrlForBlob(blob) };
+        $("candidateName").textContent = candidate.name;
+        loadPlayer(objectUrl, candidate.name, true, candidate.id);
+        $("candidate").classList.add("show");
+        setStatus("Candidate ready. Keep it or toss it.");
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Generation failed. Start PRISM with ELEVENLABS_API_KEY loaded.");
+      } finally {
+        button.disabled = false;
+        button.textContent = "Generate with ElevenLabs";
+      }
+    });
     $("candidatePlay").addEventListener("click", () => { if (candidate) loadPlayer(candidate.objectUrl, candidate.name, true, candidate.id); });
-    $("keep").addEventListener("click", () => { if (!candidate) return; generatedSounds.push({ id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true }); renderLibrary(); renderAssignments(); discardCandidate(); $("prompt").value = ""; setStatus("Kept in the sound library for this session."); });
-    $("toss").addEventListener("click", () => { if (!candidate) return; discardCandidate(); setStatus("Candidate tossed."); });
+    $("keep").addEventListener("click", () => {
+      if (!candidate) return;
+      generatedSounds.push({ id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true });
+      renderLibrary();
+      renderAssignments();
+      discardCandidate();
+      $("prompt").value = "";
+      setStatus("Kept in the sound library for this session.");
+    });
+    $("toss").addEventListener("click", () => {
+      if (!candidate) return;
+      discardCandidate();
+      setStatus("Candidate tossed.");
+    });
     window.addEventListener("pagehide", persistChanges);
-    renderLibrary(); renderAssignments();
+    document.addEventListener("click", () => document.querySelectorAll(".picker.open").forEach((item) => item.classList.remove("open")));
+    renderLibrary();
+    renderAssignments();
   </script>
 </body>
 </html>
