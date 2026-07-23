@@ -4,6 +4,13 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("teaches that the selected Signal Auto model is Primary", () => {
+    const setup = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
+    assert.match(setup, /model picker shows every local and online model/u);
+    assert.match(setup, /choice is Primary/u);
+    assert.match(setup, /configured fallback chain/u);
+  });
+
   it("explains holder-scoped bot-name prefixes and suffixes", () => {
     for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
       const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
@@ -25,19 +32,27 @@ describe("mode tutorials", () => {
     }
   });
 
+  it("teaches Signal host search and saved-group filtering", () => {
+    const createShowStep = MODE_TUTORIALS.botcast.steps[0];
+    assert.match(createShowStep?.body ?? "", /Search by bot name/u);
+    assert.match(createShowStep?.body ?? "", /saved bot groups/u);
+    assert.equal(
+      createShowStep?.targetSelector,
+      '[data-tutorial-target="botcast-create-show"]',
+    );
+  });
+
   it("teaches the generated Studio lighting map and its private default", () => {
-    const identityCopy = MODE_TUTORIALS.botcast.steps[1]?.body ?? "";
-    assert.match(identityCopy, /Every generated Studio (?:keeps|finishes with)/u);
-    assert.match(identityCopy, /guaranteed local default/u);
-    assert.match(identityCopy, /Refresh Studio Lighting/u);
-    assert.match(identityCopy, /aligned image-model pass/u);
-    assert.match(identityCopy, /waits visibly behind any image already rendering/u);
-    assert.match(identityCopy, /starts automatically when its turn arrives/u);
-    assert.match(identityCopy, /LOCAL stays on the private deterministic default/u);
-    assert.match(identityCopy, /without changing either image/u);
-    assert.match(identityCopy, /never applies a stale map/u);
-    assert.match(identityCopy, /edit or regenerate the Sound identity/u);
-    assert.match(identityCopy, /applies its musical fingerprint.*immediately/u);
+    const atmosphereCopy = MODE_TUTORIALS.botcast.steps[3]?.body ?? "";
+    assert.match(atmosphereCopy, /coordinates the show’s studio and sound/u);
+    assert.match(atmosphereCopy, /source-linked Light studio/u);
+    assert.match(atmosphereCopy, /lighting map in the background/u);
+    assert.match(atmosphereCopy, /LOCAL stays private/u);
+    assert.match(atmosphereCopy, /Signal Synth/u);
+    assert.match(atmosphereCopy, /skips ElevenLabs/u);
+    assert.match(atmosphereCopy, /rebuild stale lighting/u);
+    assert.match(atmosphereCopy, /current artwork stay in place/u);
+    assert.doesNotMatch(atmosphereCopy, /Sound identity|Studio pair/u);
   });
 
   it("clamps restored progress to a valid step", () => {
@@ -241,7 +256,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /transparent logo/u,
+      /one identity row/u,
     );
     assert.equal(MODE_TUTORIALS.botcast.steps[2]?.heading, "Build an audience");
     assert.equal(
@@ -254,7 +269,7 @@ describe("mode tutorials", () => {
     );
     assert.equal(
       MODE_TUTORIALS.botcast.steps[3]?.targetSelector,
-      '[data-tutorial-target="botcast-intro-audio"]',
+      '[data-tutorial-target="botcast-atmosphere-control"]',
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
@@ -266,48 +281,36 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /missing text identity/u,
+      /fills only missing pieces/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /Complete this show retries only unfinished pieces/u,
+      /click the logo for Generate or Upload/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /regenerate blurbs/u,
+      /blank Premise roll invents a fresh host-shaped show/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /echo-bound host[\s\S]*same blurb forever/u,
+      /successful Premise roll also refreshes the dashboard blurbs automatically/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /keep using PRISM/u,
+      /Manual premise edits leave those blurbs alone/u,
     );
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /Dark-to-Light studio pair/u,
+      /specific[\s\S]*preserves its subjects, stakes, and intent/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /gear at the bottom-right/u,
+      /echo-bound host[\s\S]*repeats it forever/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /atmosphere audio/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /replace either studio visual/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /illuminated microphone trim to match the cast/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /uploaded studio images stay untouched/u,
+      /keyword|Sound identity|Studio pair|atmosphere audio/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[2]?.body ?? "",
@@ -332,37 +335,31 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /host-persona-led Signal Synth identity/u,
+      /coordinates the show’s studio and sound in one roll/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /emotional core and signature contradiction/u,
+      /Dark studio, its source-linked Light studio, and the lighting map/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /raw character, franchise, and show prose are never sent/u,
-    );
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Play ident/u);
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /eight-second host-specific ident, its four-second outdent/u,
+      /LOCAL stays private[\s\S]*skips ElevenLabs/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /gear is always available to create or refresh/u,
+      /Raw persona prose never goes to image or music providers/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /no key or network/u,
+      /upload either studio, rebuild stale lighting/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
+      /Completed pieces and current artwork stay in place/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
       /static backdrop/u,
-    );
-    assert.match(MODE_TUTORIALS.botcast.steps[3]?.body ?? "", /Foley/u);
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[3]?.body ?? "",
-      /saves the mix for that show/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -396,6 +393,14 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /configured fallback chain/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /model picker shows every local and online model/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /choice is Primary/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -576,11 +581,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /sharpen your editable premise inspiration/u,
+      /Existing prose becomes source material/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /Refresh premise treats the prose in that box as inspiration/u,
+      /preserves its subjects, stakes, and intent/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -812,6 +817,16 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches the live Signal closed-caption control", () => {
+    const controlRoom = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Produce from the control room",
+    )?.body ?? "";
+    assert.match(
+      controlRoom,
+      /CC button in the live top line[\s\S]*without changing the saved transcript or replay captions/u,
+    );
+  });
+
   it("teaches Slate as a directed document workflow with stable targets", () => {
     const headings = MODE_TUTORIALS.slate.steps.map((step) => step.heading);
     const selectors = MODE_TUTORIALS.slate.steps.map(
@@ -1011,8 +1026,10 @@ describe("mode tutorials", () => {
     assert.match(setup?.body ?? "", /hidden 30-minute ceiling/);
     assert.match(
       routing?.body ?? "",
-      /changes response routing, not the Account default model choice/,
+      /model picker stays active and shows every model/,
     );
+    assert.match(routing?.body ?? "", /selection becomes Primary/);
+    assert.match(routing?.body ?? "", /fallback chain saved in Settings/);
     assert.match(routing?.body ?? "", /separate Images provider/);
     assert.match(routing?.body ?? "", /voice preference/);
     assert.match(routing?.body ?? "", /Voice remains available/);
@@ -1077,6 +1094,14 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /relative to your account Voice Volume/);
     assert.match(routing?.body ?? "", /SFX tab can generate an ElevenLabs loop/);
     assert.match(routing?.body ?? "", /talking, idle, thinking/);
+    const automaticThinkingSfx = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Hear each bot think",
+    );
+    assert.match(automaticThinkingSfx?.body ?? "", /AI-generated and Marketplace bots/);
+    assert.match(automaticThinkingSfx?.body ?? "", /Computer calculating/);
+    assert.match(automaticThinkingSfx?.body ?? "", /assign it only to thinking/);
+    assert.match(automaticThinkingSfx?.body ?? "", /LOCAL privacy/);
+    assert.match(automaticThinkingSfx?.body ?? "", /still completes/);
     assert.match(routing?.body ?? "", /non-neutral mood/);
     assert.match(routing?.body ?? "", /neutral speech stays untagged/);
   });

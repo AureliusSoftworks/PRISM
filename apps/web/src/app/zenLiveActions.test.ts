@@ -154,7 +154,7 @@ describe("zenLiveActionPlateFace", () => {
       rotateDeg: 90,
     });
     assert.deepEqual(zenLiveActionPlateFace("warm", "dot"), {
-      text: ":∙",
+      text: ":.",
       rotateDeg: 90,
     });
     assert.deepEqual(zenLiveActionPlateFace("warm", "at"), {

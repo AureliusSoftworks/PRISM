@@ -10,7 +10,7 @@ import {
   type ReplaySurfaceV1,
   type ReplayTimelineV1,
 } from "@localai/shared";
-import { prepareReplayAudio } from "./replayAudio";
+import { prepareReplayAudio, replayAudioBufferToWav } from "./replayAudio";
 import {
   claimReplayRecording,
   completeReplayRender,
@@ -54,43 +54,6 @@ function interleavedReplayAudio(buffer: AudioBuffer): Float32Array {
     interleaved[frame * 2 + 1] = right[frame] ?? 0;
   }
   return interleaved;
-}
-
-function replayAudioBufferToWav(buffer: AudioBuffer): ArrayBuffer {
-  const channels = Math.max(1, Math.min(2, buffer.numberOfChannels));
-  const frameCount = buffer.length;
-  const bytes = new ArrayBuffer(44 + frameCount * channels * 2);
-  const view = new DataView(bytes);
-  const write = (offset: number, value: string): void => {
-    for (let index = 0; index < value.length; index += 1) {
-      view.setUint8(offset + index, value.charCodeAt(index));
-    }
-  };
-  write(0, "RIFF");
-  view.setUint32(4, bytes.byteLength - 8, true);
-  write(8, "WAVE");
-  write(12, "fmt ");
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, channels, true);
-  view.setUint32(24, buffer.sampleRate, true);
-  view.setUint32(28, buffer.sampleRate * channels * 2, true);
-  view.setUint16(32, channels * 2, true);
-  view.setUint16(34, 16, true);
-  write(36, "data");
-  view.setUint32(40, frameCount * channels * 2, true);
-  const channelData = Array.from({ length: channels }, (_, channel) =>
-    buffer.getChannelData(channel),
-  );
-  let offset = 44;
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    for (let channel = 0; channel < channels; channel += 1) {
-      const sample = Math.max(-1, Math.min(1, channelData[channel]?.[frame] ?? 0));
-      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
-      offset += 2;
-    }
-  }
-  return bytes;
 }
 
 function waitForReplayWorker(
@@ -141,7 +104,7 @@ async function renderClaimedReplay(
   claim: NonNullable<Awaited<ReturnType<typeof claimReplayRecording>>>,
   frameRenderer?: ReplayFrameRenderer,
 ): Promise<void> {
-  const { recording, takes, premiumSegments, renderToken } = claim;
+  const { recording, takes, premiumSegments, renderToken, renderKind } = claim;
   if (!recording.manifest) throw new Error("Replay manifest is missing.");
   if (typeof Worker === "undefined" || typeof createImageBitmap === "undefined") {
     throw new Error("This PRISM client cannot encode replay video. Retry on a worker-capable client.");
@@ -152,15 +115,22 @@ async function renderClaimedReplay(
     status: "preparing_audio",
     progress: 0.04,
   });
-  if (recording.surface === "signal" && premiumSegments.length === 0) {
+  if (
+    recording.surface === "signal" &&
+    renderKind === "premium" &&
+    premiumSegments.length === 0
+  ) {
     throw new Error("Premium voice mastering must finish before studio rendering.");
   }
   const prepared = await prepareReplayAudio(recording, takes, {
     premiumSegments:
-      recording.surface === "signal" ? premiumSegments : undefined,
+      recording.surface === "signal" && renderKind === "premium"
+        ? premiumSegments
+        : undefined,
   });
   if (
     recording.surface === "signal" &&
+    renderKind === "premium" &&
     (!recording.premiumProduction?.audioUrl ||
       !recording.premiumProduction.timeline)
   ) {
@@ -310,6 +280,13 @@ export function ReplayRenderCoordinator({
 } = {}): null {
   const runningRef = useRef(false);
   useEffect(() => {
+    if (
+      new URLSearchParams(window.location.search).has(
+        "prismRenderRecording",
+      )
+    ) {
+      return;
+    }
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = (delayMs: number) => {

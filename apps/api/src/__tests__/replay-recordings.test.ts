@@ -171,11 +171,15 @@ describe("durable replay recordings", () => {
     ).run(archived.id);
     const retried = retryReplayPremiumProduction(db, "user-1", archived.id);
 
-    assert.equal(retried?.status, "queued");
+    assert.equal(retried?.status, "collecting");
     assert.equal(retried?.premiumProduction?.phase, "mixing_episode");
     assert.equal(retried?.premiumProduction?.masterReady, true);
     assert.deepEqual(retried?.premiumProduction?.timeline, archived.timeline);
     assert.equal(retried?.premiumProduction?.error, null);
+    const claimed = claimNextReplayRecording(db, "user-1", {
+      surface: "signal",
+    });
+    assert.equal(claimed?.renderKind, "premium");
   });
 
   it("deletes only Premium media and restores the canonical local timeline", () => {
@@ -194,16 +198,17 @@ describe("durable replay recordings", () => {
     markPremiumMasterReady(db, archived.id);
     db.prepare(
       `UPDATE replay_recordings
-          SET timeline_json = '{"v":1,"durationMs":999999,"beats":[]}'
+          SET status = 'ready',
+              timeline_json = '{"v":1,"durationMs":999999,"beats":[]}'
         WHERE id = ? AND user_id = 'user-1'`,
     ).run(archived.id);
 
     const deleted = deleteReplayPremiumMedia(db, "user-1", archived.id);
 
-    assert.equal(deleted?.status, "collecting");
+    assert.equal(deleted?.status, "ready");
     assert.equal(deleted?.premiumProduction, null);
     assert.ok(deleted?.manifest);
-    assert.notEqual(deleted?.timeline?.durationMs, 999_999);
+    assert.equal(deleted?.timeline?.durationMs, 999_999);
     assert.equal(replayVoiceTakesForRecording(db, "user-1", archived.id).length, 1);
   });
 
@@ -276,6 +281,7 @@ describe("durable replay recordings", () => {
     markPremiumMasterReady(db, queued.id);
     const claimed = claimNextReplayRecording(db, "user-1");
     assert.ok(claimed);
+    assert.equal(claimed.renderKind, "standard");
     assert.equal(claimed.recording.status, "preparing_audio");
     assert.equal(claimed.takes[0]?.snapshot.requestedEngine, "builtin");
 

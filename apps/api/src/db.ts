@@ -1405,6 +1405,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       master_ready INTEGER NOT NULL DEFAULT 0,
       audio_rel_path TEXT,
       timeline_json TEXT,
+      render_token TEXT,
+      upload_rel_path TEXT,
+      video_rel_path TEXT,
+      codec TEXT,
+      content_type TEXT,
+      duration_ms INTEGER,
+      size_bytes INTEGER,
       warning TEXT,
       error TEXT,
       created_at TEXT NOT NULL,
@@ -1490,11 +1497,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       name: string;
     }>).map((column) => column.name),
   );
-  if (!replayPremiumProductionColumns.has("timeline_json")) {
+  const addReplayPremiumProductionColumn = (
+    name: string,
+    definition: string,
+  ): void => {
+    if (replayPremiumProductionColumns.has(name)) return;
     db.exec(
-      "ALTER TABLE replay_premium_productions ADD COLUMN timeline_json TEXT;",
+      `ALTER TABLE replay_premium_productions ADD COLUMN ${name} ${definition};`,
     );
-  }
+  };
+  addReplayPremiumProductionColumn("timeline_json", "TEXT");
+  addReplayPremiumProductionColumn("render_token", "TEXT");
+  addReplayPremiumProductionColumn("upload_rel_path", "TEXT");
+  addReplayPremiumProductionColumn("video_rel_path", "TEXT");
+  addReplayPremiumProductionColumn("codec", "TEXT");
+  addReplayPremiumProductionColumn("content_type", "TEXT");
+  addReplayPremiumProductionColumn("duration_ms", "INTEGER");
+  addReplayPremiumProductionColumn("size_bytes", "INTEGER");
   const botcastIntroAudioColumns = new Set(
     (db.prepare("PRAGMA table_info(botcast_show_intro_audio)").all() as Array<{
       name: string;

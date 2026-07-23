@@ -5,8 +5,8 @@ import { describe, it } from "node:test";
 const signal = readFileSync(new URL("BotcastExperience.tsx", import.meta.url), "utf8");
 const replayAudio = readFileSync(new URL("replayAudio.ts", import.meta.url), "utf8");
 const panel = readFileSync(new URL("ReplayRecordingPanel.tsx", import.meta.url), "utf8");
-const renderer = readFileSync(
-  new URL("ReplayRenderCoordinator.tsx", import.meta.url),
+const renderChild = readFileSync(
+  new URL("../../../api/src/replay-render-child.ts", import.meta.url),
   "utf8",
 );
 const server = readFileSync(
@@ -14,7 +14,7 @@ const server = readFileSync(
   "utf8",
 );
 
-describe("Signal local replay and Premium production contracts", () => {
+describe("Signal local replay and video export contracts", () => {
   it("archives without rendering and opens the local replay immediately", () => {
     assert.match(signal, /queueReplayManifest\(manifest, \{ render: false \}\)/u);
     assert.match(signal, /setReplayEpisode\(detail\)/u);
@@ -39,29 +39,35 @@ describe("Signal local replay and Premium production contracts", () => {
     assert.match(server, /user\.preferred_provider === "local"/u);
   });
 
-  it("pauses local playback coherently before Premium mastering and rendering", () => {
+  it("exports captured audio without a provider call and keeps Premium separate", () => {
+    assert.match(panel, /Export video/u);
+    assert.match(panel, /captured audio and makes no new voice call/u);
+    assert.match(panel, /Export Premium video/u);
+    assert.match(signal, /onExportVideo=\{async \(\) => \{/u);
+    assert.match(signal, /await prepareSignalVideo\(replayEpisode, selectedShow\)/u);
+    assert.match(signal, /encodeReplayRenderAudio/u);
+    assert.match(renderChild, /page\.screencast\.start/u);
+  });
+
+  it("keeps local replay controls independent while background export runs", () => {
     const handlerStart = signal.indexOf(
-      "onProducePremium={async (regenerate) => {",
+      "onExportPremium={async (regenerate) => {",
     );
     assert.notEqual(handlerStart, -1);
     const handler = signal.slice(handlerStart, handlerStart + 1_200);
-    const stopIndexes = Array.from(handler.matchAll(/stopReplayPlayback\(\);/gu)).map(
-      (match) => match.index,
-    );
-    const preparationIndex = handler.indexOf("await prepareSignalPremiumVideo(");
-    assert.equal(stopIndexes.length, 2);
-    assert.ok((stopIndexes[0] ?? Number.MAX_SAFE_INTEGER) < preparationIndex);
-    assert.ok((stopIndexes[1] ?? -1) > preparationIndex);
-    assert.match(signal, /setReplayPlaying\(false\);\s*setReplayVoicePending\(false\);\s*setReplaySpeechActive\(false\);/u);
-    assert.match(signal, /disabled=\{Boolean\(replayRenderTarget\)\}/u);
-    assert.match(panel, /Starting Premium production…/u);
-    assert.match(panel, /Local replay is paused at its current position/u);
+    assert.match(handler, /await prepareSignalPremiumVideo\(/u);
+    assert.doesNotMatch(handler, /stopReplayPlayback|setReplayRenderTarget/u);
+    const standardStart = signal.indexOf("onExportVideo={async () => {");
+    const standardHandler = signal.slice(standardStart, standardStart + 400);
+    assert.doesNotMatch(standardHandler, /stopReplayPlayback|setReplayRenderTarget/u);
+    assert.match(signal, /separate background renderer/u);
+    assert.match(panel, /selected voice IDs will be sent to ElevenLabs/u);
   });
 
   it("resumes video work from the cached mixed master and Premium timeline", () => {
     assert.match(replayAudio, /recording\.premiumProduction\?\.audioUrl/u);
     assert.match(replayAudio, /recording\.premiumProduction\.timeline/u);
-    assert.match(renderer, /storeReplayPremiumTimeline/u);
-    assert.match(renderer, /!recording\.premiumProduction\.timeline/u);
+    assert.match(signal, /storeReplayPremiumTimeline/u);
+    assert.match(signal, /!detail\.recording\.premiumProduction\.timeline/u);
   });
 });

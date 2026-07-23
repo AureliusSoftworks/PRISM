@@ -16,6 +16,19 @@ test("the shared full-avatar renderer owns the looping SFX lifecycle", () => {
   assert.match(pageSource, /data-bot-avatar-sfx-runtime="true"/);
 });
 
+test("generated and Marketplace bots automatically receive unique thinking loops", () => {
+  const automaticGenerationCalls = pageSource.match(
+    /generateBotThinkingSfxProfile\(/gu,
+  );
+  assert.ok(
+    (automaticGenerationCalls?.length ?? 0) >= 3,
+    "generated drafts, Marketplace installs, and Marketplace updates should each request a loop",
+  );
+  assert.match(pageSource, /generateThinkingSfx: true/u);
+  assert.match(pageSource, /onThinkingSfxError:/u);
+  assert.match(pageSource, /thinkingSfxGenerated/u);
+});
+
 test("Avatar Studio drives SFX from its idle, blink, talking, and thinking preview", () => {
   const previewSource = sourceBefore(
     "scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}",

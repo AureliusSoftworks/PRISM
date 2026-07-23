@@ -1880,16 +1880,26 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /coffeeConversationRef\.current = args\.conversation;\s+setCoffeeConversation\(args\.conversation\);/);
   });
 
-  it("blocks sip visuals for coffee refusal, pot filling, or bot thinking", () => {
+  it("lets thinking finish a sip while blocking refusal, pot filling, and pending speech", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
     assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeCupClockMs;/);
     assert.match(
       pageSource,
-      /const visualSeatSipInProgress =\s+coffeeCupRefused \|\| refillSipLocked \|\| seatIsThinking\s+\? false\s+: seatSipInProgress;/,
+      /const visualSeatSipInProgress = coffeeCupRefused \|\| refillSipLocked \|\| coffeeSipTalkGateActive \? false : seatSipInProgress;/,
     );
     assert.match(pageSource, /sipLockedUntilMs: refillSipLockUntilMs \|\| null,/);
-    assert.match(pageSource, /refillSipLocked \|\| !seatIsFirmlySeated/);
-    assert.match(pageSource, /cupSipping: refillSipLocked \|\| seatIsThinking \? false : coffeeCupVisual\.sipping,/);
+    assert.match(
+      pageSource,
+      /refillSipLocked \|\| coffeeSipTalkGateActive \|\| !seatIsFirmlySeated/,
+    );
+    assert.match(
+      pageSource,
+      /await waitForActiveCoffeeSipBeforeTalk\( coffeeCupElementByBotIdRef\.current\.get\(args\.speakerBotId\), \);/,
+    );
+    assert.match(
+      pageSource,
+      /data-cup-sip-duration-ms=\{\s*coffeeCupVisual\.sipAnimationMs\s*\}/,
+    );
   });
 
   it("centers the thinking slash spinner within the bot face screen", () => {

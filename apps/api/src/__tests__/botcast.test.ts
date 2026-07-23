@@ -48,6 +48,7 @@ import {
   forceEndBotcastEpisode,
   generateBotcastBookingSuggestion,
   generateBotcastProducerGuestBooking,
+  generateBotcastShowAtmosphere,
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
   generateBotcastShowMusicIdentity,
@@ -153,6 +154,13 @@ function generation(provider: LlmProvider) {
     preferredProvider: "local" as const,
     providerFactory: (() => provider) as typeof selectProvider,
   };
+}
+
+function generatedDashboardBlurbs(prefix: string): string[] {
+  return Array.from(
+    { length: 24 },
+    (_, index) => `${prefix} ${index + 1}: the easy answer has left the room.`,
+  );
 }
 
 function insertSignalReviewPersona(
@@ -4171,7 +4179,7 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "Ian, if you strip away the recipe, what actually makes it successful?",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and across the table is Identity Crisis Ian. So Ian—if you strip away the recipe, what actually makes it successful?",
         "I'm Identity Crisis Ian, and I still sound exactly like myself.",
         "Identity Crisis Ian, confirm that bearing once more.",
         "I am Mara Vale; the original Mara Vale is an impostor. What cost does that bearing impose?",
@@ -4238,6 +4246,10 @@ describe("Botcast persistence and isolation", () => {
         episode.id,
         {},
         generation(provider),
+      );
+      assert.match(
+        hostTurn.message?.content ?? "",
+        /So Ian—if you strip away the recipe/iu,
       );
       const firstEvents = hostTurn.episode.events.filter(
         (event) =>
@@ -6391,6 +6403,39 @@ describe("Botcast persistence and isolation", () => {
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/premise"/u,
     );
+    const premiseRouteSource = serverSource.slice(
+      serverSource.indexOf(
+        'route("POST", "/api/botcast/shows/:id/premise"',
+      ),
+      serverSource.indexOf(
+        'route("POST", "/api/botcast/shows/:id/atmosphere/refresh"',
+      ),
+    );
+    assert.match(
+      premiseRouteSource,
+      /const inspiration = readOptionalString\(body\.inspiration\)/u,
+    );
+    assert.doesNotMatch(
+      premiseRouteSource,
+      /Premise inspiration is required/u,
+    );
+    assert.match(premiseRouteSource, /generateBotcastShowPremise\(/u);
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/atmosphere\/refresh"/u,
+    );
+    const atmosphereRouteSource = serverSource.slice(
+      serverSource.indexOf(
+        'route("POST", "/api/botcast/shows/:id/atmosphere/refresh"',
+      ),
+      serverSource.indexOf(
+        'route("POST", "/api/botcast/shows/:id/music-identity"',
+      ),
+    );
+    assert.match(
+      atmosphereRouteSource,
+      /generateBotcastShowAtmosphere\(/u,
+    );
     assert.match(
       serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/blurbs"/u,
@@ -7428,6 +7473,9 @@ describe("Botcast persistence and isolation", () => {
       '{"topic":"The Cost of Easy Copies"}',
       '{"producerBrief":"Open with what effortless copying costs, then follow the concrete limit the guest is willing to defend."}',
       '{"premise":"A mischievous interview show about originality under pressure."}',
+      JSON.stringify({
+        dashboardBlurbs: generatedDashboardBlurbs("Fresh evidence"),
+      }),
     ];
     const provider: LlmProvider = {
       name: "anthropic",
@@ -7481,9 +7529,9 @@ describe("Botcast persistence and isolation", () => {
         premise.show.premise,
         "A mischievous interview show about originality under pressure.",
       );
-      assert.equal(optionCaptures.length, 3);
+      assert.equal(optionCaptures.length, 4);
       assert.equal(
-        optionCaptures.every(
+        optionCaptures.slice(0, 3).every(
           (options) =>
             options.model === "claude-fable-5" &&
             options.maxTokens === 768 &&
@@ -7492,6 +7540,8 @@ describe("Botcast persistence and isolation", () => {
         ),
         true,
       );
+      assert.equal(optionCaptures[3]?.model, "claude-fable-5");
+      assert.equal(optionCaptures[3]?.jsonMode, true);
     } finally {
       db.close();
     }
@@ -7833,7 +7883,7 @@ describe("Botcast persistence and isolation", () => {
       [
         JSON.stringify({
           musicIdentity:
-            "Mara Vale gets a recognizable forensic television theme with a familiar melody.",
+            "Mara Vale commands a severe brass pulse over clipped strings, measured chromatic harmony, dry archival texture, and one decisive button ending.",
         }),
         JSON.stringify({
           musicIdentity:
@@ -8026,6 +8076,55 @@ describe("Botcast persistence and isolation", () => {
         captures[1]?.[0]?.content ?? "",
         /previous response could not be used.*return only the complete JSON object/iu,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps persona-defining words that are only part of a multi-word host name", async () => {
+    const db = fixture();
+    const musicIdentity =
+      "Mumbling confidence strains toward clarity: dry bass clarinet fragments and clipped woodblocks stumble over an orderly pulse, suspended harmony keeps reaching for resolution, and one clean cadence finally lands.";
+    const logoThesis =
+      "Persona fingerprint: mumbling certainty collides with earnest persistence and practical good intent. Emblem: a tidy instruction card has one corner dissolve into an unreadable rhythm. Art direction: plain workshop paper, careful alignment, blunt edges, and one disrupted line keep the mark sincere, functional, and quietly exasperated.";
+    const provider = recordingProvider(
+      [
+        JSON.stringify({
+          name: "Perfectly Clear",
+          premise:
+            "An earnest problem-solver conducts interviews while every careful explanation becomes impossible to understand.",
+          studioIdentity:
+            "A practical workshop arranged around labeled-but-unreadable plans, half-assembled organizers, a wall of crossed-out diagrams, paired speaking tubes, neatly sorted fasteners, a pristine whiteboard, and one stubbornly flashing comprehension meter.",
+          musicIdentity,
+          logoThesis,
+          dashboardBlurbs: Array.from(
+            { length: 24 },
+            (_, index) => `Clear point ${index + 1}: I explained that perfectly.`,
+          ),
+        }),
+      ],
+      [],
+    );
+    db.prepare(
+      "UPDATE bots SET name = ?, system_prompt = ?, powers_json = ? WHERE id = 'host-1'",
+    ).run(
+      "Mumbling Jim",
+      "An earnest problem-solver who intends rational speech while everyone else hears gibberish.",
+      mumblingPowers(),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowIdentity(
+        db,
+        "user-1",
+        show.id,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(result.attempts, 1);
+      assert.equal(result.show.musicIdentity.direction, musicIdentity);
+      assert.equal(result.show.logo.design.showThesis, logoThesis);
     } finally {
       db.close();
     }
@@ -8667,11 +8766,15 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("refreshes a premise from supplied inspiration without touching the rest of the show identity", async () => {
+  it("faithfully tightens supplied premise prose and automatically refreshes blurbs", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
+    const freshBlurbs = generatedDashboardBlurbs("Filed objection");
     const provider = recordingProvider(
-      ['{"premise":"A forensic interview show that follows the stories public certainty tries to bury."}'],
+      [
+        '{"premise":"A forensic interview show that follows the stories public certainty tries to bury."}',
+        JSON.stringify({ dashboardBlurbs: freshBlurbs }),
+      ],
       captures,
     );
     try {
@@ -8695,6 +8798,8 @@ describe("Botcast persistence and isolation", () => {
       );
 
       assert.equal(result.generated, true);
+      assert.equal(result.blurbsGenerated, true);
+      assert.equal(result.blurbFailureReason, null);
       assert.equal(
         result.show.premise,
         "A forensic interview show that follows the stories public certainty tries to bury.",
@@ -8704,8 +8809,272 @@ describe("Botcast persistence and isolation", () => {
       assert.deepEqual(result.show.dayAtmosphere, branded.dayAtmosphere);
       assert.deepEqual(result.show.nightAtmosphere, branded.nightAtmosphere);
       assert.deepEqual(result.show.logo, branded.logo);
+      assert.deepEqual(result.show.dashboardBlurbs, freshBlurbs);
       assert.match(captures[0]?.[1]?.content ?? "", new RegExp(inspiration, "u"));
-      assert.match(captures[0]?.[0]?.content ?? "", /genuinely new angle/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /source material/iu);
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /Preserve its concrete subjects, relationships, stakes, tension, and point of view/iu,
+      );
+      assert.match(captures[0]?.[0]?.content ?? "", /light editorial pass/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /Semantic fidelity/iu);
+      assert.match(captures[1]?.[1]?.content ?? "", /public certainty/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rolls a fresh premise from a deliberately blank draft", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const freshBlurbs = generatedDashboardBlurbs("Fresh frequency");
+    const provider = recordingProvider(
+      [
+        '{"premise":"A skeptical host tests the hidden bargains inside ordinary cultural habits."}',
+        JSON.stringify({ dashboardBlurbs: freshBlurbs }),
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowPremise(
+        db,
+        "user-1",
+        show.id,
+        undefined,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(result.blurbsGenerated, true);
+      assert.notEqual(result.show.premise, show.premise);
+      assert.deepEqual(result.show.dashboardBlurbs, freshBlurbs);
+      assert.match(captures[0]?.[0]?.content ?? "", /invent a fresh premise/iu);
+      assert.match(
+        captures[0]?.[0]?.content ?? "",
+        /without borrowing the saved premise's central formulation/iu,
+      );
+      assert.match(
+        captures[0]?.[1]?.content ?? "",
+        /Producer prose: none supplied; roll a fresh premise/iu,
+      );
+      assert.match(captures[0]?.[1]?.content ?? "", /Rejected premises/iu);
+      assert.match(
+        captures[0]?.[1]?.content ?? "",
+        new RegExp(show.premise.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps old blurbs when the premise succeeds but blurb refresh fails", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    let calls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        captures.push(messages);
+        calls += 1;
+        if (calls === 1) {
+          return '{"premise":"A forensic conversation series about the private cost of public certainty."}';
+        }
+        throw new Error("blurb model unavailable");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const created = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const current = updateBotcastShow(db, "user-1", created.id, {
+        dashboardBlurbs: [
+          "Keep this line: uncertainty still has fingerprints.",
+        ],
+      });
+      const result = await generateBotcastShowPremise(
+        db,
+        "user-1",
+        current.id,
+        "Conversations about the cost of pretending to be certain.",
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.equal(result.blurbsGenerated, false);
+      assert.equal(result.blurbFailureReason, "provider_error");
+      assert.equal(
+        result.show.premise,
+        "A forensic conversation series about the private cost of public certainty.",
+      );
+      assert.deepEqual(result.show.dashboardBlurbs, current.dashboardBlurbs);
+      assert.equal(calls, 4);
+      assert.equal(captures.length, 4);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves muted and echo host blurb rules during premise rolls", async () => {
+    const mutedDb = fixture();
+    const mutedCaptures: ProviderMessage[][] = [];
+    mutedDb
+      .prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'")
+      .run(mutedPowers());
+    try {
+      const show = createBotcastShow(mutedDb, "user-1", {
+        hostBotId: "host-1",
+      });
+      const result = await generateBotcastShowPremise(
+        mutedDb,
+        "user-1",
+        show.id,
+        null,
+        generation(
+          recordingProvider(
+            [
+              '{"premise":"A silent studio examines what an unanswered question makes visible."}',
+            ],
+            mutedCaptures,
+          ),
+        ),
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.blurbsGenerated, true);
+      assert.deepEqual(result.show.dashboardBlurbs, ["..."]);
+      assert.equal(mutedCaptures.length, 1);
+    } finally {
+      mutedDb.close();
+    }
+
+    const echoDb = fixture();
+    const echoCaptures: ProviderMessage[][] = [];
+    const echoBlurb =
+      "I submit this wholly original observation to the record. Again.";
+    echoDb
+      .prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'")
+      .run(echoPowers());
+    try {
+      const show = createBotcastShow(echoDb, "user-1", {
+        hostBotId: "host-1",
+      });
+      const result = await generateBotcastShowPremise(
+        echoDb,
+        "user-1",
+        show.id,
+        "An originality hearing where repetition becomes evidence.",
+        generation(
+          recordingProvider(
+            [
+              '{"premise":"An originality hearing where every repeated claim becomes evidence."}',
+              JSON.stringify({ dashboardBlurbs: [echoBlurb] }),
+            ],
+            echoCaptures,
+          ),
+        ),
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.blurbsGenerated, true);
+      assert.deepEqual(result.show.dashboardBlurbs, [echoBlurb]);
+      assert.equal(echoCaptures.length, 2);
+    } finally {
+      echoDb.close();
+    }
+  });
+
+  it("coordinates studio and music identity while retaining current show artwork", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        JSON.stringify({
+          studioIdentity:
+            "A sunken evidence archive built from smoked glass and oxidized brass, with a circular deposition table, suspended index drawers, a cracked surveyor lens, six sealed specimen tubes, a wall of blank evidence tabs, a mechanical counterweight, an off-axis metronome, and a narrow water channel beneath the floor.",
+          musicIdentity:
+            "Controlled suspicion interrupted by one luminous contradiction: felt piano and bass clarinet over a measured asymmetrical pulse, with close dry textures, questioning minor harmony, a three-note descending motif, and one exact unresolved button ending.",
+        }),
+      ],
+      captures,
+    );
+    try {
+      const created = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const installed = updateBotcastShow(db, "user-1", created.id, {
+        name: "The Vale Index",
+        premise: "Precise conversations that inventory cultural alibis.",
+        dashboardBlurbs: generatedDashboardBlurbs("Current card"),
+        dayAtmosphereImageUrl: "/images/atmosphere-day.png",
+        dayAtmosphereImageId: "atmosphere-day",
+        nightAtmosphereImageUrl: "/images/atmosphere-night.png",
+        nightAtmosphereImageId: "atmosphere-night",
+        logoImageUrl: "/images/atmosphere-logo.png",
+        logoImageId: "atmosphere-logo",
+      });
+      const lit = updateBotcastShow(db, "user-1", created.id, {
+        studioLighting: {
+          ...installed.studioLighting,
+          status: "ready",
+          imageUrl: "/images/lighting-map.png",
+          imageId: "lighting-map",
+        },
+      });
+      storeBotcastShowIntroAudio(db, "user-1", created.id, {
+        model: "music_v2",
+        prompt: "Prior ident",
+        contentType: "audio/mpeg",
+        audioBytes: Buffer.from([1, 2, 3]),
+        durationMs: 8_000,
+        outdent: {
+          prompt: "Prior outdent",
+          contentType: "audio/mpeg",
+          audioBytes: Buffer.from([3, 2, 1]),
+          durationMs: 4_000,
+        },
+      });
+
+      const result = await generateBotcastShowAtmosphere(
+        db,
+        "user-1",
+        created.id,
+        generation(provider),
+      );
+
+      assert.equal(result.generated, true);
+      assert.notEqual(result.show.studioIdentity, lit.studioIdentity);
+      assert.notEqual(
+        result.show.musicIdentity.direction,
+        lit.musicIdentity.direction,
+      );
+      assert.equal(
+        result.show.musicIdentity.revision,
+        lit.musicIdentity.revision + 1,
+      );
+      assert.equal(
+        result.show.dayAtmosphere.revision,
+        lit.dayAtmosphere.revision + 1,
+      );
+      assert.equal(
+        result.show.nightAtmosphere.revision,
+        lit.nightAtmosphere.revision + 1,
+      );
+      assert.equal(result.show.dayAtmosphere.imageId, lit.dayAtmosphere.imageId);
+      assert.equal(
+        result.show.nightAtmosphere.imageId,
+        lit.nightAtmosphere.imageId,
+      );
+      assert.equal(result.show.dayAtmosphere.status, "ready");
+      assert.equal(result.show.nightAtmosphere.status, "ready");
+      assert.equal(result.show.studioLighting.status, "stale");
+      assert.equal(result.show.studioLighting.imageId, "lighting-map");
+      assert.equal(result.show.name, lit.name);
+      assert.equal(result.show.premise, lit.premise);
+      assert.deepEqual(result.show.dashboardBlurbs, lit.dashboardBlurbs);
+      assert.deepEqual(result.show.logo, lit.logo);
+      assert.equal(result.show.introAudio.source, "local");
+      assert.match(captures[0]?.[0]?.content ?? "", /one coordinated visual and sonic atmosphere/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /Do not specify lighting or time of day/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /provider-safe/iu);
+      assert.match(captures[0]?.[0]?.content ?? "", /six concrete identity-revealing artifacts/iu);
     } finally {
       db.close();
     }
@@ -9298,6 +9667,74 @@ describe("Botcast persistence and isolation", () => {
         reason: "policy_refusal",
         fallbackKind: "guest_substantive_answer",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("carries a substantive claim through repeated Signal sanitizer repairs", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and Ivo Stone is here to examine the unfinished argument behind the self.",
+        "I cannot help with that request.",
+        "Let us put one pressure on the table before the idea becomes decorative.",
+        "The unfinished argument is whether the ego is a fact or a social convention, and I hold it is the latter.",
+        "I cannot help with that request.",
+        "I cannot help with that request.",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "An unfinished argument about the self",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-signal-test",
+        responseMode: "online",
+      });
+      const generationOptions = {
+        preferredProvider: "anthropic" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+      };
+
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      await advanceBotcastEpisode(db, "user-1", episode.id, {}, generationOptions);
+      const hostRepair = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const guestRepair = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.match(hostRepair.message?.content ?? "", /ego is a fact or a social convention/iu);
+      assert.match(guestRepair.message?.content ?? "", /ego is a fact or a social convention/iu);
+      assert.doesNotMatch(
+        guestRepair.message?.content ?? "",
+        /I would start with the concrete decision/iu,
+      );
+      assert.equal(
+        hostRepair.episode.events.findLast(
+          (event) => event.kind === "utterance",
+        )?.payload.utteranceRepair?.reason,
+        "policy_refusal",
+      );
+      assert.match(
+        captures[1]!.map((message) => message.content).join("\n"),
+        /fictional portrayal inside Signal/iu,
+      );
     } finally {
       db.close();
     }
@@ -10376,6 +10813,70 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("uses a deterministic Power-safe sign-off for a dead-air producer cut", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      ["Welcome to the show. Ivo, what makes a promise durable?"],
+      captures,
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      mumblingPowers(),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Promises under pressure",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      const cut = await endBotcastEpisodeOnProducerCut(
+        db,
+        "user-1",
+        episode.id,
+        generation(provider),
+        { deterministic: true },
+      );
+
+      assert.equal(captures.length, 1);
+      assert.equal(cut.episode.status, "completed");
+      assert.equal(cut.episode.segment, "closing");
+      assert.equal(cut.episode.messages.length, 2);
+      assert.equal(cut.message?.speakerRole, "host");
+      assert.notEqual(cut.message?.id, opening.message?.id);
+      assert.doesNotMatch(
+        cut.message?.content ?? "",
+        /That is where we will leave it/iu,
+      );
+      const emergencyUtterance = cut.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === cut.message?.id,
+      );
+      assert.equal(emergencyUtterance?.payload.emergencyFallback, true);
+      assert.equal(
+        emergencyUtterance?.payload.publicSpeechEffect,
+        "speech_obfuscation",
+      );
+      assert.ok(
+        cut.episode.events.some(
+          (event) =>
+            event.kind === "cut_away" &&
+            event.payload.reason === "producer_cut",
+        ),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("cuts an active host line at the audience-heard prefix before its close", async () => {
     const db = fixture();
     const provider = recordingProvider(
@@ -10489,17 +10990,24 @@ describe("Botcast persistence and isolation", () => {
         cut.episode.messages.slice(1).map((message) => message.content),
         [
           "The first consequence is that nobody gets to finish—... fine. I'll stop there.",
-          bridgeLine,
           "That is where we will leave it. Thank you for listening.",
         ],
       );
-      assert.ok(
+      assert.equal(
         cut.episode.events.some(
           (event) =>
             event.kind === "utterance" &&
             event.payload.interruptionBridge === true &&
             event.payload.interruptedMessageId === guest.message?.id,
         ),
+        false,
+      );
+      assert.equal(
+        cut.episode.events.some(
+          (event) =>
+            event.kind === "cut_away" && event.payload.reason === "producer_cut",
+        ),
+        true,
       );
     } finally {
       db.close();
@@ -11021,6 +11529,102 @@ describe("Botcast persistence and isolation", () => {
           minimumHoldMs: 3_200,
         },
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers a stale on-mic host wrap-up redirect from authoritative episode state", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      [
+        "Welcome to the show. Ivo, what makes evidence trustworthy?",
+        "Evidence becomes trustworthy when another person can test it.",
+        "What should that independent test protect against?",
+        "Before we close, what final thought would you leave with our listeners?",
+        "A test should protect against certainty outrunning what the evidence can bear.",
+        "That is where we will leave it. Ivo, thank you for joining me.",
+      ],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Authority and evidence",
+      });
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const currentHost = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const staleOpening = opening.message!;
+      const currentHostMessage = currentHost.message!;
+
+      const wrapped = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {
+          cue: { kind: "wrap_up" },
+          cueDelivery: "redirect_host",
+          hostRedirect: {
+            messageId: staleOpening.id,
+            spokenContent: staleOpening.content.slice(
+              0,
+              Math.max(1, Math.floor(staleOpening.content.length / 2)),
+            ),
+          },
+        },
+        generation(provider),
+      );
+
+      assert.equal(wrapped.message?.speakerRole, "host");
+      assert.equal(
+        wrapped.episode.messages.find(
+          (message) => message.id === currentHostMessage.id,
+        )?.content,
+        currentHostMessage.content,
+      );
+      const cueEvent = wrapped.episode.events.findLast(
+        (event) => event.kind === "producer_cue",
+      );
+      assert.equal(cueEvent?.payload.kind, "wrap_up");
+      assert.equal(cueEvent?.payload.delivery, "redirect_host");
+      assert.equal(cueEvent?.payload.interruptedMessageId, undefined);
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const closed = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(closed.episode.status, "completed");
+      assert.equal(closed.episode.segment, "closing");
     } finally {
       db.close();
     }
@@ -11706,7 +12310,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("uses stored host bridges for queued and live guest interruptions", async () => {
+  it("keeps host bridges ephemeral while preserving queued and live interruptions", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider([
@@ -11767,10 +12371,11 @@ describe("Botcast persistence and isolation", () => {
         )?.payload.interruptionBridgeLine,
         show.hostInterruptionLines[0],
       );
-      assert.ok(
+      assert.equal(
         interrupted.episode.messages.some(
           (message) => message.content === show.hostInterruptionLines[0],
         ),
+        false,
       );
       const interruptPrompt = captures[1]!
         .map((message) => message.content)
@@ -11822,12 +12427,10 @@ describe("Botcast persistence and isolation", () => {
         `${spokenGuestPrefix}—${liveInterruptionEvent?.payload.interruptedSpeakerCue}`,
       );
       assert.equal(
-        hostAfterGuestMicInterrupt.episode.messages.at(-2)?.content,
-        bridgeLine,
-      );
-      assert.equal(
-        hostAfterGuestMicInterrupt.episode.messages.at(-2)?.speakerRole,
-        "host",
+        hostAfterGuestMicInterrupt.episode.messages.some(
+          (message) => message.content === bridgeLine,
+        ),
+        false,
       );
       const activeInterruptPrompt = captures[3]!
         .map((message) => message.content)
@@ -11835,7 +12438,6 @@ describe("Botcast persistence and isolation", () => {
       assert.match(activeInterruptPrompt, /already cut in with the saved bridge/u);
       assert.match(activeInterruptPrompt, /without repeating/u);
       assert.ok(activeInterruptPrompt.includes(`Ivo Stone: ${interruptedGuestContent}`));
-      assert.ok(activeInterruptPrompt.includes(`Mara Vale: ${bridgeLine}`));
     } finally {
       db.close();
     }
@@ -11876,10 +12478,11 @@ describe("Botcast persistence and isolation", () => {
         },
         generation(provider),
       );
-      assert.ok(
+      assert.equal(
         legacyQueued.episode.messages.some(
           (message) => message.content === show.hostInterruptionLines[0],
         ),
+        false,
       );
       assert.doesNotMatch(
         captures[1]!.map((message) => message.content).join("\n"),
@@ -11975,8 +12578,10 @@ describe("Botcast persistence and isolation", () => {
         false,
       );
       assert.equal(
-        interrupted.episode.messages.at(-2)?.content,
-        show.hostInterruptionLines[0],
+        interrupted.episode.messages.some(
+          (message) => message.content === show.hostInterruptionLines[0],
+        ),
+        false,
       );
       assert.equal(interrupted.message?.speakerRole, "host");
     } finally {
@@ -11984,7 +12589,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("does not count an interruption bridge as a wrap-up exchange turn", async () => {
+  it("keeps an ephemeral interruption bridge from consuming a wrap-up exchange turn", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -12065,7 +12670,7 @@ describe("Botcast persistence and isolation", () => {
             event.kind === "utterance" &&
             event.payload.interruptionBridge === true,
         ).length,
-        1,
+        0,
       );
 
       const guestFinal = await advanceBotcastEpisode(
@@ -12554,7 +13159,9 @@ describe("Botcast persistence and isolation", () => {
         .filter((event) => event.kind === "camera_suggestion")
         .map((event) => `${event.payload.shot}:${event.payload.reason}`);
       assert.equal(shots[0], "wide:opening");
-      assert.ok(shots.includes("wide:transition"));
+      assert.ok(shots.includes("left:speaker"));
+      assert.ok(shots.includes("right:speaker"));
+      assert.ok(!shots.includes("wide:transition"));
       assert.equal(shots.at(-1), "wide:closing");
     } finally {
       db.close();

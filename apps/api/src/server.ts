@@ -187,6 +187,7 @@ import {
   ensureBotcastEpisodePersonaReview,
   generateBotcastBookingSuggestion,
   generateBotcastProducerGuestBooking,
+  generateBotcastShowAtmosphere,
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
   generateBotcastShowMusicIdentity,
@@ -253,6 +254,7 @@ import {
   queueReplayRecording,
   replayPremiumAudioFile,
   replayPremiumSegmentAudioFile,
+  replayPremiumVideoFile,
   replayTranscript,
   replayVideoFile,
   replayVoiceTakeAudioFile,
@@ -261,12 +263,17 @@ import {
   startReplayPremiumProduction,
   storeReplayPremiumAudio,
   storeReplayPremiumTimeline,
+  storeReplayRenderAudioChunk,
   storeReplayRenderChunk,
   storeReplayVoiceTakeAudio,
   updateReplayRenderProgress,
   updateReplayVoiceTakeSnapshot,
   upsertReplayVoiceTake,
 } from "./replay-recordings.ts";
+import {
+  replayRenderWorkerClient,
+  wakeReplayBackgroundRender,
+} from "./replay-render-worker-client.ts";
 import type {
   ReplayManifestV1,
   ReplayRecordingStatusV1,
@@ -8617,9 +8624,6 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const inspiration = readOptionalString(body.inspiration)?.slice(0, 360);
-      if (!inspiration) {
-        throw new HttpError(400, "Add premise inspiration before refreshing it.");
-      }
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
         requestedProvider === "local" ||
@@ -8644,6 +8648,37 @@ function buildRoutes(): RouteDefinition[] {
           preferredOnlineModel: user.preferred_online_model,
           providerFactory: providerFactoryOverride,
           keywords: normalizeSignalGenerationKeywords(body.keywords),
+        },
+      );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/atmosphere/refresh", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = body.preferredProvider;
+      const preferredProvider: ProviderName =
+        requestedProvider === "local" ||
+        requestedProvider === "openai" ||
+        requestedProvider === "anthropic"
+          ? requestedProvider
+          : user.preferred_provider;
+      const result = await generateBotcastShowAtmosphere(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          providerFactory: providerFactoryOverride,
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -9588,6 +9623,12 @@ function buildRoutes(): RouteDefinition[] {
       if (interruption === null) {
         throw new HttpError(400, "Signal cut interruption is invalid.");
       }
+      if (
+        body.deterministicClose !== undefined &&
+        typeof body.deterministicClose !== "boolean"
+      ) {
+        throw new HttpError(400, "Signal deterministic close flag is invalid.");
+      }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
@@ -9613,6 +9654,7 @@ function buildRoutes(): RouteDefinition[] {
         {
           ...(audienceCheckpoint ? { audienceCheckpoint } : {}),
           ...(interruption ? { interruption } : {}),
+          ...(body.deterministicClose === true ? { deterministic: true } : {}),
         },
       );
       await ensureBotcastEpisodePersonaReview(
@@ -12430,6 +12472,17 @@ function buildRoutes(): RouteDefinition[] {
         body.manifest as ReplayManifestV1,
         { queueRender: body.render !== false },
       );
+      if (
+        recording.surface === "signal" &&
+        recording.status === "queued" &&
+        ctx.sessionToken
+      ) {
+        wakeReplayBackgroundRender({
+          db,
+          userId,
+          sessionToken: ctx.sessionToken,
+        });
+      }
       json(ctx.res, 202, { ok: true, recording });
     }),
     route("POST", "/api/replays/takes", async (ctx) => {
@@ -12552,6 +12605,13 @@ function buildRoutes(): RouteDefinition[] {
           regenerate: body.regenerate === true,
           signal: controller.signal,
         });
+        if (ctx.sessionToken) {
+          wakeReplayBackgroundRender({
+            db,
+            userId,
+            sessionToken: ctx.sessionToken,
+          });
+        }
         json(ctx.res, 202, { ok: true, ...result });
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -12575,6 +12635,13 @@ function buildRoutes(): RouteDefinition[] {
       const recording = retryReplayPremiumProduction(db, userId, ctx.params.id);
       if (!recording) {
         throw new HttpError(409, "The Premium voice master must finish before video retry.");
+      }
+      if (ctx.sessionToken) {
+        wakeReplayBackgroundRender({
+          db,
+          userId,
+          sessionToken: ctx.sessionToken,
+        });
       }
       json(ctx.res, 202, { ok: true, recording });
     }),
@@ -12639,7 +12706,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/replays/:id/premium/video", async (ctx) => {
       const userId = requireAuth(ctx);
-      const file = replayVideoFile(db, userId, ctx.params.id);
+      const file = replayPremiumVideoFile(db, userId, ctx.params.id);
       if (!file) throw new HttpError(404, "Premium video not found.");
       streamReplayFile(ctx, file, {
         range: true,
@@ -12692,6 +12759,24 @@ function buildRoutes(): RouteDefinition[] {
         Number(body.progress),
       );
       json(ctx.res, 200, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/render-audio-chunk", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const renderToken = readReplayRenderToken(ctx);
+      if (!(ctx.body instanceof Uint8Array)) {
+        throw new HttpError(400, "Replay audio chunk must be binary.");
+      }
+      const rawPosition = ctx.req.headers["x-prism-replay-position"];
+      const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
+      const sizeBytes = storeReplayRenderAudioChunk(
+        db,
+        userId,
+        ctx.params.id,
+        renderToken,
+        position,
+        ctx.body,
+      );
+      json(ctx.res, 201, { ok: true, sizeBytes });
     }),
     route("POST", "/api/replays/:id/render-chunk", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -12750,6 +12835,17 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const recording = retryReplayRecording(db, userId, ctx.params.id);
       if (!recording) throw new HttpError(404, "Replay recording not found.");
+      if (
+        recording.surface === "signal" &&
+        recording.status === "queued" &&
+        ctx.sessionToken
+      ) {
+        wakeReplayBackgroundRender({
+          db,
+          userId,
+          sessionToken: ctx.sessionToken,
+        });
+      }
       json(ctx.res, 202, { ok: true, recording });
     }),
     route("DELETE", "/api/replays/:id", async (ctx) => {
@@ -17433,6 +17529,9 @@ async function dispatchRequest(
         .startsWith(ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE);
     const replayRenderChunkUpload =
       method === "POST" && /^\/api\/replays\/[^/]+\/render-chunk$/u.test(pathname);
+    const replayRenderAudioUpload =
+      method === "POST" &&
+      /^\/api\/replays\/[^/]+\/render-audio-chunk$/u.test(pathname);
     const replayVoiceTakeUpload =
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/takes\/[^/]+\/audio$/u.test(pathname);
@@ -17444,6 +17543,7 @@ async function dispatchRequest(
         ? slateArchiveUpload ||
           accountBackupArchiveUpload ||
           replayRenderChunkUpload ||
+          replayRenderAudioUpload ||
           replayVoiceTakeUpload ||
           replayPremiumAudioUpload
           ? await readBinaryBody(
@@ -17454,6 +17554,8 @@ async function dispatchRequest(
                   ? ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES
                   : replayRenderChunkUpload
                   ? REPLAY_RENDER_CHUNK_MAX_BYTES
+                  : replayRenderAudioUpload
+                    ? REPLAY_RENDER_CHUNK_MAX_BYTES
                     : replayPremiumAudioUpload
                       ? 256 * 1024 * 1024
                       : 24 * 1024 * 1024,
@@ -17549,6 +17651,8 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down Prism API.`);
+
+  replayRenderWorkerClient.dispose();
 
   if (slateContinuityWorker) {
     await slateContinuityWorker.stop();

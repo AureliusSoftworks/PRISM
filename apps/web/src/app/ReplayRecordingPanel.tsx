@@ -14,31 +14,11 @@ import {
   deleteReplayRecording,
   replayRecordingForSource,
   retryReplayRecording,
-  retryReplayPremiumProduction,
 } from "./replayClient";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import styles from "./replayRecording.module.css";
 
 function statusLabel(recording: ReplayRecordingV1): string {
-  const premium = recording.premiumProduction;
-  if (recording.surface === "signal") {
-    switch (premium?.phase) {
-      case "mastering_voices":
-        return "Mastering voices";
-      case "mixing_episode":
-        return "Mixing episode";
-      case "rendering_studio":
-        return "Rendering studio";
-      case "finalizing":
-        return "Finalizing";
-      case "ready":
-        return "Premium video ready";
-      case "failed":
-        return "Premium needs attention";
-      default:
-        return recording.manifest ? "Local replay ready" : "Capturing episode";
-    }
-  }
   switch (recording.status) {
     case "collecting":
       return recording.manifest ? "Video deleted" : "Capturing episode";
@@ -54,6 +34,25 @@ function statusLabel(recording: ReplayRecordingV1): string {
       return "Video ready · Needs attention";
     case "failed":
       return "Needs attention";
+  }
+}
+
+function premiumStatusLabel(recording: ReplayRecordingV1): string {
+  switch (recording.premiumProduction?.phase) {
+    case "mastering_voices":
+      return "Mastering voices";
+    case "mixing_episode":
+      return "Mixing episode";
+    case "rendering_studio":
+      return "Rendering studio";
+    case "finalizing":
+      return "Finalizing";
+    case "ready":
+      return "Premium video ready";
+    case "failed":
+      return "Premium needs attention";
+    default:
+      return "Premium available";
   }
 }
 
@@ -107,13 +106,17 @@ export function ReplayRecordingPanel({
   sourceId,
   preview,
   preferredProvider,
-  onProducePremium,
+  onExportVideo,
+  onExportPremium,
+  onRetryPremium,
 }: {
   surface: "signal" | "coffee";
   sourceId: string;
   preview?: ReactNode;
   preferredProvider?: "local" | "openai" | "anthropic";
-  onProducePremium?: (regenerate: boolean) => Promise<void>;
+  onExportVideo?: () => Promise<void>;
+  onExportPremium?: (regenerate: boolean) => Promise<void>;
+  onRetryPremium?: () => Promise<void>;
 }): React.JSX.Element | null {
   const [recording, setRecording] = useState<ReplayRecordingV1 | null>(null);
   const [busy, setBusy] = useState(false);
@@ -164,23 +167,46 @@ export function ReplayRecordingPanel({
     ) : null;
   }
   if (surface === "signal") {
+    // Standard and Premium exports are independent jobs with independent media.
     const premium = recording.premiumProduction;
-    const ready = premium?.phase === "ready" && premium.videoUrl;
-    const producing =
+    const videoReady =
+      (recording.status === "ready" || recording.status === "ready_with_warnings") &&
+      recording.videoUrl;
+    const videoProducing =
+      recording.status === "queued" ||
+      recording.status === "preparing_audio" ||
+      recording.status === "rendering";
+    const premiumReady = premium?.phase === "ready" && premium.videoUrl;
+    const premiumProducing =
       premium?.phase === "mastering_voices" ||
       premium?.phase === "mixing_episode" ||
       premium?.phase === "rendering_studio" ||
       premium?.phase === "finalizing";
-    const produce = async (regenerate: boolean): Promise<void> => {
-      if (!onProducePremium) return;
+    const exportVideo = async (): Promise<void> => {
+      if (!onExportVideo) return;
+      setBusy(true);
+      setActionError(null);
+      try {
+        await onExportVideo();
+        await refresh();
+      } catch (error) {
+        setActionError(
+          error instanceof Error ? error.message : "Video export failed.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    };
+    const exportPremium = async (regenerate: boolean): Promise<void> => {
+      if (!onExportPremium) return;
       const confirmed = window.confirm(
-        `${regenerate ? "Regenerate" : "Produce"} this Premium cut? The exact spoken transcript and selected voice IDs will be sent to ElevenLabs and may consume credits.`,
+        `${regenerate ? "Regenerate" : "Export"} this Premium video? The exact spoken transcript and selected voice IDs will be sent to ElevenLabs and may consume credits.`,
       );
       if (!confirmed) return;
       setBusy(true);
       setActionError(null);
       try {
-        await onProducePremium(regenerate);
+        await onExportPremium(regenerate);
         await refresh();
       } catch (error) {
         setActionError(
@@ -191,10 +217,11 @@ export function ReplayRecordingPanel({
       }
     };
     const retryPremium = async (): Promise<void> => {
+      if (!onRetryPremium) return;
       setBusy(true);
       try {
-        setRecording(await retryReplayPremiumProduction(recording.id));
-        window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
+        await onRetryPremium();
+        await refresh();
       } finally {
         setBusy(false);
       }
@@ -213,24 +240,26 @@ export function ReplayRecordingPanel({
       }
     };
     return (
-      <section className={styles.panel} data-replay-status={premium?.phase ?? "local"}>
+      <section className={styles.panel} data-replay-status={recording.status}>
         <header className={styles.header}>
           <div>
-            <p className={styles.eyebrow}>Premium production</p>
+            <p className={styles.eyebrow}>Video export</p>
             <h3>{recording.manifest?.title ?? "Signal episode"}</h3>
           </div>
           <span className={styles.status} aria-live="polite">
-            {busy && !producing
-              ? "Starting Premium production"
-              : statusLabel(recording)}
+            {busy && !videoProducing && !premiumProducing
+              ? "Starting export"
+              : videoProducing || videoReady
+                ? statusLabel(recording)
+                : "Ready to export"}
           </span>
         </header>
-        {producing ? (
+        {videoProducing ? (
           <div className={styles.progress} aria-label={statusLabel(recording)}>
-            <span style={{ width: `${Math.max(4, (premium?.progress ?? 0) * 100)}%` }} />
+            <span style={{ width: `${Math.max(4, recording.progress * 100)}%` }} />
           </div>
         ) : null}
-        {ready ? (
+        {videoReady ? (
           <>
             <div className={styles.screen}>
               <video
@@ -239,71 +268,89 @@ export function ReplayRecordingPanel({
                 controls
                 playsInline
                 preload="metadata"
-                src={premium.videoUrl ?? undefined}
+                src={recording.videoUrl ?? undefined}
               />
             </div>
             <div className={styles.actions}>
-              <a href={premium.videoUrl ?? undefined}>Watch Premium video</a>
-              <a href={`${premium.videoUrl}?download=1`} download>
+              <a href={`${recording.videoUrl}?download=1`} download>
                 Download video
               </a>
-              <button
-                type="button"
-                disabled={busy || preferredProvider === "local"}
-                title={
-                  preferredProvider === "local"
-                    ? "Switch to ONLINE mode to regenerate with ElevenLabs."
-                    : undefined
-                }
-                onClick={() => void produce(true)}
-              >
-                Regenerate Premium cut
-              </button>
-              <button type="button" disabled={busy} onClick={() => void removePremium()}>
-                Delete Premium media
-              </button>
             </div>
           </>
         ) : (
           <div className={styles.pending}>
             <p>
               {actionError ??
-                premium?.error ??
-                premium?.warning ??
-                (busy && !producing
-                  ? "Starting the Eleven v3 dialogue master. Local replay is paused at its current position."
-                  : producing
-                  ? "Local replay stays available while PRISM produces the Premium cut."
-                  : "Create a polished Eleven v3 dialogue master and studio video when you want one.")}
+                recording.error ??
+                recording.warning ??
+                (videoProducing
+                  ? "PRISM is rendering the studio visuals in the background and adding the captured episode audio."
+                  : "Export the recorded episode as a video. This uses the captured audio and makes no new voice call.")}
             </p>
-            {premium?.phase === "failed" && premium.masterReady ? (
-              <button type="button" disabled={busy} onClick={() => void retryPremium()}>
-                Retry video from cached master
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy || producing || preferredProvider === "local"}
-                title={
-                  preferredProvider === "local"
-                    ? "Switch to ONLINE mode to use ElevenLabs Premium production."
-                    : undefined
-                }
-                onClick={() => void produce(false)}
-                aria-busy={busy}
-              >
-                {busy
-                  ? "Starting Premium production…"
-                  : premium
-                    ? "Resume Premium production"
-                    : "Produce Premium video"}
-              </button>
-            )}
-            {preferredProvider === "local" ? (
-              <small>Switch to ONLINE to produce with your ElevenLabs key.</small>
-            ) : null}
+            <button
+              type="button"
+              disabled={busy || videoProducing}
+              onClick={() => void exportVideo()}
+              aria-busy={busy && !premiumProducing}
+            >
+              {recording.status === "failed" ? "Retry export" : "Export video"}
+            </button>
           </div>
         )}
+        <div className={styles.pending} data-premium-status={premium?.phase ?? "idle"}>
+          <p>
+            <strong>{premiumStatusLabel(recording)}.</strong>{" "}
+            {premiumReady
+              ? "This version uses the cached ElevenLabs dialogue master."
+              : premiumProducing
+                ? "PRISM is preparing the ElevenLabs voice master and Premium studio cut."
+                : "Optionally remaster the voices with ElevenLabs and export a separate Premium video."}
+          </p>
+          {premiumProducing ? (
+            <div className={styles.progress} aria-label={premiumStatusLabel(recording)}>
+              <span style={{ width: `${Math.max(4, (premium?.progress ?? 0) * 100)}%` }} />
+            </div>
+          ) : null}
+          {premiumReady ? (
+            <div className={styles.actions}>
+              <a href={premium.videoUrl ?? undefined}>Watch Premium video</a>
+              <a href={`${premium.videoUrl}?download=1`} download>
+                Download Premium video
+              </a>
+              <button
+                type="button"
+                disabled={busy || preferredProvider === "local"}
+                onClick={() => void exportPremium(true)}
+              >
+                Export Premium video again
+              </button>
+              <button type="button" disabled={busy} onClick={() => void removePremium()}>
+                Delete Premium media
+              </button>
+            </div>
+          ) : premium?.phase === "failed" && premium.masterReady ? (
+            <button type="button" disabled={busy} onClick={() => void retryPremium()}>
+              Retry Premium video from cached audio
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={busy || premiumProducing || preferredProvider === "local"}
+              title={
+                preferredProvider === "local"
+                  ? "Switch to ONLINE mode to use ElevenLabs Premium export."
+                  : undefined
+              }
+              onClick={() => void exportPremium(false)}
+              aria-busy={busy && !videoProducing}
+            >
+              Export Premium video
+            </button>
+          )}
+            {preferredProvider === "local" ? (
+            <small>Switch to ONLINE to export with your ElevenLabs key.</small>
+            ) : null}
+        </div>
       </section>
     );
   }

@@ -98,23 +98,19 @@ export function signalCameraTransitionStyleForChange(args: {
   return SIGNAL_SMART_CAMERA_TRANSITION_CADENCE[cadenceIndex]!;
 }
 
-/** Auto keeps the room visible for physical beats, then follows the speaker. */
+/** Auto follows the conversation unless a deliberate bookend needs the room. */
 export function signalLiveAutoCameraShot(args: {
   baseShot: SignalDirectedCameraShot;
   bookendWide?: boolean;
-  cupActivityWide?: boolean;
   listenerReactionShot?: SignalDirectedCameraShot | null;
   speakingShot?: SignalDirectedCameraShot | null;
   postSpeechHoldShot?: SignalDirectedCameraShot | null;
-  botThinking: boolean;
   producerGuestThinking: boolean;
 }): SignalDirectedCameraShot {
   if (args.bookendWide) return "wide";
-  if (args.cupActivityWide) return "wide";
   if (args.listenerReactionShot) return args.listenerReactionShot;
   if (args.speakingShot) return args.speakingShot;
   if (args.postSpeechHoldShot) return args.postSpeechHoldShot;
-  if (args.botThinking) return "wide";
   if (args.producerGuestThinking) return "right";
   return args.baseShot;
 }

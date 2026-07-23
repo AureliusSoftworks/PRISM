@@ -187,7 +187,7 @@ function coffeeSeatOpenMouthGlyph(
   mouthShape: ZenLiveBotMouthShape,
 ): string | null {
   if (mouthShape === "speech-closed") return ":|";
-  if (mouthShape === "dot") return ":∙";
+  if (mouthShape === "dot") return ":.";
   if (mouthShape === "at") return ":@";
   if (mouthShape === "narrow") return ":o";
   if (mouthShape === "open-wide") return ":0";

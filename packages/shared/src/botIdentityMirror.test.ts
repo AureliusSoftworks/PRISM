@@ -65,6 +65,30 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
   assert.equal(
     botDirectlyAddressesBotV1({
+      text: "So Ian—straight out of the gate—whose thought am I stealing?",
+      targetBotId: "ian",
+      targetBotName: "Ian",
+    }),
+    true,
+  );
+  assert.equal(
+    botDirectlyAddressesBotV1({
+      text: "Well, Ian, which bearing survives the weather?",
+      targetBotId: "ian",
+      targetBotName: "Ian",
+    }),
+    true,
+  );
+  assert.equal(
+    botDirectlyAddressesBotV1({
+      text: "Mara says: so Ian—straight out of the gate—must choose.",
+      targetBotId: "ian",
+      targetBotName: "Ian",
+    }),
+    false,
+  );
+  assert.equal(
+    botDirectlyAddressesBotV1({
       text: "Mara says: Ian, what bearing do you make of that?",
       targetBotId: "ian",
       targetBotName: "Ian",

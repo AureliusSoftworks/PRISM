@@ -77,4 +77,17 @@ describe("Signal delayed live captions", () => {
       "",
     );
   });
+
+  it("hides the live overlay while closed captions are disabled", () => {
+    const reveal = updateBotcastSpeechReveal(
+      startBotcastSpeechReveal({
+        text: "Caption this line.",
+        durationMs: 1_000,
+      }),
+      700,
+    );
+
+    assert.notEqual(signalLiveCaptionText(reveal), "");
+    assert.equal(signalLiveCaptionText(reveal, false), "");
+  });
 });

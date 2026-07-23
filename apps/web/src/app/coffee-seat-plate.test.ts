@@ -94,7 +94,7 @@ describe("coffeeSeatPlateGlyph", () => {
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "dot"), {
-      text: ":∙",
+      text: ":.",
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "at"), {

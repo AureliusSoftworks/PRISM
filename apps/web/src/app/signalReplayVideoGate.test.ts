@@ -6,6 +6,7 @@ import type {
 } from "@localai/shared";
 import {
   signalEpisodeArchiveActionLabel,
+  signalReplayPremiumHasVideo,
   signalReplayRecordingHasVideo,
 } from "./signalReplayVideoGate.ts";
 
@@ -15,19 +16,24 @@ function episode(status: "live" | "completed"): BotcastEpisodeSummary {
 
 function recording(
   status: ReplayRecordingV1["status"],
-  options: { premiumPhase?: "rendering_studio" | "ready"; videoUrl?: string | null } = {},
+  options: {
+    premiumPhase?: "rendering_studio" | "ready";
+    videoUrl?: string | null;
+    premiumVideoUrl?: string | null;
+  } = {},
 ): ReplayRecordingV1 {
   return {
     status,
+    videoUrl: options.videoUrl ?? null,
     premiumProduction: {
       phase: options.premiumPhase ?? "rendering_studio",
-      videoUrl: options.videoUrl ?? null,
+      videoUrl: options.premiumVideoUrl ?? null,
     },
   } as unknown as ReplayRecordingV1;
 }
 
 describe("Signal episode video gate", () => {
-  it("treats only a ready Premium video as watchable", () => {
+  it("tracks standard and Premium exports independently", () => {
     assert.equal(signalReplayRecordingHasVideo(null), false);
     assert.equal(
       signalReplayRecordingHasVideo(
@@ -39,8 +45,16 @@ describe("Signal episode video gate", () => {
     assert.equal(
       signalReplayRecordingHasVideo(
         recording("ready_with_warnings", {
-          premiumPhase: "ready",
           videoUrl: "/api/replays/premium/video",
+        }),
+      ),
+      true,
+    );
+    assert.equal(
+      signalReplayPremiumHasVideo(
+        recording("collecting", {
+          premiumPhase: "ready",
+          premiumVideoUrl: "/api/replays/premium/video",
         }),
       ),
       true,
@@ -64,11 +78,10 @@ describe("Signal episode video gate", () => {
       signalEpisodeArchiveActionLabel(
         episode("completed"),
         recording("ready", {
-          premiumPhase: "ready",
-          videoUrl: "/api/replays/premium/video",
+          videoUrl: "/api/replays/video",
         }),
       ),
-      "Open replay · Premium ready",
+      "Open replay · Video ready",
     );
   });
 });

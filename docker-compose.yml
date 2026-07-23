@@ -37,6 +37,7 @@ services:
       - API_HOST=0.0.0.0
       - PRISM_LAN_ACCESS=${PRISM_LAN_ACCESS:-false}
       - PRISM_WEB_PORT=${PRISM_WEB_PORT:-18788}
+      - PRISM_REPLAY_RENDER_WEB_ORIGIN=http://web:18788
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - QDRANT_URL=http://qdrant:6333
     volumes:

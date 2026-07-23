@@ -73,6 +73,14 @@ export function replayUploadRelativePath(
   return `${replayRecordingRelativeDirectory(userId, recordingId)}/render-${assertReplayPathSegment(renderToken)}.upload`;
 }
 
+export function replayRenderAudioRelativePath(
+  userId: string,
+  recordingId: string,
+  renderToken: string,
+): string {
+  return `${replayRecordingRelativeDirectory(userId, recordingId)}/render-${assertReplayPathSegment(renderToken)}.audio.webm`;
+}
+
 export function replayVideoRelativePath(args: {
   userId: string;
   recordingId: string;
@@ -80,6 +88,15 @@ export function replayVideoRelativePath(args: {
 }): string {
   const extension = args.contentType.includes("webm") ? "webm" : "mp4";
   return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/replay.${extension}`;
+}
+
+export function replayPremiumVideoRelativePath(args: {
+  userId: string;
+  recordingId: string;
+  contentType: string;
+}): string {
+  const extension = args.contentType.includes("webm") ? "webm" : "mp4";
+  return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/premium/replay.${extension}`;
 }
 
 export function writeReplayBytesAtomically(

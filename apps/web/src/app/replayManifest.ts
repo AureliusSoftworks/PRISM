@@ -162,7 +162,7 @@ export function buildSignalReplayManifestV1(args: {
         atmosphereMix: args.show.atmosphereMix,
         studioLighting: args.show.studioLighting,
         fallbackStudioAccentVariant: args.show.fallbackStudioAccentVariant,
-        renderContract: "signal-studio-dom-v3",
+        renderContract: "signal-studio-playwright-v1",
       },
     },
   };

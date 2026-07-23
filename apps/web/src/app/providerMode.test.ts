@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { DISABLED_MODEL_CHOICE } from "@localai/shared";
 
 import {
+  applyModelChoiceForResponseMode,
   applyOnlineModelChoice,
   autoResponseModeForProvider,
   combinedOnlineModelOptions,
@@ -182,6 +183,54 @@ describe("provider mode helpers", () => {
           anthropic: "claude-sonnet-4-6",
         },
       }
+    );
+  });
+
+  it("lets Auto choose a local model as its primary without dropping online choices", () => {
+    assert.deepEqual(
+      applyModelChoiceForResponseMode({
+        responseMode: "auto",
+        currentChoices: {
+          local: "auto",
+          openai: "gpt-4o",
+          anthropic: "auto",
+        },
+        nextChoice: "mistral:latest",
+        options: [...localModels, ...openAiModels, ...anthropicModels],
+        providerPreference: "openai",
+      }),
+      {
+        provider: "local",
+        choices: {
+          local: "mistral:latest",
+          openai: "gpt-4o",
+          anthropic: "auto",
+        },
+      },
+    );
+  });
+
+  it("lets Auto choose an online model as its primary", () => {
+    assert.deepEqual(
+      applyModelChoiceForResponseMode({
+        responseMode: "auto",
+        currentChoices: {
+          local: "mistral:latest",
+          openai: "gpt-4o",
+          anthropic: "auto",
+        },
+        nextChoice: "claude-sonnet-4-6",
+        options: [...localModels, ...openAiModels, ...anthropicModels],
+        providerPreference: "local",
+      }),
+      {
+        provider: "anthropic",
+        choices: {
+          local: "mistral:latest",
+          openai: "auto",
+          anthropic: "claude-sonnet-4-6",
+        },
+      },
     );
   });
 

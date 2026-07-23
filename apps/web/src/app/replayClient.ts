@@ -1,6 +1,7 @@
 import type {
   ReplayManifestV1,
   ReplayPremiumSegmentV1,
+  ReplayRenderKindV1,
   ReplayRecordingV1,
   ReplayTimelineV1,
   ReplayVoiceTakeRecordV1,
@@ -286,6 +287,7 @@ export async function claimReplayRecording(
   takes: ReplayVoiceTakeRecordV1[];
   premiumSegments: ReplayPremiumSegmentV1[];
   renderToken: string;
+  renderKind: ReplayRenderKindV1;
 } | null> {
   const result = await replayJson<{
     ok: true;
@@ -294,6 +296,7 @@ export async function claimReplayRecording(
       takes: ReplayVoiceTakeRecordV1[];
       premiumSegments: ReplayPremiumSegmentV1[];
       renderToken: string;
+      renderKind: ReplayRenderKindV1;
     } | null;
   }>("/api/replays/claim", {
     method: "POST",

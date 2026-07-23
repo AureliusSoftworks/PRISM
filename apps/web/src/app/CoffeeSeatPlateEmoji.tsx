@@ -349,7 +349,7 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceMouthAnimation =
     normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
   // Default means the authored glyph is the resting mouth while speech uses
-  // the same |/∙/@/o/0/O viseme sequence as every standard bot mouth. Alternate
+  // the same |/./@/o/0/O viseme sequence as every standard bot mouth. Alternate
   // effects keep the custom glyph visible and reinterpret those speech beats.
   const renderedFaceMouthCharacter =
     isTalking && normalizedFaceMouthAnimation === "none"
