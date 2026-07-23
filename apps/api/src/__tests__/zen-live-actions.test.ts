@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers.ts";
 import {
   generateZenLiveActionReaction,
+  normalizeZenLiveActionReactionRequest,
   parseZenLiveActionReactionResponse,
 } from "../zen-live-actions.ts";
 import type { ZenLiveActionReactionRequest } from "@localai/shared";
 
 function request(overrides: Partial<ZenLiveActionReactionRequest> = {}): ZenLiveActionReactionRequest {
   return {
-    source: "draft_action",
+    source: "submitted_action",
     activeBotId: "vader",
     userAction: "bows head",
     clientSequenceId: "seq-1",
@@ -18,6 +19,23 @@ function request(overrides: Partial<ZenLiveActionReactionRequest> = {}): ZenLive
 }
 
 describe("parseZenLiveActionReactionResponse", () => {
+  it("accepts submitted actions as an explicit post-Send source", () => {
+    assert.deepEqual(
+      normalizeZenLiveActionReactionRequest({
+        source: "submitted_action",
+        activeBotId: "vader",
+        userAction: "bows head",
+        clientSequenceId: "seq-submitted",
+      }),
+      {
+        source: "submitted_action",
+        activeBotId: "vader",
+        userAction: "bows head",
+        clientSequenceId: "seq-submitted",
+      },
+    );
+  });
+
   it("accepts persona-appropriate actions and normalizes mood hints", () => {
     const response = parseZenLiveActionReactionResponse(
       JSON.stringify({
@@ -114,30 +132,18 @@ describe("parseZenLiveActionReactionResponse", () => {
     assert.equal(response.botAction, "keeps his gaze fixed on the doorway");
   });
 
-  it("requires stricter confidence for interrupt candidates", () => {
+  it("never turns a submitted action into a spoken interruption", () => {
     const downgraded = parseZenLiveActionReactionResponse(
       JSON.stringify({
         kind: "interrupt_candidate",
         botAction: "rises from the chair",
         moodHint: "stern",
-        confidence: 0.82,
-      }),
-      request({ userAction: "begins breakdancing" })
-    );
-    const accepted = parseZenLiveActionReactionResponse(
-      JSON.stringify({
-        kind: "interrupt_candidate",
-        botAction: "rises from the chair",
-        moodHint: "stern",
         confidence: 0.93,
-        interruptReason: "The action violates the persona's formal presence.",
       }),
       request({ userAction: "begins breakdancing" })
     );
-
     assert.equal(downgraded.kind, "show_action");
-    assert.equal(accepted.kind, "interrupt_candidate");
-    assert.equal(accepted.interruptReason, "The action violates the persona's formal presence");
+    assert.equal(downgraded.interruptReason, undefined);
   });
 });
 

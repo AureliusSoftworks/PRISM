@@ -242,6 +242,17 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(slateCopy, /separate Action field|typing exactly \*\*|Shh/u);
   });
 
+  it("teaches Zen that action drafts and action-only exchanges stay private", () => {
+    for (const mode of ["zen", "chat"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /Action drafts stay private until Send/u);
+      assert.match(
+        copy,
+        /bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory/u,
+      );
+    }
+  });
+
   it("explains fixed Loud/Quiet presentation and Quiet's mood cost", () => {
     for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
       const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
@@ -986,7 +997,7 @@ describe("mode tutorials", () => {
     });
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });

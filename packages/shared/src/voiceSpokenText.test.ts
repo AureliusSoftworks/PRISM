@@ -15,6 +15,19 @@ describe("voice spoken text", () => {
     );
   });
 
+  it("keeps Zen presentation gestures out of spoken dialogue", () => {
+    const text =
+      "*offers a hopeful half-smile* Oh! Hello there... goodness, I don't believe we've met.";
+    assert.equal(
+      voiceSpokenText(text),
+      "Oh! Hello there... goodness, I don't believe we've met.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(text),
+      "[offers a hopeful half-smile] Oh! Hello there... goodness, I don't believe we've met.",
+    );
+  });
+
   it("removes trailing and action-only physical directions", () => {
     assert.equal(
       voiceSpokenText("That is the real answer. *folds arms*"),

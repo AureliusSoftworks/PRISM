@@ -42,3 +42,10 @@ export function serializeComposerActionDraft(
 export function composerMainValueActivatesActionInput(value: string): boolean {
   return value === "**";
 }
+
+/** Returns the submitted action only when the speech field is empty. */
+export function composerActionOnlySubmission(value: string): string | null {
+  const parts = splitComposerAction(value);
+  const action = parts.action.trim();
+  return action && !parts.message.trim() ? action : null;
+}

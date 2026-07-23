@@ -30,7 +30,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Continue this Home",
-        body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+        body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
       },
@@ -83,7 +83,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep the moment honest",
-        body: "Zen keeps the timeline as it happened. Type /undo to rewind the latest message when you need a clean correction. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+        body: "Zen keeps the timeline as it happened. Type /undo to rewind the latest message when you need a clean correction. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
       },

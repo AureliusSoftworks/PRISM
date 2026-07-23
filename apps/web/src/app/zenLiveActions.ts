@@ -12,7 +12,7 @@ export type ZenLiveBotActionState = {
   confidence: number;
   botId: string | null;
   clientSequenceId: string;
-  source: "draft_action" | "idle";
+  source: "submitted_action" | "idle";
   createdAtMs: number;
   interruptReason?: string;
 };
@@ -203,7 +203,7 @@ export function isZenLiveBotPresenceActionVerbose(value: unknown): boolean {
 
 export function normalizeZenLiveBotActionState(
   response: ZenLiveActionReactionResponse,
-  source: "draft_action" | "idle",
+  source: "submitted_action" | "idle",
   createdAtMs: number
 ): ZenLiveBotActionState | null {
   const action = sanitizeZenLiveBotActionText(response.botAction);

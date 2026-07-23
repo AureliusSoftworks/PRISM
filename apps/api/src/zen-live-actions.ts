@@ -12,7 +12,6 @@ const MAX_ACTION_CHARS = 180;
 const MAX_CONTEXT_ACTION_CHARS = 120;
 const MAX_VISIBLE_BOT_ACTION_WORDS = 8;
 const SHOW_ACTION_MIN_CONFIDENCE = 0.46;
-const INTERRUPT_MIN_CONFIDENCE = 0.88;
 
 const OUT_OF_PERSONA_ACTION_RE = /\b(?:twerk(?:s|ing)?|striptease|porn|sexual|horny|meme\s+lord|yeet|skibidi|rizz|fortnite|dab(?:s|bing)?|floss(?:es|ing)?|cartwheel(?:s|ing)?\s+uncontrollably)\b/iu;
 const TRAILING_SPEECH_BRIDGE_RE =
@@ -137,7 +136,9 @@ function readObjectFromJson(value: string): Record<string, unknown> | null {
 }
 
 export function normalizeZenLiveActionSource(value: unknown): ZenLiveActionSource | undefined {
-  return value === "draft_action" || value === "idle" ? value : undefined;
+  return value === "submitted_action" || value === "idle"
+    ? value
+    : undefined;
 }
 
 export function normalizeZenLiveActionReactionRequest(
@@ -160,7 +161,7 @@ export function normalizeZenLiveActionReactionRequest(
     normalizeZenLiveActionText(record.clientSequenceId, 80) ??
     normalizeZenLiveActionText(record.clientSequence, 80);
   if (!clientSequenceId) return undefined;
-  if (source === "draft_action" && !userAction) return undefined;
+  if (source !== "idle" && !userAction) return undefined;
   return {
     source,
     activeBotId,
@@ -237,7 +238,6 @@ export function parseZenLiveActionReactionResponse(
   );
   const confidence = clampConfidence(record.confidence);
   const moodHint = normalizeZenLiveActionMoodHint(record.moodHint ?? record.mood);
-  const interruptReason = normalizeZenLiveActionText(record.interruptReason ?? record.reason, 180);
   if (requestedKind === "silent") {
     return silentReaction(request, moodHint, confidence);
   }
@@ -254,20 +254,9 @@ export function parseZenLiveActionReactionResponse(
     return silentReaction(request, moodHint, confidence);
   }
   if (requestedKind === "interrupt_candidate") {
-    if (request.source === "idle" || confidence < INTERRUPT_MIN_CONFIDENCE) {
-      return confidence >= SHOW_ACTION_MIN_CONFIDENCE
-        ? showActionReaction(request, botAction, moodHint, confidence)
-        : silentReaction(request, moodHint, confidence);
-    }
-    return {
-      kind: "interrupt_candidate",
-      botAction,
-      moodHint,
-      confidence,
-      botId: request.activeBotId,
-      clientSequenceId: request.clientSequenceId,
-      ...(interruptReason ? { interruptReason } : {}),
-    };
+    return confidence >= SHOW_ACTION_MIN_CONFIDENCE
+      ? showActionReaction(request, botAction, moodHint, confidence)
+      : silentReaction(request, moodHint, confidence);
   }
   if (confidence < SHOW_ACTION_MIN_CONFIDENCE) {
     return silentReaction(request, moodHint, confidence);
@@ -304,11 +293,10 @@ function buildZenLiveActionReactionMessages(args: {
       role: "system",
       content: [
         "You write one compact visible body-language status for a fictional chat persona in Zen Mode.",
-        "Return JSON only: {\"kind\":\"silent|show_action|interrupt_candidate\",\"botAction\":\"...\",\"moodHint\":\"neutral|attentive|amused|confused|stern|waiting|warm\",\"confidence\":0.0,\"interruptReason\":\"...\"}.",
+        "Return JSON only: {\"kind\":\"silent|show_action\",\"botAction\":\"...\",\"moodHint\":\"neutral|attentive|amused|confused|stern|waiting|warm\",\"confidence\":0.0}.",
         "The status appears as a small peripheral action plate, not a chat message.",
         "Never invent random memes, sexual behavior, slapstick that breaks the persona, or actions that contradict the persona.",
-        "Use interrupt_candidate only for rare, high-confidence, persona-significant moments where the assistant should speak before the user sends. Otherwise use show_action or silent.",
-        "For idle beats, never interrupt. Use only subtle believable waiting actions.",
+        "Submitted actions and idle beats never interrupt or produce dialogue. Use only show_action or silent.",
         "Use one simple physical gesture or expression of 2-8 words, without surrounding asterisks.",
         "No chains of motions, facial micro-narration, motives, similes, or sentence-length choreography.",
         "Do not include dialogue, quote marks, or speech bridge words such as saying, asking, replying, or telling.",

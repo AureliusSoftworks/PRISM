@@ -316,7 +316,7 @@ describe("Zen live action client helpers", () => {
         botId: "santa",
         clientSequenceId: "seq-2",
       },
-      "draft_action",
+      "submitted_action",
       123
     );
 

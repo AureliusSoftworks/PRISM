@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import {
+  composerActionOnlySubmission,
   composerMainValueActivatesActionInput,
   normalizeComposerAction,
   serializeComposerAction,
@@ -27,6 +28,15 @@ describe("shared composer actions", () => {
 
   it("keeps asterisks out of the dedicated action field", () => {
     assert.equal(normalizeComposerAction("**waves**  slowly"), "waves slowly");
+  });
+
+  it("recognizes action-only sends without confusing action plus speech", () => {
+    assert.equal(composerActionOnlySubmission("*bows head*"), "bows head");
+    assert.equal(
+      composerActionOnlySubmission("*bows head* I understand."),
+      null,
+    );
+    assert.equal(composerActionOnlySubmission("I understand."), null);
   });
 
   it("preserves a trailing space while typing a multi-word action", () => {
@@ -74,5 +84,24 @@ describe("shared composer actions", () => {
     assert.match(pageSource, /interruptActive=\{composerReplyInterruptActive\}/u);
     assert.match(pageSource, /onInterrupt=\{handleTypingIndicatorPress\}/u);
     assert.match(pageSource, /actionInputEnabled=\{false\}/u);
+  });
+
+  it("keeps Zen action drafts private and submits action-only beats ephemerally", () => {
+    assert.doesNotMatch(
+      pageSource,
+      /requestZenLiveActionReaction\("draft_action"\)/u,
+    );
+    assert.match(
+      pageSource,
+      /composerActionOnlySubmission\(rawDraft\)/u,
+    );
+    assert.match(
+      pageSource,
+      /await requestZenSubmittedActionReaction\(cue\)/u,
+    );
+    assert.match(
+      pageSource,
+      /return \[\.\.\.source, zenEphemeralUserActionMessage\]/u,
+    );
   });
 });

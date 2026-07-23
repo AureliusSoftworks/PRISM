@@ -2502,7 +2502,9 @@ export interface ZenAskQuestionPatienceInput {
   clientTurnId: string;
 }
 
-export type ZenLiveActionSource = "draft_action" | "idle";
+export type ZenLiveActionSource =
+  | "submitted_action"
+  | "idle";
 
 export type ZenLiveActionReactionKind =
   "silent" | "show_action" | "interrupt_candidate";
