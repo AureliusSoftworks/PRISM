@@ -29,7 +29,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.29 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Chat | v1.30 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
 | Zen | v1.28 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Coffee | v2.28 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and a persona-shaped bar greeting. |
 | Signal | v1.54 | Active | Show-scoped bookings, distinct-cast soundchecks, and trigger-accurate character sound loops. |
@@ -139,6 +139,12 @@ stages do not block the standalone preview.
   edit or regenerate that sound identity from the show gear, while music
   providers receive only the derived provider-safe fingerprint—not raw persona,
   franchise, character, or show prose.
+
+- Bumped `Chat` to `v1.30` so every PRISM or persona Home can hold multiple
+  independent saved conversations again. Nested rows open their exact
+  transcript, per-Home `+` and global New chat create a fresh isolated
+  conversation for that relationship, and relationship memory stays shared
+  without merging sibling transcripts.
 
 - Bumped `Chat` to `v1.29` and `Zen` to `v1.28` so empty canvas clicks jump
   straight to All Bots Home (instead of walking one Home back through the

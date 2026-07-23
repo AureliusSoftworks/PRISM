@@ -165,9 +165,9 @@ describe("relationship-depth page integration", () => {
     }
   });
 
-  it("opens persona Homes from category rows while keeping nested episodes read-only", () => {
+  it("focuses group cards in the bot grid while keeping each saved conversation independently selectable", () => {
     const sidebarRows = sourceSlice(
-      "function selectZenPersonaFromSidebar",
+      "const renderConversationRow =",
       "function renderConversationGroupDeleteButton",
     );
     const categoryTile = sourceSlice(
@@ -177,25 +177,44 @@ describe("relationship-depth page integration", () => {
 
     assert.match(
       sidebarRows,
-      /visitZenHome\(botId, \{ destination: \{ kind: "resolve" \} \}\)/,
+      /<button[\s\S]*?void refreshConversation\(c\.id\)/,
     );
-    assert.match(sidebarRows, /nested \? \([\s\S]*?<span/);
-    assert.match(sidebarRows, /data-history-timeline-entry="true"/);
-    assert.doesNotMatch(
-      sourceSlice(
-        'data-history-timeline-entry="true"',
-        ") : (\n          <button",
-      ),
-      /onClick|refreshConversation/,
+    assert.doesNotMatch(sidebarRows, /data-history-timeline-entry/);
+    assert.doesNotMatch(sidebarRows, /conversationTimelineEntry/);
+    assert.match(
+      sidebarRows,
+      /startFreshConversation\(false, \{ zenHomeBotId: group\.botId \}\)/,
     );
     assert.match(
       categoryTile,
-      /view === "chat" && group\.botId[\s\S]{0,120}selectZenPersonaFromSidebar\(group\.botId\)/,
+      /performShowAllBotsView\(group\.botId, \{\s*suppressChatAutoRestore: true,\s*\}\)/,
     );
+    assert.doesNotMatch(categoryTile, /refreshConversation\(hubConversation\.id\)/);
+    assert.doesNotMatch(categoryTile, /selectZenPersonaFromSidebar/);
+    assert.match(cssSource, /\.conversationGroupNewButton\s*\{/);
+    assert.doesNotMatch(cssSource, /\.conversationTimelineEntry\s*\{/);
+  });
+
+  it("starts a fresh isolated conversation inside the active Home", () => {
+    const startFresh = sourceSlice(
+      "function startFreshConversation",
+      "function setAppWidePrivateMode",
+    );
+    const sendSetup = sourceSlice(
+      "const forceNewConversation =",
+      "if (!trimmed && !isStarterPrompt",
+    );
+
     assert.match(
-      cssSource,
-      /\.conversationTimelineEntry\s*\{[\s\S]{0,100}cursor: default/,
+      startFresh,
+      /detail\s*\?\s*conversationEffectiveBotId\(detail\)\s*:\s*zenPersonaBotIdRef\.current/,
     );
+    assert.match(startFresh, /armFreshZenPersona\(freshZenHomeBotId\)/);
+    assert.match(
+      sendSetup,
+      /const forceNewConversation =\s*!isZenAutonomy[\s\S]{0,160}forceNewConversationOnNextSend/,
+    );
+    assert.doesNotMatch(sendSetup, /!isStarterPrompt/);
   });
 
   it("locks the whole surface only during transition beats", () => {
