@@ -57,6 +57,11 @@ Customer-facing outputs:
 - `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional MSI)
 - `Prism-Desktop-v<version>-linux-x64.AppImage`
 
+Steam depot inputs:
+- `Prism-Desktop-v<version>-steam-macos.zip` (`PRISM.app` at archive root)
+- `Prism-Desktop-v<version>-steam-win-x64.zip` (`prism_desktop.exe` at archive root)
+- `Prism-Desktop-v<version>-linux-x64.AppImage`
+
 Release tag:
 - `desktop/v<version>`
 
@@ -87,7 +92,8 @@ Operator flow:
 
 1. Complete the normal desktop release draft and smoke-test all platform artifacts.
 2. Dispatch `.github/workflows/release-desktop-steam.yml` with
-   `publish_to_steam=false` to export and inspect `steam-build`.
+   `publish_to_steam=false` to export and inspect `steam-build`. The export
+   must contain launchable depot payloads, not installer-only files.
 3. Run the same workflow with `publish_to_steam=true` only after Jared confirms
    the Steam App ID, depot IDs, branch, and smoke-test gate.
 4. Upload to a private or prerelease branch first; do not set the default branch

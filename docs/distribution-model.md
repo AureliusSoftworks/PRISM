@@ -46,9 +46,9 @@ experience.
 
 | Platform | Format | Release Tag | Signing |
 |---|---|---|---|
-| macOS | Steam depot + `Prism-Desktop-v<version>.dmg` | Steam branch + `desktop/v<version>` | Developer ID + notarized |
-| Windows | Steam depot + `Prism-Desktop-Setup-v<version>-win-x64.exe` (+ optional MSI) | Steam branch + `desktop/v<version>` | Standard code-signing certificate when available |
-| Linux | Steam depot + `Prism-Desktop-v<version>-linux-x64.AppImage` | Steam branch + `desktop/v<version>` | Unsigned initially |
+| macOS | Steam-ready `PRISM.app` zip + direct-download DMG | Steam branch + `desktop/v<version>` | Developer ID + notarized |
+| Windows | Steam-ready portable zip + direct-download setup EXE (+ optional MSI) | Steam branch + `desktop/v<version>` | Standard code-signing certificate when available |
+| Linux | Steam depot + direct-download AppImage | Steam branch + `desktop/v<version>` | Unsigned initially |
 | iPhone | PWA via Safari -> Add to Home Screen | N/A | Not applicable |
 
 ## Channel Model

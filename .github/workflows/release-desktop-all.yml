@@ -122,6 +122,8 @@ jobs:
           - \`Prism-Desktop-Setup-v${RELEASE_VERSION}-win-x64.exe\`
           - \`Prism-Desktop-Setup-v${RELEASE_VERSION}-win-x64.msi\` (optional)
           - \`Prism-Desktop-v${RELEASE_VERSION}-linux-x64.AppImage\`
+          - \`Prism-Desktop-v${RELEASE_VERSION}-steam-macos.zip\`
+          - \`Prism-Desktop-v${RELEASE_VERSION}-steam-win-x64.zip\`
           EOF
 
           if gh release view "${tag}" >/dev/null 2>&1; then
@@ -180,6 +182,7 @@ jobs:
         run: |
           gh release upload "desktop/v${RELEASE_VERSION}" \
             "dist-desktop/Prism-Desktop-v${RELEASE_VERSION}.dmg" \
+            "dist-desktop/Prism-Desktop-v${RELEASE_VERSION}-steam-macos.zip" \
             --clobber
 
   package-linux:
@@ -295,4 +298,7 @@ jobs:
           }
           if (Test-Path "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.msi") {
             gh release upload "desktop/v$env:RELEASE_VERSION" "dist-desktop/Prism-Desktop-Setup-v$env:RELEASE_VERSION-win-x64.msi" --clobber
+          }
+          if (Test-Path "dist-desktop/Prism-Desktop-v$env:RELEASE_VERSION-steam-win-x64.zip") {
+            gh release upload "desktop/v$env:RELEASE_VERSION" "dist-desktop/Prism-Desktop-v$env:RELEASE_VERSION-steam-win-x64.zip" --clobber
           }
