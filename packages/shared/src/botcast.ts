@@ -2174,6 +2174,16 @@ export function botcastCameraShotAt(args: {
     }
     if (event.kind === "camera_suggestion") {
       const candidate = event.payload.shot;
+      // Older Auto recordings inserted a synthetic Wide cut every fourth line.
+      // Ignore only that legacy cadence so existing replays follow the speakers
+      // without changing bookends, departures, hidden performers, or manual modes.
+      if (
+        mode === "auto" &&
+        candidate === "wide" &&
+        event.payload.reason === "transition"
+      ) {
+        continue;
+      }
       if (
         candidate === "left" ||
         candidate === "right" ||

@@ -443,7 +443,8 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
 
     // ── API ──
     emit_status(app, "api", "starting");
-    let mut api_child = Command::new(&node)
+    let mut api_command = Command::new(&node);
+    api_command
         .arg(&api)
         .current_dir(&root)
         .env("API_PORT", api_port.to_string())
@@ -455,7 +456,12 @@ fn start_runtime(app: &AppHandle, state: &RuntimeState) -> std::io::Result<(u16,
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(api_stderr_file))
-        .no_window()
+        .no_window();
+    let playwright_browsers = root.join("playwright-browsers");
+    if playwright_browsers.exists() {
+        api_command.env("PLAYWRIGHT_BROWSERS_PATH", playwright_browsers);
+    }
+    let mut api_child = api_command
         .spawn()
         .map_err(|e| {
             let _ = qdrant_child.kill();

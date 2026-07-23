@@ -52,10 +52,11 @@ function parseArgs(argv) {
   return args;
 }
 
-async function runCommand(command, commandArgs, cwd) {
+async function runCommand(command, commandArgs, cwd, env = {}) {
   await new Promise((resolve, reject) => {
     const child = spawn(command, commandArgs, {
       cwd,
+      env: { ...process.env, ...env },
       stdio: "inherit",
       shell: process.platform === "win32"
     });
@@ -302,6 +303,15 @@ async function main() {
   }
   await pruneOnnxRuntimeNativeBinaries(resolvedOutputDir);
   await pruneUnusedKokoroVoices(resolvedOutputDir);
+
+  console.log("Staging Playwright Chromium renderer...");
+  const playwrightBrowsersRoot = path.join(resolvedOutputDir, "playwright-browsers");
+  await runCommand(
+    process.execPath,
+    [path.join(repoRoot, "node_modules", "playwright", "cli.js"), "install", "chromium"],
+    repoRoot,
+    { PLAYWRIGHT_BROWSERS_PATH: playwrightBrowsersRoot }
+  );
 
   console.log("Staging built-in voice model...");
   await copyDir(

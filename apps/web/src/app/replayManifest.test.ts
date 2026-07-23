@@ -119,7 +119,7 @@ describe("replay manifests", () => {
     );
     assert.equal(
       manifest.visual.metadata?.renderContract,
-      "signal-studio-dom-v3",
+      "signal-studio-playwright-v1",
     );
     assert.equal(
       manifest.visual.metadata?.microphoneTintMaskUrl,
@@ -185,15 +185,16 @@ describe("replay implementation contracts", () => {
     assert.match(source, /playsInline/u);
     assert.match(source, /preview\?: ReactNode/u);
     assert.match(source, /if \(surface === "signal"\)/u);
-    assert.match(source, /Produce Premium video/u);
-    assert.match(source, /Retry video from cached master/u);
+    assert.match(source, /Export video/u);
+    assert.match(source, /Export Premium video/u);
+    assert.match(source, /Retry Premium video from cached audio/u);
     assert.match(source, /Delete Premium media/u);
     assert.match(source, /surface === "coffee" && transcriptBeats\.length > 0/u);
     assert.doesNotMatch(source, /interactive episode/u);
     assert.doesNotMatch(source, /<track/u);
   });
 
-  it("renders Signal from its real Studio DOM and never claims it in the generic queue", () => {
+  it("renders both Signal exports from the real Studio DOM in background Chromium", () => {
     const coordinator = readFileSync(
       new URL("ReplayRenderCoordinator.tsx", import.meta.url),
       "utf8",
@@ -202,13 +203,33 @@ describe("replay implementation contracts", () => {
       new URL("BotcastExperience.tsx", import.meta.url),
       "utf8",
     );
+    const child = readFileSync(
+      new URL("../../../api/src/replay-render-child.ts", import.meta.url),
+      "utf8",
+    );
+    const workerClient = readFileSync(
+      new URL("../../../api/src/replay-render-worker-client.ts", import.meta.url),
+      "utf8",
+    );
+    const audioEncoder = readFileSync(
+      new URL("replayAudioEncoder.worker.ts", import.meta.url),
+      "utf8",
+    );
     assert.match(coordinator, /surface = "coffee"/u);
     assert.match(coordinator, /claimReplayRecording\(\{ surface, sourceId \}\)/u);
-    assert.match(signal, /import\("html-to-image"\)/u);
-    assert.match(signal, /toCanvas\(stage/u);
+    assert.match(coordinator, /prismRenderRecording/u);
+    assert.match(workerClient, /surface: "signal"/u);
+    assert.match(child, /chromium\.launch/u);
+    assert.match(child, /page\.screencast\.start/u);
+    assert.match(child, /"-c:a",\s*"copy"/u);
+    assert.match(audioEncoder, /new WebMOutputFormat/u);
+    assert.match(audioEncoder, /getFirstEncodableAudioCodec\(\["opus"\]/u);
+    assert.match(audioEncoder, /render-audio-chunk/u);
+    assert.doesNotMatch(signal, /html-to-image|toCanvas\(stage/u);
+    assert.match(signal, /encodeReplayRenderAudio/u);
     assert.match(signal, /replayRenderCapture\.frame\.shot/u);
-    assert.match(signal, /sourceId=\{replayRenderTarget\.episode\.id\}/u);
-    assert.match(signal, /setReplayRenderTarget\(\{ episode: detail, show \}\)/u);
+    assert.match(signal, /data-signal-background-render-state/u);
+    assert.match(signal, /__PRISM_SIGNAL_BACKGROUND_RENDER__/u);
     assert.match(
       signal,
       /replayRenderTarget &&[\s\S]{0,100}replayRenderCapture &&[\s\S]{0,800}currentEpisode: replayRenderTarget\.episode/u,

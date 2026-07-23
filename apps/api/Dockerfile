@@ -3,6 +3,7 @@ FROM node:24-slim
 WORKDIR /app
 
 ENV API_PORT=18787
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 COPY packages/shared/package.json packages/shared/
 COPY packages/config/package.json packages/config/
@@ -12,6 +13,8 @@ COPY scripts/fetch-builtin-tts-model.mjs scripts/
 RUN cd packages/shared && npm install --omit=dev && \
     cd /app/packages/config && npm install --omit=dev && \
     cd /app/apps/api && npm install --omit=dev
+
+RUN cd /app/apps/api && npx playwright install --with-deps chromium
 
 RUN node scripts/fetch-builtin-tts-model.mjs --output-dir /app/models
 

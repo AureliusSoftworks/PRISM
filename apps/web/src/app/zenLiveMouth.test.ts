@@ -68,10 +68,25 @@ test("CRT speech maps core English phoneme groups onto distinct visemes", () => 
   assert.equal(at("f"), "dot");
   assert.equal(at("i"), "narrow");
   assert.equal(at("a"), "open-wide");
-  assert.equal(at("u"), "open-round");
+  assert.equal(at("u"), "dot");
   assert.equal(at("l"), "at");
   assert.equal(at("r"), "narrow");
   assert.equal(at("c"), "open-round");
+});
+
+test("English CRT vowel sounds use the intended ASCII mouth sizes", () => {
+  for (const [text, expected] of [
+    ["ooh", "dot"],
+    ["oh", "open-small"],
+    ["uh", "open-small"],
+    ["aw", "open-round"],
+    ["eh", "open-wide"],
+  ] as const) {
+    assert.equal(
+      crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: 0 }),
+      expected,
+    );
+  }
 });
 
 test("English CRT visemes expose the intended mouth glyph vocabulary", () => {
@@ -203,7 +218,7 @@ test("English diphthongs transition through their opening and closing shapes", (
   );
   assert.equal(
     nonRestShapes("out").join(" "),
-    "open-wide open-round open-small",
+    "open-wide dot open-small",
   );
   assert.equal(
     nonRestShapes("boy").join(" "),
@@ -218,10 +233,10 @@ test("CRT speech gives consonant and vowel graphemes precedence", () => {
     ["chip", 0, "narrow"],
     ["phone", 0, "dot"],
     ["green", 2, "narrow"],
-    ["food", 1, "open-round"],
-    ["queen", 0, "open-round"],
-    ["what", 0, "open-round"],
-    ["ahead", 0, "open-wide"],
+    ["food", 1, "dot"],
+    ["queen", 0, "dot"],
+    ["what", 0, "dot"],
+    ["ahead", 0, "open-round"],
   ] as const) {
     assert.equal(
       crtSpeechMouthShapeAtTextCursor({ text, cursorIndex }),
@@ -238,7 +253,7 @@ test("CRT speech gives consonant and vowel graphemes precedence", () => {
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "out", cursorIndex: 1 }),
-    "open-round",
+    "dot",
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "owl", cursorIndex: 0 }),
@@ -246,7 +261,7 @@ test("CRT speech gives consonant and vowel graphemes precedence", () => {
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "owl", cursorIndex: 1 }),
-    "open-round",
+    "dot",
   );
 });
 
@@ -290,7 +305,7 @@ test("numbers expand into deterministic spoken viseme timelines", () => {
 test("CRT speech normalizes case and accented Latin letters", () => {
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "É", cursorIndex: 0 }),
-    "narrow",
+    "open-wide",
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "Á", cursorIndex: 0 }),
@@ -298,7 +313,7 @@ test("CRT speech normalizes case and accented Latin letters", () => {
   );
   assert.equal(
     crtSpeechMouthShapeAtTextCursor({ text: "flüte", cursorIndex: 2 }),
-    "open-round",
+    "dot",
   );
 });
 

@@ -120,11 +120,10 @@ describe("Signal camera transition preference", () => {
     );
   });
 
-  it("holds the Producer guest, then uses Wide whenever a bot is thinking", () => {
+  it("holds the Producer guest without forcing ordinary bot pauses Wide", () => {
     assert.equal(
       signalLiveAutoCameraShot({
         baseShot: "left",
-        botThinking: false,
         producerGuestThinking: true,
       }),
       "right",
@@ -132,28 +131,18 @@ describe("Signal camera transition preference", () => {
     assert.equal(
       signalLiveAutoCameraShot({
         baseShot: "left",
-        botThinking: true,
         producerGuestThinking: false,
       }),
-      "wide",
-    );
-    assert.equal(
-      signalLiveAutoCameraShot({
-        baseShot: "right",
-        botThinking: true,
-        producerGuestThinking: true,
-      }),
-      "wide",
+      "left",
     );
   });
 
-  it("cuts directly to live speech and holds that shot before returning Wide", () => {
+  it("cuts directly to live speech and holds that shot through handoff pauses", () => {
     assert.equal(
       signalLiveAutoCameraShot({
         baseShot: "left",
         speakingShot: "right",
         postSpeechHoldShot: "left",
-        botThinking: false,
         producerGuestThinking: false,
       }),
       "right",
@@ -162,7 +151,6 @@ describe("Signal camera transition preference", () => {
       signalLiveAutoCameraShot({
         baseShot: "right",
         postSpeechHoldShot: "left",
-        botThinking: true,
         producerGuestThinking: false,
       }),
       "left",
@@ -170,10 +158,9 @@ describe("Signal camera transition preference", () => {
     assert.equal(
       signalLiveAutoCameraShot({
         baseShot: "right",
-        botThinking: true,
         producerGuestThinking: false,
       }),
-      "wide",
+      "right",
     );
   });
 
@@ -181,7 +168,6 @@ describe("Signal camera transition preference", () => {
     assert.equal(
       signalLiveAutoCameraShot({
         baseShot: "left",
-        botThinking: false,
         producerGuestThinking: false,
       }),
       "left",
@@ -191,7 +177,6 @@ describe("Signal camera transition preference", () => {
         baseShot: "left",
         listenerReactionShot: "right",
         speakingShot: "left",
-        botThinking: true,
         producerGuestThinking: false,
       }),
       "right",
@@ -206,22 +191,6 @@ describe("Signal camera transition preference", () => {
         listenerReactionShot: "right",
         speakingShot: "left",
         postSpeechHoldShot: "right",
-        botThinking: false,
-        producerGuestThinking: false,
-      }),
-      "wide",
-    );
-  });
-
-  it("keeps the full cup beat on camera despite competing close shots", () => {
-    assert.equal(
-      signalLiveAutoCameraShot({
-        baseShot: "left",
-        cupActivityWide: true,
-        listenerReactionShot: "right",
-        speakingShot: "left",
-        postSpeechHoldShot: "right",
-        botThinking: false,
         producerGuestThinking: false,
       }),
       "wide",

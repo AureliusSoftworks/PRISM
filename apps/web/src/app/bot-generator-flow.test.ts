@@ -87,6 +87,8 @@ test("generation produces only a reviewable draft and keeps manual creation", ()
   const manualDraft = functionSource("openManualBotDraft", "applyGeneratedBotDraft");
 
   assert.match(generateDraft, /"\/api\/bots\/generate-draft"/u);
+  assert.match(generateDraft, /generateBotThinkingSfxProfile\(/u);
+  assert.match(generateDraft, /audioVoiceProfile: await/u);
   assert.match(generateDraft, /setBotAvatarCustomizerOpen\(true\)/u);
   assert.doesNotMatch(generateDraft, /createBot\(/u);
   assert.match(generateDraft, /replaces the unsaved Avatar Studio draft/u);
@@ -126,7 +128,7 @@ test("prompt generation becomes an accessible PRISM assembly ritual", () => {
 
   assert.match(pageSource, /botGeneratorBusy \? \(\s*<BotCreationRitual/u);
   assert.match(pageSource, /completedDraft=\{botGeneratorCompletedDraft\}/u);
-  assert.match(generateDraft, /setBotGeneratorCompletedDraft\(result\.draft\)/u);
+  assert.match(generateDraft, /setBotGeneratorCompletedDraft\(generatedDraft\)/u);
   assert.match(generateDraft, /prefers-reduced-motion: reduce/u);
   assert.match(ritualSource, /role="status"/u);
   assert.match(ritualSource, /aria-live="polite"/u);

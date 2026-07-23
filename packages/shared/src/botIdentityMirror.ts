@@ -256,7 +256,7 @@ export function botDirectAddressIndexV1(args: {
   }
   const escapedName = targetBotName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   const vocativePattern = new RegExp(
-    `(?:^|[.!?]\\s+)(?:hey\\s+)?${escapedName}(?:\\s*[,—:!?]|\\s+(?:you\\b|what\\b|why\\b|how\\b|do\\b|did\\b|can\\b|could\\b|would\\b|will\\b|are\\b|were\\b))`,
+    `(?:^|[.!?]\\s+)(?:(?:and|but|hey|now|okay|alright|so|well)\\s*,?\\s*)?${escapedName}(?:\\s*[,—:!?]|\\s+(?:you\\b|what\\b|why\\b|how\\b|do\\b|did\\b|can\\b|could\\b|would\\b|will\\b|are\\b|were\\b))`,
     "giu",
   );
   for (const match of text.matchAll(vocativePattern)) {

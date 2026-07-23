@@ -31,8 +31,8 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | --- | --- | --- | --- |
 | Chat | v1.27 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Zen | v1.26 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.26 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and soft recipient reactions. |
-| Signal | v1.51 | Active | Synthesized studios tint only microphone lights by host and guest color, alongside Premium video and host-owned final beats. |
+| Coffee | v2.27 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and soft recipient reactions. |
+| Signal | v1.53 | Active | One compact identity row plus a coordinated visual-and-sonic Atmosphere pass, with non-modal background progress. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -88,6 +88,18 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-07-22
+
+- Bumped `Coffee` to `v2.27` and `Signal` to `v1.53` so Identity Crisis
+  recognizes bounded sentence-leading vocatives such as `So Ian—...` and
+  `Well, Ian, ...` as direct bot address. The persisted persona, face, and
+  voice handoff now begins on that first addressed line while third-party
+  mentions remain non-triggers.
+
+- Bumped `Signal` to `v1.52` for one Logo, Name, and Premise identity row and
+  one coordinated Atmosphere card. Premise rolls now refresh host blurbs,
+  detailed prose receives a faithful editorial pass, logo actions use a
+  non-modal menu, and Atmosphere rebuilds studio and sound together while
+  preserving LOCAL privacy and existing artwork during background work.
 
 - Bumped `Signal` to `v1.51` so synthesized studios reserve only their
   microphone lights for cast color: the left mic follows the host and the right

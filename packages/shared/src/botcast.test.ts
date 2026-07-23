@@ -1147,6 +1147,47 @@ describe("Botcast replay director", () => {
     assert.equal(botcastCameraModeAt({ events, elapsedMs: 8_000 }), "auto");
   });
 
+  it("smooths legacy recurring Auto Wide cuts without overriding producer Wide", () => {
+    const events: BotcastReplayEvent[] = [
+      {
+        id: "speaker-host",
+        episodeId: "episode-1",
+        sequence: 1,
+        kind: "camera_suggestion",
+        payload: { shot: "left", reason: "speaker", atMs: 1_000 },
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "legacy-transition",
+        episodeId: "episode-1",
+        sequence: 2,
+        kind: "camera_suggestion",
+        payload: { shot: "wide", reason: "transition", atMs: 4_000 },
+        occurredAt: "2026-01-01T00:00:01.000Z",
+      },
+      {
+        id: "producer-wide",
+        episodeId: "episode-1",
+        sequence: 3,
+        kind: "camera_mode",
+        payload: { mode: "wide", shot: "wide", atMs: 5_000 },
+        occurredAt: "2026-01-01T00:00:02.000Z",
+      },
+      {
+        id: "producer-auto",
+        episodeId: "episode-1",
+        sequence: 4,
+        kind: "camera_mode",
+        payload: { mode: "auto", shot: "right", atMs: 6_000 },
+        occurredAt: "2026-01-01T00:00:03.000Z",
+      },
+    ];
+
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 4_500 }), "left");
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 5_500 }), "wide");
+    assert.equal(botcastCameraShotAt({ events, elapsedMs: 6_000 }), "right");
+  });
+
   it("keeps the guest on stage until the saved departure beat", () => {
     const events: BotcastReplayEvent[] = [
       {

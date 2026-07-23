@@ -8,7 +8,16 @@ export function signalReplayRecordingHasVideo(
 ): boolean {
   return Boolean(
     recording &&
-      recording.premiumProduction?.phase === "ready" &&
+      (recording.status === "ready" || recording.status === "ready_with_warnings") &&
+      recording.videoUrl,
+  );
+}
+
+export function signalReplayPremiumHasVideo(
+  recording: ReplayRecordingV1 | null,
+): boolean {
+  return Boolean(
+    recording?.premiumProduction?.phase === "ready" &&
       recording.premiumProduction.videoUrl,
   );
 }
@@ -19,6 +28,6 @@ export function signalEpisodeArchiveActionLabel(
 ): string {
   if (item.status === "live") return "Resume episode";
   return signalReplayRecordingHasVideo(recording)
-    ? "Open replay · Premium ready"
+    ? "Open replay · Video ready"
     : "Open local replay";
 }

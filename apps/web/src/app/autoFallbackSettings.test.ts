@@ -40,6 +40,19 @@ describe("Auto fallback settings", () => {
     assert.match(pageSource, /\+ Add fallback/);
   });
 
+  it("keeps Auto pickers active with every model and routes a selection as Primary", () => {
+    assert.match(
+      pageSource,
+      /responseMode === "online"[\s\S]{0,240}chatModelOptionsForProvider\(catalog, settings, "local"\)[\s\S]{0,260}onlineModelOptionsForPicker\(catalog, settings\)/u,
+    );
+    assert.match(
+      pageSource,
+      /provider=\{responseMode === "auto" \? "all"/u,
+    );
+    assert.match(pageSource, /applyModelChoiceForResponseMode\(\{/u);
+    assert.match(pageSource, /Primary model for AUTO replies/u);
+  });
+
   it("builds, extends, and trims a customizable fallback chain", () => {
     const first = autoFallbackChainWithEntry({
       chain: null,

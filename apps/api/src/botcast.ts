@@ -3972,26 +3972,48 @@ function validGeneratedEchoDashboardBlurbs(raw: unknown): string[] | null {
   return blurb ? [blurb] : null;
 }
 
+const BOTCAST_IDENTITY_NAME_IGNORED_TOKENS = new Set([
+  "the",
+  "and",
+  "with",
+  "from",
+  "show",
+  "of",
+]);
+
+function generatedIdentityUsesForbiddenName(
+  text: string,
+  forbiddenNames: readonly string[],
+): boolean {
+  const textTokens = text
+    .toLocaleLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+  return forbiddenNames.some((name) => {
+    const nameTokens = name
+      .toLocaleLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter(
+        (token) => !BOTCAST_IDENTITY_NAME_IGNORED_TOKENS.has(token),
+      );
+    if (nameTokens.length === 0 || nameTokens.length > textTokens.length) {
+      return false;
+    }
+    return textTokens.some((_, start) =>
+      nameTokens.every(
+        (token, offset) => textTokens[start + offset] === token,
+      ),
+    );
+  });
+}
+
 function safeGeneratedLogoThesis(
   raw: unknown,
   forbiddenNames: readonly string[],
 ): string {
   const thesis = cleanText(raw, "", BOTCAST_LOGO_THESIS_MAX);
   if (thesis.length < 36) return "";
-  const normalized = thesis.toLocaleLowerCase();
-  const thesisTokens = new Set(
-    normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean),
-  );
-  const ignoredNameTokens = new Set(["the", "and", "with", "from", "show"]);
-  const forbiddenNameTokens = forbiddenNames.flatMap((name) =>
-    name
-      .toLocaleLowerCase()
-      .split(/[^\p{L}\p{N}]+/u)
-      .filter(
-        (token) => token.length >= 3 && !ignoredNameTokens.has(token),
-      ),
-  );
-  if (forbiddenNameTokens.some((token) => thesisTokens.has(token))) {
+  if (generatedIdentityUsesForbiddenName(thesis, forbiddenNames)) {
     return "";
   }
   if (
@@ -4014,20 +4036,7 @@ function safeGeneratedMusicIdentityDirection(
     BOTCAST_MUSIC_IDENTITY_DIRECTION_MAX,
   );
   if (!direction) return "";
-  const normalized = direction.toLocaleLowerCase();
-  const directionTokens = new Set(
-    normalized.split(/[^\p{L}\p{N}]+/u).filter(Boolean),
-  );
-  const ignoredNameTokens = new Set(["the", "and", "with", "from", "show"]);
-  const forbiddenNameTokens = forbiddenNames.flatMap((name) =>
-    name
-      .toLocaleLowerCase()
-      .split(/[^\p{L}\p{N}]+/u)
-      .filter(
-        (token) => token.length >= 3 && !ignoredNameTokens.has(token),
-      ),
-  );
-  if (forbiddenNameTokens.some((token) => directionTokens.has(token))) {
+  if (generatedIdentityUsesForbiddenName(direction, forbiddenNames)) {
     return "";
   }
   if (
@@ -4155,6 +4164,33 @@ function parseGeneratedMusicIdentityDirection(
         forbiddenNames,
       ) || null
     );
+  } catch {
+    return null;
+  }
+}
+
+function parseGeneratedAtmosphereIdentity(
+  raw: string,
+  forbiddenNames: readonly string[],
+): {
+  studioIdentity: string;
+  musicIdentityDirection: string;
+} | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    const studioIdentity = cleanText(
+      parsed.studioIdentity ?? parsed.studio_identity,
+      "",
+      BOTCAST_STUDIO_IDENTITY_MAX,
+    );
+    const musicIdentityDirection = safeGeneratedMusicIdentityDirection(
+      parsed.musicIdentity ?? parsed.music_identity,
+      forbiddenNames,
+    );
+    return studioIdentity && musicIdentityDirection
+      ? { studioIdentity, musicIdentityDirection }
+      : null;
   } catch {
     return null;
   }
@@ -5277,20 +5313,25 @@ export async function generateBotcastShowPremise(
   db: DatabaseSync,
   userId: string,
   showId: string,
-  inspiration: string,
+  inspiration: string | null | undefined,
   generation: BotcastGenerationOptions,
-): Promise<{ show: BotcastShow; generated: boolean }> {
+): Promise<{
+  show: BotcastShow;
+  generated: boolean;
+  blurbsGenerated: boolean;
+  blurbFailureReason: "provider_error" | "invalid_output" | null;
+}> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
   const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
-  const sourceInspiration = cleanText(inspiration, current.premise, 360);
-  const rejectedPremises = Array.from(
-    new Set(
-      [current.premise, sourceInspiration]
-        .map((premise) => premise.trim())
-        .filter(Boolean),
-    ),
-  );
+  const sourceInspiration = cleanText(inspiration, "", 360);
+  const hasInspiration = Boolean(sourceInspiration);
+  const sourceMatchesCurrent =
+    sourceInspiration.toLocaleLowerCase() ===
+    current.premise.trim().toLocaleLowerCase();
+  const rejectedPremises = !hasInspiration || sourceMatchesCurrent
+    ? [current.premise]
+    : [];
   try {
     const selected = generationProvider(generation);
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -5299,11 +5340,26 @@ export async function generateBotcastShowPremise(
           {
             role: "system",
             content: [
-              "You refresh the premise of a premium podcast show around its host's singular voice and the producer's supplied inspiration.",
+              hasInspiration
+                ? "You edit the premise of a premium podcast show around its host's singular voice and the producer's supplied prose."
+                : "You invent a fresh premise for a premium podcast show around its host's singular voice.",
               "Return one JSON object with exactly one string field: premise.",
               "Write one crisp sentence describing the show's conversational promise. Do not use markdown.",
-              "Preserve the inspiration's core idea while finding a genuinely new angle, tension, or formulation rather than lightly editing or repeating it.",
-              "Every regeneration must differ meaningfully from every rejected premise while still feeling like the same show.",
+              ...(hasInspiration
+                ? [
+                    "Treat the supplied prose as source material, not a rejected draft. Preserve its concrete subjects, relationships, stakes, tension, and point of view.",
+                    "Let specificity control fidelity: a fragment is an invitation to invent, while a thoughtful complete premise should receive only a light editorial pass for clarity and concision.",
+                    "Do not replace a specific producer-authored concept with a more generic or merely novel one. Semantic fidelity is more important than surprise.",
+                    ...(sourceMatchesCurrent
+                      ? [
+                          "The source matches the saved premise, so tighten or clarify it enough that the result is not verbatim while keeping it unmistakably the same show.",
+                        ]
+                      : []),
+                  ]
+                : [
+                    "Create a surprising host-specific conversational promise without borrowing the saved premise's central formulation.",
+                    "The result must differ meaningfully from every rejected premise while still belonging to this host.",
+                  ]),
             ].join(" "),
           },
           {
@@ -5311,11 +5367,17 @@ export async function generateBotcastShowPremise(
             content: [
               `Show: ${current.name}`,
               `Host: ${host.name}`,
-              `Inspiration: ${sourceInspiration}`,
+              hasInspiration
+                ? `Producer prose: ${sourceInspiration}`
+                : "Producer prose: none supplied; roll a fresh premise.",
               ...(keywordLine ? [keywordLine] : []),
-              `Rejected premises:\n${rejectedPremises
-                .map((premise) => `- ${premise}`)
-                .join("\n")}`,
+              ...(rejectedPremises.length
+                ? [
+                    `Rejected premises:\n${rejectedPremises
+                      .map((premise) => `- ${premise}`)
+                      .join("\n")}`,
+                  ]
+                : [`Current saved premise: ${current.premise}`]),
               `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
             ].join("\n"),
           },
@@ -5342,8 +5404,110 @@ export async function generateBotcastShowPremise(
       ) {
         continue;
       }
+      updateBotcastShow(db, userId, showId, { premise });
+      const blurbResult = await generateBotcastShowDashboardBlurbs(
+        db,
+        userId,
+        showId,
+        generation,
+      );
       return {
-        show: updateBotcastShow(db, userId, showId, { premise }),
+        show: blurbResult.show,
+        generated: true,
+        blurbsGenerated: blurbResult.generated,
+        blurbFailureReason: blurbResult.failureReason,
+      };
+    }
+    return {
+      show: current,
+      generated: false,
+      blurbsGenerated: false,
+      blurbFailureReason: null,
+    };
+  } catch {
+    return {
+      show: current,
+      generated: false,
+      blurbsGenerated: false,
+      blurbFailureReason: null,
+    };
+  }
+}
+
+export async function generateBotcastShowAtmosphere(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  try {
+    const selected = generationProvider(generation);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      let raw: string;
+      try {
+        raw = await selected.provider.generateResponse(
+          [
+            {
+              role: "system",
+              content: [
+                "You create one coordinated visual and sonic atmosphere for a premium interview show.",
+                "Return one JSON object with exactly two string fields: studioIdentity and musicIdentity.",
+                "The two fields must feel authored from the same emotional world while remaining useful to separate studio-image and instrumental-music systems.",
+                "studioIdentity is a compact persona-first set bible: define distinctive architecture or landscape, materials, spatial motifs, and at least six concrete identity-revealing artifacts.",
+                "Do not specify lighting or time of day in studioIdentity; one physical set will be rendered as matched daylight and nighttime variants.",
+                "The room must be recognizable as the host's world without their name, portrait, logo, readable text, or generic podcast decoration.",
+                "musicIdentity is one or two dense provider-safe sentences covering emotional core, signature contradiction, sonic world, lead and support instruments, rhythmic behavior, harmonic gravity, motif gesture, production texture, and ending behavior.",
+                "The ident and outdent are wholly original, instrumental, compact, melodic, and paired. Use no person, show, artist, composer, song, franchise, character, recognizable melody, quoted lyric, or imitation request.",
+                "Replace both rejected current directions with genuinely different choices while preserving the same host and premise.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              content: [
+                `Show premise: ${current.premise}`,
+                `Hosting style: ${current.hostingStyle}`,
+                `Rejected studio identity: ${current.studioIdentity}`,
+                `Rejected music identity: ${current.musicIdentity.direction}`,
+                `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+              ].join("\n"),
+            },
+          ],
+          {
+            ...(selected.model ? { model: selected.model } : {}),
+            temperature: Math.min(1, 0.86 + attempt * 0.04),
+            ...botcastBookingGenerationOptions(
+              selected.providerName,
+              selected.model ?? defaultModelIdForProvider(selected.providerName),
+              900,
+            ),
+            jsonMode: true,
+            usagePurpose: "botcast_brand",
+          },
+        );
+      } catch {
+        continue;
+      }
+      const atmosphere = parseGeneratedAtmosphereIdentity(raw, [
+        host.name,
+        current.name,
+      ]);
+      if (
+        !atmosphere ||
+        atmosphere.studioIdentity.toLocaleLowerCase() ===
+          current.studioIdentity.toLocaleLowerCase() ||
+        atmosphere.musicIdentityDirection.toLocaleLowerCase() ===
+          current.musicIdentity.direction.toLocaleLowerCase()
+      ) {
+        continue;
+      }
+      return {
+        show: updateBotcastShow(db, userId, showId, {
+          studioIdentity: atmosphere.studioIdentity,
+          musicIdentityDirection: atmosphere.musicIdentityDirection,
+          regenerateAtmosphere: true,
+        }),
         generated: true,
       };
     }
@@ -6446,6 +6610,18 @@ function applyBotcastHostRedirect(
   return getBotcastEpisode(db, userId, episode.id);
 }
 
+function botcastHostRedirectTargetsCurrentLine(
+  episode: Pick<BotcastEpisode, "messages">,
+  redirect: BotcastHostRedirectContext,
+): boolean {
+  const latest = episode.messages.at(-1);
+  return Boolean(
+    latest &&
+      latest.id === redirect.messageId &&
+      latest.speakerRole === "host",
+  );
+}
+
 function applyBotcastGuestInterruption(
   db: DatabaseSync,
   userId: string,
@@ -6508,39 +6684,12 @@ function applyBotcastGuestInterruption(
     throw new Error("A spoken guest prefix requires its Signal message id.");
   }
 
-  const bridgeMessageId = randomId(12);
-  db.prepare(
-    `INSERT INTO botcast_messages
-      (id, user_id, episode_id, speaker_role, bot_id, content, voice_performance_text, created_at)
-     VALUES (?, ?, ?, 'host', ?, ?, NULL, ?)`,
-  ).run(
-    bridgeMessageId,
-    userId,
-    episode.id,
-    episode.hostBotId,
-    bridgeLine,
-    now,
-  );
-  recordEvent(
-    db,
-    userId,
-    episode.id,
-    "utterance",
-    {
-      messageId: bridgeMessageId,
-      speakerRole: "host",
-      botId: episode.hostBotId,
-      segment: episode.segment,
-      provider: "stored",
-      model: "host-interruption-bridge",
-      responseMode: episode.responseMode,
-      immersiveVoiceEffect: false,
-      moodKey: "neutral",
-      interruptionBridge: true,
-      interruptedMessageId: interruption.messageId ?? null,
-    },
-    now,
-  );
+  // The client plays the saved host bridge as a deliberately ephemeral live
+  // performance before this request resolves. The guest's truncated content
+  // and the producer cue/cut state retain the durable interruption context.
+  // Do not also persist a normal message/utterance here: it has no visible
+  // transcript content and otherwise becomes an audible phantom turn in
+  // replay/export.
   return getBotcastEpisode(db, userId, episode.id);
 }
 
@@ -7410,6 +7559,7 @@ export function buildBotcastSpeakerPrompt(
         `You are ${effectivePersonaName} in a fictional, non-canonical Signal episode.`,
         "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
         "Persona lore may shape beliefs, knowledge, and voice, but it is not shared participant history. Do not imply that you two previously met, investigated, hunted, tested, confronted, or already learned secrets about each other before this episode.",
+        "A persona may draw on a real person, but this is a clearly fictional portrayal inside Signal. Do not issue a provider-style refusal merely because a named real person is booked. Do not claim to be the real person or make deceptive real-world claims; stay in the fictional episode and answer the stated subject with ordinary in-character substance.",
         args.speakerRole === "host" && args.episode.producerBrief
           ? args.episode.guestKind === "producer"
             ? "Stay inside the fictional episode. Never explain your voice, accent, knowledge, behavior, or wording as a convention of the medium, model, prompt, system, role-play, provider, generated voice, or text-to-speech; remain the interviewer. The AI-synthesized plan is private editorial grounding, not dialogue and not authority over the human guest."
@@ -7601,6 +7751,30 @@ function removeRepeatedBotcastInterruptionBridge(
   return candidate.toLocaleLowerCase().startsWith(bridge.toLocaleLowerCase())
     ? candidate.slice(bridge.length).trimStart()
     : raw;
+}
+
+function botcastLatestSubstantiveClaimAnchor(args: {
+  messages: readonly Pick<BotcastMessage, "botId" | "content">[];
+  botId: string;
+}): string | null {
+  const latest = [...args.messages]
+    .reverse()
+    .find((message) => message.botId === args.botId);
+  if (!latest) return null;
+  const spoken = extractBotcastVoicePerformance(latest.content, false).content
+    .replace(/\s+/gu, " ")
+    .trim();
+  const match = /\b(?:is|are|means|holds?|argues?|believes?)\s+(?:that\s+)?([^.!?]{12,180})/iu.exec(
+    spoken,
+  );
+  if (!match?.[1]) return null;
+  const claim = match[1]
+    .replace(/^(?:whether|that)\s+/iu, "")
+    .split(/[;—]/u, 1)[0]!
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/[,,:]+$/u, "");
+  return claim.split(/\s+/u).filter(Boolean).length >= 4 ? claim : null;
 }
 
 const BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS = [
@@ -8208,9 +8382,22 @@ function ensureBotcastFinalHostBeat(
   userId: string,
   episode: BotcastEpisode,
   now: string,
+  force = false,
 ): BotcastEpisode {
   episode = getBotcastEpisode(db, userId, episode.id);
-  if (episode.messages.at(-1)?.speakerRole === "host") return episode;
+  const latestMessage = episode.messages.at(-1);
+  const latestIsEmergencySignoff = episode.events.some(
+    (event) =>
+      event.kind === "utterance" &&
+      event.payload.messageId === latestMessage?.id &&
+      event.payload.emergencyFallback === true,
+  );
+  if (
+    latestIsEmergencySignoff ||
+    (!force && latestMessage?.speakerRole === "host")
+  ) {
+    return episode;
+  }
 
   const hostPowers =
     botcastEpisodePowerSnapshot(episode)?.hostPowers ??
@@ -8223,7 +8410,14 @@ function ensureBotcastFinalHostBeat(
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : botPowerEchoesAddressedSpeechV1(hostPowers)
       ? applyBotPowerEchoResponseV1(previousGuestLine ?? "")
-      : "That is where we will leave it. Thank you for listening.";
+      : botPowerMumblesSpeechV1(hostPowers)
+        ? applyBotPowerMumbledResponseV1(
+            "That is where we will leave it. Thank you for listening.",
+          )
+        : "That is where we will leave it. Thank you for listening.";
+  const hostMumbles = botPowerMumblesSpeechV1(hostPowers);
+  const hostMuted = botPowerIsMutedV1(hostPowers);
+  const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
   const messageId = randomId(12);
   db.prepare(
     `INSERT INTO botcast_messages
@@ -8246,6 +8440,9 @@ function ensureBotcastFinalHostBeat(
       immersiveVoiceEffect: false,
       moodKey: "neutral",
       emergencyFallback: true,
+      ...(hostMumbles && !hostMuted && !hostEchoes
+        ? { publicSpeechEffect: "speech_obfuscation" }
+        : {}),
     },
     now,
   );
@@ -8258,8 +8455,15 @@ function completeEpisode(
   episode: BotcastEpisode,
   outcome: BotcastEpisodeOutcome,
   now: string,
+  options: { forceFinalHostBeat?: boolean } = {},
 ): void {
-  episode = ensureBotcastFinalHostBeat(db, userId, episode, now);
+  episode = ensureBotcastFinalHostBeat(
+    db,
+    userId,
+    episode,
+    now,
+    options.forceFinalHostBeat === true,
+  );
   closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
   const runtimeMs = botcastReplayTimeline(
     episode.messages,
@@ -8391,6 +8595,7 @@ export function forceEndBotcastEpisode(
   db: DatabaseSync,
   userId: string,
   episodeId: string,
+  options: { forceFinalHostBeat?: boolean } = {},
 ): BotcastEpisode {
   let episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status === "completed") return episode;
@@ -8402,6 +8607,7 @@ export function forceEndBotcastEpisode(
     episode,
     botcastEpisodeDepartureOutcome(episode.events) ?? "completed",
     now,
+    options,
   );
   return getBotcastEpisode(db, userId, episode.id);
 }
@@ -8603,6 +8809,7 @@ export async function endBotcastEpisodeOnProducerCut(
   options: {
     audienceCheckpoint?: BotcastProducerCutAudienceCheckpoint;
     interruption?: BotcastProducerCutInterruption;
+    deterministic?: boolean;
   } = {},
 ): Promise<BotcastEpisodeAdvanceResponse> {
   if (options.audienceCheckpoint) {
@@ -8626,6 +8833,26 @@ export async function endBotcastEpisodeOnProducerCut(
         options.interruption,
       );
     }
+  }
+  if (options.deterministic) {
+    const completedEpisode = forceEndBotcastEpisode(db, userId, episodeId, {
+      forceFinalHostBeat: true,
+    });
+    const emergencyHostMessageId = completedEpisode.events
+      .slice()
+      .reverse()
+      .find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.emergencyFallback === true,
+      )?.payload.messageId;
+    return {
+      episode: completedEpisode,
+      message:
+        completedEpisode.messages.find(
+          (message) => message.id === emergencyHostMessageId,
+        ) ?? null,
+    };
   }
   const cut = beginBotcastProducerCut(db, userId, episodeId);
   if (!cut.started) {
@@ -8891,6 +9118,7 @@ export async function advanceBotcastEpisode(
     ? normalizeBotcastProducerCue(input.cue)
     : undefined;
   const cueDelivery = input.cueDelivery ?? "next_host_turn";
+  let hostRedirect = input.hostRedirect;
   let guestInterruption = input.guestInterruption;
   if (input.cueDelivery && !requestedCue) {
     throw new Error("Signal cue delivery requires a producer cue.");
@@ -8904,15 +9132,25 @@ export async function advanceBotcastEpisode(
   }
   if (requestedCue) {
     if (cueDelivery === "redirect_host") {
-      if (!input.hostRedirect) {
+      if (!hostRedirect) {
         throw new Error("A live host redirect requires the spoken host prefix.");
       }
-      episode = applyBotcastHostRedirect(
-        db,
-        userId,
-        episode,
-        input.hostRedirect,
-      );
+      const staleWrapUpRedirect =
+        requestedCue.kind === "wrap_up" &&
+        !botcastHostRedirectTargetsCurrentLine(episode, hostRedirect);
+      if (staleWrapUpRedirect) {
+        // The client can finish playing a prepared host line before its live
+        // redirect reaches the API. Preserve the wrap direction and close from
+        // authoritative state instead of rejecting the show into dead air.
+        hostRedirect = undefined;
+      } else {
+        episode = applyBotcastHostRedirect(
+          db,
+          userId,
+          episode,
+          hostRedirect,
+        );
+      }
     } else if (input.hostRedirect) {
       throw new Error("A spoken host prefix is only valid for a live host redirect.");
     }
@@ -9016,7 +9254,7 @@ export async function advanceBotcastEpisode(
       requestedCue,
       cueDelivery,
       now,
-      input.hostRedirect,
+      hostRedirect,
       guestInterruption,
     );
     episode = getBotcastEpisode(db, userId, episodeId);
@@ -9614,6 +9852,10 @@ export async function advanceBotcastEpisode(
       .slice(-8)
       .map((message) => message.content.replace(/\s+/gu, " ").trim().toLowerCase()),
   );
+  const latestGuestClaimAnchor = botcastLatestSubstantiveClaimAnchor({
+    messages: episode.messages,
+    botId: guest.id,
+  });
   const chooseRecoveryFallback = (
     candidates: readonly string[],
     seed: string,
@@ -9626,22 +9868,34 @@ export async function advanceBotcastEpisode(
     }
     return candidates[startIndex]!;
   };
-  const hostRecoveryFallbacks = [
-    `${hostNamesGuest}, give me one concrete example that would test what you just said.`,
-    `${hostNamesGuest}, what consequence of that answer matters most, and who has to live with it?`,
-    `${hostNamesGuest}, where does that become a real choice rather than a principle?`,
-    `${hostNamesGuest}, what cost or contradiction would make you reconsider that answer?`,
-  ] as const;
+  const hostRecoveryFallbacks = latestGuestClaimAnchor
+    ? [
+        `${hostNamesGuest}, you said ${latestGuestClaimAnchor}. Where does that start directing an actual choice, and who pays when it does?`,
+        `${hostNamesGuest}, if ${latestGuestClaimAnchor}, what concrete cost exposes the convention instead of merely naming it?`,
+        `${hostNamesGuest}, take ${latestGuestClaimAnchor} out of abstraction: whose decision changes first, and what becomes harder to refuse?`,
+      ]
+    : [
+        `${hostNamesGuest}, give me one concrete example that would test what you just said.`,
+        `${hostNamesGuest}, what consequence of that answer matters most, and who has to live with it?`,
+        `${hostNamesGuest}, where does that become a real choice rather than a principle?`,
+        `${hostNamesGuest}, what cost or contradiction would make you reconsider that answer?`,
+      ];
   const hostRecoveryFallback = chooseRecoveryFallback(
     hostRecoveryFallbacks,
     `signal-host-recovery:${episode.id}:${speaker.id}:${episode.messages.length}`,
   );
-  const guestRecoveryFallbacks = [
-    `${topicWithPunctuation} I would start with the concrete decision, its cost, and who has to live with both.`,
-    `For me, ${openingSubject} becomes real at the first tradeoff: what someone chooses, gives up, or accepts.`,
-    `The useful test for ${openingSubject} is the consequence—what changes once somebody acts on it.`,
-    `I would make ${openingSubject} concrete: identify the choice, the person making it, and the price that follows.`,
-  ] as const;
+  const guestRecoveryFallbacks = latestGuestClaimAnchor
+    ? [
+        `The claim that ${latestGuestClaimAnchor} needs a practical test: when does it begin choosing for someone, and what does refusal cost?`,
+        `If ${latestGuestClaimAnchor}, then the next question is who benefits when it feels natural and who is punished for resisting it.`,
+        `Start with ${latestGuestClaimAnchor}. Its consequence appears when a person mistakes a social rule for an inner necessity.`,
+      ]
+    : [
+        `${topicWithPunctuation} I would start with the concrete decision, its cost, and who has to live with both.`,
+        `For me, ${openingSubject} becomes real at the first tradeoff: what someone chooses, gives up, or accepts.`,
+        `The useful test for ${openingSubject} is the consequence—what changes once somebody acts on it.`,
+        `I would make ${openingSubject} concrete: identify the choice, the person making it, and the price that follows.`,
+      ];
   const guestRecoveryFallback = chooseRecoveryFallback(
     guestRecoveryFallbacks,
     `signal-guest-recovery:${episode.id}:${speaker.id}:${episode.messages.length}`,
@@ -10410,10 +10664,6 @@ export async function advanceBotcastEpisode(
   const atMs = firstOpeningHost
     ? 1_400
     : messageStartMs + botcastAutoCameraLeadInMs(utteranceDurationMs);
-  const cameraEvent =
-    episode.segment === "interview" && episode.messages.length % 4 === 0
-      ? "transition"
-      : "utterance";
   const speakerVisibleToAudience = botcastObserverProjectionForRoleV2({
     episode,
     role: speakerRole,
@@ -10426,7 +10676,7 @@ export async function advanceBotcastEpisode(
     speakerVisible: speakerVisibleToAudience,
     utteranceDurationMs,
     segment: episode.segment,
-    event: cameraEvent,
+    event: "utterance",
   });
   recordEvent(
     db,

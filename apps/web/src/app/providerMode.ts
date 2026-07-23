@@ -216,3 +216,63 @@ export function applyOnlineModelChoice(args: {
     },
   };
 }
+
+export function applyModelChoiceForResponseMode(args: {
+  responseMode: AutoResponseMode;
+  currentChoices: ModelChoiceByProvider;
+  nextChoice: string;
+  options: readonly ProviderModeModelOption[];
+  providerPreference: Provider;
+}): { provider: Provider; choices: Record<Provider, string> } {
+  const normalized = normalizeProviderModeModelChoice(args.nextChoice);
+  const selectedOption =
+    normalized === AUTO_MODEL_CHOICE || normalized === DISABLED_MODEL_CHOICE
+      ? null
+      : (args.options.find(
+          (option) => option.id === normalized && !option.disabledReason,
+        ) ?? null);
+  const selectedProvider = selectedOption?.provider ?? args.providerPreference;
+
+  if (args.responseMode === "auto" && normalized === AUTO_MODEL_CHOICE) {
+    if (args.providerPreference === "local") {
+      return {
+        provider: "local",
+        choices: {
+          local: AUTO_MODEL_CHOICE,
+          openai: normalizeProviderModeModelChoice(args.currentChoices.openai),
+          anthropic: normalizeProviderModeModelChoice(args.currentChoices.anthropic),
+        },
+      };
+    }
+    const provider = onlineProviderFallback(args.providerPreference);
+    return {
+      provider,
+      choices: {
+        local: normalizeProviderModeModelChoice(args.currentChoices.local),
+        openai: AUTO_MODEL_CHOICE,
+        anthropic: AUTO_MODEL_CHOICE,
+      },
+    };
+  }
+
+  if (
+    args.responseMode === "local" ||
+    (args.responseMode === "auto" && selectedProvider === "local")
+  ) {
+    return {
+      provider: "local",
+      choices: {
+        local: normalized,
+        openai: normalizeProviderModeModelChoice(args.currentChoices.openai),
+        anthropic: normalizeProviderModeModelChoice(args.currentChoices.anthropic),
+      },
+    };
+  }
+
+  return applyOnlineModelChoice({
+    currentChoices: args.currentChoices,
+    nextChoice: normalized,
+    onlineOptions: args.options,
+    providerPreference: selectedProvider,
+  });
+}

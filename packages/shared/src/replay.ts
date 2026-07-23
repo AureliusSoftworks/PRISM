@@ -21,6 +21,8 @@ export type ReplayRecordingStatusV1 =
   | "ready_with_warnings"
   | "failed";
 
+export type ReplayRenderKindV1 = "standard" | "premium";
+
 export type ReplayParticipantKindV1 = "bot" | "player" | "prism";
 
 export interface ReplayParticipantSnapshotV1 {

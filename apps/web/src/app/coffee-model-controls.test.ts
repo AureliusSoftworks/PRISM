@@ -18,5 +18,9 @@ describe("Coffee model controls", () => {
       coffeeModelPickerAriaLabel("online"),
       "Coffee session model for online replies. Account default uses the model saved in Settings.",
     );
+    assert.equal(
+      coffeeModelPickerAriaLabel("auto"),
+      "Coffee session primary model for Auto replies. Includes all local and online models; Account default uses the model saved in Settings.",
+    );
   });
 });

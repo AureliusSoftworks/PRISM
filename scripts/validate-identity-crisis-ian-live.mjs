@@ -94,7 +94,7 @@ const social = {
   leavePressure: 0.18,
 };
 const directAddress =
-  "Ian, give me the bearing from Shackleton crater to the south-pole relay.";
+  "So Ian—straight out of the gate—give me the bearing from Shackleton crater to the south-pole relay.";
 const shortNameTriggerDetected = botcastIdentityMirrorCanTriggerV1({
   guestKind: "bot",
   guestPresenceMode: "present",
@@ -108,7 +108,7 @@ const shortNameTriggerDetected = botcastIdentityMirrorCanTriggerV1({
   content: directAddress,
 });
 if (!shortNameTriggerDetected) {
-  throw new Error("Natural short-name Signal address did not trigger identity mirroring.");
+  throw new Error("Discourse-led short-name Signal address did not trigger identity mirroring.");
 }
 const signalGuestReply =
   "The south-pole relay lies north-northeast from Shackleton crater; hold that bearing and correct at the ridge.";

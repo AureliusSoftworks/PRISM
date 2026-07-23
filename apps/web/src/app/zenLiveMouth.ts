@@ -154,13 +154,17 @@ const ENGLISH_CRT_PRONOUNCED_FINAL_E_WORDS = new Set([
   "the",
   "we",
 ]);
-const ENGLISH_CRT_WIDE_O_WORDS = new Set([
+const ENGLISH_CRT_OH_UH_WORDS = new Set([
   "above",
   "come",
   "done",
+  "go",
   "love",
+  "no",
   "none",
+  "oh",
   "one",
+  "so",
   "some",
 ]);
 
@@ -235,7 +239,17 @@ function englishCrtVowelRuleAt(
     ENGLISH_CRT_VOWEL_HOLD_UNITS,
     "vowel",
   );
-  const round = englishCrtVisemeStep(
+  const tightRound = englishCrtVisemeStep(
+    "dot",
+    ENGLISH_CRT_VOWEL_HOLD_UNITS,
+    "vowel",
+  );
+  const smallRound = englishCrtVisemeStep(
+    "open-small",
+    ENGLISH_CRT_VOWEL_HOLD_UNITS,
+    "vowel",
+  );
+  const broadRound = englishCrtVisemeStep(
     "open-round",
     ENGLISH_CRT_VOWEL_HOLD_UNITS,
     "vowel",
@@ -248,9 +262,9 @@ function englishCrtVowelRuleAt(
       return { length: 1, steps: [wide, transition("narrow")] };
     }
     if (current === "o") {
-      return { length: 1, steps: [round, transition("narrow")] };
+      return { length: 1, steps: [smallRound, transition("dot")] };
     }
-    if (current === "u") return { length: 1, steps: [round] };
+    if (current === "u") return { length: 1, steps: [tightRound] };
     return { length: 1, steps: [narrow] };
   }
 
@@ -261,10 +275,10 @@ function englishCrtVowelRuleAt(
     return { length: 2, steps: [wide, transition("narrow")] };
   }
   if (/^(ou|ow)$/u.test(pair)) {
-    return { length: 2, steps: [wide, transition("open-round")] };
+    return { length: 2, steps: [wide, transition("dot")] };
   }
   if (/^(oi|oy)$/u.test(pair)) {
-    return { length: 2, steps: [round, transition("narrow")] };
+    return { length: 2, steps: [broadRound, transition("narrow")] };
   }
   if (/^(ee|ea|ei)$/u.test(pair)) {
     return {
@@ -274,7 +288,21 @@ function englishCrtVowelRuleAt(
       ],
     };
   }
-  if (/^(oo|oa|oe|ue|ui|ew|aw|au)$/u.test(pair)) {
+  if (/^(oo|ue|ui|ew)$/u.test(pair)) {
+    return {
+      length: 2,
+      steps: [
+        englishCrtVisemeStep("dot", 2.15, "vowel"),
+      ],
+    };
+  }
+  if (/^(oa|oe)$/u.test(pair)) {
+    return {
+      length: 2,
+      steps: [smallRound, transition("dot")],
+    };
+  }
+  if (/^(aw|au)$/u.test(pair)) {
     return {
       length: 2,
       steps: [
@@ -285,7 +313,7 @@ function englishCrtVowelRuleAt(
   if (pair === "ah") {
     return {
       length: 2,
-      steps: [englishCrtVisemeStep("open-wide", 2.05, "vowel")],
+      steps: [englishCrtVisemeStep("open-round", 2.05, "vowel")],
     };
   }
   if (/^(er|ir|ur)$/u.test(pair)) {
@@ -298,22 +326,23 @@ function englishCrtVowelRuleAt(
     return { length: 2, steps: [wide, transition("narrow")] };
   }
   if (pair === "or") {
-    return { length: 2, steps: [round, transition("narrow")] };
+    return { length: 2, steps: [broadRound, transition("narrow")] };
   }
 
   if (current === "a") return { length: 1, steps: [wide] };
-  if (current === "e" || current === "i") {
-    return { length: 1, steps: [narrow] };
-  }
+  if (current === "e") return { length: 1, steps: [wide] };
+  if (current === "i") return { length: 1, steps: [narrow] };
   if (current === "o") {
     return {
       length: 1,
       steps: [
-        ENGLISH_CRT_WIDE_O_WORDS.has(options.wordText) ? wide : round,
+        ENGLISH_CRT_OH_UH_WORDS.has(options.wordText)
+          ? smallRound
+          : broadRound,
       ],
     };
   }
-  if (current === "u") return { length: 1, steps: [wide] };
+  if (current === "u") return { length: 1, steps: [smallRound] };
   if (current === "y" && !(index === 0 && /[aeiou]/u.test(next))) {
     return { length: 1, steps: [narrow] };
   }
@@ -428,7 +457,7 @@ function englishCrtWordVisemeBeats(
       durationUnits = 0.78;
     } else if (pair === "wh" || pair === "qu") {
       length = 2;
-      shape = "open-round";
+      shape = "dot";
       durationUnits = 0.82;
     } else if (/^(sh|ch|zh|ng|ck|gh)$/u.test(pair)) {
       length = 2;
@@ -448,7 +477,7 @@ function englishCrtWordVisemeBeats(
       shape = "narrow";
       durationUnits = 0.84;
     } else if (current === "w" || current === "q") {
-      shape = "open-round";
+      shape = "dot";
       durationUnits = 0.76;
     } else {
       shape =

@@ -212,7 +212,6 @@ export function coffeeCupSippingActive(args: {
   if (args.progress >= 0.96) return false;
   if (args.ambientSipAllowed === false) return false;
   if (args.speaking === true) return false;
-  if (args.thinking === true) return false;
   if (!Number.isFinite(args.nowMs)) return false;
   const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
   if (sipLikelihood <= 0) return false;
@@ -651,9 +650,7 @@ export function buildCoffeeCupVisualState(args: {
     Number.isFinite(args.nowMs) &&
     args.nowMs < args.sipLockedUntilMs;
   const sippingOverride =
-    sipLocked || args.speaking === true || args.thinking === true
-      ? false
-      : args.sippingOverride;
+    sipLocked || args.speaking === true ? false : args.sippingOverride;
   const sipBaseProgress =
     args.topOff && Number.isFinite(args.topOff.progressAfter)
       ? clampUnit(args.topOff.progressAfter)

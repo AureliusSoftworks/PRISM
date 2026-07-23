@@ -32,6 +32,9 @@ const SIGNAL_STUDIO_MIC_KEY_MIN_CHANNEL = 128;
 const SIGNAL_STUDIO_MIC_KEY_MAX_GREEN = 118;
 const SIGNAL_STUDIO_MIC_KEY_MIN_CHROMA = 58;
 const SIGNAL_STUDIO_MIC_KEY_MAX_RED_BLUE_DISTANCE = 96;
+const SIGNAL_STUDIO_MIC_KEY_EDGE_MIN_CHANNEL = 40;
+const SIGNAL_STUDIO_MIC_KEY_EDGE_MAX_GREEN = 180;
+const SIGNAL_STUDIO_MIC_KEY_EDGE_MIN_CHROMA = 12;
 const SIGNAL_STUDIO_MIC_KEY_MIN_PIXELS = 24;
 const SIGNAL_STUDIO_STRAY_KEY_MIN_CHANNEL = 220;
 const SIGNAL_STUDIO_STRAY_KEY_MAX_GREEN = 45;
@@ -55,19 +58,37 @@ function signalStudioMicrophoneKeyStrength(
   const paired = Math.min(red, blue);
   const chroma = paired - green;
   if (
-    paired < SIGNAL_STUDIO_MIC_KEY_MIN_CHANNEL ||
-    green > SIGNAL_STUDIO_MIC_KEY_MAX_GREEN ||
-    chroma < SIGNAL_STUDIO_MIC_KEY_MIN_CHROMA ||
+    paired < SIGNAL_STUDIO_MIC_KEY_EDGE_MIN_CHANNEL ||
+    green > SIGNAL_STUDIO_MIC_KEY_EDGE_MAX_GREEN ||
+    chroma < SIGNAL_STUDIO_MIC_KEY_EDGE_MIN_CHROMA ||
     Math.abs(red - blue) > SIGNAL_STUDIO_MIC_KEY_MAX_RED_BLUE_DISTANCE
   ) return 0;
-  return Math.max(0, Math.min(1, (chroma - 36) / 128));
+  return Math.max(0, Math.min(1, (chroma - 4) / 96));
+}
+
+function isStrongSignalStudioMicrophoneKey(
+  red: number,
+  green: number,
+  blue: number,
+): boolean {
+  const paired = Math.min(red, blue);
+  const chroma = paired - green;
+  return (
+    paired >= SIGNAL_STUDIO_MIC_KEY_MIN_CHANNEL &&
+    green <= SIGNAL_STUDIO_MIC_KEY_MAX_GREEN &&
+    chroma >= SIGNAL_STUDIO_MIC_KEY_MIN_CHROMA &&
+    Math.abs(red - blue) <= SIGNAL_STUDIO_MIC_KEY_MAX_RED_BLUE_DISTANCE
+  );
 }
 
 /**
  * Turns the generated-only magenta microphone key into a grayscale source plus
- * an alpha mask. Spatial gating prevents unrelated purple set dressing from
- * becoming cast-colored. Once a valid mic key exists, exact stray key pixels
- * elsewhere are neutralized so generated magenta cannot leak into the set.
+ * an alpha mask. A strict seed threshold first proves that the generated mic
+ * key is present; the wider edge threshold then captures its darker bloom and
+ * anti-aliased pixels. Spatial gating prevents unrelated purple set dressing
+ * from becoming cast-colored. Once a valid mic key exists, exact stray key
+ * pixels elsewhere are neutralized so generated magenta cannot leak into the
+ * set.
  */
 export async function extractSignalStudioMicrophoneTint(
   sourceBytes: Buffer,
@@ -86,6 +107,34 @@ export async function extractSignalStudioMicrophoneTint(
   }
   const studioPixels = Buffer.from(prepared.data);
   const maskPixels = Buffer.alloc(studioPixels.length);
+  let strongKeyPixelCount = 0;
+  for (let y = 0; y < height; y += 1) {
+    const yUnit = height <= 1 ? 0 : y / (height - 1);
+    for (let x = 0; x < width; x += 1) {
+      const xUnit = width <= 1 ? 0 : x / (width - 1);
+      if (!signalStudioMicrophoneKeyRegion(xUnit, yUnit)) continue;
+      const offset = rgbaOffset(width, x, y);
+      const red = studioPixels[offset]!;
+      const green = studioPixels[offset + 1]!;
+      const blue = studioPixels[offset + 2]!;
+      const sourceAlpha = studioPixels[offset + 3]!;
+      if (
+        sourceAlpha > 0 &&
+        isStrongSignalStudioMicrophoneKey(red, green, blue)
+      ) {
+        strongKeyPixelCount += 1;
+      }
+    }
+  }
+  if (strongKeyPixelCount < SIGNAL_STUDIO_MIC_KEY_MIN_PIXELS) {
+    return {
+      studioBytes: sourceBytes,
+      maskPngBytes: null,
+      keyedPixelCount: 0,
+      width,
+      height,
+    };
+  }
   let keyedPixelCount = 0;
   for (let y = 0; y < height; y += 1) {
     const yUnit = height <= 1 ? 0 : y / (height - 1);
@@ -97,22 +146,22 @@ export async function extractSignalStudioMicrophoneTint(
       const blue = studioPixels[offset + 2]!;
       const sourceAlpha = studioPixels[offset + 3]!;
       const strength = signalStudioMicrophoneKeyStrength(red, green, blue);
-      if (strength <= 0 || sourceAlpha <= 0) continue;
       const inMicrophoneRegion = signalStudioMicrophoneKeyRegion(xUnit, yUnit);
-      if (inMicrophoneRegion) {
+      if (inMicrophoneRegion && strength > 0 && sourceAlpha > 0) {
         const maskAlpha = Math.round(sourceAlpha * strength);
-        if (maskAlpha <= 0) continue;
-        keyedPixelCount += 1;
-        maskPixels[offset] = 255;
-        maskPixels[offset + 1] = 255;
-        maskPixels[offset + 2] = 255;
-        maskPixels[offset + 3] = maskAlpha;
+        if (maskAlpha > 0) {
+          keyedPixelCount += 1;
+          maskPixels[offset] = 255;
+          maskPixels[offset + 1] = 255;
+          maskPixels[offset + 2] = 255;
+          maskPixels[offset + 3] = maskAlpha;
+        }
       }
       const exactStrayKey =
         Math.min(red, blue) >= SIGNAL_STUDIO_STRAY_KEY_MIN_CHANNEL &&
         green <= SIGNAL_STUDIO_STRAY_KEY_MAX_GREEN &&
         Math.abs(red - blue) <= SIGNAL_STUDIO_STRAY_KEY_MAX_RED_BLUE_DISTANCE;
-      if (!inMicrophoneRegion && !exactStrayKey) continue;
+      if (!(inMicrophoneRegion && strength > 0) && !exactStrayKey) continue;
       const neutral = Math.max(
         12,
         Math.min(255, Math.round(red * 0.2126 + green * 0.7152 + blue * 0.0722)),
@@ -121,15 +170,6 @@ export async function extractSignalStudioMicrophoneTint(
       studioPixels[offset + 1] = neutral;
       studioPixels[offset + 2] = neutral;
     }
-  }
-  if (keyedPixelCount < SIGNAL_STUDIO_MIC_KEY_MIN_PIXELS) {
-    return {
-      studioBytes: sourceBytes,
-      maskPngBytes: null,
-      keyedPixelCount: 0,
-      width,
-      height,
-    };
   }
   const [studioBytes, maskPngBytes] = await Promise.all([
     sharp(studioPixels, { raw: { width, height, channels: 4 } })
