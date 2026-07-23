@@ -236,4 +236,33 @@ describe("Zen voice reveal fallback", () => {
         handlerSource.indexOf("prepareActiveAssistantRevealInterruption()")
     );
   });
+
+  it("stops progressive Zen at a completed beat without racing message truncation", () => {
+    const interruptionStart = pageSource.indexOf(
+      "function prepareActiveAssistantRevealInterruption",
+    );
+    const interruptionEnd = pageSource.indexOf(
+      "function isLocalOnlyAssistantInterruptionId",
+      interruptionStart,
+    );
+    const interruptionSource = pageSource.slice(
+      interruptionStart,
+      interruptionEnd,
+    );
+    assert.match(
+      interruptionSource,
+      /latestAssistant\.zenProgressive\?\.inProgress === true\) return null/,
+    );
+
+    const handlerStart = pageSource.indexOf("const handleTypingIndicatorPress");
+    const handlerEnd = pageSource.indexOf(
+      "function finishActiveAssistantRevealForCompaction",
+      handlerStart,
+    );
+    const handlerSource = pageSource.slice(handlerStart, handlerEnd);
+    assert.match(
+      handlerSource,
+      /latestAssistant\?\.zenProgressive\?\.inProgress === true[\s\S]*?stopPendingReply\(\)/,
+    );
+  });
 });

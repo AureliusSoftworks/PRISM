@@ -105,6 +105,10 @@ import {
   normalizeZenLiveActionReactionRequest,
 } from "./zen-live-actions.ts";
 import {
+  readZenProgressiveVoiceSegment,
+  registerZenProgressiveVoiceSegment,
+} from "./zen-progressive-voice.ts";
+import {
   cancelActiveImageJobForConversation,
   peekActiveImageJobForUser,
   pollImageJobForUser,
@@ -8178,6 +8182,32 @@ function buildRoutes(): RouteDefinition[] {
       const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider = providerOverride ?? undefined;
       const user = getUserRow(userId);
+      const progressiveZenVoiceRequested =
+        mode === "zen" &&
+        !incognito &&
+        body.progressiveZenVoice === true &&
+        user.voice_mode === "english" &&
+        normalizeEnglishVoiceEngine(user.english_voice_engine) ===
+          "elevenlabs";
+      let progressiveZenStreamStarted = false;
+      const writeProgressiveZenEvent = (
+        event: Record<string, unknown>,
+      ): void => {
+        if (ctx.res.destroyed || ctx.res.writableEnded) return;
+        if (!progressiveZenStreamStarted) {
+          progressiveZenStreamStarted = true;
+          ctx.res.statusCode = 200;
+          ctx.res.setHeader(
+            "content-type",
+            "application/x-ndjson; charset=utf-8",
+          );
+          ctx.res.setHeader("cache-control", "no-store");
+          ctx.res.setHeader("x-accel-buffering", "no");
+          ctx.res.setHeader("x-prism-zen-progressive", "speech-beats-v1");
+          ctx.res.flushHeaders();
+        }
+        ctx.res.write(`${JSON.stringify(event)}\n`);
+      };
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
       let effectiveBotId = requestedBotId;
@@ -8612,6 +8642,26 @@ function buildRoutes(): RouteDefinition[] {
             botPowerMumbling: runtimeBotMumbling,
             botPowerResponseBudget: runtimeBotResponseBudget,
             botOverrides,
+            progressiveZenVoice: progressiveZenVoiceRequested,
+            ...(progressiveZenVoiceRequested
+              ? {
+                  onProgressiveZenSegment: (segment) => {
+                    const voiceSegment =
+                      registerZenProgressiveVoiceSegment({
+                        userId,
+                        text: segment.text,
+                        provider: segment.provider,
+                        botId: segment.botId,
+                        moodKey: segment.moodKey,
+                      });
+                    writeProgressiveZenEvent({
+                      type: "segment",
+                      ...segment,
+                      voiceSegmentId: voiceSegment.id,
+                    });
+                  },
+                }
+              : {}),
             mode,
             sessionEnding,
             sessionResumeContext,
@@ -8634,6 +8684,20 @@ function buildRoutes(): RouteDefinition[] {
           conversationId,
         );
       } catch (error) {
+        if (progressiveZenStreamStarted) {
+          writeProgressiveZenEvent({
+            type: "error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Progressive Zen reply failed.",
+            ...(error instanceof AutoFallbackExhaustedError
+              ? { code: "auto_fallback_exhausted" }
+              : {}),
+          });
+          if (!ctx.res.writableEnded) ctx.res.end();
+          return;
+        }
         if (error instanceof AutoFallbackExhaustedError) {
           json(ctx.res, 503, {
             ok: false,
@@ -8666,9 +8730,10 @@ function buildRoutes(): RouteDefinition[] {
         toolCalls,
         backendEvents,
         psychicDebug,
+        progressiveZen,
         zenAutonomyDecision: resultZenAutonomyDecision,
       } = result;
-      json(ctx.res, 200, {
+      const envelope = {
         ok: true,
         conversation,
         ...(autoRecovery ? { autoRecovery } : {}),
@@ -8688,7 +8753,22 @@ function buildRoutes(): RouteDefinition[] {
                 resultZenAutonomyDecision ?? zenAutonomyDecision,
             }
           : {}),
-      });
+      };
+      if (progressiveZenVoiceRequested) {
+        if (progressiveZen) {
+          writeProgressiveZenEvent({
+            type: "progressive_end",
+            conversationId: conversation.id,
+            assistantMessageId: progressiveZen.assistantMessageId,
+            deliveredSegments: progressiveZen.segmentCount,
+            interrupted: progressiveZen.interrupted,
+          });
+        }
+        writeProgressiveZenEvent({ type: "complete", envelope });
+        if (!ctx.res.writableEnded) ctx.res.end();
+        return;
+      }
+      json(ctx.res, 200, envelope);
     }),
     route("GET", "/api/image-jobs/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -13577,6 +13657,11 @@ function buildRoutes(): RouteDefinition[] {
         typeof raw.messageId === "string" && raw.messageId.trim()
           ? raw.messageId.trim()
           : null;
+      const zenProgressiveVoiceSegmentId =
+        typeof raw.zenProgressiveVoiceSegmentId === "string" &&
+        raw.zenProgressiveVoiceSegmentId.trim()
+          ? raw.zenProgressiveVoiceSegmentId.trim().slice(0, 180)
+          : null;
       const replayTakeId =
         typeof raw.replayTakeId === "string" && raw.replayTakeId.trim()
           ? raw.replayTakeId.trim().slice(0, 180)
@@ -13586,10 +13671,44 @@ function buildRoutes(): RouteDefinition[] {
           ? raw.replayRecordingId.trim().slice(0, 180)
           : null;
       if (
-        [signalMessageId, signalEpisodeId, ordinaryMessageId, replayTakeId].filter(Boolean)
+        [
+          signalMessageId,
+          signalEpisodeId,
+          ordinaryMessageId,
+          replayTakeId,
+          zenProgressiveVoiceSegmentId,
+        ].filter(Boolean)
           .length > 1
       ) {
         throw new HttpError(400, "Choose one voice message source.");
+      }
+      if (zenProgressiveVoiceSegmentId) {
+        const segment = readZenProgressiveVoiceSegment(
+          userId,
+          zenProgressiveVoiceSegmentId,
+        );
+        if (!segment) {
+          throw new HttpError(
+            404,
+            "Progressive Zen voice segment not found.",
+          );
+        }
+        sourceText = segment.text;
+        sourceElevenLabsText = segment.text;
+        persistedMessageProvider = segment.provider;
+        sourceBotId = segment.botId;
+        raw.moodKey = segment.moodKey;
+        raw.seed = segment.id;
+        if (segment.botId) {
+          const bot = db
+            .prepare(
+              "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+            )
+            .get(segment.botId, userId) as
+            | { powers_json?: string | null }
+            | undefined;
+          sourceBotMuted = botPowerIsMutedV1(bot?.powers_json);
+        }
       }
       if (replayTakeId) {
         if (!replayRecordingId) {

@@ -8533,3 +8533,107 @@ describe("bot judgment memories", () => {
     assert.equal(inferredCount.count, 0);
   });
 });
+
+describe("processChatMessage progressive Zen voice", () => {
+  it("uses multiple bounded calls, emits speech beats, and persists one reply", async () => {
+    const db = createChatTestDb();
+    const calls: Array<{
+      messages: unknown;
+      maxTokens?: number;
+      jsonMode?: boolean;
+    }> = [];
+    const replies = [
+      JSON.stringify({
+        speech: "The first complete thought lands quickly.",
+        continue: true,
+        remainingPlan: "Give the practical conclusion.",
+      }),
+      JSON.stringify({
+        speech: "Then the practical conclusion follows without a restart.",
+        continue: false,
+        remainingPlan: "",
+      }),
+    ];
+    const providerFactory = (() => ({
+      name: "local" as const,
+      async generateResponse(
+        messages: unknown,
+        options?: { maxTokens?: number; jsonMode?: boolean },
+      ) {
+        calls.push({
+          messages,
+          maxTokens: options?.maxTokens,
+          jsonMode: options?.jsonMode,
+        });
+        return replies[calls.length - 1] ?? replies.at(-1)!;
+      },
+      async embedText() {
+        return [0];
+      },
+    })) as typeof selectProvider;
+    const delivered: Array<{
+      index: number;
+      text: string;
+      final: boolean;
+    }> = [];
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Explain this in a thoughtful extended answer.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        providerFactory,
+        autoMemory: false,
+        botOverrides: { model: "progressive-test", maxTokens: 560 },
+        progressiveZenVoice: true,
+        onProgressiveZenSegment: (segment) => {
+          delivered.push({
+            index: segment.segmentIndex,
+            text: segment.text,
+            final: segment.finalSegment,
+          });
+        },
+        mode: "zen",
+      },
+    );
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(
+      calls.map((call) => ({
+        maxTokens: call.maxTokens,
+        jsonMode: call.jsonMode,
+      })),
+      [
+        { maxTokens: 220, jsonMode: true },
+        { maxTokens: 280, jsonMode: true },
+      ],
+    );
+    assert.deepEqual(delivered, [
+      {
+        index: 0,
+        text: "The first complete thought lands quickly.",
+        final: false,
+      },
+      {
+        index: 1,
+        text: "Then the practical conclusion follows without a restart.",
+        final: true,
+      },
+    ]);
+    const assistantMessages = result.conversation.messages.filter(
+      (message) => message.role === "assistant",
+    );
+    assert.equal(assistantMessages.length, 1);
+    assert.equal(
+      assistantMessages[0]?.content,
+      "The first complete thought lands quickly.\n\nThen the practical conclusion follows without a restart.",
+    );
+    assert.deepEqual(result.progressiveZen, {
+      assistantMessageId: assistantMessages[0]?.id,
+      segmentCount: 2,
+      interrupted: false,
+    });
+  });
+});

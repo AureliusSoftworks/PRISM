@@ -171,6 +171,18 @@ import {
 } from "./web-search.ts";
 import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
 import { withPrismRuntimeGrounding } from "./bots.ts";
+import {
+  buildZenProgressiveContinuationMessages,
+  buildZenProgressiveFirstBeatMessages,
+  joinZenProgressiveSpeech,
+  parseZenProgressiveBeat,
+  zenProgressiveBeatLimit,
+  zenProgressiveContinuationTokenBudget,
+  ZEN_PROGRESSIVE_BEAT_JSON_SCHEMA,
+  ZEN_PROGRESSIVE_CONTINUATION_BEAT_MAX_TOKENS,
+  ZEN_PROGRESSIVE_FIRST_BEAT_MAX_TOKENS,
+  type ZenProgressiveBeat,
+} from "./zen-progressive-reply.ts";
 
 const config = getAppConfig();
 
@@ -291,6 +303,12 @@ export interface ProcessChatMessageResult {
   psychicDebug?: PsychicDebugPayload;
   /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
   zenAutonomyDecision?: ZenAutonomyDecision;
+  /** Present when a persisted Zen reply was delivered as progressive speech beats. */
+  progressiveZen?: {
+    assistantMessageId: string;
+    segmentCount: number;
+    interrupted: boolean;
+  };
   memoryLearned?: {
     created: Array<{
       id: string;
@@ -1694,6 +1712,167 @@ async function generateChatResponse(args: {
   });
 }
 
+interface ProgressiveZenGeneratedSegment {
+  beat: ZenProgressiveBeat;
+  segmentIndex: number;
+  provider: ProviderName;
+  model: string;
+  finalSegment: boolean;
+}
+
+async function generateProgressiveZenChatResponse(args: {
+  provider: LlmProvider;
+  promptMessages: ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  secondaryOllamaHost?: string | null;
+  responseMode?: ResponseMode;
+  autoFallbackChain?: AutoFallbackChainV1 | null;
+  providerFactory?: typeof selectProvider;
+  openAiApiKey?: string;
+  anthropicApiKey?: string;
+  experimentalAllModelEffortEnabled?: boolean;
+  psychicModeEnabled?: boolean;
+  signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+  onSimulatedEffortNotice?: (detail: string) => void;
+  onSegment: (segment: ProgressiveZenGeneratedSegment) => void;
+}): Promise<Awaited<ReturnType<typeof generateChatResponse>> & {
+  progressiveSegmentCount: number;
+  progressiveInterrupted: boolean;
+}> {
+  const beatLimit = zenProgressiveBeatLimit(args.botOverrides?.maxTokens);
+  const first = await generateChatResponse({
+    ...args,
+    promptMessages: buildZenProgressiveFirstBeatMessages(args.promptMessages),
+    botOverrides: {
+      ...args.botOverrides,
+      maxTokens: Math.min(
+        args.botOverrides?.maxTokens ?? ZEN_PROGRESSIVE_FIRST_BEAT_MAX_TOKENS,
+        ZEN_PROGRESSIVE_FIRST_BEAT_MAX_TOKENS,
+      ),
+      jsonMode: true,
+      jsonSchema: ZEN_PROGRESSIVE_BEAT_JSON_SCHEMA,
+      jsonSchemaName: "zen_progressive_speech_beat",
+    },
+  });
+  const firstBeat = parseZenProgressiveBeat(first.assistantReplyRaw);
+  if (!firstBeat) {
+    const fallback = await generateChatResponse({
+      ...args,
+      promptMessages: args.promptMessages,
+      botOverrides: args.botOverrides,
+    });
+    return {
+      ...fallback,
+      progressiveSegmentCount: 0,
+      progressiveInterrupted: false,
+    };
+  }
+
+  const beats: ZenProgressiveBeat[] = [firstBeat];
+  const firstIsFinal = !firstBeat.continue || beatLimit === 1;
+  args.onSegment({
+    beat: firstBeat,
+    segmentIndex: 0,
+    provider: first.providerNameUsed,
+    model: first.modelUsed,
+    finalSegment: firstIsFinal,
+  });
+  if (firstIsFinal) {
+    return {
+      ...first,
+      assistantReplyRaw: joinZenProgressiveSpeech(beats),
+      progressiveSegmentCount: beats.length,
+      progressiveInterrupted: false,
+    };
+  }
+
+  const providerFactory = args.providerFactory ?? selectProvider;
+  const continuationProvider =
+    first.providerNameUsed === args.provider.name
+      ? args.provider
+      : providerFactory(
+          first.providerNameUsed,
+          args.openAiApiKey,
+          args.secondaryOllamaHost,
+          args.anthropicApiKey,
+        );
+  let progressiveInterrupted = false;
+
+  for (let segmentIndex = 1; segmentIndex < beatLimit; segmentIndex += 1) {
+    const previous = beats[beats.length - 1]!;
+    if (!previous.continue) break;
+    try {
+      throwIfChatRequestCancelled(args.signal);
+      const raw = await continuationProvider.generateResponse(
+        buildZenProgressiveContinuationMessages({
+          promptMessages: args.promptMessages,
+          spokenText: joinZenProgressiveSpeech(beats),
+          remainingPlan: previous.remainingPlan,
+          beatIndex: segmentIndex,
+        }),
+        withGenerationSignal(
+          {
+            ...args.botOverrides,
+            model: first.modelUsed,
+            maxTokens: zenProgressiveContinuationTokenBudget(
+              args.botOverrides?.maxTokens,
+              segmentIndex,
+            ),
+            jsonMode: true,
+            jsonSchema: ZEN_PROGRESSIVE_BEAT_JSON_SCHEMA,
+            jsonSchemaName: "zen_progressive_speech_beat",
+            usagePurpose: "chat_reply",
+          },
+          args.signal,
+        ),
+      );
+      throwIfChatRequestCancelled(args.signal);
+      const beat = parseZenProgressiveBeat(raw);
+      if (!beat) {
+        progressiveInterrupted = true;
+        break;
+      }
+      beats.push(beat);
+      const finalSegment =
+        !beat.continue || segmentIndex === beatLimit - 1;
+      args.onSegment({
+        beat,
+        segmentIndex,
+        provider: first.providerNameUsed,
+        model: first.modelUsed,
+        finalSegment,
+      });
+      if (finalSegment) break;
+    } catch {
+      progressiveInterrupted = true;
+      break;
+    }
+  }
+
+  return {
+    ...first,
+    assistantReplyRaw: joinZenProgressiveSpeech(beats),
+    progressiveSegmentCount: beats.length,
+    progressiveInterrupted,
+  };
+}
+
+function zenProgressiveReplyHasToolIntent(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return (
+    /\b(?:search|browse|look up|google)\b/u.test(normalized) ||
+    /\b(?:latest|today|currently|current|recent|newest|up-to-date|right now|as of)\b/u.test(
+      normalized,
+    ) ||
+    /\b(?:ask me|quiz me|questionnaire)\b/u.test(normalized) ||
+    /https?:\/\//u.test(normalized) ||
+    /\b(?:generate|create|draw|send|make)\b[\s\S]{0,32}\b(?:image|picture|photo|art)\b/u.test(
+      normalized,
+    )
+  );
+}
+
 function evaluateAssistantMood(args: {
   assistantContent: string;
   toneDelta?: number;
@@ -2415,6 +2594,21 @@ export interface UserChatSettings {
   botPowerResponseBudget?: BotPowerResponseBudgetEffectV1 | null;
   /** Optional per-bot generation overrides, forwarded to the provider. */
   botOverrides?: GenerateOptions;
+  /** Let eligible Zen Premium replies generate and deliver semantic speech beats. */
+  progressiveZenVoice?: boolean;
+  /** Request-scoped delivery hook used by the streaming Zen HTTP response. */
+  onProgressiveZenSegment?: (segment: {
+    conversationId: string;
+    assistantMessageId: string;
+    segmentIndex: number;
+    text: string;
+    provider: ProviderName;
+    model: string;
+    botId: string | null;
+    moodKey: BotMoodKey;
+    createdAt: string;
+    finalSegment: boolean;
+  }) => void;
   /** Global developer rule layer applied across all bots when enabled. */
   devMemoriesEnabled?: boolean;
   /** Freeform rule text for the developer memory layer. */
@@ -7700,6 +7894,28 @@ export async function processChatMessage(
 	    });
 	  }
 	  pushBackendEvent("context", "Prepared persisted chat prompt", describePromptMessages(promptMessages));
+  const assistantProseMessageId = randomId(12);
+  let progressiveAssistantCreatedAt: string | null = null;
+  let progressiveSegmentCount = 0;
+  let progressiveInterrupted = false;
+  const progressiveZenEligible =
+    settings.progressiveZenVoice === true &&
+    typeof settings.onProgressiveZenSegment === "function" &&
+    isZenMode(mode) &&
+    !isStarterPrompt &&
+    !personaTransitionTurn &&
+    !zenAutonomyTurn &&
+    !zenAskQuestionPatienceTurn &&
+    !zenLiveActionInterruptTurn &&
+    !commandCenterPromptTurn &&
+    !manualTool &&
+    !memoryClarification &&
+    !settings.prismInterruption &&
+    !botPowerHardResponseTurn &&
+    !botPowerResponseBudgetTurn &&
+    !incognitoForTurn &&
+    !zenProgressiveReplyHasToolIntent(modelUserMessage) &&
+    zenProgressiveBeatLimit(settings.botOverrides?.maxTokens) > 1;
   insertUserMessageForTurn();
   let cancelledPersistedTurnRolledBack = false;
   const rollbackIfTurnFailedBeforeAssistantReply = (error: unknown): void => {
@@ -7718,6 +7934,7 @@ export async function processChatMessage(
     });
   };
   const throwIfCancelledBeforeAssistantReply = (): void => {
+    if (progressiveSegmentCount > 0) return;
     try {
       throwIfChatRequestCancelled(settings.signal);
     } catch (error) {
@@ -7764,6 +7981,77 @@ export async function processChatMessage(
     );
 
     try {
+      const generationResult = progressiveZenEligible
+        ? await generateProgressiveZenChatResponse({
+            provider: primaryProvider,
+            promptMessages,
+            botOverrides: primaryBotOverrides,
+            secondaryOllamaHost: settings.secondaryOllamaHost,
+            responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+            autoFallbackChain: settings.autoFallbackChain,
+            providerFactory: settings.providerFactory,
+            openAiApiKey: settings.openAiApiKey,
+            anthropicApiKey: settings.anthropicApiKey,
+            experimentalAllModelEffortEnabled:
+              settings.experimentalAllModelEffortEnabled,
+            psychicModeEnabled: psychicModeEnabledForTurn,
+            signal: settings.signal,
+            onPlanningWarning: (detail) =>
+              pushBackendEvent(
+                "model",
+                "Psychic planning unavailable",
+                detail,
+              ),
+            onSimulatedEffortNotice: (detail) =>
+              pushBackendEvent("model", "Simulated effort skipped", detail),
+            onSegment: (segment) => {
+              const mood = evaluateAssistantMood({
+                assistantContent: segment.beat.speech,
+                toneDelta: turnEvaluation?.delta,
+                sessionOpinion: existingSessionOpinion,
+                botOpinion: existingBotOpinion,
+                repairSignal,
+              });
+              const createdAt =
+                progressiveAssistantCreatedAt ??
+                (progressiveAssistantCreatedAt = new Date().toISOString());
+              settings.onProgressiveZenSegment?.({
+                conversationId: activeConversationId,
+                assistantMessageId: assistantProseMessageId,
+                segmentIndex: segment.segmentIndex,
+                text: segment.beat.speech,
+                provider: segment.provider,
+                model: segment.model,
+                botId: assistantBotId ?? null,
+                moodKey: mood.key,
+                createdAt,
+                finalSegment: segment.finalSegment,
+              });
+            },
+          })
+        : await generateChatResponse({
+            provider: primaryProvider,
+            promptMessages,
+            botOverrides: primaryBotOverrides,
+            secondaryOllamaHost: settings.secondaryOllamaHost,
+            responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+            autoFallbackChain: settings.autoFallbackChain,
+            providerFactory: settings.providerFactory,
+            openAiApiKey: settings.openAiApiKey,
+            anthropicApiKey: settings.anthropicApiKey,
+            experimentalAllModelEffortEnabled:
+              settings.experimentalAllModelEffortEnabled,
+            psychicModeEnabled: psychicModeEnabledForTurn,
+            signal: settings.signal,
+            onPlanningWarning: (detail) =>
+              pushBackendEvent(
+                "model",
+                "Psychic planning unavailable",
+                detail,
+              ),
+            onSimulatedEffortNotice: (detail) =>
+              pushBackendEvent("model", "Simulated effort skipped", detail),
+          });
       ({
         assistantReplyRaw,
         providerNameUsed,
@@ -7771,24 +8059,19 @@ export async function processChatMessage(
         autoRecovery,
         psychicThought: psychicThoughtForTurn,
         psychicDebug: psychicDebugForTurn,
-      } = await generateChatResponse({
-        provider: primaryProvider,
-        promptMessages,
-        botOverrides: primaryBotOverrides,
-        secondaryOllamaHost: settings.secondaryOllamaHost,
-        responseMode: isZenMode(mode) ? settings.responseMode : undefined,
-        autoFallbackChain: settings.autoFallbackChain,
-        providerFactory: settings.providerFactory,
-        openAiApiKey: settings.openAiApiKey,
-        anthropicApiKey: settings.anthropicApiKey,
-        experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
-        psychicModeEnabled: psychicModeEnabledForTurn,
-        signal: settings.signal,
-        onPlanningWarning: (detail) =>
-          pushBackendEvent("model", "Psychic planning unavailable", detail),
-        onSimulatedEffortNotice: (detail) =>
-          pushBackendEvent("model", "Simulated effort skipped", detail),
-      }));
+      } = generationResult);
+      const progressiveResult = generationResult as Partial<{
+        progressiveSegmentCount: number;
+        progressiveInterrupted: boolean;
+      }>;
+      if (
+        typeof progressiveResult.progressiveSegmentCount === "number"
+      ) {
+        progressiveSegmentCount =
+          progressiveResult.progressiveSegmentCount;
+        progressiveInterrupted =
+          progressiveResult.progressiveInterrupted === true;
+      }
     } catch (error) {
       rollbackIfTurnFailedBeforeAssistantReply(error);
       throw error;
@@ -7797,7 +8080,7 @@ export async function processChatMessage(
     pushBackendEvent(
       "model",
       "Model response received",
-      `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}`
+      `provider=${providerNameUsed}; model=${modelUsed}; rawChars=${assistantReplyRaw.length}; progressiveSegments=${progressiveSegmentCount}; progressiveInterrupted=${progressiveInterrupted ? "yes" : "no"}`
     );
   }
   throwIfCancelledBeforeAssistantReply();
@@ -7881,6 +8164,7 @@ export async function processChatMessage(
     }
   }
   const shouldBackfillAskQuestion =
+    progressiveSegmentCount === 0 &&
     !zenAutonomyTurn &&
     !zenAskQuestionPatienceTurn &&
     !zenLiveActionInterruptTurn &&
@@ -7947,7 +8231,11 @@ export async function processChatMessage(
   ) {
     assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay);
   }
-  if (!botPowerHardResponseTurn && mentionedBotNames.length > 0) {
+  if (
+    progressiveSegmentCount === 0 &&
+    !botPowerHardResponseTurn &&
+    mentionedBotNames.length > 0
+  ) {
     assistantDisplay = applyBotPowerBotNamesV1(
       assistantDisplay,
       settings.botPowers,
@@ -7982,17 +8270,20 @@ export async function processChatMessage(
       userId
     );
   }
-	  const sendImgPromptPersistedRaw = botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+	  const sendImgPromptPersistedRaw = progressiveSegmentCount > 0 || botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
 	    ? undefined
 	    : manualImageGenRequested
       ? manualToolQueryOrMessage(manualTool, modelUserMessage)
       : parsedAssistant.sendGeneratedImage?.prompt?.trim();
-  let sendImgPromptPersisted = autoBackfillSendGeneratedImagePrompt({
-    isStarterPrompt,
-    userMessage: modelUserMessage,
-    parsedToolPrompt: sendImgPromptPersistedRaw,
-    recentMessages: history,
-  });
+  let sendImgPromptPersisted =
+    progressiveSegmentCount > 0
+      ? undefined
+      : autoBackfillSendGeneratedImagePrompt({
+          isStarterPrompt,
+          userMessage: modelUserMessage,
+          parsedToolPrompt: sendImgPromptPersistedRaw,
+          recentMessages: history,
+        });
   const sendImgPromptPersistedRequested = sendImgPromptPersisted;
   let pendingImageJob: ProcessChatMessageResult["pendingImageJob"] | undefined;
   let sentGeneratedImagePersisted: SentGeneratedImagePayload | undefined;
@@ -8149,11 +8440,11 @@ export async function processChatMessage(
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
     : null;
 
-  const assistantCreatedAt = new Date().toISOString();
+  const assistantCreatedAt =
+    progressiveAssistantCreatedAt ?? new Date().toISOString();
   const imageFollowUpCreatedAt = sentGeneratedImagePersisted
     ? new Date(Date.now() + 2).toISOString()
     : assistantCreatedAt;
-  const assistantProseMessageId = randomId(12);
   const assistantImageMessageId = randomId(12);
 
   const assistantCountBefore = (
@@ -8839,6 +9130,15 @@ export async function processChatMessage(
     ...(psychicDebugForTurn ? { psychicDebug: psychicDebugForTurn } : {}),
     ...(zenAutonomyTurn
       ? { zenAutonomyDecision: { action: "speak", botId: assistantMemoryBotId } satisfies ZenAutonomyDecision }
+      : {}),
+    ...(progressiveSegmentCount > 0
+      ? {
+          progressiveZen: {
+            assistantMessageId: assistantProseMessageId,
+            segmentCount: progressiveSegmentCount,
+            interrupted: progressiveInterrupted,
+          },
+        }
       : {}),
     backendEvents,
   };
