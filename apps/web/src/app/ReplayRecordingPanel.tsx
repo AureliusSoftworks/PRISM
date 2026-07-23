@@ -111,6 +111,7 @@ export function ReplayRecordingPanel({
   sourceId,
   preview,
   preferredProvider,
+  blocksOnlineCapabilities = preferredProvider === "local",
   onRebuildVideo,
   onEnhanceAudio,
   onDownloadFaithfulAudio,
@@ -119,6 +120,8 @@ export function ReplayRecordingPanel({
   sourceId: string;
   preview?: ReactNode;
   preferredProvider?: "local" | "openai" | "anthropic";
+  /** True only for hard LOCAL privacy — AUTO/ONLINE may enhance with ElevenLabs. */
+  blocksOnlineCapabilities?: boolean;
   onRebuildVideo?: () => Promise<void>;
   onEnhanceAudio?: (regenerate: boolean) => Promise<void>;
   onDownloadFaithfulAudio?: () => void;
@@ -287,7 +290,7 @@ export function ReplayRecordingPanel({
               </a>
               <button
                 type="button"
-                disabled={busy || preferredProvider === "local"}
+                disabled={busy || blocksOnlineCapabilities}
                 onClick={() => void enhanceAudio(true)}
               >
                 Enhance again
@@ -304,10 +307,10 @@ export function ReplayRecordingPanel({
           ) : (
             <button
               type="button"
-              disabled={busy || premiumProducing || preferredProvider === "local"}
+              disabled={busy || premiumProducing || blocksOnlineCapabilities}
               title={
-                preferredProvider === "local"
-                  ? "Switch to ONLINE mode to use ElevenLabs enhancement."
+                blocksOnlineCapabilities
+                  ? "Switch to AUTO or ONLINE mode to use ElevenLabs enhancement."
                   : undefined
               }
               onClick={() => void enhanceAudio(false)}
@@ -316,8 +319,8 @@ export function ReplayRecordingPanel({
               Enhance recording
             </button>
           )}
-          {preferredProvider === "local" ? (
-            <small>Switch to ONLINE to enhance with your ElevenLabs key.</small>
+          {blocksOnlineCapabilities ? (
+            <small>Switch to AUTO or ONLINE to enhance with your ElevenLabs key.</small>
           ) : null}
         </div>
         {premiumReady && (premium.timeline?.beats.length ?? 0) > 0 ? (

@@ -61,14 +61,15 @@ describe("Signal faithful replay and enhanced audio contracts", () => {
     );
   });
 
-  it("requires visible credit confirmation and blocks LOCAL on both sides", () => {
+  it("requires visible credit confirmation and blocks hard LOCAL on both sides", () => {
     assert.match(
       panel,
       /exact spoken transcript and selected voice IDs will be sent to ElevenLabs and may consume credits/u,
     );
-    assert.match(panel, /preferredProvider === "local"/u);
+    assert.match(panel, /blocksOnlineCapabilities/u);
+    assert.match(panel, /Switch to AUTO or ONLINE to enhance/u);
     assert.match(server, /body\.confirm !== "send-to-elevenlabs"/u);
-    assert.match(server, /user\.preferred_provider === "local"/u);
+    assert.match(server, /userBlocksOnlineCapabilities\(user\)/u);
   });
 
   it("offers audio enhancement without exposing Signal video export", () => {

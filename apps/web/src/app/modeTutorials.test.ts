@@ -1162,7 +1162,7 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /Avatar Studio edits and previews those two identities separately/,
     );
-    assert.match(routing?.body ?? "", /for eligible ONLINE speech/);
+    assert.match(routing?.body ?? "", /on AUTO and ONLINE speech/);
     assert.match(routing?.body ?? "", /Voice Settings can narrow/);
     assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
     assert.match(routing?.body ?? "", /Voice tab also gives each bot a Voice Character pad/);

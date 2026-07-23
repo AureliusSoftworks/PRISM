@@ -2029,7 +2029,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /manifest\.missingArtwork/u);
     assert.match(source, /Creating the missing audio package/u);
     assert.match(source, /\/intro-audio\/generate/u);
-    assert.match(source, /waiting for Online/u);
+    assert.match(source, /waiting for AUTO or ONLINE/u);
     assert.match(source, /aria-label="Complete this show’s identity"/u);
     assert.match(source, /data-tutorial-target="botcast-brand-controls"/u);
     assert.match(css, /\.showLookInvitation button\s*\{[^}]*linear-gradient/iu);
@@ -2106,7 +2106,7 @@ describe("Signal experience shell", () => {
       source,
       /startSignalArtworkJob\(identity\.show, \[[\s\S]{0,80}"night-studio",[\s\S]{0,80}"day-studio"/u,
     );
-    assert.match(source, /preferredProvider === "local"[\s\S]{0,100}Promise\.resolve<BotcastShow \| null>\(null\)/u);
+    assert.match(source, /responseMode === "local"[\s\S]{0,100}Promise\.resolve<BotcastShow \| null>\(null\)/u);
     assert.match(source, /\/intro-audio\/generate/u);
     assert.match(source, /label: "Upload Light studio…"/u);
     assert.match(source, /label: "Upload Dark studio…"/u);

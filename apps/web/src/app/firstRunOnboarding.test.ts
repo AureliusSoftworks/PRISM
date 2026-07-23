@@ -62,9 +62,9 @@ describe("first-run onboarding", () => {
   });
 
   it("introduces the customizable mixed-provider Auto chain", () => {
-    assert.match(pageSource, /ordered chain of one to five/u);
-    assert.match(pageSource, /local or online fallback models/u);
-    assert.match(pageSource, /at least one fallback in Settings/u);
+    assert.match(pageSource, /ordered chain of one to five fallbacks/u);
+    assert.match(pageSource, /every local and online model/u);
+    assert.match(pageSource, /at least one fallback in\s*Settings/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {
@@ -75,7 +75,7 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
     assert.match(
       pageSource,
-      /English always uses each bot(?:&apos;|’)s local\s*PRISM or optional operating-system voice without ElevenLabs\s*credits\. Premium uses its ElevenLabs identity for eligible\s*ONLINE speech, then falls back locally/u,
+      /English always uses each bot(?:&apos;|’)s local\s*PRISM or optional operating-system voice without ElevenLabs\s*credits\. Premium uses its ElevenLabs identity for AUTO and\s*ONLINE speech, then falls back locally/u,
     );
     assert.match(pageSource, /Chat home base/u);
   });

@@ -5198,11 +5198,11 @@ export function BotcastExperience({
 
       manifest = signalShowMagicManifest(showForPass);
       if (manifest.needsAudioPackage) {
-        if (preferredProvider === "local") {
+        if (responseMode === "local") {
           setNotice(
             artworkStarted
-              ? "Artwork is continuing in the background. The ElevenLabs audio package is waiting for Online."
-              : "The remaining ElevenLabs audio package is waiting for Online.",
+              ? "Artwork is continuing in the background. The ElevenLabs audio package is waiting for AUTO or ONLINE."
+              : "The remaining ElevenLabs audio package is waiting for AUTO or ONLINE.",
           );
         } else {
           setBlockingOperation((current) =>
@@ -5233,7 +5233,7 @@ export function BotcastExperience({
           ),
         );
       }
-      if (preferredProvider !== "local" && recoverableFailures.length === 0) {
+      if (responseMode !== "local" && recoverableFailures.length === 0) {
         setNotice(
           artworkStarted
             ? "Artwork is landing in the background; every other missing identity piece is ready."
@@ -5296,7 +5296,7 @@ export function BotcastExperience({
         "day-studio",
       ]);
       const audioPromise =
-        preferredProvider === "local"
+        responseMode === "local"
           ? Promise.resolve<BotcastShow | null>(null)
           : request<{ show: BotcastShow }>(
               `/api/botcast/shows/${encodeURIComponent(identity.show.id)}/intro-audio/generate`,
@@ -5327,7 +5327,7 @@ export function BotcastExperience({
         );
       }
       setNotice(
-        preferredProvider === "local"
+        responseMode === "local"
           ? artworkReady
             ? "The new Atmosphere is active in Signal Synth while its Dark studio, Light studio, and lighting map render in the background."
             : "The new Atmosphere is active in Signal Synth. The previous studio art remains because its background job could not start."
@@ -7232,12 +7232,13 @@ export function BotcastExperience({
         { render: false },
       );
     }
-    if (preferredProvider === "local") {
-      throw new Error("Switch Signal to ONLINE before enhancing the recording.");
+    if (responseMode === "local") {
+      throw new Error("Switch Signal to AUTO or ONLINE before enhancing the recording.");
     }
     const enhanced = await startReplayPremiumProduction({
       recordingId: recording.id,
-      preferredProvider,
+      preferredProvider:
+        preferredProvider === "anthropic" ? "anthropic" : "openai",
       regenerate,
     });
     const prepared = await prepareReplayAudio(
@@ -12114,6 +12115,7 @@ export function BotcastExperience({
               surface="signal"
               sourceId={replayEpisode.id}
               preferredProvider={preferredProvider}
+              blocksOnlineCapabilities={responseMode === "local"}
               onDownloadFaithfulAudio={
                 localReplayAudio
                   ? () => {

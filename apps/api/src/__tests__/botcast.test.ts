@@ -6499,7 +6499,7 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
-      /route\("POST", "\/api\/botcast\/shows\/:id\/atmosphere-audio\/generate"[\s\S]{0,320}user\.preferred_provider === "local"[\s\S]{0,180}Switch to Online before creating an ElevenLabs Signal atmosphere/u,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/atmosphere-audio\/generate"[\s\S]{0,320}userBlocksOnlineCapabilities\(user\)[\s\S]{0,180}Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere/u,
     );
     assert.match(
       serverSource,
@@ -6519,7 +6519,7 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
-      /user\.preferred_provider === "local"[\s\S]{0,280}Switch to Online before creating an ElevenLabs Signal atmosphere/u,
+      /userBlocksOnlineCapabilities\(user\)[\s\S]{0,280}Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere/u,
     );
     assert.match(
       serverSource,

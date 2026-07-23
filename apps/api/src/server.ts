@@ -1895,6 +1895,17 @@ function getOrCreateLocalOwnerUser(): string {
   return userId;
 }
 
+/**
+ * Hard LOCAL privacy blocks online capabilities (ElevenLabs credits, Premium
+ * enhance, Signal audio packages, etc.). AUTO keeps the local/online primary
+ * but must not inherit LOCAL's outbound blockers.
+ */
+function userBlocksOnlineCapabilities(
+  user: Pick<UserDbRow, "preferred_provider" | "auto_switch_model">,
+): boolean {
+  return user.preferred_provider === "local" && user.auto_switch_model !== 1;
+}
+
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
@@ -9568,10 +9579,10 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/intro-audio/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      if (user.preferred_provider === "local") {
+      if (userBlocksOnlineCapabilities(user)) {
         throw new HttpError(
           409,
-          "Switch to Online before creating an ElevenLabs Signal audio package.",
+          "Switch to AUTO or ONLINE before creating an ElevenLabs Signal audio package.",
         );
       }
       const show = getBotcastShow(db, userId, ctx.params.id);
@@ -9703,10 +9714,10 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/atmosphere-audio/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      if (user.preferred_provider === "local") {
+      if (userBlocksOnlineCapabilities(user)) {
         throw new HttpError(
           409,
-          "Switch to Online before creating an ElevenLabs Signal atmosphere.",
+          "Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere.",
         );
       }
       const show = getBotcastShow(db, userId, ctx.params.id);
@@ -13015,10 +13026,10 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/avatar/sfx/generate", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      if (user.preferred_provider === "local") {
+      if (userBlocksOnlineCapabilities(user)) {
         throw new HttpError(
           409,
-          "Switch to Online before creating an ElevenLabs avatar sound.",
+          "Switch to AUTO or ONLINE before creating an ElevenLabs avatar sound.",
         );
       }
       const raw = ctx.body as Record<string, unknown>;
@@ -13360,12 +13371,11 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       if (
         body.confirm !== "send-to-elevenlabs" ||
-        body.preferredProvider === "local" ||
-        user.preferred_provider === "local"
+        userBlocksOnlineCapabilities(user)
       ) {
         throw new HttpError(
           409,
-          "Audio enhancement requires ONLINE mode and confirmation before sending the transcript and voice IDs to ElevenLabs.",
+          "Audio enhancement requires AUTO or ONLINE mode and confirmation before sending the transcript and voice IDs to ElevenLabs.",
         );
       }
       const userKey = decryptUserKey(userId);
@@ -14961,10 +14971,10 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/settings/elevenlabs-credits", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      if (user.preferred_provider === "local") {
+      if (userBlocksOnlineCapabilities(user)) {
         throw new HttpError(
           409,
-          "Switch Prism to ONLINE before checking ElevenLabs credits.",
+          "Switch Prism to AUTO or ONLINE before checking ElevenLabs credits.",
         );
       }
       const userKey = decryptUserKey(userId);
