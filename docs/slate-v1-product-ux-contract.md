@@ -101,6 +101,13 @@ bring up an earlier exchange unless the writer explicitly asks about one still
 in that buffer. The companion is advisory chrome, not a fourth document region:
 it cannot mutate prose, Continuity, structure, or titles.
 
+Cross-surface discussion is selection-led. Zen can send an exact, previewed
+passage into a new project's spark or attach it to an existing project as a
+read-only source card. Slate can preview an exact manuscript selection and
+stage it in Zen for discussion. No transfer includes surrounding transcripts,
+manuscript, Continuity, or memory, and the Zen draft is not a conversation turn
+until the writer deliberately sends it.
+
 The workspace moves through three phases without forcing a rigid wizard:
 
 ### Shape

@@ -224,7 +224,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep your hands on the prose",
-        body: "Edit the manuscript directly. Human edits autosave and remain authoritative over older AI proposals. The living Story so far stays at the top of the canvas and follows accepted prose as the project grows.",
+        body: "Edit the manuscript directly. Human edits autosave and remain authoritative over older AI proposals. The living Story so far stays at the top of the canvas and follows accepted prose as the project grows. To discuss a passage outside the document, select only that prose and choose Discuss in Zen; Prism previews the exact excerpt before anything crosses surfaces.",
         clickLabel: "the manuscript canvas",
         targetSelector: '[data-tutorial-target="slate-manuscript"]',
       },

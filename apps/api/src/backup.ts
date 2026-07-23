@@ -240,6 +240,7 @@ export interface BackupSlateSnapshot {
   revisions: BackupSlateRow[];
   versions: BackupSlateRow[];
   sections: BackupSlateRow[];
+  handoffs: BackupSlateRow[];
   sectionVersions: BackupSlateRow[];
   manuscriptStates: BackupSlateRow[];
   continuitySources: BackupSlateRow[];
@@ -450,6 +451,7 @@ type SlateBackupTable =
   | "slate_revisions"
   | "slate_versions"
   | "slate_sections"
+  | "slate_handoffs"
   | "slate_section_versions"
   | "slate_manuscript_state"
   | "slate_continuity_sources"
@@ -586,6 +588,27 @@ const SLATE_BACKUP_TABLES: readonly SlateBackupTableSpec[] = [
       "updated_at",
     ],
     deferredFields: ["parent_section_id"],
+  },
+  {
+    key: "handoffs",
+    table: "slate_handoffs",
+    primaryKey: "id",
+    columns: [
+      "id",
+      "direction",
+      "status",
+      "source_text",
+      "source_label",
+      "source_conversation_id",
+      "source_message_id",
+      "source_project_id",
+      "source_section_id",
+      "source_selection_start",
+      "source_selection_end",
+      "target_project_id",
+      "created_at",
+      "committed_at",
+    ],
   },
   {
     key: "sectionVersions",
@@ -883,6 +906,24 @@ const SLATE_REFERENCE_RULES: ReadonlyArray<{
     field: "parent_section_id",
     target: "sections",
     targetTable: "slate_sections",
+  },
+  {
+    source: "handoffs",
+    field: "source_project_id",
+    target: "projects",
+    targetTable: "slate_projects",
+  },
+  {
+    source: "handoffs",
+    field: "source_section_id",
+    target: "sections",
+    targetTable: "slate_sections",
+  },
+  {
+    source: "handoffs",
+    field: "target_project_id",
+    target: "projects",
+    targetTable: "slate_projects",
   },
   {
     source: "sectionVersions",

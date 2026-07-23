@@ -999,6 +999,7 @@ describe("backup Slate account data", () => {
         assert.equal("user_id" in rows[0]!, false, `${collection} must not carry a source tenant id`);
       }
 
+      db.prepare("DELETE FROM slate_handoffs WHERE user_id = ?").run("user-1");
       db.prepare("DELETE FROM slate_series WHERE id = ? AND user_id = ?").run(
         "slate-one-series",
         "user-1",
@@ -1173,6 +1174,7 @@ const SLATE_BACKUP_TEST_TABLES = [
   "slate_revisions",
   "slate_versions",
   "slate_sections",
+  "slate_handoffs",
   "slate_section_versions",
   "slate_manuscript_state",
   "slate_continuity_sources",
@@ -1300,6 +1302,25 @@ function seedSlateBackupFixture(
     3,
     "section-hash",
     "mutation-3",
+    now,
+    now,
+  );
+  db.prepare(
+    `INSERT INTO slate_handoffs (
+      id, user_id, direction, status, source_text, source_label,
+      source_conversation_id, source_message_id, source_selection_start,
+      source_selection_end, target_project_id, created_at, committed_at
+    ) VALUES (?, ?, 'zen-to-slate', 'committed', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `${prefix}-handoff`,
+    userId,
+    "The restored source.",
+    "Iris · A quiet spark",
+    `${prefix}-conversation`,
+    `${prefix}-message`,
+    0,
+    20,
+    projectId,
     now,
     now,
   );

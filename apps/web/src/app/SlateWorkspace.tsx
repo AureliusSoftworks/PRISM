@@ -23,6 +23,7 @@ import type {
   SlateDeliberationSpeaker,
   SlateDeliberationTurnResponse,
   SlateGenerateTitleResponse,
+  SlateHandoffPreview,
   SlateLockedRange,
   SlateLivingSummary,
   SlateLivingSummaryResponse,
@@ -99,6 +100,13 @@ interface SlateWorkspaceProps {
       sectionId: string | null;
     } | null,
   ) => void;
+  requestedProjectId?: string | null;
+  onDiscussSelection?: (source: {
+    projectId: string;
+    sectionId: string;
+    selectionStart: number;
+    selectionEnd: number;
+  }) => void | Promise<void>;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -401,6 +409,8 @@ export default function SlateWorkspace({
   hemisphereSettingsUpdate,
   globalCompanionEnabled,
   onCompanionContextChange,
+  requestedProjectId,
+  onDiscussSelection,
 }: SlateWorkspaceProps): React.JSX.Element {
   const { activeMenu, openMenu, closeMenu } = usePrismMenu();
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
@@ -436,6 +446,8 @@ export default function SlateWorkspace({
   const [existingMaterial, setExistingMaterial] = useState("");
   const [selectedStructureId, setSelectedStructureId] = useState<string | null>(null);
   const [selection, setSelection] = useState({ start: 0, end: 0 });
+  const [handoffSources, setHandoffSources] = useState<SlateHandoffPreview[]>([]);
+  const requestedProjectOpenedRef = useRef<string | null>(null);
   const [revisionDirection, setRevisionDirection] = useState("");
   const [draftDirection, setDraftDirection] = useState("");
   const [returnSession, setReturnSession] = useState<SlateReturnSession | null>(null);
@@ -694,6 +706,13 @@ export default function SlateWorkspace({
     if (projectRef.current?.id === projectId) setLivingSummary(response.summary);
   }, []);
 
+  const loadHandoffSources = useCallback(async (projectId: string): Promise<void> => {
+    const response = await slateApi<{ handoffs: SlateHandoffPreview[] }>(
+      `/api/slate/projects/${encodeURIComponent(projectId)}/handoffs`,
+    );
+    if (projectRef.current?.id === projectId) setHandoffSources(response.handoffs);
+  }, []);
+
   const loadCompanionMessages = useCallback(
     async (projectId: string): Promise<void> => {
       const response = await slateApi<SlateProjectChatResponse>(
@@ -931,6 +950,7 @@ export default function SlateWorkspace({
         await Promise.allSettled([
           openReturnSession(projectId),
           loadLivingSummary(projectId),
+          loadHandoffSources(projectId),
           ...(globalCompanionEnabled
             ? []
             : [loadCompanionMessages(projectId)]),
@@ -951,6 +971,7 @@ export default function SlateWorkspace({
       globalCompanionEnabled,
       loadContinuityConcern,
       loadCompanionMessages,
+      loadHandoffSources,
       loadLivingSummary,
       loadRecoveryStatus,
       loadProjectSections,
@@ -1018,6 +1039,19 @@ export default function SlateWorkspace({
       cancelled = true;
     };
   }, [refreshProjects]);
+
+  useEffect(() => {
+    if (
+      !requestedProjectId ||
+      loading ||
+      requestedProjectOpenedRef.current === requestedProjectId ||
+      !projects.some((candidate) => candidate.id === requestedProjectId)
+    ) {
+      return;
+    }
+    requestedProjectOpenedRef.current = requestedProjectId;
+    void openProject(requestedProjectId);
+  }, [loading, openProject, projects, requestedProjectId]);
 
   useEffect(() => {
     if (!project?.id) return;
@@ -2850,6 +2884,7 @@ export default function SlateWorkspace({
                       setProject(null);
                       setSections([]);
                       setActiveSection(null);
+                      setHandoffSources([]);
                       setEntryMode("desk");
                       setReturnSession(null);
                       setDismissedReturnSessionId(null);
@@ -3255,6 +3290,26 @@ export default function SlateWorkspace({
                 <p>{project.spark}</p>
               </details>
             ) : null}
+            {handoffSources.length > 0 ? (
+              <details className={styles.handoffSources}>
+                <summary>
+                  Source material from Zen
+                  <span>{handoffSources.length}</span>
+                </summary>
+                <p>
+                  Reference only. These excerpts do not alter the manuscript or
+                  enter Continuity.
+                </p>
+                <div>
+                  {handoffSources.map((handoff) => (
+                    <article key={handoff.id}>
+                      <span>{handoff.sourceLabel}</span>
+                      <blockquote>{handoff.sourceText}</blockquote>
+                    </article>
+                  ))}
+                </div>
+              </details>
+            ) : null}
             <textarea
               className={styles.manuscript}
               data-tutorial-target="slate-manuscript"
@@ -3294,6 +3349,29 @@ export default function SlateWorkspace({
               <button type="button" className={styles.quietButton} disabled={busy || selection.end <= selection.start} onClick={lockSelection}>
                 Lock selection
               </button>
+              {onDiscussSelection ? (
+                <button
+                  type="button"
+                  className={styles.quietButton}
+                  data-tutorial-target="slate-discuss-selection"
+                  disabled={
+                    busy ||
+                    !activeSection ||
+                    selection.end <= selection.start
+                  }
+                  onClick={() => {
+                    if (!activeSection) return;
+                    void onDiscussSelection({
+                      projectId: project.id,
+                      sectionId: activeSection.id,
+                      selectionStart: selection.start,
+                      selectionEnd: selection.end,
+                    });
+                  }}
+                >
+                  Discuss in Zen
+                </button>
+              ) : null}
               {(activeSection?.lockedRanges ?? []).map((range) => (
                 <button
                   key={range.id}

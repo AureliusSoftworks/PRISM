@@ -65,7 +65,23 @@ approved Tool, begin bot creation, export an owned bot, or begin an explicit
 handoff. Actions appear as buttons and run only after the player selects one.
 Destructive actions are intentionally absent. Slate's former manuscript-aware
 project chat endpoint returns `410 Gone`; the global companion receives only
-project and section identity until a later explicit, previewed handoff.
+project and section identity unless the player begins an explicit, previewed
+handoff.
+
+## Slate handoff boundary
+
+Zen and Slate exchange only the exact source passage the player selects. Each
+handoff is first stored as a tenant-scoped prepared record containing immutable
+source text, source identifiers, selection bounds, direction, and a readable
+provenance label. The canvas previews that exact record before a destination is
+confirmed.
+
+From Zen, **New project** uses the approved passage as the new project's spark;
+**Add to project** attaches a source card without touching manuscript prose or
+Continuity. From Slate, **Discuss in Zen** stages the approved excerpt in the
+composer but does not send a turn or write memory until the player chooses
+Send. Committed handoff provenance survives account backup and restore. Full
+transcripts, manuscripts, Continuity, and memories never accompany it.
 
 ## First run and living guidance
 

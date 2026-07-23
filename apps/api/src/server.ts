@@ -350,6 +350,12 @@ import {
 } from "./slate.ts";
 import { composeSlateProjectCoverPrompt } from "./slate-cover.ts";
 import {
+  commitSlateHandoff,
+  getSlateHandoff,
+  listSlateProjectHandoffs,
+  prepareSlateHandoff,
+} from "./slate-handoffs.ts";
+import {
   advanceSlateDeliberation,
   generateSlateProjectTitle,
   refreshSlateLivingSummary,
@@ -4600,6 +4606,43 @@ function buildRoutes(): RouteDefinition[] {
           "Project created",
           true,
         ),
+      });
+    }),
+    route("POST", "/api/slate/handoffs", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 201, {
+        ok: true,
+        handoff: prepareSlateHandoff(
+          db,
+          userId,
+          ctx.body as Parameters<typeof prepareSlateHandoff>[2],
+        ),
+      });
+    }),
+    route("GET", "/api/slate/handoffs/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        handoff: getSlateHandoff(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/slate/handoffs/:id/commit", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        ...commitSlateHandoff(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Parameters<typeof commitSlateHandoff>[3],
+        ),
+      });
+    }),
+    route("GET", "/api/slate/projects/:id/handoffs", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        handoffs: listSlateProjectHandoffs(db, userId, ctx.params.id),
       });
     }),
     route("GET", "/api/slate/projects/:id", async (ctx) => {

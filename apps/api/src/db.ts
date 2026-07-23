@@ -302,6 +302,26 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS slate_handoffs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      direction TEXT NOT NULL CHECK(direction IN ('zen-to-slate', 'slate-to-zen')),
+      status TEXT NOT NULL DEFAULT 'prepared' CHECK(status IN ('prepared', 'committed')),
+      source_text TEXT NOT NULL,
+      source_label TEXT NOT NULL,
+      source_conversation_id TEXT,
+      source_message_id TEXT,
+      source_project_id TEXT,
+      source_section_id TEXT,
+      source_selection_start INTEGER NOT NULL,
+      source_selection_end INTEGER NOT NULL,
+      target_project_id TEXT,
+      created_at TEXT NOT NULL,
+      committed_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_slate_handoffs_user_project
+      ON slate_handoffs(user_id, target_project_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS sessions (
       token TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
