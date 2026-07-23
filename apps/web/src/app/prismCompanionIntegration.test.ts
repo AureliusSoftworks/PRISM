@@ -7,6 +7,10 @@ const component = readFileSync(
   "utf8",
 );
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const handoffCanvas = readFileSync(
+  new URL("./PrismHandoffCanvas.tsx", import.meta.url),
+  "utf8",
+);
 const api = readFileSync(
   new URL("../../../api/src/server.ts", import.meta.url),
   "utf8",
@@ -34,7 +38,8 @@ test("keeps the companion explicit, keyboard accessible, and non-destructive", (
   assert.match(component, /window\.sessionStorage/u);
   assert.match(component, /onAction\(action\)/u);
   assert.doesNotMatch(component, /delete_bot|delete_project|delete_conversation/u);
-  assert.match(page, /Select the exact Zen text you want to send/u);
+  assert.match(handoffCanvas, /Exact source preview/u);
+  assert.match(handoffCanvas, /Only this selection will cross surfaces/u);
 });
 
 test("retires the full-manuscript Slate chat route in favor of global metadata", () => {

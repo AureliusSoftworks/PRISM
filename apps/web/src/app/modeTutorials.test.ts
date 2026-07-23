@@ -63,7 +63,7 @@ describe("mode tutorials", () => {
     );
     assert.equal(
       modeTutorialStep("botcast", 99).heading,
-      "Replay locally or produce Premium",
+      "Replay or export video",
     );
     assert.equal(
       modeTutorialStep("slate", 99).heading,
@@ -78,13 +78,14 @@ describe("mode tutorials", () => {
     assert.match(coffeeCopy, /adds no AI conversation turn/u);
     assert.match(signalCopy, /never asks an AI to recreate/u);
     assert.match(signalCopy, /opens its local replay immediately/u);
-    assert.match(signalCopy, /no ElevenLabs request/u);
-    assert.match(signalCopy, /pauses an active local replay at its current position/u);
-    assert.match(signalCopy, /transport stays paused while PRISM renders/u);
+    assert.match(signalCopy, /no future LLM or ElevenLabs call/u);
+    assert.match(signalCopy, /records that visual performance silently/u);
+    assert.match(signalCopy, /adds the voice takes and studio audio captured with the episode/u);
+    assert.match(signalCopy, /Local replay remains available before and after export/u);
     assert.match(signalCopy, /explicit ONLINE action/u);
     assert.match(signalCopy, /may be sent to ElevenLabs and consume credits/u);
-    assert.match(signalCopy, /cached master without another paid voice generation/u);
-    assert.match(signalCopy, /delete only Premium media/u);
+    assert.match(signalCopy, /cached audio without another paid voice generation/u);
+    assert.match(signalCopy, /without replacing the standard export/u);
   });
 
   it("explains that Coffee cross-talk controls audible backchannels", () => {
@@ -797,11 +798,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-      /episode card shows progress/u,
+      /episode card shows each export's progress independently/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-      /play, pause, scrub/u,
+      /Local replay remains available before and after export/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -813,7 +814,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-      /Delete episode sits beside it only after the broadcast is complete/u,
+      /Delete episode remains a separate destructive action/u,
     );
   });
 
