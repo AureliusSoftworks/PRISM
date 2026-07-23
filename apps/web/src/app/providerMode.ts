@@ -41,6 +41,15 @@ export function autoResponseModeForProvider(
   return autoEnabled && autoAllowed ? "auto" : responseModeForProvider(provider);
 }
 
+/**
+ * Hard LOCAL privacy blocks online capabilities (Premium voice, ElevenLabs
+ * credit checks, etc.). AUTO and ONLINE may use them — AUTO still routes
+ * through the user's primary + fallback chain.
+ */
+export function blocksOnlineCapabilities(mode: AutoResponseMode): boolean {
+  return mode === "local";
+}
+
 export function isOnlineProvider(provider: Provider): provider is OnlineProvider {
   return provider !== "local";
 }

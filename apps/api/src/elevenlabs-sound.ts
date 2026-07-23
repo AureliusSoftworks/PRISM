@@ -9,7 +9,10 @@ const COFFEE_ACTION_SFX_AUDIO_MAX_BYTES = 512 * 1024;
 export const AVATAR_ELEVENLABS_SFX_MODEL = "eleven_text_to_sound_v2";
 export const AVATAR_ELEVENLABS_SFX_DURATION_SECONDS = 4;
 export const AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS = 400;
+export const SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS = 450;
+export const SOUND_FX_BENCH_DURATION_SECONDS = 1.2;
 const AVATAR_ELEVENLABS_SFX_AUDIO_MAX_BYTES = 1024 * 1024;
+const SOUND_FX_BENCH_AUDIO_MAX_BYTES = 1024 * 1024;
 
 export const COFFEE_ELEVENLABS_ACTION_SFX = {
   cup_set_down: {
@@ -167,6 +170,56 @@ export function buildAvatarElevenLabsSfxPrompt(value: string): string {
     AVATAR_ELEVENLABS_SFX_PROMPT_MAX_CHARACTERS,
   );
   return `A seamless looping character sound effect: ${request}. Smooth loop boundary, stable level, and enough space for clear speech.`;
+}
+
+export async function requestSoundFxBenchSfx(args: {
+  apiKey: string;
+  prompt: string;
+  durationSeconds?: number;
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+}): Promise<{
+  audioBytes: Buffer;
+  contentType: string;
+  requestId: string | null;
+}> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const prompt = boundSignalAtmosphereText(
+    args.prompt,
+    SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS,
+  );
+  const durationSeconds = Math.min(
+    5,
+    Math.max(0.5, Number(args.durationSeconds) || SOUND_FX_BENCH_DURATION_SECONDS),
+  );
+  const response = await fetchImpl(
+    "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128",
+    {
+      method: "POST",
+      signal: args.signal,
+      headers: {
+        "content-type": "application/json",
+        "xi-api-key": args.apiKey,
+      },
+      body: JSON.stringify({
+        text: prompt,
+        duration_seconds: durationSeconds,
+        prompt_influence: 0.3,
+        loop: false,
+        model_id: "eleven_text_to_sound_v2",
+      }),
+    },
+  );
+  if (!response.ok) throw await soundError(response, "ElevenLabs could not create this sound effect.");
+  const audioBytes = Buffer.from(await response.arrayBuffer());
+  if (audioBytes.length === 0 || audioBytes.length > SOUND_FX_BENCH_AUDIO_MAX_BYTES) {
+    throw new ElevenLabsSoundError(502, "ElevenLabs returned unusable sound audio.");
+  }
+  const contentType = response.headers.get("content-type")?.split(";")[0]?.trim();
+  if (!contentType?.startsWith("audio/")) {
+    throw new ElevenLabsSoundError(502, "ElevenLabs returned an invalid sound audio format.");
+  }
+  return { audioBytes, contentType, requestId: response.headers.get("request-id") };
 }
 
 export async function requestAvatarElevenLabsSfx(args: {

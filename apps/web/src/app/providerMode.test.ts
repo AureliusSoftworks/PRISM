@@ -7,6 +7,7 @@ import {
   applyModelChoiceForResponseMode,
   applyOnlineModelChoice,
   autoResponseModeForProvider,
+  blocksOnlineCapabilities,
   combinedOnlineModelOptions,
   fallbackOnlineModelIdsForProvider,
   filterVisibleModelOptions,
@@ -46,6 +47,12 @@ describe("provider mode helpers", () => {
     assert.equal(autoResponseModeForProvider("local", true), "auto");
     assert.equal(autoResponseModeForProvider("openai", true), "auto");
     assert.equal(autoResponseModeForProvider("openai", true, false), "online");
+  });
+
+  it("blocks online capabilities only for hard LOCAL privacy", () => {
+    assert.equal(blocksOnlineCapabilities("local"), true);
+    assert.equal(blocksOnlineCapabilities("auto"), false);
+    assert.equal(blocksOnlineCapabilities("online"), false);
   });
 
   it("combines OpenAI and Anthropic model lists without hiding provider identity", () => {

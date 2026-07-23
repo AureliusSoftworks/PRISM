@@ -15,7 +15,8 @@ export interface ElevenLabsCreditCheckAvailability {
 
 export function elevenLabsCreditCheckAvailability(args: {
   keySource: "saved" | "server" | "none";
-  preferredProvider: "local" | "openai" | "anthropic";
+  /** True only for hard LOCAL privacy — AUTO/ONLINE may contact ElevenLabs. */
+  blocksOnlineCapabilities: boolean;
 }): ElevenLabsCreditCheckAvailability {
   if (args.keySource === "none") {
     return {
@@ -30,10 +31,11 @@ export function elevenLabsCreditCheckAvailability(args: {
         "This connection is managed by the server, so its balance stays private.",
     };
   }
-  if (args.preferredProvider === "local") {
+  if (args.blocksOnlineCapabilities) {
     return {
       canCheck: false,
-      message: "Switch Prism to ONLINE before contacting ElevenLabs for a balance.",
+      message:
+        "Switch Prism to AUTO or ONLINE before contacting ElevenLabs for a balance.",
     };
   }
   return {

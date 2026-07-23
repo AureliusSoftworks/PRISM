@@ -30,25 +30,32 @@ describe("ElevenLabs credit balance presentation", () => {
     );
   });
 
-  it("allows only saved account keys while Prism is online", () => {
+  it("allows only saved account keys while Prism is not hard LOCAL", () => {
     assert.equal(
       elevenLabsCreditCheckAvailability({
         keySource: "saved",
-        preferredProvider: "openai",
+        blocksOnlineCapabilities: false,
       }).canCheck,
       true,
     );
     assert.equal(
       elevenLabsCreditCheckAvailability({
         keySource: "saved",
-        preferredProvider: "local",
+        blocksOnlineCapabilities: true,
       }).canCheck,
       false,
     );
     assert.match(
       elevenLabsCreditCheckAvailability({
+        keySource: "saved",
+        blocksOnlineCapabilities: true,
+      }).message,
+      /AUTO or ONLINE/i,
+    );
+    assert.match(
+      elevenLabsCreditCheckAvailability({
         keySource: "server",
-        preferredProvider: "openai",
+        blocksOnlineCapabilities: false,
       }).message,
       /balance stays private/i,
     );

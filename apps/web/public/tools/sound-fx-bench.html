@@ -13,7 +13,16 @@
     h1 { margin:0; font-size:clamp(2rem,5vw,4.2rem); letter-spacing:-.06em; line-height:.95; }
     .eyebrow { margin:0 0 10px; color:var(--accent); font-size:.75rem; font-weight:700; letter-spacing:.16em; text-transform:uppercase; }
     .intro { max-width:500px; color:var(--muted); margin:10px 0 0; }
-    .grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); gap:18px; height:calc(100vh - 190px); min-height:0; }
+    .generator { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; align-items:center; margin:20px 0 18px; }
+    .generator input { min-width:0; background:#111218; border:1px solid var(--line); border-radius:9px; color:var(--ink); padding:10px 12px; }
+    .generator select { background:#252934; border:1px solid var(--line); border-radius:9px; color:var(--ink); padding:10px 12px; }
+    .candidate { display:none; grid-column:1/-1; align-items:center; gap:10px; color:var(--muted); }
+    .candidate.show { display:flex; }
+    .candidate audio { max-width:260px; height:32px; }
+    .candidate-name { color:var(--ink); font-weight:700; }
+    .deleted { opacity:.48; }
+    .deleted .sound-name::after { content:" · disabled"; color:#ffb0b0; font-size:.78rem; }
+    .grid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); gap:18px; height:calc(100vh - 285px); min-height:0; }
     .panel { display:flex; flex-direction:column; min-height:0; overflow:hidden; background:color-mix(in srgb,var(--panel) 94%,transparent); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 16px 60px #0003; }
     .panel h2 { margin:0 0 4px; font-size:1.05rem; }
     .hint { color:var(--muted); font-size:.88rem; margin:0 0 16px; }
@@ -44,20 +53,32 @@
     .toolbar { display:flex; flex-wrap:wrap; gap:9px; margin:18px 0 0; }
     .status { min-height:1.4em; color:var(--accent); font-size:.85rem; margin:12px 0 0; }
     code { color:#d5d7df; }
+    .raw-guard { display:none; position:fixed; inset:0; z-index:99; align-items:center; justify-content:center; padding:24px; background:#050507; color:#f3f1ea; text-align:center; }
+    .raw-guard-card { width:min(620px,100%); border:1px solid #3b3e4b; border-radius:18px; padding:34px; background:repeating-linear-gradient(135deg,#111218 0,#111218 12px,#181a22 12px,#181a22 24px); box-shadow:0 24px 90px #000; }
+    .raw-guard-label { margin:0 0 12px; color:#ff7777; font-size:.75rem; font-weight:800; letter-spacing:.18em; text-transform:uppercase; }
+    .raw-guard h1 { margin:0 0 12px; font-size:clamp(1.8rem,5vw,3.2rem); }
+    .raw-guard p { margin:0 auto 20px; max-width:480px; color:#b5b7c1; }
+    .raw-guard pre { margin:0; padding:14px 18px; border:1px solid #444856; border-radius:10px; background:#050507; color:var(--accent); text-align:left; overflow:auto; }
+    .raw-mode .raw-guard { display:flex; }
+    .raw-mode main { display:none; }
     @media (max-width:760px) { body{height:auto; min-height:100vh; overflow:auto} main{height:auto; min-height:100vh; padding-top:28px; overflow:visible}.grid{grid-template-columns:1fr; height:auto} header{display:block}.panel{overflow:visible}.library,.assignments{height:440px} }
   </style>
 </head>
 <body>
+  <div id="rawGuard" class="raw-guard" role="alert"><div class="raw-guard-card"><p class="raw-guard-label">Access blocked</p><h1>Sound FX Bench needs PRISM</h1><p>This tool was opened as a raw HTML file, so its local server and ElevenLabs connection are unavailable. Start it from the repository with:</p><pre><code>prism sound</code></pre></div></div>
   <main>
     <header>
-      <div><p class="eyebrow">PRISM / tools</p><h1>Sound FX Bench</h1><p class="intro">Audition local sounds in real time, build action pools, and copy the finished assignment map for implementation.</p></div>
+      <div><p class="eyebrow">PRISM / tools</p><h1>Sound FX Bench</h1><p class="intro">Audition local sounds in real time, generate candidates, build action pools, and copy the finished assignment map.</p></div>
     </header>
+    <form id="generator" class="generator"><input id="prompt" required maxlength="450" placeholder="Describe a sound to generate…" aria-label="Sound effect description"><select id="duration" aria-label="Sound duration"><option value="0.8">0.8 sec</option><option value="1.2" selected>1.2 sec</option><option value="2">2 sec</option><option value="3">3 sec</option></select><button class="primary" type="submit">Generate with ElevenLabs</button><div id="candidate" class="candidate"><span>Candidate:</span><span id="candidateName" class="candidate-name"></span><audio id="candidateAudio" controls></audio><button id="keep" type="button" class="primary">Keep</button><button id="toss" type="button">Toss</button></div></form>
     <div class="grid">
       <section class="panel"><h2>Sound library</h2><p class="hint">Use Play to audition a sound. Then choose it from an action’s dropdown on the right.</p><div id="library" class="library"></div></section>
       <section class="panel"><h2>Action assignments</h2><p class="hint">Choose what the sound means in plain English. PRISM shows the matching implementation key underneath. Add one or more sounds; several sounds on one action become a random pool.</p><div id="assignments" class="assignments"></div><div class="toolbar"><button id="addAction">+ Add action</button><button id="copy" class="primary">Copy assignment map</button></div><p id="status" class="status" role="status"></p></section>
     </div>
   </main>
   <script>
+    const isPrismServer = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname) && location.port === "18788";
+    if (location.protocol === "file:" || !isPrismServer) document.body.classList.add("raw-mode");
     const sounds = [
       "/audio/avatar/prism-calculating-01.mp3","/audio/avatar/prism-calculating-02.mp3","/audio/avatar/prism-calculating-03.mp3","/audio/avatar/prism-calculating-04.mp3",
       "/audio/coffee/action-reactions/burp-01.mp3","/audio/coffee/action-reactions/burp-02.mp3","/audio/coffee/action-reactions/burp-03.mp3","/audio/coffee/action-reactions/burp-04.mp3",
@@ -90,22 +111,34 @@
       burp: ["/audio/coffee/action-reactions/burp-01.mp3","/audio/coffee/action-reactions/burp-02.mp3","/audio/coffee/action-reactions/burp-03.mp3","/audio/coffee/action-reactions/burp-04.mp3"],
       cough: ["/audio/coffee/action-reactions/cough-01.mp3","/audio/coffee/action-reactions/cough-02.mp3","/audio/coffee/action-reactions/cough-03.mp3","/audio/coffee/action-reactions/cough-04.mp3"]
     };
-    let assignments = Object.entries(existingAssignments).map(([key, paths]) => ({ ...actionFor(key), sounds: paths.map((path) => sounds.indexOf(path)).filter((index) => index >= 0) }));
-    function playbackPath(path) {
-      return location.protocol === "file:" ? `../${path.replace(/^\//, "")}` : path;
-    }
+    const storageKey = "prism_sound_fx_bench_v2";
+    const savedBenchState = (() => { try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; } })();
+    let generatedSounds = Array.isArray(savedBenchState.generatedSounds) ? savedBenchState.generatedSounds : [];
+    const committedDisabledIds = new Set(Array.isArray(savedBenchState.disabledIds) ? savedBenchState.disabledIds : []);
+    const pendingDisabledIds = new Set();
+    let candidate = null;
+    function entries() { return [...sounds.map((path) => ({ id: path, path, name: label(path), generated: false })), ...generatedSounds]; }
+    function entry(index) { return entries()[index]; }
+    function soundIndexForPath(path) { return entries().findIndex((item) => item.path === path || item.id === path); }
+    function isDisabled(item) { return committedDisabledIds.has(item.id) || pendingDisabledIds.has(item.id); }
+    function playbackPath(path) { return path.startsWith("data:") || path.startsWith("blob:") ? path : location.protocol === "file:" ? `../${path.replace(/^\//, "")}` : path; }
     function play(path) { const audio = new Audio(playbackPath(path)); audio.play().catch(() => setStatus("The sound could not be loaded. Open this page through the PRISM dev server if you opened the HTML directly.")); }
     function setStatus(message) { $("status").textContent = message; window.clearTimeout(setStatus.timer); setStatus.timer = window.setTimeout(() => $("status").textContent = "", 3000); }
-    function renderLibrary() { $("library").innerHTML = sounds.map((path, i) => `<div class="sound"><div><span class="sound-name">${label(path)}</span><span class="sound-path"><code>${path}</code></span></div><button data-play="${i}">Play</button></div>`).join(""); }
-    function renderAssignments() {
-      $("assignments").innerHTML = assignments.length ? assignments.map((action, i) => `<div class="assignment"><div class="assignment-top"><div class="picker action-picker"><button class="picker-button" data-picker="action:${i}" aria-haspopup="menu">${escapeHtml(action.label)}</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-action-choice="${i}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-remove="${i}" aria-label="Remove action">×</button></div><span class="sound-path">Implementation key: <code>${escapeHtml(action.key)}</code></span><span class="hint">Add sound to this action</span><div class="picker sound-picker"><button class="picker-button" data-picker="sound:${i}" aria-haspopup="menu">Choose a sound…</button><div class="picker-menu">${sounds.map((path, soundIndex) => `<button class="picker-option" data-sound-choice="${i}:${soundIndex}">${label(path)}</button>`).join("")}</div></div><div class="chips">${action.sounds.length ? action.sounds.map((soundIndex, chipIndex) => `<span class="chip">${label(sounds[soundIndex])} <button class="remove" data-chip="${i}:${chipIndex}" aria-label="Remove sound">×</button></span>`).join("") : `<span class="hint">No sounds assigned yet.</span>`}</div></div>`).join("") : `<div class="empty">Add an action to start building the map.</div>`;
-    }
+    function renderLibrary() { $("library").innerHTML = entries().map((item, i) => { if (committedDisabledIds.has(item.id)) return ""; const disabled = pendingDisabledIds.has(item.id); return `<div class="sound${disabled ? " deleted" : ""}"><div><span class="sound-name">${escapeHtml(item.name)}</span><span class="sound-path"><code>${item.generated ? "ElevenLabs generated" : item.path}</code></span></div><button data-play="${i}"${disabled ? " disabled" : ""}>${disabled ? "Disabled" : "Play"}</button>${disabled ? `<button data-undo="${i}">Undo</button>` : `<button class="remove" data-delete="${i}" aria-label="Disable sound">×</button>`}</div>`; }).join(""); }
+    function renderAssignments() { const available = entries().map((item, i) => ({ item, i })).filter(({ item }) => !committedDisabledIds.has(item.id)); $("assignments").innerHTML = assignments.length ? assignments.map((action, i) => `<div class="assignment"><div class="assignment-top"><div class="picker action-picker"><button class="picker-button" data-picker="action:${i}" aria-haspopup="menu">${escapeHtml(action.label)}</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-action-choice="${i}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-remove="${i}" aria-label="Remove action">×</button></div><span class="sound-path">Implementation key: <code>${escapeHtml(action.key)}</code></span><span class="hint">Add sound to this action</span><div class="picker sound-picker"><button class="picker-button" data-picker="sound:${i}" aria-haspopup="menu">Choose a sound…</button><div class="picker-menu">${available.map(({ item, i: soundIndex }) => `<button class="picker-option" data-sound-choice="${i}:${soundIndex}">${escapeHtml(item.name)}</button>`).join("")}</div></div><div class="chips">${action.sounds.length ? action.sounds.map((soundIndex, chipIndex) => `<span class="chip${isDisabled(entry(soundIndex)) ? " deleted" : ""}">${escapeHtml(entry(soundIndex)?.name || "Unknown sound")} <button class="remove" data-chip="${i}:${chipIndex}" aria-label="Remove sound">×</button></span>`).join("") : `<span class="hint">No sounds assigned yet.</span>`}</div></div>`).join("") : `<div class="empty">Add an action to start building the map.</div>`; }
+    function persistChanges() { const disabledIds = [...new Set([...committedDisabledIds, ...pendingDisabledIds])]; generatedSounds = generatedSounds.filter((item) => !pendingDisabledIds.has(item.id)); try { localStorage.setItem(storageKey, JSON.stringify({ generatedSounds, disabledIds })); } catch { /* Private file tabs may deny localStorage. */ } }
+    function dataUrlForBlob(blob) { return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); }); }
+    let assignments = Object.entries(existingAssignments).map(([key, paths]) => ({ ...actionFor(key), sounds: paths.map(soundIndexForPath).filter((index) => index >= 0) }));
     function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[char])); }
-    $("library").addEventListener("click", (event) => { const playButton = event.target.closest("[data-play]"); if (playButton) play(sounds[Number(playButton.dataset.play)]); });
+    $("library").addEventListener("click", (event) => { const playButton = event.target.closest("[data-play]"); const deleteButton = event.target.closest("[data-delete]"); const undoButton = event.target.closest("[data-undo]"); if (playButton && !playButton.disabled) play(entry(Number(playButton.dataset.play)).path); if (deleteButton) { pendingDisabledIds.add(entry(Number(deleteButton.dataset.delete)).id); renderLibrary(); renderAssignments(); setStatus("Sound disabled for this session. Undo it before closing to restore it."); } if (undoButton) { pendingDisabledIds.delete(entry(Number(undoButton.dataset.undo)).id); renderLibrary(); renderAssignments(); } });
     $("assignments").addEventListener("click", (event) => { const picker = event.target.closest("[data-picker]"); if (picker) { event.stopImmediatePropagation(); const current = picker.parentElement; document.querySelectorAll(".picker.open").forEach((item) => { if (item !== current) item.classList.remove("open"); }); current.classList.toggle("open"); return; } const actionChoice = event.target.closest("[data-action-choice]"); if (actionChoice) { event.stopImmediatePropagation(); const [index, key] = actionChoice.dataset.actionChoice.split(":"); assignments[Number(index)] = { ...actionFor(key), sounds: assignments[Number(index)].sounds }; renderAssignments(); return; } const soundChoice = event.target.closest("[data-sound-choice]"); if (soundChoice) { event.stopImmediatePropagation(); const [actionIndex, soundIndex] = soundChoice.dataset.soundChoice.split(":").map(Number); assignments[actionIndex].sounds.push(soundIndex); renderAssignments(); return; } });
     $("assignments").addEventListener("click", (event) => { const remove = event.target.closest("[data-remove]"); const chip = event.target.closest("[data-chip]"); if (remove) assignments.splice(Number(remove.dataset.remove), 1); if (chip) { const [actionIndex, chipIndex] = chip.dataset.chip.split(":").map(Number); assignments[actionIndex].sounds.splice(chipIndex, 1); } renderAssignments(); });
     $("addAction").addEventListener("click", () => { assignments.push({ ...actionFor("custom-action"), sounds: [] }); renderAssignments(); });
-    $("copy").addEventListener("click", async () => { const output = { soundFx: Object.fromEntries(assignments.map((action) => [action.key, action.sounds.map((index) => sounds[index])])) }; try { await navigator.clipboard.writeText(JSON.stringify(output, null, 2)); setStatus("Assignment map copied to clipboard."); } catch { setStatus("Clipboard access was blocked. Copy the map from the browser console if needed."); console.log(JSON.stringify(output, null, 2)); } });
+    $("copy").addEventListener("click", async () => { const output = { soundFx: Object.fromEntries(assignments.map((action) => [action.key, action.sounds.map((index) => { const item = entry(index); return item.generated ? { name: item.name, source: "elevenlabs-generated", audioDataUrl: item.path } : item.path; })])) }; try { await navigator.clipboard.writeText(JSON.stringify(output, null, 2)); setStatus("Assignment map copied to clipboard."); } catch { setStatus("Clipboard access was blocked. Copy the map from the browser console if needed."); console.log(JSON.stringify(output, null, 2)); } });
+    $("generator").addEventListener("submit", async (event) => { event.preventDefault(); const prompt = $("prompt").value.trim(); if (!prompt) return; const button = event.submitter; button.disabled = true; button.textContent = "Generating…"; setStatus("Asking ElevenLabs for a candidate…"); try { const endpoint = location.protocol === "file:" ? "http://127.0.0.1:18787/api/dev/sound-fx-bench/generate" : "/api/dev/sound-fx-bench/generate"; const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt, durationSeconds: Number($("duration").value) }) }); if (!response.ok) throw new Error((await response.text()).replace(/[{}\"]/g, "").slice(0, 220)); const blob = await response.blob(); const objectUrl = URL.createObjectURL(blob); candidate = { prompt, id: `candidate-${Date.now()}`, name: prompt.slice(0, 54), objectUrl, dataUrl: await dataUrlForBlob(blob) }; $("candidateName").textContent = candidate.name; $("candidateAudio").src = objectUrl; $("candidate").classList.add("show"); setStatus("Candidate ready. Keep it or toss it."); } catch (error) { setStatus(error instanceof Error ? error.message : "Generation failed. Start PRISM with ELEVENLABS_API_KEY loaded."); } finally { button.disabled = false; button.textContent = "Generate with ElevenLabs"; } });
+    $("keep").addEventListener("click", () => { if (!candidate) return; generatedSounds.push({ id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true }); renderLibrary(); renderAssignments(); URL.revokeObjectURL(candidate.objectUrl); candidate = null; $("candidate").classList.remove("show"); $("prompt").value = ""; setStatus("Kept in the sound library for this session."); });
+    $("toss").addEventListener("click", () => { if (!candidate) return; URL.revokeObjectURL(candidate.objectUrl); candidate = null; $("candidate").classList.remove("show"); setStatus("Candidate tossed."); });
+    window.addEventListener("pagehide", persistChanges);
     renderLibrary(); renderAssignments();
   </script>
 </body>

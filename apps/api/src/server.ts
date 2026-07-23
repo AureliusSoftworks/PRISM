@@ -237,10 +237,12 @@ import {
   ElevenLabsSoundError,
   SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
   SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
+  SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS,
   buildSignalAtmospherePrompt,
   isCoffeeElevenLabsActionSfxKind,
   requestAvatarElevenLabsSfx,
   requestCoffeeElevenLabsActionSfx,
+  requestSoundFxBenchSfx,
   requestSignalElevenLabsAtmosphere,
 } from "./elevenlabs-sound.ts";
 import {
@@ -12401,6 +12403,38 @@ function buildRoutes(): RouteDefinition[] {
         restarting: true,
         mode: "watch",
       });
+    }),
+    route("POST", "/api/dev/sound-fx-bench/generate", async (ctx) => {
+      if (process.env.NODE_ENV === "production") {
+        throw new HttpError(404, "Sound FX Bench generation is only available in development.");
+      }
+      requireLocalDeveloperRequest(ctx);
+      const raw = (ctx.body ?? {}) as Record<string, unknown>;
+      const prompt = typeof raw.prompt === "string" ? raw.prompt.replace(/\s+/gu, " ").trim() : "";
+      if (!prompt) throw new HttpError(400, "Describe the sound effect to generate.");
+      if (prompt.length > SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS) {
+        throw new HttpError(400, `Sound descriptions are limited to ${SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS} characters.`);
+      }
+      const apiKey = config.elevenLabsApiKey;
+      if (!apiKey) throw new HttpError(409, "ELEVENLABS_API_KEY is not available to the local dev server.");
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const sound = await requestSoundFxBenchSfx({
+          apiKey,
+          prompt,
+          durationSeconds: typeof raw.durationSeconds === "number" ? raw.durationSeconds : undefined,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("content-type", sound.contentType);
+        ctx.res.setHeader("cache-control", "no-store");
+        ctx.res.end(sound.audioBytes);
+      } finally {
+        ctx.req.off("close", onClose);
+      }
     }),
     route("POST", "/api/memories/restore", async (ctx) => {
       const userId = requireAuth(ctx);
