@@ -7115,9 +7115,9 @@
 }
 
 /* A selected bot owns deterministic ambient light over an opaque neutral theme
-   base. Keeping that base inside the generated background prevents the root's
-   accent glow from turning the entire canvas into a solid bot-color field;
-   only the broad edge pools carry bot hue. Private mode remains mono. */
+   base. Color stops stay translucent (and ease in with --bot-chat-persona-fill)
+   so wallpaper / atmosphere texture remains visible as the room fills.
+   Private mode remains mono. */
 .appLayout[data-zen-surface="true"][data-bot-gradient-active="true"]:not(
     [data-private-active="true"]
   )
@@ -7127,6 +7127,7 @@
   )
   .messagesFrame {
   background: var(--bot-chat-gradient);
+  transition: background 720ms cubic-bezier(0.18, 0.72, 0.22, 1);
 }
 
 .appLayout[data-chat-sidebar-hidden="true"][data-accent-active="true"]:not(
@@ -12768,10 +12769,35 @@
     scaleY(var(--zen-fallback-wallpaper-scale-y, 1));
 }
 
+.themeLight .zenAtmosphereBackdrop {
+  /* Keep the light canvas open so wallpaper texture can read through.
+     An opaque --bg-deep plate + multiply made soft wallpapers vanish. */
+  background:
+    radial-gradient(
+      ellipse 80% 62% at 50% 30%,
+      color-mix(in srgb, #ffffff 18%, transparent),
+      transparent 72%
+    ),
+    color-mix(in srgb, var(--bg-surface) 42%, transparent);
+}
+
 .themeLight .zenAtmosphereBackdrop img {
-  filter: saturate(0.62) contrast(0.86) brightness(1.16)
+  /* Soft wallpapers are already light-centered; multiply against a luminous
+     frame erased them. Normal blend keeps grain visible while streaming. */
+  mix-blend-mode: normal;
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.28) * var(--zen-atmosphere-layer-opacity, 1) *
+      1.7
+  );
+  filter: saturate(0.78) contrast(0.96) brightness(1.02)
     grayscale(var(--zen-atmosphere-grayscale-amount));
-  mix-blend-mode: multiply;
+}
+
+.themeLight .zenAtmosphereBackdrop img[data-zen-fallback-wallpaper="true"] {
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.28) * var(--zen-atmosphere-layer-opacity, 1) *
+      1.85
+  );
 }
 
 .zenAtmosphereBackdrop::before {
@@ -12822,7 +12848,7 @@
     var(--zen-atmosphere-opacity, 0.28) * 0.38 *
       var(--zen-atmosphere-color-amount, 0)
   );
-  mix-blend-mode: multiply;
+  mix-blend-mode: soft-light;
   filter: blur(28px) saturate(0.66);
 }
 
@@ -12851,6 +12877,31 @@
       transparent 18%,
       transparent 82%,
       color-mix(in srgb, var(--bg-surface) 34%, transparent) 100%
+    );
+}
+
+.themeLight .zenAtmosphereBackdrop::after {
+  /* Much lighter edge veil so paper grain stays readable mid-reply. */
+  background:
+    radial-gradient(
+      ellipse 72% 54% at 50% 36%,
+      transparent 0%,
+      color-mix(in srgb, #f8fbff 6%, transparent) 78%,
+      color-mix(in srgb, #f8fbff 14%, transparent) 100%
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, #f8fbff 22%, transparent) 0%,
+      transparent 20%,
+      transparent 74%,
+      color-mix(in srgb, #f8fbff 28%, transparent) 100%
+    ),
+    linear-gradient(
+      to right,
+      color-mix(in srgb, #f8fbff 12%, transparent) 0%,
+      transparent 16%,
+      transparent 84%,
+      color-mix(in srgb, #f8fbff 12%, transparent) 100%
     );
 }
 
@@ -13035,32 +13086,35 @@
 }
 
 .themeLight .zenAtmosphereReadabilityOverlay {
+  /* Keep a soft reading lane without frosting the wallpaper away in light mode,
+     especially while a reply is still streaming in the center of the frame. */
+  opacity: calc(var(--zen-atmosphere-overlay-opacity, 0) * 0.42);
   background:
     linear-gradient(
       to right,
       transparent 0%,
-      color-mix(in srgb, #ffffff 18%, transparent) 12%,
-      color-mix(in srgb, #ffffff 58%, transparent) 34%,
-      color-mix(in srgb, #ffffff 72%, transparent) 50%,
-      color-mix(in srgb, #ffffff 58%, transparent) 66%,
-      color-mix(in srgb, #ffffff 18%, transparent) 88%,
+      color-mix(in srgb, #ffffff 8%, transparent) 12%,
+      color-mix(in srgb, #ffffff 22%, transparent) 34%,
+      color-mix(in srgb, #ffffff 28%, transparent) 50%,
+      color-mix(in srgb, #ffffff 22%, transparent) 66%,
+      color-mix(in srgb, #ffffff 8%, transparent) 88%,
       transparent 100%
     ),
     radial-gradient(
       ellipse 72% 42% at 16% 12%,
-      color-mix(in srgb, #2fd3e3 4%, transparent),
+      color-mix(in srgb, #2fd3e3 3%, transparent),
       transparent 70%
     ),
     radial-gradient(
       ellipse 68% 44% at 88% 24%,
-      color-mix(in srgb, #ff4d6d 3%, transparent),
+      color-mix(in srgb, #ff4d6d 2%, transparent),
       transparent 72%
     ),
     linear-gradient(
       to bottom,
-      color-mix(in srgb, #fffefb 58%, transparent) 0%,
-      color-mix(in srgb, var(--bg-surface) 46%, transparent) 52%,
-      color-mix(in srgb, var(--bg) 52%, transparent) 100%
+      color-mix(in srgb, #fffefb 18%, transparent) 0%,
+      color-mix(in srgb, var(--bg-surface) 14%, transparent) 52%,
+      color-mix(in srgb, var(--bg) 16%, transparent) 100%
     );
   background-position: center top;
   background-repeat: no-repeat;
@@ -13069,13 +13123,22 @@
     100% 100%,
     100% 100%,
     100% 100%;
-  backdrop-filter: blur(104px) saturate(0.72) contrast(0.94);
-  -webkit-backdrop-filter: blur(104px) saturate(0.72) contrast(0.94);
+  backdrop-filter: blur(28px) saturate(0.78) contrast(0.98);
+  -webkit-backdrop-filter: blur(28px) saturate(0.78) contrast(0.98);
 }
 
 .themeLight .zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
-  backdrop-filter: blur(28px) saturate(0.72) contrast(0.94);
-  -webkit-backdrop-filter: blur(28px) saturate(0.72) contrast(0.94);
+  backdrop-filter: blur(14px) saturate(0.78) contrast(0.98);
+  -webkit-backdrop-filter: blur(14px) saturate(0.78) contrast(0.98);
+}
+
+.themeLight
+  .messagesFrame[data-replying-live="true"]
+  .zenAtmosphereReadabilityOverlay {
+  /* While the bot is talking, prefer atmosphere presence over the frost lane. */
+  opacity: calc(var(--zen-atmosphere-overlay-opacity, 0) * 0.22);
+  backdrop-filter: blur(12px) saturate(0.82) contrast(0.99);
+  -webkit-backdrop-filter: blur(12px) saturate(0.82) contrast(0.99);
 }
 
 @supports (backdrop-filter: blur(1px)) {
@@ -13088,11 +13151,17 @@
   }
 
   .themeLight .zenAtmosphereReadabilityOverlay {
-    backdrop-filter: blur(104px) saturate(72%) contrast(94%);
+    backdrop-filter: blur(28px) saturate(78%) contrast(98%);
   }
 
   .themeLight .zenAtmosphereReadabilityOverlay[data-edge-mode="hard"] {
-    backdrop-filter: blur(28px) saturate(72%) contrast(94%);
+    backdrop-filter: blur(14px) saturate(78%) contrast(98%);
+  }
+
+  .themeLight
+    .messagesFrame[data-replying-live="true"]
+    .zenAtmosphereReadabilityOverlay {
+    backdrop-filter: blur(12px) saturate(82%) contrast(99%);
   }
 }
 
@@ -19734,6 +19803,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-style: italic;
   overflow-wrap: anywhere;
   opacity: 0.94;
+  text-transform: uppercase;
 }
 
 .chatEphemeralMarkdownBody {
@@ -24241,13 +24311,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .appLayout[data-zen-surface="true"].themeLight
   .messages[data-chat-ephemeral="true"] {
-  --zen-assistant-prose: #000000;
+  --zen-assistant-prose: #0a1628;
   --zen-assistant-heading: color-mix(
     in srgb,
-    var(--zen-assistant-prose) 62%,
+    var(--zen-assistant-prose) 72%,
     var(--fg-muted)
   );
   --zen-user-prism-color: var(--zen-user-prism-color-dark);
+}
+
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageAssistant,
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageAssistant
+  p,
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageAssistant
+  .markdownBody,
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageAssistant
+  .chatEphemeralMarkdownBody,
+.appLayout[data-zen-surface="true"].themeLight
+  .messages[data-chat-ephemeral="true"]
+  .messageAssistant
+  .chatEphemeralLine {
+  /* Soft halo so near-black prose stays legible over light persona bloom. */
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.88),
+    0 0 14px rgba(248, 251, 255, 0.62);
 }
 
 .appLayout[data-zen-surface="true"]
@@ -24368,7 +24463,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--zen-user-prose) 78%,
     var(--fg-muted)
   );
-  --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.46);
+  --zen-user-prose-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.88),
+    0 0 14px rgba(248, 251, 255, 0.55);
 }
 
 .appLayout[data-zen-surface="true"]
@@ -24399,7 +24496,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     var(--zen-user-prose) 80%,
     var(--fg-muted)
   );
-  --zen-user-prose-shadow: 0 1px 0 rgba(255, 255, 255, 0.42);
+  --zen-user-prose-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.88),
+    0 0 14px rgba(248, 251, 255, 0.55);
 }
 
 .appLayout[data-zen-surface="true"]
@@ -28575,6 +28674,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 1px 8px rgba(0, 0, 0, 0.62),
     0 0 16px color-mix(in srgb, var(--coffee-bot-color) 24%, transparent);
   opacity: var(--zen-action-text-rest-opacity);
+  text-transform: uppercase;
 }
 
 .zenLiveBotPresencePlate[data-action-verbose="true"] .zenLiveBotPresenceText,
@@ -30424,11 +30524,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--fg);
   font: inherit;
   font-size: 13px;
+  text-transform: uppercase;
 }
 
 .composerActionField > input::placeholder {
   color: var(--fg-subtle);
   font-style: italic;
+  text-transform: none;
 }
 
 .composerActionField:focus-within {
@@ -68830,6 +68932,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   font-weight: 500;
   letter-spacing: 0;
   text-align: inherit;
+  text-transform: uppercase;
   text-shadow:
     0 1px 8px rgba(0, 0, 0, 0.62),
     0 0 16px color-mix(in srgb, var(--coffee-bot-color) 26%, transparent);
@@ -69218,6 +69321,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeReplayActionPanel li span {
   font-size: 0.84rem;
   line-height: 1.3;
+  text-transform: uppercase;
 }
 
 .coffeeReplayActionPanel p {
@@ -72964,6 +73068,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1.35;
   overflow-wrap: anywhere;
   text-align: right;
+  text-transform: uppercase;
 }
 
 /* Composer — bottom of the shell. */

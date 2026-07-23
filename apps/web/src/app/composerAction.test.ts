@@ -12,6 +12,10 @@ import {
 } from "./composerAction.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const pageCssSource = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
 
 describe("shared composer actions", () => {
   it("round-trips visible action text through the established canonical form", () => {
@@ -26,8 +30,19 @@ describe("shared composer actions", () => {
     assert.equal(serializeComposerAction("nods", ""), "*nods*");
   });
 
-  it("keeps asterisks out of the dedicated action field", () => {
-    assert.equal(normalizeComposerAction("**waves**  slowly"), "waves slowly");
+  it("allows only Unicode letters and ordinary spaces in the Action field", () => {
+    assert.equal(
+      normalizeComposerAction("**Wåves 2×—slowly! 🤖**"),
+      "Wåves slowly ",
+    );
+    assert.equal(
+      normalizeComposerAction("  नमस्ते\t世界\ncafe\u0301"),
+      "नमस्ते 世界 café",
+    );
+    assert.equal(
+      serializeComposerAction("nods!!! 3 times", "Hello."),
+      "*nods times* Hello.",
+    );
   });
 
   it("recognizes action-only sends without confusing action plus speech", () => {
@@ -76,6 +91,44 @@ describe("shared composer actions", () => {
     assert.match(pageSource, /input\.focus\(\);[\s\S]{0,40}input\.select\(\);/u);
   });
 
+  it("tabs directly between Action and the prompt after unhandled completions", () => {
+    assert.match(
+      pageSource,
+      /onKeyDown=\{handleActionPromptTabHandoff\}/u,
+    );
+    assert.match(
+      pageSource,
+      /event\.defaultPrevented[\s\S]{0,220}event\.key !== "Tab"/u,
+    );
+    assert.match(
+      pageSource,
+      /target === actionInputRef\.current[\s\S]{0,180}focusPromptInput\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /target === textareaRef\.current[\s\S]{0,180}data-markdown-cm-host[\s\S]{0,180}focusActionInput\(\)/u,
+    );
+  });
+
+  it("uppercases action text visually without changing its canonical value", () => {
+    assert.match(
+      pageCssSource,
+      /\.composerActionField > input \{[\s\S]{0,280}text-transform: uppercase;/u,
+    );
+    assert.match(
+      pageCssSource,
+      /\.zenActionCueText,[\s\S]{0,220}text-transform: uppercase;/u,
+    );
+    assert.match(
+      pageCssSource,
+      /\.zenLiveBotPresenceText \{[\s\S]{0,850}text-transform: uppercase;/u,
+    );
+    assert.equal(
+      serializeComposerAction("smiles softly", "Hello."),
+      "*smiles softly* Hello.",
+    );
+  });
+
   it("renders Action and Shh as separate shared composer controls", () => {
     assert.match(pageSource, /data-composer-action-container="true"/u);
     assert.match(pageSource, /data-composer-action-input="true"/u);
@@ -90,6 +143,10 @@ describe("shared composer actions", () => {
     assert.doesNotMatch(
       pageSource,
       /requestZenLiveActionReaction\("draft_action"\)/u,
+    );
+    assert.match(
+      pageSource,
+      /import\s*\{[\s\S]{0,300}\bresolveZenActionPreview,[\s\S]{0,300}\}\s*from "\.\/zenActions";/u,
     );
     assert.match(
       pageSource,

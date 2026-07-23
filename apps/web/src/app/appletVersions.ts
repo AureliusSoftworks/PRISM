@@ -67,13 +67,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.27",
+    version: "1.28",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.26",
+    version: "1.27",
     status: "active",
   },
   arena: {

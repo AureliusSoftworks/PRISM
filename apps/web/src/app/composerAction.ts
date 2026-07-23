@@ -16,7 +16,12 @@ export function splitComposerAction(value: string): ComposerActionParts {
 }
 
 export function normalizeComposerAction(value: string): string {
-  return value.replace(/\*/gu, "").replace(/\s+/gu, " ").trimStart();
+  return value
+    .normalize("NFC")
+    .replace(/\s/gu, " ")
+    .replace(/[^\p{L}\p{M} ]/gu, "")
+    .replace(/ +/gu, " ")
+    .trimStart();
 }
 
 /** Serializes action and speech through the canonical text all existing parsers consume. */

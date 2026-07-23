@@ -70,6 +70,23 @@ test("explains the current screen controls without needing pixels or DOM", () =>
   assert.match(prompt, /not a screenshot or DOM capture/u);
 });
 
+test("keeps ordinary requests answer-first instead of trapping them in the current surface", () => {
+  const db = fixture();
+  const prompt = prismCompanionSystemPrompt(
+    buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+      surfaceId: "zen",
+      botIds: ["owned"],
+      conversationId: "c1",
+    }),
+  );
+  assert.match(prompt, /Answer the player's actual request first/u);
+  assert.match(prompt, /general-knowledge questions/u);
+  assert.match(prompt, /must not hijack or narrow an unrelated request/u);
+  assert.match(prompt, /do not say you lack a related conversation/u);
+  assert.match(prompt, /When you can answer directly, do so without ceremony/u);
+  assert.match(prompt, /Do not imply live web access/u);
+});
+
 test("keeps full Prism and the orb one identity on Prism Home", () => {
   const db = fixture();
   const prompt = prismCompanionSystemPrompt(

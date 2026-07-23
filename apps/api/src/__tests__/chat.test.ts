@@ -7,6 +7,7 @@ import {
   buildAssistantToolCallEvents,
   buildAskQuestionFallback,
   compactPreImageLeadMessage,
+  composeZenPrismSystemPrompt,
   decideZenAutonomyTurn,
   extractPrismBotMentionIdsFromMessage,
   inferChatToolRequestedImageSize,
@@ -36,6 +37,28 @@ const CHAT_TEST_USER_KEY = Buffer.alloc(32, 7);
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+});
+
+describe("Prism Home system prompt", () => {
+  it("answers ordinary standalone requests without requiring conversation context", () => {
+    const prompt = composeZenPrismSystemPrompt(
+      "Keep Prism warm and present.",
+      { prismHome: true },
+    );
+    assert.match(prompt, /Keep Prism warm and present/u);
+    assert.match(prompt, /Answer the user's actual request first/u);
+    assert.match(prompt, /standalone request does not need a related prior conversation/u);
+    assert.match(prompt, /stable general-knowledge questions/u);
+    assert.match(prompt, /Do not say you are unaware of a related conversation/u);
+    assert.match(prompt, /When you can answer directly, do so immediately/u);
+  });
+
+  it("does not impose Prism Home identity rules on a Library persona", () => {
+    const prompt = composeZenPrismSystemPrompt("You are Echo Ellen.");
+    assert.match(prompt, /You are Echo Ellen/u);
+    assert.match(prompt, /Zen Mode voice for PRISM/u);
+    assert.doesNotMatch(prompt, /Prism Home answer-first behavior/u);
+  });
 });
 
 function createChatTestDb(): DatabaseSync {

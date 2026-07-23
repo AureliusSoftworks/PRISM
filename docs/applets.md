@@ -29,8 +29,8 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.27 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Zen | v1.26 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Chat | v1.28 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Zen | v1.27 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Coffee | v2.28 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and a persona-shaped bar greeting. |
 | Signal | v1.54 | Active | Show-scoped bookings, distinct-cast soundchecks, and trigger-accurate character sound loops. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
@@ -139,6 +139,13 @@ stages do not block the standalone preview.
   edit or regenerate that sound identity from the show gear, while music
   providers receive only the derived provider-safe fingerprint—not raw persona,
   franchise, character, or show prose.
+
+- Bumped `Chat` to `v1.28` and `Zen` to `v1.27` so Home persona color eases in
+  with conversation depth instead of flooding the first turns. Early messages
+  stay readable in light mode; the translucent bot wash gradually fills the
+  room while wallpaper and atmosphere texture remain visible underneath. Light
+  mode no longer erases atmosphere wallpaper with multiply blending and a heavy
+  white frost lane while a reply is streaming.
 
 - Bumped `Chat` to `v1.27`, `Zen` to `v1.26`, `Coffee` to `v2.26`, `Signal`
   to `v1.47`, and `Story` to `v0.26` so bot-name prefixes and suffixes land as

@@ -231,7 +231,7 @@ describe("mode tutorials", () => {
   it("teaches the shared action field and draft-preserving Shh control outside Slate", () => {
     for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
       const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
-      assert.match(copy, /separate Action field without asterisks/u);
+      assert.match(copy, /separate Action field using letters and spaces only/u);
       assert.match(copy, /typing exactly \*\*/u);
       assert.match(copy, /Shh/u);
       assert.match(copy, /draft/u);
@@ -540,7 +540,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /separate Action field without asterisks/u,
+      /separate Action field using letters and spaces only/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -997,7 +997,7 @@ describe("mode tutorials", () => {
     });
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting. Put physical stage direction in the separate Action field without asterisks; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Each Home keeps its own Zen relationship and episodes. Type here to continue the one you are visiting. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });
