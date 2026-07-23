@@ -2640,6 +2640,18 @@ describe("Zen live presence CSS", () => {
     );
   });
 
+  it("keeps the startup summary in the empty Home hero only", () => {
+    assert.match(pageSource, /const emptyHomeHeroMounted =/);
+    assert.match(
+      pageSource,
+      /chatStartupSummaryVisible && !emptyHomeHeroMounted \?/
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /chatStartupSummaryVisible && !zenHeroSurfaceVisible \?/
+    );
+  });
+
   it("moves refresh to the permanent recycle navbar button", () => {
     assert.match(pageSource, /Recycle,/);
     assert.match(pageSource, /onClick=\{\(\) => runAction\(refreshPrismFromNavbar\)\}/);
