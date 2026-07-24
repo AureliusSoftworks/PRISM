@@ -138,6 +138,8 @@
       .atmosphere::before,
       .atmosphere::after,
       .demo-glass-orb,
+      .demo-thinking-avatar::before,
+      .demo-thinking-avatar img,
       .editor.is-previewing .envelope-waveform-active,
       .envelope-plot.is-loading .envelope-waveform-ghost,
       .envelope-plot.is-loading .envelope-waveform-active,
@@ -2581,6 +2583,24 @@
       background: color-mix(in srgb, var(--demo-accent) 16%, transparent);
     }
 
+    @keyframes demo-thinking-float {
+      0%, 100% { translate: 0 1px; }
+      50% { translate: 0 -5px; }
+    }
+
+    @keyframes demo-thinking-underglow {
+      0%, 100% {
+        opacity: 0.92;
+        transform: scale(0.9, 0.84);
+        filter: blur(16px);
+      }
+      50% {
+        opacity: 0.58;
+        transform: scale(1.12, 1);
+        filter: blur(21px);
+      }
+    }
+
     .demo-thinking-avatar {
       position: relative;
       width: 132px;
@@ -2594,7 +2614,23 @@
       padding: 0;
       overflow: visible;
       isolation: isolate;
+      --thinking-glow: var(--prism-p);
       --thinking-hue-rotation: 0deg;
+      --thinking-float-duration: 3.4s;
+    }
+
+    .demo-thinking-avatar::before {
+      content: "";
+      position: absolute;
+      inset: 54% 4% -2%;
+      z-index: 0;
+      border-radius: 50%;
+      background: radial-gradient(ellipse, color-mix(in srgb, var(--thinking-glow) 58%, transparent), transparent 70%);
+      filter: blur(18px);
+      opacity: 0.88;
+      pointer-events: none;
+      transform-origin: center bottom;
+      animation: demo-thinking-underglow var(--thinking-float-duration) ease-in-out infinite;
     }
 
     .demo-thinking-avatar img {
@@ -2607,15 +2643,13 @@
       position: relative;
       z-index: 1;
       filter: hue-rotate(var(--thinking-hue-rotation));
-      transition: transform 180ms ease;
-    }
-
-    .demo-thinking-avatar:hover:not(:disabled) {
-      transform: translateY(-2px);
+      scale: 1;
+      animation: demo-thinking-float var(--thinking-float-duration) ease-in-out infinite;
+      transition: scale 180ms ease;
     }
 
     .demo-thinking-avatar:hover:not(:disabled) img {
-      transform: scale(1.035);
+      scale: 1.035;
     }
 
     .demo-status {
@@ -4782,6 +4816,7 @@
     });
     const thinkingAvatar = $("demoThinking");
     const thinkingHue = Math.floor(Math.random() * 360);
+    thinkingAvatar.style.setProperty("--thinking-glow", `hsl(${thinkingHue} 88% 60%)`);
     thinkingAvatar.style.setProperty("--thinking-hue-rotation", `${thinkingHue - 320}deg`);
     thinkingAvatar.addEventListener("pointerenter", () => {
       demoThinkingHoverActive = true;
