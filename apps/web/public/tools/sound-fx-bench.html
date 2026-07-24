@@ -969,6 +969,66 @@
       gap: 12px;
     }
 
+    .envelope-mode-toggle {
+      display: inline-grid;
+      grid-auto-flow: column;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid color-mix(in srgb, var(--prism-s) 24%, var(--line));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--field) 78%, transparent);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .envelope-mode-toggle button {
+      min-width: 3.6rem;
+      padding: 5px 10px;
+      border: 0;
+      border-radius: 999px;
+      color: var(--fg-muted);
+      background: transparent;
+      font-size: 0.68rem;
+      font-weight: 760;
+      letter-spacing: 0.02em;
+      transform: none;
+    }
+
+    .envelope-mode-toggle button:hover {
+      border-color: transparent;
+      color: var(--fg);
+      background: color-mix(in srgb, var(--prism-s) 10%, transparent);
+      transform: none;
+    }
+
+    .envelope-mode-toggle button[aria-pressed="true"] {
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 78%, var(--prism-s));
+      box-shadow: 0 6px 16px rgba(123, 92, 255, 0.16);
+    }
+
+    .envelope-mode-toggle button[aria-pressed="true"]:hover {
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 78%, var(--prism-s));
+    }
+
+    .envelope-timeline[data-envelope-mode="fade"] .envelope-trim,
+    .envelope-timeline[data-envelope-mode="fade"] .envelope-guide-trim,
+    .envelope-timeline[data-envelope-mode="fade"] .envelope-readout-trim,
+    .envelope-timeline[data-envelope-mode="fade"] .envelope-time-labels {
+      display: none;
+    }
+
+    .envelope-timeline[data-envelope-mode="trim"] .envelope-range,
+    .envelope-timeline[data-envelope-mode="trim"] .envelope-guide-in,
+    .envelope-timeline[data-envelope-mode="trim"] .envelope-guide-out,
+    .envelope-timeline[data-envelope-mode="trim"] .envelope-readout-fade {
+      display: none;
+    }
+
+    .envelope-timeline[data-envelope-mode="trim"] .envelope-trim {
+      z-index: 5;
+    }
+
     .editor-section-heading > span:first-child {
       display: grid;
       gap: 2px;
@@ -1053,11 +1113,16 @@
     .envelope-timeline {
       --fade-in-position: 0%;
       --fade-out-position: 100%;
+      --trim-start-position: 0%;
+      --trim-end-position: 100%;
+      --keep-start: 0%;
+      --keep-end: 0%;
+      --keep-span: 1;
       --envelope-gain-position: 50%;
       --envelope-gain-x-position: 50%;
       position: relative;
       isolation: isolate;
-      min-height: 140px;
+      min-height: 156px;
       overflow: hidden;
       border: 1px solid color-mix(in srgb, var(--prism-s) 24%, var(--line));
       border-radius: 13px;
@@ -1221,6 +1286,9 @@
       --envelope-accent: var(--prism-i);
       justify-self: end;
     }
+    .envelope-readout-trim {
+      --envelope-accent: var(--prism-r);
+    }
 
     .editor-control-copy {
       display: flex;
@@ -1284,7 +1352,7 @@
       position: absolute;
       top: 47px;
       right: 13px;
-      bottom: 25px;
+      bottom: 29px;
       left: 13px;
       overflow: hidden;
       border: 1px solid color-mix(in srgb, var(--prism-s) 9%, transparent);
@@ -1293,6 +1361,38 @@
         repeating-linear-gradient(90deg, transparent 0 calc(12.5% - 1px), color-mix(in srgb, var(--fg-subtle) 8%, transparent) calc(12.5% - 1px) 12.5%),
         linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(0, 0, 0, 0.05));
       box-shadow: inset 0 8px 18px rgba(0, 0, 0, 0.08);
+    }
+
+    .envelope-plot::before,
+    .envelope-plot::after {
+      content: "";
+      position: absolute;
+      z-index: 1;
+      top: 0;
+      bottom: 0;
+      pointer-events: none;
+      background: color-mix(in srgb, #05070c 58%, transparent);
+      transition: width 100ms linear, opacity 120ms ease;
+    }
+
+    .envelope-plot::before {
+      left: 0;
+      width: var(--keep-start);
+      border-right: 1px solid color-mix(in srgb, var(--prism-r) 34%, transparent);
+      opacity: 0.92;
+    }
+
+    .envelope-plot::after {
+      right: 0;
+      width: var(--keep-end);
+      border-left: 1px solid color-mix(in srgb, var(--prism-r) 34%, transparent);
+      opacity: 0.92;
+    }
+
+    .envelope-timeline:not(.has-trim-start) .envelope-plot::before,
+    .envelope-timeline:not(.has-trim-end) .envelope-plot::after {
+      opacity: 0;
+      border-color: transparent;
     }
 
     .envelope-visual {
@@ -1340,8 +1440,15 @@
 
     .envelope-guide-in { stroke: color-mix(in srgb, var(--prism-m) 72%, white); }
     .envelope-guide-out { stroke: color-mix(in srgb, var(--prism-i) 72%, white); }
+    .envelope-guide-trim {
+      stroke: color-mix(in srgb, var(--prism-r) 68%, white);
+      stroke-dasharray: 3 4;
+      opacity: 0.82;
+    }
     .envelope-timeline:not(.has-fade-in) .envelope-guide-in,
     .envelope-timeline:not(.has-fade-out) .envelope-guide-out { opacity: 0.36; }
+    .envelope-timeline:not(.has-trim-start) .envelope-guide-trim-in,
+    .envelope-timeline:not(.has-trim-end) .envelope-guide-trim-out { opacity: 0.28; }
 
     .envelope-plot.is-loading .envelope-waveform-ghost,
     .envelope-plot.is-loading .envelope-waveform-active {
@@ -1353,18 +1460,83 @@
       position: absolute;
       z-index: 5;
       top: calc(50% - 15px);
-      width: 80%;
+      width: calc(var(--keep-span) * 80%);
       height: 30px;
+      pointer-events: none;
+      transition: transform 120ms ease, left 100ms linear, right 100ms linear, width 100ms linear;
+    }
+
+    .editor input[type="range"].envelope-range-in { left: var(--keep-start); }
+
+    .editor input[type="range"].envelope-range-out {
+      --control-accent: var(--prism-i);
+      right: var(--keep-end);
+      direction: rtl;
+    }
+
+    .editor input[type="range"].envelope-trim {
+      --control-accent: var(--prism-r);
+      position: absolute;
+      z-index: 6;
+      top: calc(50% - 18px);
+      width: 100%;
+      height: 36px;
       pointer-events: none;
       transition: transform 120ms ease;
     }
 
-    .editor input[type="range"].envelope-range-in { left: 0; }
+    .editor input[type="range"].envelope-trim-in { left: 0; }
 
-    .editor input[type="range"].envelope-range-out {
-      --control-accent: var(--prism-i);
+    .editor input[type="range"].envelope-trim-out {
       right: 0;
       direction: rtl;
+    }
+
+    .editor input[type="range"].envelope-trim::-webkit-slider-runnable-track {
+      height: 2px;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .editor input[type="range"].envelope-trim::-webkit-slider-thumb {
+      width: 12px;
+      height: 36px;
+      margin-top: -17px;
+      border-width: 1px;
+      border-radius: 4px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--control-accent) 78%, white), color-mix(in srgb, var(--control-accent) 52%, #1a1014));
+      box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--control-accent) 14%, transparent),
+        0 0 16px color-mix(in srgb, var(--control-accent) 28%, transparent),
+        0 4px 10px rgba(0, 0, 0, 0.34);
+      pointer-events: auto;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .editor input[type="range"].envelope-trim::-moz-range-track {
+      height: 2px;
+      border: 0;
+      background: transparent;
+    }
+
+    .editor input[type="range"].envelope-trim::-moz-range-thumb {
+      width: 10px;
+      height: 34px;
+      border-width: 1px;
+      border-radius: 4px;
+      background: color-mix(in srgb, var(--control-accent) 66%, white);
+      pointer-events: auto;
+    }
+
+    .editor input[type="range"].envelope-trim:hover::-webkit-slider-thumb,
+    .editor input[type="range"].envelope-trim:focus-visible::-webkit-slider-thumb {
+      transform: scaleX(1.1);
+      box-shadow:
+        0 0 0 5px color-mix(in srgb, var(--control-accent) 18%, transparent),
+        0 0 22px color-mix(in srgb, var(--control-accent) 36%, transparent),
+        0 4px 10px rgba(0, 0, 0, 0.34);
     }
 
     .editor input[type="range"].envelope-range::-webkit-slider-runnable-track {
@@ -1423,17 +1595,24 @@
 
     .envelope-time-labels {
       position: absolute;
+      z-index: 6;
       right: 13px;
-      bottom: 7px;
+      bottom: 6px;
       left: 13px;
       display: flex;
+      align-items: center;
       justify-content: space-between;
-      color: var(--fg-subtle);
-      font-size: 0.56rem;
-      font-weight: 720;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      pointer-events: none;
+      gap: 10px;
+    }
+
+    .envelope-time-labels .editor-reset-chip {
+      --envelope-accent: var(--prism-r);
+      min-width: 4.4rem;
+    }
+
+    .envelope-time-labels-spacer {
+      flex: 1;
+      min-width: 0;
     }
 
     .editor-control {
@@ -2961,12 +3140,18 @@
                   <span class="editor-section-kicker">Envelope</span>
                   <strong id="editorEnvelopeTitle">Shape the edges</strong>
                 </span>
+                <div class="envelope-mode-toggle" role="group" aria-label="Envelope edit mode">
+                  <button id="envelopeModeFade" type="button" aria-pressed="true">Fade</button>
+                  <button id="envelopeModeTrim" type="button" aria-pressed="false">Trim</button>
+                </div>
               </div>
-              <div id="editEnvelope" class="envelope-timeline" aria-label="Fade envelope timeline">
+              <div id="editEnvelope" class="envelope-timeline" data-envelope-mode="fade" aria-label="Fade envelope timeline">
                 <div class="envelope-readouts">
-                  <div class="envelope-readout envelope-readout-in"><label for="editFadeIn">Fade in</label><button id="editFadeInReset" class="editor-reset-chip" type="button" title="Reset fade in" aria-label="Reset fade in"><span id="editFadeInValue">None</span></button></div>
+                  <div class="envelope-readout envelope-readout-in envelope-readout-fade"><label for="editFadeIn">Fade in</label><button id="editFadeInReset" class="editor-reset-chip" type="button" title="Reset fade in" aria-label="Reset fade in"><span id="editFadeInValue">None</span></button></div>
+                  <div class="envelope-readout envelope-readout-in envelope-readout-trim"><label for="editTrimStart">Trim start</label><button id="editTrimStartReset" class="editor-reset-chip" type="button" title="Reset trim start" aria-label="Reset trim start"><span id="editTrimStartValue">Start</span></button></div>
                   <div class="envelope-readout envelope-readout-gain"><label for="editGain">Gain</label><button id="editGainReset" class="editor-reset-chip" type="button" title="Reset gain" aria-label="Reset gain"><span id="editGainValue">0 dB</span></button></div>
-                  <div class="envelope-readout envelope-readout-out"><label for="editFadeOut">Fade out</label><button id="editFadeOutReset" class="editor-reset-chip" type="button" title="Reset fade out" aria-label="Reset fade out"><span id="editFadeOutValue">None</span></button></div>
+                  <div class="envelope-readout envelope-readout-out envelope-readout-fade"><label for="editFadeOut">Fade out</label><button id="editFadeOutReset" class="editor-reset-chip" type="button" title="Reset fade out" aria-label="Reset fade out"><span id="editFadeOutValue">None</span></button></div>
+                  <div class="envelope-readout envelope-readout-out envelope-readout-trim"><label for="editTrimEnd">Trim end</label><button id="editTrimEndReset" class="editor-reset-chip" type="button" title="Reset trim end" aria-label="Reset trim end"><span id="editTrimEndValue">End</span></button></div>
                 </div>
                 <div id="editEnvelopePlot" class="envelope-plot is-loading">
                   <svg class="envelope-visual" viewBox="0 0 800 120" preserveAspectRatio="none" aria-hidden="true">
@@ -2989,6 +3174,8 @@
                     <polygon id="editEnvelopeShape" class="envelope-shape" points="0,8 800,8 800,112 0,112"/>
                     <path id="editEnvelopeWaveformGhost" class="envelope-waveform-ghost" d="M0 57 H800 V63 H0 Z"/>
                     <path id="editEnvelopeWaveformActive" class="envelope-waveform-active" d="M0 57 H800 V63 H0 Z" clip-path="url(#editorEnvelopeClip)"/>
+                    <line id="editTrimStartGuide" class="envelope-guide envelope-guide-trim envelope-guide-trim-in" x1="0" y1="4" x2="0" y2="116"/>
+                    <line id="editTrimEndGuide" class="envelope-guide envelope-guide-trim envelope-guide-trim-out" x1="800" y1="4" x2="800" y2="116"/>
                     <line id="editFadeInGuide" class="envelope-guide envelope-guide-in" x1="0" y1="4" x2="0" y2="116"/>
                     <line id="editFadeOutGuide" class="envelope-guide envelope-guide-out" x1="800" y1="4" x2="800" y2="116"/>
                   </svg>
@@ -2997,10 +3184,11 @@
                       <input id="editGain" type="range" min="-12" max="12" step="1" value="0" aria-label="Gain level">
                     </span>
                   </label>
+                  <input id="editTrimStart" class="envelope-trim envelope-trim-in" type="range" min="0" max="0.85" step="0.01" value="0" aria-label="Trim from start">
+                  <input id="editTrimEnd" class="envelope-trim envelope-trim-out" type="range" min="0" max="0.85" step="0.01" value="0" aria-label="Trim from end">
                   <input id="editFadeIn" class="envelope-range envelope-range-in" type="range" min="0" max="0.8" step="0.05" value="0" aria-label="Fade in duration">
                   <input id="editFadeOut" class="envelope-range envelope-range-out" type="range" min="0" max="0.8" step="0.05" value="0" aria-label="Fade out duration">
                 </div>
-                <div class="envelope-time-labels" aria-hidden="true"><span>Start</span><span>End</span></div>
               </div>
             </section>
 
@@ -3211,6 +3399,8 @@
     const pendingDisabledIds = new Set();
     const STACKED_WORKSPACE_MEDIA_QUERY = "(max-width: 760px)";
     const EDITOR_MAX_FADE_RATIO = 0.8;
+    const EDITOR_MIN_KEEP_RATIO = 0.15;
+    const EDITOR_MAX_TRIM_RATIO = 0.85;
     const EDITOR_ENVELOPE_GEOMETRY = Object.freeze({
       width: 800,
       top: 8,
@@ -3226,6 +3416,8 @@
       highEndDb: 0,
       fadeIn: 0,
       fadeOut: 0,
+      trimStart: 0,
+      trimEnd: 0,
       playbackRate: 1,
       invert: false,
     });
@@ -3244,6 +3436,7 @@
     let editorInitialSettings = { ...EDITOR_DEFAULT_SETTINGS };
     let editorHistory = [];
     let editorHistoryTransaction = null;
+    let editorEnvelopeMode = "fade";
     const DEMO_MASTER_GAIN = 3;
     const DEMO_DEFAULT_CUE_CONFIG = Object.freeze({ gain: 0.22, cooldownMs: 72 });
     const DEMO_CUE_CONFIG = Object.freeze({
@@ -4185,7 +4378,7 @@
         } else if (editing) {
           actions = `<button data-edit="${id}" class="${isTarget ? "is-active" : ""}">${isTarget ? "Editing" : "Edit"}</button>`;
         } else {
-          actions = `<button data-play="${id}">Play</button><button data-edit="${id}">Edit</button><button data-rename="${id}">Rename</button><div class="picker"><button data-picker="library:${id}">Assign</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-library-action="${id}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-delete="${id}" aria-label="Disable sound">×</button>`;
+          actions = `<button data-play="${id}">Play</button><button data-edit="${id}">Edit</button><button data-rename="${id}">Rename</button><button data-similar="${id}">Similar</button><div class="picker"><button data-picker="library:${id}">Assign</button><div class="picker-menu">${actionOptions.map(([friendly, key]) => `<button class="picker-option" data-library-action="${id}:${key}">${friendly}</button>`).join("")}</div></div><button class="remove" data-delete="${id}" aria-label="Disable sound">×</button>`;
         }
         return `<div class="sound${disabled ? " deleted" : ""}${isTarget ? " is-editing-target" : ""}" data-folder="${escapeHtml(folder)}"><span class="sound-meta"><span class="sound-name">${escapeHtml(displayName(item))}</span><span class="sound-path">${escapeHtml(pathLabel)}</span></span><div class="sound-actions">${actions}</div></div>`;
       }).join("");
@@ -4267,7 +4460,38 @@
         reader.readAsDataURL(blob);
       });
     }
-    function dbToGain(db) { return 10 ** (db / 20); }
+    function setEditorEnvelopeMode(mode) {
+      editorEnvelopeMode = mode === "trim" ? "trim" : "fade";
+      const envelope = $("editEnvelope");
+      const fadeButton = $("envelopeModeFade");
+      const trimButton = $("envelopeModeTrim");
+      envelope.dataset.envelopeMode = editorEnvelopeMode;
+      envelope.setAttribute(
+        "aria-label",
+        editorEnvelopeMode === "trim" ? "Trim envelope timeline" : "Fade envelope timeline"
+      );
+      fadeButton.setAttribute("aria-pressed", String(editorEnvelopeMode === "fade"));
+      trimButton.setAttribute("aria-pressed", String(editorEnvelopeMode === "trim"));
+      $("editorEnvelopeTitle").textContent = editorEnvelopeMode === "trim" ? "Trim the clip" : "Shape the edges";
+      updateEditorEnvelopeVisual();
+    }
+    function editorKeepWindow(settings = editorSettings) {
+      const trimStart = Math.max(0, Math.min(EDITOR_MAX_TRIM_RATIO, Number(settings.trimStart) || 0));
+      const trimEnd = Math.max(0, Math.min(EDITOR_MAX_TRIM_RATIO, Number(settings.trimEnd) || 0));
+      const maxCombined = 1 - EDITOR_MIN_KEEP_RATIO;
+      const combined = Math.min(maxCombined, trimStart + trimEnd);
+      const safeStart = combined <= 0 ? 0 : (trimStart / (trimStart + trimEnd || 1)) * combined;
+      const safeEnd = combined - safeStart;
+      const keepStart = Number(safeStart.toFixed(4));
+      const keepEnd = Number((1 - safeEnd).toFixed(4));
+      return {
+        trimStart: keepStart,
+        trimEnd: Number(safeEnd.toFixed(4)),
+        keepStart,
+        keepEnd,
+        keepRatio: Number((keepEnd - keepStart).toFixed(4)),
+      };
+    }
     function editorGainProgress() {
       const gainControl = $("editGain");
       const minimum = Number(gainControl.min);
@@ -4276,32 +4500,44 @@
     }
     function editorEnvelopePoints() {
       const { width, top, center, bottom } = EDITOR_ENVELOPE_GEOMETRY;
-      const fadeInX = editorSettings.fadeIn * width;
-      const fadeOutX = (1 - editorSettings.fadeOut) * width;
+      const { keepStart, keepEnd, keepRatio } = editorKeepWindow();
+      const keepStartX = keepStart * width;
+      const keepEndX = keepEnd * width;
+      const fadeInX = keepStartX + editorSettings.fadeIn * keepRatio * width;
+      const fadeOutX = keepStartX + (1 - editorSettings.fadeOut) * keepRatio * width;
       const startTop = editorSettings.fadeIn > 0 ? center : top;
       const startBottom = editorSettings.fadeIn > 0 ? center : bottom;
       const endTop = editorSettings.fadeOut > 0 ? center : top;
       const endBottom = editorSettings.fadeOut > 0 ? center : bottom;
       return [
-        [0, startTop],
+        [keepStartX, startTop],
         [fadeInX, top],
         [fadeOutX, top],
-        [width, endTop],
-        [width, endBottom],
+        [keepEndX, endTop],
+        [keepEndX, endBottom],
         [fadeOutX, bottom],
         [fadeInX, bottom],
-        [0, startBottom],
+        [keepStartX, startBottom],
       ];
     }
     function updateEditorEnvelopeVisual() {
       const envelope = $("editEnvelope");
+      const plot = $("editEnvelopePlot");
       const { width } = EDITOR_ENVELOPE_GEOMETRY;
-      const fadeInX = editorSettings.fadeIn * width;
-      const fadeOutX = (1 - editorSettings.fadeOut) * width;
+      const { keepStart, keepEnd, keepRatio, trimStart, trimEnd } = editorKeepWindow();
+      const keepStartX = keepStart * width;
+      const keepEndX = keepEnd * width;
+      const fadeInX = keepStartX + editorSettings.fadeIn * keepRatio * width;
+      const fadeOutX = keepStartX + (1 - editorSettings.fadeOut) * keepRatio * width;
       const serializedPoints = editorEnvelopePoints().map(([x, y]) => `${x},${y}`).join(" ");
       $("editEnvelopeShape").setAttribute("points", serializedPoints);
       $("editEnvelopeClipShape").setAttribute("points", serializedPoints);
-      for (const [id, x] of [["editFadeInGuide", fadeInX], ["editFadeOutGuide", fadeOutX]]) {
+      for (const [id, x] of [
+        ["editTrimStartGuide", keepStartX],
+        ["editTrimEndGuide", keepEndX],
+        ["editFadeInGuide", fadeInX],
+        ["editFadeOutGuide", fadeOutX],
+      ]) {
         const guide = $(id);
         guide.setAttribute("x1", x);
         guide.setAttribute("x2", x);
@@ -4311,12 +4547,21 @@
       const hasAnyFade = hasFadeIn || hasFadeOut;
       const handlesJoined = hasAnyFade && Math.abs(1 - editorSettings.fadeIn - editorSettings.fadeOut) < EDITOR_ENVELOPE_JOIN_EPSILON;
       const gainProgress = editorGainProgress();
-      envelope.style.setProperty("--fade-in-position", `${editorSettings.fadeIn * 100}%`);
-      envelope.style.setProperty("--fade-out-position", `${(1 - editorSettings.fadeOut) * 100}%`);
+      envelope.style.setProperty("--trim-start-position", `${keepStart * 100}%`);
+      envelope.style.setProperty("--trim-end-position", `${keepEnd * 100}%`);
+      envelope.style.setProperty("--keep-start", `${keepStart * 100}%`);
+      envelope.style.setProperty("--keep-end", `${(1 - keepEnd) * 100}%`);
+      envelope.style.setProperty("--keep-span", String(keepRatio));
+      envelope.style.setProperty("--fade-in-position", `${((fadeInX / width) * 100)}%`);
+      envelope.style.setProperty("--fade-out-position", `${((fadeOutX / width) * 100)}%`);
       envelope.style.setProperty("--envelope-gain-position", `${gainProgress * 100}%`);
-      envelope.style.setProperty("--envelope-gain-x-position", `${((fadeInX + fadeOutX) / (2 * width)) * 100}%`);
+      envelope.style.setProperty("--envelope-gain-x-position", `${(((fadeInX + fadeOutX) / (2 * width)) * 100)}%`);
+      plot.style.setProperty("--keep-start", `${keepStart * 100}%`);
+      plot.style.setProperty("--keep-end", `${(1 - keepEnd) * 100}%`);
       envelope.classList.toggle("has-fade-in", hasFadeIn);
       envelope.classList.toggle("has-fade-out", hasFadeOut);
+      envelope.classList.toggle("has-trim-start", trimStart > 0);
+      envelope.classList.toggle("has-trim-end", trimEnd > 0);
       envelope.classList.toggle("has-joined-handles", handlesJoined);
     }
     function editorWaveformPath(buffer) {
@@ -4378,20 +4623,36 @@
       }
     }
     function updateEditorOutputs() {
+      const { trimStart, trimEnd } = editorKeepWindow();
       $("editGainValue").textContent = `${editorSettings.gainDb > 0 ? "+" : ""}${editorSettings.gainDb} dB`;
       $("editHighEndValue").textContent = `${editorSettings.highEndDb > 0 ? "+" : ""}${editorSettings.highEndDb} dB`;
       $("editFadeInValue").textContent = editorSettings.fadeIn ? `${Math.round(editorSettings.fadeIn * 100)}%` : "None";
       $("editFadeOutValue").textContent = editorSettings.fadeOut ? `${Math.round(editorSettings.fadeOut * 100)}%` : "None";
+      $("editTrimStartValue").textContent = trimStart ? `−${Math.round(trimStart * 100)}%` : "Start";
+      $("editTrimEndValue").textContent = trimEnd ? `−${Math.round(trimEnd * 100)}%` : "End";
       $("editSpeedValue").textContent = `${Number(editorSettings.playbackRate).toFixed(2).replace(/0$/, "")}×`;
       const gainControl = $("editGain");
       gainControl.setAttribute("aria-valuetext", $("editGainValue").textContent);
       $("editFadeIn").setAttribute("aria-valuetext", $("editFadeInValue").textContent);
       $("editFadeOut").setAttribute("aria-valuetext", $("editFadeOutValue").textContent);
+      $("editTrimStart").setAttribute("aria-valuetext", trimStart ? `${Math.round(trimStart * 100)} percent trimmed from start` : "No start trim");
+      $("editTrimEnd").setAttribute("aria-valuetext", trimEnd ? `${Math.round(trimEnd * 100)} percent trimmed from end` : "No end trim");
       updateEditorEnvelopeVisual();
     }
     function syncEditorFadeControls() {
       $("editFadeIn").value = editorSettings.fadeIn;
       $("editFadeOut").value = editorSettings.fadeOut;
+    }
+    function syncEditorTrimControls() {
+      const { trimStart, trimEnd } = editorKeepWindow();
+      const startControl = $("editTrimStart");
+      const endControl = $("editTrimEnd");
+      startControl.max = String(Math.max(0, Number((1 - EDITOR_MIN_KEEP_RATIO - trimEnd).toFixed(2))));
+      endControl.max = String(Math.max(0, Number((1 - EDITOR_MIN_KEEP_RATIO - trimStart).toFixed(2))));
+      startControl.value = trimStart;
+      endControl.value = trimEnd;
+      editorSettings.trimStart = trimStart;
+      editorSettings.trimEnd = trimEnd;
     }
     function updateEditorFade(changedFade, value) {
       const changed = applyEditorSettingsMutation(() => {
@@ -4404,6 +4665,20 @@
       });
       if (!changed) return;
       syncEditorFadeControls();
+      updateEditorOutputs();
+    }
+    function updateEditorTrim(changedTrim, value) {
+      const changed = applyEditorSettingsMutation(() => {
+        const pairedTrim = changedTrim === "trimStart" ? "trimEnd" : "trimStart";
+        const nextValue = Math.max(0, Math.min(EDITOR_MAX_TRIM_RATIO, value));
+        const pairedLimit = 1 - EDITOR_MIN_KEEP_RATIO - nextValue;
+        editorSettings[changedTrim] = Number(nextValue.toFixed(2));
+        if (editorSettings[pairedTrim] > pairedLimit) {
+          editorSettings[pairedTrim] = Number(Math.max(0, pairedLimit).toFixed(2));
+        }
+      });
+      if (!changed) return;
+      syncEditorTrimControls();
       updateEditorOutputs();
     }
     function restoreEditorSettings() {
@@ -4419,6 +4694,7 @@
       $("editGain").value = editorSettings.gainDb;
       $("editHighEnd").value = editorSettings.highEndDb;
       syncEditorFadeControls();
+      syncEditorTrimControls();
       $("editSpeed").value = editorSettings.playbackRate;
       $("editInvert").checked = editorSettings.invert;
       updateEditorOutputs();
@@ -4497,6 +4773,11 @@
       finishEditorHistoryTransaction();
       const changed = applyEditorSettingsMutation(() => {
         editorSettings[key] = EDITOR_DEFAULT_SETTINGS[key];
+        if (key === "trimStart" || key === "trimEnd") {
+          const window = editorKeepWindow(editorSettings);
+          editorSettings.trimStart = window.trimStart;
+          editorSettings.trimEnd = window.trimEnd;
+        }
       });
       if (changed) syncEditorControls();
     }
@@ -4560,7 +4841,10 @@
       let decoded;
       try { decoded = await context.decodeAudioData(await response.arrayBuffer()); } finally { await context.close(); }
       const rate = Math.max(0.75, Math.min(1.25, Number(settings.playbackRate) || 1));
-      const duration = decoded.duration / rate;
+      const { keepStart, keepEnd, keepRatio } = editorKeepWindow(settings);
+      const sourceOffset = decoded.duration * keepStart;
+      const keepDuration = Math.max(decoded.duration * keepRatio, 1 / decoded.sampleRate);
+      const duration = keepDuration / rate;
       const length = Math.max(1, Math.ceil(duration * decoded.sampleRate));
       const offline = new OfflineAudioContextClass(decoded.numberOfChannels, length, decoded.sampleRate);
       const source = offline.createBufferSource();
@@ -4590,7 +4874,7 @@
       source.connect(filter);
       filter.connect(gain);
       gain.connect(offline.destination);
-      source.start(0);
+      source.start(0, sourceOffset, keepDuration);
       const rendered = await offline.startRendering();
       if (settings.invert) for (let channel = 0; channel < rendered.numberOfChannels; channel += 1) {
         const samples = rendered.getChannelData(channel);
@@ -4636,6 +4920,7 @@
       editorInitialSettings = { ...editorSettings };
       editorHistory = [];
       editorHistoryTransaction = null;
+      setEditorEnvelopeMode("fade");
       setEditorSaveChoiceOpen(false, { force: true });
       syncEditorUndoButton();
       syncEditorControls();
@@ -4727,7 +5012,7 @@
           setStatus("Updated the candidate. Keep it or toss it when ready.");
           return;
         }
-        if (mode === "overwrite") {
+      if (mode === "overwrite") {
           const generatedIndex = generatedSounds.findIndex((entry) => entry.id === item.id);
           if (generatedIndex >= 0) {
             generatedSounds[generatedIndex] = {
@@ -4751,6 +5036,8 @@
             name: `${displayName(item)} (edited)`,
             generated: true,
             originalPath: item.originalPath || item.id,
+            prompt: item.prompt || (candidate?.id === item.id ? candidate.prompt : undefined),
+            durationSeconds: item.durationSeconds || (candidate?.id === item.id ? candidate.durationSeconds : undefined),
           });
           renderLibrary();
           renderAssignments();
@@ -4886,6 +5173,7 @@
       const playButton = event.target.closest("[data-play]");
       const editButton = event.target.closest("[data-edit]");
       const renameButton = event.target.closest("[data-rename]");
+      const similarButton = event.target.closest("[data-similar]");
       const deleteButton = event.target.closest("[data-delete]");
       const undoButton = event.target.closest("[data-undo]");
       const libraryAction = event.target.closest("[data-library-action]");
@@ -4920,6 +5208,11 @@
         openEditor(decodeURIComponent(editButton.dataset.edit));
         return;
       }
+      if (similarButton) {
+        if (isEditing()) return;
+        void generateSimilarSound(entryById(decodeURIComponent(similarButton.dataset.similar)), similarButton);
+        return;
+      }
       if (renameButton) {
         if (isEditing()) return;
         const item = entryById(decodeURIComponent(renameButton.dataset.rename));
@@ -4948,7 +5241,7 @@
         renderAssignments();
       }
     });
-    const editorContinuousControls = ["editGain", "editHighEnd", "editFadeIn", "editFadeOut", "editSpeed"].map($);
+    const editorContinuousControls = ["editGain", "editHighEnd", "editFadeIn", "editFadeOut", "editTrimStart", "editTrimEnd", "editSpeed"].map($);
     editorContinuousControls.forEach((control) => {
       control.addEventListener("pointerdown", (event) => {
         if (event.button === 0) beginEditorHistoryTransaction();
@@ -4968,10 +5261,16 @@
     $("editHighEnd").addEventListener("input", (event) => updateEditorSetting("highEndDb", Number(event.target.value)));
     $("editFadeIn").addEventListener("input", (event) => updateEditorFade("fadeIn", Number(event.target.value)));
     $("editFadeOut").addEventListener("input", (event) => updateEditorFade("fadeOut", Number(event.target.value)));
+    $("editTrimStart").addEventListener("input", (event) => updateEditorTrim("trimStart", Number(event.target.value)));
+    $("editTrimEnd").addEventListener("input", (event) => updateEditorTrim("trimEnd", Number(event.target.value)));
+    $("envelopeModeFade").addEventListener("click", () => setEditorEnvelopeMode("fade"));
+    $("envelopeModeTrim").addEventListener("click", () => setEditorEnvelopeMode("trim"));
     for (const [buttonId, settingKey] of [
       ["editFadeInReset", "fadeIn"],
       ["editGainReset", "gainDb"],
       ["editFadeOutReset", "fadeOut"],
+      ["editTrimStartReset", "trimStart"],
+      ["editTrimEndReset", "trimEnd"],
       ["editHighEndReset", "highEndDb"],
       ["editSpeedReset", "playbackRate"],
     ]) {
@@ -5140,30 +5439,98 @@
       }
     });
     $("clean").addEventListener("click", cleanUnusedSessionAssets);
+    function soundFxGenerateEndpoint() {
+      return location.protocol === "file:" ? "http://127.0.0.1:18787/api/dev/sound-fx-bench/generate" : "/api/dev/sound-fx-bench/generate";
+    }
+    function similarPromptFor(item) {
+      if (!item) return "";
+      if (typeof item.prompt === "string" && item.prompt.trim()) return item.prompt.trim();
+      if (candidate?.id === item.id && typeof candidate.prompt === "string" && candidate.prompt.trim()) {
+        return candidate.prompt.trim();
+      }
+      const assignedLabels = assignments
+        .filter((action) => action.sounds.some((soundIndex) => entry(soundIndex)?.id === item.id))
+        .map((action) => action.label);
+      const name = displayName(item);
+      const actionHint = assignedLabels.length ? ` suited to ${assignedLabels.slice(0, 2).join(" and ")}` : "";
+      return `A polished short sound effect in the same family as "${name}"${actionHint}. Clean transient, natural space, no music, no speech.`;
+    }
+    function similarDurationFor(item) {
+      const fromItem = Number(item?.durationSeconds);
+      if (Number.isFinite(fromItem) && fromItem > 0) return fromItem;
+      if (candidate?.id === item?.id) {
+        const fromCandidate = Number(candidate.durationSeconds);
+        if (Number.isFinite(fromCandidate) && fromCandidate > 0) return fromCandidate;
+      }
+      return Number($("duration").value) || 1.2;
+    }
+    async function requestGeneratedCandidate({ prompt, durationSeconds, statusMessage }) {
+      const cleanedPrompt = String(prompt || "").trim();
+      if (!cleanedPrompt) throw new Error("Describe the sound effect to generate.");
+      const response = await fetch(soundFxGenerateEndpoint(), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: cleanedPrompt, durationSeconds }),
+      });
+      if (!response.ok) throw new Error((await response.text()).replace(/[{}\"]/g, "").slice(0, 220));
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      discardCandidate();
+      candidate = {
+        prompt: cleanedPrompt,
+        durationSeconds,
+        id: `candidate-${Date.now()}`,
+        name: cleanedPrompt.slice(0, 54),
+        objectUrl,
+        dataUrl: await dataUrlForBlob(blob),
+      };
+      $("candidateName").textContent = candidate.name;
+      $("candidate").classList.add("show");
+      loadPlayer(objectUrl, candidate.name, true, candidate.id);
+      setStatus(statusMessage || "Candidate ready. Keep it or toss it.");
+      return candidate;
+    }
+    async function generateSimilarSound(item, button) {
+      if (!item) return;
+      const prompt = similarPromptFor(item);
+      const durationSeconds = similarDurationFor(item);
+      const originalLabel = button?.textContent || "Similar";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "…";
+      }
+      setStatus(`Generating a similar take of ${displayName(item)}…`);
+      try {
+        if (benchView === "demo") setBenchView("library");
+        $("prompt").value = prompt;
+        $("duration").value = String(durationSeconds);
+        await requestGeneratedCandidate({
+          prompt,
+          durationSeconds,
+          statusMessage: `Similar candidate ready for ${displayName(item)}. Keep it or toss it.`,
+        });
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Generation failed. Start PRISM with ELEVENLABS_API_KEY loaded.");
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        }
+      }
+    }
     $("generator").addEventListener("submit", async (event) => {
       event.preventDefault();
       const prompt = $("prompt").value.trim();
       if (!prompt) return;
       const button = event.submitter;
-      discardCandidate();
       button.disabled = true;
       button.textContent = "Generating…";
       setStatus("Asking ElevenLabs for a candidate…");
       try {
-        const endpoint = location.protocol === "file:" ? "http://127.0.0.1:18787/api/dev/sound-fx-bench/generate" : "/api/dev/sound-fx-bench/generate";
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt, durationSeconds: Number($("duration").value) })
+        await requestGeneratedCandidate({
+          prompt,
+          durationSeconds: Number($("duration").value),
         });
-        if (!response.ok) throw new Error((await response.text()).replace(/[{}\"]/g, "").slice(0, 220));
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        candidate = { prompt, id: `candidate-${Date.now()}`, name: prompt.slice(0, 54), objectUrl, dataUrl: await dataUrlForBlob(blob) };
-        $("candidateName").textContent = candidate.name;
-        loadPlayer(objectUrl, candidate.name, true, candidate.id);
-        $("candidate").classList.add("show");
-        setStatus("Candidate ready. Keep it or toss it.");
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Generation failed. Start PRISM with ELEVENLABS_API_KEY loaded.");
       } finally {
@@ -5175,7 +5542,14 @@
     $("candidateEdit").addEventListener("click", () => { if (candidate) openEditor(candidate.id); });
     $("keep").addEventListener("click", () => {
       if (!candidate) return;
-      generatedSounds.push({ id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true });
+      generatedSounds.push({
+        id: candidate.id,
+        path: candidate.dataUrl,
+        name: candidate.name,
+        generated: true,
+        prompt: candidate.prompt,
+        durationSeconds: candidate.durationSeconds,
+      });
       renderLibrary();
       renderAssignments();
       discardCandidate();

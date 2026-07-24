@@ -5,6 +5,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-07-23 · [UX]
+**Trigger**: Sound FX Bench needed both local trim editing and one-click sibling generation without a reference-audio provider.
+**Lesson**: Add Start/End trim as outer waveform handles with discarded-region dimming, keep Fade In/Out relative to the retained slice, and enforce a minimum keep ratio so fades never fight empty audio. Expose Fade and Trim as mutually exclusive envelope modes so their left/right handles never share the same interaction lane. For Similar, reuse the stored generation prompt when available and otherwise build a family prompt from the display name plus assigned actions, returning through the existing candidate Keep/Edit/Toss flow.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` editor trim and library Similar action.
+
+### 2026-07-23 · [UX]
 **Trigger**: Sound FX Bench assets played at full volume from the Library but at only 16–30% from Demo panels, making contextual auditions sound substantially quieter.
 **Lesson**: Keep Library and Demo auditions perceptually comparable. Lift the contextual path with one named master-gain constant while preserving cue-specific balance and per-source headroom; include the same master gain in any displayed or recorded output-gain diagnostics.
 **Applies to**: `apps/web/public/tools/sound-fx-bench.html` Library/Demo playback balance.
