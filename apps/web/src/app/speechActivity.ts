@@ -15,7 +15,8 @@ export interface SpeechActivityWindow {
  * deliberate phrase pause.
  */
 export const SPEECH_ACTIVITY_ATTACK_MS = 45;
-export const SPEECH_ACTIVITY_RELEASE_MS = 85;
+/** Hold the last phoneme long enough for the audible vowel/consonant tail. */
+export const SPEECH_ACTIVITY_RELEASE_MS = 200;
 const SPEECH_ACTIVITY_MERGE_GAP_MS = 40;
 
 function alignmentDurationSeconds(

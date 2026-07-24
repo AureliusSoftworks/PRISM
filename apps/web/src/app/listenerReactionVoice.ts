@@ -115,7 +115,7 @@ export async function playListenerReactionVoice(args: {
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
     channel: args.channel,
-    maxDurationMs: args.plan.interjectionAttempt ? 1_300 : 900,
+    maxDurationMs: args.plan.interjectionAttempt ? 2_400 : 2_000,
   });
 }
 
@@ -163,7 +163,7 @@ export async function playEphemeralReactionVoice(args: {
       voiceEffect: voiceEffectForPlayback(profile),
       alignment: args.englishClip.alignment,
       channel: args.channel ?? "reaction",
-      maxDurationMs: args.maxDurationMs ?? 900,
+      maxDurationMs: args.maxDurationMs ?? 2_000,
       roomAcoustics: args.roomAcoustics,
       stereoPan: args.stereoPan,
       lifecycle: args.lifecycle,
@@ -187,7 +187,7 @@ export async function playEphemeralReactionVoice(args: {
         }
       : {}),
     channel: args.channel ?? "reaction",
-    maxDurationMs: args.maxDurationMs ?? 900,
+    maxDurationMs: args.maxDurationMs ?? 2_000,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
     lifecycle: args.lifecycle,

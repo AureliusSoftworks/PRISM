@@ -4,18 +4,20 @@ import { useCallback, useEffect, useState } from "react";
 import type { SessionAmbientBotVocalizationCue } from "./session-atmosphere-audio.ts";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth.ts";
 
+/** Ambient foley holds the CRT “oh” vowel (`open-small` → `:o`) while sounding. */
 const AMBIENT_BOT_VOCALIZATION_MOUTH_FRAMES = {
   "throat-clear": [
     "speech-closed",
     "narrow",
     "open-small",
-    "speech-closed",
-    "narrow",
     "open-small",
+    "open-small",
+    "narrow",
     "speech-closed",
   ],
   "mouth-sound": [
     "speech-closed",
+    "open-small",
     "open-small",
     "dot",
     "speech-closed",
@@ -24,21 +26,21 @@ const AMBIENT_BOT_VOCALIZATION_MOUTH_FRAMES = {
     "speech-closed",
     "dot",
     "open-small",
-    "dot",
+    "open-small",
     "speech-closed",
   ],
   "soft-sigh": [
     "speech-closed",
-    "open-wide",
-    "open-round",
-    "open-small",
     "narrow",
+    "open-small",
+    "open-small",
+    "open-small",
     "speech-closed",
   ],
   "soft-inhale": [
     "speech-closed",
     "narrow",
-    "open-round",
+    "open-small",
     "open-small",
     "speech-closed",
   ],

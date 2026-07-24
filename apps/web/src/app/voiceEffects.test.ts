@@ -161,7 +161,7 @@ describe("engine-agnostic voice effects", () => {
     assert.match(reactionSource, /buildBottishPlan/u);
     assert.match(reactionSource, /args\.mode === "babble"/u);
     assert.match(reactionSource, /channel: args\.channel \?\? "reaction"/u);
-    assert.match(reactionSource, /maxDurationMs: args\.plan\.interjectionAttempt \? 1_300 : 900/u);
+    assert.match(reactionSource, /maxDurationMs: args\.plan\.interjectionAttempt \? 2_400 : 2_000/u);
     assert.match(reactionSource, /args\.plan\.vocalFoley && args\.mode !== "english"/u);
     assert.match(
       reactionSource,
@@ -178,6 +178,8 @@ describe("engine-agnostic voice effects", () => {
       /interruptedSpeakerCuePlayback !== "primary"/u,
     );
     assert.match(pageSource, /channel: "crosstalk"/u);
+    assert.match(source, /VOICE_PLAYBACK_TAIL_FLUSH_MS = 120/u);
+    assert.match(source, /Math\.max\(lifecycleOutputLatencyMs, tailFlushMs\)/u);
   });
 });
 

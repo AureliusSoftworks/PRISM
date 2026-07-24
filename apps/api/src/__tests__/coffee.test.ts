@@ -5847,7 +5847,7 @@ describe("Coffee group foundation", () => {
     const ambient = parseStoredAssistantToolPayload(stored.tool_payload).coffeeAmbientAction;
     assert.equal(ambient?.name, "coffeeAmbientAction");
     assert.equal(ambient?.source, "scripted");
-    assert.match(ambient?.action ?? "", /cup|coffee|sip/);
+    assert.match(ambient?.action ?? "", /cup|coffee|sip|eyebrow|judges|eyes|head|lips|look|arms|scoff/);
     assert.deepEqual(result.conversation.messages.at(-1)?.coffeeAmbientAction, ambient);
   });
 
@@ -8597,6 +8597,8 @@ describe("buildSpeakerPrompt", () => {
     assert.match(combined, /Action section =/);
     assert.match(combined, /single asterisks/);
     assert.match(combined, /\*tilts head\*/);
+    assert.match(combined, /\*raises an eyebrow\*/);
+    assert.match(combined, /Prefer opening most ordinary turns/);
     assert.match(combined, /\*straightens napkin\* The plan still needs a limit/);
     assert.match(combined, /must begin immediately after the opening asterisk/);
     assert.match(combined, /third-person present verb ending in `s`/);

@@ -267,6 +267,12 @@ export interface VoicePlaybackProgressOptions {
 }
 
 const VOICE_OUTPUT_LATENCY_MAX_MS = 250;
+/**
+ * Keep the playback graph connected briefly after the buffer source ends so
+ * formant/time-stretch worklets can flush their last phoneme instead of
+ * disconnecting mid-vowel.
+ */
+export const VOICE_PLAYBACK_TAIL_FLUSH_MS = 120;
 
 export function estimateVoiceOutputLatencyMs(
   context: Pick<AudioContext, "baseLatency" | "currentTime"> &
@@ -814,12 +820,6 @@ export async function playRealtimeVoiceBytes(args: {
       ? args.maxDurationMs / 1_000
       : Number.POSITIVE_INFINITY,
   );
-  const playbackDurationMs = Math.min(
-    expectedVoicePlaybackDurationMs(decoded.duration * 1000, profile),
-    args.maxDurationMs && args.maxDurationMs > 0
-      ? args.maxDurationMs
-      : Number.POSITIVE_INFINITY,
-  );
   const pitchCorrectionPoints = voiceEffect.pitchCorrection
     ? analyzePrismPitchCorrection({
         samples: decoded.getChannelData(0),
@@ -837,6 +837,16 @@ export async function playRealtimeVoiceBytes(args: {
   // the await to become stale. Anchor both source scheduling and the visible
   // lifecycle to the live audio clock so neither starts ahead nor cuts short.
   const now = context.currentTime;
+  const tailFlushMs = FormantCorrectionNode
+    ? VOICE_PLAYBACK_TAIL_FLUSH_MS
+    : Math.min(40, VOICE_PLAYBACK_TAIL_FLUSH_MS);
+  const playbackDurationMs =
+    Math.min(
+      expectedVoicePlaybackDurationMs(decoded.duration * 1000, profile),
+      args.maxDurationMs && args.maxDurationMs > 0
+        ? args.maxDurationMs
+        : Number.POSITIVE_INFINITY,
+    ) + tailFlushMs;
   const createPitchTransform = (
     startAt: number,
     effectDetuneCents = 0,
@@ -1178,11 +1188,9 @@ export async function playRealtimeVoiceBytes(args: {
       "ended",
       () => {
         if (settled) return;
-        if (lifecycleOutputLatencyMs > 0) {
-          endTimer = window.setTimeout(
-            () => finish(true),
-            lifecycleOutputLatencyMs,
-          );
+        const delayMs = Math.max(lifecycleOutputLatencyMs, tailFlushMs);
+        if (delayMs > 0) {
+          endTimer = window.setTimeout(() => finish(true), delayMs);
           return;
         }
         finish(true);

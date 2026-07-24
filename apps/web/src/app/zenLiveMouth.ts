@@ -1181,25 +1181,53 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
     }
   }
   const cursorIndex = Math.max(0, low - 1);
-  if (
-    safeElapsedMs >= durationMs ||
-    providerElapsedSeconds >=
-      (characterEndTimesSeconds[cursorIndex] ?? alignmentEndSeconds)
-  ) {
+  if (safeElapsedMs >= durationMs) {
     return "closed";
   }
+  const currentCharacterEndSeconds =
+    characterEndTimesSeconds[cursorIndex] ?? alignmentEndSeconds;
+  if (providerElapsedSeconds >= currentCharacterEndSeconds) {
+    // Mid-phrase gap: close. Trailing audio after the final character: hold
+    // the last mouth shape so the closing vowel/consonant is not swallowed.
+    if (cursorIndex < characters.length - 1) {
+      return "closed";
+    }
+  }
+  // After the final letter, hold that phoneme through trailing whitespace or
+  // alignment silence so the closing vowel/consonant is not swallowed.
+  let shapeCursorIndex = cursorIndex;
+  const hasLaterLetter = characters
+    .slice(cursorIndex + 1)
+    .some((character) => /[\p{L}\p{N}]/u.test(character));
+  if (
+    !hasLaterLetter &&
+    !/[\p{L}\p{N}]/u.test(characters[shapeCursorIndex] ?? "")
+  ) {
+    for (let index = shapeCursorIndex; index >= 0; index -= 1) {
+      if (/[\p{L}\p{N}]/u.test(characters[index] ?? "")) {
+        shapeCursorIndex = index;
+        break;
+      }
+    }
+  }
   const characterStartSeconds =
-    characterStartTimesSeconds[cursorIndex] ?? providerElapsedSeconds;
+    characterStartTimesSeconds[shapeCursorIndex] ?? providerElapsedSeconds;
   const characterEndSeconds =
-    characterEndTimesSeconds[cursorIndex] ?? characterStartSeconds;
+    characterEndTimesSeconds[shapeCursorIndex] ?? characterStartSeconds;
   const cursorProgress =
     characterEndSeconds > characterStartSeconds
-      ? (providerElapsedSeconds - characterStartSeconds) /
-        (characterEndSeconds - characterStartSeconds)
+      ? Math.min(
+          1,
+          Math.max(
+            0,
+            (providerElapsedSeconds - characterStartSeconds) /
+              (characterEndSeconds - characterStartSeconds),
+          ),
+        )
       : 0;
   return crtSpeechMouthShapeAtTextCursor({
     text: characters.join(""),
-    cursorIndex,
+    cursorIndex: shapeCursorIndex,
     cursorProgress,
   });
 }

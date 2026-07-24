@@ -99,8 +99,9 @@ describe("live avatar mouth synchronization", () => {
     assert.match(pageSource, /useAmbientBotVocalization\(\)/u);
     assert.match(
       pageSource,
-      /seatAmbientVocalizationActive[\s\S]{0,180}seatMouthActive/u,
+      /seatAmbientVocalizationActive[\s\S]{0,400}seatMouthActive/u,
     );
+    assert.match(pageSource, /seatFoleyOhMouth/u);
     assert.match(
       pageSource,
       /coffeeAmbientBotVocalizationMouthShape\(bot\.id\)/u,

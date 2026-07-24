@@ -237,6 +237,37 @@ test("aligned preview visemes close for lead-in silence and real timing gaps", (
   assert.equal(at(900), "closed");
 });
 
+test("aligned preview holds the final phoneme shape through the audio tail", () => {
+  const alignment = {
+    characters: ["n", "o"],
+    characterStartTimesSeconds: [0, 0.2],
+    characterEndTimesSeconds: [0.2, 0.55],
+  };
+  // Trailing silence in the alignment timeline after the last letter.
+  assert.equal(
+    crtSpeechMouthShapeAtAlignedElapsedMs({
+      text: "no",
+      elapsedMs: 800,
+      durationMs: 1_000,
+      alignment: {
+        characters: ["n", "o", " "],
+        characterStartTimesSeconds: [0, 0.2, 0.55],
+        characterEndTimesSeconds: [0.2, 0.55, 1],
+      },
+    }),
+    "open-small",
+  );
+  assert.notEqual(
+    crtSpeechMouthShapeAtAlignedElapsedMs({
+      text: "no",
+      elapsedMs: 400,
+      durationMs: 1_000,
+      alignment,
+    }),
+    "closed",
+  );
+});
+
 test("aligned preview visemes accept chunked and overlapping provider timing", () => {
   assert.equal(
     crtSpeechMouthShapeAtAlignedElapsedMs({

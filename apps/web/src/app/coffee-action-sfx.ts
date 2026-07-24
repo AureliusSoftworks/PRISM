@@ -277,6 +277,16 @@ export function coffeeActionSfxGate(args: {
   };
 }
 
+/** Soft release when a new foley starts or the scene tears down. */
+export const COFFEE_ACTION_SFX_RELEASE_FADE_MS = 180;
+
+/** Bodily foley that should drive the default CRT “oh” mouth while it plays. */
+export function coffeeActionSfxDrivesOhMouth(
+  kind: CoffeeActionReactionKind | CoffeeActionSfxKind | null | undefined,
+): boolean {
+  return kind === "fart" || kind === "burp" || kind === "cough";
+}
+
 const preparedClips = new Map<CoffeeActionSfxKind, Blob>();
 const pendingClips = new Map<CoffeeActionSfxKind, Promise<void>>();
 let activeAudio: HTMLAudioElement | null = null;
@@ -374,7 +384,8 @@ export async function playPreparedCoffeeActionSfx(args: {
   ) {
     return false;
   }
-  stopCoffeeActionSfx();
+  // Fade the previous clip instead of hard-cutting mid-waveform.
+  stopCoffeeActionSfx(COFFEE_ACTION_SFX_RELEASE_FADE_MS);
   const url = clip ? URL.createObjectURL(clip) : bundledPlayback!.source;
   const audio = new Audio(url);
   const outputCleanup = routeAudioElementToPrismOutput(audio);
@@ -397,7 +408,8 @@ export async function playPreparedCoffeeActionSfx(args: {
     ).webkitPreservesPitch = false;
   }
   const release = (): void => {
-    if (activeAudio === audio) activeAudio = null;
+    if (activeAudio !== audio) return;
+    activeAudio = null;
     outputCleanup?.();
     if (activeAudioOutputCleanup === outputCleanup) {
       activeAudioOutputCleanup = null;
@@ -418,11 +430,46 @@ export async function playPreparedCoffeeActionSfx(args: {
   }
 }
 
-export function stopCoffeeActionSfx(): void {
-  activeAudio?.pause();
+function releaseCoffeeActionAudioElement(
+  audio: HTMLAudioElement,
+  outputCleanup: (() => void) | null,
+  url: string | null,
+): void {
+  audio.pause();
+  outputCleanup?.();
+  if (url) URL.revokeObjectURL(url);
+}
+
+/** Stop active action foley. Prefer a short fade so bodily cues are not clipped. */
+export function stopCoffeeActionSfx(
+  fadeMs: number = COFFEE_ACTION_SFX_RELEASE_FADE_MS,
+): void {
+  const audio = activeAudio;
+  if (!audio) {
+    activeAudioOutputCleanup?.();
+    activeAudioOutputCleanup = null;
+    if (activeAudioUrl) URL.revokeObjectURL(activeAudioUrl);
+    activeAudioUrl = null;
+    return;
+  }
+  // Detach from the singleton so a new clip can start while this one fades.
   activeAudio = null;
-  activeAudioOutputCleanup?.();
+  const outputCleanup = activeAudioOutputCleanup;
   activeAudioOutputCleanup = null;
-  if (activeAudioUrl) URL.revokeObjectURL(activeAudioUrl);
+  const url = activeAudioUrl;
   activeAudioUrl = null;
+  const durationMs = Math.max(0, Math.round(fadeMs));
+  if (audio.paused || durationMs <= 0 || audio.volume <= 0) {
+    releaseCoffeeActionAudioElement(audio, outputCleanup, url);
+    return;
+  }
+  const initialVolume = audio.volume;
+  const startedAt = Date.now();
+  const fadeTimer = globalThis.setInterval(() => {
+    const progress = Math.min(1, (Date.now() - startedAt) / durationMs);
+    audio.volume = initialVolume * (1 - progress);
+    if (progress < 1) return;
+    globalThis.clearInterval(fadeTimer);
+    releaseCoffeeActionAudioElement(audio, outputCleanup, url);
+  }, 20);
 }

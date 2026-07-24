@@ -3211,20 +3211,28 @@ const SCRIPTED_COFFEE_AMBIENT_ACTIONS: readonly ScriptedCoffeeAmbientActionEntry
   { category: "cup", action: "stirs the coffee" },
   { category: "cup", action: "nudges the cup closer" },
   { category: "cup", action: "slides the cup aside" },
+  { category: "gesture", action: "raises an eyebrow" },
+  { category: "gesture", action: "judges the table in silence" },
+  { category: "gesture", action: "narrows their eyes" },
+  { category: "gesture", action: "tilts their head" },
+  { category: "gesture", action: "presses their lips thin" },
+  { category: "gesture", action: "gives a pointed look" },
+  { category: "gesture", action: "folds their arms" },
+  { category: "gesture", action: "stifles a scoff" },
 ] as const;
 
 function coffeeAmbientActionChance(settings: CoffeeSessionSettings): number {
   switch (settings.tableEnergy) {
     case "still":
-      return 0.12;
+      return 0.22;
     case "relaxed":
-      return 0.2;
+      return 0.34;
     case "buzzy":
-      return 0.26;
+      return 0.42;
     case "theatre":
-      return 0.24;
+      return 0.4;
     case "afterparty":
-      return 0.3;
+      return 0.48;
   }
 }
 
@@ -3301,7 +3309,7 @@ function buildScriptedCoffeeAmbientAction(args: {
     const actionRoll = stableUnitValue(
       `${args.conversationId}:${args.speaker.id}:${args.historyLength}:coffee-power-action`
     );
-    const chance = args.actionBias.frequency === "frequent" ? 0.45 : 0.18;
+    const chance = args.actionBias.frequency === "frequent" ? 0.62 : 0.32;
     if (actionRoll <= chance) {
       return {
         v: 1,
@@ -9960,10 +9968,12 @@ const COFFEE_STAGE_DIRECTION_APPENDIX = [
   "Action section = a short non-spoken beat wrapped in single asterisks. Spoken table words = the plain unwrapped text that appears on the table.",
   "Coffee Mode is not Markdown-formatted chat. Do NOT use asterisks for emphasis in ordinary dialogue — write plain words instead (`the thought that counts`, not `the *thought* that counts`).",
   "Only use single asterisks for a complete non-verbal action, gesture, or aside (anything that isn't spoken dialogue), like `*tilts head*` or `*glances at the door*`. Every action section must begin immediately after the opening asterisk with a third-person present verb ending in `s`; do not begin it with `I`, an adverb, a noun, or an `-ing` form. Do not put ordinary sentence words inside asterisks.",
+  "Prefer opening most ordinary turns with one short `*action*` before the spoken line (`*raises an eyebrow* That is optimistic.`, `*judges quietly* Fine.`, `*narrows their eyes* Say that again.`). Keep the action brief; the spoken line still carries the substance.",
+  "Judgemental, dry, or social micro-reactions are welcome when they fit the character (`*raises an eyebrow*`, `*judges the claim*`, `*stifles a scoff*`, `*gives a pointed look*`) — do not force them every turn, but use them more often than cup ambience.",
   "If your turn has both action and speech, format it as `*action* Spoken line.` Never leave non-spoken narration unwrapped at the start/end of the line (for example, write `*straightens napkin* The plan still needs a limit.`, not `I straighten my napkin The plan still needs a limit.`).",
   "Asterisk-wrapped actions are presented separately from your spoken line, so keep them short, in third person, and self-contained. The bulk of your reply should still be one short spoken line in plain prose with no Markdown styling.",
   "Do not output another participant as a speaker label, and do not write hidden coach/director language such as `show me`, `put a real case`, or `with a receipt attached` as your table line.",
-  "Keep stage directions name-free and ambient (`*nods slowly*`, `*straightens napkin*`, `*winces*`). Do NOT name another bot inside a `*…*` block — directed asides like `*glares at Squidward*` aren't allowed; if you genuinely want to address someone, do it in spoken text instead.",
+  "Keep stage directions name-free and ambient (`*nods slowly*`, `*straightens napkin*`, `*winces*`, `*raises an eyebrow*`). Do NOT name another bot inside a `*…*` block — directed asides like `*glares at Squidward*` aren't allowed; if you genuinely want to address someone, do it in spoken text instead.",
   "Do not put the user's name inside stage directions. If your spoken line answers another bot, keep the action aimed at the table or that same bot, not at the user.",
   "Match the speaker's actual body and props. Do not invent impossible anatomy or wardrobe in stage directions (for example, no beard-stroking for Mr. Krabs); use neutral table actions when unsure.",
   "The app already animates cup sipping visually. Do not write sip/drink actions or anything that implies drinking from the cup (`*sips*`, `*takes a sip*`, `*drinks from the cup*`, `*raises the mug to lips*`). Non-drinking cup gestures are okay only when meaningful, but do not default to coffee/cup ambience.",

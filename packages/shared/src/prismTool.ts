@@ -153,7 +153,7 @@ export interface CoffeeAmbientActionPayload {
   v: 1;
   name: "coffeeAmbientAction";
   source: "scripted";
-  category: "sip" | "cup" | "power";
+  category: "sip" | "cup" | "power" | "gesture";
   action: string;
 }
 
@@ -725,7 +725,10 @@ function normalizeCoffeeAmbientActionPayload(
     return undefined;
   }
   const category =
-    row.category === "sip" || row.category === "cup" || row.category === "power"
+    row.category === "sip" ||
+    row.category === "cup" ||
+    row.category === "power" ||
+    row.category === "gesture"
       ? row.category
       : undefined;
   const action = typeof row.action === "string" ? row.action.replace(/\s+/g, " ").trim() : "";

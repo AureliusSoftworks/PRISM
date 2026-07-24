@@ -7,6 +7,7 @@ import {
   buildCoffeeActionSfxPlan,
   coffeeActionCueTextForMessage,
   coffeeActionReactionKindForAction,
+  coffeeActionSfxDrivesOhMouth,
   coffeeActionSfxGate,
   coffeeActionSfxIsEligible,
   coffeeActionSfxKindForAction,
@@ -15,6 +16,24 @@ import {
 } from "./coffee-action-sfx.ts";
 
 describe("Coffee action sound effects", () => {
+  it("marks bodily foley kinds as default-mouth oh drivers", () => {
+    assert.equal(coffeeActionSfxDrivesOhMouth("cough"), true);
+    assert.equal(coffeeActionSfxDrivesOhMouth("burp"), true);
+    assert.equal(coffeeActionSfxDrivesOhMouth("fart"), true);
+    assert.equal(coffeeActionSfxDrivesOhMouth("nod"), false);
+    assert.equal(coffeeActionSfxDrivesOhMouth("cup_set_down"), false);
+  });
+
+  it("fades action foley instead of hard-stopping by default", () => {
+    const source = readFileSync(new URL("./coffee-action-sfx.ts", import.meta.url), "utf8");
+    assert.match(source, /COFFEE_ACTION_SFX_RELEASE_FADE_MS = 180/u);
+    assert.match(
+      source,
+      /export function stopCoffeeActionSfx\(\s*fadeMs: number = COFFEE_ACTION_SFX_RELEASE_FADE_MS/u,
+    );
+    assert.match(source, /audio\.volume = initialVolume \* \(1 - progress\)/u);
+  });
+
   it("recognizes only the small physical foley allowlist", () => {
     assert.equal(coffeeActionSfxKindForAction("pours coffee into her mug"), "coffee_pour");
     assert.equal(coffeeActionSfxKindForAction("stirs the coffee with a spoon"), "spoon_stir");
@@ -179,6 +198,9 @@ describe("Coffee action sound effects", () => {
     assert.match(pageSource, /presentCoffeeAuthoredActionReactionOnce/u);
     assert.match(pageSource, /data-coffee-authored-action-reaction/u);
     assert.match(pageSource, /actor: message\.role === "user" \? "player" : "bot"/u);
+    assert.match(pageSource, /coffeeActionSfxDrivesOhMouth/u);
+    assert.match(pageSource, /seatFoleyOhMouth/u);
+    assert.match(pageSource, /seatFoleyOhMouth\s*\?\s*"open-small"/u);
     assert.doesNotMatch(
       pageSource,
       /coffeeAuthoredActionReaction\?\.actor === "player"/u,

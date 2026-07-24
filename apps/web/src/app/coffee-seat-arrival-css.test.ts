@@ -397,6 +397,11 @@ describe("Coffee seat arrival CSS", () => {
       coffeeSeatPlateEmojiSource,
       /coffeeSeatScreenRelativeMouthRotationDeg\(\s*normalizedFaceMouthRotationDeg,\s*rotateDeg,?\s*\)/
     );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /normalizedFaceMouthCharacter && !renderedFaceMouthCharacter\s+\? undefined/,
+      "Default speech must drop custom-glyph counter-rotation when plate visemes replace the glyph",
+    );
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-mouth-rotation"/);
     assert.match(coffeeSeatPlateEmojiSource, /`\$\{faceMouthRotationCssDeg\}deg`/);
     assert.match(pageSource, /faceBlinkBar=\{faceStyle\.blinkBar\}/);
