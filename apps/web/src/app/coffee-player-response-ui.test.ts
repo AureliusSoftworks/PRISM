@@ -87,6 +87,17 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
+  it("hands a finished player line to botThinking before a queued bot reveal", () => {
+    assert.match(
+      pageSource,
+      /resolveCoffeeUserRevealSettledWaiters\(\);[\s\S]*?setCoffeeTypewriterLength\(charCount\);[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?if \(queued\) \{[\s\S]*?queueCoffeeRevealFnRef\.current\(queued\);/,
+    );
+    assert.match(
+      pageSource,
+      /coffeeUserTableTypingShouldRestart\(\{[\s\S]*?settled:\s*coffeeUserTableTypingSettledRef\.current,[\s\S]*?visibleLength:\s*coffeeTypewriterLengthRef\.current,[\s\S]*?fullDisplayLength:\s*charCount/,
+    );
+  });
+
   it("feeds accepted pending turns into Table talk without revealing bot prose early", () => {
     assert.match(
       pageSource,
@@ -110,6 +121,10 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /const tableTimelineMessages = coffeeCenterFeedMessagesDuringPendingReveal\(\{[\s\S]*?messages: tableTimelineMessagesRaw,[\s\S]*?revealInProgress: pendingAssistantRevealActive/,
+    );
+    assert.match(
+      pageSource,
+      /coffeePendingRevealConversation != null &&[\s\S]*?coffeePendingRevealConversation\.id === coffeeConversation\?\.id[\s\S]*?coffeePendingRevealConversation\.messages[\s\S]*?: messages;/,
     );
     assert.match(
       pageSource,
