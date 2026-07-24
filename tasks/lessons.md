@@ -5,6 +5,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench thinking-avatar loop was verified by numeric filenames, but the visible third and fourth poses were out of order.
+**Lesson**: Verify animation order from the rendered artwork, not only filename sequence. For the current thinking-avatar spinner, the smooth visual cycle is horizontal → descending diagonal → vertical → ascending diagonal, while idle remains the separate smiling `bot_0` image. Keep all five source PNGs tracked with the bench instead of relying on ignored local files, and let the supplied sprite art own its lighting rather than adding a separate radial hover orb behind it.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` thinking-avatar frame mapping.
+
+### 2026-07-23 · [UX]
 **Trigger**: The Sound FX Bench demo represented bot-card hover with one large card, but evaluating hover sound and visual timing needs repeated neighboring targets.
 **Lesson**: Interaction demos should preserve the density that gives the behavior meaning. For bot-card hover auditions, use a compact multi-card grid so moving between targets exposes hover onset, visual activation, and release timing together.
 **Applies to**: `apps/web/public/tools/sound-fx-bench.html` demo snippets.
@@ -375,11 +380,41 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Applies to**: LocalAI responsive UI/debugging work in `apps/web/src/app/page.tsx` and `apps/web/src/app/page.module.css`.
 
 ### 2026-07-23 · [UX]
-**Trigger**: “More tension” was initially interpreted as held drag resistance, but the intended feel was several strong wall-to-wall passes before momentum visibly decays.
-**Lesson**: For elastic pointer toys, distinguish held resistance, spring acceleration, and post-release momentum retention before tuning. Companion Glass should keep direct drag and use damping/restitution to preserve roughly two or three strong edge-to-edge passes.
+**Trigger**: “More tension” and “increase the drag” referred to different parts of Companion Glass feel: strong held resistance, a forceful release, and several wall-to-wall passes before momentum visibly decays.
+**Lesson**: Tune elastic pointer toys along three explicit axes: held drag transfer, release spring/slingshot force, and post-release damping/restitution. A bounded web drag cannot guarantee that a hidden native cursor reappears on the orb: the pointer can continue beyond the arena after the orb clamps, and browsers cannot warp it back. Do not simulate the native cursor with a fake one after that distinction matters. For Sound FX Bench, prioritize a visible native cursor with direct 1:1 orb tracking; express the requested slingshot feel through high spring/launch force and low-loss wall bounces. For impact-audio calibration, scale gain from measured collision velocity with explicit floor/ceiling constants, but remove all visible calibration/interaction copy once tuning is approved—the Companion Glass footer should show only its assigned-sound count. Keep energetic toys interruptible: clicking a moving arena should engage a clearly indicated high-damping, zero-rebound brake and return cleanly to center.
 **Applies to**: `apps/web/public/tools/sound-fx-bench.html` Companion Glass pointer physics.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sanctum Sound Editor was allowed to stack at a normal desktop width and repeated the selected sound, privacy state, and editing instructions in a large heading block.
+**Lesson**: Keep the Sound FX Bench library and assignment/editor panels side by side throughout normal desktop widths. Treat single-column stacking as an emergency narrow-screen fallback, not the design target. The selected library row already supplies editing context, so the editor should open directly on its instrument controls instead of repeating identity and instructional copy.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` workspace and editor breakpoints.
 
 ### 2026-04-24 · [UX]
 **Trigger**: Mobile bot customizer color/glyph popover used vertical space well but felt ambiguous to dismiss because it behaved like a near-full-height sheet.
 **Lesson**: Third-layer mobile popovers inside the right drawer should read as centered modal cards, not full-height sheets. Keep a visible dimmed outside area around the card so tap-outside dismissal is obvious; use a moderate viewport-height cap and let the internal glyph grid scroll instead of stretching the whole popover to the top and bottom safe areas.
 **Applies to**: `apps/web/src/app/page.module.css` `.colorGlyphPopover` mobile styling.
+
+### 2026-07-23 · [UX]
+**Trigger**: The first shared fade timeline was clearer than two nested slider cards, but its repeating decorative waveform and rectangular color washes still did not explain how the edit would shape the sound.
+**Lesson**: Audio-editing visuals should communicate the actual processing, not merely decorate the controls. Use the selected sound’s real waveform, clip it to the gain envelope, draw the fade ramps directly, keep paired handles independently reachable when they meet, and constrain conflicting values so the visual shape and rendered audio remain identical. Once the handles and waveform make the state obvious, omit redundant dynamic prose such as “Drag inward” or “Fades shaped.” Treat the three prominent envelope value chips as keyboard-accessible per-parameter reset buttons—Fade In to None, Gain to 0 dB, and Fade Out to None—with each reset recorded as one Undo step.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Sound FX Bench envelope editor.
+
+### 2026-07-23 · [UX]
+**Trigger**: Fine Tune still behaved like optional disclosure content even though its controls are part of the core desktop editing instrument.
+**Lesson**: Keep core Sound FX editing controls permanently visible. When vertical space is tight, remove explanatory repetition and consolidate controls instead of hiding them. Gain belongs inside the full-width waveform as a vertical fader, dynamically centered between the Fade In and Fade Out handles; never shrink the envelope to create a sidecar control. Fine Tune should retain only tone, timing, and phase, with its prominent High-end and Speed value chips acting as one-click resets to 0 dB and 1×.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` waveform gain fader and Fine Tune console.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX editor presented Save as available before any setting changed, then placed whole-edit Restore, Undo, and Preview actions inside the Envelope heading.
+**Lesson**: Editing instruments should reflect whether the current settings differ from their opening state: disable Save when there is nothing to preserve, including after values are restored manually. Undo should retain real edit history while Save follows current-state equality, and a continuous slider or dial gesture should collapse into one reversible step rather than flooding history with every input frame. Place actions according to their true scope: controls affecting both Envelope and Fine Tune belong in a distinct toolbar owned by their shared editor parent, and a globally placed Restore action must restore the whole editor.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` editor action state and history controls.
+
+### 2026-07-23 · [UX]
+**Trigger**: The custom player looked cohesive, but its vertical volume popover felt detached from the otherwise inline transport and overlapped nearby interface space.
+**Lesson**: Do not duplicate sound-shaping gain as temporary player volume. Keep the compact audition transport mute-only, and overlay per-file gain inside the editor waveform between the fade handles so its ownership and save behavior are unambiguous.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Sanctum player and waveform gain control.
+
+### 2026-07-23 · [UX]
+**Trigger**: The Sound FX Bench header stacked its title and full explanatory subtitle beneath the PRISM mark at a normal desktop width, then retained a redundant tool title after being compressed.
+**Lesson**: Utility benches should use a compact single-row identity bar at normal desktop widths: small atelier mark and the primary view toggle. Omit a repeated tool title when the surrounding context already identifies the bench, move optional explanatory copy into a title tooltip on the mark, and reserve header stacking for emergency narrow-screen fallback.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` bench header and responsive breakpoints.

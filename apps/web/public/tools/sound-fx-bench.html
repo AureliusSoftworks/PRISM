@@ -43,6 +43,9 @@
 
     * { box-sizing: border-box; }
 
+    body { user-select: none; -webkit-user-select: none; }
+    input, textarea, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
+
     html, body {
       margin: 0;
       height: 100%;
@@ -134,7 +137,11 @@
     @media (prefers-reduced-motion: reduce) {
       .atmosphere::before,
       .atmosphere::after,
-      .demo-glass-orb { animation: none !important; }
+      .demo-glass-orb,
+      .editor.is-previewing .envelope-waveform-active,
+      .envelope-plot.is-loading .envelope-waveform-ghost,
+      .envelope-plot.is-loading .envelope-waveform-active,
+      .prism-player.is-loading .player-toggle::after { animation: none !important; }
     }
 
     /* ── Shell ── */
@@ -157,22 +164,22 @@
     /* ── Header ── */
     header {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      gap: clamp(10px, 1.4vw, 20px);
-      align-items: end;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: clamp(10px, 1.2vw, 16px);
+      align-items: center;
       min-width: 0;
     }
 
     .brand {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 8px;
       min-width: 0;
     }
 
     .brand-emblem {
-      width: clamp(40px, 4vw, 52px);
-      height: clamp(40px, 4vw, 52px);
+      width: 36px;
+      height: 36px;
       flex-shrink: 0;
       filter:
         drop-shadow(0 0 9px rgba(255, 159, 28, 0.18))
@@ -182,11 +189,12 @@
     .brand-copy { min-width: 0; }
 
     .eyebrow {
-      margin: 0 0 8px;
+      margin: 0 0 2px;
       color: var(--fg-muted);
-      font-size: 0.68rem;
+      font-size: 0.55rem;
       font-weight: 700;
-      letter-spacing: 0.22em;
+      letter-spacing: 0.18em;
+      line-height: 1;
       text-transform: uppercase;
     }
 
@@ -196,7 +204,7 @@
       margin: 0;
       font-family: var(--font-title);
       font-weight: 300;
-      font-size: clamp(1.55rem, 3.4vw, 2.8rem);
+      font-size: clamp(1.1rem, 2vw, 1.35rem);
       letter-spacing: 0.14em;
       line-height: 0.95;
       text-transform: uppercase;
@@ -207,27 +215,6 @@
     .wordmark span:nth-child(3) { color: var(--prism-i); }
     .wordmark span:nth-child(4) { color: var(--prism-s); }
     .wordmark span:nth-child(5) { color: var(--prism-m); }
-
-    .title-block {
-      min-width: 0;
-    }
-
-    .title-block h1 {
-      margin: 0;
-      font-family: var(--font-title);
-      font-weight: 300;
-      font-size: clamp(1.35rem, 2.6vw, 2.1rem);
-      letter-spacing: -0.03em;
-      line-height: 1.05;
-      color: var(--fg);
-    }
-
-    .intro {
-      max-width: min(420px, 100%);
-      margin: 8px 0 0;
-      color: var(--fg-muted);
-      font-size: clamp(0.82rem, 1.1vw, 0.92rem);
-    }
 
     .header-meta {
       display: flex;
@@ -258,6 +245,56 @@
 
     .view-control[hidden] {
       display: none;
+    }
+
+    .view-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 9px;
+      border-color: color-mix(in srgb, var(--prism-m) 34%, var(--line));
+      color: var(--fg-muted);
+      font-size: 0.68rem;
+      font-weight: 750;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .view-switch-option {
+      transition: color 140ms ease;
+    }
+
+    .view-switch[aria-checked="false"] .view-switch-option:first-child,
+    .view-switch[aria-checked="true"] .view-switch-option:last-child {
+      color: var(--fg);
+    }
+
+    .view-switch-track {
+      position: relative;
+      width: 34px;
+      height: 19px;
+      flex: 0 0 auto;
+      border: 1px solid color-mix(in srgb, var(--prism-m) 45%, var(--line));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--prism-m) 18%, var(--field));
+    }
+
+    .view-switch-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      background: var(--prism-m);
+      box-shadow: 0 0 9px color-mix(in srgb, var(--prism-m) 72%, transparent);
+      transition: transform 160ms ease, background 160ms ease;
+    }
+
+    .view-switch[aria-checked="true"] .view-switch-thumb {
+      transform: translateX(15px);
+      background: var(--prism-i);
+      box-shadow: 0 0 9px color-mix(in srgb, var(--prism-i) 72%, transparent);
     }
 
     .pill {
@@ -324,6 +361,10 @@
       min-width: 0;
     }
 
+    body[data-bench-view="demo"] .player-bar {
+      display: none;
+    }
+
     .player-bar.is-demo-playing {
       animation: demo-player-glow 640ms ease-out;
     }
@@ -372,11 +413,367 @@
       white-space: nowrap;
     }
 
-    .player-bar audio {
+    .prism-player {
+      --player-progress: 0%;
+      position: relative;
+      isolation: isolate;
+      display: grid;
+      grid-template-columns: 38px max-content minmax(70px, 1fr) 36px;
+      align-items: center;
+      gap: 8px;
       width: 100%;
-      height: 36px;
+      min-width: 0;
+      height: 46px;
+      padding: 4px 5px;
+      overflow: visible;
+      border: 1px solid color-mix(in srgb, var(--line-strong) 86%, transparent);
       border-radius: 999px;
-      filter: saturate(0.9);
+      background:
+        radial-gradient(circle at 13% 0%, color-mix(in srgb, var(--prism-m) 11%, transparent), transparent 44%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018)),
+        color-mix(in srgb, var(--field) 88%, transparent);
+      box-shadow:
+        inset 0 1px rgba(255, 255, 255, 0.07),
+        inset 0 -1px rgba(0, 0, 0, 0.36),
+        0 8px 22px rgba(0, 0, 0, 0.24);
+      transition: border-color 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+    }
+
+    .prism-player::before {
+      content: "";
+      position: absolute;
+      z-index: -1;
+      inset: 0;
+      border-radius: inherit;
+      background:
+        linear-gradient(100deg,
+          color-mix(in srgb, var(--prism-p) 8%, transparent),
+          transparent 30%,
+          color-mix(in srgb, var(--prism-s) 7%, transparent) 68%,
+          color-mix(in srgb, var(--prism-m) 8%, transparent));
+      pointer-events: none;
+    }
+
+    .prism-player::after {
+      content: "";
+      position: absolute;
+      z-index: 2;
+      top: -1px;
+      left: 14%;
+      width: 72%;
+      height: 1px;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        color-mix(in srgb, var(--prism-p) 42%, transparent),
+        color-mix(in srgb, var(--prism-i) 52%, transparent),
+        color-mix(in srgb, var(--prism-s) 48%, transparent),
+        transparent
+      );
+      opacity: 0.66;
+      pointer-events: none;
+    }
+
+    .prism-player.is-empty {
+      opacity: 0.7;
+    }
+
+    .prism-player.is-playing {
+      border-color: color-mix(in srgb, var(--prism-s) 30%, var(--line-strong));
+      box-shadow:
+        inset 0 1px rgba(255, 255, 255, 0.08),
+        inset 0 -1px rgba(0, 0, 0, 0.34),
+        0 8px 24px rgba(0, 0, 0, 0.28),
+        0 0 24px color-mix(in srgb, var(--prism-s) 8%, transparent);
+    }
+
+    .prism-player.is-error {
+      border-color: color-mix(in srgb, var(--danger) 52%, var(--line-strong));
+      box-shadow:
+        inset 0 1px rgba(255, 255, 255, 0.06),
+        0 0 20px color-mix(in srgb, var(--danger) 10%, transparent);
+    }
+
+    .player-toggle,
+    .player-mute {
+      display: grid;
+      place-items: center;
+      width: 100%;
+      aspect-ratio: 1;
+      padding: 0;
+      color: color-mix(in srgb, var(--fg) 86%, var(--prism-s));
+      border-color: color-mix(in srgb, var(--line-strong) 88%, transparent);
+      background:
+        radial-gradient(circle at 34% 26%, rgba(255, 255, 255, 0.1), transparent 42%),
+        rgba(255, 255, 255, 0.045);
+      box-shadow: inset 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    .player-toggle:hover:not(:disabled),
+    .player-mute:hover:not(:disabled) {
+      color: #fff;
+      border-color: color-mix(in srgb, var(--prism-s) 50%, var(--line));
+      background: color-mix(in srgb, var(--prism-s) 12%, rgba(255, 255, 255, 0.05));
+      box-shadow:
+        inset 0 1px rgba(255, 255, 255, 0.1),
+        0 0 16px color-mix(in srgb, var(--prism-s) 14%, transparent);
+    }
+
+    .player-toggle:focus-visible,
+    .player-mute:focus-visible,
+    .player-progress input:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--prism-s) 76%, #fff);
+      outline-offset: 2px;
+    }
+
+    .prism-player.is-playing .player-toggle {
+      color: #071014;
+      border-color: transparent;
+      background:
+        radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.58), transparent 30%),
+        linear-gradient(135deg, var(--prism-i), var(--prism-s) 58%, var(--prism-m));
+      box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--prism-s) 32%, transparent),
+        0 0 18px color-mix(in srgb, var(--prism-s) 26%, transparent);
+    }
+
+    .player-play-icon {
+      position: relative;
+      width: 12px;
+      height: 14px;
+    }
+
+    .player-play-icon::before,
+    .player-play-icon::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      margin: auto;
+      transition: opacity 130ms ease, transform 160ms var(--ease);
+    }
+
+    .player-play-icon::before {
+      width: 0;
+      height: 0;
+      border-top: 7px solid transparent;
+      border-bottom: 7px solid transparent;
+      border-left: 10px solid currentColor;
+      transform: translateX(1px);
+    }
+
+    .player-play-icon::after {
+      width: 11px;
+      height: 13px;
+      border-radius: 1px;
+      background: linear-gradient(90deg, currentColor 0 3px, transparent 3px 8px, currentColor 8px);
+      opacity: 0;
+      transform: scale(0.72);
+    }
+
+    .prism-player.is-playing .player-play-icon::before {
+      opacity: 0;
+      transform: translateX(1px) scale(0.72);
+    }
+
+    .prism-player.is-playing .player-play-icon::after {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .prism-player.is-loading .player-toggle::after {
+      content: "";
+      position: absolute;
+      inset: 3px;
+      border: 1px solid transparent;
+      border-top-color: color-mix(in srgb, var(--prism-s) 72%, #fff);
+      border-radius: 50%;
+      animation: player-loading 720ms linear infinite;
+    }
+
+    .player-time {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 3px;
+      min-width: 61px;
+      color: var(--fg-subtle);
+      font-size: 0.67rem;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.025em;
+      white-space: nowrap;
+    }
+
+    #playerCurrentTime {
+      color: color-mix(in srgb, var(--fg) 82%, var(--prism-s));
+    }
+
+    .player-progress {
+      position: relative;
+      display: grid;
+      align-items: center;
+      width: 100%;
+      min-width: 0;
+      height: 24px;
+      cursor: pointer;
+    }
+
+    .player-progress-track {
+      position: absolute;
+      inset: auto 1px;
+      height: 4px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.045);
+      border-radius: 999px;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 12px, rgba(255, 255, 255, 0.055) 12px 13px),
+        rgba(255, 255, 255, 0.065);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+    }
+
+    .player-progress-fill {
+      position: relative;
+      display: block;
+      width: var(--player-progress);
+      height: 100%;
+      min-width: 0;
+      border-radius: inherit;
+      background: linear-gradient(
+        90deg,
+        var(--prism-p),
+        var(--prism-r) 27%,
+        var(--prism-i) 52%,
+        var(--prism-s) 75%,
+        var(--prism-m)
+      );
+      box-shadow: 0 0 10px color-mix(in srgb, var(--prism-s) 36%, transparent);
+      transition: width 60ms linear;
+    }
+
+    .player-progress-fill::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: -2px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #f7ffff;
+      box-shadow:
+        0 0 7px color-mix(in srgb, var(--prism-s) 82%, transparent),
+        0 0 12px color-mix(in srgb, var(--prism-m) 54%, transparent);
+      opacity: 0;
+      transform: translateY(-50%) scale(0.7);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .prism-player:not(.is-empty) .player-progress:hover .player-progress-fill::after,
+    .prism-player:not(.is-empty) .player-progress:focus-within .player-progress-fill::after,
+    .prism-player.is-playing .player-progress-fill::after {
+      opacity: 1;
+      transform: translateY(-50%) scale(1);
+    }
+
+    .player-progress input {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 24px;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .player-progress input::-webkit-slider-runnable-track {
+      height: 4px;
+      background: transparent;
+    }
+
+    .player-progress input::-webkit-slider-thumb {
+      width: 12px;
+      height: 12px;
+      margin-top: -4px;
+      appearance: none;
+      -webkit-appearance: none;
+      border: 2px solid rgba(7, 16, 20, 0.92);
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--prism-s) 74%, #fff);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--prism-s) 60%, transparent);
+      opacity: 0;
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+
+    .player-progress input::-moz-range-track {
+      height: 4px;
+      background: transparent;
+    }
+
+    .player-progress input::-moz-range-thumb {
+      width: 8px;
+      height: 8px;
+      border: 2px solid rgba(7, 16, 20, 0.92);
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--prism-s) 74%, #fff);
+      box-shadow: 0 0 8px color-mix(in srgb, var(--prism-s) 60%, transparent);
+      opacity: 0;
+    }
+
+    .player-progress:hover input::-webkit-slider-thumb,
+    .player-progress:focus-within input::-webkit-slider-thumb {
+      opacity: 1;
+    }
+
+    .player-progress:hover input::-moz-range-thumb,
+    .player-progress:focus-within input::-moz-range-thumb {
+      opacity: 1;
+    }
+
+    .player-progress input:disabled {
+      cursor: default;
+    }
+
+    .player-volume {
+      display: grid;
+      width: 36px;
+      height: 36px;
+    }
+
+    .player-mute svg {
+      width: 18px;
+      height: 18px;
+      overflow: visible;
+      fill: currentColor;
+    }
+
+    .player-sound-waves,
+    .player-mute-mark {
+      fill: none;
+      stroke: currentColor;
+      stroke-linecap: round;
+      stroke-width: 1.6;
+      transition: opacity 130ms ease, transform 160ms var(--ease);
+      transform-origin: center;
+    }
+
+    .player-mute-mark {
+      opacity: 0;
+      transform: scale(0.7);
+    }
+
+    .prism-player.is-muted .player-sound-waves {
+      opacity: 0;
+      transform: scale(0.72);
+    }
+
+    .prism-player.is-muted .player-mute-mark {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    @keyframes player-loading {
+      to { transform: rotate(1turn); }
     }
 
     .generator {
@@ -502,17 +899,25 @@
     .assignments-view[hidden],
     .editor[hidden] { display: none; }
 
+    body.is-editing #sidePanel > .panel-head,
+    body.is-editing #sidePanel > .hint {
+      display: none;
+    }
+
     .editor {
+      --editor-accent: var(--prism-s);
+      position: relative;
       display: grid;
-      grid-template-rows: auto auto auto auto auto auto minmax(0, 1fr);
-      align-content: start;
-      gap: 12px;
+      grid-template-rows: minmax(0, 1fr) auto;
+      align-content: stretch;
+      gap: 10px;
       flex: 1;
       min-width: 0;
       min-height: 0;
+      max-height: 100%;
       overflow-x: hidden;
-      overflow-y: auto;
-      padding: 2px 4px 4px 0;
+      overflow-y: hidden;
+      padding: 0 1px 1px;
       border: 0;
       border-radius: 0;
       background: transparent;
@@ -521,97 +926,847 @@
       -webkit-backdrop-filter: none;
     }
 
-    .editor-heading {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
+    .editor-scroll-region {
+      display: grid;
+      grid-template-rows: repeat(3, max-content);
+      align-content: start;
       gap: 8px;
+      min-width: 0;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: 3px 6px 6px 0;
+      scrollbar-gutter: stable;
     }
 
-    .editor-title {
+    .editor-section {
+      position: relative;
+      display: grid;
+      gap: 12px;
       overflow: hidden;
-      text-overflow: ellipsis;
+      padding: 14px;
+      border: 1px solid color-mix(in srgb, var(--editor-accent) 24%, var(--line));
+      border-radius: var(--radius-md);
+      background:
+        radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--editor-accent) 12%, transparent), transparent 46%),
+        color-mix(in srgb, var(--bg-elevated) 80%, transparent);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+    }
+
+    .editor-envelope {
+      gap: 9px;
+      padding: 12px;
+    }
+
+    .editor-section-heading {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .editor-section-heading > span:first-child {
+      display: grid;
+      gap: 2px;
+    }
+
+    .editor-section-heading strong,
+    .editor-control-copy strong,
+    .editor-fine-tune-heading strong {
+      color: var(--fg);
+      font-size: 0.83rem;
+      font-weight: 780;
+    }
+
+    .editor-section-heading small,
+    .editor-control-copy small,
+    .editor-fine-tune-heading small {
+      color: var(--fg-subtle);
+      font-size: 0.68rem;
+      line-height: 1.35;
+    }
+
+    .editor-section-kicker {
+      color: color-mix(in srgb, var(--editor-accent) 68%, var(--fg-muted));
+      font-size: 0.59rem;
+      font-weight: 850;
+      letter-spacing: 0.13em;
+      text-transform: uppercase;
+    }
+
+    .editor-toolstrip {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 38px;
+      padding: 5px 6px 5px 11px;
+      border: 1px solid color-mix(in srgb, var(--prism-p) 20%, var(--line));
+      border-radius: 12px;
+      background:
+        linear-gradient(90deg, color-mix(in srgb, var(--prism-p) 6%, transparent), transparent 42%),
+        color-mix(in srgb, var(--field) 68%, transparent);
+      box-shadow: inset 0 1px rgba(255, 255, 255, 0.025);
+    }
+
+    .editor-toolstrip-label {
+      color: var(--fg-subtle);
+      font-size: 0.58rem;
+      font-weight: 850;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
       white-space: nowrap;
     }
 
-    .editor-note {
-      color: var(--fg-muted);
-      font-size: 0.78rem;
-      margin: 0;
+    .editor-toolstrip-actions {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 5px;
     }
 
-    .editor-controls {
+    .editor-tool-button {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 5px 9px;
+      border-radius: 9px;
+      font-size: 0.62rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .editor-tool-icon {
+      min-width: 0.75em;
+      font-size: 0.72rem;
+      line-height: 1;
+    }
+
+    .envelope-timeline {
+      --fade-in-position: 0%;
+      --fade-out-position: 100%;
+      --envelope-gain-position: 50%;
+      --envelope-gain-x-position: 50%;
+      position: relative;
+      isolation: isolate;
+      min-height: 140px;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--prism-s) 24%, var(--line));
+      border-radius: 13px;
+      color: color-mix(in srgb, var(--prism-s) 72%, var(--fg-muted));
+      background:
+        radial-gradient(circle at 0% 50%, color-mix(in srgb, var(--prism-m) 9%, transparent), transparent 38%),
+        radial-gradient(circle at 100% 50%, color-mix(in srgb, var(--prism-i) 8%, transparent), transparent 38%),
+        linear-gradient(180deg, color-mix(in srgb, var(--prism-p) 5%, transparent), transparent 54%),
+        color-mix(in srgb, var(--field) 84%, transparent);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.025),
+        0 12px 28px rgba(0, 0, 0, 0.1);
+    }
+
+    .envelope-gain-fader {
+      --gain-accent: var(--prism-p);
+      position: absolute;
+      z-index: 4;
+      top: 4px;
+      bottom: 4px;
+      left: var(--envelope-gain-x-position);
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
+      place-items: center;
+      width: 24px;
+      min-height: 0;
+      pointer-events: none;
+      cursor: ns-resize;
+      transform: translateX(-50%);
+      transition: left 100ms linear, filter 140ms ease;
     }
 
-    .fade-waveform {
+    .envelope-gain-control {
       position: relative;
       display: grid;
-      gap: 10px;
-      overflow: hidden;
-      padding: 12px 12px 10px;
-      border: 1px solid color-mix(in srgb, var(--prism-s) 28%, var(--line));
-      border-radius: var(--radius-sm);
-      background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+      width: 24px;
+      height: 100%;
+      min-height: 0;
+      place-items: center;
     }
 
-    .fade-waveform svg {
+    .envelope-gain-control::after {
+      content: "";
       position: absolute;
-      inset: 26px 12px 10px;
-      width: calc(100% - 24px);
-      height: calc(100% - 36px);
-      opacity: 0.28;
+      z-index: 2;
+      top: 50%;
+      right: 0;
+      width: 4px;
+      height: 1px;
+      background: color-mix(in srgb, var(--fg-muted) 42%, transparent);
       pointer-events: none;
     }
 
-    .fade-track {
-      position: relative;
-      z-index: 1;
-      display: grid;
-      gap: 3px;
-      color: var(--fg-muted);
-      font-size: 0.76rem;
+    .editor .envelope-gain-control input[type="range"] {
+      --control-accent: var(--gain-accent);
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 52px;
+      height: 22px;
+      margin: 0;
+      appearance: none;
+      -webkit-appearance: none;
+      background: transparent;
+      cursor: ns-resize;
+      pointer-events: auto;
+      transform: translate(-50%, -50%) rotate(-90deg);
     }
 
-    .fade-track output { color: var(--fg); font-variant-numeric: tabular-nums; }
-    .fade-track input { width: 100%; accent-color: var(--prism-s); }
-    .fade-track.fade-out input { direction: rtl; }
+    .editor .envelope-gain-control input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--gain-accent) 70%, var(--prism-m)) 0 var(--envelope-gain-position),
+        color-mix(in srgb, var(--fg-subtle) 18%, var(--field)) var(--envelope-gain-position) 100%
+      );
+      box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, 0.42),
+        0 0 7px color-mix(in srgb, var(--gain-accent) 15%, transparent);
+    }
 
-    @media (max-width: 700px) {
-      .editor-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .editor .envelope-gain-control input[type="range"]::-webkit-slider-thumb {
+      width: 11px;
+      height: 11px;
+      margin-top: -3.5px;
+      appearance: none;
+      -webkit-appearance: none;
+      border: 2px solid color-mix(in srgb, var(--field) 90%, black);
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--gain-accent) 60%, white);
+      box-shadow: 0 0 9px color-mix(in srgb, var(--gain-accent) 48%, transparent);
+    }
+
+    .editor .envelope-gain-control input[type="range"]::-moz-range-track {
+      height: 4px;
+      border: 0;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--fg-subtle) 18%, var(--field));
+    }
+
+    .editor .envelope-gain-control input[type="range"]::-moz-range-progress {
+      height: 4px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--gain-accent) 70%, var(--prism-m));
+    }
+
+    .editor .envelope-gain-control input[type="range"]::-moz-range-thumb {
+      width: 8px;
+      height: 8px;
+      border: 2px solid color-mix(in srgb, var(--field) 90%, black);
+      border-radius: 50%;
+      background: color-mix(in srgb, var(--gain-accent) 60%, white);
+      box-shadow: 0 0 9px color-mix(in srgb, var(--gain-accent) 48%, transparent);
+    }
+
+    .editor .envelope-gain-control input[type="range"]:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--gain-accent) 56%, transparent);
+      outline-offset: 2px;
+    }
+
+    .envelope-gain-fader:has(input:hover),
+    .envelope-gain-fader:has(input:focus-visible) {
+      filter: drop-shadow(0 0 8px color-mix(in srgb, var(--gain-accent) 34%, transparent));
+    }
+
+    .envelope-readouts {
+      position: absolute;
+      z-index: 6;
+      top: 10px;
+      right: 10px;
+      left: 10px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      align-items: center;
+      gap: 10px;
+    }
+
+    .envelope-readout {
+      --envelope-accent: var(--prism-m);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      color: var(--fg-muted);
+      font-size: 0.68rem;
+      font-weight: 760;
+      transition: color 140ms ease;
+    }
+
+    .envelope-readout label {
+      cursor: pointer;
+    }
+
+    .envelope-readout-in { justify-self: start; }
+    .envelope-readout-gain {
+      --envelope-accent: var(--prism-p);
+      justify-self: center;
+    }
+    .envelope-readout-out {
+      --envelope-accent: var(--prism-i);
+      justify-self: end;
+    }
+
+    .editor-control-copy {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .editor-reset-chip {
+      flex-shrink: 0;
+      min-width: 3.6rem;
+      padding: 4px 7px;
+      border: 1px solid color-mix(in srgb, var(--envelope-accent, var(--control-accent, var(--prism-s))) 30%, var(--line));
+      border-radius: 999px;
+      color: var(--fg);
+      background: color-mix(in srgb, var(--envelope-accent, var(--control-accent, var(--prism-s))) 9%, transparent);
+      font: inherit;
+      font-size: 0.67rem;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+      transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+    }
+
+    .editor-reset-chip {
+      cursor: pointer;
+    }
+
+    .editor-reset-chip:hover,
+    .editor-reset-chip:focus-visible,
+    .editor-compact-control:has(input[type="range"]:focus-visible) .editor-reset-chip {
+      border-color: color-mix(in srgb, var(--envelope-accent, var(--control-accent, var(--prism-s))) 62%, var(--line));
+      color: var(--fg);
+      background: color-mix(in srgb, var(--envelope-accent, var(--control-accent, var(--prism-s))) 17%, transparent);
+      box-shadow: 0 0 16px color-mix(in srgb, var(--envelope-accent, var(--control-accent, var(--prism-s))) 14%, transparent);
+      outline: none;
+      transform: none;
+    }
+
+    .editor-reset-chip:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--envelope-accent, var(--control-accent, var(--prism-s))) 58%, transparent);
+      outline-offset: 2px;
+    }
+
+    .envelope-timeline:has(.envelope-range-in:focus-visible) .envelope-readout-in,
+    .envelope-timeline:has(.envelope-range-out:focus-visible) .envelope-readout-out,
+    .envelope-timeline:has(#editGain:focus-visible) .envelope-readout-gain {
+      color: var(--fg);
+    }
+
+    .envelope-timeline:has(.envelope-range-in:focus-visible) .envelope-readout-in .editor-reset-chip,
+    .envelope-timeline:has(.envelope-range-out:focus-visible) .envelope-readout-out .editor-reset-chip,
+    .envelope-timeline:has(#editGain:focus-visible) .envelope-readout-gain .editor-reset-chip {
+      border-color: color-mix(in srgb, var(--envelope-accent) 58%, var(--line));
+      background: color-mix(in srgb, var(--envelope-accent) 15%, transparent);
+      box-shadow: 0 0 16px color-mix(in srgb, var(--envelope-accent) 13%, transparent);
+    }
+
+    .envelope-plot {
+      position: absolute;
+      top: 47px;
+      right: 13px;
+      bottom: 25px;
+      left: 13px;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--prism-s) 9%, transparent);
+      border-radius: 9px;
+      background:
+        repeating-linear-gradient(90deg, transparent 0 calc(12.5% - 1px), color-mix(in srgb, var(--fg-subtle) 8%, transparent) calc(12.5% - 1px) 12.5%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.012), rgba(0, 0, 0, 0.05));
+      box-shadow: inset 0 8px 18px rgba(0, 0, 0, 0.08);
+    }
+
+    .envelope-visual {
+      position: absolute;
+      z-index: 2;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .envelope-center-line {
+      stroke: color-mix(in srgb, var(--fg-subtle) 34%, var(--line));
+      stroke-width: 1;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .envelope-shape {
+      fill: url("#editorEnvelopeFill");
+      stroke: color-mix(in srgb, var(--prism-s) 34%, transparent);
+      stroke-width: 1.2;
+      vector-effect: non-scaling-stroke;
+      transition: opacity 120ms ease;
+    }
+
+    .envelope-waveform-ghost {
+      fill: currentColor;
+      opacity: 0.15;
+    }
+
+    .envelope-waveform-active {
+      fill: url("#editorEnvelopeSignal");
+      opacity: 0.78;
+      filter: drop-shadow(0 0 7px color-mix(in srgb, var(--prism-s) 24%, transparent));
+      transform-origin: center;
+      transition: opacity 120ms ease;
+    }
+
+    .envelope-guide {
+      stroke-width: 1.25;
+      vector-effect: non-scaling-stroke;
+      transition: opacity 100ms ease;
+    }
+
+    .envelope-guide-in { stroke: color-mix(in srgb, var(--prism-m) 72%, white); }
+    .envelope-guide-out { stroke: color-mix(in srgb, var(--prism-i) 72%, white); }
+    .envelope-timeline:not(.has-fade-in) .envelope-guide-in,
+    .envelope-timeline:not(.has-fade-out) .envelope-guide-out { opacity: 0.36; }
+
+    .envelope-plot.is-loading .envelope-waveform-ghost,
+    .envelope-plot.is-loading .envelope-waveform-active {
+      animation: editor-envelope-loading 900ms ease-in-out infinite alternate;
+    }
+
+    .editor input[type="range"].envelope-range {
+      --control-accent: var(--prism-m);
+      position: absolute;
+      z-index: 5;
+      top: calc(50% - 15px);
+      width: 80%;
+      height: 30px;
+      pointer-events: none;
+      transition: transform 120ms ease;
+    }
+
+    .editor input[type="range"].envelope-range-in { left: 0; }
+
+    .editor input[type="range"].envelope-range-out {
+      --control-accent: var(--prism-i);
+      right: 0;
+      direction: rtl;
+    }
+
+    .editor input[type="range"].envelope-range::-webkit-slider-runnable-track {
+      height: 2px;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .editor input[type="range"].envelope-range::-webkit-slider-thumb {
+      width: 10px;
+      height: 30px;
+      margin-top: -14px;
+      border-width: 1px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--control-accent) 66%, white);
+      box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--control-accent) 12%, transparent),
+        0 0 14px color-mix(in srgb, var(--control-accent) 24%, transparent),
+        0 4px 10px rgba(0, 0, 0, 0.32);
+      pointer-events: auto;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+
+    .editor input[type="range"].envelope-range::-moz-range-track {
+      height: 2px;
+      border: 0;
+      background: transparent;
+    }
+
+    .editor input[type="range"].envelope-range::-moz-range-thumb {
+      width: 8px;
+      height: 28px;
+      border-width: 1px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--control-accent) 66%, white);
+      pointer-events: auto;
+    }
+
+    .editor input[type="range"].envelope-range:hover::-webkit-slider-thumb,
+    .editor input[type="range"].envelope-range:focus-visible::-webkit-slider-thumb {
+      transform: scaleX(1.14);
+      box-shadow:
+        0 0 0 5px color-mix(in srgb, var(--control-accent) 17%, transparent),
+        0 0 20px color-mix(in srgb, var(--control-accent) 34%, transparent),
+        0 4px 10px rgba(0, 0, 0, 0.32);
+    }
+
+    .editor .envelope-timeline.has-joined-handles input[type="range"].envelope-range-in {
+      transform: translateY(-8px);
+    }
+
+    .editor .envelope-timeline.has-joined-handles input[type="range"].envelope-range-out {
+      transform: translateY(8px);
+    }
+
+    .envelope-time-labels {
+      position: absolute;
+      right: 13px;
+      bottom: 7px;
+      left: 13px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--fg-subtle);
+      font-size: 0.56rem;
+      font-weight: 720;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      pointer-events: none;
     }
 
     .editor-control {
       display: grid;
-      gap: 4px;
+      gap: 11px;
+      min-width: 0;
       color: var(--fg-muted);
       font-size: 0.76rem;
     }
 
-    .editor-control output {
-      color: var(--fg);
-      font-variant-numeric: tabular-nums;
+    .editor-control-copy > span:first-child {
+      display: grid;
+      gap: 2px;
     }
 
-    .editor-control input[type="range"] {
+    .editor input[type="range"] {
+      appearance: none;
+      -webkit-appearance: none;
       width: 100%;
-      accent-color: var(--prism-s);
+      height: 18px;
+      margin: 0;
+      background: transparent;
+      cursor: ew-resize;
     }
 
-    .editor-check {
+    .editor input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      border: 1px solid color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 28%, var(--line));
+      border-radius: 999px;
+      background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 72%, var(--fg-muted)),
+        color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 20%, var(--field))
+      );
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.34);
+    }
+
+    .editor input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 17px;
+      height: 17px;
+      margin-top: -7px;
+      border: 2px solid color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 65%, white);
+      border-radius: 50%;
+      background: var(--fg);
+      box-shadow:
+        0 0 0 4px color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 13%, transparent),
+        0 3px 9px rgba(0, 0, 0, 0.3);
+    }
+
+    .editor input[type="range"]::-moz-range-track {
+      height: 4px;
+      border: 1px solid color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 28%, var(--line));
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 45%, var(--field));
+    }
+
+    .editor input[type="range"]::-moz-range-thumb {
+      width: 15px;
+      height: 15px;
+      border: 2px solid color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 65%, white);
+      border-radius: 50%;
+      background: var(--fg);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 13%, transparent);
+    }
+
+    .editor input[type="range"]:focus-visible {
+      outline: none;
+    }
+
+    .editor input[type="range"]:focus-visible::-webkit-slider-thumb {
+      box-shadow:
+        0 0 0 5px color-mix(in srgb, var(--control-accent, var(--track-accent, var(--prism-s))) 24%, transparent),
+        0 3px 9px rgba(0, 0, 0, 0.3);
+    }
+
+    .editor-fine-tune {
+      display: grid;
+      gap: 9px;
+      overflow: hidden;
+      padding: 11px;
+      border: 1px solid color-mix(in srgb, var(--prism-i) 28%, var(--line));
+      border-radius: var(--radius-md);
+      background:
+        radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--prism-i) 7%, transparent), transparent 44%),
+        color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+    }
+
+    .editor-fine-tune-heading {
       display: flex;
       align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+      padding: 0 2px;
+    }
+
+    .editor-fine-tune-heading > span:first-child {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+    }
+
+    .editor-phase-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      flex-shrink: 0;
+      color: var(--fg-muted);
+      font-size: 0.63rem;
+      font-weight: 740;
+      cursor: pointer;
+    }
+
+    .editor-fine-tune-body {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
+      min-width: 0;
+    }
+
+    .editor-fine-tune .editor-control {
+      --control-accent: var(--prism-i);
+      align-content: space-between;
+      min-height: 104px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--field) 88%, transparent);
+    }
+
+    .editor-fine-tune .editor-control:nth-child(2) {
+      --control-accent: var(--prism-s);
+    }
+
+    .editor-compact-control-heading strong {
       color: var(--fg);
-      font-size: 0.84rem;
+      font-size: 0.7rem;
+      font-weight: 780;
+    }
+
+    .editor-compact-control {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 8px;
+    }
+
+    .editor-compact-control-heading {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .editor-compact-control-heading label {
+      cursor: pointer;
+    }
+
+    .editor-compact-control-heading .editor-reset-chip {
+      width: 100%;
+      min-width: 0;
+      padding-block: 3px;
+    }
+
+    .editor-compact-control input[type="range"] {
+      align-self: end;
+    }
+
+    .editor-phase-toggle input {
+      appearance: none;
+      width: 34px;
+      height: 20px;
+      margin: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--field);
+      cursor: pointer;
+      transition: background 150ms ease, border-color 150ms ease;
+    }
+
+    .editor-phase-toggle input::before {
+      content: "";
+      display: block;
+      width: 14px;
+      height: 14px;
+      margin: 2px;
+      border-radius: 50%;
+      background: var(--fg-muted);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.28);
+      transition: transform 150ms var(--ease), background 150ms ease;
+    }
+
+    .editor-phase-toggle input:checked {
+      border-color: color-mix(in srgb, var(--prism-p) 55%, var(--line));
+      background: color-mix(in srgb, var(--prism-p) 44%, var(--field));
+    }
+
+    .editor-phase-toggle input:checked::before {
+      background: var(--fg);
+      transform: translateX(14px);
+    }
+
+    .editor-phase-toggle input:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--prism-p) 24%, transparent);
+      outline-offset: 2px;
     }
 
     .editor-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+      position: relative;
+      z-index: 5;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+      padding: 9px;
+      border: 1px solid color-mix(in srgb, var(--prism-s) 22%, var(--line));
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+      box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(18px) saturate(1.18);
+      -webkit-backdrop-filter: blur(18px) saturate(1.18);
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .editor-actions.is-choosing {
+      border-color: color-mix(in srgb, var(--prism-i) 42%, var(--line));
+      box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--prism-i) 7%, transparent),
+        0 -12px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    .editor-actions button {
+      min-height: 40px;
+      font-weight: 780;
+    }
+
+    .editor-restore-button {
+      border-color: color-mix(in srgb, var(--prism-r) 26%, var(--line));
+      color: color-mix(in srgb, var(--prism-r) 58%, var(--fg-muted));
+      background: color-mix(in srgb, var(--prism-r) 5%, transparent);
+    }
+
+    .editor-restore-button:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--prism-r) 48%, var(--line));
+      color: var(--fg);
+      background: color-mix(in srgb, var(--prism-r) 10%, transparent);
+    }
+
+    .editor-preview-button {
+      border-color: color-mix(in srgb, var(--prism-s) 42%, var(--line));
+      color: color-mix(in srgb, var(--prism-s) 68%, var(--fg));
+      background:
+        radial-gradient(circle at 16% 0%, color-mix(in srgb, var(--prism-s) 20%, transparent), transparent 62%),
+        var(--field);
+    }
+
+    .editor-undo-button {
+      border-color: color-mix(in srgb, var(--prism-p) 34%, var(--line));
+      color: color-mix(in srgb, var(--prism-p) 68%, var(--fg));
+      background:
+        radial-gradient(circle at 16% 0%, color-mix(in srgb, var(--prism-p) 16%, transparent), transparent 62%),
+        var(--field);
+    }
+
+    .editor-undo-button:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--prism-p) 58%, var(--line));
+      color: var(--fg);
+      box-shadow: 0 0 16px color-mix(in srgb, var(--prism-p) 12%, transparent);
+    }
+
+    .editor.is-previewing .editor-preview-button {
+      border-color: color-mix(in srgb, var(--prism-s) 70%, var(--line));
+      color: var(--fg);
+      box-shadow:
+        0 0 0 3px color-mix(in srgb, var(--prism-s) 11%, transparent),
+        0 0 20px color-mix(in srgb, var(--prism-s) 13%, transparent);
+    }
+
+    .editor-cancel-button {
+      color: var(--fg-muted);
+      background: transparent;
+    }
+
+    .editor-save-button {
+      border-color: transparent;
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 40%, var(--prism-i) 74%, var(--prism-s));
+      box-shadow: 0 9px 24px rgba(123, 92, 255, 0.18);
+    }
+
+    .editor-save-button:hover:not(:disabled),
+    .editor-actions.is-choosing .editor-cancel-button:hover:not(:disabled) {
+      border-color: transparent;
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 40%, var(--prism-i) 74%, var(--prism-s));
+      filter: brightness(1.06);
+    }
+
+    .editor-actions.is-choosing .editor-save-button {
+      border-color: color-mix(in srgb, var(--prism-i) 38%, var(--line));
+      color: color-mix(in srgb, var(--prism-i) 66%, var(--fg));
+      background: color-mix(in srgb, var(--prism-i) 8%, var(--field));
+      box-shadow: none;
+    }
+
+    .editor-actions.is-choosing .editor-save-button:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--prism-i) 56%, var(--line));
+      color: var(--fg);
+      background: color-mix(in srgb, var(--prism-i) 13%, var(--field));
+      filter: none;
+    }
+
+    .editor-actions.is-choosing .editor-cancel-button {
+      border-color: transparent;
+      color: #17131d;
+      background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 40%, var(--prism-i) 74%, var(--prism-s));
+      box-shadow: 0 9px 24px rgba(123, 92, 255, 0.18);
+    }
+
+    @keyframes editor-envelope-loading {
+      from { opacity: 0.08; }
+      to { opacity: 0.28; }
+    }
+
+    @keyframes editor-wave-live {
+      0%, 100% { opacity: 0.68; transform: scaleY(0.97); }
+      50% { opacity: 0.94; transform: scaleY(1.03); }
+    }
+
+    .editor.is-previewing .envelope-waveform-active {
+      animation: editor-wave-live 1.25s ease-in-out infinite;
+    }
+
+    @media (max-width: 460px) {
+      .editor-fine-tune-body { grid-template-columns: minmax(0, 1fr); }
     }
 
     /* ── Library / assignments scroll regions ── */
@@ -841,10 +1996,36 @@
     .toolbar {
       display: flex;
       flex-wrap: wrap;
-      gap: 9px;
+      gap: 7px;
       margin-top: 14px;
       padding-top: 14px;
       border-top: 1px solid var(--line);
+    }
+
+    .toolbar-action-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .toolbar button {
+      padding: 7px 10px;
+      font-size: 0.86rem;
+      white-space: nowrap;
+    }
+
+    .clean-button {
+      border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+      color: color-mix(in srgb, var(--danger) 72%, var(--fg));
+      background: color-mix(in srgb, var(--danger) 7%, transparent);
+    }
+
+    .clean-button:hover:not(:disabled) {
+      border-color: color-mix(in srgb, var(--danger) 58%, var(--line));
+      color: color-mix(in srgb, var(--danger) 82%, #fff);
+      background: color-mix(in srgb, var(--danger) 13%, transparent);
     }
 
     .status {
@@ -924,29 +2105,12 @@
       flex-wrap: wrap;
     }
 
-    .demo-spatial-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      flex-shrink: 0;
-      color: var(--fg-muted);
-      font-size: 0.78rem;
-      cursor: pointer;
-    }
-
-    .demo-spatial-toggle input {
-      width: 17px;
-      height: 17px;
-      accent-color: var(--prism-s);
-      cursor: pointer;
-    }
-
     .demo-gallery {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
       gap: 12px;
       min-width: 0;
-      min-height: 0;
+      min-height: 585px;
       overflow-y: auto;
       align-content: start;
       padding: 2px 5px 8px 0;
@@ -984,6 +2148,10 @@
       min-width: 0;
     }
 
+    .demo-card-footer.demo-assignment-only {
+      justify-content: flex-end;
+    }
+
     .demo-card-head strong {
       overflow: hidden;
       color: var(--fg);
@@ -1014,14 +2182,6 @@
       background:
         radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--demo-accent) 13%, transparent), transparent 44%),
         color-mix(in srgb, var(--field) 90%, transparent);
-    }
-
-    .demo-card-footer code {
-      overflow: hidden;
-      color: var(--fg-subtle);
-      font-size: 0.66rem;
-      text-overflow: ellipsis;
-      white-space: nowrap;
     }
 
     .demo-pool-state {
@@ -1285,22 +2445,34 @@
         inset 0 0 22px rgba(255, 255, 255, 0.25),
         0 0 30px color-mix(in srgb, var(--prism-s) 25%, transparent);
       transform: translate3d(var(--companion-x, 0px), var(--companion-y, 0px), 0);
-      transition: border-color 140ms ease, filter 140ms ease, box-shadow 140ms ease;
+      scale: 1;
+      transition: border-color 140ms ease, filter 140ms ease, box-shadow 140ms ease, scale 70ms linear;
       cursor: grab;
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
-      will-change: transform;
+      will-change: transform, scale;
     }
 
     .demo-companion-arena .demo-glass-orb.is-dragging {
       border-color: rgba(255, 255, 255, 0.42);
       filter: brightness(1.12) saturate(1.08);
+      scale: calc(1 + var(--companion-pull, 0) * 0.08);
       cursor: grabbing;
       box-shadow:
         inset 0 0 24px rgba(255, 255, 255, 0.3),
         0 12px 32px rgba(0, 0, 0, 0.28),
-        0 0 36px color-mix(in srgb, var(--prism-s) 31%, transparent);
+        0 0 calc(36px + var(--companion-pull, 0) * 18px) color-mix(in srgb, var(--prism-s) 31%, transparent);
+    }
+
+    .demo-companion-arena[data-moving="true"],
+    .demo-companion-arena[data-moving="true"] .demo-glass-orb:not(.is-dragging) {
+      cursor: pointer;
+    }
+
+    .demo-companion-arena[data-braking="true"] {
+      border-color: color-mix(in srgb, var(--prism-s) 34%, var(--line));
+      box-shadow: inset 0 0 28px color-mix(in srgb, var(--prism-s) 9%, transparent);
     }
 
     .demo-companion-arena .demo-glass-orb.is-tapped {
@@ -1375,7 +2547,7 @@
     }
 
     .demo-action-match {
-      min-height: 2.5em;
+      min-height: 0;
       margin: 0;
       color: var(--fg-subtle);
       font-size: 0.67rem;
@@ -1410,36 +2582,40 @@
     }
 
     .demo-thinking-avatar {
-      width: 88px;
-      height: 88px;
+      position: relative;
+      width: 132px;
+      height: 132px;
       display: grid;
       place-items: center;
-      border: 1px solid color-mix(in srgb, var(--prism-m) 38%, var(--line));
-      border-radius: 28px;
-      color: var(--fg);
-      background:
-        radial-gradient(circle at 36% 30%, rgba(255, 255, 255, 0.12), transparent 24%),
-        color-mix(in srgb, var(--prism-m) 14%, var(--field));
-      box-shadow: 0 0 28px color-mix(in srgb, var(--prism-m) 16%, transparent);
-      font-size: 1.35rem;
-      letter-spacing: 0.12em;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      box-shadow: none;
+      padding: 0;
+      overflow: visible;
+      isolation: isolate;
+      --thinking-hue-rotation: 0deg;
     }
 
-    .demo-thinking-avatar.is-thinking span {
-      animation: demo-thinking-pulse 760ms ease-in-out;
+    .demo-thinking-avatar img {
+      display: block;
+      width: 114px;
+      height: 114px;
+      object-fit: contain;
+      image-rendering: pixelated;
+      pointer-events: none;
+      position: relative;
+      z-index: 1;
+      filter: hue-rotate(var(--thinking-hue-rotation));
+      transition: transform 180ms ease;
     }
 
     .demo-thinking-avatar:hover:not(:disabled) {
-      border-color: color-mix(in srgb, var(--prism-m) 60%, var(--line));
-      color: var(--fg);
-      background:
-        radial-gradient(circle at 36% 30%, rgba(255, 255, 255, 0.14), transparent 24%),
-        color-mix(in srgb, var(--prism-m) 20%, var(--field));
+      transform: translateY(-2px);
     }
 
-    @keyframes demo-thinking-pulse {
-      0%, 100% { opacity: 0.45; transform: scale(0.9); }
-      50% { opacity: 1; transform: scale(1.12); }
+    .demo-thinking-avatar:hover:not(:disabled) img {
+      transform: scale(1.035);
     }
 
     .demo-status {
@@ -1564,9 +2740,18 @@
     .raw-mode main,
     .raw-mode .atmosphere { display: none; }
 
-    @media (max-width: 1200px) {
+    @media (max-width: 760px) {
       .grid {
         grid-template-columns: minmax(0, 1fr);
+      }
+      body.is-editing .grid {
+        align-content: start;
+        overflow-y: auto;
+        scrollbar-gutter: stable;
+      }
+      body.is-editing #sidePanel {
+        min-height: 500px;
+        height: min(68vh, 680px);
       }
       .library, .assignments {
         max-height: min(38vh, 400px);
@@ -1574,34 +2759,7 @@
       .header-meta .slogan { display: none; }
     }
 
-    @media (max-width: 1100px) {
-      header {
-        grid-template-columns: auto minmax(0, 1fr);
-        grid-template-areas:
-          "brand meta"
-          "title title";
-      }
-      .brand { grid-area: brand; }
-      .title-block { grid-area: title; }
-      .header-meta {
-        grid-area: meta;
-        justify-content: flex-end;
-        text-align: right;
-        align-self: start;
-        max-width: none;
-      }
-      .generator {
-        grid-template-columns: minmax(0, 1fr) minmax(5.5rem, 7rem);
-      }
-      .generator .primary {
-        grid-column: 1 / -1;
-        justify-self: stretch;
-        text-align: center;
-      }
-    }
-
     @media (max-width: 980px) {
-      .editor-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .player-bar { grid-template-columns: minmax(0, 1fr); }
       .sound {
         grid-template-columns: minmax(0, 1fr);
@@ -1629,6 +2787,14 @@
       }
       .grid { overflow: visible; }
       .panel { overflow: visible; }
+      body.is-editing #sidePanel {
+        min-height: 0;
+        height: auto;
+      }
+      .editor {
+        max-height: min(72vh, 680px);
+        overflow-y: hidden;
+      }
       .demo-view {
         grid-template-rows: auto auto auto;
         overflow: visible;
@@ -1637,13 +2803,11 @@
         align-items: start;
         flex-direction: column;
       }
-      .demo-gallery { overflow: visible; }
+      .demo-gallery { min-height: 0; overflow: visible; }
       .library, .assignments {
         height: 380px;
         max-height: min(50vh, 420px);
       }
-      header { grid-template-columns: minmax(0, 1fr); }
-      .header-meta { justify-content: flex-start; text-align: left; }
       .slogan { text-align: left; }
       .generator { grid-template-columns: minmax(0, 1fr); }
     }
@@ -1663,24 +2827,21 @@
   </div>
   <main>
     <header>
-      <div class="brand">
+      <div class="brand" title="Audition local sounds, generate candidates, shape action pools, and copy the finished assignment map — all inside the sanctum.">
         <img class="brand-emblem" src="/refraction-emblem.svg" alt="" width="52" height="52">
         <div class="brand-copy">
           <p class="eyebrow">Tools · Sound atelier</p>
           <p class="wordmark" aria-label="PRISM"><span>P</span><span>R</span><span>I</span><span>S</span><span>M</span></p>
         </div>
       </div>
-      <div class="title-block">
-        <h1>Sound FX Bench</h1>
-        <p class="intro">Audition local sounds, generate candidates, shape action pools, and copy the finished assignment map — all inside the sanctum.</p>
-      </div>
-      <div class="header-meta">
-        <div class="view-controls" aria-label="Bench view">
-          <button id="enterDemo" class="view-control" type="button">Enter demo</button>
-          <button id="backToLibrary" class="view-control" type="button" hidden>Back to library</button>
+        <div class="header-meta">
+          <div class="view-controls" aria-label="Bench view">
+          <button id="benchViewToggle" class="view-switch" type="button" role="switch" aria-checked="false" aria-label="Switch to demo view">
+            <span class="view-switch-option">Library</span>
+            <span class="view-switch-track" aria-hidden="true"><span class="view-switch-thumb"></span></span>
+            <span class="view-switch-option">Demo</span>
+          </button>
         </div>
-        <span class="pill"><span class="pill-dot" aria-hidden="true"></span> Local session</span>
-        <p class="slogan">One light. Many colors.</p>
       </div>
     </header>
 
@@ -1690,30 +2851,28 @@
           <span class="player-kicker">Now playing</span>
           <span id="playerLabel"><strong>Sound player</strong> · choose Play to load a sound</span>
         </div>
-        <audio id="player" controls preload="metadata" aria-label="Sound player"></audio>
-      </div>
-      <div id="editor" class="editor" hidden>
-        <div class="editor-heading">
-          <strong id="editorTitle" class="editor-title"></strong>
-          <button id="editCancel" type="button">Cancel</button>
+        <div id="playerTransport" class="prism-player is-empty">
+          <button id="playerToggle" class="player-toggle" type="button" aria-label="Play sound" disabled>
+            <span class="player-play-icon" aria-hidden="true"></span>
+          </button>
+          <span class="player-time" aria-label="Playback time">
+            <span id="playerCurrentTime">0:00</span><span aria-hidden="true">/</span><span id="playerDuration">0:00</span>
+          </span>
+          <label class="player-progress">
+            <span class="player-progress-track" aria-hidden="true"><span class="player-progress-fill"></span></span>
+            <input id="playerSeek" type="range" min="0" max="1000" step="1" value="0" aria-label="Playback position" disabled>
+          </label>
+          <div class="player-volume">
+            <button id="playerMute" class="player-mute" type="button" aria-label="Mute sound" aria-pressed="false" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path class="player-speaker" d="M4 9v6h4l5 4V5L8 9H4Z"/>
+                <path class="player-sound-waves" d="M16 9.25a4 4 0 0 1 0 5.5M18.5 6.5a7.5 7.5 0 0 1 0 11"/>
+                <path class="player-mute-mark" d="m16 9 5 6m0-6-5 6"/>
+              </svg>
+            </button>
+          </div>
         </div>
-        <p class="editor-note">Edits run locally in your browser. Preview loops in the player above — use the button to pause and play.</p>
-        <div class="fade-waveform" aria-label="Fade thresholds">
-          <svg viewBox="0 0 800 120" preserveAspectRatio="none" aria-hidden="true"><path d="M0 60 C18 12 28 108 48 60 S78 8 98 60 S128 112 148 60 S178 15 198 60 S228 105 248 60 S278 12 298 60 S328 108 348 60 S378 8 398 60 S428 112 448 60 S478 15 498 60 S528 105 548 60 S578 12 598 60 S628 108 648 60 S678 8 698 60 S728 112 748 60 S778 15 800 60" fill="none" stroke="currentColor" stroke-width="3" vector-effect="non-scaling-stroke"/></svg>
-          <label class="fade-track fade-in">Fade in <output id="editFadeInValue">None</output><input id="editFadeIn" type="range" min="0" max="0.8" step="0.05" value="0"></label>
-          <label class="fade-track fade-out">Fade out <output id="editFadeOutValue">None</output><input id="editFadeOut" type="range" min="0" max="0.8" step="0.05" value="0"></label>
-        </div>
-        <div class="editor-controls">
-          <label class="editor-control">Volume <output id="editGainValue">0 dB</output><input id="editGain" type="range" min="-12" max="12" step="1" value="0"></label>
-          <label class="editor-control">High-end <output id="editHighEndValue">0 dB</output><input id="editHighEnd" type="range" min="-18" max="6" step="1" value="0"></label>
-          <label class="editor-control">Speed <output id="editSpeedValue">1×</output><input id="editSpeed" type="range" min="0.75" max="1.25" step="0.01" value="1"></label>
-        </div>
-        <label class="editor-check"><input id="editInvert" type="checkbox"> Invert polarity</label>
-        <div class="editor-actions">
-          <button id="editPreview" type="button">Preview</button>
-          <button id="editOverwrite" type="button">Overwrite</button>
-          <button id="editSaveNew" type="button" class="primary">Save as new</button>
-        </div>
+        <audio id="player" preload="metadata" aria-hidden="true" hidden></audio>
       </div>
       <form id="generator" class="generator glass">
         <input id="prompt" required maxlength="450" placeholder="Describe a sound to generate…" aria-label="Sound effect description">
@@ -1728,6 +2887,7 @@
           <span>Candidate:</span>
           <span id="candidateName" class="candidate-name"></span>
           <button id="candidatePlay" type="button">Play candidate</button>
+          <button id="candidateEdit" type="button">Edit</button>
           <button id="keep" type="button" class="primary">Keep</button>
           <button id="toss" type="button">Toss</button>
         </div>
@@ -1750,11 +2910,105 @@
           <span id="assignmentCount" class="panel-count">0 actions</span>
         </div>
         <p id="sideHint" class="hint">Pick what the sound means in plain English. Several sounds on one action become a random pool.</p>
+        <div id="editor" class="editor" hidden>
+          <div class="editor-scroll-region">
+            <div class="editor-toolstrip" role="toolbar" aria-label="Sound editor controls">
+              <span class="editor-toolstrip-label">Editor controls</span>
+              <div class="editor-toolstrip-actions">
+                <button id="editRestore" class="editor-tool-button editor-restore-button" type="button" title="Nothing to restore" disabled><span class="editor-tool-icon" aria-hidden="true">↺</span><span>Restore</span></button>
+                <button id="editUndo" class="editor-tool-button editor-undo-button" type="button" title="Nothing to undo" disabled><span class="editor-tool-icon" aria-hidden="true">↶</span><span>Undo</span></button>
+                <button id="editPreview" class="editor-tool-button editor-preview-button" type="button" aria-label="Preview edited sound" aria-pressed="false" title="Preview edited sound"><span id="editPreviewIcon" class="editor-tool-icon" aria-hidden="true">▶</span><span id="editPreviewLabel">Preview</span></button>
+              </div>
+            </div>
+            <section class="editor-section editor-envelope" aria-labelledby="editorEnvelopeTitle">
+              <div class="editor-section-heading">
+                <span>
+                  <span class="editor-section-kicker">Envelope</span>
+                  <strong id="editorEnvelopeTitle">Shape the edges</strong>
+                </span>
+              </div>
+              <div id="editEnvelope" class="envelope-timeline" aria-label="Fade envelope timeline">
+                <div class="envelope-readouts">
+                  <div class="envelope-readout envelope-readout-in"><label for="editFadeIn">Fade in</label><button id="editFadeInReset" class="editor-reset-chip" type="button" title="Reset fade in" aria-label="Reset fade in"><span id="editFadeInValue">None</span></button></div>
+                  <div class="envelope-readout envelope-readout-gain"><label for="editGain">Gain</label><button id="editGainReset" class="editor-reset-chip" type="button" title="Reset gain" aria-label="Reset gain"><span id="editGainValue">0 dB</span></button></div>
+                  <div class="envelope-readout envelope-readout-out"><label for="editFadeOut">Fade out</label><button id="editFadeOutReset" class="editor-reset-chip" type="button" title="Reset fade out" aria-label="Reset fade out"><span id="editFadeOutValue">None</span></button></div>
+                </div>
+                <div id="editEnvelopePlot" class="envelope-plot is-loading">
+                  <svg class="envelope-visual" viewBox="0 0 800 120" preserveAspectRatio="none" aria-hidden="true">
+                    <defs>
+                      <linearGradient id="editorEnvelopeFill" x1="0" x2="1">
+                        <stop offset="0" style="stop-color:var(--prism-m);stop-opacity:.18"/>
+                        <stop offset=".5" style="stop-color:var(--prism-s);stop-opacity:.09"/>
+                        <stop offset="1" style="stop-color:var(--prism-i);stop-opacity:.18"/>
+                      </linearGradient>
+                      <linearGradient id="editorEnvelopeSignal" x1="0" x2="1">
+                        <stop offset="0" style="stop-color:var(--prism-m)"/>
+                        <stop offset=".5" style="stop-color:var(--prism-s)"/>
+                        <stop offset="1" style="stop-color:var(--prism-i)"/>
+                      </linearGradient>
+                      <clipPath id="editorEnvelopeClip">
+                        <polygon id="editEnvelopeClipShape" points="0,8 800,8 800,112 0,112"/>
+                      </clipPath>
+                    </defs>
+                    <line class="envelope-center-line" x1="0" y1="60" x2="800" y2="60"/>
+                    <polygon id="editEnvelopeShape" class="envelope-shape" points="0,8 800,8 800,112 0,112"/>
+                    <path id="editEnvelopeWaveformGhost" class="envelope-waveform-ghost" d="M0 57 H800 V63 H0 Z"/>
+                    <path id="editEnvelopeWaveformActive" class="envelope-waveform-active" d="M0 57 H800 V63 H0 Z" clip-path="url(#editorEnvelopeClip)"/>
+                    <line id="editFadeInGuide" class="envelope-guide envelope-guide-in" x1="0" y1="4" x2="0" y2="116"/>
+                    <line id="editFadeOutGuide" class="envelope-guide envelope-guide-out" x1="800" y1="4" x2="800" y2="116"/>
+                  </svg>
+                  <label class="envelope-gain-fader" title="Adjust saved file gain">
+                    <span class="envelope-gain-control">
+                      <input id="editGain" type="range" min="-12" max="12" step="1" value="0" aria-label="Gain level">
+                    </span>
+                  </label>
+                  <input id="editFadeIn" class="envelope-range envelope-range-in" type="range" min="0" max="0.8" step="0.05" value="0" aria-label="Fade in duration">
+                  <input id="editFadeOut" class="envelope-range envelope-range-out" type="range" min="0" max="0.8" step="0.05" value="0" aria-label="Fade out duration">
+                </div>
+                <div class="envelope-time-labels" aria-hidden="true"><span>Start</span><span>End</span></div>
+              </div>
+            </section>
+
+            <section id="editorFineTune" class="editor-fine-tune" aria-labelledby="editorFineTuneTitle">
+              <div class="editor-fine-tune-heading">
+                <span><strong id="editorFineTuneTitle">Fine tune</strong><small>Tone, timing, and phase.</small></span>
+                <label class="editor-phase-toggle">
+                  <span>Invert</span>
+                  <input id="editInvert" type="checkbox" aria-label="Invert waveform polarity">
+                </label>
+              </div>
+              <div class="editor-fine-tune-body">
+                <div class="editor-control editor-compact-control">
+                  <span class="editor-compact-control-heading">
+                    <label for="editHighEnd"><strong>High-end</strong></label>
+                    <button id="editHighEndReset" class="editor-reset-chip" type="button" title="Reset high-end" aria-label="Reset high-end"><span id="editHighEndValue">0 dB</span></button>
+                  </span>
+                  <input id="editHighEnd" type="range" min="-18" max="6" step="1" value="0" aria-label="High-end tone">
+                </div>
+                <div class="editor-control editor-compact-control">
+                  <span class="editor-compact-control-heading">
+                    <label for="editSpeed"><strong>Speed</strong></label>
+                    <button id="editSpeedReset" class="editor-reset-chip" type="button" title="Reset speed" aria-label="Reset speed"><span id="editSpeedValue">1×</span></button>
+                  </span>
+                  <input id="editSpeed" type="range" min="0.75" max="1.25" step="0.01" value="1" aria-label="Playback speed">
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div id="editorActions" class="editor-actions" aria-label="Editor actions">
+            <button id="editSave" class="editor-save-button" type="button">Save</button>
+            <button id="editCancel" class="editor-cancel-button" type="button">Cancel</button>
+          </div>
+        </div>
         <div id="assignmentsView" class="assignments-view">
           <div id="assignments" class="assignments"></div>
           <div class="toolbar">
             <button id="addAction" type="button">+ Add action</button>
-            <button id="copy" type="button" class="primary">Copy assignment map</button>
+            <div class="toolbar-action-group">
+              <button id="copy" type="button" class="primary">Copy assignment map</button>
+              <button id="clean" class="clean-button" type="button" disabled>Clean</button>
+            </div>
           </div>
         </div>
         <p id="status" class="status" role="status"></p>
@@ -1768,7 +3022,7 @@
           <h2 id="demoTitle">Prism interaction snippets</h2>
           <p>Use these tiny interaction scenes to hear the live assignment map before copying it.</p>
         </div>
-        <div class="demo-view-tools"><label class="demo-spatial-toggle"><input id="demoSpatialAudio" type="checkbox" role="switch" checked> Spatial audio</label><span class="demo-live-pill"><span class="pill-dot" aria-hidden="true"></span> Live map</span></div>
+        <div class="demo-view-tools"><button id="demoSpatialAudio" class="demo-live-pill" type="button" aria-pressed="true"><span class="pill-dot" aria-hidden="true"></span> Spatial audio: On</button></div>
       </div>
 
       <div id="demoGallery" class="demo-gallery">
@@ -1787,7 +3041,7 @@
               <button class="demo-bot-tile demo-action" type="button" aria-label="Community bot card" aria-pressed="false" data-demo-bot-card data-demo-hover-cue="bot-hover" data-demo-click-cue="bot-select"><span class="demo-bot-glyph" aria-hidden="true">♙</span></button>
             </div>
           </div>
-          <div class="demo-card-footer"><code>Hovered · bot-hover / selected · bot-select</code><span class="demo-pool-state" data-pool-keys="bot-hover,bot-select"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="bot-hover,bot-select"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="violet">
@@ -1798,7 +3052,7 @@
               <span class="demo-panel-body"><span class="demo-panel-line"></span><span class="demo-panel-line"></span></span>
             </button>
           </div>
-          <div class="demo-card-footer"><code>panel-open · panel-close</code><span class="demo-pool-state" data-pool-keys="panel-open,panel-close"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="panel-open,panel-close"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="cyan">
@@ -1809,7 +3063,7 @@
               <span class="demo-switch-track" aria-hidden="true"></span>
             </button>
           </div>
-          <div class="demo-card-footer"><code>toggle</code><span class="demo-pool-state" data-pool-keys="toggle"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="toggle"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="lime">
@@ -1817,7 +3071,7 @@
           <div class="demo-mini">
             <button class="demo-confirm-button demo-action" type="button" data-demo-cue="confirm">Save changes</button>
           </div>
-          <div class="demo-card-footer"><code>confirm</code><span class="demo-pool-state" data-pool-keys="confirm"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="confirm"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="violet">
@@ -1825,21 +3079,21 @@
           <div id="demoCompanionArena" class="demo-mini demo-companion-arena">
             <button id="demoCompanion" class="demo-glass-orb demo-action" type="button" aria-label="Drag or tap Prism companion"></button>
           </div>
-          <div class="demo-card-footer"><code>drag · release · confirm impacts</code><span class="demo-pool-state" data-pool-keys="confirm"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="confirm"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="amber">
           <div class="demo-card-head"><strong>Action audio</strong><span class="demo-mode-tag">Action text</span></div>
           <div class="demo-mini">
             <div class="demo-action-composer">
-              <form id="demoActionAudioForm" class="demo-action-form">
-                <input id="demoActionAudioInput" class="demo-action-input" type="text" maxlength="180" required placeholder="e.g. sets her mug down" aria-label="Action text to test">
+              <form id="demoActionAudioForm" class="demo-action-form" autocomplete="off">
+                <input id="demoActionAudioInput" class="demo-action-input" type="text" maxlength="180" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-autocomplete="none" placeholder="e.g. sets her mug down" aria-label="Action text to test">
                 <button class="demo-action-submit" type="submit">Send</button>
               </form>
-              <p id="demoActionAudioMatch" class="demo-action-match" aria-live="polite">Try a cough, burp, fart, pour, stir, table tap, or setting a cup down.</p>
+              <p id="demoActionAudioMatch" class="demo-action-match" aria-live="polite"></p>
             </div>
           </div>
-          <div class="demo-card-footer"><code>Text → matched action cue</code><span class="demo-pool-state" data-pool-keys="fart,burp,cough,coffee_pour,spoon_stir,table_knock,cup_set_down"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="fart,burp,cough,coffee_pour,spoon_stir,table_knock,cup_set_down"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="rose">
@@ -1852,15 +3106,15 @@
               <button class="demo-pad demo-action" type="button" data-demo-cue="rimshot">Rimshot</button>
             </div>
           </div>
-          <div class="demo-card-footer"><code>applause · laughter · gasp · rimshot</code><span class="demo-pool-state" data-pool-keys="applause,laughter,gasp,rimshot"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="applause,laughter,gasp,rimshot"></span></div>
         </article>
 
         <article class="demo-card" data-demo-tone="violet">
           <div class="demo-card-head"><strong>Avatar thinking</strong><span class="demo-mode-tag">Chat · Zen</span></div>
           <div class="demo-mini">
-            <button id="demoThinking" class="demo-thinking-avatar demo-action" type="button" aria-label="Start avatar thinking sound" data-demo-cue="avatar-thinking"><span>···</span></button>
+            <button id="demoThinking" class="demo-thinking-avatar demo-action" type="button" aria-label="Avatar thinking sound" data-demo-cue="avatar-thinking"><img id="demoThinkingFrame" src="/tools/assets/avatar-thinking/avatar-thinking-05.png" alt="Thinking avatar"></button>
           </div>
-          <div class="demo-card-footer"><code>avatar-thinking</code><span class="demo-pool-state" data-pool-keys="avatar-thinking"></span></div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="avatar-thinking"></span></div>
         </article>
       </div>
 
@@ -1920,12 +3174,41 @@
     const soundOverrides = { ...(savedBenchState.soundOverrides || {}) };
     const committedDisabledIds = new Set(Array.isArray(savedBenchState.disabledIds) ? savedBenchState.disabledIds : []);
     const pendingDisabledIds = new Set();
+    const STACKED_WORKSPACE_MEDIA_QUERY = "(max-width: 760px)";
+    const EDITOR_MAX_FADE_RATIO = 0.8;
+    const EDITOR_ENVELOPE_GEOMETRY = Object.freeze({
+      width: 800,
+      top: 8,
+      center: 60,
+      bottom: 112,
+    });
+    const EDITOR_WAVEFORM_BUCKET_COUNT = 96;
+    const EDITOR_WAVEFORM_SAMPLES_PER_BUCKET = 128;
+    const EDITOR_WAVEFORM_MIN_HALF_HEIGHT = 3;
+    const EDITOR_ENVELOPE_JOIN_EPSILON = 0.001;
+    const EDITOR_DEFAULT_SETTINGS = Object.freeze({
+      gainDb: 0,
+      highEndDb: 0,
+      fadeIn: 0,
+      fadeOut: 0,
+      playbackRate: 1,
+      invert: false,
+    });
+    const EDITOR_SETTING_KEYS = Object.freeze(Object.keys(EDITOR_DEFAULT_SETTINGS));
+    const EDITOR_HISTORY_LIMIT = 32;
+    const EDITOR_HISTORY_KEYS = new Set(["ArrowDown", "ArrowLeft", "ArrowRight", "ArrowUp", "End", "Home", "PageDown", "PageUp"]);
     let candidate = null;
     let editorItemId = null;
     let editorPreviewUrl = null;
     let editorPreviewReady = false;
     let editorPreviewPlaying = false;
-    let editorSettings = { gainDb: 0, highEndDb: 0, fadeIn: 0, fadeOut: 0, playbackRate: 1, invert: false };
+    let editorWaveformRequestId = 0;
+    let editorSaveChoiceOpen = false;
+    let editorSaveInProgress = false;
+    let editorSettings = { ...EDITOR_DEFAULT_SETTINGS };
+    let editorInitialSettings = { ...EDITOR_DEFAULT_SETTINGS };
+    let editorHistory = [];
+    let editorHistoryTransaction = null;
     const DEMO_DEFAULT_CUE_CONFIG = Object.freeze({ gain: 0.22, cooldownMs: 72 });
     const DEMO_CUE_CONFIG = Object.freeze({
       "bot-hover": { gain: 0.24, cooldownMs: 46 },
@@ -1947,18 +3230,29 @@
     const DEMO_MAX_ACTIVE_SOURCES = 8;
     const DEMO_MAX_PAN = 0.88;
     const DEMO_PRESS_FEEDBACK_MS = 420;
-    const DEMO_THINKING_FEEDBACK_MS = 760;
+    const DEMO_THINKING_IDLE_FRAME = "/tools/assets/avatar-thinking/avatar-thinking-05.png";
+    const DEMO_THINKING_FRAMES = [
+      "/tools/assets/avatar-thinking/avatar-thinking-01.png",
+      "/tools/assets/avatar-thinking/avatar-thinking-02.png",
+      "/tools/assets/avatar-thinking/avatar-thinking-04.png",
+      "/tools/assets/avatar-thinking/avatar-thinking-03.png",
+    ];
     const COMPANION_GLASS_PHYSICS = Object.freeze({
-      springStrength: 72,
-      damping: 1.1,
-      wallRestitution: 0.84,
-      slingshotStrength: 11,
+      springStrength: 240,
+      damping: 0.7,
+      wallRestitution: 0.94,
+      slingshotStrength: 26,
       releaseVelocityCarry: 0.45,
       velocityBlend: 0.65,
-      maxSpeed: 1400,
+      maxSpeed: 2200,
       maxFrameSeconds: 1 / 30,
       minPointerSampleSeconds: 1 / 240,
-      impactSoundSpeed: 150,
+      impactSoundSpeed: 180,
+      fullVolumeImpactSpeed: 1800,
+      minimumImpactGainScale: 0.45,
+      maximumImpactGainScale: 2.4,
+      impactGainExponent: 0.7,
+      brakeDamping: 18,
       dragThreshold: 5,
       maxTapDurationMs: 260,
       settleDistance: 0.65,
@@ -1968,10 +3262,18 @@
     const demoLastPlayedAt = new Map();
     const demoLastVariant = new Map();
     const demoActiveSources = new Set();
+    const demoActiveSourceOrigins = new Map();
+    const demoHoverActiveElements = new Set();
+    const demoHoverRequestEpochs = new WeakMap();
     let demoAudioContext = null;
     let demoPlaybackEpoch = 0;
+    let demoThinkingFrameTimer = null;
+    let demoThinkingFrameIndex = 0;
+    let demoThinkingSource = null;
+    let demoThinkingHoverActive = false;
+    let demoThinkingRequestEpoch = 0;
     let demoSpatialAudioEnabled = true;
-    let benchView = "library";
+    let benchView = savedBenchState.view === "demo" ? "demo" : "library";
     let preDemoPlayerLabel = null;
     let companionGlassController = null;
     function entries() {
@@ -2006,7 +3308,47 @@
     function isSessionAudio(item) {
       return Boolean(item?.overwritten || item?.generated || String(item?.path || "").startsWith("data:"));
     }
+    function assignedSoundIds() {
+      const ids = new Set();
+      for (const action of assignments) {
+        for (const soundIndex of action.sounds) {
+          const item = entry(soundIndex);
+          if (item) ids.add(item.id);
+        }
+      }
+      return ids;
+    }
+    function unusedSessionAssets() {
+      const usedIds = assignedSoundIds();
+      const assets = generatedSounds
+        .filter((item) => !usedIds.has(item.id))
+        .map((item) => ({ id: item.id, path: item.path, kind: "generated" }));
+      for (const [id, path] of Object.entries(soundOverrides)) {
+        if (typeof path === "string" && path && !usedIds.has(id)) {
+          assets.push({ id, path, kind: "override" });
+        }
+      }
+      return assets;
+    }
+    function snapshotAssignmentSoundIds() {
+      return assignments.map((action) => action.sounds
+        .map((soundIndex) => entry(soundIndex)?.id)
+        .filter((id) => typeof id === "string"));
+    }
+    function remapAssignmentsFromSoundIds(soundIdsByAction) {
+      assignments.forEach((action, actionIndex) => {
+        action.sounds = (soundIdsByAction[actionIndex] || [])
+          .map(soundIndexForId)
+          .filter((soundIndex) => soundIndex >= 0);
+      });
+    }
     function isEditing() { return Boolean(editorItemId); }
+    function editorTarget() {
+      if (candidate && candidate.id === editorItemId) {
+        return { id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true };
+      }
+      return entryById(editorItemId);
+    }
     function cueConfig(key) {
       return DEMO_CUE_CONFIG[key] || DEMO_DEFAULT_CUE_CONFIG;
     }
@@ -2103,6 +3445,10 @@
         try { source.stop(); } catch { /* The source may have already ended. */ }
       }
       demoActiveSources.clear();
+      demoThinkingSource = null;
+      demoThinkingHoverActive = false;
+      demoThinkingRequestEpoch += 1;
+      stopThinkingAnimation();
     }
     function setDemoStatus(message) {
       const status = $("demoStatus");
@@ -2111,6 +3457,12 @@
       window.clearTimeout(setDemoStatus.timer);
       setDemoStatus.timer = window.setTimeout(() => { status.textContent = ""; }, 3000);
     }
+    function syncSpatialAudioButton() {
+      const button = $("demoSpatialAudio");
+      if (!button) return;
+      button.setAttribute("aria-pressed", String(demoSpatialAudioEnabled));
+      button.innerHTML = `<span class="pill-dot" aria-hidden="true"></span> Spatial audio: ${demoSpatialAudioEnabled ? "On" : "Off"}`;
+    }
     function showDemoNowPlaying(source, key) {
       const action = actionFor(key);
       $("playerLabel").innerHTML = `<strong>${escapeHtml(source.name)}</strong> · ${escapeHtml(action.label)}`;
@@ -2118,7 +3470,7 @@
       playerBar?.classList.remove("is-demo-playing");
       window.requestAnimationFrame(() => playerBar?.classList.add("is-demo-playing"));
     }
-    async function playDemoCue(key, origin) {
+    async function playDemoCue(key, origin, onPlayed, { gainScale = 1, loop = false, onSource } = {}) {
       const sources = resolveCueSources(key);
       if (!sources.length) {
         setDemoStatus(`No sounds assigned to ${actionFor(key).label}.`);
@@ -2149,22 +3501,27 @@
         mono.channelCount = 1;
         mono.channelCountMode = "explicit";
         mono.channelInterpretation = "speakers";
+        source.loop = loop;
         panner.pan.value = demoSpatialAudioEnabled ? demoPanFor(origin) : 0;
-        output.gain.value = Math.max(0, Math.min(1, config.gain));
+        output.gain.value = Math.max(0, Math.min(1, config.gain * gainScale));
         source.connect(mono);
         mono.connect(panner);
         panner.connect(output);
         output.connect(context.destination);
-        source.addEventListener("ended", () => {
-          demoActiveSources.delete(source);
-          source.disconnect();
+      source.addEventListener("ended", () => {
+        demoActiveSources.delete(source);
+        demoActiveSourceOrigins.delete(source);
+        source.disconnect();
           mono.disconnect();
           panner.disconnect();
           output.disconnect();
         }, { once: true });
         demoActiveSources.add(source);
+        demoActiveSourceOrigins.set(source, origin);
         source.start();
+        onSource?.(source);
         showDemoNowPlaying(sourceInfo, key);
+        onPlayed?.(sourceInfo);
         setDemoStatus(`${actionFor(key).label} · ${sourceInfo.name}`);
         return true;
       } catch (error) {
@@ -2240,8 +3597,13 @@
       $("libraryView").hidden = inDemo;
       $("generator").hidden = inDemo;
       $("demoView").hidden = !inDemo;
-      $("enterDemo").hidden = inDemo;
-      $("backToLibrary").hidden = !inDemo;
+      const viewToggle = $("benchViewToggle");
+      viewToggle.setAttribute("aria-checked", String(inDemo));
+      viewToggle.setAttribute("aria-label", inDemo ? "Switch to library view" : "Switch to demo view");
+      try {
+        const current = JSON.parse(localStorage.getItem(storageKey) || "{}");
+        localStorage.setItem(storageKey, JSON.stringify({ ...current, view: benchView }));
+      } catch { /* Private file tabs may deny localStorage. */ }
       companionGlassController?.reset();
       if (inDemo) {
         const player = $("player");
@@ -2269,6 +3631,41 @@
         element.demoPulseTimer = window.setTimeout(() => element.classList.remove(className), durationMs);
       });
     }
+    function startThinkingAnimation() {
+      const frame = $("demoThinkingFrame");
+      if (!frame || demoThinkingFrameTimer) return;
+      demoThinkingFrameIndex = 0;
+      frame.src = DEMO_THINKING_FRAMES[demoThinkingFrameIndex];
+      demoThinkingFrameTimer = window.setInterval(() => {
+        demoThinkingFrameIndex = (demoThinkingFrameIndex + 1) % DEMO_THINKING_FRAMES.length;
+        frame.src = DEMO_THINKING_FRAMES[demoThinkingFrameIndex];
+      }, 180);
+    }
+    function stopThinkingAnimation() {
+      window.clearInterval(demoThinkingFrameTimer);
+      demoThinkingFrameTimer = null;
+      demoThinkingFrameIndex = 0;
+      const frame = $("demoThinkingFrame");
+      if (frame) frame.src = DEMO_THINKING_IDLE_FRAME;
+    }
+    function stopThinkingSound() {
+      if (!demoThinkingSource) return;
+      try { demoThinkingSource.stop(0); } catch { /* The source may have already ended. */ }
+      demoThinkingSource = null;
+    }
+    function stopDemoPlaybackForOrigin(origin) {
+      for (const source of demoActiveSources) {
+        if (demoActiveSourceOrigins.get(source) !== origin) continue;
+        try { source.stop(0); } catch { /* The source may have already ended. */ }
+      }
+    }
+    function stopThinkingInteraction() {
+      demoThinkingHoverActive = false;
+      demoThinkingRequestEpoch += 1;
+      stopThinkingAnimation();
+      stopThinkingSound();
+      stopDemoPlaybackForOrigin($("demoThinking"));
+    }
     function createCompanionGlassController(arena, orb) {
       const physics = COMPANION_GLASS_PHYSICS;
       const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -2281,9 +3678,10 @@
         maxY: 0,
         pointerId: null,
         dragging: false,
+        braking: false,
         moved: false,
-        grabOffsetX: 0,
-        grabOffsetY: 0,
+        dragStartX: 0,
+        dragStartY: 0,
         downClientX: 0,
         downClientY: 0,
         downAt: 0,
@@ -2302,6 +3700,14 @@
       function applyPosition() {
         orb.style.setProperty("--companion-x", `${state.x.toFixed(2)}px`);
         orb.style.setProperty("--companion-y", `${state.y.toFixed(2)}px`);
+        const pullRatio = Math.min(
+          1,
+          Math.max(
+            state.maxX ? Math.abs(state.x) / state.maxX : 0,
+            state.maxY ? Math.abs(state.y) / state.maxY : 0,
+          ),
+        );
+        orb.style.setProperty("--companion-pull", pullRatio.toFixed(3));
       }
       function refreshBounds() {
         const arenaRect = arena.getBoundingClientRect();
@@ -2325,7 +3731,9 @@
         state.y = 0;
         state.velocityX = 0;
         state.velocityY = 0;
+        state.braking = false;
         arena.dataset.moving = "false";
+        arena.dataset.braking = "false";
         applyPosition();
       }
       function reset() {
@@ -2337,13 +3745,30 @@
         if (pointerId !== null && orb.hasPointerCapture(pointerId)) orb.releasePointerCapture(pointerId);
         state.collisionCount = 0;
         orb.dataset.collisionCount = "0";
+        delete orb.dataset.impactSpeed;
+        delete orb.dataset.impactGain;
         stopAtCenter();
+      }
+      function impactGainScaleForSpeed(impactSpeed) {
+        const velocityRange = physics.fullVolumeImpactSpeed - physics.impactSoundSpeed;
+        const velocityRatio = Math.max(
+          0,
+          Math.min(1, (impactSpeed - physics.impactSoundSpeed) / velocityRange),
+        );
+        // A softened curve keeps medium impacts audible without flattening the fastest hits.
+        const shapedRatio = velocityRatio ** physics.impactGainExponent;
+        return physics.minimumImpactGainScale
+          + (physics.maximumImpactGainScale - physics.minimumImpactGainScale) * shapedRatio;
       }
       function playImpact(impactSpeed) {
         if (impactSpeed < physics.impactSoundSpeed) return;
+        const gainScale = impactGainScaleForSpeed(impactSpeed);
+        const outputGain = Math.max(0, Math.min(1, cueConfig("confirm").gain * gainScale));
         state.collisionCount += 1;
         orb.dataset.collisionCount = String(state.collisionCount);
-        void playDemoCue("confirm", orb);
+        orb.dataset.impactSpeed = String(Math.round(impactSpeed));
+        orb.dataset.impactGain = outputGain.toFixed(3);
+        void playDemoCue("confirm", orb, undefined, { gainScale });
       }
       function integrateFrame(timestamp) {
         if (benchView !== "demo") {
@@ -2359,40 +3784,49 @@
         const deltaSeconds = Math.min(physics.maxFrameSeconds, Math.max(0, elapsedSeconds));
         state.lastFrameAt = timestamp;
         if (deltaSeconds > 0) {
-          state.velocityX += (-physics.springStrength * state.x - physics.damping * state.velocityX) * deltaSeconds;
-          state.velocityY += (-physics.springStrength * state.y - physics.damping * state.velocityY) * deltaSeconds;
+          if (state.braking) {
+            state.velocityX += -physics.springStrength * state.x * deltaSeconds;
+            state.velocityY += -physics.springStrength * state.y * deltaSeconds;
+            const brakeRetention = Math.exp(-physics.brakeDamping * deltaSeconds);
+            state.velocityX *= brakeRetention;
+            state.velocityY *= brakeRetention;
+          } else {
+            state.velocityX += (-physics.springStrength * state.x - physics.damping * state.velocityX) * deltaSeconds;
+            state.velocityY += (-physics.springStrength * state.y - physics.damping * state.velocityY) * deltaSeconds;
+          }
           clampVelocity();
           state.x += state.velocityX * deltaSeconds;
           state.y += state.velocityY * deltaSeconds;
         }
+        const wallRestitution = state.braking ? 0 : physics.wallRestitution;
         let impactSpeed = 0;
         if (state.x < -state.maxX) {
           state.x = -state.maxX;
           if (state.velocityX < 0) {
             impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityX));
-            state.velocityX = Math.abs(state.velocityX) * physics.wallRestitution;
+            state.velocityX = Math.abs(state.velocityX) * wallRestitution;
           }
         } else if (state.x > state.maxX) {
           state.x = state.maxX;
           if (state.velocityX > 0) {
             impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityX));
-            state.velocityX = -Math.abs(state.velocityX) * physics.wallRestitution;
+            state.velocityX = -Math.abs(state.velocityX) * wallRestitution;
           }
         }
         if (state.y < -state.maxY) {
           state.y = -state.maxY;
           if (state.velocityY < 0) {
             impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityY));
-            state.velocityY = Math.abs(state.velocityY) * physics.wallRestitution;
+            state.velocityY = Math.abs(state.velocityY) * wallRestitution;
           }
         } else if (state.y > state.maxY) {
           state.y = state.maxY;
           if (state.velocityY > 0) {
             impactSpeed = Math.max(impactSpeed, Math.abs(state.velocityY));
-            state.velocityY = -Math.abs(state.velocityY) * physics.wallRestitution;
+            state.velocityY = -Math.abs(state.velocityY) * wallRestitution;
           }
         }
-        playImpact(impactSpeed);
+        if (!state.braking) playImpact(impactSpeed);
         applyPosition();
         const settled = Math.hypot(state.x, state.y) <= physics.settleDistance
           && Math.hypot(state.velocityX, state.velocityY) <= physics.settleSpeed;
@@ -2408,6 +3842,8 @@
           return;
         }
         refreshBounds();
+        state.braking = false;
+        arena.dataset.braking = "false";
         if (applySlingshot) {
           state.velocityX = state.velocityX * physics.releaseVelocityCarry - state.x * physics.slingshotStrength;
           state.velocityY = state.velocityY * physics.releaseVelocityCarry - state.y * physics.slingshotStrength;
@@ -2430,16 +3866,28 @@
           y: event.clientY - (rect.top + rect.height / 2),
         };
       }
+      function centerOrbOnPointer(event) {
+        const pointer = localPointerPosition(event);
+        state.x = Math.max(-state.maxX, Math.min(state.maxX, pointer.x));
+        state.y = Math.max(-state.maxY, Math.min(state.maxY, pointer.y));
+        applyPosition();
+      }
+      function engageBrake(event) {
+        if (!state.frameId || state.dragging) return;
+        event.preventDefault();
+        event.stopPropagation();
+        state.braking = true;
+        arena.dataset.braking = "true";
+      }
       function onPointerDown(event) {
         if (event.pointerType === "mouse" && event.button !== 0) return;
         cancelFrame();
         refreshBounds();
-        const pointer = localPointerPosition(event);
         state.pointerId = event.pointerId;
         state.dragging = true;
         state.moved = false;
-        state.grabOffsetX = pointer.x - state.x;
-        state.grabOffsetY = pointer.y - state.y;
+        state.dragStartX = state.x;
+        state.dragStartY = state.y;
         state.downClientX = event.clientX;
         state.downClientY = event.clientY;
         state.downAt = event.timeStamp;
@@ -2452,13 +3900,16 @@
         orb.dataset.collisionCount = "0";
         arena.dataset.moving = "false";
         orb.classList.add("is-dragging");
+        centerOrbOnPointer(event);
+        state.lastPointerX = state.x;
+        state.lastPointerY = state.y;
         orb.setPointerCapture(event.pointerId);
       }
       function onPointerMove(event) {
         if (!state.dragging || event.pointerId !== state.pointerId) return;
         const pointer = localPointerPosition(event);
-        const nextX = Math.max(-state.maxX, Math.min(state.maxX, pointer.x - state.grabOffsetX));
-        const nextY = Math.max(-state.maxY, Math.min(state.maxY, pointer.y - state.grabOffsetY));
+        const nextX = Math.max(-state.maxX, Math.min(state.maxX, pointer.x));
+        const nextY = Math.max(-state.maxY, Math.min(state.maxY, pointer.y));
         const elapsedSeconds = Math.max(
           physics.minPointerSampleSeconds,
           (event.timeStamp - state.lastPointerAt) / 1000,
@@ -2483,18 +3934,23 @@
         const pointerId = state.pointerId;
         state.pointerId = null;
         state.dragging = false;
+        if (!cancelled && state.moved) centerOrbOnPointer(event);
         orb.classList.remove("is-dragging");
         if (orb.hasPointerCapture(pointerId)) orb.releasePointerCapture(pointerId);
         const quickTap = !cancelled
           && !state.moved
           && event.timeStamp - state.downAt <= physics.maxTapDurationMs;
         if (quickTap) {
+          state.x = state.dragStartX;
+          state.y = state.dragStartY;
+          applyPosition();
           pulseDemoElement(orb, "is-tapped", DEMO_PRESS_FEEDBACK_MS);
           void playDemoCue("confirm", orb);
         }
         const displaced = Math.hypot(state.x, state.y) > physics.settleDistance;
         startMotion({ applySlingshot: !quickTap || displaced });
       }
+      arena.addEventListener("pointerdown", engageBrake, { capture: true });
       orb.addEventListener("pointerdown", onPointerDown);
       orb.addEventListener("pointermove", onPointerMove);
       orb.addEventListener("pointerup", (event) => finishPointer(event));
@@ -2518,10 +3974,29 @@
           velocityX: state.velocityX,
           velocityY: state.velocityY,
           dragging: state.dragging,
+          braking: state.braking,
           moving: Boolean(state.frameId),
           collisionCount: state.collisionCount,
         }),
       };
+    }
+    function syncCleanButton() {
+      const button = $("clean");
+      if (!button) return;
+      const count = unusedSessionAssets().length;
+      button.dataset.cleanCount = String(count);
+      button.disabled = isEditing() || count === 0;
+      if (isEditing()) {
+        button.title = "Save or cancel the active edit before cleaning.";
+        button.setAttribute("aria-label", "Clean unavailable while editing");
+      } else if (count > 0) {
+        const assetLabel = `unused session asset${count === 1 ? "" : "s"}`;
+        button.title = `Delete ${count} ${assetLabel}`;
+        button.setAttribute("aria-label", `Clean ${count} ${assetLabel}`);
+      } else {
+        button.title = "No unused generated or edited session assets";
+        button.setAttribute("aria-label", "Clean unavailable; no unused session assets");
+      }
     }
     function updateCounts() {
       const visible = libraryEntries().filter((item) => !committedDisabledIds.has(item.id)).length;
@@ -2533,6 +4008,7 @@
           ? "editing"
           : `${assignments.length} action${assignments.length === 1 ? "" : "s"}`;
       }
+      syncCleanButton();
     }
     function syncSidePanel() {
       const editing = isEditing();
@@ -2541,16 +4017,78 @@
       $("assignmentsView").hidden = editing;
       $("sideTitle").textContent = editing ? "Sound editor" : "Action assignments";
       $("sideHint").textContent = editing
-        ? "Library play, assign, rename, and delete are paused. Switch Edit on another sound to change targets, or Cancel to return."
+        ? "Shape locally, preview above, then choose how this version should enter your library."
         : "Pick what the sound means in plain English. Several sounds on one action become a random pool.";
       $("libraryHint").textContent = editing
         ? "Focus lock on — only Edit stays available so you can switch sounds."
         : "Play loads into the stage above. Edit, rename, assign, or disable inline.";
       $("addAction").disabled = editing;
       $("copy").disabled = editing;
-      $("enterDemo").disabled = editing;
-      $("enterDemo").title = editing ? "Save or cancel the active edit before entering Demo." : "Test the live assignment map";
+      $("benchViewToggle").disabled = editing;
+      $("benchViewToggle").title = editing ? "Save or cancel the active edit before entering Demo." : "Switch between the library and demo views";
       updateCounts();
+    }
+    function playerHasSource(player = $("player")) {
+      return Boolean(player.getAttribute("src"));
+    }
+    function formatPlayerTime(value) {
+      if (!Number.isFinite(value) || value < 0) return "0:00";
+      const secondsPerMinute = 60;
+      const minutesPerHour = 60;
+      const wholeSeconds = Math.floor(value);
+      const seconds = wholeSeconds % secondsPerMinute;
+      const totalMinutes = Math.floor(wholeSeconds / secondsPerMinute);
+      if (totalMinutes < minutesPerHour) return `${totalMinutes}:${String(seconds).padStart(2, "0")}`;
+      const hours = Math.floor(totalMinutes / minutesPerHour);
+      const minutes = totalMinutes % minutesPerHour;
+      return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+    function syncPlayerTransport() {
+      const player = $("player");
+      const transport = $("playerTransport");
+      const hasSource = playerHasSource(player);
+      const hasDuration = hasSource && player.readyState >= 1 && Number.isFinite(player.duration) && player.duration > 0;
+      const currentTime = hasDuration ? Math.min(player.currentTime, player.duration) : 0;
+      const progress = hasDuration ? currentTime / player.duration : 0;
+      const isPlaying = hasSource && !player.paused && !player.ended;
+      const isMuted = player.muted || player.volume <= 0;
+      const seek = $("playerSeek");
+      const seekMaximum = Number(seek.max);
+
+      transport.classList.toggle("is-empty", !hasSource);
+      transport.classList.toggle("is-playing", isPlaying);
+      transport.classList.toggle("is-muted", isMuted);
+      transport.style.setProperty("--player-progress", `${progress * 100}%`);
+
+      $("playerToggle").disabled = !hasSource;
+      $("playerToggle").setAttribute("aria-label", isPlaying ? "Pause sound" : "Play sound");
+      $("playerCurrentTime").textContent = formatPlayerTime(currentTime);
+      $("playerDuration").textContent = formatPlayerTime(hasDuration ? player.duration : 0);
+
+      seek.disabled = !hasDuration;
+      seek.value = String(Math.round(progress * seekMaximum));
+      seek.setAttribute(
+        "aria-valuetext",
+        hasDuration ? `${formatPlayerTime(currentTime)} of ${formatPlayerTime(player.duration)}` : "No sound loaded"
+      );
+
+      $("playerMute").disabled = !hasSource;
+      $("playerMute").setAttribute("aria-pressed", String(isMuted));
+      $("playerMute").setAttribute("aria-label", isMuted ? "Unmute sound" : "Mute sound");
+    }
+    async function togglePlayerPlayback() {
+      const player = $("player");
+      if (!playerHasSource(player)) return;
+      if (!player.paused && !player.ended) {
+        player.pause();
+        return;
+      }
+      if (player.ended || (Number.isFinite(player.duration) && player.currentTime >= player.duration)) player.currentTime = 0;
+      try {
+        await player.play();
+      } catch {
+        setStatus("Playback was blocked. Try pressing Play again.");
+      }
     }
     function loadPlayer(path, name, autoplay = false, sourceId = "") {
       const player = $("player");
@@ -2563,6 +4101,9 @@
       player.src = playbackPath(path);
       player.dataset.sourceId = sourceId;
       $("playerLabel").innerHTML = `<strong>${escapeHtml(name)}</strong>`;
+      $("playerTransport").classList.add("is-loading");
+      $("playerTransport").classList.remove("is-error");
+      syncPlayerTransport();
       player.load();
       if (autoplay) player.play().catch(() => setStatus("Press play in the sound player to audition this sound."));
     }
@@ -2576,6 +4117,8 @@
       player.removeAttribute("data-source-id");
       player.load();
       $("playerLabel").innerHTML = "<strong>Sound player</strong> · choose Play to load a sound";
+      $("playerTransport").classList.remove("is-loading", "is-error");
+      syncPlayerTransport();
       if (sourceId === "editor-preview") {
         editorPreviewReady = false;
         editorPreviewPlaying = false;
@@ -2618,15 +4161,67 @@
       updateCounts();
       updateDemoAvailability();
     }
-    function persistChanges() {
+    function writeBenchState() {
       const disabledIds = [...new Set([...committedDisabledIds, ...pendingDisabledIds])];
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ generatedSounds, disabledIds, customNames, soundOverrides, view: benchView }));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    function persistChanges() {
       generatedSounds = generatedSounds.filter((item) => !pendingDisabledIds.has(item.id));
       for (const id of pendingDisabledIds) {
         if (soundOverrides[id]) delete soundOverrides[id];
       }
-      try {
-        localStorage.setItem(storageKey, JSON.stringify({ generatedSounds, disabledIds, customNames, soundOverrides }));
-      } catch { /* Private file tabs may deny localStorage. */ }
+      return writeBenchState();
+    }
+    function cleanUnusedSessionAssets() {
+      if (isEditing()) return;
+      const assets = unusedSessionAssets();
+      if (!assets.length) {
+        syncCleanButton();
+        setStatus("Nothing to clean. No unused session assets were found.");
+        return;
+      }
+      const count = assets.length;
+      const assetLabel = `unused session asset${count === 1 ? "" : "s"}`;
+      const confirmed = window.confirm(
+        `Delete ${count} ${assetLabel}?\n\nGenerated sounds and saved edits will be removed from this browser. Assigned sounds and bundled PRISM files will not be touched.`
+      );
+      if (!confirmed) {
+        setStatus("Clean cancelled.");
+        return;
+      }
+
+      const soundIdsByAction = snapshotAssignmentSoundIds();
+      const generatedIds = new Set(assets.filter((asset) => asset.kind === "generated").map((asset) => asset.id));
+      const overrideIds = new Set(assets.filter((asset) => asset.kind === "override").map((asset) => asset.id));
+
+      for (const asset of assets) {
+        clearPlayerFor(asset.id);
+        demoBufferCache.delete(asset.path);
+        demoBufferCache.delete(playbackPath(asset.path));
+      }
+      generatedSounds = generatedSounds.filter((item) => !generatedIds.has(item.id));
+      for (const id of generatedIds) {
+        delete customNames[id];
+        pendingDisabledIds.delete(id);
+        committedDisabledIds.delete(id);
+      }
+      for (const id of overrideIds) delete soundOverrides[id];
+
+      remapAssignmentsFromSoundIds(soundIdsByAction);
+      const persisted = writeBenchState();
+      renderLibrary();
+      renderAssignments();
+      if ($("clean").disabled) $("copy").focus({ preventScroll: true });
+      setStatus(
+        persisted
+          ? `Cleaned ${count} ${assetLabel}. Assigned sounds and bundled files were preserved.`
+          : `Cleaned ${count} ${assetLabel}, but browser storage could not be updated.`
+      );
     }
     function dataUrlForBlob(blob) {
       return new Promise((resolve, reject) => {
@@ -2637,18 +4232,157 @@
       });
     }
     function dbToGain(db) { return 10 ** (db / 20); }
+    function editorGainProgress() {
+      const gainControl = $("editGain");
+      const minimum = Number(gainControl.min);
+      const maximum = Number(gainControl.max);
+      return Math.max(0, Math.min(1, (editorSettings.gainDb - minimum) / (maximum - minimum)));
+    }
+    function editorEnvelopePoints() {
+      const { width, top, center, bottom } = EDITOR_ENVELOPE_GEOMETRY;
+      const fadeInX = editorSettings.fadeIn * width;
+      const fadeOutX = (1 - editorSettings.fadeOut) * width;
+      const startTop = editorSettings.fadeIn > 0 ? center : top;
+      const startBottom = editorSettings.fadeIn > 0 ? center : bottom;
+      const endTop = editorSettings.fadeOut > 0 ? center : top;
+      const endBottom = editorSettings.fadeOut > 0 ? center : bottom;
+      return [
+        [0, startTop],
+        [fadeInX, top],
+        [fadeOutX, top],
+        [width, endTop],
+        [width, endBottom],
+        [fadeOutX, bottom],
+        [fadeInX, bottom],
+        [0, startBottom],
+      ];
+    }
+    function updateEditorEnvelopeVisual() {
+      const envelope = $("editEnvelope");
+      const { width } = EDITOR_ENVELOPE_GEOMETRY;
+      const fadeInX = editorSettings.fadeIn * width;
+      const fadeOutX = (1 - editorSettings.fadeOut) * width;
+      const serializedPoints = editorEnvelopePoints().map(([x, y]) => `${x},${y}`).join(" ");
+      $("editEnvelopeShape").setAttribute("points", serializedPoints);
+      $("editEnvelopeClipShape").setAttribute("points", serializedPoints);
+      for (const [id, x] of [["editFadeInGuide", fadeInX], ["editFadeOutGuide", fadeOutX]]) {
+        const guide = $(id);
+        guide.setAttribute("x1", x);
+        guide.setAttribute("x2", x);
+      }
+      const hasFadeIn = editorSettings.fadeIn > 0;
+      const hasFadeOut = editorSettings.fadeOut > 0;
+      const hasAnyFade = hasFadeIn || hasFadeOut;
+      const handlesJoined = hasAnyFade && Math.abs(1 - editorSettings.fadeIn - editorSettings.fadeOut) < EDITOR_ENVELOPE_JOIN_EPSILON;
+      const gainProgress = editorGainProgress();
+      envelope.style.setProperty("--fade-in-position", `${editorSettings.fadeIn * 100}%`);
+      envelope.style.setProperty("--fade-out-position", `${(1 - editorSettings.fadeOut) * 100}%`);
+      envelope.style.setProperty("--envelope-gain-position", `${gainProgress * 100}%`);
+      envelope.style.setProperty("--envelope-gain-x-position", `${((fadeInX + fadeOutX) / (2 * width)) * 100}%`);
+      envelope.classList.toggle("has-fade-in", hasFadeIn);
+      envelope.classList.toggle("has-fade-out", hasFadeOut);
+      envelope.classList.toggle("has-joined-handles", handlesJoined);
+    }
+    function editorWaveformPath(buffer) {
+      const { width, top, center, bottom } = EDITOR_ENVELOPE_GEOMETRY;
+      const bucketCount = Math.min(EDITOR_WAVEFORM_BUCKET_COUNT, Math.max(2, buffer.length));
+      const maxHalfHeight = (bottom - top) / 2;
+      const channels = Array.from({ length: buffer.numberOfChannels }, (_, channel) => buffer.getChannelData(channel));
+      const amplitudes = Array.from({ length: bucketCount }, (_, bucketIndex) => {
+        const start = Math.floor((bucketIndex * buffer.length) / bucketCount);
+        const end = Math.max(start + 1, Math.floor(((bucketIndex + 1) * buffer.length) / bucketCount));
+        const stride = Math.max(1, Math.floor((end - start) / EDITOR_WAVEFORM_SAMPLES_PER_BUCKET));
+        let peak = 0;
+        for (const samples of channels) {
+          for (let sampleIndex = start; sampleIndex < end; sampleIndex += stride) {
+            peak = Math.max(peak, Math.abs(samples[sampleIndex] || 0));
+          }
+        }
+        const shapedPeak = Math.min(1, Math.sqrt(peak));
+        return EDITOR_WAVEFORM_MIN_HALF_HEIGHT + shapedPeak * (maxHalfHeight - EDITOR_WAVEFORM_MIN_HALF_HEIGHT);
+      });
+      const points = amplitudes.map((amplitude, index) => {
+        const x = (index * width) / (bucketCount - 1);
+        return [x, center - amplitude, center + amplitude];
+      });
+      const upper = points.map(([x, y]) => `${x.toFixed(2)},${y.toFixed(2)}`);
+      const lower = points.toReversed().map(([x, , y]) => `${x.toFixed(2)},${y.toFixed(2)}`);
+      return `M${upper.join(" L")} L${lower.join(" L")} Z`;
+    }
+    function setEditorWaveformPath(path) {
+      $("editEnvelopeWaveformGhost").setAttribute("d", path);
+      $("editEnvelopeWaveformActive").setAttribute("d", path);
+    }
+    async function loadEditorWaveform(item) {
+      const requestId = ++editorWaveformRequestId;
+      const plot = $("editEnvelopePlot");
+      plot.classList.add("is-loading");
+      plot.classList.remove("is-fallback");
+      setEditorWaveformPath("M0 57 H800 V63 H0 Z");
+      try {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContextClass) throw new Error("Web Audio is unavailable.");
+        const response = await fetch(playbackPath(item.path));
+        if (!response.ok) throw new Error("The waveform source could not be loaded.");
+        const context = new AudioContextClass();
+        let decoded;
+        try {
+          decoded = await context.decodeAudioData(await response.arrayBuffer());
+        } finally {
+          await context.close();
+        }
+        if (requestId !== editorWaveformRequestId || editorItemId !== item.id) return;
+        setEditorWaveformPath(editorWaveformPath(decoded));
+      } catch (error) {
+        if (requestId !== editorWaveformRequestId) return;
+        plot.classList.add("is-fallback");
+        console.warn("Could not draw the editor waveform.", error);
+      } finally {
+        if (requestId === editorWaveformRequestId) plot.classList.remove("is-loading");
+      }
+    }
     function updateEditorOutputs() {
       $("editGainValue").textContent = `${editorSettings.gainDb > 0 ? "+" : ""}${editorSettings.gainDb} dB`;
       $("editHighEndValue").textContent = `${editorSettings.highEndDb > 0 ? "+" : ""}${editorSettings.highEndDb} dB`;
       $("editFadeInValue").textContent = editorSettings.fadeIn ? `${Math.round(editorSettings.fadeIn * 100)}%` : "None";
       $("editFadeOutValue").textContent = editorSettings.fadeOut ? `${Math.round(editorSettings.fadeOut * 100)}%` : "None";
       $("editSpeedValue").textContent = `${Number(editorSettings.playbackRate).toFixed(2).replace(/0$/, "")}×`;
+      const gainControl = $("editGain");
+      gainControl.setAttribute("aria-valuetext", $("editGainValue").textContent);
+      $("editFadeIn").setAttribute("aria-valuetext", $("editFadeInValue").textContent);
+      $("editFadeOut").setAttribute("aria-valuetext", $("editFadeOutValue").textContent);
+      updateEditorEnvelopeVisual();
+    }
+    function syncEditorFadeControls() {
+      $("editFadeIn").value = editorSettings.fadeIn;
+      $("editFadeOut").value = editorSettings.fadeOut;
+    }
+    function updateEditorFade(changedFade, value) {
+      const changed = applyEditorSettingsMutation(() => {
+        const pairedFade = changedFade === "fadeIn" ? "fadeOut" : "fadeIn";
+        editorSettings[changedFade] = Math.max(0, Math.min(EDITOR_MAX_FADE_RATIO, value));
+        const pairedLimit = 1 - editorSettings[changedFade];
+        if (editorSettings[pairedFade] > pairedLimit) {
+          editorSettings[pairedFade] = Number(pairedLimit.toFixed(2));
+        }
+      });
+      if (!changed) return;
+      syncEditorFadeControls();
+      updateEditorOutputs();
+    }
+    function restoreEditorSettings() {
+      const changed = applyEditorSettingsMutation(() => {
+        editorSettings = { ...editorInitialSettings };
+      });
+      if (!changed) return;
+      setEditorSaveChoiceOpen(false);
+      syncEditorControls();
+      $("editRestore").focus({ preventScroll: true });
     }
     function syncEditorControls() {
       $("editGain").value = editorSettings.gainDb;
       $("editHighEnd").value = editorSettings.highEndDb;
-      $("editFadeIn").value = editorSettings.fadeIn;
-      $("editFadeOut").value = editorSettings.fadeOut;
+      syncEditorFadeControls();
       $("editSpeed").value = editorSettings.playbackRate;
       $("editInvert").checked = editorSettings.invert;
       updateEditorOutputs();
@@ -2656,8 +4390,108 @@
     function syncPreviewButton() {
       const button = $("editPreview");
       if (!button) return;
-      if (!editorPreviewReady) button.textContent = "Preview";
-      else button.textContent = editorPreviewPlaying ? "Pause" : "Play";
+      const icon = $("editPreviewIcon");
+      const label = !editorPreviewReady
+        ? "Preview edited sound"
+        : editorPreviewPlaying
+          ? "Pause edited preview"
+          : "Play edited preview";
+      icon.textContent = editorPreviewPlaying ? "❚❚" : "▶";
+      $("editPreviewLabel").textContent = !editorPreviewReady ? "Preview" : editorPreviewPlaying ? "Pause" : "Play";
+      button.setAttribute("aria-label", label);
+      button.title = label;
+      button.setAttribute("aria-pressed", String(editorPreviewPlaying));
+      $("editor")?.classList.toggle("is-previewing", editorPreviewPlaying);
+    }
+    function snapshotEditorSettings() {
+      return { ...editorSettings };
+    }
+    function editorSettingsMatch(first, second) {
+      return EDITOR_SETTING_KEYS.every((key) => first[key] === second[key]);
+    }
+    function hasEditorChanges() {
+      return !editorSettingsMatch(editorSettings, editorInitialSettings);
+    }
+    function syncEditorUndoButton() {
+      const button = $("editUndo");
+      const canUndo = editorHistory.length > 0 && !editorSaveInProgress;
+      button.disabled = !canUndo;
+      button.title = canUndo ? "Undo last edit" : "Nothing to undo";
+    }
+    function syncEditorRestoreButton() {
+      const button = $("editRestore");
+      const canRestore = hasEditorChanges() && !editorSaveInProgress;
+      button.disabled = !canRestore;
+      button.title = canRestore ? "Restore opening settings" : "Nothing to restore";
+    }
+    function pushEditorHistory(settings) {
+      if (editorSettingsMatch(settings, editorSettings)) return;
+      const previous = editorHistory[editorHistory.length - 1];
+      if (!previous || !editorSettingsMatch(previous, settings)) {
+        editorHistory.push({ ...settings });
+        if (editorHistory.length > EDITOR_HISTORY_LIMIT) editorHistory.shift();
+      }
+      syncEditorUndoButton();
+    }
+    function beginEditorHistoryTransaction() {
+      if (!editorHistoryTransaction) editorHistoryTransaction = snapshotEditorSettings();
+    }
+    function finishEditorHistoryTransaction() {
+      if (!editorHistoryTransaction) return;
+      const startingSettings = editorHistoryTransaction;
+      editorHistoryTransaction = null;
+      if (!editorSettingsMatch(startingSettings, editorSettings)) pushEditorHistory(startingSettings);
+      else syncEditorUndoButton();
+    }
+    function applyEditorSettingsMutation(mutate) {
+      const previousSettings = snapshotEditorSettings();
+      mutate();
+      if (editorSettingsMatch(previousSettings, editorSettings)) return false;
+      if (!editorHistoryTransaction) pushEditorHistory(previousSettings);
+      markEditorDirty();
+      return true;
+    }
+    function updateEditorSetting(key, value) {
+      const changed = applyEditorSettingsMutation(() => {
+        editorSettings[key] = value;
+      });
+      if (changed) updateEditorOutputs();
+    }
+    function resetEditorEnvelopeSetting(key) {
+      finishEditorHistoryTransaction();
+      const changed = applyEditorSettingsMutation(() => {
+        editorSettings[key] = EDITOR_DEFAULT_SETTINGS[key];
+      });
+      if (changed) syncEditorControls();
+    }
+    function undoEditorChange() {
+      finishEditorHistoryTransaction();
+      const previousSettings = editorHistory.pop();
+      if (!previousSettings) return;
+      editorSettings = { ...previousSettings };
+      setEditorSaveChoiceOpen(false);
+      stopEditorPreview({ resetReady: true });
+      syncEditorControls();
+      syncEditorSaveChoices();
+      syncEditorUndoButton();
+      $("editUndo").focus({ preventScroll: true });
+    }
+    function syncEditorSaveChoices() {
+      const actions = $("editorActions");
+      const saveButton = $("editSave");
+      const cancelButton = $("editCancel");
+      actions.classList.toggle("is-choosing", editorSaveChoiceOpen);
+      saveButton.textContent = editorSaveChoiceOpen ? "Overwrite?" : "Save";
+      cancelButton.textContent = editorSaveChoiceOpen ? "Save new?" : "Cancel";
+      saveButton.disabled = editorSaveInProgress || !hasEditorChanges();
+      cancelButton.disabled = editorSaveInProgress;
+      actions.setAttribute("aria-label", editorSaveChoiceOpen ? "Choose how to save" : "Editor actions");
+      syncEditorRestoreButton();
+    }
+    function setEditorSaveChoiceOpen(open, { force = false } = {}) {
+      if (editorSaveInProgress && !force) return;
+      editorSaveChoiceOpen = Boolean(open);
+      syncEditorSaveChoices();
     }
     function stopEditorPreview({ resetReady = false } = {}) {
       const player = $("player");
@@ -2677,6 +4511,8 @@
     }
     function markEditorDirty() {
       stopEditorPreview({ resetReady: true });
+      syncEditorSaveChoices();
+      syncEditorUndoButton();
     }
     async function renderAudioEdit(item, settings) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -2700,8 +4536,8 @@
       filter.gain.value = Number(settings.highEndDb) || 0;
       const gain = offline.createGain();
       const level = dbToGain(Number(settings.gainDb) || 0);
-      const fadeIn = Math.max(0, Math.min(0.8, Number(settings.fadeIn) || 0));
-      const fadeOut = Math.max(0, Math.min(0.8, Number(settings.fadeOut) || 0));
+      const fadeIn = Math.max(0, Math.min(EDITOR_MAX_FADE_RATIO, Number(settings.fadeIn) || 0));
+      const fadeOut = Math.max(0, Math.min(EDITOR_MAX_FADE_RATIO, Number(settings.fadeOut) || 0));
       const fadeInEnd = fadeIn > 0 ? duration * fadeIn : 0;
       const fadeOutStart = fadeOut > 0 ? duration * (1 - fadeOut) : duration;
       if (fadeIn > 0) {
@@ -2756,28 +4592,42 @@
       return new Blob([bytes], { type: "audio/wav" });
     }
     function openEditor(id) {
-      const item = entryById(id);
+      const item = candidate?.id === id ? { id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true } : entryById(id);
       if (!item) return;
       stopEditorPreview({ resetReady: true });
       editorItemId = id;
-      editorSettings = { gainDb: 0, highEndDb: 0, fadeIn: 0, fadeOut: 0, playbackRate: 1, invert: false };
-      $("editorTitle").textContent = displayName(item);
+      editorSettings = { ...EDITOR_DEFAULT_SETTINGS };
+      editorInitialSettings = { ...editorSettings };
+      editorHistory = [];
+      editorHistoryTransaction = null;
+      setEditorSaveChoiceOpen(false, { force: true });
+      syncEditorUndoButton();
       syncEditorControls();
+      loadEditorWaveform(item);
       syncPreviewButton();
       syncSidePanel();
       renderLibrary();
-      document.querySelector("#sidePanel")?.scrollIntoView({ block: "nearest" });
-      $("editGain").focus();
+      document.querySelector(".editor-scroll-region").scrollTop = 0;
+      document.querySelector("#sidePanel")?.scrollIntoView({
+        block: window.matchMedia(STACKED_WORKSPACE_MEDIA_QUERY).matches ? "start" : "nearest",
+      });
+      $("editGain").focus({ preventScroll: true });
       setStatus(`Editing ${displayName(item)}. Preview loops in the player above.`);
     }
     function closeEditor() {
       stopEditorPreview({ resetReady: true });
+      setEditorSaveChoiceOpen(false, { force: true });
+      editorHistory = [];
+      editorHistoryTransaction = null;
+      syncEditorUndoButton();
+      editorWaveformRequestId += 1;
+      $("editEnvelopePlot").classList.remove("is-loading");
       editorItemId = null;
       syncSidePanel();
       renderLibrary();
     }
     async function previewEdit() {
-      const item = entryById(editorItemId);
+      const item = editorTarget();
       if (!item) return;
       const button = $("editPreview");
       const player = $("player");
@@ -2798,7 +4648,9 @@
         return;
       }
       button.disabled = true;
-      button.textContent = "Rendering…";
+      $("editPreviewIcon").textContent = "…";
+      button.setAttribute("aria-label", "Rendering edited preview");
+      button.title = "Rendering edited preview";
       try {
         const blob = await renderAudioEdit(item, editorSettings);
         if (editorPreviewUrl) URL.revokeObjectURL(editorPreviewUrl);
@@ -2818,17 +4670,27 @@
       }
     }
     async function saveEdit(mode) {
-      const item = entryById(editorItemId);
-      if (!item) return;
-      const overwriteButton = $("editOverwrite");
-      const saveNewButton = $("editSaveNew");
-      const activeButton = mode === "overwrite" ? overwriteButton : saveNewButton;
-      overwriteButton.disabled = true;
-      saveNewButton.disabled = true;
+      const item = editorTarget();
+      if (!item || editorSaveInProgress || !hasEditorChanges()) return;
+      const saveButton = $("editSave");
+      const cancelButton = $("editCancel");
+      const activeButton = mode === "overwrite" ? saveButton : cancelButton;
+      editorSaveInProgress = true;
+      syncEditorSaveChoices();
+      syncEditorUndoButton();
       activeButton.textContent = "Saving…";
       try {
         const blob = await renderAudioEdit(item, editorSettings);
         const dataUrl = await dataUrlForBlob(blob);
+        if (candidate && item.id === candidate.id) {
+          URL.revokeObjectURL(candidate.objectUrl);
+          candidate.objectUrl = URL.createObjectURL(blob);
+          candidate.dataUrl = dataUrl;
+          loadPlayer(candidate.objectUrl, candidate.name, false, candidate.id);
+          closeEditor();
+          setStatus("Updated the candidate. Keep it or toss it when ready.");
+          return;
+        }
         if (mode === "overwrite") {
           const generatedIndex = generatedSounds.findIndex((entry) => entry.id === item.id);
           if (generatedIndex >= 0) {
@@ -2863,14 +4725,14 @@
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "The edit could not be saved.");
       } finally {
-        overwriteButton.disabled = false;
-        saveNewButton.disabled = false;
-        overwriteButton.textContent = "Overwrite";
-        saveNewButton.textContent = "Save as new";
+        editorSaveInProgress = false;
+        setEditorSaveChoiceOpen(false, { force: true });
+        syncEditorUndoButton();
       }
     }
     function discardCandidate() {
       if (!candidate) return;
+      if (editorItemId === candidate.id) closeEditor();
       clearPlayerFor(candidate.id);
       URL.revokeObjectURL(candidate.objectUrl);
       candidate = null;
@@ -2881,20 +4743,34 @@
       return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[char]));
     }
     companionGlassController = createCompanionGlassController($("demoCompanionArena"), $("demoCompanion"));
-    $("enterDemo").addEventListener("click", () => setBenchView("demo"));
-    $("backToLibrary").addEventListener("click", () => setBenchView("library"));
-    $("demoSpatialAudio").addEventListener("change", (event) => {
-      demoSpatialAudioEnabled = event.target.checked;
+    $("benchViewToggle").addEventListener("click", () => setBenchView(benchView === "demo" ? "library" : "demo"));
+    $("demoSpatialAudio").addEventListener("click", () => {
+      demoSpatialAudioEnabled = !demoSpatialAudioEnabled;
+      syncSpatialAudioButton();
       stopDemoPlayback();
       setDemoStatus(demoSpatialAudioEnabled ? "Spatial audio enabled." : "Spatial audio disabled.");
     });
     document.querySelectorAll("[data-demo-bot-card]").forEach((button) => {
-      button.addEventListener("mouseenter", (event) => {
-        event.currentTarget.classList.add("is-hovering");
-        playDemoCue(event.currentTarget.dataset.demoHoverCue, event.currentTarget);
+      button.addEventListener("pointerenter", (event) => {
+        const botCard = event.currentTarget;
+        const requestEpoch = (demoHoverRequestEpochs.get(botCard) || 0) + 1;
+        demoHoverRequestEpochs.set(botCard, requestEpoch);
+        demoHoverActiveElements.add(botCard);
+        botCard.classList.add("is-hovering");
+        void playDemoCue(botCard.dataset.demoHoverCue, botCard, undefined, {
+          onSource: (source) => {
+            if (!demoHoverActiveElements.has(botCard) || demoHoverRequestEpochs.get(botCard) !== requestEpoch) {
+              try { source.stop(0); } catch { /* The source may have already ended. */ }
+            }
+          },
+        });
       });
-      button.addEventListener("mouseleave", (event) => {
-        event.currentTarget.classList.remove("is-hovering");
+      button.addEventListener("pointerleave", (event) => {
+        const botCard = event.currentTarget;
+        demoHoverActiveElements.delete(botCard);
+        demoHoverRequestEpochs.set(botCard, (demoHoverRequestEpochs.get(botCard) || 0) + 1);
+        botCard.classList.remove("is-hovering");
+        stopDemoPlaybackForOrigin(botCard);
       });
       button.addEventListener("click", (event) => {
         const botCard = event.currentTarget;
@@ -2904,10 +4780,35 @@
         playDemoCue(botCard.dataset.demoClickCue, botCard);
       });
     });
+    const thinkingAvatar = $("demoThinking");
+    const thinkingHue = Math.floor(Math.random() * 360);
+    thinkingAvatar.style.setProperty("--thinking-hue-rotation", `${thinkingHue - 320}deg`);
+    thinkingAvatar.addEventListener("pointerenter", () => {
+      demoThinkingHoverActive = true;
+      const requestEpoch = ++demoThinkingRequestEpoch;
+      demoLastPlayedAt.delete("avatar-thinking");
+      startThinkingAnimation();
+      void playDemoCue("avatar-thinking", thinkingAvatar, undefined, {
+        loop: true,
+        onSource: (source) => {
+          if (!demoThinkingHoverActive || demoThinkingRequestEpoch !== requestEpoch) {
+            try { source.stop(0); } catch { /* The source may have already ended. */ }
+            return;
+          }
+          demoThinkingSource = source;
+        },
+      });
+    });
+    thinkingAvatar.addEventListener("pointerleave", stopThinkingInteraction);
+    thinkingAvatar.addEventListener("mouseleave", stopThinkingInteraction);
+    window.addEventListener("blur", stopThinkingInteraction);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) stopThinkingInteraction();
+    });
     $("demoActionAudioInput").addEventListener("input", () => {
       const match = $("demoActionAudioMatch");
       match.removeAttribute("data-match");
-      match.textContent = "Press Send to test this action against PRISM’s production keywords.";
+      match.textContent = "";
     });
     $("demoActionAudioForm").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -2920,8 +4821,10 @@
         return;
       }
       match.dataset.match = "true";
-      match.textContent = `Matched ${actionFor(cue).label} · ${cue}`;
-      playDemoCue(cue, event.submitter || event.currentTarget);
+      match.textContent = "Playing a matched sound…";
+      playDemoCue(cue, event.submitter || event.currentTarget, (sourceInfo) => {
+        match.textContent = `Matched ${sourceInfo.name}`;
+      });
     });
     $("demoPanelToggle").addEventListener("click", (event) => {
       const panel = event.currentTarget;
@@ -2937,7 +4840,7 @@
       if (action.id === "demoToggle") {
         action.setAttribute("aria-checked", String(action.getAttribute("aria-checked") !== "true"));
       } else if (action.id === "demoThinking") {
-        pulseDemoElement(action, "is-thinking", DEMO_THINKING_FEEDBACK_MS);
+        return;
       }
       playDemoCue(action.dataset.demoCue, action);
     });
@@ -3008,28 +4911,128 @@
         renderAssignments();
       }
     });
-    $("editGain").addEventListener("input", (event) => { editorSettings.gainDb = Number(event.target.value); updateEditorOutputs(); markEditorDirty(); });
-    $("editHighEnd").addEventListener("input", (event) => { editorSettings.highEndDb = Number(event.target.value); updateEditorOutputs(); markEditorDirty(); });
-    $("editFadeIn").addEventListener("input", (event) => { editorSettings.fadeIn = Number(event.target.value); updateEditorOutputs(); markEditorDirty(); });
-    $("editFadeOut").addEventListener("input", (event) => { editorSettings.fadeOut = Number(event.target.value); updateEditorOutputs(); markEditorDirty(); });
-    $("editSpeed").addEventListener("input", (event) => { editorSettings.playbackRate = Number(event.target.value); updateEditorOutputs(); markEditorDirty(); });
-    $("editInvert").addEventListener("change", (event) => { editorSettings.invert = event.target.checked; markEditorDirty(); });
+    const editorContinuousControls = ["editGain", "editHighEnd", "editFadeIn", "editFadeOut", "editSpeed"].map($);
+    editorContinuousControls.forEach((control) => {
+      control.addEventListener("pointerdown", (event) => {
+        if (event.button === 0) beginEditorHistoryTransaction();
+      });
+      control.addEventListener("pointerup", finishEditorHistoryTransaction);
+      control.addEventListener("pointercancel", finishEditorHistoryTransaction);
+      control.addEventListener("change", finishEditorHistoryTransaction);
+      control.addEventListener("keydown", (event) => {
+        if (EDITOR_HISTORY_KEYS.has(event.key)) beginEditorHistoryTransaction();
+      });
+      control.addEventListener("keyup", (event) => {
+        if (EDITOR_HISTORY_KEYS.has(event.key)) finishEditorHistoryTransaction();
+      });
+      control.addEventListener("blur", finishEditorHistoryTransaction);
+    });
+    $("editGain").addEventListener("input", (event) => updateEditorSetting("gainDb", Number(event.target.value)));
+    $("editHighEnd").addEventListener("input", (event) => updateEditorSetting("highEndDb", Number(event.target.value)));
+    $("editFadeIn").addEventListener("input", (event) => updateEditorFade("fadeIn", Number(event.target.value)));
+    $("editFadeOut").addEventListener("input", (event) => updateEditorFade("fadeOut", Number(event.target.value)));
+    for (const [buttonId, settingKey] of [
+      ["editFadeInReset", "fadeIn"],
+      ["editGainReset", "gainDb"],
+      ["editFadeOutReset", "fadeOut"],
+      ["editHighEndReset", "highEndDb"],
+      ["editSpeedReset", "playbackRate"],
+    ]) {
+      $(buttonId).addEventListener("click", () => resetEditorEnvelopeSetting(settingKey));
+    }
+    $("editRestore").addEventListener("click", restoreEditorSettings);
+    $("editSpeed").addEventListener("input", (event) => updateEditorSetting("playbackRate", Number(event.target.value)));
+    $("editInvert").addEventListener("change", (event) => {
+      applyEditorSettingsMutation(() => {
+        editorSettings.invert = event.target.checked;
+      });
+    });
+    $("editUndo").addEventListener("click", undoEditorChange);
     $("editPreview").addEventListener("click", previewEdit);
-    $("player").addEventListener("play", () => {
-      if ($("player").dataset.sourceId !== "editor-preview") return;
+    const soundPlayer = $("player");
+    $("playerToggle").addEventListener("click", togglePlayerPlayback);
+    $("playerSeek").addEventListener("input", (event) => {
+      if (!Number.isFinite(soundPlayer.duration) || soundPlayer.duration <= 0) return;
+      const seekMaximum = Number(event.currentTarget.max);
+      soundPlayer.currentTime = (Number(event.currentTarget.value) / seekMaximum) * soundPlayer.duration;
+      syncPlayerTransport();
+    });
+    $("playerMute").addEventListener("click", () => {
+      soundPlayer.muted = !soundPlayer.muted;
+      syncPlayerTransport();
+    });
+    soundPlayer.addEventListener("loadstart", () => {
+      if (playerHasSource(soundPlayer)) $("playerTransport").classList.add("is-loading");
+      $("playerTransport").classList.remove("is-error");
+      syncPlayerTransport();
+    });
+    soundPlayer.addEventListener("loadedmetadata", () => {
+      $("playerTransport").classList.remove("is-loading");
+      syncPlayerTransport();
+    });
+    soundPlayer.addEventListener("durationchange", syncPlayerTransport);
+    soundPlayer.addEventListener("timeupdate", syncPlayerTransport);
+    soundPlayer.addEventListener("playing", () => {
+      $("playerTransport").classList.remove("is-loading");
+      syncPlayerTransport();
+    });
+    soundPlayer.addEventListener("waiting", () => {
+      if (!soundPlayer.paused) $("playerTransport").classList.add("is-loading");
+    });
+    soundPlayer.addEventListener("canplay", () => $("playerTransport").classList.remove("is-loading"));
+    soundPlayer.addEventListener("stalled", () => {
+      if (!soundPlayer.paused) $("playerTransport").classList.add("is-loading");
+    });
+    soundPlayer.addEventListener("play", () => {
+      syncPlayerTransport();
+      if (soundPlayer.dataset.sourceId !== "editor-preview") return;
       editorPreviewPlaying = true;
       syncPreviewButton();
     });
-    $("player").addEventListener("pause", () => {
-      if ($("player").dataset.sourceId !== "editor-preview") return;
+    soundPlayer.addEventListener("pause", () => {
+      $("playerTransport").classList.remove("is-loading");
+      syncPlayerTransport();
+      if (soundPlayer.dataset.sourceId !== "editor-preview") return;
       editorPreviewPlaying = false;
       syncPreviewButton();
     });
-    $("editOverwrite").addEventListener("click", () => saveEdit("overwrite"));
-    $("editSaveNew").addEventListener("click", () => saveEdit("new"));
+    soundPlayer.addEventListener("ended", syncPlayerTransport);
+    soundPlayer.addEventListener("volumechange", syncPlayerTransport);
+    soundPlayer.addEventListener("emptied", () => {
+      if (!playerHasSource(soundPlayer)) $("playerTransport").classList.remove("is-loading", "is-error");
+      syncPlayerTransport();
+    });
+    soundPlayer.addEventListener("error", () => {
+      $("playerTransport").classList.remove("is-loading");
+      $("playerTransport").classList.add("is-error");
+      syncPlayerTransport();
+      if (playerHasSource(soundPlayer)) setStatus("This sound could not be loaded.");
+    });
+    $("editSave").addEventListener("click", () => {
+      if (!editorSaveChoiceOpen) {
+        setEditorSaveChoiceOpen(true);
+        return;
+      }
+      void saveEdit("overwrite");
+    });
     $("editCancel").addEventListener("click", () => {
+      if (editorSaveChoiceOpen) {
+        void saveEdit("new");
+        return;
+      }
       closeEditor();
       setStatus("Edit canceled. Assignments restored.");
+    });
+    $("editorActions").addEventListener("pointerleave", () => setEditorSaveChoiceOpen(false));
+    $("editorActions").addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !editorSaveChoiceOpen) return;
+      event.preventDefault();
+      setEditorSaveChoiceOpen(false);
+      $("editSave").focus();
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!editorSaveChoiceOpen || $("editorActions").contains(event.target)) return;
+      setEditorSaveChoiceOpen(false);
     });
     $("assignments").addEventListener("click", (event) => {
       if (isEditing()) return;
@@ -3099,6 +5102,7 @@
         console.log(JSON.stringify(output, null, 2));
       }
     });
+    $("clean").addEventListener("click", cleanUnusedSessionAssets);
     $("generator").addEventListener("submit", async (event) => {
       event.preventDefault();
       const prompt = $("prompt").value.trim();
@@ -3131,6 +5135,7 @@
       }
     });
     $("candidatePlay").addEventListener("click", () => { if (candidate) loadPlayer(candidate.objectUrl, candidate.name, true, candidate.id); });
+    $("candidateEdit").addEventListener("click", () => { if (candidate) openEditor(candidate.id); });
     $("keep").addEventListener("click", () => {
       if (!candidate) return;
       generatedSounds.push({ id: candidate.id, path: candidate.dataUrl, name: candidate.name, generated: true });
@@ -3147,7 +5152,8 @@
     });
     window.addEventListener("pagehide", persistChanges);
     document.addEventListener("click", () => document.querySelectorAll(".picker.open").forEach((item) => item.classList.remove("open")));
-    setBenchView("library");
+    setBenchView(benchView);
+    syncPlayerTransport();
     syncSidePanel();
     renderLibrary();
     renderAssignments();
