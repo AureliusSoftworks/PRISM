@@ -2048,8 +2048,13 @@ export function botcastHostRageQuitIntent(args: {
 
 const BOTCAST_HOST_SIGN_OFF_PATTERNS = [
   /\b(?:and\s+)?that(?:'s| is)\s+(?:the|our|this)\s+(?:show|podcast|episode|interview|broadcast)\b(?=\s*(?:$|[,.!?:;—]|\b(?:folks|everyone|everybody|listeners)\b))/iu,
+  // "That's it for What Grinds Your Gears" / "That's it for the show"
+  /\bthat(?:'s| is)\s+it\s+for\b/iu,
   /\b(?:(?:this|the)\s+)?(?:show|podcast|episode|interview|broadcast)(?:'s| is)\s+(?:over|done|finished)\b/iu,
   /\bthis\s+has\s+been\s+[^.!?]{1,80}\b(?:show|podcast|broadcast)\b(?=\s*(?:$|[,.!?:;—]))/iu,
+  // "We're out, goodnight everybody" / "We're done here, folks"
+  /\bwe(?:'re| are)\s+(?:out|done)\b(?=\s*(?:$|[,.!?:;—]|\b(?:good\s*night|everybody|everyone|folks|listeners)\b))/iu,
+  /\bgood\s*night\b(?:\s+\w+){0,3}\s*,?\s*\b(?:everybody|everyone|folks|listeners)\b/iu,
 ] as const;
 
 /**

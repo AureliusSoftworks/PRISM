@@ -122,10 +122,12 @@ import {
   DEFAULT_SIGNAL_ATMOSPHERE_MIX,
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_STEP,
+  sessionAtmosphereBusVolume,
   signalAtmosphereMixLevelFromRelative,
   signalAtmosphereRelativeMixLevel,
   signalSessionAtmosphereActive,
 } from "./session-atmosphere-audio";
+import { signalAvatarSfxShouldPlay } from "./signalAvatarSfx";
 import {
   SIGNAL_ARTWORK_JOB_EVENT,
   announceSignalArtworkJob,
@@ -411,6 +413,9 @@ export interface BotcastExperienceProps {
       sipping: boolean;
       replayAudioMaster?: boolean;
       role: "host" | "guest";
+      surface: "dashboard" | "stage" | "alignment";
+      sfxEnabled: boolean;
+      sfxMixGain?: number;
       facing?: "left" | "right";
       theme?: "light" | "dark";
       mouthShape: ZenLiveBotMouthShape;
@@ -1151,6 +1156,9 @@ export function BotcastExperience({
   const [episodeOutro, setEpisodeOutro] = useState<SignalEpisodeOutro | null>(
     null,
   );
+  const [episodeOutroSfxMutedId, setEpisodeOutroSfxMutedId] = useState<
+    string | null
+  >(null);
   const [introPreviewShowId, setIntroPreviewShowId] = useState<string | null>(
     null,
   );
@@ -1641,6 +1649,7 @@ export function BotcastExperience({
   const stopEpisodeOutro = useCallback((): void => {
     outroRunIdRef.current += 1;
     setEpisodeOutro(null);
+    setEpisodeOutroSfxMutedId(null);
     stopSignalIntroAudio();
   }, []);
 
@@ -1709,6 +1718,7 @@ export function BotcastExperience({
     }): Promise<void> => {
       if (presentedEpisodeOutroIdsRef.current.has(args.episode.id)) return;
       presentedEpisodeOutroIdsRef.current.add(args.episode.id);
+      setEpisodeOutroSfxMutedId(args.episode.id);
       const runId = outroRunIdRef.current + 1;
       outroRunIdRef.current = runId;
       // Let the host's final words settle in the live studio before the
@@ -1889,12 +1899,6 @@ export function BotcastExperience({
     setBlockingOperation(null);
     setBusy(false);
   };
-
-  useEffect(() => {
-    if (responseMode === "auto" && episodeModelDraft) {
-      setEpisodeModelDraft("");
-    }
-  }, [episodeModelDraft, responseMode]);
 
   useEffect(() => {
     if (
@@ -3824,10 +3828,8 @@ export function BotcastExperience({
     stopIntroPreview();
     onPrepareUtterance?.();
     const { controller, runId } = beginEpisodeOperation();
-    const selectedModelOption =
-      responseMode !== "auto" && episodeModelDraft
-        ? (modelOptions.find((option) => option.id === episodeModelDraft) ??
-          null)
+    const selectedModelOption = episodeModelDraft
+      ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
       : null;
     const episodeProvider =
       selectedModelOption?.provider ??
@@ -5938,6 +5940,11 @@ export function BotcastExperience({
         thinkingRole === "guest",
     );
     const stageAtmosphere = activeShowAtmosphere(args.show, theme);
+    const avatarSfxMixGain = sessionAtmosphereBusVolume({
+      volume: introAudioVolume,
+      mix: args.show.atmosphereMix,
+      bus: "foley",
+    });
     const studioLayout = normalizeBotcastStudioLayout(args.show.studioLayout);
     const replayMessageStartMs =
       replayFaithfulBeat?.startMs ??
@@ -6032,14 +6039,37 @@ export function BotcastExperience({
         listenerReactionPlan?.listenerBotId ===
           (role === "host" ? args.host?.id : args.guest?.id),
       );
-    const roleIsSpeaking = (role: "host" | "guest"): boolean =>
-      Boolean(
+    const replayParticipantIdForRole = (
+      role: "host" | "guest",
+    ): string =>
+      role === "host"
+        ? args.currentEpisode.hostBotId
+        : args.currentEpisode.guestKind === "producer"
+          ? "prism-player"
+          : args.currentEpisode.guestBotId;
+    const roleIsSpeaking = (role: "host" | "guest"): boolean => {
+      const directedParticipant =
+        replayDirectedScene?.participants[replayParticipantIdForRole(role)];
+      if (args.replay && replayFaithful && directedParticipant) {
+        const activeMessageAllowsSpeech =
+          args.activeMessage?.speakerRole !== role ||
+          (botcastMessageIsAudibleToAudienceV1(args.activeMessage) &&
+            !botPowerResponseIsSilentV1(args.activeMessage.content));
+        return Boolean(
+          replayPlaying &&
+            directedParticipant.speaking === true &&
+            directedParticipant.audible !== false &&
+            activeMessageAllowsSpeech,
+        );
+      }
+      return Boolean(
         speechIsPlaying &&
           botcastMessageIsAudibleToAudienceV1(args.activeMessage ?? {}) &&
           !botPowerResponseIsSilentV1(args.activeMessage?.content) &&
           (args.replay || botcastSpeechRevealIsVoicing(speechReveal) !== false) &&
           args.activeMessage?.speakerRole === role,
       );
+    };
     const roleAvatarScaleMode = (
       role: "host" | "guest",
       bot: BotcastBotSummary,
@@ -6215,6 +6245,18 @@ export function BotcastExperience({
         sipping,
         replayAudioMaster: args.replay && replayFaithful,
         role,
+        surface: "stage",
+        sfxEnabled:
+          !(args.replay && replayFaithful) &&
+          signalAvatarSfxShouldPlay({
+            surface: "stage",
+            introActive: episodePreRoll !== null,
+            outroActive:
+              !args.replay &&
+              (episodeOutroSfxMutedId === args.currentEpisode.id ||
+                episodeOutro !== null),
+          }),
+        sfxMixGain: avatarSfxMixGain,
         facing: signalStudioFacingForRole(studioLayout, role),
         theme,
         mouthShape,
@@ -6756,6 +6798,11 @@ export function BotcastExperience({
       bot: BotcastBotSummary,
       role: "host" | "guest",
     ): ReactNode => {
+      const sfxMixGain = sessionAtmosphereBusVolume({
+        volume: introAudioVolume,
+        mix: show.atmosphereMix,
+        bus: "foley",
+      });
       const speech =
         studioSoundcheckSpeech?.botId === bot.id
           ? studioSoundcheckSpeech
@@ -6780,6 +6827,9 @@ export function BotcastExperience({
             thinking: false,
             sipping: false,
             role,
+            surface: "alignment",
+            sfxEnabled: sfxMixGain > 0,
+            sfxMixGain,
             facing: signalStudioFacingForRole(layout, role),
             theme: previewTheme,
             mouthShape,
@@ -7411,31 +7461,6 @@ export function BotcastExperience({
           )}
         </div>
         <div className={styles.episodeLaunchRow}>
-          <label className={styles.episodeModelControl}>
-            <span>Episode model</span>
-            <select
-              value={episodeModelDraft}
-              onChange={(event) => setEpisodeModelDraft(event.target.value)}
-              aria-label="Signal episode model"
-              disabled={responseMode === "auto"}
-            >
-              <option value="">
-                {`Account default · ${accountDefaultModel ? (modelLabels.get(accountDefaultModel) ?? accountDefaultModel) : "Provider default"}`}
-              </option>
-              {modelOptions
-                .filter((option) => option.id !== accountDefaultModel)
-                .map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-            </select>
-            <small>
-              {responseMode === "auto"
-                ? "AUTO · primary may recover through your fallback chain"
-                : `${providerLabel(episodeModelProvider)} · locked for this recording`}
-            </small>
-          </label>
           <label className={styles.episodeLengthControl}>
             <span>Episode length</span>
             <select
@@ -8110,6 +8135,8 @@ export function BotcastExperience({
                   thinking: hostChatBusy && !hostChatStreamingMessage,
                   sipping: false,
                   role: "host",
+                  surface: "dashboard",
+                  sfxEnabled: false,
                   facing: signalStudioFacingForRole(
                     normalizeBotcastStudioLayout(selectedShow.studioLayout),
                     "host",
@@ -9310,6 +9337,8 @@ export function BotcastExperience({
                       thinking: hostChatBusy,
                       sipping: false,
                       role: "host",
+                      surface: "dashboard",
+                      sfxEnabled: false,
                       facing: signalStudioFacingForRole(
                         normalizeBotcastStudioLayout(selectedShow.studioLayout),
                         "host",

@@ -933,7 +933,24 @@ describe("Botcast episode state", () => {
       priorUtteranceCount: 16,
     }), true);
     assert.equal(botcastHostSignOffIntent({
+      content:
+        "Storming the wing factory — hehehehehehe, that's the most romantic thing anyone's ever said to me. That's it for What Grinds Your Gears — Rick Sanchez, everybody, the guy who killed money and made my change jar cry. Freakin' sweet, goodnight Quahog!",
+      segment: "interview",
+      priorUtteranceCount: 14,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        'Hehehehehehe, "subpoenas are annoyingly real" — put that on my tombstone right under "he tried to deep-fry the jar." We\'re out, goodnight everybody!',
+      segment: "interview",
+      priorUtteranceCount: 16,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
       content: "That's the show I wanted to make, but we still have more to discuss.",
+      segment: "interview",
+      priorUtteranceCount: 12,
+    }), false);
+    assert.equal(botcastHostSignOffIntent({
+      content: "If that's it for tonight, we never reach the hard question.",
       segment: "interview",
       priorUtteranceCount: 12,
     }), false);

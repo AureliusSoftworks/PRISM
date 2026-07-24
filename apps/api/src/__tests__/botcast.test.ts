@@ -11952,6 +11952,10 @@ describe("Botcast persistence and isolation", () => {
       assert.match(prompt, /do not invert it, preemptively decline it/u);
       assert.match(
         prompt,
+        /Never quote, paraphrase, or voice the brief's off-mic meta-asides/u,
+      );
+      assert.match(
+        prompt,
         /Persona preference alone is not a reason to reject, invert, or replace it/u,
       );
       assert.match(

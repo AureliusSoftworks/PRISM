@@ -652,7 +652,15 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-        /selected episode model/u,
+        /model in the top navbar/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+        /choose the model there for tonight’s recording/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+        /AUTO uses that choice as Primary/u,
       );
       assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /small dice/u);
       assert.match(

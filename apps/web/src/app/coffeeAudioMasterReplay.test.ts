@@ -61,6 +61,34 @@ test("Coffee uses authenticated master currentTime as the sole procedural replay
   );
 });
 
+test("Coffee faithful replay drives seated mouths and gaze from V2 speaking", () => {
+  assert.match(
+    pageSource,
+    /coffeeActiveSeatBotIds\.find\(\(botId\): botId is string => \{[\s\S]{0,420}botId === "coffee-player"[\s\S]{0,420}participant\?\.speaking === true && participant\.audible !== false/u,
+  );
+  assert.match(pageSource, /setCoffeeReplaySpeakingBotId\(speakingBotId\)/u);
+  assert.match(
+    pageSource,
+    /replayMessage\.botId[\s\S]{0,100}coffeeBotsById\.get\(replayMessage\.botId\)[\s\S]{0,220}replayMessage\.botName/u,
+  );
+  assert.match(
+    pageSource,
+    /const directedReplaySpeakingBot =[\s\S]{0,260}coffeeReplayPlaying[\s\S]{0,180}coffeeBotsById\.get\(coffeeReplaySpeakingBotId\)/u,
+  );
+  assert.match(
+    pageSource,
+    /const isTableTypingThisSeat =\s*!seatPowerMuted &&[\s\S]{0,420}!tableTypingAssistantIsSilent[\s\S]{0,160}replayAudioMasterSpeakingThisSeat/u,
+  );
+  assert.match(
+    pageSource,
+    /const replayMouthVisibleLength =[\s\S]{0,300}coffeeReplayAudioMasterElapsedMs \/\s*ZEN_LIVE_MOUTH_PHASE_MS/u,
+  );
+  assert.match(
+    pageSource,
+    /const tableStreamingSpeakerBotId =\s*tableTypingBot\?\.id \?\? null/u,
+  );
+});
+
 test("master playback suppresses reconstructed voices, action SFX, and atmosphere", () => {
   assert.match(
     pageSource,
@@ -76,7 +104,11 @@ test("master playback suppresses reconstructed voices, action SFX, and atmospher
   );
   assert.match(
     pageSource,
-    /avatarState\.replayAudioMaster\s*\? null\s*:\s*botAvatarSfxFor/u,
+    /avatarState\.sfxEnabled[\s\S]{0,120}botAvatarSfxForSignalMix/u,
+  );
+  assert.match(
+    signalSource,
+    /sfxEnabled:\s*!\(args\.replay && replayFaithful\) &&[\s\S]{0,220}signalAvatarSfxShouldPlay\(\{/u,
   );
   assert.match(
     signalSource,

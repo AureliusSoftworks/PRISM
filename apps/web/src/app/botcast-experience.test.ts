@@ -302,7 +302,15 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const roleIsSpeaking = \(role: "host" \| "guest"\): boolean =>[\s\S]{0,100}speechIsPlaying/u,
+      /const replayParticipantIdForRole = \([\s\S]{0,280}args\.currentEpisode\.guestKind === "producer"[\s\S]{0,100}"prism-player"/u,
+    );
+    assert.match(
+      source,
+      /if \(args\.replay && replayFaithful && directedParticipant\) \{[\s\S]{0,500}directedParticipant\.speaking === true[\s\S]{0,160}directedParticipant\.audible !== false/u,
+    );
+    assert.match(
+      source,
+      /const roleIsSpeaking = \(role: "host" \| "guest"\): boolean => \{[\s\S]{0,900}return Boolean\(\s*speechIsPlaying/u,
     );
     assert.match(source, /speaking: roleIsSpeaking\(role\)/u);
     assert.match(
@@ -1955,15 +1963,32 @@ describe("Signal experience shell", () => {
   });
 
   it("locks one account or episode model before recording", () => {
-    assert.match(source, /aria-label="Signal episode model"/u);
-    assert.match(source, /Account default ·/u);
-    assert.match(source, /locked for this recording/u);
+    assert.doesNotMatch(source, /aria-label="Signal episode model"/u);
+    assert.doesNotMatch(source, />Episode model</u);
+    assert.doesNotMatch(source, /Account default ·/u);
+    assert.doesNotMatch(source, /locked for this recording/u);
+    assert.doesNotMatch(
+      source,
+      /primary may recover through your fallback chain/u,
+    );
+    assert.doesNotMatch(source, /disabled=\{responseMode === "auto"\}/u);
+    assert.doesNotMatch(
+      source,
+      /if \(responseMode === "auto" && episodeModelDraft\)/u,
+    );
+    assert.match(
+      source,
+      /const selectedModelOption = episodeModelDraft[\s\S]{0,120}modelOptions\.find/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /responseMode !== "auto" && episodeModelDraft/u,
+    );
     assert.match(
       source,
       /guestBotId: guestDraftId,[\s\S]{0,260}preferredProvider: episodeProvider,[\s\S]{0,120}responseMode,[\s\S]{0,120}modelOverride: selectedModelOption\?\.id \?\? accountDefaultModel/u,
     );
     assert.match(source, /provider: "local" \| "openai" \| "anthropic"/u);
-    assert.match(source, /providerLabel\(episodeModelProvider\)/u);
     assert.match(source, /episodeModeLabel\(episode\)/u);
     assert.match(source, /episodeModeLabel\(replayEpisode\)/u);
     assert.match(source, /function episodeModeLabel/u);
@@ -1988,6 +2013,10 @@ describe("Signal experience shell", () => {
       pageSource,
       /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*true,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*<ComposerModelPicker/u,
     );
+    assert.match(
+      pageSource,
+      /Primary model for the next Signal episode/u,
+    );
     assert.doesNotMatch(pageSource, /providerModeToggle=/u);
     assert.doesNotMatch(source, /providerModeToggle/u);
     assert.doesNotMatch(source, /Global response mode/u);
@@ -1996,9 +2025,8 @@ describe("Signal experience shell", () => {
       /Ephemeral chat follows this unless overridden\./u,
     );
     assert.doesNotMatch(source, />Episode mode</u);
-    assert.match(source, /primary may recover through your fallback chain/u);
-    assert.match(source, /disabled=\{responseMode === "auto"\}/u);
-    assert.match(css, /\.episodeModelControl\s*\{/u);
+    assert.doesNotMatch(css, /\.episodeModelControl\s*\{/u);
+    assert.match(css, /\.episodeLengthControl\s*\{/u);
     assert.doesNotMatch(css, /\.signalGlobalProviderControl\s*\{/u);
   });
 

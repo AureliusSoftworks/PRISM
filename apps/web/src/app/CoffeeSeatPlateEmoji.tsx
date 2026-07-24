@@ -589,18 +589,20 @@ export function CoffeeSeatPlateEmoji({
       ? undefined
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
   const faceMouthRotationCssDeg =
-    normalizedFaceMouthRotationDeg === undefined
-      ? transientSipPucker
-        ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
-        : undefined
-      : transientSipPucker
-        ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
-        : normalizedFaceMouthCharacter
-        ? coffeeSeatScreenRelativeMouthRotationDeg(
-            normalizedFaceMouthRotationDeg,
-            rotateDeg,
-          )
-        : normalizedFaceMouthRotationDeg;
+    normalizedFaceMouthCharacter && !renderedFaceMouthCharacter
+      ? undefined
+      : normalizedFaceMouthRotationDeg === undefined
+        ? transientSipPucker
+          ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
+          : undefined
+        : transientSipPucker
+          ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
+          : renderedFaceMouthCharacter
+            ? coffeeSeatScreenRelativeMouthRotationDeg(
+                normalizedFaceMouthRotationDeg,
+                rotateDeg,
+              )
+            : normalizedFaceMouthRotationDeg;
   const faceEyeRotationCssDeg =
     normalizedFaceEyeRotationDeg === undefined
       ? undefined
