@@ -2643,13 +2643,14 @@
       position: relative;
       z-index: 1;
       filter: hue-rotate(var(--thinking-hue-rotation));
-      scale: 1;
       animation: demo-thinking-float var(--thinking-float-duration) ease-in-out infinite;
-      transition: scale 180ms ease;
     }
 
-    .demo-thinking-avatar:hover:not(:disabled) img {
-      scale: 1.035;
+    .demo-thinking-avatar:hover:not(:disabled) {
+      border-color: transparent;
+      background: transparent;
+      color: inherit;
+      box-shadow: none;
     }
 
     .demo-status {
