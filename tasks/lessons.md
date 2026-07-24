@@ -5,6 +5,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-07-23 · [UX]
+**Trigger**: Sound FX Bench assets played at full volume from the Library but at only 16–30% from Demo panels, making contextual auditions sound substantially quieter.
+**Lesson**: Keep Library and Demo auditions perceptually comparable. Lift the contextual path with one named master-gain constant while preserving cue-specific balance and per-source headroom; include the same master gain in any displayed or recorded output-gain diagnostics.
+**Applies to**: `apps/web/public/tools/sound-fx-bench.html` Library/Demo playback balance.
+
+### 2026-07-23 · [UX]
 **Trigger**: The Sound FX Bench thinking-avatar loop was verified by numeric filenames, but the visible third and fourth poses were out of order.
 **Lesson**: Verify animation order from the rendered artwork, not only filename sequence. For the current thinking-avatar spinner, the smooth visual cycle is horizontal → descending diagonal → vertical → ascending diagonal, while idle remains the separate smiling `bot_0` image. Keep all five source PNGs tracked with the bench instead of relying on ignored local files. Preserve the small elliptical underglow that grounds the robot, but do not add a separate upper radial hover orb behind the supplied sprite art. For idle levitation, animate the sprite rather than its container so the light remains attached to the ground; widen, soften, and dim the underglow as the robot rises, then tighten and brighten it as the robot descends. Hover may start the thinking frames and sound, but must not scale the sprite or inherit the generic circular button highlight.
 **Applies to**: `apps/web/public/tools/sound-fx-bench.html` thinking-avatar frame mapping.

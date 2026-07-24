@@ -3244,6 +3244,7 @@
     let editorInitialSettings = { ...EDITOR_DEFAULT_SETTINGS };
     let editorHistory = [];
     let editorHistoryTransaction = null;
+    const DEMO_MASTER_GAIN = 3;
     const DEMO_DEFAULT_CUE_CONFIG = Object.freeze({ gain: 0.22, cooldownMs: 72 });
     const DEMO_CUE_CONFIG = Object.freeze({
       "bot-hover": { gain: 0.24, cooldownMs: 46 },
@@ -3538,7 +3539,7 @@
         mono.channelInterpretation = "speakers";
         source.loop = loop;
         panner.pan.value = demoSpatialAudioEnabled ? demoPanFor(origin) : 0;
-        output.gain.value = Math.max(0, Math.min(1, config.gain * gainScale));
+        output.gain.value = Math.max(0, Math.min(1, config.gain * DEMO_MASTER_GAIN * gainScale));
         source.connect(mono);
         mono.connect(panner);
         panner.connect(output);
@@ -3798,7 +3799,7 @@
       function playImpact(impactSpeed) {
         if (impactSpeed < physics.impactSoundSpeed) return;
         const gainScale = impactGainScaleForSpeed(impactSpeed);
-        const outputGain = Math.max(0, Math.min(1, cueConfig("confirm").gain * gainScale));
+        const outputGain = Math.max(0, Math.min(1, cueConfig("confirm").gain * DEMO_MASTER_GAIN * gainScale));
         state.collisionCount += 1;
         orb.dataset.collisionCount = String(state.collisionCount);
         orb.dataset.impactSpeed = String(Math.round(impactSpeed));
