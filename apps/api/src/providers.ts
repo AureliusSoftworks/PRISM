@@ -1316,6 +1316,19 @@ export class LocalOllamaProvider implements LlmProvider {
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
+    return generateWithFinalLocalOllamaFallback({
+      messages,
+      options,
+      skipFinalLocalFallback:
+        (options?.model?.trim() || config.ollamaModel) === FINAL_LOCAL_OLLAMA_FALLBACK_MODEL,
+      generate: () => this.generateResponseDirect(messages, options),
+    });
+  }
+
+  private async generateResponseDirect(
+    messages: ProviderMessage[],
+    options?: GenerateOptions
+  ): Promise<string> {
     if (
       this.secondaryOllamaHostRejected &&
       parseSecondaryOllamaModelId(options?.model?.trim() || config.ollamaModel)
@@ -1524,6 +1537,50 @@ export class LocalOllamaProvider implements LlmProvider {
   }
 }
 
+/**
+ * The included Ollama model is the final recovery path for text generation.
+ * Keep this at the provider boundary so every normal provider caller gets the
+ * same recovery without duplicating it in Chat, Coffee, or server routes.
+ */
+const FINAL_LOCAL_OLLAMA_FALLBACK_MODEL = "llama3.2";
+
+async function generateWithFinalLocalOllamaFallback(args: {
+  messages: ProviderMessage[];
+  options?: GenerateOptions;
+  /** Avoid retrying the final llama3.2 model with itself. */
+  skipFinalLocalFallback?: boolean;
+  generate: () => Promise<string>;
+}): Promise<string> {
+  try {
+    return await args.generate();
+  } catch (primaryError) {
+    // Cancellation is control flow, not a failed model response. Retrying it
+    // would undermine the caller's stop request.
+    if (
+      args.skipFinalLocalFallback ||
+      isAbortFailure(primaryError, args.options?.signal)
+    ) {
+      throw primaryError;
+    }
+
+    try {
+      // Deliberately construct a primary-host provider with the included model:
+      // this must not reuse a paired host, the failed provider, or its model.
+      return await new LocalOllamaProvider().generateResponse(args.messages, {
+        ...args.options,
+        model: FINAL_LOCAL_OLLAMA_FALLBACK_MODEL,
+      });
+    } catch (fallbackError) {
+      if (isAbortFailure(fallbackError, args.options?.signal)) {
+        throw fallbackError;
+      }
+      // The user-facing error remains the original failure; the recovery path
+      // is best-effort and must neither recurse nor obscure the root cause.
+      throw primaryError;
+    }
+  }
+}
+
 export class OpenAiProvider implements LlmProvider {
   public readonly name = "openai" as const;
   private readonly openAiConfig: OpenAiConfig;
@@ -1533,6 +1590,17 @@ export class OpenAiProvider implements LlmProvider {
   }
 
   public async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions
+  ): Promise<string> {
+    return generateWithFinalLocalOllamaFallback({
+      messages,
+      options,
+      generate: () => this.generateResponseDirect(messages, options),
+    });
+  }
+
+  private async generateResponseDirect(
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {
@@ -1764,6 +1832,17 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   public async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions
+  ): Promise<string> {
+    return generateWithFinalLocalOllamaFallback({
+      messages,
+      options,
+      generate: () => this.generateResponseDirect(messages, options),
+    });
+  }
+
+  private async generateResponseDirect(
     messages: ProviderMessage[],
     options?: GenerateOptions
   ): Promise<string> {

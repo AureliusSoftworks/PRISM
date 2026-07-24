@@ -540,24 +540,31 @@ describe("LocalOllamaProvider secondary routing", () => {
     assert.equal(requestedBody.think, false);
   });
 
-  it("never contacts a public paired host for a LOCAL request", async () => {
-    let fetchCalls = 0;
-    globalThis.fetch = (async () => {
-      fetchCalls += 1;
-      throw new Error("public host must not be contacted");
+  it("recovers from an unsafe paired-host choice through the primary llama3.2 failsafe", async () => {
+    const requestedUrls: string[] = [];
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      requestedUrls.push(String(input));
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "safe local recovery" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
     }) as typeof fetch;
 
     const provider = new LocalOllamaProvider({
       secondaryOllamaHost: "https://public.example:11434",
     });
-    await assert.rejects(
-      () => provider.generateResponse(
-        [{ role: "user", content: "private manuscript" }],
-        { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` },
-      ),
-      /Paired Ollama host must be on the private network/,
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "private manuscript" }],
+      { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` },
     );
-    assert.equal(fetchCalls, 0);
+
+    assert.equal(response, "safe local recovery");
+    assert.equal(requestedUrls.length, 1);
+    assert.ok(requestedUrls[0]?.endsWith("/api/chat"));
+    assert.ok(!requestedUrls[0]?.startsWith("https://public.example"));
+    assert.equal(requestedBody.model, "llama3.2");
   });
 
   it("does not probe a public paired host during status or model discovery", async () => {
@@ -668,17 +675,24 @@ describe("LocalOllamaProvider secondary routing", () => {
     );
   });
 
-  it("does not silently route stale secondary model ids to the primary host", async () => {
+  it("uses the bundled failsafe instead of treating a stale secondary id as the primary model", async () => {
+    let requestedBody: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      requestedBody = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({ message: { content: "fallback ok" } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
     const provider = new LocalOllamaProvider();
 
-    await assert.rejects(
-      () =>
-        provider.generateResponse(
-          [{ role: "user", content: "hi" }],
-          { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
-        ),
-      /Paired Ollama host is not configured/
+    const response = await provider.generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: `${SECONDARY_OLLAMA_MODEL_PREFIX}mistral:latest` }
     );
+
+    assert.equal(response, "fallback ok");
+    assert.equal(requestedBody.model, "llama3.2");
   });
 
   it("does not automatically route to the secondary host when dual routing is off", async () => {
@@ -868,6 +882,140 @@ describe("local request diagnostics", () => {
         }
       );
     }
+  });
+});
+
+describe("final local Ollama response fallback", () => {
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
+  });
+
+  it("recovers an OpenAI failure with one primary-host llama3.2 response", async () => {
+    const requests: Array<{ url: string; model: string }> = [];
+    console.error = () => {};
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ url: String(input), model: String(body.model) });
+      if (String(input).includes("api.openai.com")) {
+        return new Response(JSON.stringify({ error: { message: "primary unavailable" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ message: { content: "local recovery" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const response = await new OpenAiProvider({ apiKey: "sk-test" }).generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "gpt-4o-mini" },
+    );
+
+    assert.equal(response, "local recovery");
+    assert.deepEqual(requests.map((request) => request.model), ["gpt-4o-mini", "llama3.2"]);
+    assert.match(requests[1]?.url ?? "", /\/api\/chat$/);
+    assert.doesNotMatch(requests[1]?.url ?? "", /api\.openai\.com/);
+  });
+
+  it("preserves the primary error when the one llama3.2 recovery attempt also fails", async () => {
+    const requestedModels: string[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requestedModels.push(String(body.model));
+      return new Response(
+        requestedModels.length === 1
+          ? JSON.stringify({ error: "model 'missing' not found" })
+          : "Ollama is unavailable",
+        { status: requestedModels.length === 1 ? 404 : 503 },
+      );
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new LocalOllamaProvider().generateResponse(
+        [{ role: "user", content: "hi" }],
+        { model: "missing" },
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof LocalModelRequestError);
+        assert.equal(error.kind, "model_unavailable");
+        assert.equal(error.status, 404);
+        return true;
+      },
+    );
+    assert.deepEqual(requestedModels, ["missing", "llama3.2"]);
+  });
+
+  it("does not make a fallback request after a successful primary response", async () => {
+    const requestedModels: string[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requestedModels.push(String(body.model));
+      return new Response(JSON.stringify({ message: { content: "primary reply" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    const response = await new LocalOllamaProvider().generateResponse(
+      [{ role: "user", content: "hi" }],
+      { model: "mistral:latest" },
+    );
+
+    assert.equal(response, "primary reply");
+    assert.deepEqual(requestedModels, ["mistral:latest"]);
+  });
+
+  it("does not retry llama3.2 with itself when the final model fails", async () => {
+    const requestedModels: string[] = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requestedModels.push(String(body.model));
+      return new Response("Ollama is unavailable", { status: 503 });
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new LocalOllamaProvider().generateResponse(
+        [{ role: "user", content: "hi" }],
+        { model: "llama3.2" },
+      ),
+      LocalModelRequestError,
+    );
+    assert.deepEqual(requestedModels, ["llama3.2"]);
+  });
+
+  it("preserves cancellation instead of hiding it behind the primary error", async () => {
+    let requestCount = 0;
+    console.error = () => {};
+    globalThis.fetch = (async () => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        return new Response(JSON.stringify({ error: { message: "primary unavailable" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const error = new Error("stopped");
+      error.name = "AbortError";
+      throw error;
+    }) as typeof fetch;
+
+    await assert.rejects(
+      () => new OpenAiProvider({ apiKey: "sk-test" }).generateResponse(
+        [{ role: "user", content: "hi" }],
+      ),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.equal(error.name, "AbortError");
+        return true;
+      },
+    );
+    assert.equal(requestCount, 2);
   });
 });
 
