@@ -1,18 +1,14 @@
 export const SPATIAL_UI_SFX_SOURCES = {
   "bot-hover": [
-    "/audio/ui-asmr/bot-hover-01.mp3",
     "/audio/ui-asmr/bot-hover-02.mp3",
-    "/audio/ui-asmr/bot-hover-03.mp3",
     "/audio/ui-asmr/bot-hover-04.mp3",
     "/audio/ui-asmr/bot-hover-05.mp3",
-    "/audio/ui-asmr/bot-hover-07.mp3",
-    "/audio/ui-asmr/bot-hover-08.mp3",
+    "/audio/ui-asmr/bot-select-01.mp3",
   ],
   "bot-select": [
-    "/audio/ui-asmr/bot-select-01.mp3",
-    "/audio/ui-asmr/bot-select-02.mp3",
-    "/audio/ui-asmr/bot-select-03.mp3",
-    "/audio/ui-asmr/bot-select-04.mp3",
+    "/audio/ui-asmr/bot-hover-01.mp3",
+    "/audio/ui-asmr/bot-hover-03.mp3",
+    "/audio/ui-asmr/bot-hover-07.mp3",
   ],
   "panel-open": [
     "/audio/ui-asmr/panel-open-01.mp3",

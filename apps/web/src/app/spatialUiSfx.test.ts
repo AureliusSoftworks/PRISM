@@ -12,10 +12,10 @@ import {
 
 test("ships a varied tactile UI library with real local assets", () => {
   const sources = Object.values(SPATIAL_UI_SFX_SOURCES).flat();
-  assert.equal(sources.length, 24);
-  assert.equal(new Set(sources).size, 24);
-  assert.equal(SPATIAL_UI_SFX_SOURCES["bot-hover"].length, 7);
-  assert.equal(SPATIAL_UI_SFX_SOURCES["bot-select"].length, 4);
+  assert.equal(sources.length, 20);
+  assert.equal(new Set(sources).size, 20);
+  assert.equal(SPATIAL_UI_SFX_SOURCES["bot-hover"].length, 4);
+  assert.equal(SPATIAL_UI_SFX_SOURCES["bot-select"].length, 3);
 
   for (const source of sources) {
     const asset = statSync(new URL(`../../public${source}`, import.meta.url));
