@@ -506,17 +506,17 @@ export function botcastVoiceLevelForBot(
 }
 
 export const BOTCAST_DEFAULT_STUDIO_LAYOUT: BotcastStudioLayout = {
-  hostBot: { x: 18.5, y: 66 },
-  guestBot: { x: 81.5, y: 66 },
-  hostCup: { x: 36.25, y: 86 },
-  guestCup: { x: 63.75, y: 86 },
+  hostBot: { x: 22.5, y: 71.25 },
+  guestBot: { x: 77.5, y: 71.25 },
+  hostCup: { x: 36.25, y: 90 },
+  guestCup: { x: 63.75, y: 90 },
   hostFloorGlow: {
-    x: 18.5,
+    x: 22.5,
     y: 84,
     scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
   },
   guestFloorGlow: {
-    x: 81.5,
+    x: 77.5,
     y: 84,
     scale: BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
   },
@@ -1804,6 +1804,8 @@ export interface BotcastEpisodeAdvanceRequest {
 export interface BotcastEpisodeAdvanceResponse {
   episode: BotcastEpisode;
   message: BotcastMessage | null;
+  /** The completed response is transient and no episode archive was retained. */
+  discarded?: boolean;
 }
 
 export interface BotcastModelWarmupHoldRequest {

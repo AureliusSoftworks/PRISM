@@ -16,6 +16,14 @@ const pageCssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const signalSource = readFileSync(
+  new URL("./BotcastExperience.tsx", import.meta.url),
+  "utf8",
+);
+const signalCssSource = readFileSync(
+  new URL("./botcast.module.css", import.meta.url),
+  "utf8",
+);
 
 describe("shared composer actions", () => {
   it("round-trips visible action text through the established canonical form", () => {
@@ -130,6 +138,22 @@ describe("shared composer actions", () => {
     assert.match(
       pageCssSource,
       /\.zenLiveBotPresenceText \{[\s\S]{0,850}text-transform: none;/u,
+    );
+    assert.match(
+      pageCssSource,
+      /\.coffeeSeatActionBadgeText \{[\s\S]{0,400}font-style: italic;[\s\S]{0,280}text-transform: none;/u,
+    );
+    assert.doesNotMatch(
+      pageCssSource,
+      /\.coffeeSeatActionBadgeText \{[\s\S]{0,400}font-style: italic;[\s\S]{0,280}text-transform: uppercase;/u,
+    );
+    assert.match(
+      signalSource,
+      /\*\{sentenceCaseActionText\(activeVoiceAction\.action\)\}\*/u,
+    );
+    assert.match(
+      signalCssSource,
+      /\.avatarRig > \.voiceActionText \{[^}]*text-transform: none;/u,
     );
     assert.equal(
       serializeComposerAction("smiles softly", "Hello."),

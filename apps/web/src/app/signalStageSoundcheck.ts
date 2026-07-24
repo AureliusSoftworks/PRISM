@@ -48,8 +48,7 @@ export function signalStageSoundcheckMessages(args: {
   runId: number;
   exchangeIndex?: number;
   createdAt?: string;
-}): readonly BotcastMessage[] {
-  if (args.hostBotId === args.guestBotId) return [];
+}): readonly [BotcastMessage, BotcastMessage] {
   const rawIndex = args.exchangeIndex ?? signalStageSoundcheckExchangeIndex();
   const exchange =
     SIGNAL_STAGE_SOUNDCHECK_EXCHANGES[

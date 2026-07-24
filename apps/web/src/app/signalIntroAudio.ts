@@ -1,19 +1,18 @@
 import {
   BOTCAST_LOCAL_INTRO_DURATION_MS,
-  BOTCAST_LOCAL_OUTDENT_DURATION_MS,
   type BotcastIntroAudioState,
   type SignalMusicPalette,
   type SignalMusicProfile,
   type SignalPersonaTemperament,
 } from "@localai/shared";
-import { routeAudioElementToPrismOutput } from "./signalAudioMasterCapture.ts";
+import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
 
 export const SIGNAL_SYNTH_IDENT_DURATION_MS = BOTCAST_LOCAL_INTRO_DURATION_MS;
-export const SIGNAL_SYNTH_OUTDENT_DURATION_MS =
-  BOTCAST_LOCAL_OUTDENT_DURATION_MS;
+export const SIGNAL_SYNTH_OUTRO_DURATION_MS = 1_800;
 export const SIGNAL_EPISODE_INTRO_LEAD_IN_MS = 180;
-export const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 4_200;
-export const SIGNAL_AUDIO_STOP_FADE_MS = 320;
 
 export type SignalSynthNote = {
   startMs: number;
@@ -34,27 +33,15 @@ export type SignalSynthIdentPlan = {
   register: "low" | "low-middle" | "middle" | "middle-high";
   contour: "descending" | "turning" | "bouncing" | "stepwise" | "asymmetric" | "arch" | "ascending" | "balanced";
   ending: "hard" | "resolve" | "lift" | "button";
-  energyShape: SignalMusicProfile["energyShape"];
-  rhythmicCharacter: SignalMusicProfile["rhythmicCharacter"];
-  harmonicLanguage: SignalMusicProfile["harmonicLanguage"];
-  productionTexture: SignalMusicProfile["productionTexture"];
-  endingBehavior: SignalMusicProfile["endingBehavior"];
   notes: SignalSynthNote[];
 };
 
 type SignalSynthTemperamentRecipe = Omit<
   SignalSynthIdentPlan,
-  | "durationMs"
-  | "temperament"
-  | "palette"
-  | "energyShape"
-  | "rhythmicCharacter"
-  | "harmonicLanguage"
-  | "productionTexture"
-  | "endingBehavior"
-  | "notes"
+  "durationMs" | "temperament" | "palette" | "notes"
 > & {
   rootMidi: number;
+  motif: readonly [number, number, number, number];
   supportIntervals: readonly number[];
   pulseBeats: readonly number[];
   melodyWaveform: SignalSynthNote["waveform"];
@@ -77,6 +64,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "descending",
     ending: "hard",
     rootMidi: 43,
+    motif: [7, 5, 3, 0],
     supportIntervals: [0, 7, 10],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "soft-square",
@@ -94,6 +82,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "turning",
     ending: "resolve",
     rootMidi: 46,
+    motif: [0, 3, 7, 5],
     supportIntervals: [0, 7],
     pulseBeats: [0, 3, 6],
     melodyWaveform: "triangle",
@@ -111,6 +100,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "bouncing",
     ending: "lift",
     rootMidi: 51,
+    motif: [0, 7, 4, 12],
     supportIntervals: [0, 4, 7],
     pulseBeats: [0, 1.5, 3, 4.5, 6],
     melodyWaveform: "triangle",
@@ -128,6 +118,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "stepwise",
     ending: "button",
     rootMidi: 48,
+    motif: [0, 2, 5, 7],
     supportIntervals: [0, 7],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "soft-square",
@@ -145,6 +136,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "asymmetric",
     ending: "button",
     rootMidi: 48,
+    motif: [0, 3, 7, 9],
     supportIntervals: [0, 4, 7],
     pulseBeats: [0, 1.5, 3, 4.5, 6],
     melodyWaveform: "soft-square",
@@ -162,6 +154,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "arch",
     ending: "resolve",
     rootMidi: 48,
+    motif: [0, 5, 7, 3],
     supportIntervals: [0, 3, 7],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "triangle",
@@ -179,6 +172,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "asymmetric",
     ending: "resolve",
     rootMidi: 50,
+    motif: [0, 5, 3, 10],
     supportIntervals: [0, 5, 10],
     pulseBeats: [0, 2, 3.5, 5, 6],
     melodyWaveform: "triangle",
@@ -196,6 +190,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "ascending",
     ending: "button",
     rootMidi: 49,
+    motif: [0, 5, 7, 12],
     supportIntervals: [0, 5, 7],
     pulseBeats: [0, 1.5, 3, 4.5, 6],
     melodyWaveform: "soft-square",
@@ -213,6 +208,7 @@ const SIGNAL_SYNTH_TEMPERAMENT_RECIPES: Record<
     contour: "balanced",
     ending: "button",
     rootMidi: 48,
+    motif: [0, 2, 7, 5],
     supportIntervals: [0, 7, 10],
     pulseBeats: [0, 2, 4, 6],
     melodyWaveform: "triangle",
@@ -381,73 +377,6 @@ const SIGNAL_SYNTH_PALETTE_MOTIF_BEATS: Record<
   broadcast: [0, 1, 2.25, 3.75],
 };
 
-const SIGNAL_SYNTH_RHYTHM_MOTIF_BEATS: Record<
-  SignalMusicProfile["rhythmicCharacter"],
-  readonly [number, number, number, number]
-> = {
-  "lurching-asymmetric": [0, 0.45, 2.15, 3.55],
-  "martial-deliberate": [0, 1, 2.5, 3.5],
-  "buoyant-syncopated": [0, 0.35, 2.25, 3],
-  "wandering-irregular": [0, 0.7, 2.05, 3.7],
-  clockwork: [0, 0.75, 1.5, 2.6],
-  "sparse-measured": [0, 1.35, 2.85, 4.1],
-  "human-pulse": [0, 0.8, 2.45, 3.4],
-  "forward-driving": [0, 0.65, 1.55, 2.8],
-  broadcast: [0, 1, 2.25, 3.75],
-};
-
-const SIGNAL_SYNTH_RHYTHM_PULSE_BEATS: Record<
-  SignalMusicProfile["rhythmicCharacter"],
-  readonly number[]
-> = {
-  "lurching-asymmetric": [0, 1.25, 3.5, 5.25],
-  "martial-deliberate": [0, 2, 4, 6],
-  "buoyant-syncopated": [0, 1.5, 3, 4.5, 6],
-  "wandering-irregular": [0, 2.75, 5.5],
-  clockwork: [0, 1.5, 3, 4.5, 6],
-  "sparse-measured": [0, 3, 6],
-  "human-pulse": [0, 2, 4, 6],
-  "forward-driving": [0, 1.5, 3, 4.5, 6],
-  broadcast: [0, 2, 4, 6],
-};
-
-const SIGNAL_SYNTH_HARMONY_SUPPORT_INTERVALS: Record<
-  SignalMusicProfile["harmonicLanguage"],
-  readonly number[]
-> = {
-  "chromatic-unstable": [0, 6, 10],
-  "minor-gravity": [0, 7, 10],
-  "bright-modal": [0, 4, 7],
-  "suspended-modal": [0, 5, 10],
-  "warm-open": [0, 5, 7],
-  "questioning-jazz": [0, 3, 10],
-  geometric: [0, 2, 7],
-  balanced: [0, 7, 10],
-};
-
-function signalSynthTextureWaveform(
-  profile: SignalMusicProfile,
-  role: "melody" | "support",
-  fallback: SignalSynthNote["waveform"],
-): SignalSynthNote["waveform"] {
-  switch (profile.productionTexture) {
-    case "electrical-analog":
-      return role === "melody" ? "sine" : "soft-square";
-    case "monumental-orchestral":
-      return role === "melody" ? "soft-square" : "sine";
-    case "mechanical-metal":
-      return "soft-square";
-    case "wooden-acoustic":
-    case "human-chamber":
-    case "noir-close":
-      return "triangle";
-    case "tuned-glass":
-      return role === "melody" ? "sine" : "triangle";
-    default:
-      return fallback;
-  }
-}
-
 function stableHash(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -471,77 +400,53 @@ export function buildSignalSynthIdentPlan(args: {
   const hash = stableHash(args.seed);
   const tempoBpm = args.profile.tempoBpm;
   const beatMs = 60_000 / tempoBpm;
-  const root = recipe.rootMidi + palette.rootShift + (hash % 5) - 2;
-  const supportIntervals =
-    SIGNAL_SYNTH_HARMONY_SUPPORT_INTERVALS[args.profile.harmonicLanguage];
-  const melodyWaveform = signalSynthTextureWaveform(
-    args.profile,
-    "melody",
-    palette.melodyWaveform ?? recipe.melodyWaveform,
-  );
-  const supportWaveform = signalSynthTextureWaveform(
-    args.profile,
-    "support",
-    palette.supportWaveform ?? recipe.supportWaveform,
-  );
+  const root = recipe.rootMidi + palette.rootShift + (hash % 3);
   const notes: SignalSynthNote[] = [];
-  const answerStartMs = Math.max(3_900, beatMs * 6.2);
 
-  for (const phraseStartMs of [0, answerStartMs]) {
-    for (const interval of supportIntervals) {
-      notes.push({
-        startMs: phraseStartMs,
-        durationMs:
-          beatMs * (phraseStartMs === 0 ? 1.45 : 2.7),
-        midi: root + interval,
-        gain: interval === 0 ? 0.036 : 0.021,
-        waveform: supportWaveform,
-        attackMs: recipe.supportAttackMs * palette.supportAttackScale,
-        releaseMs: recipe.supportReleaseMs * palette.supportReleaseScale,
-        lowpassHz: Math.max(
-          950,
-          recipe.melodyLowpassHz * palette.lowpassScale - 1_450,
-        ),
-      });
-    }
+  for (const interval of recipe.supportIntervals) {
+    notes.push({
+      startMs: 0,
+      durationMs: beatMs * (
+        args.profile.temperament === "commanding" ? 0.9 : 1.45
+      ),
+      midi: root + interval,
+      gain: interval === 0 ? 0.036 : 0.021,
+      waveform: palette.supportWaveform ?? recipe.supportWaveform,
+      attackMs: recipe.supportAttackMs * palette.supportAttackScale,
+      releaseMs: recipe.supportReleaseMs * palette.supportReleaseScale,
+      lowpassHz: Math.max(
+        950,
+        recipe.melodyLowpassHz * palette.lowpassScale - 1_450,
+      ),
+    });
   }
 
-  for (const [phraseStartMs, pulseBeats] of [
-    [
-      0,
-      SIGNAL_SYNTH_RHYTHM_PULSE_BEATS[args.profile.rhythmicCharacter],
-    ],
-    [answerStartMs, [0, 1.5, 3]],
-  ] as const) {
-    for (const beat of pulseBeats) {
-      notes.push({
-        startMs: phraseStartMs + 180 + beat * beatMs,
-        durationMs: beatMs * 0.82,
-        midi: root - 12 + (
-          beat === pulseBeats[pulseBeats.length - 1] &&
-          args.profile.ending !== "hard"
-            ? 7
-            : 0
-        ),
-        gain: recipe.pulseGain * palette.pulseGainScale,
-        waveform: "soft-square",
-        attackMs: args.profile.ending === "hard" ? 5 : 12,
-        releaseMs: 190,
-        lowpassHz: args.profile.ending === "hard" ? 620 : 470,
-      });
-    }
+  for (const beat of recipe.pulseBeats) {
+    notes.push({
+      startMs: 180 + beat * beatMs,
+      durationMs: beatMs * 0.82,
+      midi: root - 12 + (
+        beat === recipe.pulseBeats[recipe.pulseBeats.length - 1] &&
+        args.profile.ending !== "hard"
+          ? 7
+          : 0
+      ),
+      gain: recipe.pulseGain * palette.pulseGainScale,
+      waveform: "soft-square",
+      attackMs: args.profile.ending === "hard" ? 5 : 12,
+      releaseMs: 190,
+      lowpassHz: args.profile.ending === "hard" ? 620 : 470,
+    });
   }
 
-  const motifBeats = args.profile.rhythmicCharacter === "broadcast"
-    ? SIGNAL_SYNTH_PALETTE_MOTIF_BEATS[args.profile.palette]
-    : SIGNAL_SYNTH_RHYTHM_MOTIF_BEATS[args.profile.rhythmicCharacter];
+  const motifBeats = SIGNAL_SYNTH_PALETTE_MOTIF_BEATS[args.profile.palette];
   const melodyOffset = args.profile.temperament === "commanding"
     ? 0
     : args.profile.temperament === "contemplative"
       ? 7
       : 12;
-  args.profile.motifIntervals.forEach((interval, index) => {
-    const finalNote = index === args.profile.motifIntervals.length - 1;
+  recipe.motif.forEach((interval, index) => {
+    const finalNote = index === recipe.motif.length - 1;
     notes.push({
       startMs: 60 + motifBeats[index]! * beatMs,
       durationMs: finalNote
@@ -550,7 +455,7 @@ export function buildSignalSynthIdentPlan(args: {
         : beatMs * 0.7 * palette.melodyDurationScale,
       midi: root + melodyOffset + interval,
       gain: finalNote ? recipe.melodyGain + 0.012 : recipe.melodyGain,
-      waveform: melodyWaveform,
+      waveform: palette.melodyWaveform ?? recipe.melodyWaveform,
       attackMs:
         palette.melodyAttackMs ?? (args.profile.ending === "hard" ? 4 : 10),
       releaseMs: finalNote
@@ -562,45 +467,13 @@ export function buildSignalSynthIdentPlan(args: {
     });
   });
 
-  const answerIntervals = [
-    args.profile.motifIntervals[1],
-    args.profile.motifIntervals[2],
-    args.profile.motifIntervals[3],
-    args.profile.ending === "lift"
-      ? args.profile.motifIntervals[3] + 7
-      : 0,
-  ] as const;
-  const answerBeats = [0, 0.85, 2.05, 3.25] as const;
-  answerIntervals.forEach((interval, index) => {
-    const finalNote = index === answerIntervals.length - 1;
-    notes.push({
-      startMs:
-        answerStartMs +
-        (answerBeats[index]! + args.profile.variant * 0.08) * beatMs,
-      durationMs: finalNote
-        ? beatMs * (args.profile.ending === "hard" ? 0.8 : 1.75)
-        : beatMs * 0.74,
-      midi: root + melodyOffset + interval,
-      gain: finalNote ? recipe.melodyGain + 0.018 : recipe.melodyGain * 0.96,
-      waveform: melodyWaveform,
-      attackMs:
-        palette.melodyAttackMs ?? (args.profile.ending === "hard" ? 4 : 10),
-      releaseMs: finalNote
-        ? (args.profile.ending === "hard" || args.profile.ending === "button"
-            ? 260
-            : 680) * palette.melodyReleaseScale
-        : 220 * palette.melodyReleaseScale,
-      lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale,
-    });
-  });
-
   if (recipe.accentInterval !== null) {
     notes.push({
       startMs: 60 + 3.75 * beatMs,
       durationMs: beatMs * 1.35,
       midi: root + recipe.accentInterval,
       gain: 0.042,
-      waveform: supportWaveform,
+      waveform: palette.supportWaveform ?? recipe.supportWaveform,
       attackMs: 16,
       releaseMs: (args.profile.ending === "button" ? 360 : 620) *
         palette.melodyReleaseScale,
@@ -616,95 +489,56 @@ export function buildSignalSynthIdentPlan(args: {
     register: args.profile.register,
     contour: args.profile.contour,
     ending: args.profile.ending,
-    energyShape: args.profile.energyShape,
-    rhythmicCharacter: args.profile.rhythmicCharacter,
-    harmonicLanguage: args.profile.harmonicLanguage,
-    productionTexture: args.profile.productionTexture,
-    endingBehavior: args.profile.endingBehavior,
     notes,
   };
 }
 
-/** Builds the shorter closing half of one host's stable audio signature. */
-export function buildSignalSynthOutdentPlan(args: {
-  profile: SignalMusicProfile;
-  seed: string;
-}): SignalSynthIdentPlan {
-  const recipe = SIGNAL_SYNTH_TEMPERAMENT_RECIPES[args.profile.temperament];
-  const palette = SIGNAL_SYNTH_PALETTE_RECIPES[args.profile.palette];
-  const hash = stableHash(args.seed);
-  const beatMs = 60_000 / args.profile.tempoBpm;
-  const root = recipe.rootMidi + palette.rootShift + (hash % 5) - 2;
-  const supportIntervals =
-    SIGNAL_SYNTH_HARMONY_SUPPORT_INTERVALS[args.profile.harmonicLanguage];
-  const melodyWaveform = signalSynthTextureWaveform(
-    args.profile,
-    "melody",
-    palette.melodyWaveform ?? recipe.melodyWaveform,
-  );
-  const supportWaveform = signalSynthTextureWaveform(
-    args.profile,
-    "support",
-    palette.supportWaveform ?? recipe.supportWaveform,
-  );
-  const melodyOffset = args.profile.temperament === "commanding"
-    ? 0
-    : args.profile.temperament === "contemplative"
-      ? 7
-      : 12;
-  const notes: SignalSynthNote[] = supportIntervals.map(
-    (interval) => ({
+/** Builds a shorter resolving cadence for the end of a Signal episode. */
+export function buildSignalSynthOutroPlan(seed: string): SignalSynthIdentPlan {
+  const hash = stableHash(`${seed}:outro`);
+  const root = 45 + ((hash >>> 4) % 9);
+  const notes: SignalSynthNote[] = [
+    {
       startMs: 0,
-      durationMs: SIGNAL_SYNTH_OUTDENT_DURATION_MS - 180,
-      midi: root + interval,
-      gain: interval === 0 ? 0.034 : 0.019,
-      waveform: supportWaveform,
-      attackMs: recipe.supportAttackMs * palette.supportAttackScale,
-      releaseMs: Math.max(
-        540,
-        recipe.supportReleaseMs * palette.supportReleaseScale,
-      ),
-      lowpassHz: Math.max(
-        900,
-        recipe.melodyLowpassHz * palette.lowpassScale - 1_500,
-      ),
-    }),
-  );
-  const recallIntervals = [
-    args.profile.motifIntervals[2],
-    args.profile.motifIntervals[1],
-    args.profile.motifIntervals[3],
-    0,
-  ] as const;
-  const recallBeats = [0, 0.72, 1.55, 2.65] as const;
-  recallIntervals.forEach((interval, index) => {
-    const finalNote = index === recallIntervals.length - 1;
+      durationMs: 1_650,
+      midi: root,
+      gain: 0.042,
+      waveform: "sine",
+      attackMs: 80,
+      releaseMs: 620,
+      lowpassHz: 1_050,
+    },
+    {
+      startMs: 0,
+      durationMs: 1_650,
+      midi: root + 7,
+      gain: 0.026,
+      waveform: "sine",
+      attackMs: 100,
+      releaseMs: 660,
+      lowpassHz: 1_350,
+    },
+  ];
+  [12, 7, hash % 2 === 0 ? 3 : 4, 0].forEach((interval, index) => {
     notes.push({
-      startMs: 50 + recallBeats[index]! * beatMs,
-      durationMs: finalNote ? beatMs * 1.2 : beatMs * 0.58,
-      midi: root + melodyOffset + interval,
-      gain: finalNote ? recipe.melodyGain + 0.014 : recipe.melodyGain * 0.9,
-      waveform: melodyWaveform,
-      attackMs: palette.melodyAttackMs ?? 8,
-      releaseMs: finalNote
-        ? Math.max(460, 620 * palette.melodyReleaseScale)
-        : 170 * palette.melodyReleaseScale,
-      lowpassHz: recipe.melodyLowpassHz * palette.lowpassScale,
+      startMs: 90 + index * 360,
+      durationMs: index === 3 ? 760 : 420,
+      midi: root + 12 + interval,
+      gain: index === 3 ? 0.105 : 0.082,
+      waveform: "triangle",
+      attackMs: 10,
+      releaseMs: index === 3 ? 520 : 180,
+      lowpassHz: 2_450,
     });
   });
   return {
-    durationMs: SIGNAL_SYNTH_OUTDENT_DURATION_MS,
-    tempoBpm: args.profile.tempoBpm,
-    temperament: args.profile.temperament,
-    palette: args.profile.palette,
-    register: args.profile.register,
-    contour: args.profile.contour,
-    ending: args.profile.ending,
-    energyShape: args.profile.energyShape,
-    rhythmicCharacter: args.profile.rhythmicCharacter,
-    harmonicLanguage: args.profile.harmonicLanguage,
-    productionTexture: args.profile.productionTexture,
-    endingBehavior: args.profile.endingBehavior,
+    durationMs: SIGNAL_SYNTH_OUTRO_DURATION_MS,
+    tempoBpm: 100,
+    temperament: "neutral",
+    palette: "broadcast",
+    register: "middle",
+    contour: "descending",
+    ending: "resolve",
     notes,
   };
 }
@@ -771,139 +605,21 @@ export function encodeSignalSynthIdentWave(
   return output;
 }
 
-type ActiveSignalAudio = {
-  audio: HTMLAudioElement;
-  objectUrl: string | null;
-  disconnectOutput: (() => void) | null;
-  resolve: () => void;
-  startTimer: number | null;
-  watchdogTimer: number | null;
-  fadeTimer: number | null;
-  stopping: boolean;
-  settled: boolean;
-};
-
-let activeSignalAudio: ActiveSignalAudio | null = null;
-
-export function signalAudioFadeVolumeAt(
-  startVolume: number,
-  progress: number,
-): number {
-  const normalizedVolume = Math.max(0, Math.min(1, startVolume));
-  const normalizedProgress = Math.max(0, Math.min(1, progress));
-  return normalizedVolume * Math.cos((normalizedProgress * Math.PI) / 2);
-}
-
-function releaseSignalAudio(state: ActiveSignalAudio): void {
-  if (state.settled) return;
-  state.settled = true;
-  state.stopping = false;
-  if (state.startTimer !== null) window.clearTimeout(state.startTimer);
-  if (state.watchdogTimer !== null) window.clearTimeout(state.watchdogTimer);
-  if (state.fadeTimer !== null) window.clearTimeout(state.fadeTimer);
-  state.startTimer = null;
-  state.watchdogTimer = null;
-  state.fadeTimer = null;
-  if (activeSignalAudio === state) activeSignalAudio = null;
-  try {
-    state.audio.pause();
-    state.audio.removeAttribute("src");
-    state.audio.load();
-  } catch {
-    // The promise still settles if a browser has already released the element.
-  }
-  state.disconnectOutput?.();
-  state.disconnectOutput = null;
-  if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
-  state.resolve();
-}
-
-function fadeAndReleaseSignalAudio(
-  state: ActiveSignalAudio,
-  fadeOutMs: number,
-): void {
-  if (state.settled || state.stopping) return;
-  state.stopping = true;
-  if (activeSignalAudio === state) activeSignalAudio = null;
-  if (state.startTimer !== null) {
-    window.clearTimeout(state.startTimer);
-    state.startTimer = null;
-  }
-  if (state.watchdogTimer !== null) {
-    window.clearTimeout(state.watchdogTimer);
-    state.watchdogTimer = null;
-  }
-  const durationMs = Math.max(0, Math.round(fadeOutMs));
-  const startVolume = state.audio.volume;
-  if (durationMs === 0 || state.audio.paused || startVolume <= 0) {
-    releaseSignalAudio(state);
-    return;
-  }
-  const startedAt = Date.now();
-  const step = (): void => {
-    if (state.settled) return;
-    const progress = (Date.now() - startedAt) / durationMs;
-    state.audio.volume = signalAudioFadeVolumeAt(startVolume, progress);
-    if (progress >= 1) {
-      releaseSignalAudio(state);
-      return;
-    }
-    state.fadeTimer = window.setTimeout(step, 16);
-  };
-  step();
-}
+let activeAudio: HTMLAudioElement | null = null;
+let activeObjectUrl: string | null = null;
+let activeResolve: (() => void) | null = null;
+let activeOutputCleanup: (() => void) | null = null;
 
 export function stopSignalIntroAudio(): void {
-  const state = activeSignalAudio;
-  if (!state) return;
-  fadeAndReleaseSignalAudio(state, SIGNAL_AUDIO_STOP_FADE_MS);
-}
-
-function playSignalAudio(args: {
-  audio: HTMLAudioElement;
-  objectUrl: string | null;
-  durationMs: number;
-  startDelayMs?: number;
-}): Promise<void> {
-  let settle!: () => void;
-  const finished = new Promise<void>((resolve) => {
-    settle = resolve;
-  });
-  const state: ActiveSignalAudio = {
-    audio: args.audio,
-    objectUrl: args.objectUrl,
-    disconnectOutput: routeAudioElementToPrismOutput(args.audio),
-    resolve: settle,
-    startTimer: null,
-    watchdogTimer: null,
-    fadeTimer: null,
-    stopping: false,
-    settled: false,
-  };
-  activeSignalAudio = state;
-  const finish = (): void => {
-    if (state.stopping) return;
-    releaseSignalAudio(state);
-  };
-  args.audio.addEventListener("ended", finish, { once: true });
-  args.audio.addEventListener("error", finish, { once: true });
-  args.audio.load();
-  const startDelayMs = Math.max(0, Math.min(1_000, args.startDelayMs ?? 0));
-  const beginPlayback = (): void => {
-    state.startTimer = null;
-    if (state.settled || state.stopping || activeSignalAudio !== state) return;
-    void args.audio.play().catch(finish);
-  };
-  if (startDelayMs > 0) {
-    state.startTimer = window.setTimeout(beginPlayback, startDelayMs);
-  } else {
-    beginPlayback();
-  }
-  state.watchdogTimer = window.setTimeout(
-    () => fadeAndReleaseSignalAudio(state, SIGNAL_AUDIO_STOP_FADE_MS),
-    startDelayMs + args.durationMs + 1_500,
-  );
-  return finished;
+  activeOutputCleanup?.();
+  activeOutputCleanup = null;
+  activeAudio?.pause();
+  activeAudio = null;
+  if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+  activeObjectUrl = null;
+  const resolve = activeResolve;
+  activeResolve = null;
+  resolve?.();
 }
 
 export function playSignalIntroAudio(args: {
@@ -929,7 +645,6 @@ export function playSignalIntroAudio(args: {
   const audio = new Audio();
   audio.preload = "auto";
   audio.volume = Math.max(0, Math.min(1, args.volume));
-  let objectUrl: string | null = null;
   if (args.introAudio.source === "elevenlabs" && args.introAudio.audioUrl) {
     audio.src = args.introAudio.audioUrl;
   } else {
@@ -937,32 +652,55 @@ export function playSignalIntroAudio(args: {
       profile: args.profile,
       seed: args.seed,
     }));
-    objectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
-    audio.src = objectUrl;
+    activeObjectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
+    audio.src = activeObjectUrl;
   }
-  const finished = playSignalAudio({
-    audio,
-    objectUrl,
-    durationMs,
-    startDelayMs: args.startDelayMs,
+  activeAudio = audio;
+  activeOutputCleanup = routeAudioElementToPrismOutput(audio);
+  if (!activeOutputCleanup && replayAudioMasterCaptureActive()) {
+    activeAudio = null;
+    if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+    activeObjectUrl = null;
+    return { durationMs, finished: Promise.resolve() };
+  }
+
+  const finished = new Promise<void>((resolve) => {
+    activeResolve = resolve;
+    const finish = () => {
+      if (activeAudio !== audio) return;
+      activeOutputCleanup?.();
+      activeOutputCleanup = null;
+      activeAudio = null;
+      if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+      activeObjectUrl = null;
+      if (activeResolve === resolve) activeResolve = null;
+      resolve();
+    };
+    audio.addEventListener("ended", finish, { once: true });
+    audio.addEventListener("error", finish, { once: true });
+    audio.load();
+    const startDelayMs = Math.max(0, Math.min(1_000, args.startDelayMs ?? 0));
+    const beginPlayback = () => {
+      if (activeAudio !== audio) return;
+      void audio.play().catch(finish);
+    };
+    if (startDelayMs > 0) {
+      window.setTimeout(beginPlayback, startDelayMs);
+    } else {
+      beginPlayback();
+    }
+    window.setTimeout(finish, startDelayMs + durationMs + 1_500);
   });
   return { durationMs, finished };
 }
 
-export function playSignalOutdentAudio(args: {
-  profile: SignalMusicProfile;
+export function playSignalOutroAudio(args: {
   seed: string;
-  introAudio: BotcastIntroAudioState;
   enabled: boolean;
   volume: number;
 }): { durationMs: number; finished: Promise<void> } {
   stopSignalIntroAudio();
-  const useCachedOutdent =
-    args.introAudio.source === "elevenlabs" &&
-    Boolean(args.introAudio.outdentAudioUrl);
-  const durationMs = useCachedOutdent
-    ? Math.max(3_000, args.introAudio.outdentDurationMs)
-    : SIGNAL_SYNTH_OUTDENT_DURATION_MS;
+  const durationMs = SIGNAL_SYNTH_OUTRO_DURATION_MS;
   if (
     !args.enabled ||
     typeof Audio === "undefined" ||
@@ -971,28 +709,37 @@ export function playSignalOutdentAudio(args: {
     return { durationMs, finished: Promise.resolve() };
   }
 
+  const wave = encodeSignalSynthIdentWave(buildSignalSynthOutroPlan(args.seed));
+  activeObjectUrl = URL.createObjectURL(new Blob([wave], { type: "audio/wav" }));
   const audio = new Audio();
   audio.preload = "auto";
-  audio.volume = Math.max(0, Math.min(1, args.volume * 0.9));
-  let objectUrl: string | null = null;
-  if (useCachedOutdent) {
-    audio.src = args.introAudio.outdentAudioUrl!;
-  } else {
-    const wave = encodeSignalSynthIdentWave(
-      buildSignalSynthOutdentPlan({
-        profile: args.profile,
-        seed: args.seed,
-      }),
-    );
-    objectUrl = URL.createObjectURL(
-      new Blob([wave], { type: "audio/wav" }),
-    );
-    audio.src = objectUrl;
+  audio.volume = Math.max(0, Math.min(1, args.volume * 0.82));
+  audio.src = activeObjectUrl;
+  activeAudio = audio;
+  activeOutputCleanup = routeAudioElementToPrismOutput(audio);
+  if (!activeOutputCleanup && replayAudioMasterCaptureActive()) {
+    activeAudio = null;
+    URL.revokeObjectURL(activeObjectUrl);
+    activeObjectUrl = null;
+    return { durationMs, finished: Promise.resolve() };
   }
-  const finished = playSignalAudio({
-    audio,
-    objectUrl,
-    durationMs,
+
+  const finished = new Promise<void>((resolve) => {
+    activeResolve = resolve;
+    const finish = () => {
+      if (activeAudio !== audio) return;
+      activeOutputCleanup?.();
+      activeOutputCleanup = null;
+      activeAudio = null;
+      if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+      activeObjectUrl = null;
+      if (activeResolve === resolve) activeResolve = null;
+      resolve();
+    };
+    audio.addEventListener("ended", finish, { once: true });
+    audio.addEventListener("error", finish, { once: true });
+    void audio.play().catch(finish);
+    window.setTimeout(finish, durationMs + 1_000);
   });
   return { durationMs, finished };
 }

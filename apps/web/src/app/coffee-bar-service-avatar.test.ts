@@ -1,129 +1,81 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 
 const appDir = dirname(fileURLToPath(import.meta.url));
 const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
-const cssSource = readFileSync(join(appDir, "page.module.css"), "utf8");
-const coffeeSeatPlateEmojiSource = readFileSync(
-  join(appDir, "CoffeeSeatPlateEmoji.tsx"),
-  "utf8",
-);
-const publicCoffeeBarDir = join(appDir, "..", "..", "public", "coffee-bar");
+const pageCss = readFileSync(join(appDir, "page.module.css"), "utf8");
+const tutorialSource = readFileSync(join(appDir, "modeTutorials.ts"), "utf8");
 
-describe("Coffee bar scene", () => {
-  it("renders distinct frozen front and working baristas as live mannequins", () => {
-    assert.match(
-      pageSource,
-      /const coffeeBarFrontSnapshot =[\s\S]*coffeeBarRitual\?\.frontBarista[\s\S]*const coffeeBarServiceBot = coffeeBarFrontSnapshot\?\.id[\s\S]*coffeeBotsById\.get\(coffeeBarFrontSnapshot\.id\)/u,
+describe("retired Coffee service", () => {
+  it("removes retired service and player-cup presentation from Coffee", () => {
+    assert.doesNotMatch(pageSource, /coffeeSettings\?\.barRitual/u);
+    assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
+    assert.doesNotMatch(pageSource, /player-cup\/sip/u);
+    assert.doesNotMatch(pageSource, /drinkReaction/u);
+    assert.doesNotMatch(pageSource, /coffeeReplayPlayerSeat/u);
+    assert.doesNotMatch(
+      pageCss,
+      /\.coffee(?:Bar|Waiter|PlayerCup|ReplayPlayer(?:Seat|Avatar|Nameplate|Glyph))/u,
     );
+  });
+
+  it("starts new and resumed sessions at topic or arrivals", () => {
+    const createStart = pageSource.indexOf("const createCoffeeSession = async");
+    const createEnd = pageSource.indexOf(
+      "const createCoffeeGroupFromSelection",
+      createStart,
+    );
+    const createSource = pageSource.slice(createStart, createEnd);
+    assert.doesNotMatch(createSource, /assignCoffeeSessionPhase\("barista"\)/u);
+    assert.match(createSource, /assignCoffeeSessionPhase\("topic"\)/u);
+    assert.match(createSource, /startCoffeeArrivalSequence\(/u);
+
+    const resumeStart = pageSource.indexOf(
+      "const joinPreviewedCoffeeSession =",
+    );
+    const resumeEnd = pageSource.indexOf(
+      "type CoffeeTurnClientResponse",
+      resumeStart,
+    );
+    const resumeSource = pageSource.slice(resumeStart, resumeEnd);
+    assert.doesNotMatch(resumeSource, /setCoffeeSessionPhase\("barista"\)/u);
+    assert.match(resumeSource, /startCoffeeArrivalSequence\(/u);
+  });
+
+  it("gives every live off-camera player the pot without legacy ritual state", () => {
     assert.match(
       pageSource,
-      /className=\{styles\.coffeeBarServiceAvatar\}[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{coffeeBarServiceGlyph\}[\s\S]*faceStyle=\{coffeeBarServiceFaceStyle\}[\s\S]*avatarDetails=\{[\s\S]*coffeeBarServiceAvatarDetails/u,
+      /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\|\s*coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive;/u,
     );
     assert.doesNotMatch(
       pageSource,
-      /className=\{styles\.coffeeBarGlyph\}[\s\S]{0,80}☕/u,
+      /coffeePotComposerDockVisible[\s\S]{0,220}barRitual/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /activeConv\.coffeeSettings\?\.barRitual\?\.drinkReactionStatus/u,
     );
     assert.match(
       pageSource,
-      /const coffeeBarServicePersonaBlurb = coffeeBarServiceBot[\s\S]*botHeroPreview\(coffeeBarServiceBot\.system_prompt, 140\)/u,
+      /const coffeePotVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!previewingSession &&\s*!coffeeReplayActive;/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageSource,
-      /className=\{styles\.coffeeBarServiceBlurb\}[\s\S]*coffeeBarServicePersonaBlurb[\s\S]*coffeeBarServiceInvitation/u,
-    );
-    assert.match(
-      pageSource,
-      /function coffeeBarInvitationForVoice/u,
-    );
-    assert.match(
-      pageSource,
-      /className=\{styles\.coffeeBarWorkingPresence\}[\s\S]*coffeeBarRitual\.workingBarista\.name[\s\S]*coffeeBarWorkingGlyph/u,
-    );
-    for (const invitation of [
-      "Would you like some coffee",
-      "Can I make you some coffee",
-      "Coffee before you sit?",
-      "shall we get you some coffee",
-      "May I offer you some coffee",
-    ]) {
-      assert.equal(pageSource.includes(invitation), true);
-    }
-  });
-
-  it("keeps the service face upright outside a Coffee seat wrapper", () => {
-    assert.match(
-      coffeeSeatPlateEmojiSource,
-      /translateY\(var\(--coffee-plate-emoji-nudge-y, 0px\)\) rotate\(/u,
+      /const coffeePotVisible =[\s\S]{0,220}barRitual/u,
     );
   });
 
-  it("explains where a generated special drink appears", () => {
-    assert.match(
-      pageSource,
-      /Choose a drink for your silver Prism mug at the\s+table/u,
-    );
-    assert.match(
-      pageSource,
-      /shown inside your\s+Prism mug at the table/u,
-    );
-    assert.match(pageSource, /I&apos;ll take the…/u);
-    assert.match(pageSource, />\s*Surprise me\s*</u);
-    assert.match(pageSource, />\s*Standard house blend\s*</u);
-    assert.match(pageSource, /scheduleCoffeeBarOrderPoll/u);
-    assert.match(pageSource, /coffeeDrinkPreparationStatus/u);
-    assert.match(pageSource, /coffeeBarDeliveryVisit/u);
-    assert.match(
-      pageSource,
-      /const speakCoffeeBaristaServiceLine[\s\S]*startCoffeeVoiceForReveal/u,
-    );
-    assert.match(pageSource, /coffeePlayerCupFrame >= 6/u);
-    assert.match(pageSource, /drinkReaction \? 10_000/u);
-  });
-
-  it("presents the ritual in a viewport-level modal", () => {
-    assert.match(
-      pageSource,
-      /createPortal\([\s\S]*className=\{styles\.coffeeBarSceneBackdrop\}[\s\S]*role="dialog"[\s\S]*aria-modal="true"[\s\S]*data-tutorial-target="coffee-bar-ritual"/u,
-    );
-    assert.match(
-      cssSource,
-      /\.coffeeBarSceneBackdrop\s*\{[\s\S]*position:\s*fixed;[\s\S]*inset:\s*0;[\s\S]*z-index:\s*950;/u,
-    );
-    assert.match(
-      cssSource,
-      /\.coffeeBarServiceAvatar\s*\{[\s\S]*--zen-live-bot-avatar-size:\s*clamp\(224px, 31vmin, 360px\);/u,
-    );
-    assert.match(
-      cssSource,
-      /\.coffeeBarServicePresence\s*\{[\s\S]*--coffee-bar-avatar-lift:\s*clamp\(120px, 15vh, 192px\);/u,
-    );
-    assert.match(
-      cssSource,
-      /@media \(max-width: 680px\)[\s\S]*\.coffeeBarServiceAvatar\s*\{[\s\S]*bottom:\s*0;/u,
-    );
-    assert.match(
-      cssSource,
-      /\.coffeeBarServiceBlurb\s*\{[\s\S]*bottom:\s*var\(--coffee-bar-avatar-lift\);[\s\S]*grid-area:\s*blurb;/u,
-    );
-    assert.match(
-      cssSource,
-      /\.coffeeBarServiceAvatar\s*\{[\s\S]*--bot-ambient-hover-amplitude:\s*10px;[\s\S]*animation:\s*coffeeBarServiceGlow 4\.8s ease-in-out infinite;/u,
-    );
-    assert.match(cssSource, /@keyframes coffeeBarServiceGlow/u);
-    assert.match(
-      cssSource,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.coffeeBarServiceAvatar,[\s\S]*\.coffeeBarWorkingPresence\s*\{[\s\S]*animation:\s*none;/u,
-    );
-  });
-
-  it("ships one shared matched environment for each app theme", () => {
-    assert.match(cssSource, /url\("\/coffee-bar\/coffee-bar-dark\.webp"\)/u);
-    assert.match(cssSource, /url\("\/coffee-bar\/coffee-bar-light\.webp"\)/u);
-    assert.equal(existsSync(join(publicCoffeeBarDir, "coffee-bar-dark.webp")), true);
-    assert.equal(existsSync(join(publicCoffeeBarDir, "coffee-bar-light.webp")), true);
+  it("teaches pot-only play without barista, waiter, mug, or video steps", () => {
+    const coffeeStart = tutorialSource.indexOf("coffee: {");
+    const coffeeEnd = tutorialSource.indexOf("botcast: {", coffeeStart);
+    const coffeeTutorial = tutorialSource.slice(coffeeStart, coffeeEnd);
+    assert.match(coffeeTutorial, /You remain off camera/u);
+    assert.match(coffeeTutorial, /Drag the pot/u);
+    assert.match(coffeeTutorial, /faithful audio master/u);
+    assert.doesNotMatch(coffeeTutorial, /Stop at the bar|Receive your drink/u);
+    assert.doesNotMatch(coffeeTutorial, /Choose Video|video download/u);
   });
 });

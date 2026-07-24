@@ -43,6 +43,7 @@ import {
   coffeeMeetingSummarySourceMessages,
   coffeeReplyIsLowValueTableLine,
   coffeeReplyIsPunctuationOnly,
+  coffeeReplyNeedsTopicAnchor,
   coffeeReplyLooksUnfinished,
   coffeeReplyLooksLikePromptLeak,
   coffeeReplyRepeatsRecentAssistant,
@@ -1498,7 +1499,43 @@ async function createCoffeeConversationWithId(
   };
 }
 
-describe("Coffee bar ritual", () => {
+describe("retired Coffee service", () => {
+  it("has no active custom-drink or first-sip generation path", () => {
+    const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+    assert.doesNotMatch(
+      serverSource,
+      /runCoffeeDrinkOrder|claimCoffeeDrinkReaction|finishCoffeeDrinkReaction|drinkReactionFocus|source:\s*"coffee_drink"/u,
+    );
+  });
+
+  it("omits active bar ritual state from new sessions", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "coffee-pot-only-user";
+    db.prepare("INSERT INTO users (id) VALUES (?)").run(userId);
+    for (const bot of [ALICE, BORIS, CARA]) seedCoffeeBot(db, userId, bot);
+
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "At the table",
+      coffeeSettings: {
+        barRitual: {
+          version: 2,
+          serviceBot: {
+            id: CARA.id,
+            name: CARA.name,
+            color: null,
+            glyph: null,
+            fallback: false,
+          },
+        } as never,
+      },
+    });
+
+    assert.equal(created.conversation.coffeeSettings?.barRitual, undefined);
+  });
+});
+
+describe.skip("legacy Coffee bar ritual implementation", () => {
   it("freezes two distinct non-roster baristas and delivers a house cup", async () => {
     const db = createCoffeeTestDb();
     const userId = "coffee-bar-user";
@@ -6605,6 +6642,66 @@ describe("buildRouterPrompt", () => {
     assert.doesNotMatch(system, /Dominant duo detected/);
   });
 
+  it("requires a topic anchor on the opening and after three zero-overlap replies", () => {
+    const topic = "Why SpongeBob wins without trying";
+    assert.equal(
+      coffeeReplyNeedsTopicAnchor({
+        coffeeTopic: topic,
+        candidate: "The kitchen smells like victory.",
+        recentAssistantMessages: [],
+        openingTurn: true,
+        stayOnThread: true,
+        activePoll: false,
+        deterministicResponse: false,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeReplyNeedsTopicAnchor({
+        coffeeTopic: topic,
+        candidate: "SpongeBob keeps winning because he never treats it like a contest.",
+        recentAssistantMessages: [],
+        openingTurn: true,
+        stayOnThread: true,
+        activePoll: false,
+        deterministicResponse: false,
+      }),
+      false,
+    );
+    const drift = [
+      { content: "The curtains need replacing." },
+      { content: "That lamp is too bright." },
+    ];
+    assert.equal(
+      coffeeReplyNeedsTopicAnchor({
+        coffeeTopic: topic,
+        candidate: "The floor could use another rug.",
+        recentAssistantMessages: drift,
+        openingTurn: false,
+        stayOnThread: true,
+        activePoll: false,
+        deterministicResponse: false,
+      }),
+      true,
+    );
+    for (const exempt of [
+      { activePoll: true, deterministicResponse: false },
+      { activePoll: false, deterministicResponse: true },
+    ]) {
+      assert.equal(
+        coffeeReplyNeedsTopicAnchor({
+          coffeeTopic: topic,
+          candidate: "The floor could use another rug.",
+          recentAssistantMessages: drift,
+          openingTurn: false,
+          stayOnThread: true,
+          ...exempt,
+        }),
+        false,
+      );
+    }
+  });
+
   it("indicates a fresh thread when no one has spoken yet", () => {
     const messages = buildRouterPrompt({
       group: [ALICE, BORIS],
@@ -10710,6 +10807,101 @@ describe("Coffee direct mention routing helpers", () => {
     assert.match(retryPrompt, /previous draft contained only punctuation/i);
   });
 
+  it("retries an off-topic opening once with an explicit topic anchor", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-topic-opening";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "Why SpongeBob wins without trying",
+      coffeeSettings: { stayOnThread: true },
+    });
+    const chatBodies: unknown[] = [];
+
+    const turn = await withMockedCoffeeFetch(
+      "unused",
+      () =>
+        processCoffeeAutonomousTurn(
+          db,
+          userId,
+          session.conversation.id,
+          { preferredProvider: "local", sessionRemainingMs: 120_000 },
+          false,
+          ALICE.id,
+        ),
+      {
+        chatBodies,
+        chatReplies: [
+          "Curtains frame the room, and the lamp makes every shadow feel deliberate.",
+          "SpongeBob wins because he treats the work as play instead of a contest.",
+        ],
+      },
+    );
+
+    const retryPrompt = (
+      (chatBodies[1] as { messages?: Array<{ content?: string }> } | undefined)
+        ?.messages ?? []
+    )
+      .map((message) => message.content ?? "")
+      .join("\n");
+    assert.equal(chatBodies.length, 2);
+    assert.match(retryPrompt, /Stay on the table topic/u);
+    assert.match(retryPrompt, /Why SpongeBob wins without trying/u);
+    assert.match(
+      turn.conversation.messages.at(-1)?.content ?? "",
+      /SpongeBob|wins|contest/u,
+    );
+  });
+
+  it("uses the topic-aware fallback when the one topic retry still drifts", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-topic-fallback";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "Why SpongeBob wins without trying",
+      coffeeSettings: { stayOnThread: true },
+    });
+    const chatBodies: unknown[] = [];
+
+    const turn = await withMockedCoffeeFetch(
+      "unused",
+      () =>
+        processCoffeeAutonomousTurn(
+          db,
+          userId,
+          session.conversation.id,
+          { preferredProvider: "local", sessionRemainingMs: 120_000 },
+          false,
+          ALICE.id,
+        ),
+      {
+        chatBodies,
+        chatReplies: [
+          "Curtains frame the room, and the lamp makes every shadow feel deliberate.",
+          "The rug needs another color before anyone can settle in.",
+        ],
+      },
+    );
+
+    const reply = turn.conversation.messages.at(-1)?.content ?? "";
+    assert.equal(chatBodies.length, 2);
+    assert.equal(
+      coffeeReplyNeedsTopicAnchor({
+        coffeeTopic: "Why SpongeBob wins without trying",
+        candidate: reply,
+        recentAssistantMessages: [],
+        openingTurn: true,
+        stayOnThread: true,
+        activePoll: false,
+        deterministicResponse: false,
+      }),
+      false,
+    );
+  });
+
   it("uses a visible fallback after one punctuation-only retry", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -11422,7 +11614,6 @@ describe("coffee social state helpers", () => {
       groupBotIds: [ALICE.id, BORIS.id],
       initialTopic: "No coffee",
     });
-    chooseCoffeeHouseDrink(db, userId, created.conversation.id);
     db.prepare(
       "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ?",
     ).run(
@@ -11466,25 +11657,37 @@ describe("coffee social state helpers", () => {
     );
   });
 
-  it("lets the ambient waiter top off an eligible bot without adding a table turn", async () => {
+  it("never lets a legacy ambient waiter top off an eligible bot", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);
     seedCoffeeBot(db, userId, BORIS);
     const created = await createCoffeeConversation(db, userId, {
       groupBotIds: [ALICE.id, BORIS.id],
-      initialTopic: "Waiter cadence",
+      initialTopic: "Conversation cadence",
     });
     const conversationId = created.conversation.id;
-    const withCup = chooseCoffeeHouseDrink(db, userId, conversationId);
     const sixMinutesAgo = new Date(Date.now() - 6 * 60_000).toISOString();
-    const ritual = withCup.coffeeSettings?.barRitual;
+    const withCupSettings = normalizeCoffeeSessionSettings({
+      barRitual: {
+        version: 1,
+        serviceBot: { id: "legacy-waiter", name: "Waiter", fallback: true },
+        role: "cup",
+        drink: "house",
+        liveStartedAt: sixMinutesAgo,
+        visitStartedAtByBotId: {
+          [ALICE.id]: sixMinutesAgo,
+          [BORIS.id]: sixMinutesAgo,
+        },
+      },
+    });
+    const ritual = withCupSettings.barRitual;
     assert.ok(ritual);
     db.prepare(
       "UPDATE conversations SET coffee_settings = ?, coffee_power_plan_json = ? WHERE id = ? AND user_id = ?",
     ).run(
       JSON.stringify({
-        ...withCup.coffeeSettings,
+        ...withCupSettings,
         barRitual: {
           ...ritual,
           liveStartedAt: sixMinutesAgo,
@@ -11548,13 +11751,12 @@ describe("coffee social state helpers", () => {
       "SELECT coffee_settings FROM conversations WHERE id = ? AND user_id = ?",
     ).get(conversationId, userId) as { coffee_settings: string };
     const nextSettings = parseStoredCoffeeSessionSettings(settingsRow.coffee_settings);
-    assert.equal(nextSettings.barRitual?.lastBotWaiterVisit?.targetBotId, BORIS.id);
-    assert.equal(nextSettings.barRitual?.lastBotWaiterVisit?.status, "accepted");
+    assert.equal(nextSettings.barRitual?.lastBotWaiterVisit, null);
     assert.equal(
       (db.prepare(
         "SELECT COUNT(*) AS count FROM coffee_cup_top_offs WHERE conversation_id = ? AND bot_id = ?",
       ).get(conversationId, BORIS.id) as { count: number }).count,
-      1,
+      0,
     );
     assert.equal(
       (db.prepare(
@@ -11570,7 +11772,7 @@ describe("coffee social state helpers", () => {
     );
   });
 
-  it("gives a coffee-refusing bot a normal hidden visit clock and neutral mandatory farewell", async () => {
+  it.skip("keeps the legacy no-vessel hidden visit clock compatible", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
     seedCoffeeBot(db, userId, ALICE);

@@ -1,26 +1,15 @@
 import {
+  BOTCAST_IMMERSIVE_VOICE_TAGS,
   type BotcastMessage,
 } from "@localai/shared";
-import {
-  extractStageDirectionCues,
-  extractStageDirections,
-  getBotMentionDisplayLength,
-} from "./botMention.ts";
 
-const SIGNAL_VOICE_TAG_PATTERN =
-  /(?<![\\[])\[([^\[\]\n]{1,48})\](?!\])(?!\s*\()/giu;
+const SIGNAL_VOICE_TAG_PATTERN = /\[([^\]\n]{1,48})\]/giu;
 
 export interface SignalVoicePerformancePresentation {
   actions: string[];
   leadingActions: string[];
   trailingActions: string[];
-  cues: SignalVoicePerformanceCue[];
   transcriptText: string;
-}
-
-export interface SignalVoicePerformanceCue {
-  action: string;
-  revealAtProgress: number;
 }
 
 type SignalPerformanceMessage = Pick<
@@ -29,15 +18,6 @@ type SignalPerformanceMessage = Pick<
 > &
   Partial<Pick<BotcastMessage, "stageActionText">>;
 
-function normalizeSignalTranscriptText(value: string): string {
-  return extractStageDirections(value).mainText.replace(/\s+/gu, " ").trim();
-}
-
-function signalCueProgress(displayLength: number, transcriptLength: number): number {
-  if (transcriptLength <= 0) return 0;
-  return Math.max(0, Math.min(1, displayLength / transcriptLength));
-}
-
 /**
  * Turns saved Eleven v3 audio directions into viewer-facing stage actions
  * without changing the canonical spoken text.
@@ -45,94 +25,53 @@ function signalCueProgress(displayLength: number, transcriptLength: number): num
 export function signalVoicePerformancePresentation(
   message: SignalPerformanceMessage,
 ): SignalVoicePerformancePresentation | null {
-  const content = normalizeSignalTranscriptText(message.content);
+  const content = message.content.replace(/\s+/gu, " ").trim();
   const stageAction = message.stageActionText?.replace(/\s+/gu, " ").trim();
   if (stageAction) {
     return {
       actions: [stageAction],
       leadingActions: [stageAction],
       trailingActions: [],
-      cues: [{ action: stageAction, revealAtProgress: 0 }],
       transcriptText: content,
     };
   }
   const taggedText = message.voicePerformanceText?.replace(/\s+/gu, " ").trim();
-  const transcriptLength = getBotMentionDisplayLength(content);
-  const authoredCues: SignalVoicePerformanceCue[] = extractStageDirectionCues(
-    message.content,
-  ).map((cue) => ({
-    action: cue.action.replace(/\s+/gu, " ").trim(),
-    revealAtProgress: signalCueProgress(
-      cue.revealAtDisplayLength,
-      transcriptLength,
-    ),
-  }));
-  const matches = taggedText
-    ? [...taggedText.matchAll(SIGNAL_VOICE_TAG_PATTERN)]
-    : [];
-  const taggedTranscript = taggedText
-    ? normalizeSignalTranscriptText(
-        taggedText.replace(SIGNAL_VOICE_TAG_PATTERN, " "),
-      )
-    : "";
-  const performanceCues: SignalVoicePerformanceCue[] =
-    taggedText && taggedTranscript === content
-      ? matches.map((match) => {
-          const action = (match[1] ?? "").trim().toLowerCase();
-          const before = normalizeSignalTranscriptText(
-            taggedText
-              .slice(0, match.index ?? 0)
-              .replace(SIGNAL_VOICE_TAG_PATTERN, " "),
-          );
-          return {
-            action,
-            revealAtProgress: signalCueProgress(
-              getBotMentionDisplayLength(before),
-              transcriptLength,
-            ),
-          };
-        })
-      : [];
-  const cues = [
-    ...authoredCues,
-    ...performanceCues.filter(
-      (candidate) =>
-        !authoredCues.some(
-          (authored) =>
-            Math.abs(
-              authored.revealAtProgress - candidate.revealAtProgress,
-            ) < 0.0001,
-        ),
-    ),
-  ].sort((left, right) => left.revealAtProgress - right.revealAtProgress);
-  if (cues.length === 0) return null;
-  const actions = cues.map((cue) => cue.action);
-  const leadingActions = cues
-    .filter((cue) => cue.revealAtProgress <= 0)
-    .map((cue) => cue.action);
-  const trailingActions = cues
-    .filter((cue) => cue.revealAtProgress >= 1)
-    .map((cue) => cue.action);
+  if (!taggedText || !content) return null;
+
+  const allowed = new Set<string>(BOTCAST_IMMERSIVE_VOICE_TAGS);
+  const matches = [...taggedText.matchAll(SIGNAL_VOICE_TAG_PATTERN)].filter(
+    (match) => allowed.has((match[1] ?? "").trim().toLowerCase()),
+  );
+  if (matches.length === 0) return null;
+
+  const spokenText = taggedText
+    .replace(SIGNAL_VOICE_TAG_PATTERN, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (spokenText !== content) return null;
+
+  const leadingActions: string[] = [];
+  const trailingActions: string[] = [];
+  for (const match of matches) {
+    const action = (match[1] ?? "").trim().toLowerCase();
+    const before = taggedText
+      .slice(0, match.index ?? 0)
+      .replace(SIGNAL_VOICE_TAG_PATTERN, " ")
+      .trim();
+    if (!before) leadingActions.push(action);
+    else trailingActions.push(action);
+  }
+  const actions = [...leadingActions, ...trailingActions];
   return {
     actions,
     leadingActions,
     trailingActions,
-    cues,
-    transcriptText: content,
+    transcriptText: [
+      leadingActions.map((action) => `*${action}*`).join(" "),
+      content,
+      trailingActions.map((action) => `*${action}*`).join(" "),
+    ].filter(Boolean).join(" "),
   };
-}
-
-function signalVoicePerformanceCueAtProgress(
-  presentation: SignalVoicePerformancePresentation,
-  progress: number,
-): SignalVoicePerformanceCue | null {
-  const clampedProgress = Math.max(0, Math.min(1, progress));
-  let current: SignalVoicePerformanceCue | null = null;
-  for (const cue of presentation.cues) {
-    if (cue.revealAtProgress > clampedProgress) break;
-    current = cue;
-  }
-  return current;
 }
 
 export function signalVoicePerformanceActionAtProgress(
@@ -141,7 +80,13 @@ export function signalVoicePerformanceActionAtProgress(
 ): string | null {
   const presentation = signalVoicePerformancePresentation(message);
   if (!presentation) return null;
-  return signalVoicePerformanceCueAtProgress(presentation, progress)?.action ?? null;
+  if (presentation.actions.length === 1) return presentation.actions[0] ?? null;
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const index = Math.min(
+    presentation.actions.length - 1,
+    Math.floor(clampedProgress * presentation.actions.length),
+  );
+  return presentation.actions[index] ?? null;
 }
 
 export type SignalVoicePerformanceActionPresentation = {
@@ -151,9 +96,8 @@ export type SignalVoicePerformanceActionPresentation = {
 };
 
 /**
- * Keeps the latest reached action mounted until another authored cue replaces
- * it. The caller supplies transcript reveal progress, so actions change at the
- * same point the cleaned dialogue reaches them.
+ * Keeps each saved action mounted for its whole share of the utterance while
+ * the real speech clock eases it in, holds it, and fades it fully away.
  */
 export function signalVoicePerformanceActionPresentationAtProgress(
   message: SignalPerformanceMessage,
@@ -161,19 +105,37 @@ export function signalVoicePerformanceActionPresentationAtProgress(
 ): SignalVoicePerformanceActionPresentation | null {
   const presentation = signalVoicePerformancePresentation(message);
   if (!presentation) return null;
-  const cue = signalVoicePerformanceCueAtProgress(presentation, progress);
-  if (!cue) return null;
+  const clampedProgress = Math.max(0, Math.min(1, progress));
+  const scaledProgress = clampedProgress * presentation.actions.length;
+  const index = Math.min(
+    presentation.actions.length - 1,
+    Math.floor(scaledProgress),
+  );
+  const localProgress =
+    clampedProgress === 1 ? 1 : Math.max(0, scaledProgress - index);
+  const enteringUntil = 0.14;
+  const exitingFrom = 0.72;
+  const phase =
+    localProgress < enteringUntil
+      ? "entering"
+      : localProgress > exitingFrom
+        ? "exiting"
+        : "holding";
+  const opacity =
+    phase === "entering"
+      ? localProgress / enteringUntil
+      : phase === "exiting"
+        ? (1 - localProgress) / (1 - exitingFrom)
+        : 1;
   return {
-    action: cue.action,
-    opacity: 1,
-    phase: "holding",
+    action: presentation.actions[index]!,
+    opacity: Number(Math.max(0, Math.min(1, opacity)).toFixed(3)),
+    phase,
   };
 }
 
 export function signalVoicePerformanceTranscriptText(
   message: SignalPerformanceMessage,
 ): string {
-  return extractStageDirectionCues(message.content).length > 0
-    ? normalizeSignalTranscriptText(message.content)
-    : message.content;
+  return signalVoicePerformancePresentation(message)?.transcriptText ?? message.content;
 }

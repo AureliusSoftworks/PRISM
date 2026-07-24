@@ -7,7 +7,10 @@ import type {
   SessionAtmosphereController,
   SessionAtmosphereFoleyPlaybackOptions,
 } from "./session-atmosphere-audio.ts";
-import { routeAudioElementToPrismOutput } from "./signalAudioMasterCapture.ts";
+import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
 
 export interface SignalSoundboardCueDefinition {
   kind: BotcastSoundboardCueKind;
@@ -210,6 +213,7 @@ export function playSignalSoundboardCue(
       audio as unknown as HTMLMediaElement,
     );
     if (cleanup) soundboardAudioOutputCleanup.set(audio, cleanup);
+    else if (replayAudioMasterCaptureActive()) return false;
   }
   audio.preload = "auto";
   audio.volume = plan.trim;

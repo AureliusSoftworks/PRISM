@@ -5,6 +5,10 @@ import {
   type NormalizedBotAudioVoiceProfileV1,
   type VoiceMode,
 } from "@localai/shared";
+import {
+  prismAudioContext,
+  prismAudioOutputNode,
+} from "./replayAudioMasterCapture.ts";
 
 const COFFEE_PLAYER_SHUSH_BASE_DURATION_MS = 440;
 const COFFEE_PLAYER_SHUSH_EXTRA_H_DURATION_MS = 110;
@@ -65,14 +69,11 @@ export function coffeePlayerStaticShushDurationForPlayback(args: {
 }
 
 function coffeePlayerShushContext(): AudioContext | null {
-  if (typeof window === "undefined" || typeof window.AudioContext !== "function") {
-    return null;
-  }
   if (
     !coffeePlayerShushAudioContext ||
     coffeePlayerShushAudioContext.state === "closed"
   ) {
-    coffeePlayerShushAudioContext = new window.AudioContext();
+    coffeePlayerShushAudioContext = prismAudioContext();
   }
   return coffeePlayerShushAudioContext;
 }
@@ -136,7 +137,7 @@ export async function playCoffeePlayerStaticShush(args: {
   source.connect(highpass);
   highpass.connect(lowpass);
   lowpass.connect(output);
-  output.connect(context.destination);
+  output.connect(prismAudioOutputNode(context));
 
   return await new Promise<boolean>((resolve) => {
     let finished = false;

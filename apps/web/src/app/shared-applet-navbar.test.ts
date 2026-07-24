@@ -42,7 +42,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(navbarHelper, /liveSessionChromePolicy\("Signal"\)/);
   assert.match(
     navbarHelper,
-    /renderLocationStrip\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
+    /renderAppSwitcher\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
   );
   assert.match(
     navbarHelper,
@@ -50,7 +50,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   );
   assert.match(
     navbarHelper,
-    /options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:[\s\S]*disabledNavbarActions\.voice[\s\S]*tutorialTarget: "botcast-voice-mode"/,
+    /const voiceSelectorOptions = \{[\s\S]*disabled:[\s\S]*disabledNavbarActions\.voice[\s\S]*tutorialTarget: "botcast-voice-mode"[\s\S]*options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(voiceSelectorOptions\)/,
   );
   assert.match(pageSource, /data-tutorial-target=\{options\.tutorialTarget\}/);
   assert.match(
@@ -72,6 +72,13 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
     pageSource,
     /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,/,
   );
+  assert.match(
+    pageSource,
+    /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*true,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*<ComposerModelPicker/u,
+  );
+  assert.doesNotMatch(signalSource, /providerModeToggle/u);
+  assert.doesNotMatch(signalSource, /signalGlobalProviderControl/u);
+  assert.doesNotMatch(signalCss, /\.signalGlobalProviderControl/u);
   assert.match(
     pageSource,
     /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,

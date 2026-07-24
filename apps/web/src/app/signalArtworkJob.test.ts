@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  signalArtworkAssetLabel,
-  signalArtworkJobCompletionNotice,
   signalArtworkJobHeadline,
   type SignalArtworkAssetKind,
   type SignalArtworkJobSnapshot,
@@ -30,7 +28,6 @@ function activeSingleAssetJob(
       identityMs: null,
       nightStudioMs: null,
       dayRelightMs: null,
-      studioLightingMs: null,
       logoMs: null,
       downloadMs: 0,
       localPersistenceMs: 0,
@@ -64,41 +61,4 @@ test("a completed single regeneration names that asset instead of the whole show
   logo.completedCount = 1;
   logo.assets[0]!.status = "complete";
   assert.equal(signalArtworkJobHeadline(logo), "Logo ready");
-});
-
-test("Studio artwork progress includes its automatic receiver-map pass", () => {
-  const lighting = activeSingleAssetJob("studio-lighting");
-  assert.equal(signalArtworkAssetLabel("studio-lighting"), "Studio lighting");
-  assert.equal(
-    signalArtworkJobHeadline(lighting),
-    "Generating surface-aware Studio lighting",
-  );
-
-  const studio = activeSingleAssetJob("day-studio");
-  studio.status = "completed";
-  studio.currentAsset = null;
-  studio.completedCount = 2;
-  studio.totalCount = 2;
-  studio.assets[0]!.status = "complete";
-  studio.assets.push({
-    kind: "studio-lighting",
-    status: "complete",
-    error: null,
-    imageId: "lighting-map",
-  });
-  assert.equal(signalArtworkJobHeadline(studio), "Studio refresh complete");
-  assert.equal(
-    signalArtworkJobCompletionNotice(studio),
-    "The refreshed Light studio and its Studio lighting are live.",
-  );
-});
-
-test("a waiting Studio lighting refresh names the shared image queue", () => {
-  const lighting = activeSingleAssetJob("studio-lighting");
-  lighting.currentAsset = null;
-  lighting.assets[0]!.status = "waiting";
-  assert.equal(
-    signalArtworkJobHeadline(lighting),
-    "Queued for image generation",
-  );
 });

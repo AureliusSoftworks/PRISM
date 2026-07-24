@@ -5,7 +5,10 @@ import {
   type BotAvatarSfxV1,
   type NormalizedBotAudioVoiceProfileV1,
 } from "@localai/shared";
-import { prismAudioOutputNode } from "./signalAudioMasterCapture.ts";
+import {
+  prismAudioContext,
+  prismAudioOutputNode,
+} from "./replayAudioMasterCapture.ts";
 
 export const GENERATED_BOT_THINKING_SFX_PROMPT = "Computer calculating";
 export const PRISM_BOT_THINKING_SFX_FALLBACK_URLS = [
@@ -112,16 +115,8 @@ function isBrowserMediaElement(
 }
 
 function botAvatarSfxContext(): AudioContext | null {
-  if (
-    typeof window === "undefined" ||
-    typeof window.AudioContext !== "function"
-  ) {
-    return null;
-  }
   if (!botAvatarSfxAudioContext || botAvatarSfxAudioContext.state === "closed") {
-    botAvatarSfxAudioContext = new window.AudioContext({
-      latencyHint: "interactive",
-    });
+    botAvatarSfxAudioContext = prismAudioContext();
   }
   return botAvatarSfxAudioContext;
 }

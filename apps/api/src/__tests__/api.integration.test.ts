@@ -623,7 +623,79 @@ describe("API request integration", () => {
     fetchRecorder.calls.length = 0;
   });
 
-  it("runs the Coffee bar ritual and blocks special drinks in LOCAL mode without egress", async () => {
+  it("creates pot-only sessions and retires every Coffee service route", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "coffee-pot-only@example.com",
+        password: "coffee-pot-only-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const now = "2026-07-23T18:00:00.000Z";
+    const botIds = ["pot-table-a", "pot-table-b"];
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+    );
+    insertBot.run(botIds[0], userId, "Avery", "Practical.", now, now);
+    insertBot.run(botIds[1], userId, "Blake", "Curious.", now, now);
+
+    const created = await client.request(
+      "/api/coffee/sessions",
+      jsonInit({ groupBotIds: botIds, initialTopic: "Pot only" }),
+    );
+    const createdPayload = await json(created);
+    assert.equal(created.status, 200, JSON.stringify(createdPayload));
+    assert.equal(
+      createdPayload.conversation.coffeeSettings.barRitual,
+      undefined,
+    );
+    const conversationId = String(createdPayload.conversation.id);
+    const storedBefore = (
+      db.prepare(
+        "SELECT coffee_settings FROM conversations WHERE id = ? AND user_id = ?",
+      ).get(conversationId, userId) as { coffee_settings: string }
+    ).coffee_settings;
+    const fetchCount = fetchRecorder.calls.length;
+    const retiredRoutes: Array<[string, RequestInit]> = [
+      [`/api/coffee/sessions/${conversationId}/bar/role`, jsonInit({ role: "pot" })],
+      [`/api/coffee/sessions/${conversationId}/bar/house`, { method: "POST" }],
+      [`/api/coffee/sessions/${conversationId}/bar/order`, { method: "GET" }],
+      [
+        `/api/coffee/sessions/${conversationId}/bar/order`,
+        jsonInit({ choice: "surprise" }),
+      ],
+      [
+        `/api/coffee/sessions/${conversationId}/bar/special`,
+        jsonInit({ orderText: "lavender" }),
+      ],
+      [`/api/coffee/sessions/${conversationId}/bar/deliver`, { method: "POST" }],
+      [`/api/coffee/sessions/${conversationId}/player-cup/sip`, { method: "POST" }],
+      [
+        `/api/coffee/sessions/${conversationId}/bar/waiter/respond`,
+        jsonInit({ response: "accept" }),
+      ],
+    ];
+    for (const [path, init] of retiredRoutes) {
+      const response = await client.request(path, init);
+      const payload = await json(response);
+      assert.equal(response.status, 410, `${path}: ${JSON.stringify(payload)}`);
+      assert.match(payload.error, /Coffee service is retired/u);
+    }
+    const storedAfter = (
+      db.prepare(
+        "SELECT coffee_settings FROM conversations WHERE id = ? AND user_id = ?",
+      ).get(conversationId, userId) as { coffee_settings: string }
+    ).coffee_settings;
+    assert.equal(storedAfter, storedBefore);
+    assert.equal(fetchRecorder.calls.length, fetchCount);
+  });
+
+  it.skip("runs the legacy Coffee bar ritual and blocks special drinks in LOCAL mode without egress", async () => {
     const client = createClient();
     const email = "coffee-bar-local@example.com";
     const register = await client.request(
@@ -716,7 +788,7 @@ describe("API request integration", () => {
     assert.equal(potPayload.conversation.coffeeSettings.barRitual.playerCup, null);
   });
 
-  it("queues a unified Surprise me order, polls it after the table starts, and delivers once", async () => {
+  it.skip("queues a legacy Surprise me order, polls it after the table starts, and delivers once", async () => {
     const client = createClient();
     const email = "coffee-bar-surprise@example.com";
     const register = await client.request(

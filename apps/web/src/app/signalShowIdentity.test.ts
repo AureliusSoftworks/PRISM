@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildSignalMusicProfile, type BotcastShow } from "@localai/shared";
+import type { BotcastShow } from "@localai/shared";
 
 import { signalShowMagicManifest } from "./signalShowIdentity.ts";
 
@@ -15,42 +15,23 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
     fallbackStudioAccentVariant: 0,
     atmosphere: {} as BotcastShow["atmosphere"],
     studioIdentity: "A precise studio.",
-    musicIdentity: {
-      version: 1,
-      direction: "Precise broadcast geometry with one revealing interruption.",
-      revision: 1,
-      profile: buildSignalMusicProfile({
-        temperament: "analytical",
-        seed: "show-1:music:1",
-      }),
-    },
     dashboardBlurbs: ["Already written."],
-    hostRecoveryQuestions: [
-      "Which example would actually test that claim?",
-      "Which consequence matters, and who bears it?",
-      "Where does that become a real choice?",
-      "What evidence would make you reconsider?",
-    ],
     dayAtmosphere: { imageUrl: "/day.png" } as BotcastShow["dayAtmosphere"],
     nightAtmosphere: {
       imageUrl: "/night.png",
     } as BotcastShow["nightAtmosphere"],
-    studioLighting: {} as BotcastShow["studioLighting"],
     studioLayout: {} as BotcastShow["studioLayout"],
-    studioGlowTuning: {
-      dark: { opacity: 1, blendMode: "overlay" },
-      light: { opacity: 1, blendMode: "overlay" },
-    },
     voiceLevelsByBotId: {},
     atmosphereMix: {} as BotcastShow["atmosphereMix"],
     logo: { imageUrl: "/logo.png" } as BotcastShow["logo"],
-    introAudio: {
-      source: "elevenlabs",
-      outdentAudioUrl: "/outdent.mp3",
-    } as BotcastShow["introAudio"],
+    introAudio: { source: "elevenlabs" } as BotcastShow["introAudio"],
     atmosphereAudio: {
       source: "elevenlabs",
     } as BotcastShow["atmosphereAudio"],
+    musicIdentity: {} as BotcastShow["musicIdentity"],
+    hostRecoveryQuestions: [],
+    studioLighting: {} as BotcastShow["studioLighting"],
+    studioGlowTuning: {} as BotcastShow["studioGlowTuning"],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     episodeCount: 0,
@@ -98,7 +79,6 @@ describe("signalShowMagicManifest", () => {
     const manifest = signalShowMagicManifest(
       show({
         dashboardBlurbs: [],
-        hostRecoveryQuestions: [],
         dayAtmosphere: { imageUrl: null } as BotcastShow["dayAtmosphere"],
         atmosphereAudio: {
           source: "bundled",
@@ -160,14 +140,5 @@ describe("signalShowMagicManifest", () => {
       needsAudioPackage: false,
       complete: true,
     });
-  });
-
-  it("treats a speaking host's missing recovery questions as unfinished text identity", () => {
-    const manifest = signalShowMagicManifest(
-      show({ hostRecoveryQuestions: [] }),
-    );
-
-    assert.equal(manifest.needsTextIdentity, true);
-    assert.equal(manifest.complete, false);
   });
 });

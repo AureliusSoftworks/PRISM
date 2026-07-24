@@ -5,6 +5,16 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-07-23 · [UX]
+**Trigger**: Coffee seat action badges rendered stage directions in all caps (“EXTENDS A HAND…”).
+**Lesson**: Canvas-facing action/stage-direction copy stays sentence case across Coffee, Zen, and Signal. Keep `text-transform: none` on badge/presence/voice-action text and sentence-case in the display normalizer; only the composer Action field chrome stays uppercase.
+**Applies to**: `page.module.css` `.coffeeSeatActionBadgeText`, `normalizeCoffeeSeatActionBadgeText`, Signal `voiceActionText` / `signalVoicePerformanceActionPresentationAtProgress`.
+
+### 2026-07-23 · [architecture]
+**Trigger**: Signal episodes froze with bots staring; sending a producer cue then failed with “Producer cues wait for the host's next turn.”
+**Lesson**: Prefetch (`prepareFollowingBotResponse`) commits the next turn via `POST /advance`. A queued producer cue must not skip that prepared result and re-POST with the cue — the server has already moved on, the 400 stops autoRun, and the stage goes dead. Prefer a matching prepared advance, bake any already-queued host cue into the prefetch body, and if a late cue still 400s, resync the episode and catch up unplayed lines instead of killing the rundown.
+**Applies to**: `apps/web/src/app/BotcastExperience.tsx` advance/prefetch/cue handoff.
+
+### 2026-07-23 · [UX]
 **Trigger**: Sound FX Bench needed both local trim editing and one-click sibling generation without a reference-audio provider.
 **Lesson**: Add Start/End trim as outer waveform handles with discarded-region dimming, keep Fade In/Out relative to the retained slice, and enforce a minimum keep ratio so fades never fight empty audio. Expose Fade and Trim as mutually exclusive envelope modes so their left/right handles never share the same interaction lane. For Similar, reuse the stored generation prompt when available and otherwise build a family prompt from the display name plus assigned actions, returning through the existing candidate Keep/Edit/Toss flow.
 **Applies to**: `apps/web/public/tools/sound-fx-bench.html` editor trim and library Similar action.

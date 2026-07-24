@@ -45,9 +45,19 @@ export function coffeeSeatCustomMouthCharacterForSip(args: {
     args.coffeePuckerEnabled &&
     args.mouthCharacter !== null
   ) {
-    return null;
+    return "⁎";
   }
   return args.mouthCharacter;
+}
+
+export function coffeeSeatScreenRelativeMouthRotationDeg(
+  authoredRotationDeg: number,
+  faceRotationDeg: number,
+): number {
+  const wrapped =
+    ((((authoredRotationDeg - faceRotationDeg + 180) % 360) + 360) % 360) -
+    180;
+  return Object.is(wrapped, -0) ? 0 : Number(wrapped.toFixed(3));
 }
 
 export function coffeeSeatMouthShapeFromVisibleLength(

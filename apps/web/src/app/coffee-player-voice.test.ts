@@ -209,7 +209,7 @@ describe("Coffee player voice", () => {
     assert.doesNotMatch(source, /playerAudioVoiceProfile|playerNamePronunciation/);
   });
 
-  it("houses replay Prism identity and pot together at the table", () => {
+  it("keeps replay player voice and pot actions off camera", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const styles = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
     assert.match(
@@ -217,66 +217,18 @@ describe("Coffee player voice", () => {
       /coffeeComposerVisible[\s\S]*?renderViewSwitchOverlay\("workspace"\)[\s\S]*?coffeeFinishedControlsVisible/
     );
     assert.match(source, /coffeeGlobalComposer[^\n]*coffeeReplayComposerControls/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerSeat\}/);
-    assert.match(source, /data-review-active=\{shellPolicy\.reviewActive \? "true" : undefined\}/);
-    assert.match(source, /zenDefaultPrismGlyph/);
     assert.match(
       source,
-      /data-player-thinking=\{\s*coffeeReplayPlayerThinking/
+      /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayOffCameraPotDock\}/,
     );
-    assert.match(source, /data-table-speaking=\{\s*replayPlayerTalking/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerPot\}/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerName\}/);
-    assert.match(source, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
-    assert.match(
-      source,
-      /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayPlayerPot\}/,
-    );
+    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerSeat\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerAvatar\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeePlayerCup\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerName\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayComposerPot\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPersona\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPersonaGlyph\}/);
-    assert.match(styles, /\.coffeeReplayPlayerSeat\b/);
-    assert.match(source, /<ZenLiveBotMannequin[\s\S]*?showThinkingSpinner=\{coffeeReplayPlayerThinking\}/);
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerPot img\s*\{[\s\S]*?width:\s*62px;/
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?bottom:\s*clamp\(-54px,\s*-4\.8vh,\s*-32px\);/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?--zen-live-bot-avatar-size:\s*var\(\s*--coffee-seat-responsive-avatar-size,\s*clamp\(148px,\s*12\.6vw,\s*196px\)\s*\);[\s\S]*?--zen-live-bot-avatar-body-size:\s*var\(--zen-live-bot-avatar-size\);/,
-    );
-    assert.doesNotMatch(
-      styles,
-      /\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?clamp\(126px,\s*12cqw,\s*168px\)/,
-    );
-    assert.match(
-      styles,
-      /\.zenLiveBotPresenceHitTarget\s*\{[\s\S]*?width:\s*77\.4%;[\s\S]*?height:\s*78\.6%;/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?width:\s*min\(268px,\s*calc\(100%\s*-\s*32px\)\);[\s\S]*?pointer-events:\s*none;/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerNameplate\s*\{[\s\S]*?width:\s*clamp\(232px,\s*21cqw,\s*268px\);[\s\S]*?margin-top:\s*clamp\(-41px,\s*-3\.2cqw,\s*-30px\);/,
-    );
-    assert.match(
-      source,
-      /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}\s+size=\{16\}\s+strokeWidth=\{2\}/,
-    );
-    assert.match(
-      styles,
-      /\.coffeeReplayPlayerSeat\[data-player-thinking="true"\],[\s\S]*?\.coffeeReplayPlayerSeat\[data-table-speaking="true"\]\s*\{[\s\S]*?drop-shadow\(/,
-    );
-    assert.match(
-      styles,
-      /\.themeLight\.coffeeShell \.coffeeReplayPlayerNameplate\s*\{/,
-    );
     assert.match(
       source,
       /const compactCoffeeStage =\s*coffeeSessionPhase === "selecting" && coffeeConversation === null;/,

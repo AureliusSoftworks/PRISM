@@ -61,8 +61,8 @@ describe("applet version helpers", () => {
   it("tracks the current visual applet versions for release provenance", () => {
     assert.equal(PRISM_APPLETS.chat.version, "1.30");
     assert.equal(PRISM_APPLETS.zen.version, "1.28");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.28");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.54");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.30");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.29");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.26");
     assert.equal(PRISM_APPLETS.story.status, "planned");
@@ -70,8 +70,8 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.slate.status, "preview");
     assert.equal(prismAppletVersionLabel("chat"), "v1.30");
     assert.equal(prismAppletVersionLabel("zen"), "v1.28");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.28");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.54");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.30");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.29");
     assert.equal(prismAppletVersionLabel("story"), "v0.26");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });

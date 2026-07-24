@@ -22,7 +22,10 @@ import {
   voicePitchCorrectionCentsAt,
   type VoicePitchCorrectionPlan,
 } from "./voicePitchCorrection.ts";
-import { prismAudioOutputNode } from "./signalAudioMasterCapture.ts";
+import {
+  prismAudioContext,
+  prismAudioOutputNode,
+} from "./replayAudioMasterCapture.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -538,9 +541,8 @@ const activeVoiceChannels: Record<
 const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
 
 function contextForPlayback(): AudioContext | null {
-  if (typeof window === "undefined" || typeof window.AudioContext !== "function") return null;
   if (audioContext?.state === "closed") audioContext = null;
-  audioContext ??= new window.AudioContext();
+  audioContext ??= prismAudioContext();
   return audioContext;
 }
 

@@ -1,56 +1,62 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-const child = readFileSync(
-  new URL("../replay-render-child.ts", import.meta.url),
-  "utf8",
-);
-const client = readFileSync(
-  new URL("../replay-render-worker-client.ts", import.meta.url),
-  "utf8",
-);
 const server = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
-const storage = readFileSync(
-  new URL("../replay-storage.ts", import.meta.url),
-  "utf8",
-);
 
-describe("background replay renderer", () => {
-  it("serializes Signal and Coffee leases behind an isolated Chromium child", () => {
-    assert.match(client, /private active = false/u);
-    assert.match(client, /if \(this\.active \|\| this\.disposed\) return/u);
-    assert.match(
-      client,
-      /claimNextReplayRecording\(request\.db, request\.userId\)/u,
+describe("retired replay rendering", () => {
+  it("has no background render worker entry point", () => {
+    assert.equal(
+      existsSync(new URL("../replay-render-child.ts", import.meta.url)),
+      false,
     );
-    assert.doesNotMatch(client, /surface: "signal"/u);
-    assert.match(client, /fork\(workerUrl/u);
-    assert.match(child, /chromium\.launch/u);
-    assert.match(child, /page\.screencast\.start/u);
-    assert.match(
-      child,
-      /job\.surface === "signal" \? "botcast" : "coffee"/u,
+    assert.equal(
+      existsSync(
+        new URL("../replay-render-worker-client.ts", import.meta.url),
+      ),
+      false,
     );
-    assert.match(child, /__PRISM_COFFEE_BACKGROUND_RENDER__/u);
     assert.doesNotMatch(
       server,
-      /recording\.surface === "signal"[\s\S]{0,120}recording\.status === "queued"/u,
+      /wakeReplayBackgroundRender|replayRenderWorkerClient/u,
     );
   });
 
-  it("keeps the lease secret out of the render URL and sends it as a header", () => {
-    assert.doesNotMatch(child, /searchParams\.set\("prismRenderToken"/u);
-    assert.match(child, /authorization: `Bearer \$\{job\.sessionToken\}`/u);
-    assert.match(child, /"x-prism-replay-token": job\.renderToken/u);
-    assert.match(child, /sessionStorage\.setItem\("prism_replay_render_token"/u);
+  it("keeps every historical render and enhancement route retired", () => {
+    for (const route of [
+      "/api/replays/:id/premium",
+      "/api/replays/claim",
+      "/api/replays/:id/render-audio-chunk",
+      "/api/replays/:id/render-chunk",
+      "/api/replays/:id/complete",
+      "/api/replays/:id/fail",
+      "/api/replays/:id/retry",
+      "/api/replays/:id/video",
+    ]) {
+      const routeIndex = server.indexOf(`"${route}"`);
+      assert.ok(routeIndex >= 0, `${route} remains a stable retired route`);
+      assert.match(server.slice(routeIndex, routeIndex + 320), /410/u);
+    }
   });
 
-  it("streams compressed Opus separately and remuxes without re-encoding", () => {
-    assert.match(server, /render-audio-chunk/u);
-    assert.match(storage, /\.audio\.webm/u);
-    assert.match(child, /"-c:v",\s*"copy",\s*"-c:a",\s*"copy"/u);
-    assert.match(child, /4 \* 1024 \* 1024/u);
-    assert.match(child, /contentType: "video\/webm"/u);
+  it("retires captions while preserving the readable Markdown transcript", () => {
+    const captions = server.indexOf('"/api/replays/:id/transcript.vtt"');
+    const markdown = server.indexOf('"/api/replays/:id/transcript.md"');
+    assert.match(server.slice(captions, captions + 420), /410/u);
+    assert.match(
+      server.slice(markdown, markdown + 700),
+      /text\/markdown[\s\S]*replay-transcript\.md/u,
+    );
+  });
+
+  it("keeps faithful masters bounded while allowing long audio-only sessions", () => {
+    assert.match(
+      server,
+      /const REPLAY_FAITHFUL_AUDIO_MAX_BYTES = 256 \* 1024 \* 1024;/u,
+    );
+    assert.match(
+      server,
+      /replayFaithfulAudioUpload[\s\S]*REPLAY_FAITHFUL_AUDIO_MAX_BYTES/u,
+    );
   });
 });

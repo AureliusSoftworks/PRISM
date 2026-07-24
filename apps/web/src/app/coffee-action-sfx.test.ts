@@ -179,7 +179,7 @@ describe("Coffee action sound effects", () => {
     assert.match(pageSource, /presentCoffeeAuthoredActionReactionOnce/u);
     assert.match(pageSource, /data-coffee-authored-action-reaction/u);
     assert.match(pageSource, /actor: message\.role === "user" \? "player" : "bot"/u);
-    assert.match(
+    assert.doesNotMatch(
       pageSource,
       /coffeeAuthoredActionReaction\?\.actor === "player"/u,
     );
@@ -191,9 +191,9 @@ describe("Coffee action sound effects", () => {
     assert.match(cssSource, /coffeeAuthoredActionFart/u);
     assert.match(cssSource, /coffeeAuthoredActionBurp/u);
     assert.match(cssSource, /coffeeAuthoredActionCough/u);
-    assert.match(
-      cssSource,
-      /coffeeReplayPlayerSeat\[data-coffee-authored-action-reaction="nod"\]/u,
+    assert.doesNotMatch(
+      pageSource,
+      /className=\{styles\.coffeeReplayPlayerSeat\}/u,
     );
     assert.match(
       cssSource,

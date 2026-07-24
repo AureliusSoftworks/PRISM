@@ -31,8 +31,8 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | --- | --- | --- | --- |
 | Chat | v1.30 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
 | Zen | v1.28 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.28 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and a persona-shaped bar greeting. |
-| Signal | v1.54 | Active | Show-scoped bookings, distinct-cast soundchecks, and trigger-accurate character sound loops. |
+| Coffee | v2.30 | Active | Two-to-five-bot tables with an off-camera player carrying the pot and shared faithful audio-master replay. |
+| Signal | v1.29 | Active | Released interview studio restored as the stable Signal baseline. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -87,6 +87,24 @@ stages do not block the standalone preview.
   perspectives.
 
 ## Changelog
+
+### 2026-07-24
+
+- Signal and Coffee now share one post-effect session recorder and V2 private
+  direction format. Authenticated replay uses the exact master as its only
+  clock, supports deterministic seeking, preserves presentation-timed silent
+  and audible thinking intervals without doubling their recorded SFX, and
+  makes no synthesis, enhancement, or video-generation calls. Sessions without
+  a master are transcript-only, and the sole visible download is a readable
+  Markdown transcript.
+
+- Bumped `Coffee` to `v2.30` for the restored five-seat, pot-only table. The
+  player remains off camera, barista and waiter service stays retired, valid
+  replay manifests preserve table events without empty dialogue, and one
+  faithful live audio master drives procedural replay without video generation
+  or doubled sound.
+- Restored `Signal` provenance to released `v1.29`; Coffee remains off camera
+  even though Signal Producer guests still appear on its stage.
 
 ### 2026-07-22
 

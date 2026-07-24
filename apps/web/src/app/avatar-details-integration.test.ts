@@ -516,7 +516,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat \.zenLiveBotPresenceFaceRig,\s*\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceFaceRig\s*\{[^}]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
+      /\.coffeeSeat \.zenLiveBotPresenceFaceRig\s*\{[^}]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
     );
     assert.match(
       pageCss,
@@ -542,10 +542,6 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(
       pageSource,
       /\["--avatar-details-facing-offset-y" as string\]:\s*botAvatarDetailsFacingOffsetY\(coffeePlateFaceScaleY\)/,
-    );
-    assert.match(
-      pageSource,
-      /botAvatarDetailsSignalFacingOffsetY\(\s*faceScaleY,\s*avatarState\.surface,\s*\)/,
     );
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
     assert.match(

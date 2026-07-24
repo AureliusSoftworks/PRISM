@@ -26,20 +26,6 @@ function elapsedLabel(startedAt: string, nowMs: number): string {
   return minutes > 0 ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }
 
-function assetStatusLabel(
-  asset: SignalArtworkJobSnapshot["assets"][number],
-): string {
-  if (asset.status === "waiting-for-night") return "Waiting for Dark studio";
-  if (asset.kind === "studio-lighting" && asset.status === "waiting") {
-    return "Waiting for the image queue";
-  }
-  if (asset.kind === "studio-lighting" && asset.status === "generating") {
-    return "Mapping real Studio surfaces";
-  }
-  if (asset.status === "attaching") return "Saving to show";
-  return asset.status.replaceAll("-", " ");
-}
-
 export function SignalArtworkJobActivity({
   request,
   theme,
@@ -153,7 +139,13 @@ export function SignalArtworkJobActivity({
           <li key={asset.kind} data-status={asset.status}>
             <span aria-hidden="true" />
             <b>{asset.label}</b>
-            <small>{assetStatusLabel(asset)}</small>
+            <small>
+              {asset.status === "waiting-for-night"
+                ? "Waiting for Dark studio"
+                : asset.status === "attaching"
+                  ? "Saving to show"
+                  : asset.status.replaceAll("-", " ")}
+            </small>
           </li>
         ))}
       </ul>

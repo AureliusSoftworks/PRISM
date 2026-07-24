@@ -103,11 +103,11 @@ describe("Coffee voice text", () => {
     );
     assert.match(
       pageSource,
-      /const isTableTypingThisSeat = !seatPowerMuted && !tableTypingAssistantIsSilent/u,
+      /const isTableTypingThisSeat =\s*!seatPowerMuted &&[\s\S]{0,420}!tableTypingAssistantIsSilent/u,
     );
     assert.match(
       pageSource,
-      /isTalking=\{isTableTypingThisSeat\}[\s\S]{0,420}seatSipPresentation\.active/u,
+      /const seatMouthActive =\s*isTableTypingThisSeat \|\| seatAmbientVocalizationActive[\s\S]*?isTalking=\{seatMouthActive\}[\s\S]{0,520}seatSipPresentation\.active/u,
     );
     assert.match(
       pageSource,

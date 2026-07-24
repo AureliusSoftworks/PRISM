@@ -280,7 +280,7 @@ describe("relationship-depth page integration", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.hubWordmark\}\s+data-home-affordance="wordmark"/,
+      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?data-home-affordance="wordmark"/,
     );
   });
 

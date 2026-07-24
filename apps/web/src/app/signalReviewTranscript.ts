@@ -6,7 +6,6 @@ import {
   type BotcastReplayEvent,
   type BotcastShow,
 } from "@localai/shared";
-import { signalVoicePerformanceTranscriptText } from "./signalVoicePerformance.ts";
 
 export type SignalReviewParticipant = {
   id: string;
@@ -183,7 +182,6 @@ export function buildSignalReviewTranscript(
       const recordedAt = event?.occurredAt ?? message.createdAt;
       const autoRecovery = event?.payload.autoRecovery;
       const providerRecovery = event?.payload.providerRecovery;
-      const utteranceRepair = event?.payload.utteranceRepair;
       lines.push(
         `### Turn ${String(index + 1).padStart(2, "0")} | ${formatDuration(timeline.messageStartMs[index] ?? 0)} | ${participant.name} (${message.speakerRole})`,
         "",
@@ -195,12 +193,11 @@ export function buildSignalReviewTranscript(
         `- Turn routing: ${responseMode} -> ${provider} -> ${model}`,
         `- AUTO recovery: ${humanProducerGuest ? "Not applicable (human-authored)" : autoRecovery === undefined ? "None recorded" : stableJson(autoRecovery)}`,
         `- ONLINE retry: ${humanProducerGuest ? "Not applicable (human-authored)" : providerRecovery === undefined ? "None recorded" : stableJson(providerRecovery)}`,
-        `- Deterministic repair: ${humanProducerGuest ? "Not applicable (human-authored)" : utteranceRepair === undefined ? "None recorded" : stableJson(utteranceRepair)}`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
         "- Stage action (avatar only):",
         indentBlock(message.stageActionText),
         "- Visible transcript:",
-        indentBlock(signalVoicePerformanceTranscriptText(message)),
+        indentBlock(message.content),
         "- Voice performance text:",
         indentBlock(message.voicePerformanceText),
         "",

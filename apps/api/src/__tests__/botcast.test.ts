@@ -4737,9 +4737,11 @@ describe("Botcast persistence and isolation", () => {
       );
 
       assert.equal(guardedHostTurn.message?.speakerRole, "host");
-      assert.match(
-        guardedHostTurn.message?.content ?? "",
-        /^(?:Okay|Hold on|Give me|So where)/u,
+      assert.ok(
+        BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS.includes(
+          guardedHostTurn.message?.content as
+            (typeof BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS)[number],
+        ),
       );
       assert.doesNotMatch(guardedHostTurn.message?.content ?? "", /^Ivo Stone,/u);
       assert.doesNotMatch(guardedHostTurn.message?.content ?? "", /part of/u);
@@ -5410,6 +5412,122 @@ describe("Botcast persistence and isolation", () => {
       assert.match(thirdPrompt, /current other-speaker on-air message/iu);
       assert.match(thirdPrompt, /do not know the episode topic unless that message states it/iu);
       assert.doesNotMatch(thirdPrompt, /Repetition and patience/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects a forgetful Signal speaker adopting the other speaker's identity", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to examine what a first impression costs. Ivo, what do you notice first?",
+        "I'm Mara Vale, and I notice whether the person opposite me is willing to answer plainly.",
+        "My name is Mara Vale. The first thing I notice is whether the other person means what they say.",
+      ],
+      captures,
+    );
+    const powerName = "Eternal Introduction";
+    const powerIntent =
+      "Every message is only a sincere first introduction. Ivo has no awareness of his own prior messages or the earlier conversation.";
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+        JSON.stringify([
+          {
+            version: 1,
+            id: "eternal-introduction",
+            name: powerName,
+            intent: powerIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+              selfCue: "Every request is first contact.",
+              observerCue: "Remember every repetition and react naturally.",
+              effects: [
+                {
+                  type: "eternal_introduction",
+                  memory: "current_other_speaker_message",
+                },
+              ],
+              ruleLabels: ["Current other-speaker message only"],
+            },
+          },
+        ]),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The cost of a first impression",
+        preferredProvider: "anthropic",
+        modelOverride: "claude-signal-test",
+        responseMode: "online",
+      });
+      const generationOptions = {
+        preferredProvider: "anthropic" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const repaired = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.equal(repaired.message?.speakerRole, "guest");
+      assert.doesNotMatch(
+        repaired.message?.content ?? "",
+        /\b(?:I\s*(?:am|['’]m)|my name is)\s+Mara(?:\s+Vale)?\b/iu,
+      );
+      assert.equal(
+        getBotcastEpisode(db, "user-1", episode.id).messages.at(-1)?.content,
+        repaired.message?.content,
+      );
+      const utterance = repaired.episode.events.findLast(
+        (event) => event.kind === "utterance",
+      );
+      assert.equal(
+        utterance?.payload.utteranceRepair?.reason,
+        "speaker_identity_swap",
+      );
+      assert.equal(
+        utterance?.payload.providerRecovery?.trigger,
+        "content_validation",
+      );
+      assert.deepEqual(
+        utterance?.payload.providerRecovery?.attempts?.map(
+          (attempt: SignalOnlineTurnAttemptV1) => ({
+            outcome: attempt.outcome,
+            reason: attempt.reason,
+          }),
+        ),
+        [
+          { outcome: "rejected", reason: "invalid_output" },
+          { outcome: "rejected", reason: "invalid_output" },
+        ],
+      );
+      const guestPrompt = captures[1]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(
+        guestPrompt,
+        /Immutable identity: you are "Ivo Stone", and the other speaker is "Mara Vale"/u,
+      );
+      assert.match(
+        captures[2]!.map((message) => message.content).join("\n"),
+        /Your immutable identity is Ivo Stone\. Mara Vale is the other speaker\./u,
+      );
     } finally {
       db.close();
     }

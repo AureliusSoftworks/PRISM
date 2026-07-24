@@ -1,12 +1,17 @@
 import type {
-  ReplayManifestV1,
+  ReplayManifest,
+  ReplayManifestV2,
   ReplayPremiumSegmentV1,
-  ReplayRenderKindV1,
   ReplayRecordingV1,
-  ReplayTimelineV1,
   ReplayVoiceTakeRecordV1,
   ReplayVoiceTakeV1,
 } from "@localai/shared";
+import type { ReplayAudioMasterCaptureResult } from "./replayAudioMasterCapture.ts";
+import {
+  discardPendingFaithfulReplayCapture,
+  pendingFaithfulReplayCaptures,
+  retainPendingFaithfulReplayCapture,
+} from "./replayPendingCapture.ts";
 
 const NATIVE_SESSION_STORAGE_KEY = "prism_native_session_token";
 const CLIENT_ACCESS_STORAGE_KEY = "prism_client_access_token";
@@ -146,7 +151,7 @@ export async function storeCapturedReplayVoiceAudio(args: {
 }
 
 export async function queueReplayManifest(
-  manifest: ReplayManifestV1,
+  manifest: ReplayManifest,
   options: { render?: boolean } = {},
 ): Promise<ReplayRecordingV1> {
   const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
@@ -157,6 +162,119 @@ export async function queueReplayManifest(
     },
   );
   return result.recording;
+}
+
+export async function startReplayRecordingDraft(args: {
+  surface: "signal" | "coffee";
+  sourceId: string;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    "/api/replays/start",
+    {
+      method: "POST",
+      body: JSON.stringify(args),
+    },
+  );
+  return result.recording;
+}
+
+export async function finalizeReplayRecording(args: {
+  recordingId: string;
+  manifest: ReplayManifestV2;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/finalize`,
+    {
+      method: "POST",
+      body: JSON.stringify({ manifest: args.manifest }),
+    },
+  );
+  return result.recording;
+}
+
+export async function saveFaithfulReplaySession(args: {
+  surface: "signal" | "coffee";
+  sourceId: string;
+  manifest: ReplayManifestV2;
+  capture: ReplayAudioMasterCaptureResult | null;
+}): Promise<ReplayRecordingV1> {
+  await retainPendingFaithfulReplayCapture({
+    surface: args.surface,
+    sourceId: args.sourceId,
+    recordingId: null,
+    bytes: args.capture?.bytes ?? null,
+    contentType: args.capture?.contentType ?? null,
+    durationMs: args.capture?.durationMs ?? null,
+    manifest: args.manifest,
+  });
+  const draft = await startReplayRecordingDraft({
+    surface: args.surface,
+    sourceId: args.sourceId,
+  });
+  await retainPendingFaithfulReplayCapture({
+    surface: args.surface,
+    sourceId: args.sourceId,
+    recordingId: draft.id,
+    bytes: args.capture?.bytes ?? null,
+    contentType: args.capture?.contentType ?? null,
+    durationMs: args.capture?.durationMs ?? null,
+    manifest: args.manifest,
+  });
+  if (args.capture) {
+    await uploadReplayFaithfulAudio({
+      recordingId: draft.id,
+      bytes: args.capture.bytes,
+      contentType: args.capture.contentType,
+      durationMs: args.capture.durationMs,
+    });
+  }
+  const recording = await finalizeReplayRecording({
+    recordingId: draft.id,
+    manifest: args.manifest,
+  });
+  await discardPendingFaithfulReplayCapture(args.surface, args.sourceId);
+  return recording;
+}
+
+export async function retryPendingFaithfulReplaySessions(): Promise<number> {
+  const pending = await pendingFaithfulReplayCaptures();
+  let completed = 0;
+  for (const capture of pending) {
+    try {
+      const recordingId =
+        capture.recordingId ??
+        (
+          await startReplayRecordingDraft({
+            surface: capture.surface,
+            sourceId: capture.sourceId,
+          })
+        ).id;
+      if (
+        capture.bytes &&
+        capture.contentType &&
+        capture.durationMs !== null
+      ) {
+        await uploadReplayFaithfulAudio({
+          recordingId,
+          bytes: capture.bytes,
+          contentType: capture.contentType,
+          durationMs: capture.durationMs,
+        });
+      }
+      await finalizeReplayRecording({
+        recordingId,
+        manifest: capture.manifest,
+      });
+      await discardPendingFaithfulReplayCapture(
+        capture.surface,
+        capture.sourceId,
+      );
+      completed += 1;
+    } catch {
+      // Keep the durable capture for the next authenticated retry.
+    }
+  }
+  return completed;
 }
 
 export async function replayRecordingForSource(
@@ -190,66 +308,6 @@ export async function replayRecordingDetail(recordingId: string): Promise<{
   };
 }
 
-export async function startReplayPremiumProduction(args: {
-  recordingId: string;
-  preferredProvider: "openai" | "anthropic";
-  regenerate?: boolean;
-}): Promise<{
-  recording: ReplayRecordingV1;
-  premiumSegments: ReplayPremiumSegmentV1[];
-}> {
-  const result = await replayJson<{
-    ok: true;
-    recording: ReplayRecordingV1;
-    premiumSegments: ReplayPremiumSegmentV1[];
-  }>(`/api/replays/${encodeURIComponent(args.recordingId)}/premium`, {
-    method: "POST",
-    body: JSON.stringify({
-      confirm: "send-to-elevenlabs",
-      preferredProvider: args.preferredProvider,
-      regenerate: args.regenerate === true,
-    }),
-  });
-  return {
-    recording: result.recording,
-    premiumSegments: result.premiumSegments,
-  };
-}
-
-export async function retryReplayPremiumProduction(
-  recordingId: string,
-): Promise<ReplayRecordingV1> {
-  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
-    `/api/replays/${encodeURIComponent(recordingId)}/premium/retry`,
-    { method: "POST", body: "{}" },
-  );
-  return result.recording;
-}
-
-export async function uploadReplayPremiumAudio(args: {
-  recordingId: string;
-  bytes: ArrayBuffer;
-  contentType: "audio/wav" | "audio/webm";
-}): Promise<ReplayRecordingV1> {
-  const response = await replayFetch(
-    `/api/replays/${encodeURIComponent(args.recordingId)}/premium/audio`,
-    {
-      method: "POST",
-      headers: { "content-type": args.contentType },
-      body: args.bytes,
-    },
-  );
-  const payload = (await response.json().catch(() => null)) as
-    | { ok: true; recording: ReplayRecordingV1; error?: string }
-    | null;
-  if (!response.ok || !payload) {
-    throw new Error(
-      payload?.error ?? `Premium audio upload failed (${response.status}).`,
-    );
-  }
-  return payload.recording;
-}
-
 export async function uploadReplayFaithfulAudio(args: {
   recordingId: string;
   bytes: ArrayBuffer;
@@ -272,146 +330,10 @@ export async function uploadReplayFaithfulAudio(args: {
     | null;
   if (!response.ok || !payload) {
     throw new Error(
-      payload?.error ?? `Faithful Signal audio upload failed (${response.status}).`,
+      payload?.error ?? `Faithful replay audio upload failed (${response.status}).`,
     );
   }
   return payload.recording;
-}
-
-export async function storeReplayPremiumTimeline(args: {
-  recordingId: string;
-  timeline: ReplayTimelineV1;
-}): Promise<ReplayRecordingV1> {
-  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
-    `/api/replays/${encodeURIComponent(args.recordingId)}/premium/timeline`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ timeline: args.timeline }),
-    },
-  );
-  return result.recording;
-}
-
-export async function deleteReplayPremiumMedia(
-  recordingId: string,
-): Promise<ReplayRecordingV1> {
-  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
-    `/api/replays/${encodeURIComponent(recordingId)}/premium`,
-    {
-      method: "DELETE",
-      body: JSON.stringify({ confirm: "delete-premium-media" }),
-    },
-  );
-  return result.recording;
-}
-
-export async function claimReplayRecording(
-  filters: {
-    surface?: "signal" | "coffee";
-    sourceId?: string;
-  } = {},
-): Promise<{
-  recording: ReplayRecordingV1;
-  takes: ReplayVoiceTakeRecordV1[];
-  premiumSegments: ReplayPremiumSegmentV1[];
-  renderToken: string;
-  renderKind: ReplayRenderKindV1;
-} | null> {
-  const result = await replayJson<{
-    ok: true;
-    claimed: {
-      recording: ReplayRecordingV1;
-      takes: ReplayVoiceTakeRecordV1[];
-      premiumSegments: ReplayPremiumSegmentV1[];
-      renderToken: string;
-      renderKind: ReplayRenderKindV1;
-    } | null;
-  }>("/api/replays/claim", {
-    method: "POST",
-    body: JSON.stringify(filters),
-  });
-  return result.claimed;
-}
-
-export async function updateReplayRenderProgress(args: {
-  recordingId: string;
-  renderToken: string;
-  status: "preparing_audio" | "rendering";
-  progress: number;
-}): Promise<void> {
-  await replayJson(
-    `/api/replays/${encodeURIComponent(args.recordingId)}/progress`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(args),
-    },
-  );
-}
-
-export async function uploadReplayRenderChunk(args: {
-  recordingId: string;
-  renderToken: string;
-  position: number;
-  bytes: Uint8Array;
-}): Promise<void> {
-  const response = await replayFetch(
-    `/api/replays/${encodeURIComponent(args.recordingId)}/render-chunk`,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/octet-stream",
-        "x-prism-replay-token": args.renderToken,
-        "x-prism-replay-position": String(args.position),
-      },
-      body: args.bytes.buffer.slice(
-        args.bytes.byteOffset,
-        args.bytes.byteOffset + args.bytes.byteLength,
-      ) as ArrayBuffer,
-    },
-  );
-  if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as
-      | { error?: string }
-      | null;
-    throw new Error(payload?.error ?? `Replay upload failed (${response.status}).`);
-  }
-}
-
-export async function completeReplayRender(args: {
-  recordingId: string;
-  renderToken: string;
-  contentType: "video/mp4" | "video/webm";
-  codec: string;
-  durationMs: number;
-  warning?: string | null;
-  timeline?: ReplayTimelineV1 | null;
-}): Promise<ReplayRecordingV1> {
-  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
-    `/api/replays/${encodeURIComponent(args.recordingId)}/complete`,
-    { method: "POST", body: JSON.stringify(args) },
-  );
-  return result.recording;
-}
-
-export async function failReplayRender(args: {
-  recordingId: string;
-  renderToken: string;
-  error: string;
-}): Promise<void> {
-  await replayJson(`/api/replays/${encodeURIComponent(args.recordingId)}/fail`, {
-    method: "POST",
-    body: JSON.stringify(args),
-  });
-}
-
-export async function retryReplayRecording(
-  recordingId: string,
-): Promise<ReplayRecordingV1> {
-  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
-    `/api/replays/${encodeURIComponent(recordingId)}/retry`,
-    { method: "POST", body: "{}" },
-  );
-  return result.recording;
 }
 
 export async function deleteReplayRecording(

@@ -385,43 +385,15 @@ export function buildSignalListenerReactionPlanV1(args: {
     Math.max(0, Math.round(args.tensionLevel)),
   ].join(":");
   const tensionLevel = Math.max(0, Math.round(args.tensionLevel));
-  const interjectionAttempt =
-    args.listenerRole === "guest" &&
-    args.segment === "interview" &&
-    tensionLevel >= 1 &&
-    stableUnit(`${seed}:interjection-roll`) <
-      (tensionLevel >= 2 ? 0.68 : 0.3);
-  if (
-    !interjectionAttempt &&
-    stableUnit(`${seed}:visual-roll`) >= SIGNAL_VISUAL_REACTION_CHANCE
-  ) {
+  if (stableUnit(`${seed}:visual-roll`) >= SIGNAL_VISUAL_REACTION_CHANCE) {
     return null;
   }
   const audioChance = args.listenerRole === "host" ? 0.4 : 0.3;
   const audible = args.segment === "interview" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
   const vocalFoley = audible &&
-      !interjectionAttempt &&
       stableUnit(`${seed}:foley-roll`) < 0.28
     ? signalVocalFoley(seed, args.mood, tensionLevel)
-    : undefined;
-  const spokenCue = interjectionAttempt
-    ? choose(
-        `${seed}:cue:interjection`,
-        ["No, hold on.", "Let me answer that.", "That's not fair."] as const,
-      )
-    : audible && !vocalFoley
-    ? args.tensionLevel >= 2 || args.mood === "strained"
-      ? "hmm"
-      : args.mood === "warm" || args.mood === "joyful"
-        ? choose(`${seed}:cue:warm`, ["mm-hm", "right", "oh"] as const)
-        : choose(
-            `${seed}:cue`,
-            ["mm-hm", "I see", "hmm", "right", "oh", "go on"] as const,
-          )
-    : undefined;
-  const interruptedSpeakerCue = interjectionAttempt
-    ? botCrosstalkInterruptedSpeakerCueForSeed(seed)
     : undefined;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
@@ -430,24 +402,12 @@ export function buildSignalListenerReactionPlanV1(args: {
     listenerBotId: args.listenerBotId,
     messageId: args.messageId,
     targetSource: "role",
-    visualAction: interjectionAttempt
-      ? "lean_in"
-      : signalVisualAction(seed, args.mood, args.tensionLevel),
-    ...(spokenCue ? { spokenCue } : {}),
+    visualAction: signalVisualAction(seed, args.mood, args.tensionLevel),
     ...(vocalFoley ? { vocalFoley } : {}),
-    ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
-    ...(interruptedSpeakerCue
-      ? {
-          interruptedSpeakerCue,
-          interruptedSpeakerCuePlayback: "crosstalk" as const,
-        }
-      : {}),
-    targetProgress: interjectionAttempt
-      ? Number((0.3 + stableUnit(`${seed}:interjection-progress`) * 0.25).toFixed(3))
-      : targetProgress(seed),
+    targetProgress: targetProgress(seed),
     seed,
     cameraCutEligible:
-      stableUnit(`${seed}:camera-roll`) < (interjectionAttempt ? 0.55 : 0.22),
+      stableUnit(`${seed}:camera-roll`) < 0.22,
   };
 }
 

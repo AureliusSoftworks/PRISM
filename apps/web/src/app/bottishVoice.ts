@@ -22,6 +22,10 @@ import {
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
+import {
   readEnglishVoiceWaveStream,
   readEnglishVoiceSynthesisClip,
   type EnglishVoiceSynthesisClip,
@@ -422,6 +426,16 @@ export function encodeBottishPlanWave(
 let activeMedia: HTMLAudioElement | null = null;
 let activeMediaUrl: string | null = null;
 let activeMediaFadeTimer: number | null = null;
+const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
+
+function routeBottishMediaOutput(audio: HTMLMediaElement): void {
+  if (mediaOutputCleanup.has(audio)) return;
+  const cleanup = routeAudioElementToPrismOutput(audio);
+  if (!cleanup && replayAudioMasterCaptureActive()) {
+    throw new Error("Bottish voice could not enter the faithful session mix.");
+  }
+  if (cleanup) mediaOutputCleanup.set(audio, cleanup);
+}
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let activeTimer: number | null = null;
@@ -492,6 +506,8 @@ function releaseActiveMedia(keepElement = false): void {
     activeMediaFadeTimer = null;
   }
   if (media) {
+    mediaOutputCleanup.get(media)?.();
+    mediaOutputCleanup.delete(media);
     media.pause();
     media.removeAttribute("src");
     media.load();
@@ -592,6 +608,7 @@ async function playPlanWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
+  routeBottishMediaOutput(audio);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -945,6 +962,7 @@ async function playHybridBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
+  routeBottishMediaOutput(audio);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;

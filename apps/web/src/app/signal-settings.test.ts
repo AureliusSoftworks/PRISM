@@ -22,9 +22,9 @@ test("Signal presents immersive voice performance as automatic", () => {
   assert.match(pageSource, /data-settings-section="botcast"/u);
   assert.match(pageSource, /Automatic ElevenLabs immersion/u);
   assert.match(pageSource, /Always on with ElevenLabs v3/u);
-  assert.match(pageSource, /bracketed items and asterisk-authored/u);
-  assert.match(pageSource, /current\s+action floats above/u);
-  assert.match(pageSource, /Captions, transcripts, and local voice fallbacks keep\s+only the spoken/u);
+  assert.match(pageSource, /automatically adds sparse/u);
+  assert.match(pageSource, /action floats above/u);
+  assert.match(pageSource, /appears between/u);
   assert.doesNotMatch(pageSource, /settings\.signalImmersiveVoiceEffectsEnabled/u);
   assert.doesNotMatch(pageSource, /Save Signal settings/u);
   assert.match(pageSource, /activeSettingsScope !== "botcast"/u);
@@ -44,26 +44,18 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
     tutorialsSource,
     /The direct stereo mix follows the host and guest’s saved stage positions subtly while their room reflections remain shared/u,
   );
-  assert.match(
-    tutorialsSource,
-    /mic-ready breath that overlaps the opening of a substantial line instead of leaving a gap/u,
-  );
-  assert.match(
-    tutorialsSource,
-    /bracketed items and asterisk-authored actions are performed/u,
-  );
 });
 
-test("Signal sends bracketed and starred performance only through the ElevenLabs request lane", () => {
+test("Signal sends saved performance text only through the ElevenLabs request lane", () => {
   assert.match(
     pageSource,
-    /voicePerformanceTextFromActionCues\([\s\S]{0,100}message\.voicePerformanceText \?\? message\.content/u,
+    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
   assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && performanceText[\s\S]{0,100}elevenLabsText: performanceText/u,
+    /elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
   );
   assert.match(
     pageSource,
@@ -79,7 +71,7 @@ test("Signal sends bracketed and starred performance only through the ElevenLabs
 test("Signal procedural voices use the same stage-direction-free spoken text", () => {
   assert.match(
     pageSource,
-    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]{0,6500}sourceText: spokenText/u,
+    /const spokenText = voiceSpokenText\(message\.content\);[\s\S]*?enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \},\s*sourceText: spokenText/u,
   );
   assert.match(
     pageSource,

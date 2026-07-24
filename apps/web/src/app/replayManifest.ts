@@ -13,15 +13,19 @@ import {
   type BotVoicePreset,
   type SignalPersonaTemperament,
   type ReplayEventV1,
+  type ReplayDirectionEventV2,
   type ReplayManifestV1,
+  type ReplayManifestV2,
   type ReplayParticipantSnapshotV1,
   type ReplayUtteranceV1,
+  defaultReplaySceneV2,
 } from "@localai/shared";
 import {
   SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
-  SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
   SIGNAL_SYNTH_IDENT_DURATION_MS,
 } from "./signalIntroAudio.ts";
+
+const SIGNAL_REPLAY_PRE_ROLL_MIN_MS = 4_200;
 
 export const COFFEE_REPLAY_RENDER_CONTRACT =
   "coffee-table-playwright-v1" as const;
@@ -231,7 +235,7 @@ export function buildSignalReplayManifestV1(args: {
         introAudioUrl: args.show.introAudio?.audioUrl ?? null,
         introAudioDurationMs: args.show.introAudio?.durationMs ?? null,
         introPresentationDurationMs: Math.max(
-          SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
+          SIGNAL_REPLAY_PRE_ROLL_MIN_MS,
           SIGNAL_EPISODE_INTRO_LEAD_IN_MS + introDurationMs,
         ),
         outdentAudioUrl: args.show.introAudio?.outdentAudioUrl ?? null,
@@ -288,6 +292,7 @@ export function buildCoffeeReplayManifestV1(args: {
   prismColor: string | null;
   prismGlyph: string | null;
   theme: "light" | "dark";
+  capturedReplayEvents?: readonly ReplayEventV1[];
 }): ReplayManifestV1 {
   const botsById = new Map(args.bots.map((bot) => [bot.id, bot]));
   const seatBotIds = (args.conversation.coffeeSeatBotIds?.filter(
@@ -312,62 +317,55 @@ export function buildCoffeeReplayManifestV1(args: {
       };
     }),
     {
-      id: "prism-player",
+      id: "coffee-player",
       name: args.playerName,
-      kind: "prism",
+      kind: "player",
       role: "player",
-      color: args.prismColor,
-      glyph: args.prismGlyph ?? "prism",
-      seatIndex: seatBotIds.length,
-      visible: true,
+      color: null,
+      glyph: null,
+      seatIndex: null,
+      visible: false,
+      metadata: {
+        offCamera: true,
+        carriesCoffeePot: true,
+      },
     },
   ];
   const utterances: ReplayUtteranceV1[] = args.conversation.messages
     .filter(
       (message) =>
-        ((message.role === "assistant" || message.role === "user") &&
-          message.content.trim().length > 0) ||
-        Boolean(
-          message.coffeeReplayEvents?.length ||
-            message.coffeeAmbientAction ||
-            message.coffeeUserAction,
-        ),
+        (message.role === "assistant" || message.role === "user") &&
+        message.content.trim().length > 0,
     )
     .map((message) => {
-      const stateOnly = message.role === "system";
       return {
         id: message.id,
         sourceMessageId: message.id,
         speakerId:
           message.role === "user"
-            ? "prism-player"
+            ? "coffee-player"
             : message.botId ?? message.botName ?? "table",
         speakerRole:
           message.role === "user"
             ? "player"
-            : stateOnly
-              ? "table-event"
-              : "table-guest",
-        text: stateOnly ? "" : message.content,
-        spokenText: stateOnly ? "" : voiceSpokenText(message.content),
+            : "table-guest",
+        text: message.content,
+        spokenText: voiceSpokenText(message.content),
         moodKey: message.moodKey ?? "neutral",
         audible:
-          !stateOnly &&
           message.coffeeObserverProjection?.audible !== false &&
           voiceSpokenText(message.content).length > 0 &&
           message.content.trim() !== "...",
         visible:
-          !stateOnly &&
           message.coffeeObserverProjection?.visible !== false,
         createdAt: message.createdAt,
         metadata: {
           botColor: message.botColor ?? null,
           botGlyph: message.botGlyph ?? null,
-          stateOnly,
         },
       };
     });
-  const events: ReplayEventV1[] = args.conversation.messages.flatMap(
+  const savedEvents: ReplayEventV1[] = args.conversation.messages.flatMap(
     (message) => {
       const replayEvents = (message.coffeeReplayEvents ?? []).map(
         (event, index) => ({
@@ -403,6 +401,13 @@ export function buildCoffeeReplayManifestV1(args: {
       return [...replayEvents, ...ambient, ...userAction] satisfies ReplayEventV1[];
     },
   );
+  const savedEventIds = new Set(savedEvents.map((event) => event.id));
+  const events = [
+    ...savedEvents,
+    ...(args.capturedReplayEvents ?? []).filter(
+      (event) => !savedEventIds.has(event.id),
+    ),
+  ];
   const generatedProviders = args.conversation.messages
     .filter((message) => message.role === "assistant")
     .map((message) => message.provider)
@@ -433,9 +438,232 @@ export function buildCoffeeReplayManifestV1(args: {
       accentColor: args.prismColor,
       atmosphereImageUrl: null,
       metadata: {
-        playerPerspective: "third-person-prism",
+        playerPerspective: "off-camera-pot",
         renderContract: COFFEE_REPLAY_RENDER_CONTRACT,
       },
     },
   };
+}
+
+function replayDirectionKindFromSavedEvent(
+  kind: string,
+): ReplayDirectionEventV2["kind"] | null {
+  const normalized = kind.replace(/[_-]/gu, "").toLowerCase();
+  if (normalized.includes("camera") || normalized.includes("shot")) return "camera";
+  if (normalized.includes("segment")) return "segment";
+  if (normalized.includes("thinking")) return "thinking";
+  if (normalized.includes("arrival")) return "arrival";
+  if (normalized.includes("mood")) return "mood";
+  if (normalized.includes("topoff") || normalized.includes("refill")) return "top_off";
+  if (normalized.includes("sip")) return "sip";
+  if (normalized.includes("action") || normalized.includes("soundboard")) return "action";
+  if (normalized.includes("reaction")) return "reaction";
+  if (normalized.includes("overlap") || normalized.includes("crosstalk")) return "overlap";
+  if (normalized.includes("departure") || normalized.includes("departed")) return "departure";
+  if (normalized.includes("mix") || normalized.includes("atmosphere")) return "studio_mix";
+  if (normalized.includes("intro")) return "intro";
+  if (normalized.includes("outro") || normalized.includes("completed")) return "outro";
+  return null;
+}
+
+function replayEventAtMs(
+  event: ReplayEventV1,
+  createdAtMs: number,
+): number {
+  const explicit = Number(event.payload.atMs);
+  if (Number.isFinite(explicit) && explicit >= 0) return Math.round(explicit);
+  const occurredAtMs = event.occurredAt ? Date.parse(event.occurredAt) : Number.NaN;
+  return Number.isFinite(occurredAtMs)
+    ? Math.max(0, Math.round(occurredAtMs - createdAtMs))
+    : 0;
+}
+
+function capturedSpeechDirection(
+  manifest: ReplayManifestV1,
+): ReplayDirectionEventV2[] {
+  const createdAtMs = Date.parse(manifest.createdAt);
+  const startByMessageId = new Map<string, ReplayEventV1>();
+  const endByMessageId = new Map<string, ReplayEventV1>();
+  for (const event of manifest.events) {
+    if (event.kind !== "capture_timing") continue;
+    const messageId =
+      typeof event.payload.messageId === "string"
+        ? event.payload.messageId.trim()
+        : "";
+    if (!messageId) continue;
+    if (event.payload.phase === "speech_start") startByMessageId.set(messageId, event);
+    if (event.payload.phase === "speech_end") endByMessageId.set(messageId, event);
+  }
+  return manifest.utterances.flatMap((utterance) => {
+    const start = startByMessageId.get(utterance.sourceMessageId);
+    if (!start) return [];
+    const end = endByMessageId.get(utterance.sourceMessageId);
+    const atMs = replayEventAtMs(start, createdAtMs);
+    const endMs = end ? replayEventAtMs(end, createdAtMs) : atMs + 1;
+    return [
+      {
+        sequence: 0,
+        atMs,
+        endMs: Math.max(atMs + 1, endMs),
+        kind: "speech" as const,
+        sourceMessageId: utterance.sourceMessageId,
+        payload: {
+          speakerId: utterance.speakerId,
+          audible: utterance.audible,
+          active: true,
+          mood: utterance.moodKey,
+        },
+      },
+    ];
+  });
+}
+
+function buildReplayDirectionV2(
+  manifest: ReplayManifestV1,
+  capturedDirection: readonly ReplayDirectionEventV2[] = [],
+): ReplayDirectionEventV2[] {
+  const createdAtMs = Date.parse(manifest.createdAt);
+  const semanticEvents = manifest.events.flatMap((event) => {
+    if (event.kind === "capture_timing") {
+      const phase = event.payload.phase;
+      if (phase === "intro_start" || phase === "outro_start") {
+        return [
+          {
+            sequence: 0,
+            atMs: replayEventAtMs(event, createdAtMs),
+            kind: phase === "intro_start" ? "intro" as const : "outro" as const,
+            sourceMessageId: event.sourceMessageId,
+            payload: { active: true },
+          },
+        ];
+      }
+      return [];
+    }
+    const kind = replayDirectionKindFromSavedEvent(event.kind);
+    if (!kind) return [];
+    // V2 thinking comes only from the committed on-screen presentation hook.
+    // Server request/job timestamps are not equivalent to the spinner interval.
+    if (kind === "thinking") return [];
+    return [
+      {
+        sequence: 0,
+        atMs: replayEventAtMs(event, createdAtMs),
+        kind,
+        sourceMessageId: event.sourceMessageId,
+        payload: { ...event.payload },
+      },
+    ];
+  });
+  const explicitlyDirectedSpeechIds = new Set(
+    capturedDirection.flatMap((event) =>
+      event.kind === "speech" && event.sourceMessageId
+        ? [event.sourceMessageId]
+        : [],
+    ),
+  );
+  const deduped = [
+    ...capturedSpeechDirection(manifest).filter(
+      (event) =>
+        !event.sourceMessageId ||
+        !explicitlyDirectedSpeechIds.has(event.sourceMessageId),
+    ),
+    ...semanticEvents,
+    ...capturedDirection,
+  ]
+    .sort((left, right) => left.atMs - right.atMs || left.sequence - right.sequence)
+    .filter((event, index, events) => {
+      const previous = events[index - 1];
+      return !(
+        previous &&
+        previous.atMs === event.atMs &&
+        previous.kind === event.kind &&
+        previous.sourceMessageId === event.sourceMessageId &&
+        JSON.stringify(previous.payload) === JSON.stringify(event.payload)
+      );
+    });
+  return deduped.map((event, index) => ({
+    ...event,
+    sequence: index + 1,
+  }));
+}
+
+function replayManifestV2FromV1(
+  manifest: ReplayManifestV1,
+  capturedDirection: readonly ReplayDirectionEventV2[] = [],
+): ReplayManifestV2 {
+  const direction = buildReplayDirectionV2(manifest, capturedDirection);
+  const initialScene = defaultReplaySceneV2(manifest.participants);
+  if (manifest.surface === "signal") {
+    initialScene.camera = "wide";
+  } else {
+    const arrivingParticipantIds = new Set(
+      direction.flatMap((event) => {
+        if (event.kind !== "arrival") return [];
+        const participantId =
+          typeof event.payload.participantId === "string"
+            ? event.payload.participantId
+            : typeof event.payload.botId === "string"
+              ? event.payload.botId
+              : null;
+        return participantId ? [participantId] : [];
+      }),
+    );
+    for (const participantId of arrivingParticipantIds) {
+      const participant = initialScene.participants[participantId];
+      if (!participant) continue;
+      participant.present = false;
+      participant.visible = false;
+    }
+  }
+  const directedWithSnapshot = [
+    {
+      sequence: 1,
+      atMs: 0,
+      kind: "scene_snapshot" as const,
+      sourceMessageId: null,
+      payload: { scene: initialScene },
+    },
+    ...direction.map((event, index) => ({
+      ...event,
+      sequence: index + 2,
+    })),
+  ];
+  return {
+    v: 2,
+    surface: manifest.surface,
+    sourceId: manifest.sourceId,
+    title: manifest.title,
+    createdAt: manifest.createdAt,
+    completedAt: manifest.completedAt,
+    privacyMode: manifest.privacyMode,
+    participants: manifest.participants,
+    utterances: manifest.utterances,
+    initialScene,
+    direction: directedWithSnapshot,
+    visual: manifest.visual,
+  };
+}
+
+export function buildSignalReplayManifestV2(
+  args: Parameters<typeof buildSignalReplayManifestV1>[0] & {
+    capturedDirection?: readonly ReplayDirectionEventV2[];
+  },
+): ReplayManifestV2 {
+  const { capturedDirection = [], ...legacyArgs } = args;
+  return replayManifestV2FromV1(
+    buildSignalReplayManifestV1(legacyArgs),
+    capturedDirection,
+  );
+}
+
+export function buildCoffeeReplayManifestV2(
+  args: Parameters<typeof buildCoffeeReplayManifestV1>[0] & {
+    capturedDirection?: readonly ReplayDirectionEventV2[];
+  },
+): ReplayManifestV2 {
+  const { capturedDirection = [], ...legacyArgs } = args;
+  return replayManifestV2FromV1(
+    buildCoffeeReplayManifestV1(legacyArgs),
+    capturedDirection,
+  );
 }

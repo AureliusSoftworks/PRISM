@@ -20,6 +20,10 @@ import {
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
+import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
 
 export interface EnglishVoicePostProcessing {
   detuneCents: number;
@@ -237,6 +241,16 @@ let activeMediaUrl: string | null = null;
 let activeMediaStartTimer: number | null = null;
 let activeMediaFadeTimer: number | null = null;
 let activeMediaResolve: (() => void) | null = null;
+const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
+
+function routeEnglishMediaOutput(audio: HTMLMediaElement): void {
+  if (mediaOutputCleanup.has(audio)) return;
+  const cleanup = routeAudioElementToPrismOutput(audio);
+  if (!cleanup && replayAudioMasterCaptureActive()) {
+    throw new Error("English voice could not enter the faithful session mix.");
+  }
+  if (cleanup) mediaOutputCleanup.set(audio, cleanup);
+}
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let generation = 0;
@@ -318,6 +332,8 @@ function releaseActiveMedia(keepElement = false): void {
     activeMediaFadeTimer = null;
   }
   if (activeMedia) {
+    mediaOutputCleanup.get(activeMedia)?.();
+    mediaOutputCleanup.delete(activeMedia);
     activeMedia.pause();
     activeMedia.removeAttribute("src");
     activeMedia.load();
@@ -416,6 +432,7 @@ async function playBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
+  routeEnglishMediaOutput(audio);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -589,6 +606,7 @@ async function playStreamingResponseWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
+  routeEnglishMediaOutput(audio);
 
   const reader = body.getReader();
   await new Promise<void>((resolve, reject) => {

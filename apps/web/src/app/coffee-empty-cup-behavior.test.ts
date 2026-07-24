@@ -13,7 +13,7 @@ describe("Coffee empty-cup behavior", () => {
     assert.match(pageSource, /coffeeEmptyCupAttemptState\(\{/u);
     assert.match(
       pageSource,
-      /const coffeeCupVisible =\s*!rosterPreviewSeat &&\s*seatIsFirmlySeated;/u,
+      /const coffeeCupVisible =\s*!rosterPreviewSeat &&\s*!seatLiveDeparting &&\s*seatIsFirmlySeated &&\s*!coffeeCupRefused;/u,
     );
     assert.match(
       pageSource,

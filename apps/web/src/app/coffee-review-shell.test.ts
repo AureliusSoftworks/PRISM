@@ -12,7 +12,7 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
   );
   assert.match(
     pageSource,
-    /const toggleCoffeeReplayPlayback = \(\) => \{[\s\S]*?startCoffeeReplay\(\);[\s\S]*?setCoffeeReplayPlaying\(\(playing\) => !playing\);/,
+    /const toggleCoffeeReplayPlayback = \(\) => \{[\s\S]*?startCoffeeReplay\(\);[\s\S]*?if \(coffeeReplayUsesAudioMaster\) \{[\s\S]*?stopCoffeeReplayAudioMaster\(\{ preserveOffset: true \}\);[\s\S]*?playCoffeeReplayAudioMaster\(\);[\s\S]*?setCoffeeReplayPlaying\(false\);/,
   );
   assert.match(pageSource, /onClick=\{toggleCoffeeReplayPlayback\}/);
   assert.match(
@@ -30,25 +30,14 @@ test("completed Coffee sessions enter read-only review before replay starts", ()
 });
 
 test("completed Coffee review keeps the table clear behind a Signal-like header", () => {
-  assert.equal(
-    pageSource.match(/<ReplayRecordingPanel\s+surface="coffee"/gu)?.length,
-    1,
-  );
+  assert.doesNotMatch(pageSource, /<ReplayRecordingPanel\s+surface="coffee"/u);
   assert.match(
     pageSource,
     /className=\{`\$\{styles\.coffeeStageHeader\} \$\{styles\.coffeeReviewHeader\}`\}/,
   );
-  assert.match(pageSource, /className=\{styles\.coffeeReviewVideoDisclosure\}/);
-  assert.match(
-    pageSource,
-    /coffeeReviewVideoDisclosure[\s\S]{0,1800}<ReplayRecordingPanel\s+surface="coffee"/,
-  );
-  assert.doesNotMatch(
-    pageSource,
-    /coffeeFinishedRecap[\s\S]{0,500}<ReplayRecordingPanel\s+surface="coffee"/,
-  );
+  assert.doesNotMatch(pageSource, /Open Coffee Session video/u);
+  assert.doesNotMatch(pageSource, /onRebuildVideo/u);
   assert.match(cssSource, /\.coffeeReviewHeader\s*\{/);
-  assert.match(cssSource, /\.coffeeReviewVideoBackdrop\s*\{/);
 });
 
 test("Coffee review copies transcripts instead of exporting transcript files", () => {
@@ -61,33 +50,15 @@ test("Coffee review copies transcripts instead of exporting transcript files", (
   assert.match(pageSource, /data-copy-state=/u);
 });
 
-test("replay renders Default Prism in a reserved bottom table seat", () => {
+test("replay keeps the player off camera while retaining a pot-motion anchor", () => {
   assert.match(
     pageSource,
-    /\{\(coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)\)[\s\S]{0,260}\? \(\s*<div\s*className=\{styles\.coffeeReplayPlayerSeat\}/,
+    /coffeeReplayActive \? \(\s*<span\s+ref=\{coffeeReplayPotDockRef\}\s+className=\{styles\.coffeeReplayOffCameraPotDock\}/u,
   );
-  assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerSeat\}/);
-  assert.match(pageSource, /glyph=\{zenDefaultPrismGlyph\}/);
-  assert.match(pageSource, /faceStyle=\{coffeePlayerSipFaceStyle\}/);
-  assert.match(
+  assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
+  assert.doesNotMatch(
     pageSource,
-    /showThinkingSpinner=\{coffeeReplayPlayerThinking\}/,
-  );
-  assert.match(pageSource, /isTalking=\{replayPlayerTalking\}/);
-  assert.match(pageSource, /mouthShape=\{replayPlayerMouthShape\}/);
-  assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerNameplate\}/);
-  assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerPot\}/);
-  assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerName\}/);
-  assert.match(pageSource, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
-  assert.match(pageSource, /\{coffeePlayerLabel\}/);
-  assert.match(
-    pageSource,
-    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}/,
-  );
-  assert.match(pageSource, /data-player-departing=/);
-  assert.match(
-    cssSource,
-    /\.coffeeReplayPlayerSeat\[data-player-departing="true"\][\s\S]*?animation: coffeeReplayPlayerWalkAway/,
+    /className=\{styles\.coffeeReplayPlayerSeat\}/u,
   );
 });
 

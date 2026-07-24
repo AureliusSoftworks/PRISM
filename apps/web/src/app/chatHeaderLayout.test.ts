@@ -38,33 +38,23 @@ describe("Chat shell header layout", () => {
     );
   });
 
-  it("keeps Home as the location strip's only navigation affordance", () => {
-    const locationStripStart = pageSource.indexOf(
-      "const renderLocationStrip =",
+  it("moves Home navigation onto the PRISM wordmarks", () => {
+    assert.doesNotMatch(pageSource, /renderLocationStrip/);
+    assert.doesNotMatch(pageSource, /livingShellLocation/);
+    assert.doesNotMatch(cssSource, /\.locationStrip(?:Home|Copy|Status)?\b/);
+    assert.match(
+      pageSource,
+      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-home-affordance="wordmark"[\s\S]*?aria-label="Open All Bots Home"/,
     );
-    const locationStripEnd = pageSource.indexOf(
-      "const renderAppSwitcher =",
-      locationStripStart,
+    assert.match(
+      pageSource,
+      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.sidebarWordmarkButton\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?aria-label="Open All Bots Home"/,
     );
-    assert.notEqual(locationStripStart, -1);
-    assert.notEqual(locationStripEnd, -1);
-
-    const locationStripSource = pageSource.slice(
-      locationStripStart,
-      locationStripEnd,
-    );
-    assert.match(locationStripSource, /className=\{styles\.locationStripHome\}/);
-    assert.match(locationStripSource, /onClick=\{openLivingShellHome\}/);
-    assert.match(locationStripSource, /aria-label="Open All Bots Home"/);
-    assert.equal(locationStripSource.match(/<button\b/g)?.length, 1);
-    assert.doesNotMatch(locationStripSource, /locationStripBack/);
-    assert.doesNotMatch(locationStripSource, /aria-label="Back"/);
-
     const openHomeStart = pageSource.indexOf(
       "const openLivingShellHome =",
     );
     const openHomeEnd = pageSource.indexOf(
-      "const livingShellLocation =",
+      "const prismCompanionSurfaceReference =",
       openHomeStart,
     );
     const openHomeSource = pageSource.slice(openHomeStart, openHomeEnd);

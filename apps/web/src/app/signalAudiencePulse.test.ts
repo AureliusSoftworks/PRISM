@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS } from "@localai/shared";
 
 import {
   formatSignalAudienceViews,
   signalAudienceReviews,
-  signalNextAudienceReviewRefreshDelayMs,
   signalAudienceSnapshot,
   type SignalAudienceEpisode,
 } from "./signalAudiencePulse.ts";
@@ -140,36 +138,6 @@ describe("Signal audience pulse", () => {
         createdAt: "2026-07-01T18:01:00.000Z",
       },
     ]);
-  });
-
-  it("refreshes at the next four-hour review threshold", () => {
-    const nowMs = Date.parse("2026-07-02T20:00:00.000Z");
-    assert.equal(
-      signalNextAudienceReviewRefreshDelayMs(
-        [
-          episode("1", {
-            completedAt: "2026-07-02T18:00:00.000Z",
-            personaReview: null,
-          }),
-          episode("2", {
-            completedAt: "2026-07-02T16:00:00.000Z",
-            personaReview: null,
-          }),
-          episode("3", {
-            completedAt: "2026-07-02T19:00:00.000Z",
-            personaReview: {
-              reviewerBotId: "already-visible",
-              reviewerName: "Already Visible",
-              rating: 4,
-              comment: "This one is already here.",
-              createdAt: "2026-07-02T19:01:00.000Z",
-            },
-          }),
-        ],
-        nowMs,
-      ),
-      BOTCAST_PERSONA_REVIEW_VISIBILITY_DELAY_MS - 2 * 60 * 60 * 1_000,
-    );
   });
 
   it("lets guest and topic identity change the temporary audience", () => {

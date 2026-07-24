@@ -134,40 +134,27 @@ import {
   createCoffeeGroupWithGeneratedName,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
-  beginCoffeeBarDelivery,
-  claimCoffeeDrinkReaction,
-  chooseCoffeeBarRole,
-  chooseCoffeeHouseDrink,
-  completeCoffeeSpecialOrder,
-  deliverCoffeeBarOrder,
   deleteCoffeeGroup,
   deleteCoffeePreset,
   getCoffeeConversationTranscript,
   getCoffeeSessionPoll,
   generateCoffeeSessionSynopsis,
-  getCoffeeBarConversation,
   coffeePlayerDepartureEpilogueShouldStop,
   listCoffeeGroups,
   listCoffeePresets,
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
-  prepareCoffeeSpecialOrder,
   recordCoffeePlayerDeparture,
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
-  respondCoffeeWaiterOffer,
   restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
   setCoffeePlayerTeam,
   setCoffeePollPlayerVote,
-  sipCoffeePlayerCup,
   topOffCoffeeCupForBot,
-  failCoffeeSpecialOrder,
-  finishCoffeeDrinkReaction,
-  markCoffeeSpecialOrderGenerating,
   undoLatestCoffeeDebugMessage,
   updateCoffeePreset,
   updateCoffeeGroupWithGeneratedTopics,
@@ -256,41 +243,23 @@ import {
   withSignalGenerationKeywords,
 } from "./signal-generation-keywords.ts";
 import {
-  REPLAY_RENDER_CHUNK_MAX_BYTES,
-  claimNextReplayRecording,
-  completeReplayRender,
-  deleteReplayPremiumMedia,
   deleteReplayRecordingMedia,
-  failReplayRender,
+  finalizeReplayRecordingV2,
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
   replayFaithfulAudioFile,
-  replayPremiumAudioFile,
-  replayPremiumSegmentAudioFile,
-  replayPremiumVideoFile,
   replayTranscript,
-  replayVideoFile,
   replayVoiceTakeAudioFile,
-  retryReplayRecording,
-  retryReplayPremiumProduction,
-  startReplayPremiumProduction,
-  storeReplayPremiumAudio,
+  startReplayRecordingDraft,
   storeReplayFaithfulAudio,
-  storeReplayPremiumTimeline,
-  storeReplayRenderAudioChunk,
-  storeReplayRenderChunk,
   storeReplayVoiceTakeAudio,
-  updateReplayRenderProgress,
   updateReplayVoiceTakeSnapshot,
   upsertReplayVoiceTake,
 } from "./replay-recordings.ts";
-import {
-  replayRenderWorkerClient,
-  wakeReplayBackgroundRender,
-} from "./replay-render-worker-client.ts";
 import type {
   ReplayManifestV1,
+  ReplayManifestV2,
   ReplayRecordingStatusV1,
   ReplaySurfaceV1,
   ReplayVoiceTakeV1,
@@ -691,7 +660,6 @@ import {
   type BotFaceGlyphAnimation,
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
-  type CoffeeBarGeneratedDrink,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
   BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   buildSignalMusicProfile,
@@ -1045,8 +1013,6 @@ let builtinVoiceWaveGeneratorOverride: typeof generateBuiltinEnglishWave =
   generateBuiltinEnglishWave;
 let slateRecoveryCoordinator: SlateRecoveryCoordinator | null = null;
 const activeCoffeeDepartureEpilogues = new Map<string, Promise<void>>();
-const activeCoffeeDrinkOrderControllers = new Map<string, AbortController>();
-const explicitlyCancelledCoffeeDrinkOrders = new Set<string>();
 /**
  * Runtime view of local-network access. `boundLanActive` reflects what the
  * process actually bound at startup (immutable for the process lifetime);
@@ -1351,6 +1317,7 @@ const memoryInferenceCheckedAtByScope = new Map<string, string>();
 const COMPOSER_RANDOM_PROMPT_MAX_CONTEXT_MESSAGES = 8;
 const COMPOSER_RANDOM_PROMPT_MAX_MESSAGE_CHARS = 900;
 const COMPOSER_RANDOM_PROMPT_MAX_OUTPUT_CHARS = 220;
+const REPLAY_FAITHFUL_AUDIO_MAX_BYTES = 256 * 1024 * 1024;
 const IMAGE_GENERATION_ALLOWED_SIZES = new Set([
   "1024x1536",
   "1024x1024",
@@ -1947,316 +1914,6 @@ function dualOllamaWorkloadOptions(user: UserDbRow): {
     secondaryOllamaHost: user.secondary_ollama_host,
     experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
   };
-}
-
-function coffeeDrinkOrderKey(userId: string, conversationId: string): string {
-  return `${userId}:${conversationId}`;
-}
-
-function cancelCoffeeDrinkOrder(userId: string, conversationId: string): void {
-  const key = coffeeDrinkOrderKey(userId, conversationId);
-  const controller = activeCoffeeDrinkOrderControllers.get(key);
-  if (controller) {
-    explicitlyCancelledCoffeeDrinkOrders.add(key);
-    controller.abort();
-  }
-  activeCoffeeDrinkOrderControllers.delete(key);
-}
-
-function cancelCoffeeDrinkOrdersForUser(userId: string): void {
-  for (const [key, controller] of activeCoffeeDrinkOrderControllers) {
-    if (!key.startsWith(`${userId}:`)) continue;
-    explicitlyCancelledCoffeeDrinkOrders.add(key);
-    controller.abort();
-    activeCoffeeDrinkOrderControllers.delete(key);
-  }
-}
-
-function sanitizeCoffeeConceptText(
-  raw: unknown,
-  maxLength: number,
-): string {
-  if (typeof raw !== "string") return "";
-  return raw
-    .replace(/[\u0000-\u001f\u007f]/gu, " ")
-    .replace(/\b(?:system prompt|developer message|ignore previous|api key|password)\b/giu, "")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, maxLength);
-}
-
-function safeCoffeeRequest(raw: string): string {
-  const cleaned = sanitizeCoffeeConceptText(raw, 240);
-  const replacements: Array<[RegExp, string]> = [
-    [/\b(?:blood|gore|viscera)\b/giu, "hibiscus-red syrup"],
-    [/\b(?:poison|toxin|venom)\b/giu, "bittersweet botanical notes"],
-    [/\b(?:glass|metal|plastic|weapon|knife|bullet)\b/giu, "crisp mineral notes"],
-    [/\b(?:human|animal|body|flesh|organ)\b/giu, "warm spiced pastry notes"],
-    [/\b(?:drug|cocaine|heroin|meth|fentanyl)\b/giu, "bright aromatic spice"],
-  ];
-  return replacements.reduce(
-    (value, [pattern, replacement]) => value.replace(pattern, replacement),
-    cleaned,
-  );
-}
-
-function safeCoffeeVisualBrief(raw: unknown): string {
-  return sanitizeCoffeeConceptText(raw, 320)
-    .replace(
-      /\b(?:person|people|human|animal|body|blood|gore|drug|weapon|knife|gun|cup|mug|rim|saucer|table|hand|utensil|lettering|logo|watermark)\b/giu,
-      "",
-    )
-    .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, 320);
-}
-
-function parseCoffeeDrinkConcept(
-  raw: string,
-): CoffeeBarGeneratedDrink | null {
-  const match = raw.match(/\{[\s\S]*\}/u);
-  if (!match) return null;
-  try {
-    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
-    const name = sanitizeCoffeeConceptText(parsed.name, 80);
-    const description = sanitizeCoffeeConceptText(parsed.description, 220);
-    const visualBrief = safeCoffeeVisualBrief(parsed.visualBrief);
-    if (!name || !description || !visualBrief) return null;
-    return { name, description, visualBrief };
-  } catch {
-    return null;
-  }
-}
-
-async function generateCoffeeDrinkConcept(args: {
-  database: DatabaseSync;
-  auxiliaryProviderFactory: typeof getAuxiliaryProvider;
-  user: UserDbRow;
-  choice: "custom" | "surprise";
-  request: string;
-  frontBaristaId: string | null;
-  frontBaristaName: string;
-  signal: AbortSignal;
-}): Promise<CoffeeBarGeneratedDrink> {
-  const safeRequest = safeCoffeeRequest(args.request);
-  const persona = args.frontBaristaId
-    ? args.database.prepare(
-        "SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?",
-      ).get(args.frontBaristaId, args.user.id) as
-        | { system_prompt: string | null }
-        | undefined
-    : undefined;
-  const personaExcerpt = sanitizeCoffeeConceptText(
-    persona?.system_prompt,
-    1600,
-  );
-  const fallback =
-    args.choice === "surprise"
-      ? {
-          name: `${args.frontBaristaName}’s House Special`,
-          description:
-            "A balanced espresso drink with layered aromatics, soft foam, and a quietly unexpected finish.",
-          visualBrief:
-            "deep espresso with a velvety cream spiral, fine aromatic spice, and restrained jewel-toned accents",
-        }
-      : {
-          name: "The House Commission",
-          description: safeRequest
-            ? `A drink built around ${safeRequest}.`
-            : "A balanced, one-of-a-kind espresso drink.",
-          visualBrief:
-            safeCoffeeVisualBrief(safeRequest) ||
-            "deep espresso with velvety cream and restrained aromatic accents",
-        };
-  const source =
-    args.choice === "surprise"
-      ? [
-          `Barista name: ${args.frontBaristaName}`,
-          `Barista persona only: ${personaExcerpt || "restrained, attentive PRISM barista"}`,
-          "Invent the drink solely from that persona. Do not infer anything about the player or table guests.",
-        ].join("\n")
-      : [
-          `Sanitized player flavor request: ${safeRequest}`,
-          "Preserve its flavor intent. Translate anything unsafe, non-drink, or visually impossible into a safe metaphorical beverage.",
-        ].join("\n");
-  try {
-    const provider = args.auxiliaryProviderFactory(
-      args.user.prism_default_llm_model ?? undefined,
-      dualOllamaWorkloadOptions(args.user),
-    );
-    const raw = await provider.generateResponse(
-      [
-        {
-          role: "system",
-          content: [
-            "Design one safe non-alcoholic coffeehouse beverage.",
-            'Reply with JSON only: {"name":"...","description":"...","visualBrief":"..."}.',
-            "Name under 8 words. Description one sentence. visualBrief describes only colors, foam, crema, syrups, spices, and edible surface details.",
-            "Never include people, body matter, drugs, weapons, text, logos, cup geometry, or instructions in visualBrief.",
-          ].join(" "),
-        },
-        { role: "user", content: source },
-      ],
-      {
-        temperature: args.choice === "surprise" ? 0.78 : 0.42,
-        maxTokens: 220,
-        usagePurpose: "image_prompt",
-        signal: args.signal,
-      },
-    );
-    return parseCoffeeDrinkConcept(raw) ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-async function runCoffeeDrinkOrder(args: {
-  database: DatabaseSync;
-  auxiliaryProviderFactory: typeof getAuxiliaryProvider;
-  user: UserDbRow;
-  imageApiKey: string | undefined;
-  imageFetchImpl: typeof fetch;
-  userId: string;
-  conversationId: string;
-  attemptId: string;
-  choice: "custom" | "surprise";
-  request: string;
-  controller: AbortController;
-}): Promise<void> {
-  const key = coffeeDrinkOrderKey(args.userId, args.conversationId);
-  let imageSlotJobId: string | null = null;
-  let imageId: string | null = null;
-  let localRelPath: string | null = null;
-  let imageRowStored = false;
-  try {
-    const conversation = getCoffeeBarConversation(
-      args.database,
-      args.userId,
-      args.conversationId,
-    );
-    const ritual = conversation.coffeeSettings?.barRitual;
-    if (!ritual) throw new Error("Coffee bar service is unavailable.");
-    const concept = await generateCoffeeDrinkConcept({
-      database: args.database,
-      auxiliaryProviderFactory: args.auxiliaryProviderFactory,
-      user: args.user,
-      choice: args.choice,
-      request: args.request,
-      frontBaristaId: ritual.frontBarista.id,
-      frontBaristaName: ritual.frontBarista.name,
-      signal: args.controller.signal,
-    });
-    const acquired = await waitForImageSlot({
-      userId: args.userId,
-      conversationId: args.conversationId,
-      botId: ritual.frontBarista.id,
-      mode: "coffee",
-      incognito: false,
-      captionPrompt: concept.name,
-      userMessage: `[Coffee bar] ${concept.name}`,
-      source: "coffee_drink",
-      requestedSize: "1024x1024",
-      abortController: args.controller,
-      signal: args.controller.signal,
-    });
-    imageSlotJobId = acquired.id;
-    markCoffeeSpecialOrderGenerating(
-      args.database,
-      args.userId,
-      args.conversationId,
-      args.attemptId,
-      acquired.id,
-    );
-    imageId = randomId(12);
-    localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
-    const prompt = [
-      "A seamless, flat top-down macro view of only a beverage surface.",
-      `Safe visual brief: ${concept.visualBrief}`,
-      "Centered circular drink surface filling the entire square canvas, made only from coffee, tea, milk, foam, crema, edible syrup, and edible spice.",
-      "Opaque background pixels must all be beverage or foam. No cup, rim, saucer, table, hands, utensils, lettering, logo, watermark, border, perspective view, or cast shadow.",
-    ].join("\n");
-    const result = await generateImage(prompt, args.imageApiKey, {
-      model: "gpt-image-2",
-      size: "1024x1024",
-      quality: "medium",
-      background: "opaque",
-      signal: args.controller.signal,
-      fetchImpl: args.imageFetchImpl,
-    });
-    const imageBytes = await readOpenAiGeneratedImageBytes(
-      result,
-      args.controller.signal,
-    );
-    writeGeneratedImageBytes(localRelPath, imageBytes);
-    await tryGenerateThumbAfterPngWrite(localRelPath);
-    const storedUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
-    const createdAt = new Date().toISOString();
-    args.database.prepare(
-      `INSERT INTO images
-         (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
-          revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at)
-       VALUES (?, ?, ?, NULL, '[]', 'coffee_bar', ?, ?, ?, '1024x1024',
-               'medium', 'openai', ?, ?, 'coffee_drink_surface', ?)`,
-    ).run(
-      imageId,
-      args.userId,
-      args.conversationId,
-      concept.visualBrief,
-      result.revisedPrompt,
-      storedUrl,
-      result.model,
-      localRelPath,
-      createdAt,
-    );
-    imageRowStored = true;
-    recordImageUsage({
-      provider: "openai",
-      model: result.model,
-      purpose: "image_generation",
-      imageCount: 1,
-      imageSize: "1024x1024",
-      imageQuality: "medium",
-      createdAt,
-    });
-    completeCoffeeSpecialOrder(
-      args.database,
-      args.userId,
-      args.conversationId,
-      args.attemptId,
-      imageId,
-      concept,
-    );
-  } catch (error) {
-    if (imageRowStored && imageId) {
-      args.database.prepare(
-        "DELETE FROM images WHERE id = ? AND user_id = ? AND conversation_id = ?",
-      ).run(imageId, args.userId, args.conversationId);
-    }
-    if (localRelPath) tryUnlinkGeneratedImageFile(localRelPath);
-    if (!explicitlyCancelledCoffeeDrinkOrders.has(key)) {
-      try {
-        failCoffeeSpecialOrder(
-          args.database,
-          args.userId,
-          args.conversationId,
-          args.attemptId,
-        );
-      } catch {
-        // The Coffee session may have been deleted while its image rendered.
-      }
-    }
-    if (!(error instanceof Error && error.name === "AbortError")) {
-      console.warn("[coffee-drink] Falling back to house blend:", error);
-    }
-  } finally {
-    if (imageSlotJobId) {
-      await releaseImageSlotIfOwned(args.userId, imageSlotJobId);
-    }
-    if (activeCoffeeDrinkOrderControllers.get(key) === args.controller) {
-      activeCoffeeDrinkOrderControllers.delete(key);
-    }
-    explicitlyCancelledCoffeeDrinkOrders.delete(key);
-  }
 }
 
 async function inferBotMemoriesIfNeeded(
@@ -7356,7 +7013,6 @@ function buildRoutes(): RouteDefinition[] {
         "coffee",
         [ctx.params.id],
       );
-      cancelCoffeeDrinkOrder(userId, ctx.params.id);
       deleteConversation(db, userId, ctx.params.id);
       removeReplayDirectories(userId, replayIds);
       json(ctx.res, 200, { ok: true });
@@ -7372,13 +7028,11 @@ function buildRoutes(): RouteDefinition[] {
     // userId means there's no footgun for an admin/shared-DB scenario.
     route("DELETE", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);
-      cancelCoffeeDrinkOrdersForUser(userId);
       const deleted = deleteAllConversations(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),
     route("DELETE", "/api/conversations/by-bot/:botId", async (ctx) => {
       const userId = requireAuth(ctx);
-      cancelCoffeeDrinkOrdersForUser(userId);
       const botId = ctx.params.botId === "_default" ? null : ctx.params.botId;
       const deleted = deleteConversationsByBot(db, userId, botId);
       json(ctx.res, 200, { ok: true, deleted });
@@ -10846,186 +10500,60 @@ function buildRoutes(): RouteDefinition[] {
       });
     }),
     route("POST", "/api/coffee/sessions/:id/bar/role", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const conversation = chooseCoffeeBarRole(db, userId, ctx.params.id, body.role);
-      json(ctx.res, 200, { ok: true, conversation });
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
+      );
     }),
     route("POST", "/api/coffee/sessions/:id/bar/house", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const conversation = chooseCoffeeHouseDrink(db, userId, ctx.params.id);
-      json(ctx.res, 200, { ok: true, conversation });
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
+      );
     }),
     route("GET", "/api/coffee/sessions/:id/bar/order", async (ctx) => {
-      const userId = requireAuth(ctx);
-      let conversation = getCoffeeBarConversation(db, userId, ctx.params.id);
-      const ritual = conversation.coffeeSettings?.barRitual;
-      if (
-        (ritual?.orderStatus === "queued" ||
-          ritual?.orderStatus === "generating") &&
-        ritual.orderStartedAt &&
-        Date.now() - Date.parse(ritual.orderStartedAt) > 16 * 60_000
-      ) {
-        conversation = failCoffeeSpecialOrder(
-          db,
-          userId,
-          ctx.params.id,
-          ritual.generationAttemptId ?? "",
-        );
-      }
-      json(ctx.res, 200, { ok: true, conversation });
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
+      );
     }),
     route("POST", "/api/coffee/sessions/:id/bar/order", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const user = getUserRow(userId);
-      const preferredProvider = readProvider(body.preferredProvider) ?? user.preferred_provider;
-      const choice =
-        body.choice === "house" ||
-        body.choice === "custom" ||
-        body.choice === "surprise"
-          ? body.choice
-          : null;
-      if (!choice) {
-        throw new HttpError(
-          400,
-          "Choose a custom drink, a barista surprise, or the standard house blend.",
-        );
-      }
-      if (choice === "house") {
-        const conversation = chooseCoffeeHouseDrink(db, userId, ctx.params.id);
-        json(ctx.res, 200, { ok: true, conversation });
-        return;
-      }
-      if (preferredProvider === "local") {
-        throw new HttpError(
-          409,
-          "Generated drinks are unavailable in LOCAL mode. Choose the standard house blend or make the rounds.",
-        );
-      }
-      const attemptId = typeof body.idempotencyKey === "string"
-        ? body.idempotencyKey.trim().slice(0, 180)
-        : "";
-      const prepared = prepareCoffeeSpecialOrder(
-        db,
-        userId,
-        ctx.params.id,
-        body.request,
-        attemptId,
-        choice,
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
       );
-      if (!prepared.shouldGenerate) {
-        json(ctx.res, prepared.imageId ? 200 : 202, {
-          ok: true,
-          conversation: prepared.conversation,
-          imageId: prepared.imageId,
-          idempotent: true,
-        });
-        return;
-      }
-      const key = coffeeDrinkOrderKey(userId, ctx.params.id);
-      const controller = new AbortController();
-      activeCoffeeDrinkOrderControllers.set(key, controller);
-      const imageUserKey = decryptUserKey(userId);
-      void runCoffeeDrinkOrder({
-        database: db,
-        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
-        user,
-        imageApiKey:
-          getOpenAiApiKeyForUser(userId, imageUserKey) ??
-          config.openAiApiKey,
-        imageFetchImpl: globalThis.fetch,
-        userId,
-        conversationId: ctx.params.id,
-        attemptId,
-        choice,
-        request: prepared.orderText,
-        controller,
-      });
-      json(ctx.res, 202, {
-        ok: true,
-        conversation: prepared.conversation,
-        jobId: attemptId,
-      });
     }),
     route("POST", "/api/coffee/sessions/:id/bar/special", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const user = getUserRow(userId);
-      const preferredProvider =
-        readProvider(body.preferredProvider) ?? user.preferred_provider;
-      if (preferredProvider === "local") {
-        throw new HttpError(
-          409,
-          "Generated drinks are unavailable in LOCAL mode. Choose the standard house blend or make the rounds.",
-        );
-      }
-      const attemptId =
-        typeof body.idempotencyKey === "string"
-          ? body.idempotencyKey.trim().slice(0, 180)
-          : "";
-      const prepared = prepareCoffeeSpecialOrder(
-        db,
-        userId,
-        ctx.params.id,
-        body.orderText,
-        attemptId,
-        "custom",
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
       );
-      if (prepared.shouldGenerate) {
-        const controller = new AbortController();
-        const imageUserKey = decryptUserKey(userId);
-        activeCoffeeDrinkOrderControllers.set(
-          coffeeDrinkOrderKey(userId, ctx.params.id),
-          controller,
-        );
-        void runCoffeeDrinkOrder({
-          database: db,
-          auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
-          user,
-          imageApiKey:
-            getOpenAiApiKeyForUser(userId, imageUserKey) ??
-            config.openAiApiKey,
-          imageFetchImpl: globalThis.fetch,
-          userId,
-          conversationId: ctx.params.id,
-          attemptId,
-          choice: "custom",
-          request: prepared.orderText,
-          controller,
-        });
-      }
-      json(ctx.res, prepared.imageId ? 200 : 202, {
-        ok: true,
-        conversation: prepared.conversation,
-        imageId: prepared.imageId,
-        idempotent: !prepared.shouldGenerate,
-      });
     }),
     route("POST", "/api/coffee/sessions/:id/bar/deliver", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const conversation =
-        body.phase === "begin"
-          ? beginCoffeeBarDelivery(db, userId, ctx.params.id)
-          : deliverCoffeeBarOrder(db, userId, ctx.params.id);
-      json(ctx.res, 200, { ok: true, conversation });
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
+      );
     }),
     route("POST", "/api/coffee/sessions/:id/player-cup/sip", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const conversation = sipCoffeePlayerCup(db, userId, ctx.params.id);
-      json(ctx.res, 200, { ok: true, conversation });
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
+      );
     }),
     route("POST", "/api/coffee/sessions/:id/bar/waiter/respond", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const conversation = respondCoffeeWaiterOffer(
-        db,
-        userId,
-        ctx.params.id,
-        body.response,
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Coffee service is retired. Carry the pot to top off seated bots.",
       );
-      json(ctx.res, 200, { ok: true, conversation });
     }),
     route("POST", "/api/coffee/sessions/:id/restart", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -11085,7 +10613,6 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const conversationId = ctx.params.id;
       cancelCoffeeTurnJobsForConversation(userId, conversationId);
-      cancelCoffeeDrinkOrder(userId, conversationId);
       const departure = recordCoffeePlayerDeparture(db, userId, conversationId);
       const requestedProvider = readProvider(body.preferredProvider);
       const user = getUserRow(userId);
@@ -11846,8 +11373,6 @@ function buildRoutes(): RouteDefinition[] {
               typeof value === "string" && value.trim().length > 0,
           )
         : undefined;
-      const drinkReactionRequested =
-        kind === "autonomous" && body.drinkReaction === true;
       const requestedProvider = readProvider(body.preferredProvider);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -11901,24 +11426,6 @@ function buildRoutes(): RouteDefinition[] {
           json(ctx.res, 202, { ok: true, job: activeJob });
           return;
         }
-      }
-      let drinkReactionFocus: string | undefined;
-      if (drinkReactionRequested) {
-        if (!presentBotIds || presentBotIds.length === 0) {
-          throw new HttpError(
-            409,
-            "Wait until an invited bot is firmly seated before opening the drink conversation.",
-          );
-        }
-        const claim = claimCoffeeDrinkReaction(
-          db,
-          userId,
-          conversationId,
-        );
-        if (!claim) {
-          throw new HttpError(409, "That first-sip reaction is no longer pending.");
-        }
-        drinkReactionFocus = claim.focus;
       }
       const jobDb = db;
       const status = startCoffeeTurnJob({
@@ -11993,39 +11500,16 @@ function buildRoutes(): RouteDefinition[] {
                   settings,
                 );
               }
-              try {
-                const result = await processCoffeeAutonomousTurn(
-                  jobDb,
-                  userId,
-                  conversationId,
-                  settings,
-                  body.userIsComposing === true,
-                  directedSpeakerBotId,
-                  directedUserMessage,
-                  presentBotIds,
-                  undefined,
-                  drinkReactionFocus,
-                );
-                if (drinkReactionRequested) {
-                  result.conversation = finishCoffeeDrinkReaction(
-                    jobDb,
-                    userId,
-                    conversationId,
-                    true,
-                  );
-                }
-                return result;
-              } catch (error) {
-                if (drinkReactionRequested) {
-                  finishCoffeeDrinkReaction(
-                    jobDb,
-                    userId,
-                    conversationId,
-                    false,
-                  );
-                }
-                throw error;
-              }
+              return processCoffeeAutonomousTurn(
+                jobDb,
+                userId,
+                conversationId,
+                settings,
+                body.userIsComposing === true,
+                directedSpeakerBotId,
+                directedUserMessage,
+                presentBotIds,
+              );
             },
           ),
       });
@@ -13211,6 +12695,37 @@ function buildRoutes(): RouteDefinition[] {
       if (!detail) throw new HttpError(404, "Replay recording not found.");
       json(ctx.res, 200, { ok: true, ...detail });
     }),
+    route("POST", "/api/replays/start", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const surface = readReplaySurface(body.surface);
+      const sourceId =
+        typeof body.sourceId === "string"
+          ? body.sourceId.trim().slice(0, 180)
+          : "";
+      if (!surface || !sourceId) {
+        throw new HttpError(400, "Replay source is invalid.");
+      }
+      const recording = startReplayRecordingDraft(
+        db,
+        userId,
+        surface,
+        sourceId,
+      );
+      json(ctx.res, 201, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/finalize", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const recording = finalizeReplayRecordingV2(
+        db,
+        userId,
+        ctx.params.id,
+        body.manifest as ReplayManifestV2,
+      );
+      if (!recording) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 200, { ok: true, recording });
+    }),
     route("POST", "/api/replays/queue", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -13220,13 +12735,6 @@ function buildRoutes(): RouteDefinition[] {
         body.manifest as ReplayManifestV1,
         { queueRender: body.render !== false },
       );
-      if (recording.status === "queued" && ctx.sessionToken) {
-        wakeReplayBackgroundRender({
-          db,
-          userId,
-          sessionToken: ctx.sessionToken,
-        });
-      }
       json(ctx.res, 202, { ok: true, recording });
     }),
     route("POST", "/api/replays/takes", async (ctx) => {
@@ -13317,7 +12825,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/replays/:id/audio", async (ctx) => {
       const userId = requireAuth(ctx);
       if (!(ctx.body instanceof Uint8Array)) {
-        throw new HttpError(400, "Faithful Signal audio must be binary.");
+        throw new HttpError(400, "Faithful replay audio must be binary.");
       }
       const contentType = String(ctx.req.headers["content-type"] ?? "")
         .split(";", 1)[0]
@@ -13331,14 +12839,14 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         throw new HttpError(
           400,
-          "Faithful Signal audio must be WebM, Ogg, MP4, or WAV.",
+          "Faithful replay audio must be WebM, Ogg, MP4, or WAV.",
         );
       }
       const durationMs = Number(
         ctx.req.headers["x-prism-audio-duration-ms"],
       );
       if (!Number.isFinite(durationMs) || durationMs <= 0) {
-        throw new HttpError(400, "Faithful Signal audio duration is required.");
+        throw new HttpError(400, "Faithful replay audio duration is required.");
       }
       const recording = storeReplayFaithfulAudio(
         db,
@@ -13349,280 +12857,80 @@ function buildRoutes(): RouteDefinition[] {
         durationMs,
       );
       if (!recording) {
-        throw new HttpError(404, "Signal replay recording not found.");
+        throw new HttpError(404, "Replay recording not found.");
       }
       json(ctx.res, 201, { ok: true, recording });
     }),
     route("GET", "/api/replays/:id/audio", async (ctx) => {
       const userId = requireAuth(ctx);
       const file = replayFaithfulAudioFile(db, userId, ctx.params.id);
-      if (!file) throw new HttpError(404, "Faithful Signal audio not found.");
+      if (!file) throw new HttpError(404, "Faithful replay audio not found.");
       streamReplayFile(ctx, file, {
         range: true,
-        attachmentName:
-          ctx.query.get("download") === "1"
-            ? `prism-signal-faithful.${file.contentType === "audio/ogg" ? "ogg" : file.contentType === "audio/mp4" ? "m4a" : file.contentType === "audio/wav" ? "wav" : "webm"}`
-            : undefined,
       });
     }),
     route("POST", "/api/replays/:id/premium", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const user = getUserRow(userId);
-      if (
-        body.confirm !== "send-to-elevenlabs" ||
-        userBlocksOnlineCapabilities(user)
-      ) {
-        throw new HttpError(
-          409,
-          "Audio enhancement requires AUTO or ONLINE mode and confirmation before sending the transcript and voice IDs to ElevenLabs.",
-        );
-      }
-      const userKey = decryptUserKey(userId);
-      const apiKey =
-        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
-      if (!apiKey) {
-        throw new HttpError(
-          503,
-          "ElevenLabs is not connected. Add or verify the key in Settings → Keys.",
-        );
-      }
-      const controller = new AbortController();
-      const onClose = () => controller.abort();
-      ctx.req.once("close", onClose);
-      try {
-        const result = await startReplayPremiumProduction({
-          db,
-          userId,
-          recordingId: ctx.params.id,
-          apiKey,
-          regenerate: body.regenerate === true,
-          signal: controller.signal,
-        });
-        json(ctx.res, 202, { ok: true, ...result });
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        if (error instanceof ElevenLabsVoiceError) {
-          throw new HttpError(
-            error.status === 401 || error.status === 403
-              ? 401
-              : error.status === 429
-                ? 429
-                : 502,
-            error.message,
-          );
-        }
-        throw error;
-      } finally {
-        ctx.req.off("close", onClose);
-      }
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Replay enhancement is retired. Faithful sessions use the recorded live mix.",
+      );
     }),
     route("POST", "/api/replays/:id/premium/retry", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const recording = retryReplayPremiumProduction(db, userId, ctx.params.id);
-      if (!recording) {
-        throw new HttpError(409, "The enhanced voice master is not ready to mix.");
-      }
-      json(ctx.res, 202, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay enhancement is retired.");
     }),
     route("POST", "/api/replays/:id/premium/audio", async (ctx) => {
-      const userId = requireAuth(ctx);
-      if (!(ctx.body instanceof Uint8Array)) {
-        throw new HttpError(400, "Enhanced master audio must be binary.");
-      }
-      const contentType = String(ctx.req.headers["content-type"] ?? "")
-        .split(";", 1)[0]
-        .trim();
-      if (contentType !== "audio/wav" && contentType !== "audio/webm") {
-        throw new HttpError(400, "Enhanced master audio must be WAV or WebM.");
-      }
-      const recording = storeReplayPremiumAudio(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.body,
-        contentType,
-      );
-      if (!recording) throw new HttpError(404, "Audio enhancement not found.");
-      json(ctx.res, 201, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay enhancement is retired.");
     }),
     route("PATCH", "/api/replays/:id/premium/timeline", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      if (!body.timeline || typeof body.timeline !== "object") {
-        throw new HttpError(400, "Enhanced recording timeline is required.");
-      }
-      const recording = storeReplayPremiumTimeline(
-        db,
-        userId,
-        ctx.params.id,
-        body.timeline as import("@localai/shared").ReplayTimelineV1,
-      );
-      if (!recording) throw new HttpError(404, "Audio enhancement not found.");
-      json(ctx.res, 200, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay enhancement is retired.");
     }),
     route("GET", "/api/replays/:id/premium/segments/:segmentId/audio", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const file = replayPremiumSegmentAudioFile(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.segmentId,
-      );
-      if (!file) throw new HttpError(404, "Enhanced voice segment not found.");
-      streamReplayFile(ctx, file);
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay enhancement is retired.");
     }),
     route("GET", "/api/replays/:id/premium/audio", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const file = replayPremiumAudioFile(db, userId, ctx.params.id);
-      if (!file) throw new HttpError(404, "Enhanced audio master not found.");
-      streamReplayFile(ctx, file, {
-        range: true,
-        attachmentName:
-          ctx.query.get("download") === "1"
-            ? `prism-enhanced-recording.${file.contentType === "audio/wav" ? "wav" : "webm"}`
-            : undefined,
-      });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay enhancement is retired.");
     }),
     route("GET", "/api/replays/:id/premium/video", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const file = replayPremiumVideoFile(db, userId, ctx.params.id);
-      if (!file) throw new HttpError(404, "Premium video not found.");
-      streamReplayFile(ctx, file, {
-        range: true,
-        attachmentName:
-          ctx.query.get("download") === "1"
-            ? `prism-premium-video.${file.contentType === "video/webm" ? "webm" : "mp4"}`
-            : undefined,
-      });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay video is retired.");
     }),
     route("DELETE", "/api/replays/:id/premium", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      if (body.confirm !== "delete-premium-media") {
-        throw new HttpError(400, "Premium media deletion requires explicit confirmation.");
-      }
-      const recording = deleteReplayPremiumMedia(db, userId, ctx.params.id);
-      if (!recording) throw new HttpError(404, "Replay recording not found.");
-      json(ctx.res, 200, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay enhancement is retired.");
     }),
     route("POST", "/api/replays/claim", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const surface =
-        body.surface === "signal" || body.surface === "coffee"
-          ? body.surface
-          : undefined;
-      const sourceId =
-        typeof body.sourceId === "string" && body.sourceId.trim()
-          ? body.sourceId.trim()
-          : undefined;
-      const claimed = claimNextReplayRecording(db, userId, {
-        surface,
-        sourceId,
-      });
-      json(ctx.res, 200, { ok: true, claimed });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("PATCH", "/api/replays/:id/progress", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const renderToken =
-        typeof body.renderToken === "string" ? body.renderToken : "";
-      const status =
-        body.status === "rendering" ? "rendering" : "preparing_audio";
-      const recording = updateReplayRenderProgress(
-        db,
-        userId,
-        ctx.params.id,
-        renderToken,
-        status,
-        Number(body.progress),
-      );
-      json(ctx.res, 200, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("POST", "/api/replays/:id/render-audio-chunk", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const renderToken = readReplayRenderToken(ctx);
-      if (!(ctx.body instanceof Uint8Array)) {
-        throw new HttpError(400, "Replay audio chunk must be binary.");
-      }
-      const rawPosition = ctx.req.headers["x-prism-replay-position"];
-      const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
-      const sizeBytes = storeReplayRenderAudioChunk(
-        db,
-        userId,
-        ctx.params.id,
-        renderToken,
-        position,
-        ctx.body,
-      );
-      json(ctx.res, 201, { ok: true, sizeBytes });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("POST", "/api/replays/:id/render-chunk", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const renderToken = readReplayRenderToken(ctx);
-      if (!(ctx.body instanceof Uint8Array)) {
-        throw new HttpError(400, "Replay render chunk must be binary.");
-      }
-      const rawPosition = ctx.req.headers["x-prism-replay-position"];
-      const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
-      const sizeBytes = storeReplayRenderChunk(
-        db,
-        userId,
-        ctx.params.id,
-        renderToken,
-        position,
-        ctx.body,
-      );
-      json(ctx.res, 201, { ok: true, sizeBytes });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("POST", "/api/replays/:id/complete", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const contentType =
-        body.contentType === "video/webm" ? "video/webm" : "video/mp4";
-      const recording = completeReplayRender(
-        db,
-        userId,
-        ctx.params.id,
-        String(body.renderToken ?? ""),
-        {
-          contentType,
-          codec: String(body.codec ?? (contentType === "video/webm" ? "vp9/opus" : "avc/aac")),
-          durationMs: Number(body.durationMs),
-          warning: typeof body.warning === "string" ? body.warning : null,
-          timeline:
-            body.timeline && typeof body.timeline === "object"
-              ? (body.timeline as import("@localai/shared").ReplayTimelineV1)
-              : null,
-        },
-      );
-      json(ctx.res, 201, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("POST", "/api/replays/:id/fail", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const recording = failReplayRender(
-        db,
-        userId,
-        ctx.params.id,
-        String(body.renderToken ?? ""),
-        body.error,
-      );
-      json(ctx.res, 200, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("POST", "/api/replays/:id/retry", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const recording = retryReplayRecording(db, userId, ctx.params.id);
-      if (!recording) throw new HttpError(404, "Replay recording not found.");
-      if (recording.status === "queued" && ctx.sessionToken) {
-        wakeReplayBackgroundRender({
-          db,
-          userId,
-          sessionToken: ctx.sessionToken,
-        });
-      }
-      json(ctx.res, 202, { ok: true, recording });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay rendering is retired.");
     }),
     route("DELETE", "/api/replays/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -13635,24 +12943,15 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, { ok: true, recording });
     }),
     route("GET", "/api/replays/:id/video", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const file = replayVideoFile(db, userId, ctx.params.id);
-      if (!file) throw new HttpError(404, "Replay video not found.");
-      streamReplayFile(ctx, file, {
-        range: true,
-        attachmentName:
-          ctx.query.get("download") === "1"
-            ? `prism-replay.${file.contentType === "video/webm" ? "webm" : "mp4"}`
-            : undefined,
-      });
+      requireAuth(ctx);
+      throw new HttpError(410, "Replay video is retired.");
     }),
     route("GET", "/api/replays/:id/transcript.vtt", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const transcript = replayTranscript(db, userId, ctx.params.id, "vtt");
-      if (transcript === null) throw new HttpError(404, "Replay transcript not found.");
-      ctx.res.statusCode = 200;
-      ctx.res.setHeader("content-type", "text/vtt; charset=utf-8");
-      ctx.res.end(transcript);
+      requireAuth(ctx);
+      throw new HttpError(
+        410,
+        "Caption downloads are retired. Download the readable transcript instead.",
+      );
     }),
     route("GET", "/api/replays/:id/transcript.md", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -13714,6 +13013,12 @@ function buildRoutes(): RouteDefinition[] {
         typeof raw.replayRecordingId === "string" && raw.replayRecordingId.trim()
           ? raw.replayRecordingId.trim().slice(0, 180)
           : null;
+      if (replayTakeId || replayRecordingId) {
+        throw new HttpError(
+          410,
+          "Replay voice synthesis is retired. Faithful replays use the saved live mix.",
+        );
+      }
       if (
         [
           signalMessageId,
@@ -18536,43 +17841,26 @@ async function dispatchRequest(
       String(req.headers["content-type"] ?? "")
         .toLowerCase()
         .startsWith(ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE);
-    const replayRenderChunkUpload =
-      method === "POST" && /^\/api\/replays\/[^/]+\/render-chunk$/u.test(pathname);
-    const replayRenderAudioUpload =
-      method === "POST" &&
-      /^\/api\/replays\/[^/]+\/render-audio-chunk$/u.test(pathname);
     const replayVoiceTakeUpload =
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/takes\/[^/]+\/audio$/u.test(pathname);
     const replayFaithfulAudioUpload =
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/audio$/u.test(pathname);
-    const replayPremiumAudioUpload =
-      method === "POST" &&
-      /^\/api\/replays\/[^/]+\/premium\/audio$/u.test(pathname);
     const body =
       method === "POST" || method === "PATCH" || method === "DELETE"
         ? slateArchiveUpload ||
           accountBackupArchiveUpload ||
-          replayRenderChunkUpload ||
-          replayRenderAudioUpload ||
           replayVoiceTakeUpload ||
-          replayFaithfulAudioUpload ||
-          replayPremiumAudioUpload
+          replayFaithfulAudioUpload
           ? await readBinaryBody(
               req,
               slateArchiveUpload
                 ? MAX_SLATE_ARCHIVE_BYTES
                 : accountBackupArchiveUpload
                   ? ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES
-                  : replayRenderChunkUpload
-                  ? REPLAY_RENDER_CHUNK_MAX_BYTES
-                  : replayRenderAudioUpload
-                    ? REPLAY_RENDER_CHUNK_MAX_BYTES
-                    : replayFaithfulAudioUpload
-                      ? 256 * 1024 * 1024
-                    : replayPremiumAudioUpload
-                      ? 256 * 1024 * 1024
+                  : replayFaithfulAudioUpload
+                      ? REPLAY_FAITHFUL_AUDIO_MAX_BYTES
                       : 24 * 1024 * 1024,
             )
           : await readJsonBody(req)
@@ -18666,8 +17954,6 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
   shuttingDown = true;
   console.log(`Received ${signal}; shutting down Prism API.`);
-
-  replayRenderWorkerClient.dispose();
 
   if (slateContinuityWorker) {
     await slateContinuityWorker.stop();

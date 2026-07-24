@@ -58,11 +58,19 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /coffeeChromePolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderLocationStrip\(\)/u,
+    /coffeeChromePolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderAppSwitcher\(\)/u,
   );
   assert.match(pageSource, />\s*End session\s*</iu);
   assert.match(
     pageSource,
     /data-live-session-locked=\{[\s\S]*coffeeChromePolicy\.liveSessionActive/u,
   );
+});
+
+test("Coffee's PRISM wordmark returns to All Bots Home", () => {
+  assert.match(
+    pageSource,
+    /className=\{`\$\{styles\.coffeeHubButton\} \$\{styles\.sidebarWordmarkButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?aria-label="Open All Bots Home"[\s\S]*?<AppletHeaderLabel appletId="coffee" \/>/u,
+  );
+  assert.doesNotMatch(pageSource, /returnToCoffeeStart/u);
 });

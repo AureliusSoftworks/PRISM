@@ -486,20 +486,17 @@ describe("Coffee speaker gaze wiring", () => {
       pageSource,
       /coffeeVisibleDirectedMentionBotIds\([\s\S]*?resolveCoffeeSpeakerGazeTarget\([\s\S]*?explicitMentionBotIds:/,
     );
-    assert.match(
-      pageSource,
-      /coffeeSpeakerGazeParticipant\?\.kind === "player"[\s\S]*?replayPlayerGazeDirection/,
-    );
+    assert.doesNotMatch(pageSource, /replayPlayerGazeDirection/u);
     assert.match(
       pageSource,
       /coffeeSpeakerGazeParticipant\?\.kind === "bot"[\s\S]*?coffeePlateFaceScaleYFromGazeDirection/,
     );
   });
 
-  it("labels both bot and player avatars with one active gaze direction", () => {
+  it("labels bot seats with one active gaze direction", () => {
     assert.ok(
-      (pageSource.match(/data-gaze-direction=/g)?.length ?? 0) >= 2,
-      "expected bot-seat and player-avatar gaze attributes",
+      (pageSource.match(/data-gaze-direction=/g)?.length ?? 0) >= 1,
+      "expected a bot-seat gaze attribute",
     );
     assert.match(pageSource, /data-gaze-target-source=/);
   });
@@ -507,7 +504,7 @@ describe("Coffee speaker gaze wiring", () => {
   it("turns and resets the body subtly with a reduced-motion fallback", () => {
     assert.match(
       cssSource,
-      /\.coffeeSeat,\s*\.coffeeReplayPlayerAvatar\s*\{[\s\S]*?--coffee-speaker-gaze-body-shift-x:\s*0px;[\s\S]*?--coffee-speaker-gaze-body-rotation:\s*0deg/,
+      /\.coffeeSeat\s*\{[\s\S]*?--coffee-speaker-gaze-body-shift-x:\s*0px;[\s\S]*?--coffee-speaker-gaze-body-rotation:\s*0deg/,
     );
     assert.match(
       cssSource,
@@ -519,11 +516,11 @@ describe("Coffee speaker gaze wiring", () => {
     );
     assert.match(
       cssSource,
-      /\.coffeeSeat \.zenLiveBotPresenceBody,[\s\S]*?transition:\s*transform 380ms/,
+      /\.coffeeSeat \.zenLiveBotPresenceBody\s*\{[\s\S]*?transition:\s*transform 380ms/,
     );
     assert.match(
       cssSource,
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceBody[\s\S]*?transition:\s*none/,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.coffeeSeat \.zenLiveBotPresenceBody,[\s\S]*?transition:\s*none/,
     );
   });
 });

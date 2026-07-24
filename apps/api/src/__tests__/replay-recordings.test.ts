@@ -1,27 +1,25 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import type { ReplayManifestV1, ReplayVoiceTakeV1 } from "@localai/shared";
+import type {
+  ReplayManifestV1,
+  ReplayManifestV2,
+} from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
 import {
   claimNextReplayRecording,
-  deleteReplayPremiumMedia,
-  deleteReplayRecordingMedia,
+  finalizeReplayRecordingV2,
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
-  replayPremiumSegmentsForRecording,
-  replayVoiceTakesForRecording,
-  retryReplayPremiumProduction,
+  startReplayRecordingDraft,
   storeReplayFaithfulAudio,
-  storeReplayPremiumTimeline,
-  upsertReplayVoiceTake,
 } from "../replay-recordings.ts";
 import { replayRecordingRelativeDirectory } from "../replay-storage.ts";
 
 function fixture(): DatabaseSync {
   const db = initializeDatabase(new DatabaseSync(":memory:"));
-  const now = "2026-07-21T00:00:00.000Z";
+  const now = "2026-07-24T00:00:00.000Z";
   db.prepare(
     `INSERT INTO users
       (id, email, display_name, password_hash, password_salt, wrapped_user_key,
@@ -53,50 +51,121 @@ function fixture(): DatabaseSync {
   return db;
 }
 
-function markPremiumMasterReady(db: DatabaseSync, recordingId: string): void {
-  const now = "2026-07-21T00:00:00.000Z";
-  db.prepare(
-    `INSERT INTO replay_premium_productions
-       (recording_id, user_id, phase, progress, input_hash, master_ready,
-        created_at, updated_at)
-     VALUES (?, 'user-1', 'mixing_episode', 0.48, 'test-master', 1, ?, ?)`,
-  ).run(recordingId, now, now);
+const participant = {
+  id: "host-1",
+  name: "Host",
+  kind: "bot" as const,
+  role: "host",
+  color: "#ff3366",
+  glyph: "spark",
+  seatIndex: 0,
+  visible: true,
+};
+
+const utterance = {
+  id: "message-1",
+  sourceMessageId: "message-1",
+  speakerId: "host-1",
+  speakerRole: "host",
+  text: "Welcome.",
+  spokenText: "Welcome.",
+  moodKey: "warm",
+  audible: true,
+  visible: true,
+  createdAt: "2026-07-24T00:00:01.000Z",
+};
+
+function manifestV2(
+  surface: "signal" | "coffee" = "signal",
+): ReplayManifestV2 {
+  const sourceId = surface === "signal" ? "episode-1" : "coffee-1";
+  return {
+    v: 2,
+    surface,
+    sourceId,
+    title: surface === "signal" ? "The Episode" : "Coffee replay",
+    createdAt: "2026-07-24T00:00:00.000Z",
+    completedAt: "2026-07-24T00:00:10.000Z",
+    privacyMode: "local",
+    participants: [participant],
+    utterances: [utterance],
+    initialScene: {
+      camera: surface === "signal" ? "wide" : null,
+      segment: surface === "signal" ? "opening" : null,
+      introActive: false,
+      outroActive: false,
+      activeAction: null,
+      activeReaction: null,
+      overlapMessageIds: [],
+      studioMix: {},
+      participants: {
+        "host-1": {
+          visible: true,
+          present: true,
+          speaking: false,
+          thinking: false,
+          mood: "warm",
+          cupLevel: surface === "coffee" ? 1 : null,
+          sipping: false,
+          voiceMode: "english",
+          audible: true,
+          gain: 1,
+          pan: 0,
+          effects: [],
+        },
+      },
+    },
+    direction: [
+      {
+        sequence: 1,
+        atMs: 1_250,
+        endMs: 3_800,
+        kind: "speech",
+        sourceMessageId: "message-1",
+        payload: {
+          speakerId: "host-1",
+          voiceMode: "english",
+          audible: true,
+          effects: ["studio-room"],
+          gain: 0.9,
+          pan: -0.25,
+          alignment: {
+            characters: ["W"],
+            characterStartTimesSeconds: [0],
+            characterEndTimesSeconds: [0.1],
+          },
+        },
+      },
+      {
+        sequence: 2,
+        atMs: 4_100,
+        endMs: 4_900,
+        kind: "action",
+        sourceMessageId: "message-1",
+        payload: {
+          userVisibleText: "The host taps the desk.",
+          captureDiagnostic: "private",
+        },
+      },
+    ],
+    visual: {
+      theme: "dark",
+      accentColor: "#ff3366",
+      atmosphereImageUrl: null,
+    },
+  };
 }
 
-const manifest: ReplayManifestV1 = {
+const manifestV1: ReplayManifestV1 = {
   v: 1,
   surface: "signal",
   sourceId: "episode-1",
   title: "The Episode",
-  createdAt: "2026-07-21T00:00:00.000Z",
-  completedAt: "2026-07-21T00:02:00.000Z",
+  createdAt: "2026-07-24T00:00:00.000Z",
+  completedAt: "2026-07-24T00:00:10.000Z",
   privacyMode: "local",
-  participants: [
-    {
-      id: "host-1",
-      name: "Host",
-      kind: "bot",
-      role: "host",
-      color: "#ff3366",
-      glyph: "spark",
-      seatIndex: 0,
-      visible: true,
-    },
-  ],
-  utterances: [
-    {
-      id: "message-1",
-      sourceMessageId: "message-1",
-      speakerId: "host-1",
-      speakerRole: "host",
-      text: "Welcome.",
-      spokenText: "Welcome.",
-      moodKey: "warm",
-      audible: true,
-      visible: true,
-      createdAt: "2026-07-21T00:00:01.000Z",
-    },
-  ],
+  participants: [participant],
+  utterances: [utterance],
   events: [],
   visual: {
     theme: "dark",
@@ -105,275 +174,206 @@ const manifest: ReplayManifestV1 = {
   },
 };
 
-const takeSnapshot: ReplayVoiceTakeV1 = {
-  v: 1,
-  sourceKey: "message-1",
-  sourceMessageId: "message-1",
-  sourceEventId: null,
-  speakerId: "host-1",
-  speakerName: "Host",
-  spokenText: "Welcome.",
-  performanceText: null,
-  mode: "english",
-  requestedEngine: "builtin",
-  resolvedEngine: null,
-  profile: {
-    v: 1,
-    baseVoiceId: "voice-1",
-    pitch: 0,
-    warmth: 0,
-    pace: 0,
-    lilt: 0,
-  },
-  moodKey: "warm",
-  effectsEnabled: true,
-  gain: 1,
-  stereoPan: -0.3,
-  channel: "primary",
-  seed: "episode-1:message-1",
-  audible: true,
-  durationMs: null,
-  alignment: null,
-};
-
-describe("durable replay recordings", () => {
-  it("stores the flattened Signal master separately from reconstructed takes", () => {
+describe("faithful replay recordings", () => {
+  it("uses an idempotent draft, upload, finalize lifecycle and becomes faithful atomically", () => {
     const db = fixture();
-    const queued = queueReplayRecording(db, "user-1", manifest, {
-      queueRender: false,
-    });
-    const stored = storeReplayFaithfulAudio(
+    const first = startReplayRecordingDraft(
       db,
       "user-1",
-      queued.id,
+      "signal",
+      "episode-1",
+    );
+    const repeated = startReplayRecordingDraft(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    assert.equal(first.id, repeated.id);
+    assert.equal(first.availability, "saving");
+
+    const uploaded = storeReplayFaithfulAudio(
+      db,
+      "user-1",
+      first.id,
       new Uint8Array([1, 2, 3, 4]),
       "audio/webm",
-      18_420,
+      12_400,
     );
-    assert.equal(stored?.audioUrl, `/api/replays/${queued.id}/audio`);
-    assert.equal(stored?.audioContentType, "audio/webm");
-    assert.equal(stored?.audioSizeBytes, 4);
-    assert.equal(stored?.audioDurationMs, 18_420);
+    assert.equal(uploaded?.availability, "saving");
 
-    const deleted = deleteReplayRecordingMedia(db, "user-1", queued.id);
-    assert.equal(deleted?.audioUrl, null);
-    assert.equal(deleted?.audioDurationMs, null);
+    const finalized = finalizeReplayRecordingV2(
+      db,
+      "user-1",
+      first.id,
+      manifestV2(),
+    );
+    assert.equal(finalized?.availability, "faithful");
+    assert.equal(finalized?.status, "ready");
+    assert.equal(finalized?.audioUrl, `/api/replays/${first.id}/audio`);
+    assert.equal(finalized?.videoUrl, null);
+    assert.equal(finalized?.timeline?.durationMs, 12_400);
+    assert.deepEqual(
+      finalized?.timeline?.beats
+        .filter((beat) => beat.kind === "utterance")
+        .map((beat) => [beat.startMs, beat.endMs]),
+      [[1_250, 3_800]],
+    );
+
+    const idempotent = finalizeReplayRecordingV2(
+      db,
+      "user-1",
+      first.id,
+      manifestV2(),
+    );
+    assert.equal(idempotent?.id, first.id);
+    assert.equal(listReplayRecordings(db, "user-1").length, 1);
+    assert.equal(claimNextReplayRecording(db, "user-1"), null);
   });
 
-  it("archives Signal locally without exposing it to the video render queue", () => {
+  it("keeps a missing master transcript-only and never reconstructs audio", () => {
     const db = fixture();
-    const archived = queueReplayRecording(db, "user-1", manifest, {
-      queueRender: false,
-    });
-    assert.equal(archived.status, "collecting");
-    assert.ok(archived.manifest);
+    const draft = startReplayRecordingDraft(
+      db,
+      "user-1",
+      "coffee",
+      "coffee-1",
+    );
+    const finalized = finalizeReplayRecordingV2(
+      db,
+      "user-1",
+      draft.id,
+      manifestV2("coffee"),
+    );
+    assert.equal(finalized?.availability, "transcript_only");
+    assert.equal(finalized?.audioUrl, null);
+    assert.equal(finalized?.videoUrl, null);
+    assert.match(finalized?.warning ?? "", /transcript-only/u);
+    assert.equal(claimNextReplayRecording(db, "user-1"), null);
+  });
+
+  it("allows a locally retained master to finish a transcript-only recording later", () => {
+    const db = fixture();
+    const draft = startReplayRecordingDraft(
+      db,
+      "user-1",
+      "coffee",
+      "coffee-1",
+    );
+    finalizeReplayRecordingV2(
+      db,
+      "user-1",
+      draft.id,
+      manifestV2("coffee"),
+    );
+    const recovered = storeReplayFaithfulAudio(
+      db,
+      "user-1",
+      draft.id,
+      new Uint8Array([9, 8, 7]),
+      "audio/ogg",
+      9_600,
+    );
+    assert.equal(recovered?.availability, "faithful");
+    assert.equal(recovered?.warning, null);
+    assert.equal(recovered?.timeline?.durationMs, 9_600);
+  });
+
+  it("compiles one readable transcript without exposing private direction details", () => {
+    const db = fixture();
+    const draft = startReplayRecordingDraft(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    finalizeReplayRecordingV2(db, "user-1", draft.id, manifestV2());
+    const stored = db
+      .prepare(
+        "SELECT transcript_markdown FROM replay_recordings WHERE id = ?",
+      )
+      .get(draft.id) as { transcript_markdown: string };
+    assert.match(stored.transcript_markdown, /\*\*00:01 · Host\*\*/u);
+    assert.match(stored.transcript_markdown, /Welcome\./u);
+    assert.match(stored.transcript_markdown, /The host taps the desk\./u);
+    assert.doesNotMatch(
+      stored.transcript_markdown,
+      /studio-room|voiceMode|alignment|captureDiagnostic|private/u,
+    );
+  });
+
+  it("keeps V1 masters playable and V1 recordings without a master transcript-only", () => {
+    const withAudioDb = fixture();
+    const withAudioDraft = startReplayRecordingDraft(
+      withAudioDb,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    storeReplayFaithfulAudio(
+      withAudioDb,
+      "user-1",
+      withAudioDraft.id,
+      new Uint8Array([1]),
+      "audio/webm",
+      5_000,
+    );
+    const faithful = queueReplayRecording(
+      withAudioDb,
+      "user-1",
+      manifestV1,
+    );
+    assert.equal(faithful.availability, "faithful");
+
+    const transcriptDb = fixture();
+    const transcriptOnly = queueReplayRecording(
+      transcriptDb,
+      "user-1",
+      manifestV1,
+    );
+    assert.equal(transcriptOnly.availability, "transcript_only");
+    assert.equal(transcriptOnly.audioUrl, null);
+  });
+
+  it("enforces source ownership and tenant-scopes draft, audio, and manifest access", () => {
+    const db = fixture();
+    const draft = startReplayRecordingDraft(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+    );
+    assert.equal(getReplayRecording(db, "other-user", draft.id), null);
     assert.equal(
-      claimNextReplayRecording(db, "user-1", { surface: "signal" }),
+      storeReplayFaithfulAudio(
+        db,
+        "other-user",
+        draft.id,
+        new Uint8Array([1]),
+        "audio/webm",
+        1_000,
+      ),
       null,
     );
-  });
-
-  it("keeps a failed enhanced mix out of the video render queue", () => {
-    const db = fixture();
-    const archived = queueReplayRecording(db, "user-1", manifest, {
-      queueRender: false,
-    });
-    markPremiumMasterReady(db, archived.id);
-    const cached = storeReplayPremiumTimeline(
-      db,
-      "user-1",
-      archived.id,
-      archived.timeline!,
-    );
-    assert.deepEqual(cached?.premiumProduction?.timeline, archived.timeline);
-    db.prepare(
-      `UPDATE replay_premium_productions
-          SET phase = 'failed', progress = 0.7, error = 'encoder unavailable'
-        WHERE recording_id = ? AND user_id = 'user-1'`,
-    ).run(archived.id);
-    const retried = retryReplayPremiumProduction(db, "user-1", archived.id);
-
-    assert.equal(retried?.status, "collecting");
-    assert.equal(retried?.premiumProduction?.phase, "mixing_episode");
-    assert.equal(retried?.premiumProduction?.masterReady, true);
-    assert.deepEqual(retried?.premiumProduction?.timeline, archived.timeline);
-    assert.equal(retried?.premiumProduction?.error, null);
-    const claimed = claimNextReplayRecording(db, "user-1", {
-      surface: "signal",
-    });
-    assert.equal(claimed, null);
-  });
-
-  it("deletes only Premium media and restores the canonical local timeline", () => {
-    const db = fixture();
-    const take = upsertReplayVoiceTake(
-      db,
-      "user-1",
-      "signal",
-      "episode-1",
-      takeSnapshot,
-    );
-    const archived = queueReplayRecording(db, "user-1", manifest, {
-      queueRender: false,
-    });
-    assert.equal(take.recordingId, archived.id);
-    markPremiumMasterReady(db, archived.id);
-    db.prepare(
-      `UPDATE replay_recordings
-          SET status = 'ready',
-              timeline_json = '{"v":1,"durationMs":999999,"beats":[]}'
-        WHERE id = ? AND user_id = 'user-1'`,
-    ).run(archived.id);
-
-    const deleted = deleteReplayPremiumMedia(db, "user-1", archived.id);
-
-    assert.equal(deleted?.status, "ready");
-    assert.equal(deleted?.premiumProduction, null);
-    assert.ok(deleted?.manifest);
-    assert.equal(deleted?.timeline?.durationMs, 999_999);
-    assert.equal(replayVoiceTakesForRecording(db, "user-1", archived.id).length, 1);
-  });
-
-  it("invalidates only derived Premium media when the saved replay changes", () => {
-    const db = fixture();
-    const archived = queueReplayRecording(db, "user-1", manifest, {
-      queueRender: false,
-    });
-    markPremiumMasterReady(db, archived.id);
-    db.prepare(
-      `UPDATE replay_premium_productions
-          SET phase = 'ready', progress = 1,
-              timeline_json = '{"v":1,"durationMs":999999,"beats":[]}'
-        WHERE recording_id = ? AND user_id = 'user-1'`,
-    ).run(archived.id);
-    db.prepare(
-      `INSERT INTO replay_premium_segments
-         (id, user_id, recording_id, segment_index, strategy, input_hash,
-          source_message_ids_json, audio_rel_path, content_type, duration_ms,
-          timings_json, created_at, updated_at)
-       VALUES ('segment-1', 'user-1', ?, 0, 'isolated_tts', 'old-segment',
-               '["message-1"]', 'replays/user-1/recording/segment.mp3',
-               'audio/mpeg', 1000, '[]', ?, ?)`,
-    ).run(archived.id, archived.createdAt, archived.updatedAt);
-
-    const changed = queueReplayRecording(
-      db,
-      "user-1",
-      {
-        ...manifest,
-        utterances: manifest.utterances.map((utterance) => ({
-          ...utterance,
-          text: "A corrected transcript.",
-          spokenText: "A corrected transcript.",
-        })),
-      },
-      { queueRender: false },
-    );
-
-    assert.equal(changed.status, "collecting");
-    assert.equal(changed.premiumProduction?.phase, "idle");
-    assert.equal(changed.premiumProduction?.masterReady, false);
-    assert.equal(changed.premiumProduction?.timeline, null);
-    assert.match(
-      changed.premiumProduction?.warning ?? "",
-      /create a new enhanced recording/u,
-    );
-    assert.equal(replayPremiumSegmentsForRecording(db, "user-1", archived.id).length, 1);
-  });
-
-  it("freezes a Signal take without exposing a video render lease", () => {
-    const db = fixture();
-    const firstTake = upsertReplayVoiceTake(
-      db,
-      "user-1",
-      "signal",
-      "episode-1",
-      takeSnapshot,
-    );
-    const duplicateTake = upsertReplayVoiceTake(
-      db,
-      "user-1",
-      "signal",
-      "episode-1",
-      { ...takeSnapshot, mode: "mute" },
-    );
-    assert.equal(duplicateTake.id, firstTake.id);
-    assert.equal(duplicateTake.snapshot.mode, "english");
-
-    const queued = queueReplayRecording(db, "user-1", manifest, {
-      queueRender: false,
-    });
-    assert.equal(queued.status, "collecting");
-    assert.match(queued.transcriptVttUrl ?? "", /transcript\.vtt/u);
-    markPremiumMasterReady(db, queued.id);
-    const claimed = claimNextReplayRecording(db, "user-1");
-    assert.equal(claimed, null);
     assert.equal(
-      getReplayRecording(db, "user-1", queued.id)?.takes[0]?.snapshot
-        .requestedEngine,
-      "builtin",
+      finalizeReplayRecordingV2(
+        db,
+        "other-user",
+        draft.id,
+        manifestV2(),
+      ),
+      null,
     );
-  });
-
-  it("keeps recordings tenant-scoped and cascades metadata with the source", () => {
-    const db = fixture();
-    const queued = queueReplayRecording(db, "user-1", manifest);
-    markPremiumMasterReady(db, queued.id);
-    assert.equal(getReplayRecording(db, "other-user", queued.id), null);
-    assert.equal(listReplayRecordings(db, "user-1").length, 1);
-    db.prepare("DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?").run(
-      "episode-1",
-      "user-1",
+    assert.throws(
+      () =>
+        startReplayRecordingDraft(
+          db,
+          "other-user",
+          "signal",
+          "episode-1",
+        ),
+      /Unknown signal replay source/u,
     );
-    assert.equal(listReplayRecordings(db, "user-1").length, 0);
-  });
-
-  it("recovers stale client leases and keeps the transcript after recording deletion", () => {
-    const db = fixture();
-    const queued = queueReplayRecording(db, "user-1", {
-      ...manifest,
-      surface: "coffee",
-      sourceId: "coffee-1",
-    });
-    const firstClaim = claimNextReplayRecording(db, "user-1");
-    assert.ok(firstClaim);
-    db.prepare(
-      "UPDATE replay_recordings SET updated_at = '2000-01-01T00:00:00.000Z' WHERE id = ?",
-    ).run(queued.id);
-    const recoveredClaim = claimNextReplayRecording(db, "user-1");
-    assert.ok(recoveredClaim);
-    assert.equal(recoveredClaim.recording.id, queued.id);
-    assert.notEqual(recoveredClaim.renderToken, firstClaim.renderToken);
-
-    const deleted = deleteReplayRecordingMedia(db, "user-1", queued.id);
-    assert.equal(deleted?.status, "collecting");
-    assert.ok(deleted?.manifest);
-    assert.match(deleted?.transcriptMarkdownUrl ?? "", /transcript\.md/u);
-    assert.equal(deleted?.videoUrl, null);
-  });
-
-  it("claims only the requested replay surface and source", () => {
-    const db = fixture();
-    queueReplayRecording(db, "user-1", {
-      ...manifest,
-      surface: "coffee",
-      sourceId: "coffee-1",
-      title: "Coffee replay",
-    });
-    const signalQueued = queueReplayRecording(db, "user-1", manifest);
-    markPremiumMasterReady(db, signalQueued.id);
-
-    const signal = claimNextReplayRecording(db, "user-1", {
-      surface: "signal",
-      sourceId: "episode-1",
-    });
-    assert.equal(signal, null);
-
-    const coffee = claimNextReplayRecording(db, "user-1", {
-      surface: "coffee",
-    });
-    assert.equal(coffee?.recording.surface, "coffee");
-    assert.equal(coffee?.recording.sourceId, "coffee-1");
   });
 
   it("rejects traversal in every replay media path segment", () => {
@@ -384,40 +384,6 @@ describe("durable replay recordings", () => {
     assert.throws(
       () => replayRecordingRelativeDirectory("user-1", "../../recording-1"),
       /Invalid replay media path segment/u,
-    );
-  });
-
-  it("freezes English, Premium, Bottish, and Muted on the exact next utterances", () => {
-    const db = fixture();
-    const expected = [
-      { mode: "english" as const, requestedEngine: "builtin" as const },
-      { mode: "english" as const, requestedEngine: "elevenlabs" as const },
-      { mode: "bottish" as const, requestedEngine: null },
-      { mode: "mute" as const, requestedEngine: null },
-    ];
-    const recordingId = expected
-      .map((voice, index) =>
-        upsertReplayVoiceTake(db, "user-1", "signal", "episode-1", {
-          ...takeSnapshot,
-          sourceKey: `message-${index + 1}`,
-          sourceMessageId: `message-${index + 1}`,
-          mode: voice.mode,
-          requestedEngine: voice.requestedEngine,
-          audible: voice.mode !== "mute",
-        }),
-      )[0]!.recordingId;
-    assert.deepEqual(
-      replayVoiceTakesForRecording(db, "user-1", recordingId).map((take) => ({
-        messageId: take.snapshot.sourceMessageId,
-        mode: take.snapshot.mode,
-        engine: take.snapshot.requestedEngine,
-      })),
-      [
-        { messageId: "message-1", mode: "english", engine: "builtin" },
-        { messageId: "message-2", mode: "english", engine: "elevenlabs" },
-        { messageId: "message-3", mode: "bottish", engine: null },
-        { messageId: "message-4", mode: "mute", engine: null },
-      ],
     );
   });
 });

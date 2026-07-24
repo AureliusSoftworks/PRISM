@@ -2526,7 +2526,7 @@ describe("Zen live presence CSS", () => {
     );
   });
 
-  it("keeps the Chat wordmark as static branding", () => {
+  it("keeps the Chat wordmark as the Home affordance", () => {
     assert.match(
       pageSource,
       /const \[zenZoomedOutConversationId, setZenZoomedOutConversationId\]\s*=\s*useState<\s*string \| null\s*>\(null\);/
@@ -2537,7 +2537,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.hubWordmark\}\s+data-home-affordance="wordmark"/
+      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-home-affordance="wordmark"/
     );
     assert.match(css, /\.hubWordmark\s*\{/);
     assert.doesNotMatch(pageSource, /handleChatHeaderWordmarkClick/);

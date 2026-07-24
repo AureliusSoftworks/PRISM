@@ -98,14 +98,10 @@ test("two-to-five-seat action anchors stay locked to their authored seats", () =
   assert.match(pageSource, /data-seat-count=\{display\.seatCount\}/);
 });
 
-test("long bot and player names truncate safely in live and review layouts", () => {
+test("long bot names truncate safely in live and review layouts", () => {
   assert.match(
     ruleFor(".coffeeSeatGlowText span"),
     /overflow: hidden; text-overflow: ellipsis; white-space: nowrap/,
-  );
-  assert.match(
-    ruleFor(".coffeeReplayPlayerName"),
-    /min-width: 0; overflow: hidden;[\s\S]*?text-overflow: ellipsis;[\s\S]*?white-space: nowrap/,
   );
   assert.match(
     pageSource,
@@ -113,28 +109,12 @@ test("long bot and player names truncate safely in live and review layouts", () 
   );
 });
 
-test("review lifts the player plate and keeps its Prism marker glyph", () => {
-  const playerNameplate = ruleFor(".coffeeReplayPlayerNameplate");
-  assert.match(
-    playerNameplate,
-    /margin-top: clamp\(-41px, -3\.2cqw, -30px\)/,
-  );
-  assert.match(
-    playerNameplate,
-    /--coffee-player-nameplate-width: clamp\(232px, 21cqw, 268px\)/,
-  );
-  assert.match(playerNameplate, /width: var\(--coffee-player-nameplate-width\)/);
-  assert.match(playerNameplate, /box-sizing: border-box/);
-  assert.match(playerNameplate, /height: 46px; min-height: 0/);
-  assert.match(
-    ruleFor(".coffeePlayerCup"),
-    /position: absolute; left: 8px; bottom: -10px/,
-  );
-  assert.match(ruleFor(".coffeeReplayPlayerName"), /grid-column: 2; grid-row: 1/);
-  assert.match(ruleFor(".coffeeReplayPlayerGlyph"), /grid-column: 3; grid-row: 1/);
+test("review keeps the player off camera and restores bot seats", () => {
+  assert.doesNotMatch(cssSource, /\.coffeeReplayPlayer(?:Seat|Avatar|Nameplate|Glyph)/u);
+  assert.doesNotMatch(pageSource, /styles\.coffeeReplayPlayer(?:Seat|Avatar|Nameplate|Glyph)/u);
   assert.match(
     pageSource,
-    /className=\{styles\.coffeeReplayPlayerGlyph\}[\s\S]{0,180}<BotGlyph\s+name=\{zenDefaultPrismGlyph\}/,
+    /className=\{styles\.coffeeReplayOffCameraPotDock\}/u,
   );
   assert.match(
     css,
@@ -142,31 +122,7 @@ test("review lifts the player plate and keeps its Prism marker glyph", () => {
   );
 });
 
-test("the player cup reaches Prism's mouth and uses the default sip pucker", () => {
-  const playerCup = ruleFor(".coffeePlayerCup");
-  assert.match(
-    playerCup,
-    /--coffee-player-cup-sip-x: calc\( \(var\(--coffee-player-nameplate-width\) \/ 2\) - 42px \)/,
-  );
-  assert.match(
-    playerCup,
-    /--coffee-player-cup-sip-y: clamp\( -62px, calc\(45px - 6\.8cqw\), -40px \)/,
-  );
-  assert.match(playerCup, /--coffee-player-cup-sip-duration-ms: 1650ms/);
-  assert.match(
-    css,
-    /@keyframes coffeePlayerCupSip \{[\s\S]*var\(--coffee-player-cup-sip-x\), var\(--coffee-player-cup-sip-y\)/,
-  );
-  assert.match(
-    pageSource,
-    /const coffeePlayerSipFaceActive =\s*!coffeeReplayActive && coffeePlayerSipAnimating;[\s\S]*const coffeePlayerSipFaceStyle = coffeePlayerSipFaceActive[\s\S]*coffeePuckerEnabled:\s*zenDefaultPrismFaceStyle\.mouthCoffeePucker,[\s\S]*sipActive: true/,
-  );
-  assert.match(
-    pageSource,
-    /faceStyle=\{coffeePlayerSipFaceStyle\}[\s\S]*plateFace=\{[\s\S]*coffeePlayerSipFaceActive[\s\S]*COFFEE_SEAT_SIP_PLATE_GLYPH[\s\S]*plateFaceRest=\{coffeePlayerSipRestingFace\}[\s\S]*COFFEE_PLAYER_SIP_ANIMATION_MS \*[\s\S]*COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS/,
-  );
-  assert.match(
-    pageSource,
-    /--coffee-player-cup-sip-duration-ms": `\$\{COFFEE_PLAYER_SIP_ANIMATION_MS\}ms`/,
-  );
+test("Coffee has no player mug or sip path", () => {
+  assert.doesNotMatch(cssSource, /\.coffeePlayerCup/u);
+  assert.doesNotMatch(pageSource, /coffeePlayerSip|player-cup\/sip/u);
 });

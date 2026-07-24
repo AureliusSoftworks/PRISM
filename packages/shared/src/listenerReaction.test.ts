@@ -45,27 +45,16 @@ describe("listener reaction planning", () => {
       if (plan) visual += 1;
       if (plan?.spokenCue || plan?.vocalFoley) audible += 1;
       if (plan?.vocalFoley) vocalFoley += 1;
-      assert.ok(!plan?.spokenCue || !plan.vocalFoley);
+      assert.equal(plan?.spokenCue, undefined);
+      assert.equal(plan?.interjectionAttempt, undefined);
     }
     assert.ok(visual / 8_000 > 0.79 && visual / 8_000 < 0.85);
-    assert.ok(audible / visual > 0.37 && audible / visual < 0.43);
-    assert.ok(vocalFoley / audible > 0.25 && vocalFoley / audible < 0.31);
+    assert.ok(audible / visual > 0.09 && audible / visual < 0.13);
+    assert.equal(vocalFoley, audible);
   });
 
-  it("lets an annoyed guest attempt to interject over the host", () => {
-    const calmAttempts = Array.from({ length: 2_000 }, (_, index) =>
-      buildSignalListenerReactionPlanV1({
-        episodeId: "calm",
-        messageId: `message-${index}`,
-        speakerBotId: "host",
-        listenerBotId: "guest",
-        listenerRole: "guest",
-        segment: "interview",
-        mood: "neutral",
-        tensionLevel: 0,
-      })
-    ).filter((plan) => plan?.interjectionAttempt);
-    const warningAttempts = Array.from({ length: 2_000 }, (_, index) =>
+  it("keeps ordinary Signal reactions nonverbal even under tension", () => {
+    const warningReactions = Array.from({ length: 2_000 }, (_, index) =>
       buildSignalListenerReactionPlanV1({
         episodeId: "warning",
         messageId: `message-${index}`,
@@ -76,16 +65,18 @@ describe("listener reaction planning", () => {
         mood: "strained",
         tensionLevel: 2,
       })
-    ).filter((plan) => plan?.interjectionAttempt);
+    ).filter((plan) => plan !== null);
 
-    assert.equal(calmAttempts.length, 0);
-    assert.ok(warningAttempts.length > 1_250 && warningAttempts.length < 1_450);
-    assert.ok(warningAttempts.every((plan) => plan?.spokenCue));
-    assert.ok(warningAttempts.every((plan) => plan?.interruptedSpeakerCue));
-    assert.ok(warningAttempts.every(
-      (plan) => plan?.interruptedSpeakerCuePlayback === "crosstalk",
-    ));
-    assert.ok(warningAttempts.every((plan) => plan?.visualAction === "lean_in"));
+    assert.ok(warningReactions.length > 1_580 && warningReactions.length < 1_700);
+    assert.ok(warningReactions.every((plan) => plan?.spokenCue === undefined));
+    assert.ok(
+      warningReactions.every((plan) => plan?.interjectionAttempt === undefined),
+    );
+    assert.ok(
+      warningReactions.every(
+        (plan) => plan?.interruptedSpeakerCue === undefined,
+      ),
+    );
   });
 
   it("builds deterministic bot crosstalk with a transcript-safe annoyed cutoff", () => {

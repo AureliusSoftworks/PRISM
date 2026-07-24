@@ -12,6 +12,7 @@ import {
   coffeeSeatSipFaceActive,
   coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
+  coffeeSeatScreenRelativeMouthRotationDeg,
   resolveCoffeeSeatSipFacePresentation,
 } from "./coffee-seat-plate.ts";
 
@@ -130,14 +131,14 @@ describe("coffeeSeatPlateGlyph", () => {
     });
   });
 
-  it("lets custom mouths explicitly opt out of the Coffee sip pucker", () => {
+  it("swaps only custom mouths into the Coffee sip pucker when enabled", () => {
     assert.equal(
       coffeeSeatCustomMouthCharacterForSip({
         mouthCharacter: "△",
         coffeePuckerEnabled: true,
         sipActive: true,
       }),
-      null,
+      "⁎",
     );
     assert.equal(
       coffeeSeatCustomMouthCharacterForSip({
@@ -154,6 +155,28 @@ describe("coffeeSeatPlateGlyph", () => {
         sipActive: false,
       }),
       "△",
+    );
+  });
+
+  it("keeps the transient sip pucker upright across left, center, and right face rotations", () => {
+    for (const [faceRotationDeg, expectedMouthRotationDeg] of [
+      [90, -90],
+      [0, 0],
+      [-90, 90],
+    ] as const) {
+      assert.equal(
+        coffeeSeatScreenRelativeMouthRotationDeg(0, faceRotationDeg),
+        expectedMouthRotationDeg,
+      );
+      assert.equal(
+        faceRotationDeg + expectedMouthRotationDeg,
+        0,
+      );
+    }
+    assert.equal(
+      coffeeSeatScreenRelativeMouthRotationDeg(27, 90),
+      -63,
+      "the authored mouth rotation remains recoverable after the sip layer clears",
     );
   });
 

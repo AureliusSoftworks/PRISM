@@ -9,20 +9,13 @@ const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
 const cssSource = readFileSync(join(appDir, "page.module.css"), "utf8");
 
 describe("Coffee live immersion", () => {
-  it("embodies the service bot in waiter visits instead of showing a coffee emoji", () => {
-    assert.match(
+  it("omits waiter presentation and the player avatar", () => {
+    assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
+    assert.doesNotMatch(
       pageSource,
-      /const renderCoffeeWaiterAvatar = \(\): React\.JSX\.Element => \([\s\S]*className=\{styles\.coffeeWaiterAvatar\}[\s\S]*<ZenLiveBotMannequin[\s\S]*glyph=\{coffeeBarServiceGlyph\}[\s\S]*avatarDetails=\{coffeeBarServiceAvatarDetails\}/u,
+      /className=\{styles\.coffeeReplayPlayerSeat\}/u,
     );
-    assert.equal(
-      pageSource.match(/\{renderCoffeeWaiterAvatar\(\)\}/gu)?.length,
-      2,
-    );
-    assert.doesNotMatch(pageSource, /<span aria-hidden="true">☕<\/span>/u);
-    assert.match(
-      cssSource,
-      /\.coffeeWaiterAvatar\s*\{[\s\S]*--zen-live-bot-avatar-size:\s*clamp\(112px,\s*9cqw,\s*148px\);/u,
-    );
+    assert.match(pageSource, /className=\{styles\.coffeeReplayOffCameraPotDock\}/u);
   });
 
   it("holds a live departing seat through the authored walk-away animation", () => {

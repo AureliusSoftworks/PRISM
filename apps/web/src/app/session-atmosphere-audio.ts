@@ -7,7 +7,11 @@ import {
   connectRoomAcoustics,
   type RoomAcousticsSend,
 } from "./roomAcoustics.ts";
-import { prismAudioOutputNode } from "./signalAudioMasterCapture.ts";
+import {
+  prismAudioContext,
+  prismAudioOutputNode,
+  replayAudioMasterCaptureActive,
+} from "./replayAudioMasterCapture.ts";
 
 export const DEFAULT_STUDIO_ATMOSPHERE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
@@ -268,21 +272,17 @@ let sessionAtmosphereAudioContext: AudioContext | null = null;
 
 function sessionAtmosphereContext(): AudioContext | null {
   if (
-    typeof window === "undefined" ||
-    typeof window.AudioContext !== "function"
-  ) {
-    return null;
-  }
-  if (
     !sessionAtmosphereAudioContext ||
     sessionAtmosphereAudioContext.state === "closed"
   ) {
-    sessionAtmosphereAudioContext = new window.AudioContext();
+    sessionAtmosphereAudioContext = prismAudioContext();
   }
-  if (sessionAtmosphereAudioContext.state === "suspended") {
-    void sessionAtmosphereAudioContext.resume().catch(() => undefined);
+  const context = sessionAtmosphereAudioContext;
+  if (!context) return null;
+  if (context.state === "suspended") {
+    void context.resume().catch(() => undefined);
   }
-  return sessionAtmosphereAudioContext;
+  return context;
 }
 
 function levelSessionAtmosphereNode(
@@ -651,18 +651,16 @@ export function startSessionAtmosphere(args: {
       bus,
       trim,
       ...(options.tag ? { tag: options.tag } : {}),
-      leveler:
-        loop || args.allowMixBoost
-          ? levelSessionAtmosphereSource(
-              audio,
-              loop,
-              bus,
-              args.backgroundTone ?? "neutral",
-              args.foleyRoomAcoustics,
-              options,
-            )
-          : null,
+      leveler: levelSessionAtmosphereSource(
+        audio,
+        loop,
+        bus,
+        args.backgroundTone ?? "neutral",
+        args.foleyRoomAcoustics,
+        options,
+      ),
     } satisfies SessionAtmosphereActiveSource;
+    if (!source.leveler && replayAudioMasterCaptureActive()) return null;
     activeAudio.set(audio, source);
     applySourceVolume(audio, source);
     if (!loop) {

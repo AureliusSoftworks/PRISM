@@ -365,7 +365,10 @@ describe("Coffee seat arrival CSS", () => {
       coffeeSeatPlateEmojiSource,
       /blinkBar: normalizedFaceBlinkBar,/
     );
-    assert.match(coffeeSeatPlateEmojiSource, /function screenRelativeFacePartRotationDeg/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /coffeeSeatScreenRelativeMouthRotationDeg/,
+    );
     assert.match(
       coffeeSeatPlateEmojiSource,
       /const normalizedFaceMouthScale =\s+thinkingSpinnerActive \|\| questionGlyphActive\s+\? undefined\s+: \(?normalizeBotFaceMouthScale\(faceMouthScale\) \?\? undefined\)?;/
@@ -392,7 +395,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /screenRelativeFacePartRotationDeg\(\s*normalizedFaceMouthRotationDeg,\s*rotateDeg,?\s*\)/
+      /coffeeSeatScreenRelativeMouthRotationDeg\(\s*normalizedFaceMouthRotationDeg,\s*rotateDeg,?\s*\)/
     );
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-mouth-rotation"/);
     assert.match(coffeeSeatPlateEmojiSource, /`\$\{faceMouthRotationCssDeg\}deg`/);
@@ -1411,7 +1414,7 @@ describe("Coffee seat arrival CSS", () => {
   it("keeps Table Talk permanent for joined Coffee sessions", () => {
     assert.match(
       pageSource,
-      /const coffeeSessionSurfaceActive =\s*coffeeSessionJoined \|\| shellPolicy\.reviewActive;/,
+      /const coffeeSessionSurfaceActive =\s*coffeeSessionJoined \|\|\s*coffeeChromePolicy\.reviewActive;/,
     );
     assert.match(
       pageSource,
@@ -1459,8 +1462,11 @@ describe("Coffee seat arrival CSS", () => {
     assert.doesNotMatch(overviewSource, /renderCoffeeProviderModeToggle/);
     assert.doesNotMatch(overviewSource, /renderCoffeeHeaderModelPicker/);
     assert.doesNotMatch(overviewSource, /renderCoffeeHeaderModelChrome/);
-    assert.match(pageSource, /const renderCoffeeHeaderModelChrome = \(\): React\.ReactNode => \(/);
-    assert.match(pageSource, /\{renderCoffeeHeaderModelChrome\(\)\}/);
+    assert.match(
+      pageSource,
+      /const renderCoffeeHeaderModelChrome = \([\s\S]{0,120}\): React\.ReactNode => \(/,
+    );
+    assert.match(pageSource, /\{renderCoffeeHeaderModelChrome\(\{/);
 
     const startPanelRule = ruleForExactSelector(".coffeeGroupStartPanel");
     assert.match(
@@ -1489,7 +1495,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*shellPolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer\(\{/
+      /: coffeeSetupComposerVisible\s*\?\s*renderCoffeeSetupComposer\(\)\s*:\s*coffeeGroupStartComposerVisible\s*\?\s*renderCoffeeGroupStartComposer\(\)\s*:\s*coffeeChromePolicy\.reviewActive\s*\?\s*null\s*:\s*renderShellComposer\(\{/
     );
 
     const setupButtonRule = ruleForExactSelector(".coffeeSetupComposerButton");
@@ -1766,11 +1772,11 @@ describe("Coffee seat arrival CSS", () => {
   it("docks the Coffee pot directly above the composer", () => {
     assert.match(
       pageSource,
-      /const coffeePotVisible =[\s\S]*conversationActive[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!previewingSession[\s\S]*!coffeeReplayActive[\s\S]*coffeeBarRitual\?\.role === "pot";/
+      /const coffeePotVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!previewingSession &&\s*!coffeeReplayActive;/
     );
     assert.match(
       pageSource,
-      /const coffeePotComposerDockVisible =[\s\S]*coffeeSessionPhase === "arriving"[\s\S]*coffeeSessionPhase === "live"[\s\S]*!coffeeReplayActive[\s\S]*coffeeConversation\?\.coffeeSettings\?\.barRitual\?\.role === "pot";/
+      /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive;/
     );
     assert.match(
       pageSource,

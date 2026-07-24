@@ -49,6 +49,7 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth.ts";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
+import { coffeeSeatScreenRelativeMouthRotationDeg } from "./coffee-seat-plate.ts";
 
 function randomBetween(lo: number, hi: number): number {
   return lo + Math.random() * (hi - lo);
@@ -130,14 +131,6 @@ function rotatedFaceOffset(
       ),
     ),
   };
-}
-
-function screenRelativeFacePartRotationDeg(
-  valueDeg: number,
-  rotateDeg: number,
-): number {
-  const wrapped = ((((valueDeg - rotateDeg + 180) % 360) + 360) % 360) - 180;
-  return Object.is(wrapped, -0) ? 0 : Number(wrapped.toFixed(3));
 }
 
 function coffeeSeatEmojiPartForGlyph(args: {
@@ -349,6 +342,12 @@ export function CoffeeSeatPlateEmoji({
     : 1;
   const normalizedFaceMouthCharacter =
     normalizeBotFaceMouthCharacter(faceMouthCharacter);
+  const transientSipPucker =
+    normalizedFaceMouthCharacter !== null &&
+    COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(normalizedFaceMouthCharacter) &&
+    !Array.from(baseText).some((glyph) =>
+      COFFEE_SEAT_SIP_MOUTH_GLYPHS.has(glyph),
+    );
   const normalizedFaceMouthAnimation =
     normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
   // Default means the authored glyph is the resting mouth while speech uses
@@ -591,9 +590,13 @@ export function CoffeeSeatPlateEmoji({
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
   const faceMouthRotationCssDeg =
     normalizedFaceMouthRotationDeg === undefined
-      ? undefined
-      : normalizedFaceMouthCharacter
-        ? screenRelativeFacePartRotationDeg(
+      ? transientSipPucker
+        ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
+        : undefined
+      : transientSipPucker
+        ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
+        : normalizedFaceMouthCharacter
+        ? coffeeSeatScreenRelativeMouthRotationDeg(
             normalizedFaceMouthRotationDeg,
             rotateDeg,
           )
@@ -688,6 +691,7 @@ export function CoffeeSeatPlateEmoji({
         normalizedFaceEyeCharacter ? normalizedFaceEyeCount : undefined
       }
       data-face-mouth-character={renderedFaceMouthCharacter ?? undefined}
+      data-face-transient-pucker={transientSipPucker ? "true" : undefined}
       data-face-mouth-animation={
         renderedFaceMouthCharacter ? normalizedFaceMouthAnimation : undefined
       }

@@ -1,5 +1,8 @@
 import { extractStageDirectionCues } from "./botMention.ts";
-import { routeAudioElementToPrismOutput } from "./signalAudioMasterCapture.ts";
+import {
+  replayAudioMasterCaptureActive,
+  routeAudioElementToPrismOutput,
+} from "./replayAudioMasterCapture.ts";
 
 export type CoffeeActionSfxKind =
   | "cup_set_down"
@@ -375,6 +378,10 @@ export async function playPreparedCoffeeActionSfx(args: {
   const url = clip ? URL.createObjectURL(clip) : bundledPlayback!.source;
   const audio = new Audio(url);
   const outputCleanup = routeAudioElementToPrismOutput(audio);
+  if (!outputCleanup && replayAudioMasterCaptureActive()) {
+    if (clip) URL.revokeObjectURL(url);
+    return false;
+  }
   activeAudioOutputCleanup = outputCleanup;
   activeAudio = audio;
   activeAudioUrl = clip ? url : null;

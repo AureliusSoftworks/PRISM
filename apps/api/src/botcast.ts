@@ -7748,7 +7748,7 @@ export function buildBotcastSpeakerPrompt(
       : "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line after your opening, return only `...`. This overrides every later question, answer, closing, and vocal-reaction instruction."
     : null;
   const eternalIntroductionRule = !muteRule && speakerEternallyIntroduces
-    ? "Hard short-term-amnesia rule: receive and understand only the current other-speaker on-air message below. Respond directly to its concrete content as fresh first contact. You do not know the episode topic unless that message states it, and you do not know prior turns or your own earlier messages. Keep your assigned host or guest role; never claim older familiarity, use private episode history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it."
+    ? `Hard short-term-amnesia rule: receive and understand only the current other-speaker on-air message below. Respond directly to its concrete content as fresh first contact. You do not know the episode topic unless that message states it, and you do not know prior turns or your own earlier messages. Immutable identity: you are "${speaker.name}", and the other speaker is "${peerAddressName}". Never call yourself "${peerAddressName}", adopt their identity, or swap your assigned host or guest role. Never claim older familiarity, use private episode history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it.`
     : null;
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(speaker.powers);
   const responseBudgetRule = responseBudget
@@ -8094,7 +8094,33 @@ type BotcastUtteranceRepairReason =
   | "non_answering_deferral"
   | "peer_label"
   | "policy_refusal"
-  | "production_meta";
+  | "production_meta"
+  | "speaker_identity_swap";
+
+function botcastSpeakerClaimsPeerIdentity(
+  content: string,
+  peerName: string,
+): boolean {
+  const peerParts = peerName
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
+  if (peerParts.length === 0) return false;
+  const aliases = [
+    peerParts.join(" "),
+    ...(peerParts.length > 1 &&
+    !/^(?:a|an|the|producer|host|guest)$/iu.test(peerParts[0]!)
+      ? [peerParts[0]!]
+      : []),
+  ]
+    .sort((left, right) => right.length - left.length)
+    .map((alias) => alias.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
+  const peerIdentity = `(?:${aliases.join("|")})`;
+  return new RegExp(
+    `(?:^|[.!?…]\\s+)[“"'‘’]?\\s*(?:hello[,!—\\s-]*)?(?:i\\s*(?:am|['’]m)|my\\s+name\\s+is)\\s+${peerIdentity}(?=$|[\\s,;:.!?…—-])`,
+    "iu",
+  ).test(content);
+}
 
 function sanitizeUtteranceWithRepair(
   raw: string,
@@ -8103,6 +8129,7 @@ function sanitizeUtteranceWithRepair(
   peerName: string,
   speakerRole: BotcastSpeakerRole,
   allowLeadingStageAction = false,
+  rejectPeerIdentityClaim = false,
 ): { content: string; repairReason: BotcastUtteranceRepairReason | null } {
   const repaired = (repairReason: BotcastUtteranceRepairReason) => ({
     content: fallback,
@@ -8167,6 +8194,12 @@ function sanitizeUtteranceWithRepair(
   if (!cleaned) return repaired("empty_after_cleanup");
   if (policyStyleRefusal) return repaired("policy_refusal");
   if (nonAnsweringDeferral) return repaired("non_answering_deferral");
+  if (
+    rejectPeerIdentityClaim &&
+    botcastSpeakerClaimsPeerIdentity(spokenContent, peerName)
+  ) {
+    return repaired("speaker_identity_swap");
+  }
   if (botcastUtteranceAppearsIncomplete(cleaned)) {
     return repaired("incomplete");
   }
@@ -8180,6 +8213,7 @@ function sanitizeUtterance(
   peerName: string,
   speakerRole: BotcastSpeakerRole,
   allowLeadingStageAction = false,
+  rejectPeerIdentityClaim = false,
 ): string {
   return sanitizeUtteranceWithRepair(
     raw,
@@ -8188,6 +8222,7 @@ function sanitizeUtterance(
     peerName,
     speakerRole,
     allowLeadingStageAction,
+    rejectPeerIdentityClaim,
   ).content;
 }
 
@@ -8196,6 +8231,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   speakerName: string;
   peerName: string;
   speakerRole: BotcastSpeakerRole;
+  rejectPeerIdentityClaim?: boolean;
 }):
   | { ok: true; value: string }
   | { ok: false; reason: "empty" | "refusal" | "invalid_output" } {
@@ -8207,6 +8243,8 @@ function validateBotcastAutoSpeakerUtterance(input: {
     input.speakerName,
     input.peerName,
     input.speakerRole,
+    false,
+    input.rejectPeerIdentityClaim,
   );
   const spokenContent = extractBotcastVoicePerformance(sanitized, false).content;
   if (
@@ -10101,6 +10139,7 @@ export async function advanceBotcastEpisode(
                   speakerName: speaker.name,
                   peerName: peer.name,
                   speakerRole,
+                  rejectPeerIdentityClaim: speakerEternallyIntroduces,
                 }),
             }),
       });
@@ -10138,11 +10177,17 @@ export async function advanceBotcastEpisode(
             speakerName: speaker.name,
             peerName: peer.name,
             speakerRole,
+            rejectPeerIdentityClaim: speakerEternallyIntroduces,
           }),
         validationRetryInstruction: [
           "The previous draft was rejected before it could go on air.",
           `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
           "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
+          ...(speakerEternallyIntroduces
+            ? [
+                `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
+              ]
+            : []),
           "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
           "Do not add speaker labels, production notes, stage directions, or private instructions.",
         ].join(" "),
@@ -10449,6 +10494,7 @@ export async function advanceBotcastEpisode(
     peerAddressName,
     speakerRole,
     true,
+    speakerEternallyIntroduces,
   );
   const generatedContent = generatedUtterance.content;
   const performance = extractBotcastVoicePerformance(
