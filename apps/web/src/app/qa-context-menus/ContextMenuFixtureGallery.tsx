@@ -178,6 +178,9 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
       action("settings", "Settings", <Settings />),
       action("atmosphere", "Atmosphere", <ImageGlyph />, { kind: "toggle", checked: false }),
       action("theme", "Theme: Dark", <Sparkles />),
+      action("copy-verbose-transcript", "Copy Verbose Transcript", <Copy />, {
+        feedback: "Copied",
+      }),
     ];
     const lock = id === "canvas-coffee-live"
       ? "Coffee setup is locked while the session is live."

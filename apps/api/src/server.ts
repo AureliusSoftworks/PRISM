@@ -17922,7 +17922,9 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
-      if (conversation.conversation_mode === "zen") {
+      // Standard Zen export stays blocked (product surface). Developer format is
+      // available so digests builds can clipboard a verbose diagnostic transcript.
+      if (conversation.conversation_mode === "zen" && !developerTranscript) {
         throw new HttpError(
           400,
           "Zen conversations cannot be exported from the chat surface.",

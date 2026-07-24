@@ -19650,8 +19650,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
   color: var(--fg-muted);
   font-size: 12px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  text-transform: none;
 }
 
 .chatArchiveLoadingSpinner {
@@ -19751,8 +19751,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .messages[data-chat-ephemeral="true"] .message h4 {
   font-size: 11px;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.02em;
   color: color-mix(in srgb, var(--fg) 66%, transparent);
+  text-transform: none;
 }
 
 .messages[data-chat-ephemeral="true"] .message p,
@@ -19885,7 +19886,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-weight: 720;
   line-height: 1;
   opacity: 0.5;
-  text-transform: uppercase;
+  /* Canvas-facing labels stay sentence/natural case; Action input chrome stays uppercase. */
+  text-transform: none;
 }
 
 .zenActionCueActor::after,
@@ -19906,7 +19908,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-style: italic;
   overflow-wrap: anywhere;
   opacity: 0.94;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .chatEphemeralMarkdownBody {

@@ -110,7 +110,7 @@ describe("shared composer actions", () => {
     );
   });
 
-  it("uppercases action text visually without changing its canonical value", () => {
+  it("uppercases Action-field chrome only; canvas action copy stays sentence case", () => {
     assert.match(
       pageCssSource,
       /\.composerActionField > input \{[\s\S]{0,360}font-weight: 750;[\s\S]{0,120}letter-spacing: 0\.08em;[\s\S]{0,120}text-transform: uppercase;/u,
@@ -118,6 +118,14 @@ describe("shared composer actions", () => {
     assert.match(
       pageCssSource,
       /\.zenActionCueText \{[\s\S]{0,220}text-transform: none;/u,
+    );
+    assert.match(
+      pageCssSource,
+      /\.zenActionCueActor,[\s\S]{0,220}\.zenActionComposerPreviewActor \{[\s\S]{0,280}text-transform: none;/u,
+    );
+    assert.match(
+      pageCssSource,
+      /\.zenActionComposerPreviewText \{[\s\S]{0,220}text-transform: none;/u,
     );
     assert.match(
       pageCssSource,
