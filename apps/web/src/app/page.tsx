@@ -71514,6 +71514,89 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
+  /** Expand /prompts, !decks, and {slots}/{a|b} for non-chat composers. */
+  function expandComposerDraft(rawDraft: string): string {
+    if (!rawDraft.trim()) return rawDraft;
+    const commandCenterResolution =
+      resolveCommandCenterPromptShortcuts(rawDraft);
+    if (commandCenterResolution.kind === "error") return rawDraft;
+    const base =
+      commandCenterResolution.kind === "resolved"
+        ? commandCenterResolution.prompt
+        : rawDraft;
+    return resolveComposerWildcardDraft(base).prompt;
+  }
+
+  type PickAwareComposerFieldState = {
+    id?: string;
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+    disabled?: boolean;
+    multiline?: boolean;
+    ariaLabel?: string;
+    className?: string;
+    onBlur?: (value: string) => void;
+    onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
+  };
+
+  /** Compact ComposerInput with Prompt Center prompts + wildcard decks only. */
+  const renderPickAwareComposer = (
+    field: PickAwareComposerFieldState,
+  ): React.JSX.Element => {
+    const singleLine = field.multiline !== true;
+    return (
+      <div
+        id={field.id}
+        className={field.className}
+        data-pick-aware-composer="true"
+        data-multiline={field.multiline ? "true" : undefined}
+        onKeyDown={field.onKeyDown}
+        onBlur={(event) => {
+          if (
+            field.onBlur &&
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
+            field.onBlur(field.value);
+          }
+        }}
+      >
+        <ComposerInput
+          enabled={false}
+          disabled={field.disabled === true}
+          value={field.value}
+          placeholder={field.placeholder}
+          writingAssistEnabled={false}
+          submitDisabled={true}
+          submitLabel="Send"
+          submitAriaLabel={field.ariaLabel ?? field.placeholder}
+          hideSubmitButton
+          actionInputEnabled={false}
+          resolvedTheme={resolvedTheme}
+          mentionBots={EMPTY_COMPOSER_MENTION_PICKS}
+          commandPicks={EMPTY_COMPOSER_COMMAND_PICKS}
+          toolPicks={EMPTY_COMPOSER_COMMAND_PICKS}
+          promptPicks={commandCenterPromptPicks}
+          wildcardPicks={composerWildcardDeckPicks}
+          dismissPopoversSignal={composerPopoverDismissSignal}
+          onChange={(event) => {
+            const next = singleLine
+              ? event.currentTarget.value.replace(/\n/g, " ")
+              : event.currentTarget.value;
+            field.onChange(next);
+          }}
+          onValueChange={(nextValue) => {
+            const next = singleLine
+              ? nextValue.replace(/\n/g, " ")
+              : nextValue;
+            field.onChange(next);
+          }}
+          onFocus={() => undefined}
+        />
+      </div>
+    );
+  };
+
   function clearPendingImageJobPoll(jobId: string) {
     const handle = pendingImageJobPollTimersRef.current.get(jobId);
     if (handle !== undefined) {
@@ -117488,8 +117571,9 @@ function HomeContent(): React.JSX.Element {
     }
   };
   const sendCoffeeTurn = async (overrideText?: string) => {
-    const liveDraft =
+    const rawDraft =
       overrideText ?? coffeeComposerRichRef.current?.getValue() ?? coffeeDraft;
+    const liveDraft = expandComposerDraft(rawDraft);
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
     if (settings?.voiceMode && settings.voiceMode !== "mute") {
@@ -125112,6 +125196,10 @@ function HomeContent(): React.JSX.Element {
                 onValueChange: updateCoffeeDraftFromComposer,
                 onFocus: () => {},
                 mentionBots: coffeeMentionBotPicks,
+                commandPicks: composerCommandPicks,
+                toolPicks: COMPOSER_TOOL_PICKS,
+                promptPicks: commandCenterPromptPicks,
+                wildcardPicks: composerWildcardDeckPicks,
                 topContent:
                   coffeePotComposerDockVisible || coffeeShhVisible ? (
                     <div className={styles.coffeeComposerTools}>
@@ -126305,6 +126393,8 @@ function HomeContent(): React.JSX.Element {
           }
           theme={resolvedTheme}
           producerName={user?.displayName?.trim() || "You"}
+          expandComposerDraft={expandComposerDraft}
+          renderPickAwareComposer={renderPickAwareComposer}
           renderProducerGuestComposer={(composer) =>
             renderShellComposer({
               variant: "signal",
@@ -126339,8 +126429,8 @@ function HomeContent(): React.JSX.Element {
               mentionBots: EMPTY_COMPOSER_MENTION_PICKS,
               commandPicks: EMPTY_COMPOSER_COMMAND_PICKS,
               toolPicks: EMPTY_COMPOSER_COMMAND_PICKS,
-              promptPicks: EMPTY_COMPOSER_COMMAND_PICKS,
-              wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS,
+              promptPicks: commandCenterPromptPicks,
+              wildcardPicks: composerWildcardDeckPicks,
               showQueuedPromptRail: false,
               composeBotSelected: true,
               composeReady: !composer.disabled,
@@ -126751,6 +126841,8 @@ function HomeContent(): React.JSX.Element {
           onCompanionContextChange={setSlateCompanionContext}
           requestedProjectId={requestedSlateProjectId}
           onDiscussSelection={prepareSlateSelectionHandoff}
+          renderPickAwareComposer={renderPickAwareComposer}
+          expandComposerDraft={expandComposerDraft}
         />
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}

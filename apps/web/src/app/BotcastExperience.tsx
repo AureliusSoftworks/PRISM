@@ -480,6 +480,22 @@ export interface BotcastExperienceProps {
   renderProducerGuestComposer?: (
     state: BotcastProducerGuestComposerState,
   ) => ReactNode;
+  /**
+   * Compact pick-aware composer for booking/setup fields (prompts + wildcards).
+   */
+  renderPickAwareComposer?: (state: {
+    id?: string;
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+    disabled?: boolean;
+    multiline?: boolean;
+    ariaLabel?: string;
+    className?: string;
+    onBlur?: (value: string) => void;
+  }) => ReactNode;
+  /** Expand /prompts, !decks, and {slots}/{a|b} before booking or guest send. */
+  expandComposerDraft?: (rawDraft: string) => string;
 }
 
 type BotcastLiveSpeech = {
@@ -1052,6 +1068,8 @@ export function BotcastExperience({
   navigationHeader,
   producerName = "You",
   renderProducerGuestComposer,
+  renderPickAwareComposer,
+  expandComposerDraft,
 }: BotcastExperienceProps): React.JSX.Element {
   const eligibleBots = useMemo(
     () => [...bots].sort((a, b) => a.name.localeCompare(b.name)),
@@ -3235,15 +3253,17 @@ export function BotcastExperience({
     setError(null);
     setNotice("Finding the show hidden inside this host…");
     try {
+      const premiseInspiration = (
+        expandComposerDraft?.(showPremiseInspirationDraft) ??
+        showPremiseInspirationDraft
+      ).trim();
       const response = await request<{ show: BotcastShow }>(
         "/api/botcast/shows",
         {
         method: "POST",
         body: JSON.stringify({
           hostBotId: hostDraftId,
-          ...(showPremiseInspirationDraft.trim()
-            ? { premise: showPremiseInspirationDraft.trim() }
-            : {}),
+          ...(premiseInspiration ? { premise: premiseInspiration } : {}),
         }),
         },
       );
@@ -3290,7 +3310,10 @@ export function BotcastExperience({
 
   const saveShowPremise = async (nextPremise?: string): Promise<void> => {
     if (!selectedShow) return;
-    const premise = (nextPremise ?? showPremiseDraft).trim();
+    const premise = (
+      expandComposerDraft?.(nextPremise ?? showPremiseDraft) ??
+      (nextPremise ?? showPremiseDraft)
+    ).trim();
     if (!premise || premise === selectedShow.premise) {
       setShowPremiseDraft(selectedShow.premise);
       return;
@@ -3951,7 +3974,10 @@ export function BotcastExperience({
                   guestKind: "bot",
                   guestBotId: guestDraftId,
                   topic: topicDraft,
-                  producerBrief: producerBriefDraft,
+                  producerBrief: (
+                    expandComposerDraft?.(producerBriefDraft) ??
+                    producerBriefDraft
+                  ).trim(),
                 }),
             preferredProvider: episodeProvider,
             responseMode,
@@ -4944,7 +4970,9 @@ export function BotcastExperience({
       (speakingMessageId !== null && !producerGuestHostInterruption)
     )
       return;
-    const answer = producerGuestAnswerDraft.trim();
+    const answer = (
+      expandComposerDraft?.(producerGuestAnswerDraft) ?? producerGuestAnswerDraft
+    ).trim();
     if (!answer) return;
     const nextRole = botcastNextSpeakerRole({
       messages: episode.messages,
@@ -6692,16 +6720,29 @@ export function BotcastExperience({
         <label htmlFor="botcast-premise-inspiration">
           Premise inspiration <span>optional</span>
         </label>
-        <textarea
-          id="botcast-premise-inspiration"
-          value={showPremiseInspirationDraft}
-          maxLength={360}
-          rows={3}
-          placeholder="A spark, tension, or reason this show should exist"
-          onChange={(event) =>
-            setShowPremiseInspirationDraft(event.target.value)
-          }
-        />
+        {renderPickAwareComposer ? (
+          renderPickAwareComposer({
+            id: "botcast-premise-inspiration",
+            value: showPremiseInspirationDraft,
+            onChange: setShowPremiseInspirationDraft,
+            placeholder: "A spark, tension, or reason this show should exist",
+            multiline: true,
+            ariaLabel: "Premise inspiration",
+            className: styles.pickAwareSetupField,
+            disabled: busy,
+          })
+        ) : (
+          <textarea
+            id="botcast-premise-inspiration"
+            value={showPremiseInspirationDraft}
+            maxLength={360}
+            rows={3}
+            placeholder="A spark, tension, or reason this show should exist"
+            onChange={(event) =>
+              setShowPremiseInspirationDraft(event.target.value)
+            }
+          />
+        )}
         <button
           type="button"
           onClick={() => void createShow()}
@@ -7072,7 +7113,10 @@ export function BotcastExperience({
               guestBotId: suggestionGuest.id,
               field,
               currentTopic: topicDraft,
-              currentProducerBrief: producerBriefDraft,
+              currentProducerBrief: (
+                expandComposerDraft?.(producerBriefDraft) ??
+                producerBriefDraft
+              ).trim(),
               preferredProvider: episodeModelProvider,
               responseMode,
               modelOverride:
@@ -7428,12 +7472,26 @@ export function BotcastExperience({
             Private producer comments <span>optional</span>
             </label>
             <div className={styles.contextualTextField} data-multiline="true">
-            <textarea
-                id="signal-producer-brief"
-              value={producerBriefDraft}
-              onChange={(event) => setProducerBriefDraft(event.target.value)}
-              placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
-            />
+              {renderPickAwareComposer ? (
+                renderPickAwareComposer({
+                  id: "signal-producer-brief",
+                  value: producerBriefDraft,
+                  onChange: setProducerBriefDraft,
+                  placeholder:
+                    "The provocative question, angle, boundaries, and follow-ups. This stays off-mic.",
+                  multiline: true,
+                  ariaLabel: "Private producer comments",
+                  className: styles.pickAwareSetupField,
+                  disabled: busy,
+                })
+              ) : (
+                <textarea
+                  id="signal-producer-brief"
+                  value={producerBriefDraft}
+                  onChange={(event) => setProducerBriefDraft(event.target.value)}
+                  placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
+                />
+              )}
               <button
                 type="button"
                 className={styles.contextualDiceButton}
@@ -9167,27 +9225,41 @@ export function BotcastExperience({
                         >
                           Premise
                         </label>
-                        <textarea
-                          id={`signal-show-premise-${selectedShow.id}`}
-                          className={styles.showLookPremiseInput}
-                          value={showPremiseDraft}
-                          maxLength={360}
-                          rows={3}
-                          disabled={busy}
-                          aria-label="Edit show premise"
-                          onChange={(event) =>
-                            setShowPremiseDraft(event.target.value)
-                          }
-                          onBlur={(event) =>
-                            void saveShowPremise(event.currentTarget.value)
-                          }
-                          onKeyDown={(event) => {
-                            if (event.key === "Escape") {
-                              setShowPremiseDraft(selectedShow.premise);
-                              event.currentTarget.blur();
+                        {renderPickAwareComposer ? (
+                          renderPickAwareComposer({
+                            id: `signal-show-premise-${selectedShow.id}`,
+                            value: showPremiseDraft,
+                            onChange: setShowPremiseDraft,
+                            placeholder: "Show premise",
+                            multiline: true,
+                            ariaLabel: "Edit show premise",
+                            className: `${styles.showLookPremiseInput} ${styles.pickAwareSetupField}`,
+                            disabled: busy,
+                            onBlur: (value) => void saveShowPremise(value),
+                          })
+                        ) : (
+                          <textarea
+                            id={`signal-show-premise-${selectedShow.id}`}
+                            className={styles.showLookPremiseInput}
+                            value={showPremiseDraft}
+                            maxLength={360}
+                            rows={3}
+                            disabled={busy}
+                            aria-label="Edit show premise"
+                            onChange={(event) =>
+                              setShowPremiseDraft(event.target.value)
                             }
-                          }}
-                        />
+                            onBlur={(event) =>
+                              void saveShowPremise(event.currentTarget.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Escape") {
+                                setShowPremiseDraft(selectedShow.premise);
+                                event.currentTarget.blur();
+                              }
+                            }}
+                          />
+                        )}
                         <button
                           type="button"
                           onPointerDown={(event) => event.preventDefault()}

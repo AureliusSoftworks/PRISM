@@ -1088,7 +1088,7 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /variant: "signal"/u);
     assert.match(
       pageSource,
-      /variant: "signal"[\s\S]{0,1400}mentionBots: EMPTY_COMPOSER_MENTION_PICKS[\s\S]{0,300}commandPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}toolPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}promptPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS/u,
+      /variant: "signal"[\s\S]{0,1400}mentionBots: EMPTY_COMPOSER_MENTION_PICKS[\s\S]{0,300}commandPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}toolPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}promptPicks: commandCenterPromptPicks[\s\S]{0,300}wildcardPicks: composerWildcardDeckPicks/u,
     );
     assert.match(pageSource, /showQueuedPromptRail: false/u);
     assert.match(

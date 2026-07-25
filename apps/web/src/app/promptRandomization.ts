@@ -1,6 +1,7 @@
 import {
   isDisabledPromptWildcardToken,
   parseBuiltInPromptWildcardReference,
+  resolveContextualBuiltInPromptWildcards,
   type PromptShortcutWildcardReplacement,
 } from "@localai/shared";
 
@@ -305,9 +306,18 @@ function normalizedPromptRandomizationReplacementsForPrompt(
 
 export function resolveBuiltInPromptWildcardInvocations(
   source: string,
-  existingReplacements?: readonly PromptShortcutWildcardReplacement[]
+  existingReplacements?: readonly PromptShortcutWildcardReplacement[],
+  options: {
+    now?: Date;
+    locales?: Intl.LocalesArgument;
+  } = {}
 ): PromptRandomizationResolution {
-  return normalizeNounPluralShorthand(source, existingReplacements);
+  const normalized = normalizeNounPluralShorthand(source, existingReplacements);
+  return resolveContextualBuiltInPromptWildcards(normalized.prompt, {
+    now: options.now,
+    locales: options.locales,
+    existingReplacements: normalized.replacements,
+  });
 }
 
 function buildPromptRandomizationDeckLookup(

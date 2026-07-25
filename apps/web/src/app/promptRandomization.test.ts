@@ -412,6 +412,25 @@ describe("resolveBuiltInPromptWildcardInvocations", () => {
       },
     ]);
   });
+
+  it("resolves {TODAY} locally before send", () => {
+    const now = new Date(2026, 6, 25, 12, 0, 0);
+    const result = resolveBuiltInPromptWildcardInvocations(
+      "Journal entry for {TODAY}.",
+      undefined,
+      { now, locales: "en-US" }
+    );
+    assert.match(result.prompt, /Journal entry for Saturday, July 25, 2026\./u);
+    assert.deepEqual(result.replacements, [
+      {
+        key: "TODAY",
+        value: "Saturday, July 25, 2026",
+        start: "Journal entry for ".length,
+        end: "Journal entry for Saturday, July 25, 2026".length,
+        source: "wildcard",
+      },
+    ]);
+  });
 });
 
 describe("pending built-in wildcard slot masking", () => {

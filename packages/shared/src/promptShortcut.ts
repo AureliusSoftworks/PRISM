@@ -171,6 +171,15 @@ export const BUILT_IN_PROMPT_WILDCARD_SLOTS = [
     pickerVisibility: "primary",
   },
   {
+    key: "TODAY",
+    label: "TODAY",
+    aliases: ["today", "date", "current-date"],
+    title: "Insert today’s calendar date.",
+    generationHint:
+      "Return today’s real calendar date in a short natural format. Never invent a fictional date.",
+    pickerVisibility: "primary",
+  },
+  {
     key: "PROBLEM",
     label: "PROBLEM",
     aliases: ["problem", "obstacle", "complication"],
@@ -525,6 +534,157 @@ export function parseBuiltInPromptWildcardReference(
     slot,
     key: slot.key as BuiltInPromptWildcardSlotKey,
     reference,
+  };
+}
+
+/** Built-ins resolved from local context (not random seeds or the model). */
+export function isContextualBuiltInPromptWildcardKey(key: string): boolean {
+  return key === "TODAY";
+}
+
+/**
+ * Formats today’s date for `{TODAY}` using the runtime locale.
+ * Example: "Saturday, July 25, 2026"
+ */
+export function formatBuiltInPromptWildcardToday(
+  now: Date = new Date(),
+  locales?: Intl.LocalesArgument
+): string {
+  return new Intl.DateTimeFormat(locales, {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+}
+
+export function contextualBuiltInPromptWildcardValue(
+  key: string,
+  options: {
+    now?: Date;
+    locales?: Intl.LocalesArgument;
+  } = {}
+): string | null {
+  if (key === "TODAY") {
+    return formatBuiltInPromptWildcardToday(options.now, options.locales);
+  }
+  return null;
+}
+
+const CONTEXTUAL_BUILT_IN_WILDCARD_BRACE_RE = /\{([^{}\r\n]{1,80})\}/gu;
+
+/**
+ * Replaces contextual built-ins such as `{TODAY}` with local values before
+ * random/model wildcard resolution.
+ */
+export function resolveContextualBuiltInPromptWildcards(
+  source: string,
+  options: {
+    now?: Date;
+    locales?: Intl.LocalesArgument;
+    existingReplacements?: readonly PromptShortcutWildcardReplacement[];
+  } = {}
+): {
+  prompt: string;
+  replacements: PromptShortcutWildcardReplacement[];
+} {
+  const matches: Array<{
+    start: number;
+    end: number;
+    key: BuiltInPromptWildcardSlotKey;
+    token: string;
+    value: string;
+  }> = [];
+  CONTEXTUAL_BUILT_IN_WILDCARD_BRACE_RE.lastIndex = 0;
+  for (const match of source.matchAll(CONTEXTUAL_BUILT_IN_WILDCARD_BRACE_RE)) {
+    const token = match[0] ?? "";
+    const parsed = parseBuiltInPromptWildcardReference(match[1] ?? "");
+    if (!parsed || !isContextualBuiltInPromptWildcardKey(parsed.key)) continue;
+    const value = contextualBuiltInPromptWildcardValue(parsed.key, options);
+    if (!value) continue;
+    const start = match.index ?? -1;
+    if (start < 0 || !token) continue;
+    matches.push({
+      start,
+      end: start + token.length,
+      key: parsed.key,
+      token,
+      value,
+    });
+  }
+
+  const existing = (options.existingReplacements ?? [])
+    .filter((replacement) => {
+      const start = replacement.start;
+      const end = replacement.end;
+      return (
+        typeof start === "number" &&
+        typeof end === "number" &&
+        Number.isFinite(start) &&
+        Number.isFinite(end) &&
+        start >= 0 &&
+        end > start &&
+        end <= source.length
+      );
+    })
+    .sort(
+      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+    );
+
+  if (matches.length === 0) {
+    return {
+      prompt: source,
+      replacements: existing.map((replacement) => ({ ...replacement })),
+    };
+  }
+
+  let prompt = "";
+  let cursor = 0;
+  const replacements: PromptShortcutWildcardReplacement[] = [];
+  const preserveSegment = (
+    segmentStart: number,
+    segmentEnd: number,
+    resolvedSegmentStart: number
+  ): void => {
+    for (const replacement of existing) {
+      const start = replacement.start ?? -1;
+      const end = replacement.end ?? -1;
+      if (start < segmentStart || end > segmentEnd) continue;
+      replacements.push({
+        ...replacement,
+        start: resolvedSegmentStart + (start - segmentStart),
+        end: resolvedSegmentStart + (end - segmentStart),
+      });
+    }
+  };
+
+  for (const match of matches) {
+    const segmentStart = cursor;
+    const segmentEnd = match.start;
+    const resolvedSegmentStart = prompt.length;
+    prompt += source.slice(segmentStart, segmentEnd);
+    preserveSegment(segmentStart, segmentEnd, resolvedSegmentStart);
+    const start = prompt.length;
+    prompt += match.value;
+    replacements.push({
+      key: match.key,
+      value: match.value,
+      start,
+      end: start + match.value.length,
+      source: "wildcard",
+    });
+    cursor = match.end;
+  }
+  const finalSegmentStart = cursor;
+  const finalResolvedSegmentStart = prompt.length;
+  prompt += source.slice(finalSegmentStart);
+  preserveSegment(finalSegmentStart, source.length, finalResolvedSegmentStart);
+
+  return {
+    prompt,
+    replacements: replacements.sort(
+      (a, b) => (a.start ?? 0) - (b.start ?? 0) || (a.end ?? 0) - (b.end ?? 0)
+    ),
   };
 }
 

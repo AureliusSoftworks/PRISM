@@ -3,6 +3,7 @@ import {
   getBuiltInPromptWildcardSlot,
   isDisabledPromptWildcardToken,
   parseBuiltInPromptWildcardReference,
+  contextualBuiltInPromptWildcardValue,
   type PromptShortcutWildcardReplacement,
 } from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "./providers.ts";
@@ -41,6 +42,8 @@ export function generateScriptedPromptWildcardValue(
   if (key === "NUM") {
     return String(randomInt(1, 11));
   }
+  const contextualValue = contextualBuiltInPromptWildcardValue(key);
+  if (contextualValue) return contextualValue;
   const values = SCRIPTED_PROMPT_WILDCARD_VALUES[key];
   if (!values || values.length === 0) return null;
   const availableValues =

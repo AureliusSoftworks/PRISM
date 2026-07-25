@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -109,6 +110,19 @@ interface SlateWorkspaceProps {
     selectionStart: number;
     selectionEnd: number;
   }) => void | Promise<void>;
+  renderPickAwareComposer?: (state: {
+    id?: string;
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+    disabled?: boolean;
+    multiline?: boolean;
+    ariaLabel?: string;
+    className?: string;
+    onBlur?: (value: string) => void;
+    onKeyDown?: (event: ReactKeyboardEvent<HTMLElement>) => void;
+  }) => ReactNode;
+  expandComposerDraft?: (rawDraft: string) => string;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -413,6 +427,8 @@ export default function SlateWorkspace({
   onCompanionContextChange,
   requestedProjectId,
   onDiscussSelection,
+  renderPickAwareComposer,
+  expandComposerDraft,
 }: SlateWorkspaceProps): React.JSX.Element {
   const { activeMenu, openMenu, closeMenu } = usePrismMenu();
   const [projects, setProjects] = useState<SlateProjectSummary[]>([]);
@@ -1264,7 +1280,10 @@ export default function SlateWorkspace({
 
   const sendCompanionMessage = async (): Promise<void> => {
     const current = projectRef.current;
-    const content = companionDraft.trim();
+    const rawContent = companionDraft.trim();
+    const content = (
+      expandComposerDraft?.(rawContent) ?? rawContent
+    ).trim();
     if (!current || !content || companionBusy) return;
     const optimisticMessage: SlateProjectChatMessage = {
       id: `local-${Date.now()}`,
@@ -3911,31 +3930,64 @@ export default function SlateWorkspace({
                   void sendCompanionMessage();
                 }}
               >
-                <textarea
-                  value={companionDraft}
-                  onChange={(event) => setCompanionDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      toggleCompanion();
-                    } else if (
-                      shouldSubmitComposerOnEnter({
-                        key: event.key,
-                        shiftKey: event.shiftKey,
-                        isComposing: event.nativeEvent.isComposing,
-                      })
-                    ) {
-                      event.preventDefault();
-                      if (!companionBusy && companionDraft.trim()) {
-                        event.currentTarget.form?.requestSubmit();
+                {renderPickAwareComposer ? (
+                  renderPickAwareComposer({
+                    value: companionDraft,
+                    onChange: setCompanionDraft,
+                    placeholder: "Catch the next idea…",
+                    multiline: true,
+                    ariaLabel: "Message the project companion",
+                    disabled: companionBusy,
+                    className: styles.companionPickAwareField,
+                    onKeyDown: (event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        toggleCompanion();
+                      } else if (
+                        shouldSubmitComposerOnEnter({
+                          key: event.key,
+                          shiftKey: event.shiftKey,
+                          isComposing: event.nativeEvent.isComposing,
+                        })
+                      ) {
+                        event.preventDefault();
+                        if (!companionBusy && companionDraft.trim()) {
+                          (
+                            event.currentTarget.closest("form") as
+                              | HTMLFormElement
+                              | null
+                          )?.requestSubmit();
+                        }
                       }
-                    }
-                  }}
-                  placeholder="Catch the next idea…"
-                  aria-label="Message the project companion"
-                  rows={2}
-                  enterKeyHint="send"
-                />
+                    },
+                  })
+                ) : (
+                  <textarea
+                    value={companionDraft}
+                    onChange={(event) => setCompanionDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        toggleCompanion();
+                      } else if (
+                        shouldSubmitComposerOnEnter({
+                          key: event.key,
+                          shiftKey: event.shiftKey,
+                          isComposing: event.nativeEvent.isComposing,
+                        })
+                      ) {
+                        event.preventDefault();
+                        if (!companionBusy && companionDraft.trim()) {
+                          event.currentTarget.form?.requestSubmit();
+                        }
+                      }
+                    }}
+                    placeholder="Catch the next idea…"
+                    aria-label="Message the project companion"
+                    rows={2}
+                    enterKeyHint="send"
+                  />
+                )}
                 <footer>
                   <small>Ideas fade · the last 3 can recover after a close</small>
                   <button

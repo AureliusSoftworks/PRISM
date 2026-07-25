@@ -411,6 +411,8 @@
 .producerGuestContext small { color: var(--botcast-muted); line-height: 1.5; }
 .contextualTextField { position: relative; display: grid; min-width: 0; }
 .contextualTextField input, .contextualTextField textarea { padding-right: 48px; }
+.pickAwareSetupField { min-width: 0; }
+.contextualTextField .pickAwareSetupField { padding-right: 44px; }
 .contextualDiceButton { position: absolute; top: 50%; right: 7px; width: 32px; height: 32px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 32%, var(--botcast-line)); border-radius: 8px; padding: 0; color: color-mix(in srgb, var(--botcast-host-accent) 58%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-soft-panel)); box-shadow: 0 5px 14px color-mix(in srgb, var(--botcast-host-accent) 10%, transparent); cursor: pointer; }
 .contextualTextField[data-multiline="true"] .contextualDiceButton { top: 7px; transform: none; }
 .contextualDiceButton svg { width: 16px; height: 16px; stroke-width: 1.9; }

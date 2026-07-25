@@ -53,6 +53,35 @@ describe("prompt wildcard resolution", () => {
     assert.equal(Number.isInteger(num) && num >= 1 && num <= 10, true);
   });
 
+  it("resolves TODAY from the local calendar without calling the provider", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for TODAY");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: "Write about {TODAY}.",
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.doesNotMatch(result.prompt, /\{TODAY\}/u);
+    assert.match(result.prompt, /\d{4}/u);
+    assert.equal(result.replacements[0]?.key, "TODAY");
+    assert.equal(
+      generateScriptedPromptWildcardValue("TODAY"),
+      result.replacements[0]?.value
+    );
+  });
+
   it("resolves built-in wildcard slots without calling the provider", async () => {
     let providerCalls = 0;
     const provider: LlmProvider = {

@@ -134,6 +134,10 @@ describe("mode tutorials", () => {
         MODE_TUTORIALS.slate.steps[0]?.body ?? "",
         /waits for your confirmation or another try/i,
       );
+      assert.match(
+        MODE_TUTORIALS.slate.steps[6]?.body ?? "",
+        /Type \/ for Prompt Center prompts and ! for wildcard decks in the companion composer/u,
+      );
       assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /privacy-matched book cover/i);
       assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /regenerate either title or cover/i);
       assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /project shelf becomes home/i);
@@ -368,6 +372,10 @@ describe("mode tutorials", () => {
       );
       assert.match(joinStep?.body ?? "", /Review stays quiet/u);
       assert.match(joinStep?.body ?? "", /remain off camera/u);
+      assert.match(
+        joinStep?.body ?? "",
+        /Type \/ for Prompt Center prompts and ! for wildcard decks/u,
+      );
       assert.doesNotMatch(joinStep?.body ?? "", /Prism leave first/u);
       assert.match(joinStep?.body ?? "", /each bot physically depart/u);
     });
@@ -1043,6 +1051,14 @@ describe("mode tutorials", () => {
       assert.match(booking?.body ?? "", /whether they have coffee at all/u);
       assert.match(booking?.body ?? "", /cups only for bots who drink coffee/u);
       assert.match(booking?.body ?? "", /drag the visible pieces/u);
+      assert.match(
+        booking?.body ?? "",
+        /Prompt Center \/prompts and !wildcard decks/u,
+      );
+      assert.match(
+        booking?.body ?? "",
+        /Topic field remains a single-line title input/u,
+      );
     });
 
   it("teaches automatic ElevenLabs mood delivery in every mood-aware voice lane", () => {

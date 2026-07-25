@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  formatBuiltInPromptWildcardToday,
   getBuiltInPromptWildcardSlot,
   isDisabledPromptWildcardToken,
   normalizeBuiltInPromptWildcardSlotKey,
@@ -10,6 +11,7 @@ import {
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredPsychicThoughtPayload,
+  resolveContextualBuiltInPromptWildcards,
   serializePromptShortcutPayload,
   serializePromptToolPayload,
   withPromptShortcutResolvedPrompt,
@@ -31,6 +33,9 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{number}"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("number"), "NUM");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{BOT}"), "BOT");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{TODAY}"), "TODAY");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("current-date"), "TODAY");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("date"), "TODAY");
   });
 
   it("rejects unsupported built-in wildcard keys", () => {
@@ -94,6 +99,7 @@ describe("built-in prompt wildcard slots", () => {
       "GENRE",
       "COLOR",
       "TIME",
+      "TODAY",
       "PROBLEM",
     ]);
     assert.equal(getBuiltInPromptWildcardSlot("CONTAINER")?.pickerVisibility, "searchable");
@@ -124,6 +130,26 @@ describe("built-in prompt wildcard slots", () => {
     assert.match(name.generationHint, /first name/iu);
     assert.match(person.title, /person, role, or character type/iu);
     assert.match(person.generationHint, /person, role, job, or character type/iu);
+  });
+
+  it("resolves {TODAY} to the local calendar date", () => {
+    const now = new Date(2026, 6, 25, 12, 0, 0);
+    const expected = formatBuiltInPromptWildcardToday(now, "en-US");
+    assert.equal(expected, "Saturday, July 25, 2026");
+
+    const result = resolveContextualBuiltInPromptWildcards(
+      "Meet on {TODAY} and again on {today}.",
+      { now, locales: "en-US" }
+    );
+    assert.equal(result.prompt, `Meet on ${expected} and again on ${expected}.`);
+    assert.deepEqual(
+      result.replacements.map(({ key, value, source }) => ({ key, value, source })),
+      [
+        { key: "TODAY", value: expected, source: "wildcard" },
+        { key: "TODAY", value: expected, source: "wildcard" },
+      ]
+    );
+    assert.equal(getBuiltInPromptWildcardSlot("TODAY")?.pickerVisibility, "primary");
   });
 
   it("keeps the STYLE generation rule focused on tone or genre labels", () => {

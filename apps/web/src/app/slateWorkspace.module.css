@@ -3083,6 +3083,11 @@
   font: 0.76rem/1.45 var(--font-ui-sans), system-ui, sans-serif;
 }
 
+.companionPickAwareField {
+  width: 100%;
+  min-width: 0;
+}
+
 .companionComposerBubble textarea::placeholder {
   color: var(--fg-muted, #938b82);
 }

@@ -669,6 +669,7 @@ export {
 export {
   normalizePromptShortcutMetadata,
   isDisabledPromptWildcardToken,
+  isContextualBuiltInPromptWildcardKey,
   normalizeBuiltInPromptWildcardSlotKey,
   normalizeManualAskQuestionResultPayload,
   normalizePromptWildcardRunMetadata,
@@ -683,7 +684,10 @@ export {
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  contextualBuiltInPromptWildcardValue,
+  formatBuiltInPromptWildcardToday,
   getBuiltInPromptWildcardSlot,
+  resolveContextualBuiltInPromptWildcards,
   type BuiltInPromptWildcardReference,
   type BuiltInPromptWildcardSlot,
   type BuiltInPromptWildcardSlotKey,
