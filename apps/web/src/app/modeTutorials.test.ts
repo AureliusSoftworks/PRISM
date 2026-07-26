@@ -652,7 +652,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-        /Randomize booking/u,
+        /Book for me/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -670,7 +670,22 @@ describe("mode tutorials", () => {
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
         /AUTO uses that choice as Primary/u,
       );
-      assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /small dice/u);
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+        /Shift-click.*Option Space.*Control Space.*Space rerolls.*Escape.*restores/u,
+      );
+      assert.doesNotMatch(
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+        /small dice|Randomize booking/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
+        /skippable Refract ritual/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+        /temporary one-line direction.*raw prompt is not remembered/u,
+      );
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
         /Me — go on as the guest/u,

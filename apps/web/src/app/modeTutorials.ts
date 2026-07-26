@@ -295,6 +295,25 @@ function currentSignalPowerTutorialBody(step: ModeTutorialStep): string {
     );
 }
 
+function currentSignalRefractTutorialBody(
+  body: string,
+  index: number,
+): string {
+  const current = body
+    .replace("Randomize booking", "Book for me")
+    .replace(
+      "The small dice beside Topic and Private comments can regenerate either field on its own.",
+      "Refract replaces the old Topic and Private comments dice: Shift-click either registered field, focus it and press Option Space on macOS or Control Space elsewhere, or drag the Prism orb onto it. Space rerolls after a draft settles; Enter or Tab keeps it, while Escape or an outside click restores the original.",
+    );
+  if (index === 0) {
+    return `${current} The first eligible creative control offers one skippable Refract ritual: summon Prism, press Space once, then keep the draft or restore what you had.`;
+  }
+  if (index === 1) {
+    return `${current} Ordinary clicks on Complete this show, Book for me, blurbs, studio, logo, and atmosphere keep their current behavior. Refracting one of those actions opens a temporary one-line direction for only that pass; its raw prompt is not remembered.`;
+  }
+  return current;
+}
+
 export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
   zen: {
@@ -328,7 +347,10 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   botcast: {
     ...BASE_MODE_TUTORIALS.botcast,
     steps: BASE_MODE_TUTORIALS.botcast.steps.map((step, index) => {
-      const body = currentSignalPowerTutorialBody(step);
+      const body = currentSignalRefractTutorialBody(
+        currentSignalPowerTutorialBody(step),
+        index,
+      );
       return index === 5
         ? {
             ...step,

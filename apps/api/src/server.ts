@@ -181,12 +181,16 @@ import {
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
   type BotcastProducerCutInterruption,
+  type BotcastGenerationOptions,
   ensureBotcastEpisodePersonaReview,
   generateBotcastBookingSuggestion,
+  generateBotcastDirectedBooking,
   generateBotcastProducerGuestBooking,
+  generateBotcastRefractDraft,
   generateBotcastShowAtmosphere,
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
+  generateBotcastShowLogoThesis,
   generateBotcastShowMusicIdentity,
   generateBotcastShowName,
   generateBotcastShowPremise,
@@ -663,6 +667,8 @@ import {
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
   BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   buildSignalMusicProfile,
+  normalizePrismRefractDirection,
+  normalizePrismRefractRequest,
   signalPersonaTemperamentFor,
   type BotcastProducerCue,
   type BotcastShowPatchRequest,
@@ -8467,6 +8473,94 @@ function buildRoutes(): RouteDefinition[] {
     // Signal is a deliberately isolated anthology pipeline. Its internal
     // botcast namespace reuses bot personas/providers but never enters
     // Chat/Coffee memory or relationship paths.
+    route("POST", "/api/prism/refract", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      let request;
+      try {
+        request = normalizePrismRefractRequest(ctx.body);
+      } catch (error) {
+        throw new HttpError(
+          400,
+          error instanceof Error
+            ? error.message
+            : "A valid Prism Refract request is required.",
+        );
+      }
+      const autoFallbackChain = parseStoredAutoFallbackChain(
+        user.auto_fallback_chain,
+      );
+      const requestedResponseMode = normalizeResponseMode(
+        request.responseMode,
+        user.preferred_provider === "local" ? "local" : "online",
+      );
+      const localModeLocked = user.preferred_provider === "local";
+      const autoEnabled =
+        !localModeLocked &&
+        requestedResponseMode === "auto" &&
+        user.auto_switch_model === 1 &&
+        autoFallbackChain !== null;
+      const preferredProvider = localModeLocked
+        ? "local"
+        : (request.preferredProvider ?? user.preferred_provider);
+      const requestedModelOverride = readCoffeeSessionSpeakerModel(
+        request.modelOverride,
+      );
+      const accountModel =
+        preferredProvider === "local"
+          ? user.preferred_local_model
+          : user.preferred_online_model;
+      const availableAccountModel =
+        accountModel && !isDisabledModelChoice(accountModel)
+          ? accountModel
+          : null;
+      const modelOverride =
+        localModeLocked &&
+        request.preferredProvider !== undefined &&
+        request.preferredProvider !== "local"
+          ? availableAccountModel
+          : (requestedModelOverride ?? availableAccountModel);
+      const result = await generateBotcastRefractDraft(
+        db,
+        userId,
+        request.target,
+        request.currentValue,
+        request.rejectedValues,
+        modelOverride,
+        {
+          preferredProvider,
+          responseMode: autoEnabled
+            ? "auto"
+            : preferredProvider === "local"
+              ? "local"
+              : "online",
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          autoFallbackChain,
+          providerFactory: providerFactoryOverride,
+        },
+      );
+      if (!result.generated || !result.value) {
+        throw new HttpError(
+          502,
+          "Prism could not produce a usable draft. Press Space to try again.",
+        );
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        value: result.value,
+        provider: result.provider,
+        model: result.model,
+      });
+    }),
     route("GET", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, shows: listBotcastShows(db, userId) });
@@ -8731,30 +8825,71 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
-        requestedProvider === "local" ||
-        requestedProvider === "openai" ||
-        requestedProvider === "anthropic"
-          ? requestedProvider
-          : user.preferred_provider;
+        user.preferred_provider === "local"
+          ? "local"
+          : requestedProvider === "local" ||
+              requestedProvider === "openai" ||
+              requestedProvider === "anthropic"
+            ? requestedProvider
+            : user.preferred_provider;
       const result = await generateBotcastShowIdentity(
         db,
         userId,
         ctx.params.id,
         {
-        preferredProvider,
-        openAiApiKey:
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-        anthropicApiKey:
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
             getAnthropicApiKeyForUser(userId, userKey) ??
             config.anthropicApiKey,
-        secondaryOllamaHost: user.secondary_ollama_host,
-        preferredLocalModel: user.preferred_local_model,
-        preferredOnlineModel: user.preferred_online_model,
-        providerFactory: providerFactoryOverride,
-        preserveArtwork: body.preserveArtwork === true,
-        keywords: normalizeSignalGenerationKeywords(body.keywords),
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          providerFactory: providerFactoryOverride,
+          preserveArtwork: body.preserveArtwork === true,
+          keywords: normalizeSignalGenerationKeywords(body.keywords),
+          direction: normalizePrismRefractDirection(body.direction),
         },
       );
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/logo-direction", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedProvider = readProvider(body.preferredProvider);
+      const preferredProvider =
+        user.preferred_provider === "local"
+          ? "local"
+          : (requestedProvider ?? user.preferred_provider);
+      const result = await generateBotcastShowLogoThesis(
+        db,
+        userId,
+        ctx.params.id,
+        {
+          preferredProvider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          providerFactory: providerFactoryOverride,
+          keywords: normalizeSignalGenerationKeywords(body.keywords),
+          direction: normalizePrismRefractDirection(body.direction),
+        },
+      );
+      if (!result.generated) {
+        throw new HttpError(
+          502,
+          "Signal could not produce a usable logo direction.",
+        );
+      }
       json(ctx.res, 200, { ok: true, ...result });
     }),
     route("POST", "/api/botcast/shows/:id/blurbs", async (ctx) => {
@@ -8764,11 +8899,13 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
-        requestedProvider === "local" ||
-        requestedProvider === "openai" ||
-        requestedProvider === "anthropic"
-          ? requestedProvider
-          : user.preferred_provider;
+        user.preferred_provider === "local"
+          ? "local"
+          : requestedProvider === "local" ||
+              requestedProvider === "openai" ||
+              requestedProvider === "anthropic"
+            ? requestedProvider
+            : user.preferred_provider;
       const result = await generateBotcastShowDashboardBlurbs(
         db,
         userId,
@@ -8785,6 +8922,7 @@ function buildRoutes(): RouteDefinition[] {
           preferredOnlineModel: user.preferred_online_model,
           providerFactory: providerFactoryOverride,
           keywords: normalizeSignalGenerationKeywords(body.keywords),
+          direction: normalizePrismRefractDirection(body.direction),
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8890,11 +9028,13 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
-        requestedProvider === "local" ||
-        requestedProvider === "openai" ||
-        requestedProvider === "anthropic"
-          ? requestedProvider
-          : user.preferred_provider;
+        user.preferred_provider === "local"
+          ? "local"
+          : requestedProvider === "local" ||
+              requestedProvider === "openai" ||
+              requestedProvider === "anthropic"
+            ? requestedProvider
+            : user.preferred_provider;
       const result = await generateBotcastShowAtmosphere(
         db,
         userId,
@@ -8910,6 +9050,8 @@ function buildRoutes(): RouteDefinition[] {
           preferredLocalModel: user.preferred_local_model,
           preferredOnlineModel: user.preferred_online_model,
           providerFactory: providerFactoryOverride,
+          keywords: normalizeSignalGenerationKeywords(body.keywords),
+          direction: normalizePrismRefractDirection(body.direction),
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8921,11 +9063,13 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const requestedProvider = body.preferredProvider;
       const preferredProvider: ProviderName =
-        requestedProvider === "local" ||
-        requestedProvider === "openai" ||
-        requestedProvider === "anthropic"
-          ? requestedProvider
-          : user.preferred_provider;
+        user.preferred_provider === "local"
+          ? "local"
+          : requestedProvider === "local" ||
+              requestedProvider === "openai" ||
+              requestedProvider === "anthropic"
+            ? requestedProvider
+            : user.preferred_provider;
       const result = await generateBotcastShowMusicIdentity(
         db,
         userId,
@@ -8942,6 +9086,7 @@ function buildRoutes(): RouteDefinition[] {
           preferredOnlineModel: user.preferred_online_model,
           providerFactory: providerFactoryOverride,
           keywords: normalizeSignalGenerationKeywords(body.keywords),
+          direction: normalizePrismRefractDirection(body.direction),
         },
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -8997,41 +9142,78 @@ function buildRoutes(): RouteDefinition[] {
         requestedProvider !== "local"
           ? availableAccountModel
           : (requestedModelOverride ?? availableAccountModel);
-      const result = await generateBotcastBookingSuggestion(
-        db,
-        userId,
-        ctx.params.id,
-        {
-          guestBotId:
-            typeof body.guestBotId === "string" ? body.guestBotId : "",
-          field,
-          currentTopic:
-            typeof body.currentTopic === "string" ? body.currentTopic : null,
-          currentProducerBrief:
-            typeof body.currentProducerBrief === "string"
-              ? body.currentProducerBrief
-              : null,
-          modelOverride,
-        },
-        {
-          preferredProvider,
-          responseMode: autoEnabled
-            ? "auto"
-            : preferredProvider === "local"
-              ? "local"
-              : "online",
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
-          autoFallbackChain,
-          providerFactory: providerFactoryOverride,
-        },
+      const generationKeywords = normalizeSignalGenerationKeywords(
+        body.keywords,
       );
+      const direction =
+        normalizePrismRefractDirection(body.direction) ||
+        generationKeywords[0] ||
+        "";
+      const generationOptions: BotcastGenerationOptions = {
+        preferredProvider,
+        responseMode: autoEnabled
+          ? "auto"
+          : preferredProvider === "local"
+            ? "local"
+            : "online",
+        openAiApiKey:
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+        anthropicApiKey:
+          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+        secondaryOllamaHost: user.secondary_ollama_host,
+        preferredLocalModel: user.preferred_local_model,
+        preferredOnlineModel: user.preferred_online_model,
+        autoFallbackChain,
+        providerFactory: providerFactoryOverride,
+        keywords: generationKeywords,
+        direction,
+      };
+      const result =
+        field === "booking" && direction
+          ? await generateBotcastDirectedBooking(
+              db,
+              userId,
+              ctx.params.id,
+              {
+                direction,
+                currentGuestBotId:
+                  typeof body.guestBotId === "string"
+                    ? body.guestBotId
+                    : null,
+                currentTopic:
+                  typeof body.currentTopic === "string"
+                    ? body.currentTopic
+                    : null,
+                currentProducerBrief:
+                  typeof body.currentProducerBrief === "string"
+                    ? body.currentProducerBrief
+                    : null,
+                modelOverride,
+              },
+              generationOptions,
+            )
+          : await generateBotcastBookingSuggestion(
+              db,
+              userId,
+              ctx.params.id,
+              {
+                guestBotId:
+                  typeof body.guestBotId === "string"
+                    ? body.guestBotId
+                    : "",
+                field,
+                currentTopic:
+                  typeof body.currentTopic === "string"
+                    ? body.currentTopic
+                    : null,
+                currentProducerBrief:
+                  typeof body.currentProducerBrief === "string"
+                    ? body.currentProducerBrief
+                    : null,
+                modelOverride,
+              },
+              generationOptions,
+            );
       if (!result.generated) {
         const fieldLabel =
           field === "booking"

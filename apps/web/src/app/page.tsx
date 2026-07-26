@@ -69040,6 +69040,15 @@ function HomeContent(): React.JSX.Element {
     const nextProgress: PrismTutorialProgress = {
       ...tutorialProgress,
       [mode]: { status: "pending", step: 0, remindAfter: null },
+      ...(mode === "botcast"
+        ? {
+            signalRefract: {
+              status: "pending" as const,
+              step: 0,
+              remindAfter: null,
+            },
+          }
+        : {}),
     };
     setTutorialProgress(nextProgress);
     const currentMode: TutorialMode | null =
@@ -96320,6 +96329,28 @@ function HomeContent(): React.JSX.Element {
 
   const renderGlobalPrismCompanion = (): React.JSX.Element | null => {
     if (!user || !settings) return null;
+    const resolveSignalRefractTutorial = (
+      status: "completed" | "skipped" | "remind",
+    ): void => {
+      const nextTutorialProgress: PrismTutorialProgress = {
+        ...tutorialProgress,
+        signalRefract: {
+          status,
+          step: 0,
+          remindAfter:
+            status === "remind"
+              ? new Date(
+                  Date.now() + TUTORIAL_REMIND_LATER_MS,
+                ).toISOString()
+              : null,
+        },
+      };
+      setTutorialProgress(nextTutorialProgress);
+      void persistLivingShellProgress(
+        { tutorialProgress: nextTutorialProgress },
+        false,
+      );
+    };
     const handoffLayer = pendingSlateHandoff ? (
       <PrismHandoffCanvas
         handoff={pendingSlateHandoff}
@@ -96410,6 +96441,19 @@ function HomeContent(): React.JSX.Element {
         <PrismCompanion
           accountKey={user.id}
           surface={prismCompanionSurfaceReference()}
+          refractTutorialActive={
+            view === "botcast" &&
+            prismTutorialShouldRun(tutorialProgress.signalRefract)
+          }
+          onRefractTutorialComplete={() =>
+            resolveSignalRefractTutorial("completed")
+          }
+          onRefractTutorialSkip={() =>
+            resolveSignalRefractTutorial("skipped")
+          }
+          onRefractTutorialRemind={() =>
+            resolveSignalRefractTutorial("remind")
+          }
           onAction={handlePrismCompanionAction}
           onError={setPanelError}
           onStopSpeaking={() => {
@@ -126819,6 +126863,7 @@ function HomeContent(): React.JSX.Element {
         {renderModeTutorialOverlay()}
         {renderDesktopFirstRunChecklist()}
         {renderBackendUnavailableNotice("banner")}
+        {renderGlobalPrismCompanion()}
         <GlyphTooltipLayer />
       </div>
     );

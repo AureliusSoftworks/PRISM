@@ -95,11 +95,13 @@ import {
   type ListenerReactionPlanV1,
   type ReplayManifestV2,
   type ReplayRecordingV1,
+  type PrismRefractResponse,
+  type PrismRefractSignalTextTarget,
   type SignalPersonaTemperament,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import { INTERRUPTED_SPEAKER_RETORT_PAUSE_MS } from "./listenerReactionVoice";
-import { Dices, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import {
   buildCoffeeCupVisualState,
   coffeeCupSipAnimationTiming,
@@ -116,6 +118,7 @@ import {
   type BotcastSpeechRevealState,
 } from "./botcastSpeechReveal";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { PrismRefractTarget } from "./prismRefract";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
 import {
@@ -161,6 +164,7 @@ import {
   type ModelWarmupIntermissionPhase,
 } from "./ModelWarmupIntermission";
 import { waitForModelPreparation } from "./modelPreparation";
+import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import {
   formatSignalAudienceViews,
   signalAudienceReviews,
@@ -528,10 +532,7 @@ type SignalReviewCopyState = {
   phase: "copying" | "copied" | "failed";
 };
 
-type SignalBookingSuggestionField = "topic" | "producerBrief";
-type SignalBookingSuggestionOperation =
-  | SignalBookingSuggestionField
-  | "booking";
+type SignalBookingSuggestionOperation = "booking";
 
 type SignalAssetSlot =
   | "day-studio"
@@ -3247,6 +3248,46 @@ export function BotcastExperience({
     }
   };
 
+  const generateSignalRefractDraft = async (
+    target: PrismRefractSignalTextTarget,
+    currentValue: string,
+    rejectedValues: readonly string[],
+    signal: AbortSignal,
+  ): Promise<string> => {
+    const bookingTarget =
+      target.kind === "signal.booking.topic" ||
+      target.kind === "signal.booking.producerBrief";
+    const selectedEpisodeModel = episodeModelDraft
+      ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
+      : null;
+    const routedProvider = bookingTarget
+      ? (selectedEpisodeModel?.provider ??
+        accountDefaultModelOption?.provider ??
+        preferredProvider)
+      : preferredProvider;
+    const response = await request<PrismRefractResponse>(
+      "/api/prism/refract",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          target,
+          currentValue,
+          rejectedValues,
+          preferredProvider: routedProvider,
+          responseMode,
+          ...(bookingTarget
+            ? {
+                modelOverride:
+                  selectedEpisodeModel?.id ?? accountDefaultModel,
+              }
+            : {}),
+        }),
+        signal,
+      },
+    );
+    return response.value;
+  };
+
   const createShow = async (): Promise<void> => {
     if (!hostDraftId) return;
     setBusy(true);
@@ -3332,45 +3373,7 @@ export function BotcastExperience({
     }
   };
 
-  const regenerateShowName = async (): Promise<void> => {
-    if (!selectedShow) return;
-    setBusy(true);
-    setError(null);
-    setBlockingOperation({
-      title: "Finding another name",
-      detail: `PRISM is listening for the idea at the heart of ${selectedShow.name}.`,
-      stepLabel: "Drafting and rejecting the obvious titles",
-      progress: null,
-      cancellable: false,
-    });
-    try {
-      const response = await request<{ show: BotcastShow; generated: boolean }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/name`,
-        {
-          method: "POST",
-          body: JSON.stringify({ preferredProvider }),
-        },
-      );
-      if (!response.generated) {
-        setNotice(
-          "Signal couldn’t find a different name. Try again whenever you want another pass.",
-        );
-        return;
-      }
-      replaceShow(response.show);
-      setShowNameDraft(response.show.name);
-      setNotice(
-        `“${response.show.name}” is now on the marquee. You can still edit it.`,
-      );
-    } catch (nameError) {
-      setError(signalErrorToast("Generate show name", nameError));
-    } finally {
-      setBlockingOperation(null);
-      setBusy(false);
-    }
-  };
-
-  const regenerateShowBlurbs = async (): Promise<void> => {
+  const regenerateShowBlurbs = async (direction = ""): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
     setError(null);
@@ -3392,7 +3395,10 @@ export function BotcastExperience({
         `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/blurbs`,
         {
           method: "POST",
-          body: JSON.stringify({ preferredProvider }),
+          body: JSON.stringify({
+            preferredProvider,
+            ...(direction ? { direction } : {}),
+          }),
         },
       );
       if (!response.generated) {
@@ -3444,13 +3450,14 @@ export function BotcastExperience({
     return response.job;
   };
 
-  const synthesizeShowLook = async (): Promise<void> => {
+  const synthesizeShowLook = async (direction = ""): Promise<void> => {
     if (!selectedShow) return;
     const controller = new AbortController();
     const identityStartedAt = performance.now();
     let showForPass = selectedShow;
     let artworkStarted = false;
     let artworkHandoffStarted = false;
+    let directionAppliedToAudioIdentity = false;
     const recoverableFailures: string[] = [];
     setBusy(true);
     setError(null);
@@ -3483,11 +3490,16 @@ export function BotcastExperience({
             generated: boolean;
           }>(`/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/brand`, {
             method: "POST",
-            body: JSON.stringify({ preferredProvider, preserveArtwork: true }),
+            body: JSON.stringify({
+              preferredProvider,
+              preserveArtwork: true,
+              ...(direction ? { direction } : {}),
+            }),
             signal: controller.signal,
           });
           showForPass = identity.show;
           if (identity.generated) {
+            directionAppliedToAudioIdentity = Boolean(direction);
             replaceShow(identity.show);
             setShowNameDraft(identity.show.name);
           } else {
@@ -3545,16 +3557,52 @@ export function BotcastExperience({
               ? { ...current, stepLabel: "Creating the missing audio package" }
               : current,
           );
-          try {
-            const response = await request<{ show: BotcastShow }>(
-              `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/intro-audio/generate`,
-              { method: "POST", body: JSON.stringify({}), signal: controller.signal },
-            );
-            showForPass = response.show;
-            replaceShow(response.show);
-          } catch (audioError) {
-            if (isAbortError(audioError)) throw audioError;
-            recoverableFailures.push("the ElevenLabs audio package");
+          let audioIdentityReady = true;
+          if (direction && !directionAppliedToAudioIdentity) {
+            try {
+              const identity = await request<{
+                show: BotcastShow;
+                generated: boolean;
+              }>(
+                `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/music-identity`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({
+                    preferredProvider,
+                    direction,
+                  }),
+                  signal: controller.signal,
+                },
+              );
+              if (!identity.generated) {
+                audioIdentityReady = false;
+                recoverableFailures.push("the directed audio identity");
+              } else {
+                showForPass = identity.show;
+                replaceShow(identity.show);
+              }
+            } catch (identityError) {
+              if (isAbortError(identityError)) throw identityError;
+              audioIdentityReady = false;
+              recoverableFailures.push("the directed audio identity");
+            }
+          }
+          if (audioIdentityReady) {
+            try {
+              const response = await request<{ show: BotcastShow }>(
+                `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/intro-audio/generate`,
+                {
+                  method: "POST",
+                  body: JSON.stringify({}),
+                  signal: controller.signal,
+                },
+              );
+              showForPass = response.show;
+              replaceShow(response.show);
+            } catch (audioError) {
+              if (isAbortError(audioError)) throw audioError;
+              recoverableFailures.push("the ElevenLabs audio package");
+            }
           }
         }
       }
@@ -3595,19 +3643,30 @@ export function BotcastExperience({
     }
   };
 
-  const regenerateStudio = async (): Promise<void> => {
+  const regenerateStudio = async (direction = ""): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
     setError(null);
     setNotice("Refreshing the show’s linked studio pair…");
     try {
-      const reset = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ regenerateAtmosphere: true }),
-        },
-      );
+      const reset = direction
+        ? await request<{ show: BotcastShow }>(
+            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/atmosphere/refresh`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                preferredProvider,
+                direction,
+              }),
+            },
+          )
+        : await request<{ show: BotcastShow }>(
+            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ regenerateAtmosphere: true }),
+            },
+          );
       replaceShow(reset.show);
       await startSignalArtworkJob(reset.show, ["night-studio", "day-studio"]);
       if (preferredProvider === "local") {
@@ -3618,7 +3677,10 @@ export function BotcastExperience({
         try {
           const response = await request<{ show: BotcastShow }>(
             `/api/botcast/shows/${encodeURIComponent(reset.show.id)}/atmosphere-audio/generate`,
-            { method: "POST", body: JSON.stringify({}) },
+            {
+              method: "POST",
+              body: JSON.stringify({}),
+            },
           );
           replaceShow(response.show);
           setNotice(
@@ -3641,19 +3703,30 @@ export function BotcastExperience({
     }
   };
 
-  const regenerateLogo = async (): Promise<void> => {
+  const regenerateLogo = async (direction = ""): Promise<void> => {
     if (!selectedShow) return;
     setBusy(true);
     setError(null);
     setNotice("Refreshing the show’s logo…");
     try {
-      const reset = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ regenerateLogo: true }),
-        },
-      );
+      const reset = direction
+        ? await request<{ show: BotcastShow }>(
+            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/logo-direction`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                preferredProvider,
+                direction,
+              }),
+            },
+          )
+        : await request<{ show: BotcastShow }>(
+            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ regenerateLogo: true }),
+            },
+          );
       replaceShow(reset.show);
       await startSignalArtworkJob(reset.show, ["logo"]);
       setNotice(
@@ -3667,7 +3740,7 @@ export function BotcastExperience({
     }
   };
 
-  const generateShowIntroAudio = async (): Promise<void> => {
+  const generateShowIntroAudio = async (direction = ""): Promise<void> => {
     if (!selectedShow) return;
     if (preferredProvider === "local") {
       setError(
@@ -3694,6 +3767,41 @@ export function BotcastExperience({
       cancellable: true,
     });
     try {
+      if (direction) {
+        setBlockingOperation((current) =>
+          current
+            ? {
+                ...current,
+                stepLabel: "Shaping the instrumental identity",
+              }
+            : current,
+        );
+        const identity = await request<{
+          show: BotcastShow;
+          generated: boolean;
+        }>(
+          `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/music-identity`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              preferredProvider,
+              direction,
+            }),
+            signal: controller.signal,
+          },
+        );
+        if (!identity.generated) {
+          throw new Error(
+            "Signal could not shape a usable audio identity for this pass.",
+          );
+        }
+        replaceShow(identity.show);
+        setBlockingOperation((current) =>
+          current
+            ? { ...current, stepLabel: "Creating the audio package" }
+            : current,
+        );
+      }
       const response = await request<{ show: BotcastShow }>(
         `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/intro-audio/generate`,
         {
@@ -6702,47 +6810,101 @@ export function BotcastExperience({
       </div>
       <div className={styles.createShowCard}>
         <label htmlFor="botcast-host-picker">Create a show</label>
-        <select
-          id="botcast-host-picker"
-          value={hostDraftId}
-          onChange={(event) => setHostDraftId(event.target.value)}
-          data-botcast-delete-focus-fallback="true"
+        <PrismRefractTarget
+          target={{
+            id: "signal-create-host",
+            kind: "choice",
+            label: "show host",
+            read: () => hostDraftId,
+            preview: setHostDraftId,
+            accept: setHostDraftId,
+            choices: () =>
+              eligibleBots
+                .filter(
+                  (bot) =>
+                    !shows.some((show) => show.hostBotId === bot.id),
+                )
+                .map((bot) => ({ value: bot.id, label: bot.name })),
+            disabled: () =>
+              busy ||
+              eligibleBots.every((bot) =>
+                shows.some((show) => show.hostBotId === bot.id),
+              ),
+          }}
         >
-          <option value="">Choose a host…</option>
-          {eligibleBots
-            .filter((bot) => !shows.some((show) => show.hostBotId === bot.id))
-            .map((bot) => (
-              <option key={bot.id} value={bot.id}>
-                {bot.name}
-              </option>
-            ))}
-          </select>
+          {(binding) => (
+            <select
+              {...binding}
+              id="botcast-host-picker"
+              value={hostDraftId}
+              onChange={(event) => setHostDraftId(event.target.value)}
+              data-botcast-delete-focus-fallback="true"
+            >
+              <option value="">Choose a host…</option>
+              {eligibleBots
+                .filter(
+                  (bot) =>
+                    !shows.some((show) => show.hostBotId === bot.id),
+                )
+                .map((bot) => (
+                  <option key={bot.id} value={bot.id}>
+                    {bot.name}
+                  </option>
+                ))}
+            </select>
+          )}
+        </PrismRefractTarget>
         <label htmlFor="botcast-premise-inspiration">
           Premise inspiration <span>optional</span>
         </label>
-        {renderPickAwareComposer ? (
-          renderPickAwareComposer({
-            id: "botcast-premise-inspiration",
-            value: showPremiseInspirationDraft,
-            onChange: setShowPremiseInspirationDraft,
-            placeholder: "A spark, tension, or reason this show should exist",
-            multiline: true,
-            ariaLabel: "Premise inspiration",
-            className: styles.pickAwareSetupField,
-            disabled: busy,
-          })
-        ) : (
-          <textarea
-            id="botcast-premise-inspiration"
-            value={showPremiseInspirationDraft}
-            maxLength={360}
-            rows={3}
-            placeholder="A spark, tension, or reason this show should exist"
-            onChange={(event) =>
-              setShowPremiseInspirationDraft(event.target.value)
-            }
-          />
-        )}
+        <PrismRefractTarget
+          target={{
+            id: "signal-create-premise",
+            kind: "field",
+            label: "premise inspiration",
+            read: () => showPremiseInspirationDraft,
+            preview: setShowPremiseInspirationDraft,
+            accept: setShowPremiseInspirationDraft,
+            disabled: () => busy || !hostDraftId,
+            generate: ({ currentValue, rejectedValues, signal }) =>
+              generateSignalRefractDraft(
+                { kind: "signal.create.premise", hostBotId: hostDraftId },
+                currentValue,
+                rejectedValues,
+                signal,
+              ),
+          }}
+        >
+          {(binding) =>
+            renderPickAwareComposer ? (
+              <div {...binding} tabIndex={-1}>
+                {renderPickAwareComposer({
+                  id: "botcast-premise-inspiration",
+                  value: showPremiseInspirationDraft,
+                  onChange: setShowPremiseInspirationDraft,
+                  placeholder:
+                    "A spark, tension, or reason this show should exist",
+                  multiline: true,
+                  ariaLabel: "Premise inspiration",
+                  className: styles.pickAwareSetupField,
+                  disabled: busy,
+                })}
+              </div>
+            ) : (
+              <textarea
+                {...binding}
+                id="botcast-premise-inspiration"
+                value={showPremiseInspirationDraft}
+                maxLength={360}
+                rows={3}
+                placeholder="A spark, tension, or reason this show should exist"
+                onChange={(event) =>
+                  setShowPremiseInspirationDraft(event.target.value)
+                }
+              />
+            )
+          }
+        </PrismRefractTarget>
         <button
           type="button"
           onClick={() => void createShow()}
@@ -7096,60 +7258,6 @@ export function BotcastExperience({
       selectedEpisodeModelOption?.provider ??
       accountDefaultModelOption?.provider ??
       preferredProvider;
-    const suggestionGuest = botsById.get(guestDraftId) ?? null;
-    const synthesizeBookingField = async (
-      field: SignalBookingSuggestionField,
-    ): Promise<void> => {
-      if (!suggestionGuest || bookingSuggestionBusy) return;
-      setBookingSuggestionBusy(field);
-      setError(null);
-      setNotice(null);
-      try {
-        const response = await request<{ value: string; generated: boolean }>(
-          `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/booking-suggestion`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              guestBotId: suggestionGuest.id,
-              field,
-              currentTopic: topicDraft,
-              currentProducerBrief: (
-                expandComposerDraft?.(producerBriefDraft) ??
-                producerBriefDraft
-              ).trim(),
-              preferredProvider: episodeModelProvider,
-              responseMode,
-              modelOverride:
-                selectedEpisodeModelOption?.id ?? accountDefaultModel,
-            }),
-          },
-        );
-        const value = response.value.trim();
-        if (!response.generated || !value) {
-          throw new Error(
-            "Signal could not synthesize a suggestion this time.",
-          );
-        }
-        if (field === "topic") setTopicDraft(value);
-        else setProducerBriefDraft(value);
-        setNotice(
-          field === "topic"
-            ? "A short guest-aware episode title is ready to edit."
-            : "A private producer angle is ready to edit.",
-        );
-      } catch (suggestionError) {
-        setError(
-          signalErrorToast(
-            "Generate booking suggestion",
-            suggestionError instanceof Error
-              ? suggestionError
-              : "Signal could not synthesize a suggestion this time.",
-          ),
-        );
-      } finally {
-        setBookingSuggestionBusy(null);
-      }
-    };
     const latestEpisodes = episodes
       .filter((item) => item.status === "completed")
       .slice(0, 5);
@@ -7222,16 +7330,16 @@ export function BotcastExperience({
         );
       }
     };
-    const randomizeBooking = async (): Promise<void> => {
+    const randomizeBooking = async (direction = ""): Promise<void> => {
       if (bookingSuggestionBusy) return;
-      const guestId = randomSignalEpisodeGuestId({
-        candidateGuestIds: guestOptions.map((bot) => bot.id),
-        hostBotId: hostBot.id,
-        currentGuestId: guestDraftId,
-      });
-      if (!guestId) return;
-      const bookingGuest = botsById.get(guestId);
-      if (!bookingGuest) return;
+      const guestId = direction
+        ? guestDraftId
+        : randomSignalEpisodeGuestId({
+            candidateGuestIds: guestOptions.map((bot) => bot.id),
+            hostBotId: hostBot.id,
+            currentGuestId: guestDraftId,
+          });
+      if (!direction && !guestId) return;
       setBookingSuggestionBusy("booking");
       setError(null);
       setNotice(null);
@@ -7239,6 +7347,7 @@ export function BotcastExperience({
         const response = await request<{
           topic: string;
           producerBrief: string;
+          guestBotId?: string;
           generated: boolean;
         }>(
           `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/booking-suggestion`,
@@ -7253,15 +7362,26 @@ export function BotcastExperience({
               responseMode,
               modelOverride:
                 selectedEpisodeModelOption?.id ?? accountDefaultModel,
+              ...(direction ? { direction } : {}),
             }),
           },
         );
         const topic = response.topic.trim();
         const producerBrief = response.producerBrief.trim();
-        if (!response.generated || !topic || !producerBrief) {
+        const resolvedGuestId = response.guestBotId ?? guestId;
+        const bookingGuest = resolvedGuestId
+          ? botsById.get(resolvedGuestId)
+          : undefined;
+        if (
+          !response.generated ||
+          !topic ||
+          !producerBrief ||
+          !resolvedGuestId ||
+          !bookingGuest
+        ) {
           throw new Error("Signal could not produce this booking.");
         }
-        setGuestDraftId(guestId);
+        setGuestDraftId(resolvedGuestId);
         setTopicDraft(topic);
         setProducerBriefDraft(producerBrief);
         setNotice(
@@ -7270,7 +7390,7 @@ export function BotcastExperience({
       } catch (bookingError) {
         setError(
           signalErrorToast(
-            "Randomize Signal booking",
+            "Book Signal guest",
             bookingError instanceof Error
               ? bookingError
               : "Signal could not produce this booking.",
@@ -7295,27 +7415,44 @@ export function BotcastExperience({
             </h2>
           </div>
           <div className={styles.productionHeadingActions}>
-            <button
-              type="button"
-              className={styles.randomizeBookingButton}
-              onClick={() => void randomizeBooking()}
-              disabled={
-                busy ||
-                Boolean(bookingSuggestionBusy) ||
-                producerGuestSelected ||
-                guestOptions.length === 0
-              }
-              aria-busy={bookingSuggestionBusy === "booking"}
+            <PrismRefractTarget
+              target={{
+                id: `signal-book-for-me-${selectedShow.id}`,
+                kind: "magic",
+                label: "Book for me",
+                run: randomizeBooking,
+                disabled: () =>
+                  busy ||
+                  Boolean(bookingSuggestionBusy) ||
+                  producerGuestSelected ||
+                  guestOptions.length === 0,
+              }}
             >
-              {bookingSuggestionBusy === "booking" ? (
-                <>
-                  <LoaderCircle data-loading="true" aria-hidden="true" />
-                  Booking…
-                </>
-              ) : (
-                "↻ Randomize booking"
+              {(binding) => (
+                <button
+                  {...binding}
+                  type="button"
+                  className={styles.randomizeBookingButton}
+                  onClick={() => void randomizeBooking()}
+                  disabled={
+                    busy ||
+                    Boolean(bookingSuggestionBusy) ||
+                    producerGuestSelected ||
+                    guestOptions.length === 0
+                  }
+                  aria-busy={bookingSuggestionBusy === "booking"}
+                >
+                  {bookingSuggestionBusy === "booking" ? (
+                    <>
+                      <LoaderCircle data-loading="true" aria-hidden="true" />
+                      Booking…
+                    </>
+                  ) : (
+                    "Book for me"
+                  )}
+                </button>
               )}
-            </button>
+            </PrismRefractTarget>
             <button
               type="button"
               data-tutorial-target="botcast-stage-layout"
@@ -7384,26 +7521,49 @@ export function BotcastExperience({
         <div className={styles.setupGrid}>
           <label>
             Guest
-            <select
-              value={guestDraftId}
-              onChange={(event) => setGuestDraftId(event.target.value)}
-              disabled={busy || Boolean(bookingSuggestionBusy)}
+            <PrismRefractTarget
+              target={{
+                id: `signal-episode-guest-${selectedShow.id}`,
+                kind: "choice",
+                label: "episode guest",
+                read: () => guestDraftId,
+                preview: setGuestDraftId,
+                accept: setGuestDraftId,
+                choices: () =>
+                  guestOptions.map((bot) => ({
+                    value: bot.id,
+                    label: bot.name,
+                  })),
+                disabled: () =>
+                  busy ||
+                  Boolean(bookingSuggestionBusy) ||
+                  guestOptions.length === 0,
+              }}
             >
-              <option value="">Choose one guest…</option>
-              <option
-                value={BOTCAST_PRODUCER_GUEST_ID}
-                disabled={producerGuestUnavailable}
-              >
-                {producerGuestUnavailable
-                  ? "Me — unavailable for this host"
-                  : "Me — go on as the guest"}
-              </option>
-              {guestOptions.map((bot) => (
-                <option key={bot.id} value={bot.id}>
-                  {bot.name}
-                </option>
-              ))}
-            </select>
+              {(binding) => (
+                <select
+                  {...binding}
+                  value={guestDraftId}
+                  onChange={(event) => setGuestDraftId(event.target.value)}
+                  disabled={busy || Boolean(bookingSuggestionBusy)}
+                >
+                  <option value="">Choose one guest…</option>
+                  <option
+                    value={BOTCAST_PRODUCER_GUEST_ID}
+                    disabled={producerGuestUnavailable}
+                  >
+                    {producerGuestUnavailable
+                      ? "Me — unavailable for this host"
+                      : "Me — go on as the guest"}
+                  </option>
+                  {guestOptions.map((bot) => (
+                    <option key={bot.id} value={bot.id}>
+                      {bot.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </PrismRefractTarget>
           </label>
           {producerGuestSelected ? (
             <div
@@ -7413,15 +7573,40 @@ export function BotcastExperience({
                 Interview direction{" "}
                 <span>optional · leave blank for host’s choice</span>
               </label>
-              <textarea
-                id="signal-producer-guest-context"
-                value={producerGuestContextDraft}
-                onChange={(event) =>
-                  setProducerGuestContextDraft(event.currentTarget.value)
-                }
-                placeholder="Share anything you want covered—or leave this blank and let the host surprise you."
-                maxLength={2000}
-              />
+              <PrismRefractTarget
+                target={{
+                  id: `signal-producer-guest-direction-${selectedShow.id}`,
+                  kind: "field",
+                  label: "Producer guest direction",
+                  read: () => producerGuestContextDraft,
+                  preview: setProducerGuestContextDraft,
+                  accept: setProducerGuestContextDraft,
+                  disabled: () => busy,
+                  generate: ({ currentValue, rejectedValues, signal }) =>
+                    generateSignalRefractDraft(
+                      {
+                        kind: "signal.booking.producerGuestDirection",
+                        showId: selectedShow.id,
+                      },
+                      currentValue,
+                      rejectedValues,
+                      signal,
+                    ),
+                }}
+              >
+                {(binding) => (
+                  <textarea
+                    {...binding}
+                    id="signal-producer-guest-context"
+                    value={producerGuestContextDraft}
+                    onChange={(event) =>
+                      setProducerGuestContextDraft(event.currentTarget.value)
+                    }
+                    placeholder="Share anything you want covered—or leave this blank and let the host surprise you."
+                    maxLength={2000}
+                  />
+                )}
+              </PrismRefractTarget>
               <small>
                 With no direction, the host chooses a fresh show-shaped topic
                 without inventing facts about you. You’ll be introduced as the
@@ -7437,83 +7622,106 @@ export function BotcastExperience({
             <label htmlFor="signal-episode-topic">
               Episode topic <span>public title</span>
             </label>
-            <div className={styles.contextualTextField}>
-            <input
-                id="signal-episode-topic"
-              value={topicDraft}
-              onChange={(event) => setTopicDraft(event.target.value)}
-              placeholder="A short public title, not the full question"
-            />
-              <button
-                type="button"
-                className={styles.contextualDiceButton}
-                onClick={() => void synthesizeBookingField("topic")}
-                disabled={
-                  busy || Boolean(bookingSuggestionBusy) || !suggestionGuest
-                }
-                aria-label="Synthesize a relevant episode topic"
-                title={
-                  suggestionGuest
-                    ? "Synthesize a relevant episode topic"
-                    : "Choose a guest first"
-                }
-                aria-busy={bookingSuggestionBusy === "topic"}
-              >
-                {bookingSuggestionBusy === "topic" ? (
-                  <LoaderCircle data-loading="true" aria-hidden="true" />
-                ) : (
-                  <Dices aria-hidden="true" />
-                )}
-              </button>
-            </div>
+            <PrismRefractTarget
+              target={{
+                id: `signal-episode-topic-${selectedShow.id}`,
+                kind: "field",
+                label: "episode topic",
+                read: () => topicDraft,
+                preview: setTopicDraft,
+                accept: setTopicDraft,
+                disabled: () =>
+                  busy ||
+                  Boolean(bookingSuggestionBusy) ||
+                  !guestDraftId ||
+                  guestDraftId === BOTCAST_PRODUCER_GUEST_ID,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateSignalRefractDraft(
+                    {
+                      kind: "signal.booking.topic",
+                      showId: selectedShow.id,
+                      guestBotId: guestDraftId,
+                    },
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
+              }}
+            >
+              {(binding) => (
+                <input
+                  {...binding}
+                  id="signal-episode-topic"
+                  value={topicDraft}
+                  onChange={(event) => setTopicDraft(event.target.value)}
+                  placeholder="A short public title, not the full question"
+                />
+              )}
+            </PrismRefractTarget>
           </div>
           <div className={`${styles.setupField} ${styles.producerBrief}`}>
             <label htmlFor="signal-producer-brief">
             Private producer comments <span>optional</span>
             </label>
-            <div className={styles.contextualTextField} data-multiline="true">
-              {renderPickAwareComposer ? (
-                renderPickAwareComposer({
-                  id: "signal-producer-brief",
-                  value: producerBriefDraft,
-                  onChange: setProducerBriefDraft,
-                  placeholder:
-                    "The provocative question, angle, boundaries, and follow-ups. This stays off-mic.",
-                  multiline: true,
-                  ariaLabel: "Private producer comments",
-                  className: styles.pickAwareSetupField,
-                  disabled: busy,
-                })
-              ) : (
-                <textarea
-                  id="signal-producer-brief"
-                  value={producerBriefDraft}
-                  onChange={(event) => setProducerBriefDraft(event.target.value)}
-                  placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
-                />
-              )}
-              <button
-                type="button"
-                className={styles.contextualDiceButton}
-                onClick={() => void synthesizeBookingField("producerBrief")}
-                disabled={
-                  busy || Boolean(bookingSuggestionBusy) || !suggestionGuest
-                }
-                aria-label="Synthesize a relevant private producer brief"
-                title={
-                  suggestionGuest
-                    ? "Synthesize a relevant private producer brief"
-                    : "Choose a guest first"
-                }
-                aria-busy={bookingSuggestionBusy === "producerBrief"}
-              >
-                {bookingSuggestionBusy === "producerBrief" ? (
-                  <LoaderCircle data-loading="true" aria-hidden="true" />
+            <PrismRefractTarget
+              target={{
+                id: `signal-producer-brief-${selectedShow.id}`,
+                kind: "field",
+                label: "private producer comments",
+                read: () => producerBriefDraft,
+                preview: setProducerBriefDraft,
+                accept: setProducerBriefDraft,
+                disabled: () =>
+                  busy ||
+                  Boolean(bookingSuggestionBusy) ||
+                  !guestDraftId ||
+                  guestDraftId === BOTCAST_PRODUCER_GUEST_ID,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateSignalRefractDraft(
+                    {
+                      kind: "signal.booking.producerBrief",
+                      showId: selectedShow.id,
+                      guestBotId: guestDraftId,
+                    },
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
+              }}
+            >
+              {(binding) =>
+                renderPickAwareComposer ? (
+                  <div
+                    {...binding}
+                    className={styles.contextualTextField}
+                    data-multiline="true"
+                    tabIndex={-1}
+                  >
+                    {renderPickAwareComposer({
+                      id: "signal-producer-brief",
+                      value: producerBriefDraft,
+                      onChange: setProducerBriefDraft,
+                      placeholder:
+                        "The provocative question, angle, boundaries, and follow-ups. This stays off-mic.",
+                      multiline: true,
+                      ariaLabel: "Private producer comments",
+                      className: styles.pickAwareSetupField,
+                      disabled: busy,
+                    })}
+                  </div>
                 ) : (
-                  <Dices aria-hidden="true" />
-                )}
-              </button>
-            </div>
+                  <textarea
+                    {...binding}
+                    id="signal-producer-brief"
+                    value={producerBriefDraft}
+                    onChange={(event) =>
+                      setProducerBriefDraft(event.target.value)
+                    }
+                    placeholder="The provocative question, angle, boundaries, and follow-ups. This stays off-mic."
+                  />
+                )
+              }
+            </PrismRefractTarget>
           </div>
           </>
           )}
@@ -7521,31 +7729,72 @@ export function BotcastExperience({
         <div className={styles.episodeLaunchRow}>
           <label className={styles.episodeLengthControl}>
             <span>Episode length</span>
-            <select
-              value={episodeDurationDraft ?? "auto"}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setEpisodeDurationDraft(
-                  value === "auto" ? null : Number(value),
-                );
+            <PrismRefractTarget
+              target={{
+                id: `signal-episode-length-${selectedShow.id}`,
+                kind: "choice",
+                label: "episode length",
+                read: () => String(episodeDurationDraft ?? "auto"),
+                preview: (value) =>
+                  setEpisodeDurationDraft(
+                    value === "auto" ? null : Number(value),
+                  ),
+                accept: (value) =>
+                  setEpisodeDurationDraft(
+                    value === "auto" ? null : Number(value),
+                  ),
+                choices: () => [
+                  { value: "auto", label: "Auto · natural ending" },
+                  ...Array.from(
+                    {
+                      length:
+                        BOTCAST_SESSION_DURATION_MINUTES_MAX -
+                        BOTCAST_SESSION_DURATION_MINUTES_MIN +
+                        1,
+                    },
+                    (_, index) => {
+                      const minutes =
+                        BOTCAST_SESSION_DURATION_MINUTES_MIN + index;
+                      return {
+                        value: String(minutes),
+                        label: `${minutes} minutes`,
+                      };
+                    },
+                  ),
+                ],
+                disabled: () => busy,
               }}
-              aria-label="Signal episode length"
             >
-              <option value="auto">Auto · natural ending</option>
-              {Array.from(
-                {
-                  length:
-                    BOTCAST_SESSION_DURATION_MINUTES_MAX -
-                    BOTCAST_SESSION_DURATION_MINUTES_MIN +
-                    1,
-                },
-                (_, index) => BOTCAST_SESSION_DURATION_MINUTES_MIN + index,
-              ).map((minutes) => (
-                <option key={minutes} value={minutes}>
-                  {minutes} minutes
-                </option>
-              ))}
-            </select>
+              {(binding) => (
+                <select
+                  {...binding}
+                  value={episodeDurationDraft ?? "auto"}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setEpisodeDurationDraft(
+                      value === "auto" ? null : Number(value),
+                    );
+                  }}
+                  aria-label="Signal episode length"
+                >
+                  <option value="auto">Auto · natural ending</option>
+                  {Array.from(
+                    {
+                      length:
+                        BOTCAST_SESSION_DURATION_MINUTES_MAX -
+                        BOTCAST_SESSION_DURATION_MINUTES_MIN +
+                        1,
+                    },
+                    (_, index) =>
+                      BOTCAST_SESSION_DURATION_MINUTES_MIN + index,
+                  ).map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {minutes} minutes
+                    </option>
+                  ))}
+                </select>
+              )}
+            </PrismRefractTarget>
             <small>
               {episodeDurationDraft === null
                 ? "No countdown · closes at a natural resting point"
@@ -7946,6 +8195,9 @@ export function BotcastExperience({
 
   return (
     <>
+      {liveSessionActive ? (
+        <PrismCompanionPresenceBoundary reason="signal-live-session" />
+      ) : null}
       <SessionAtmosphereLayer
         active={signalSessionAtmosphereActive({
           audioEnabled: introAudioEnabled,
@@ -8339,7 +8591,34 @@ export function BotcastExperience({
                 </span>
               {selectedShow ? (
                 <div className={styles.showTitleRow}>
+                  <PrismRefractTarget
+                    target={{
+                      id: `signal-show-header-name-${selectedShow.id}`,
+                      kind: "field",
+                      label: "show name",
+                      read: () => showNameDraft,
+                      preview: setShowNameDraft,
+                      accept: renameShow,
+                      disabled: () => busy || Boolean(replayEpisode),
+                      generate: ({
+                        currentValue,
+                        rejectedValues,
+                        signal,
+                      }) =>
+                        generateSignalRefractDraft(
+                          {
+                            kind: "signal.show.name",
+                            showId: selectedShow.id,
+                          },
+                          currentValue,
+                          rejectedValues,
+                          signal,
+                        ),
+                    }}
+                  >
+                    {(binding) => (
                     <input
+                      {...binding}
                       className={styles.showNameInput}
                       value={showNameDraft}
                       onChange={(event) => setShowNameDraft(event.target.value)}
@@ -8356,6 +8635,8 @@ export function BotcastExperience({
                     aria-label="Show name"
                     data-botcast-delete-focus-fallback="true"
                   />
+                    )}
+                  </PrismRefractTarget>
                   <div className={styles.showNameActions}>
                     <button
                       type="button"
@@ -9107,14 +9388,27 @@ export function BotcastExperience({
                         have installed, and can be rerun whenever a piece needs
                         another pass.
                       </small>
-                    <button
-                      type="button"
-                      data-signal-first-look-action="create"
-                      onClick={() => void synthesizeShowLook()}
-                      disabled={busy || selectedShowArtworkBusy}
+                    <PrismRefractTarget
+                      target={{
+                        id: `signal-complete-show-${selectedShow.id}`,
+                        kind: "magic",
+                        label: "Complete this show",
+                        run: synthesizeShowLook,
+                        disabled: () => busy || selectedShowArtworkBusy,
+                      }}
                     >
-                      Complete this show
-                    </button>
+                      {(binding) => (
+                        <button
+                          {...binding}
+                          type="button"
+                          data-signal-first-look-action="create"
+                          onClick={() => void synthesizeShowLook()}
+                          disabled={busy || selectedShowArtworkBusy}
+                        >
+                          Complete this show
+                        </button>
+                      )}
+                    </PrismRefractTarget>
                   </div>
                 ) : null}
                   <div
@@ -9174,50 +9468,58 @@ export function BotcastExperience({
                           >
                             Name
                           </label>
-                        <input
-                          id={`signal-show-name-${selectedShow.id}`}
-                          className={styles.showLookNameInput}
-                          value={showNameDraft}
-                          maxLength={80}
-                          disabled={busy}
-                          aria-label="Edit show name"
-                            onChange={(event) =>
-                              setShowNameDraft(event.target.value)
-                            }
-                            onBlur={(event) =>
-                              void renameShow(event.currentTarget.value)
-                            }
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              void renameShow(event.currentTarget.value);
-                              event.currentTarget.blur();
-                            } else if (event.key === "Escape") {
-                              setShowNameDraft(selectedShow.name);
-                              event.currentTarget.blur();
-                            }
+                        <PrismRefractTarget
+                          target={{
+                            id: `signal-show-identity-name-${selectedShow.id}`,
+                            kind: "field",
+                            label: "show name",
+                            read: () => showNameDraft,
+                            preview: setShowNameDraft,
+                            accept: renameShow,
+                            disabled: () => busy,
+                            generate: ({
+                              currentValue,
+                              rejectedValues,
+                              signal,
+                            }) =>
+                              generateSignalRefractDraft(
+                                {
+                                  kind: "signal.show.name",
+                                  showId: selectedShow.id,
+                                },
+                                currentValue,
+                                rejectedValues,
+                                signal,
+                              ),
                           }}
-                        />
-                        <button
-                          type="button"
-                          onPointerDown={(event) => event.preventDefault()}
-                          onClick={() => void renameShow()}
-                          disabled={
-                            busy ||
-                            !showNameDraft.trim() ||
-                            showNameDraft.trim() === selectedShow.name
-                          }
                         >
-                          Save name
-                        </button>
-                        <button
-                          type="button"
-                          data-signal-artwork-action="name"
-                          onPointerDown={(event) => event.preventDefault()}
-                          onClick={() => void regenerateShowName()}
-                          disabled={busy}
-                        >
-                          Regenerate name
-                        </button>
+                          {(binding) => (
+                            <input
+                              {...binding}
+                              id={`signal-show-name-${selectedShow.id}`}
+                              className={styles.showLookNameInput}
+                              value={showNameDraft}
+                              maxLength={80}
+                              disabled={busy}
+                              aria-label="Edit show name"
+                              onChange={(event) =>
+                                setShowNameDraft(event.target.value)
+                              }
+                              onBlur={(event) =>
+                                void renameShow(event.currentTarget.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  void renameShow(event.currentTarget.value);
+                                  event.currentTarget.blur();
+                                } else if (event.key === "Escape") {
+                                  setShowNameDraft(selectedShow.name);
+                                  event.currentTarget.blur();
+                                }
+                              }}
+                            />
+                          )}
+                        </PrismRefractTarget>
                       </div>
                       <div className={styles.showLookControlGroup}>
                         <label
@@ -9225,82 +9527,132 @@ export function BotcastExperience({
                         >
                           Premise
                         </label>
-                        {renderPickAwareComposer ? (
-                          renderPickAwareComposer({
-                            id: `signal-show-premise-${selectedShow.id}`,
-                            value: showPremiseDraft,
-                            onChange: setShowPremiseDraft,
-                            placeholder: "Show premise",
-                            multiline: true,
-                            ariaLabel: "Edit show premise",
-                            className: `${styles.showLookPremiseInput} ${styles.pickAwareSetupField}`,
-                            disabled: busy,
-                            onBlur: (value) => void saveShowPremise(value),
-                          })
-                        ) : (
-                          <textarea
-                            id={`signal-show-premise-${selectedShow.id}`}
-                            className={styles.showLookPremiseInput}
-                            value={showPremiseDraft}
-                            maxLength={360}
-                            rows={3}
-                            disabled={busy}
-                            aria-label="Edit show premise"
-                            onChange={(event) =>
-                              setShowPremiseDraft(event.target.value)
-                            }
-                            onBlur={(event) =>
-                              void saveShowPremise(event.currentTarget.value)
-                            }
-                            onKeyDown={(event) => {
-                              if (event.key === "Escape") {
-                                setShowPremiseDraft(selectedShow.premise);
-                                event.currentTarget.blur();
-                              }
-                            }}
-                          />
-                        )}
-                        <button
-                          type="button"
-                          onPointerDown={(event) => event.preventDefault()}
-                          onClick={() => void saveShowPremise()}
-                          disabled={
-                            busy ||
-                            !showPremiseDraft.trim() ||
-                            showPremiseDraft.trim() === selectedShow.premise
-                          }
+                        <PrismRefractTarget
+                          target={{
+                            id: `signal-show-identity-premise-${selectedShow.id}`,
+                            kind: "field",
+                            label: "show premise",
+                            read: () => showPremiseDraft,
+                            preview: setShowPremiseDraft,
+                            accept: saveShowPremise,
+                            disabled: () => busy,
+                            generate: ({
+                              currentValue,
+                              rejectedValues,
+                              signal,
+                            }) =>
+                              generateSignalRefractDraft(
+                                {
+                                  kind: "signal.show.premise",
+                                  showId: selectedShow.id,
+                                },
+                                currentValue,
+                                rejectedValues,
+                                signal,
+                              ),
+                          }}
                         >
-                          Save premise
-                        </button>
+                          {(binding) =>
+                            renderPickAwareComposer ? (
+                              <div {...binding} tabIndex={-1}>
+                                {renderPickAwareComposer({
+                                  id: `signal-show-premise-${selectedShow.id}`,
+                                  value: showPremiseDraft,
+                                  onChange: setShowPremiseDraft,
+                                  placeholder: "Show premise",
+                                  multiline: true,
+                                  ariaLabel: "Edit show premise",
+                                  className: `${styles.showLookPremiseInput} ${styles.pickAwareSetupField}`,
+                                  disabled: busy,
+                                  onBlur: (value) =>
+                                    void saveShowPremise(value),
+                                })}
+                              </div>
+                            ) : (
+                              <textarea
+                                {...binding}
+                                id={`signal-show-premise-${selectedShow.id}`}
+                                className={styles.showLookPremiseInput}
+                                value={showPremiseDraft}
+                                maxLength={360}
+                                rows={3}
+                                disabled={busy}
+                                aria-label="Edit show premise"
+                                onChange={(event) =>
+                                  setShowPremiseDraft(event.target.value)
+                                }
+                                onBlur={(event) =>
+                                  void saveShowPremise(
+                                    event.currentTarget.value,
+                                  )
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === "Escape") {
+                                    setShowPremiseDraft(selectedShow.premise);
+                                    event.currentTarget.blur();
+                                  }
+                                }}
+                              />
+                            )
+                          }
+                        </PrismRefractTarget>
                       </div>
                         <div className={styles.showLookControlGroup}>
                           <span>Dashboard blurbs</span>
-                          <button
-                            type="button"
-                            data-signal-identity-action="blurbs"
-                            onClick={() => void regenerateShowBlurbs()}
-                            disabled={busy || hostBot?.muted}
-                            title={
-                              hostBot?.muted
-                                ? "This host’s Power allows only ..."
-                                : undefined
-                            }
+                          <PrismRefractTarget
+                            target={{
+                              id: `signal-refresh-blurbs-${selectedShow.id}`,
+                              kind: "magic",
+                              label: "Regenerate blurbs",
+                              run: regenerateShowBlurbs,
+                              disabled: () => busy || Boolean(hostBot?.muted),
+                            }}
                           >
-                            Regenerate{" "}
-                            {hostBot?.echoesAddressedSpeech ? "blurb" : "blurbs"}
-                          </button>
+                            {(binding) => (
+                              <button
+                                {...binding}
+                                type="button"
+                                data-signal-identity-action="blurbs"
+                                onClick={() => void regenerateShowBlurbs()}
+                                disabled={busy || hostBot?.muted}
+                                title={
+                                  hostBot?.muted
+                                    ? "This host’s Power allows only ..."
+                                    : undefined
+                                }
+                              >
+                                Regenerate{" "}
+                                {hostBot?.echoesAddressedSpeech
+                                  ? "blurb"
+                                  : "blurbs"}
+                              </button>
+                            )}
+                          </PrismRefractTarget>
                         </div>
                       <div className={styles.showLookControlGroup}>
                         <span>Studio pair</span>
-                        <button
-                          type="button"
-                          data-signal-artwork-action="studio"
-                          title="Regenerate the Dark studio and its source-linked Light variant"
-                          onClick={() => void regenerateStudio()}
-                          disabled={busy || selectedShowArtworkBusy}
+                        <PrismRefractTarget
+                          target={{
+                            id: `signal-refresh-studio-${selectedShow.id}`,
+                            kind: "magic",
+                            label: "Refresh studio",
+                            run: regenerateStudio,
+                            disabled: () => busy || selectedShowArtworkBusy,
+                          }}
                         >
-                          Refresh studio
-                        </button>
+                          {(binding) => (
+                            <button
+                              {...binding}
+                              type="button"
+                              data-signal-artwork-action="studio"
+                              title="Regenerate the Dark studio and its source-linked Light variant"
+                              onClick={() => void regenerateStudio()}
+                              disabled={busy || selectedShowArtworkBusy}
+                            >
+                              Refresh studio
+                            </button>
+                          )}
+                        </PrismRefractTarget>
                         <button
                           type="button"
                           className={styles.assetUploadButton}
@@ -9324,14 +9676,27 @@ export function BotcastExperience({
                       </div>
                       <div className={styles.showLookControlGroup}>
                         <span>Logo</span>
-                        <button
-                          type="button"
-                          data-signal-artwork-action="logo"
-                          onClick={() => void regenerateLogo()}
-                          disabled={busy || selectedShowArtworkBusy}
+                        <PrismRefractTarget
+                          target={{
+                            id: `signal-refresh-logo-${selectedShow.id}`,
+                            kind: "magic",
+                            label: "Refresh logo",
+                            run: regenerateLogo,
+                            disabled: () => busy || selectedShowArtworkBusy,
+                          }}
                         >
-                          Refresh logo
-                        </button>
+                          {(binding) => (
+                            <button
+                              {...binding}
+                              type="button"
+                              data-signal-artwork-action="logo"
+                              onClick={() => void regenerateLogo()}
+                              disabled={busy || selectedShowArtworkBusy}
+                            >
+                              Refresh logo
+                            </button>
+                          )}
+                        </PrismRefractTarget>
                         <button
                           type="button"
                           className={styles.assetUploadButton}
@@ -9344,21 +9709,42 @@ export function BotcastExperience({
                       </div>
                       <div className={styles.showLookControlGroup}>
                           <span>Atmosphere audio</span>
-                        <button
-                          type="button"
-                          onClick={() => void generateShowIntroAudio()}
-                          disabled={busy || preferredProvider === "local"}
-                            title={
-                              preferredProvider === "local"
-                                ? "Switch to Online to create an ElevenLabs atmosphere"
-                                : undefined
-                            }
+                        <PrismRefractTarget
+                          target={{
+                            id: `signal-generate-atmosphere-${selectedShow.id}`,
+                            kind: "magic",
+                            label:
+                              selectedShow.introAudio.source === "elevenlabs" ||
+                              selectedShow.atmosphereAudio.source ===
+                                "elevenlabs"
+                                ? "Refresh atmosphere"
+                                : "Create atmosphere",
+                            run: generateShowIntroAudio,
+                            disabled: () =>
+                              busy || preferredProvider === "local",
+                          }}
                         >
-                          {selectedShow.introAudio.source === "elevenlabs" ||
-                          selectedShow.atmosphereAudio.source === "elevenlabs"
-                              ? "Refresh atmosphere"
-                              : "Create atmosphere"}
-                        </button>
+                          {(binding) => (
+                            <button
+                              {...binding}
+                              type="button"
+                              onClick={() => void generateShowIntroAudio()}
+                              disabled={busy || preferredProvider === "local"}
+                              title={
+                                preferredProvider === "local"
+                                  ? "Switch to Online to create an ElevenLabs atmosphere"
+                                  : undefined
+                              }
+                            >
+                              {selectedShow.introAudio.source ===
+                                "elevenlabs" ||
+                              selectedShow.atmosphereAudio.source ===
+                                "elevenlabs"
+                                ? "Refresh atmosphere"
+                                : "Create atmosphere"}
+                            </button>
+                          )}
+                        </PrismRefractTarget>
                         {selectedShow.introAudio.source === "elevenlabs" ||
                         selectedShow.atmosphereAudio.source === "elevenlabs" ? (
                           <button

@@ -977,6 +977,68 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
+.shell :global([data-prism-refract-drop-target="true"]) {
+  outline: 2px solid color-mix(in srgb, var(--prism-s) 82%, white);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--prism-m) 14%, transparent),
+    0 0 30px color-mix(in srgb, var(--prism-s) 28%, transparent);
+}
+
+.shell :global([data-prism-refract-tutorial="true"]) {
+  outline: 2px solid color-mix(in srgb, var(--prism-s) 64%, white);
+  outline-offset: 3px;
+  box-shadow: 0 0 24px color-mix(in srgb, var(--prism-m) 22%, transparent);
+}
+
+.shell :global([data-prism-refract-state]) {
+  border-color: color-mix(in srgb, var(--prism-s) 58%, var(--botcast-line)) !important;
+  background:
+    linear-gradient(
+      116deg,
+      color-mix(in srgb, var(--prism-p) 10%, transparent),
+      color-mix(in srgb, var(--prism-s) 8%, var(--botcast-field)) 44%,
+      color-mix(in srgb, var(--prism-m) 11%, var(--botcast-field))
+    ) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .18),
+    inset 0 -12px 30px color-mix(in srgb, var(--prism-m) 8%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--prism-p) 22%, transparent),
+    0 0 26px color-mix(in srgb, var(--prism-s) 18%, transparent) !important;
+  transition:
+    border-color 180ms ease,
+    background 240ms ease,
+    box-shadow 240ms ease,
+    filter 180ms ease;
+}
+
+.shell :global([data-prism-refract-state="traveling"]),
+.shell :global([data-prism-refract-state="generating"]) {
+  filter: saturate(1.16) brightness(1.06);
+  animation: signalRefractGlass 1.4s ease-in-out infinite alternate;
+}
+
+.shell :global([data-prism-refract-state="ready"]) {
+  border-color: color-mix(in srgb, var(--prism-i) 62%, white) !important;
+}
+
+.shell :global([data-prism-refract-state="error"]) {
+  border-color: color-mix(in srgb, var(--prism-p) 70%, white) !important;
+}
+
+@keyframes signalRefractGlass {
+  from {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .14),
+      0 0 18px color-mix(in srgb, var(--prism-s) 15%, transparent);
+  }
+  to {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .24),
+      0 0 32px color-mix(in srgb, var(--prism-m) 25%, transparent);
+  }
+}
+
 @keyframes signalShowCardQuipIn {
   from { opacity: 0; transform: translate3d(8px, 7px, 0) scale(.96); }
   to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
@@ -984,4 +1046,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .avatarRig[data-ghostly-presence="true"] { transition: none; }
+  .shell :global([data-prism-refract-state]) { animation: none; transition-duration: 1ms; }
 }
