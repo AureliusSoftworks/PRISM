@@ -9,6 +9,28 @@ import {
 } from "./botcastSpeechReveal.ts";
 
 export const SIGNAL_LIVE_CAPTION_DELAY_MS = 500;
+const SIGNAL_SILENT_CAPTION_WORD_MS = 400;
+const SIGNAL_SILENT_CAPTION_MIN_MS = 2_000;
+const SIGNAL_SILENT_CAPTION_MAX_MS = 20_000;
+
+/**
+ * When configured voice playback fails, keep the live caption readable instead
+ * of racing through it at UI-animation speed. 400ms per word is roughly 150
+ * words per minute, close to a natural spoken delivery.
+ */
+export function signalSilentCaptionRevealDurationMs(
+  text: string,
+  options: { stageAction?: boolean } = {},
+): number {
+  const wordCount = Math.max(1, text.trim().split(/\s+/u).length);
+  return Math.min(
+    SIGNAL_SILENT_CAPTION_MAX_MS,
+    Math.max(
+      options.stageAction ? 1_800 : SIGNAL_SILENT_CAPTION_MIN_MS,
+      wordCount * SIGNAL_SILENT_CAPTION_WORD_MS,
+    ),
+  );
+}
 
 /**
  * Mirrors only the fully spoken prefix of the active line after a small initial

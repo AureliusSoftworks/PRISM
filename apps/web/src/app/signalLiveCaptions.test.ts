@@ -10,9 +10,25 @@ import {
 import {
   SIGNAL_LIVE_CAPTION_DELAY_MS,
   signalLiveCaptionText,
+  signalSilentCaptionRevealDurationMs,
 } from "./signalLiveCaptions.ts";
 
 describe("Signal delayed live captions", () => {
+  it("paces an Abe-sized silent fallback like readable speech", () => {
+    const text =
+      "That is my plain answer: equal citizenship is not a reward for obedience, but a right belonging to persons under the law. I arrived at it late, yet I mean it without qualification.";
+
+    assert.equal(signalSilentCaptionRevealDurationMs(text), 13_200);
+    assert.equal(
+      signalSilentCaptionRevealDurationMs("A very short line."),
+      2_000,
+    );
+    assert.equal(
+      signalSilentCaptionRevealDurationMs("word ".repeat(100)),
+      20_000,
+    );
+  });
+
   it("starts with only the words spoken by the end of the initial delay", () => {
     const text = "One two.";
     const reveal = startBotcastSpeechReveal({

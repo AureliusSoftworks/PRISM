@@ -19,8 +19,10 @@ import {
   type ReplayDirectionEventV2,
   type ReplayManifestV1,
   type ReplayManifestV2,
+  type ReplayMouthTrackV2,
   type ReplayParticipantSnapshotV1,
   type ReplayUtteranceV1,
+  type ReplayVoiceSelectionSnapshotV2,
   defaultReplaySceneV2,
 } from "@localai/shared";
 import {
@@ -638,6 +640,8 @@ function buildReplayDirectionV2(
 function replayManifestV2FromV1(
   manifest: ReplayManifestV1,
   capturedDirection: readonly ReplayDirectionEventV2[] = [],
+  capturedMouthTracks: readonly ReplayMouthTrackV2[] = [],
+  voiceSelection?: ReplayVoiceSelectionSnapshotV2,
 ): ReplayManifestV2 {
   const direction = buildReplayDirectionV2(manifest, capturedDirection);
   const initialScene = defaultReplaySceneV2(manifest.participants);
@@ -688,6 +692,19 @@ function replayManifestV2FromV1(
     utterances: manifest.utterances,
     initialScene,
     direction: directedWithSnapshot,
+    ...((capturedMouthTracks.length > 0 || voiceSelection)
+      ? {
+          presentation: {
+            mouthTracks: capturedMouthTracks.map((track) => ({
+              participantId: track.participantId,
+              cues: track.cues.map((cue) => ({ ...cue })),
+            })),
+            ...(voiceSelection
+              ? { voiceSelection: { ...voiceSelection } }
+              : {}),
+          },
+        }
+      : {}),
     visual: manifest.visual,
   };
 }
@@ -695,23 +712,41 @@ function replayManifestV2FromV1(
 export function buildSignalReplayManifestV2(
   args: Parameters<typeof buildSignalReplayManifestV1>[0] & {
     capturedDirection?: readonly ReplayDirectionEventV2[];
+    capturedMouthTracks?: readonly ReplayMouthTrackV2[];
+    voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   },
 ): ReplayManifestV2 {
-  const { capturedDirection = [], ...legacyArgs } = args;
+  const {
+    capturedDirection = [],
+    capturedMouthTracks = [],
+    voiceSelection,
+    ...legacyArgs
+  } = args;
   return replayManifestV2FromV1(
     buildSignalReplayManifestV1(legacyArgs),
     capturedDirection,
+    capturedMouthTracks,
+    voiceSelection,
   );
 }
 
 export function buildCoffeeReplayManifestV2(
   args: Parameters<typeof buildCoffeeReplayManifestV1>[0] & {
     capturedDirection?: readonly ReplayDirectionEventV2[];
+    capturedMouthTracks?: readonly ReplayMouthTrackV2[];
+    voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   },
 ): ReplayManifestV2 {
-  const { capturedDirection = [], ...legacyArgs } = args;
+  const {
+    capturedDirection = [],
+    capturedMouthTracks = [],
+    voiceSelection,
+    ...legacyArgs
+  } = args;
   return replayManifestV2FromV1(
     buildCoffeeReplayManifestV1(legacyArgs),
     capturedDirection,
+    capturedMouthTracks,
+    voiceSelection,
   );
 }

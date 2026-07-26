@@ -251,6 +251,9 @@ export function indexPrismSessionReview(source) {
       sourceMessageId: event.sourceMessageId,
       participantId: event.payload?.participantId ?? null,
       botId: event.payload?.botId ?? null,
+      presentationDurationMs:
+        event.payload?.presentationDurationMs ?? null,
+      timelineCompacted: event.payload?.timelineCompacted ?? null,
       audible: event.payload?.audible ?? null,
       camera: event.payload?.camera ?? null,
       segment: event.payload?.segment ?? null,
@@ -358,8 +361,11 @@ export function formatPrismSessionReviewIndex(index) {
     lines.push("- None indexed.");
   } else {
     for (const interval of index.thinkingIntervals) {
+      const presented = interval.presentationDurationMs == null
+        ? "unknown"
+        : `${interval.presentationDurationMs}ms`;
       lines.push(
-        `- #${String(interval.sequence).padStart(4, "0")} ${interval.atMs}-${markdownValue(interval.endMs)}ms; bot=${markdownValue(interval.botId)}; audible=${markdownValue(interval.audible)}; camera=${markdownValue(interval.camera)}; segment=${markdownValue(interval.segment)}; following=${markdownValue(interval.followingMessageId)}; end=${markdownValue(interval.endReason)}`,
+        `- #${String(interval.sequence).padStart(4, "0")} ${interval.atMs}-${markdownValue(interval.endMs)}ms; presented=${presented}; compacted=${markdownValue(interval.timelineCompacted)}; bot=${markdownValue(interval.botId)}; audible=${markdownValue(interval.audible)}; camera=${markdownValue(interval.camera)}; segment=${markdownValue(interval.segment)}; following=${markdownValue(interval.followingMessageId)}; end=${markdownValue(interval.endReason)}`,
       );
     }
   }

@@ -291,11 +291,12 @@ describe("mode tutorials", () => {
       assert.match(routing?.body ?? "", /fallback chain saved in Settings/);
       assert.match(routing?.body ?? "", /separate Images provider/);
       assert.match(routing?.body ?? "", /voice preference/);
-      assert.match(routing?.body ?? "", /Voice remains available/);
-      assert.match(routing?.body ?? "", /next utterance without cutting off/);
+      assert.match(routing?.body ?? "", /freezes the selected speaking type and engine/u);
+      assert.match(routing?.body ?? "", /locks routing, model, Voice/u);
+      assert.match(routing?.body ?? "", /Recorded replay/u);
       assert.match(
         routing?.body ?? "",
-        /entire utility strip stay locked until you choose End session/,
+        /entire utility strip until you choose End session/,
       );
       assert.doesNotMatch(routing?.body ?? "", /remain available/u);
     });
@@ -647,11 +648,15 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
-        /change it before or during an episode/u,
+        /Choose Voice before recording/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
-        /next line instead of cutting off/u,
+        /freezes that speaking type and English or Premium engine/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
+        /bakes the rendered mouth performance/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -899,7 +904,11 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-        /records every camera choice/u,
+        /bakes every camera shot, its timestamp/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+        /effective Animated or Instant transition/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -1007,7 +1016,11 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-        /Voice remains available for the next line/u,
+        /routing, model, Voice[\s\S]*stay closed through the closing card/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /Animated or Instant camera control remains available/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -1095,6 +1108,18 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+        /intro-length slider[\s\S]*translates the complete baked transcript, mouth, camera, and transition performance/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+        /calibrated nine-second Signal intro is the default/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+        /Recorded replay replaces routing, model, and Voice controls/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
         /Copy for Signal Review/u,
       );
       assert.match(
@@ -1160,11 +1185,11 @@ describe("mode tutorials", () => {
       assert.match(booking?.body ?? "", /faithful replay/u);
       assert.match(
         booking?.body ?? "",
-        /selected Prompt Center prompts and wildcard rolls are inserted immediately as ordinary editable text/u,
+        /Across Signal setup and the on-air composer, selected Prompt Center prompts and wildcard rolls insert as ordinary editable text/u,
       );
       assert.match(
         booking?.body ?? "",
-        /premise composers keep \/prompt and !wildcard tokens until the show is saved/u,
+        /Signal never renders those shortcuts as chips/u,
       );
       assert.match(
         booking?.body ?? "",

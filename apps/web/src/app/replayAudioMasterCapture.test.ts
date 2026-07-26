@@ -7,6 +7,7 @@ import {
   primeReplayAudioMasterCapture,
   markReplayAudioMasterCapture,
   markReplayDirectionEvent,
+  markReplayMouthShape,
   prismAudioContext,
   prismAudioOutputNode,
   replayAudioMasterCaptureCompactsThinkingGaps,
@@ -18,6 +19,7 @@ import {
   stopReplayAudioMasterCapture,
   syncReplayThinkingPresentations,
 } from "./replayAudioMasterCapture.ts";
+import type { ReplayVoiceSelectionSnapshotV2 } from "@localai/shared";
 
 class FakeAudioNode {
   readonly connections = new Set<object>();
@@ -283,6 +285,89 @@ test("Coffee can share the recorder and failed captures fully release it", async
   }
 });
 
+test("mouth capture coalesces rendered shapes and snapshots the recording Voice selection", async () => {
+  const originalWindow = globalThis.window;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { AudioContext: FakeAudioContext },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: FakeMediaRecorder,
+  });
+
+  try {
+    const voiceSelection: ReplayVoiceSelectionSnapshotV2 = {
+      voiceMode: "english",
+      englishVoiceEngine: "builtin",
+    };
+    assert.equal(
+      await startReplayAudioMasterCapture("baked-presentation", {
+        markIntro: false,
+        voiceSelection,
+      }),
+      true,
+    );
+    voiceSelection.voiceMode = "bottish";
+    markReplayMouthShape({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      shape: "closed",
+      atMs: 100,
+    });
+    markReplayMouthShape({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      shape: "closed",
+      atMs: 150,
+    });
+    markReplayMouthShape({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      shape: "open-wide",
+      atMs: 200,
+    });
+    markReplayMouthShape({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      shape: "open-wide",
+      atMs: 250,
+    });
+    markReplayMouthShape({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      shape: "closed",
+      atMs: 300,
+    });
+
+    const result = await stopReplayAudioMasterCapture("baked-presentation");
+    assert.deepEqual(result?.voiceSelection, {
+      voiceMode: "english",
+      englishVoiceEngine: "builtin",
+    });
+    assert.deepEqual(result?.mouthTracks, [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 100, shape: "closed" },
+          { atMs: 200, shape: "open-wide" },
+          { atMs: 300, shape: "closed" },
+        ],
+      },
+    ]);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      value: originalMediaRecorder,
+    });
+  }
+});
+
 test("thinking intervals retain presentation timing, silence, interruption, overlap, and following speech", async () => {
   const originalWindow = globalThis.window;
   const originalMediaRecorder = globalThis.MediaRecorder;
@@ -388,6 +473,8 @@ test("thinking intervals retain presentation timing, silence, interruption, over
         botId: "host",
         startMs: 100,
         endMs: 500,
+        presentationDurationMs: 400,
+        timelineCompacted: false,
         audible: false,
         camera: "left",
         segment: "opening",
@@ -485,6 +572,8 @@ test("Signal compactThinkingGaps pauses the master clock across thinking holds",
     assert.equal(thinking.length, 1);
     assert.equal(thinking[0]?.atMs, 500);
     assert.equal(thinking[0]?.endMs, 501);
+    assert.equal(thinking[0]?.payload.presentationDurationMs, 3_000);
+    assert.equal(thinking[0]?.payload.timelineCompacted, true);
     assert.equal(
       result.events.find((event) => event.payload.phase === "speech_start")
         ?.payload.atMs,

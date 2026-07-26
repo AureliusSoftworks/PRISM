@@ -6,6 +6,14 @@ const companionSource = readFileSync(
   new URL("./PrismCompanion.tsx", import.meta.url),
   "utf8",
 );
+const refractSource = readFileSync(
+  new URL("./prismRefract.ts", import.meta.url),
+  "utf8",
+);
+const companionStyles = readFileSync(
+  new URL("./prismCompanion.module.css", import.meta.url),
+  "utf8",
+);
 const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
@@ -92,6 +100,21 @@ describe("Prism Refract Signal integration", () => {
     assert.match(
       companionSource,
       /prismRefractTargetIdAtPoint\([\s\S]*"orb-drop"/u,
+    );
+    assert.match(
+      companionSource,
+      /const session = refractSessionRef\.current;[\s\S]*refractRunRef\.current \+= 1;[\s\S]*anchorRef\.current\?\.removeAttribute\("data-refracting"\)[\s\S]*updateRefractSession\(null\)/u,
+    );
+    assert.match(
+      companionStyles,
+      /\.avatar \{[\s\S]*opacity: 1;[\s\S]*transform: none;[\s\S]*transition:[\s\S]*opacity 180ms ease/u,
+    );
+  });
+
+  it("falls back to the click boundary when a text control misses pointer-down capture", () => {
+    assert.match(
+      refractSource,
+      /onClickCapture: \(event\) => \{[\s\S]*if \(suppressClickRef\.current\)[\s\S]*event\.button !== 0[\s\S]*!event\.shiftKey[\s\S]*requestPrismRefract\(target\.id, "shift-click"\)/u,
     );
   });
 

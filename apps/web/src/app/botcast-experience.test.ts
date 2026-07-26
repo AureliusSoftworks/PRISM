@@ -82,7 +82,7 @@ describe("Signal experience shell", () => {
       -1,
       "the show mixer belongs only in the placement workspace",
     );
-    assert.doesNotMatch(source, /replayCamera|setReplayCamera|manualShot/u);
+    assert.doesNotMatch(source, /setReplayCamera|manualShot/u);
     assert.doesNotMatch(source, /className=\{styles\.cameraButtons\}/u);
     assert.match(source, /replayTimeline\.messageStartMs\[index\]/u);
     assert.doesNotMatch(source, /index \* 4_500/u);
@@ -113,11 +113,14 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("cuts on live speech, lingers after it, then uses Wide while a bot thinks", () => {
-    assert.match(source, /const liveBotThinking = Boolean/u);
+  it("cuts on live speech, lingers after it, then uses Wide only while a bot actually thinks", () => {
     assert.match(
       source,
-      /liveSpeech\?\.reveal\.phase === "preparing"[\s\S]{0,120}livePreparedMessageIsBot/u,
+      /const liveBotThinking = Boolean\([\s\S]{0,220}busy[\s\S]{0,100}speakingMessageId === null/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /const liveBotThinking = Boolean\([\s\S]{0,260}liveSpeech\?\.reveal\.phase === "preparing"/u,
     );
     assert.match(
       source,
@@ -777,8 +780,21 @@ describe("Signal experience shell", () => {
       source,
       /openingMessageReceived = true;[\s\S]{0,120}setTopicDraft\(""\)/u,
     );
-    assert.match(source, /SIGNAL_VOICE_START_TIMEOUT_MS = 30_000/u);
+    assert.match(source, /SIGNAL_VOICE_START_TIMEOUT_MS = 12_000/u);
     assert.match(source, /voicePreparationTimer = window\.setTimeout/u);
+    assert.match(source, /signalSilentCaptionRevealDurationMs\(/u);
+    assert.match(
+      source,
+      /configuredVoicePlaybackAttempted\)[\s\S]{0,220}voice didn’t start\. Continuing with readable captions/u,
+    );
+    assert.match(
+      source,
+      /const signalVoicePreparationPending =[\s\S]{0,260}const livePresentedThinkingRole/u,
+    );
+    assert.match(
+      source,
+      /livePresentedThinkingBot \|\| signalVoicePreparationPending/u,
+    );
     assert.match(pageSource, /requestSignalVoiceWithFallback\(\{/u);
     assert.match(
       pageSource,
@@ -787,6 +803,22 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /onStopUtterance\?\.\(\);[\s\S]{0,80}settle\(false\)/u,
+    );
+    assert.match(
+      pageSource,
+      /enqueueEnglishVoice\([\s\S]{0,1500}playbackIsCurrent/u,
+    );
+    assert.match(
+      source,
+      /let voiceAttemptActive = true[\s\S]{0,2200}!voiceAttemptActive/u,
+    );
+    assert.match(
+      pageSource,
+      /const playbackIsCurrent = \(\): boolean =>[\s\S]{0,140}signalVoiceAbortRef\.current === controller/u,
+    );
+    assert.match(
+      pageSource,
+      /const trackedLifecycle:[\s\S]{0,220}onStart: \(durationMs, alignment\) => \{[\s\S]{0,80}!playbackIsCurrent\(\)/u,
     );
     assert.match(
       source,
@@ -915,11 +947,15 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /pictureStartMs=\{\s*replayBookend\.kind === "intro"\s*\?\s*replayIntroEffectivePictureStartMs/u,
+      /signalReplayBookendAt\([\s\S]{0,180}replayInterviewFootageElapsedMs[\s\S]{0,220}introEndMs: replayIntroEffectiveEndMs/u,
     );
     assert.match(
       source,
-      /Card hold is audio-clock only\. Picture start never shortens or lengthens it/u,
+      /pictureStartMs=\{\s*replayBookend\.kind === "intro"\s*\?\s*replayIntroAutomaticOffsetMs/u,
+    );
+    assert.match(
+      source,
+      /signalReplayInterviewFootageElapsedMs\(\{[\s\S]{0,180}introCardEndMs: replayIntroEffectiveEndMs/u,
     );
     assert.match(replayBookendSource, /data-replay-bookend=\{kind\}/u);
     assert.match(
@@ -1009,51 +1045,42 @@ describe("Signal experience shell", () => {
     assert.match(source, /Signal Intro Alignment/u);
     assert.match(
       source,
-      /Picture start \(animation only · negative = later\)/u,
+      /signalReplayDefaultIntroDurationMs\(replayRecording\?\.timeline\)/u,
     );
     assert.match(
       source,
-      /SIGNAL_REPLAY_CALIBRATION_PICTURE_DELAY_MAX_MS = 20_000/u,
-    );
-    assert.match(source, /Later art −1000/u);
-    assert.match(source, /Restart &amp; play/u);
-    assert.match(source, /Earlier art \+1000/u);
-    assert.match(
-      source,
-      /data-signal-replay-puppeteering-calibration="true"/u,
-    );
-    assert.match(source, /Transcript puppeteering vs recorded audio/u);
-    assert.match(
-      source,
-      /Transcript puppeteering offset \(positive = later\)/u,
-    );
-    assert.match(source, /Recorded audio and camera timing stay[\s\S]*fixed/u);
-    assert.match(
-      source,
-      /signalReplayTranscriptPuppeteeringElapsedMs\(\{/u,
+      /This single control changes how long the intro card is[\s\S]*interview footage starts from[\s\S]*normal speed/u,
     );
     assert.match(
       source,
-      /replayPuppeteeringElapsedMs >= beat\.startMs[\s\S]*replayPuppeteeringElapsedMs < beat\.endMs/u,
+      /Intro card visible duration/u,
     );
-    assert.match(
-      source,
-      /replayIntroPictureStartMinMs =\s*-SIGNAL_REPLAY_CALIBRATION_PICTURE_DELAY_MAX_MS/u,
-    );
-    assert.match(
-      replayBookendSource,
-      /Positive skips into the intro art; negative/u,
-    );
-    assert.match(source, /Intro card before wide/u);
-    assert.match(source, /Card hold before wide/u);
-    assert.match(source, /Independent from picture start/u);
     assert.match(source, /Shorter −500/u);
+    assert.match(source, /Restart &amp; play/u);
     assert.match(source, /Longer \+500/u);
+    assert.match(
+      source,
+      /replayInterviewFootageElapsedMs >= beat\.startMs[\s\S]*replayInterviewFootageElapsedMs < beat\.endMs/u,
+    );
+    assert.match(
+      source,
+      /replaySceneAtV2\([\s\S]{0,120}replayInterviewFootageElapsedMs/u,
+    );
+    assert.match(
+      source,
+      /replayElapsedMs: replayInterviewFootageElapsedMs,[\s\S]{0,120}activeMessage: replayActiveMessage/u,
+    );
+    assert.match(source, /Interview speed <strong>1×<\/strong>/u);
+    assert.doesNotMatch(
+      source,
+      /data-signal-replay-puppeteering-calibration/u,
+    );
+    assert.doesNotMatch(source, /Transcript puppeteering offset/u);
     assert.match(source, /Copy timing report/u);
-    assert.match(source, /chosenPictureStartMs:/u);
-    assert.match(source, /chosenTranscriptPuppeteeringOffsetMs:/u);
-    assert.match(source, /chosenIntroCardHoldMs:/u);
-    assert.match(source, /cutToWideAtAudioMs:/u);
+    assert.match(source, /chosenIntroCardDurationMs:/u);
+    assert.match(source, /introDurationAdjustmentMs:/u);
+    assert.match(source, /interviewFootageStartsAtAudioMs:/u);
+    assert.match(source, /interviewFootageSpeed: 1/u);
     assert.match(source, /landingCameraShot: wide/u);
     assert.match(
       source,
@@ -1092,6 +1119,14 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /signalFaithfulReplayCameraState\(\{/u);
     assert.match(source, /markReplayDirectionEvent\(\{[\s\S]{0,120}kind: "camera"/u);
+    assert.match(
+      source,
+      /previous\.shot === liveShot &&[\s\S]{0,80}previous\.transitionMode === transitionMode/u,
+    );
+    assert.match(
+      source,
+      /signalCameraTransitionsShouldAnimate\([\s\S]{0,120}prefers-reduced-motion: reduce/u,
+    );
     assert.match(source, /preferDirectedCamera: replayHasCapturedCameraDirection/u);
     assert.match(
       source,
@@ -1099,7 +1134,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayFaithfulCamera\?\.eventElapsedMs \?\? replayElapsedMs/u,
+      /replayFaithfulCamera\?\.eventElapsedMs \?\? replayInterviewFootageElapsedMs/u,
     );
     assert.match(
       source,
@@ -1108,6 +1143,28 @@ describe("Signal experience shell", () => {
     assert.match(
       source,
       /botcastGuestHasDepartedAt\([\s\S]{0,120}replayEventElapsedMs/u,
+    );
+    assert.match(
+      source,
+      /replayCameraTransitionModeV2\(replayDirectedScene\)/u,
+    );
+    assert.match(
+      source,
+      /data-camera-transitions=\{stageCameraTransitionMode\}/u,
+    );
+    assert.match(
+      source,
+      /replayMouthShapeAtV2\([\s\S]{0,140}replayInterviewFootageElapsedMs/u,
+    );
+    assert.match(source, /<ReplayMouthPresentationCapture/u);
+    assert.match(
+      pageSource,
+      /recordingVoiceSelection=\{voicePlaybackSelectionRef\.current\}/u,
+    );
+    assert.match(pageSource, /recordedReplay:\s*replayActive/u);
+    assert.match(
+      pageSource,
+      /data-recorded-replay="true"[\s\S]{0,260}Recorded replay/u,
     );
   });
 
@@ -1538,11 +1595,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /markReplayDirectionEvent\(\{[\s\S]{0,80}kind: "camera",[\s\S]{0,80}payload: \{ shot: liveShot \}/u,
+      /markReplayDirectionEvent\(\{[\s\S]{0,120}kind: "camera",[\s\S]{0,180}shot: liveShot,[\s\S]{0,120}transitionMode,[\s\S]{0,120}transitionPreset: "signal-camera-v1"/u,
     );
     const capturedCameraEventAt = source.indexOf(
       'kind: "camera",',
-      source.indexOf("signalCapturedCameraRef.current = { sourceId, shot: liveShot }"),
+      source.indexOf("signalCapturedCameraRef.current = {"),
     );
     assert.ok(capturedCameraEventAt >= 0);
     assert.doesNotMatch(
@@ -1739,7 +1796,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-botcast-replay-intro-row="true"/u);
     assert.match(
       source,
-      /replayElapsedMs < replayIntroDurationMs \? "true" : undefined/u,
+      /replayElapsedMs < replayIntroEffectiveEndMs[\s\S]{0,80}\? "true"/u,
     );
     assert.match(
       source,

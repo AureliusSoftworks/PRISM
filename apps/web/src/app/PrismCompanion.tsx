@@ -530,7 +530,6 @@ export default function PrismCompanion({
   const releasePrismRefract = useCallback(
     (restoreOriginal: boolean): void => {
       const session = refractSessionRef.current;
-      if (!session) return;
       refractRunRef.current += 1;
       refractAbortRef.current?.abort();
       refractAbortRef.current = null;
@@ -542,19 +541,25 @@ export default function PrismCompanion({
         window.cancelAnimationFrame(refractTravelFrameRef.current);
         refractTravelFrameRef.current = null;
       }
-      const { element, target } = session.registration;
-      if (restoreOriginal && target.kind !== "magic") {
-        target.preview(session.originalValue);
-      }
-      delete element.dataset.prismRefractState;
-      if (session.originalAriaBusy === null) element.removeAttribute("aria-busy");
-      else element.setAttribute("aria-busy", session.originalAriaBusy);
-      if (session.originalAriaReadonly === null) {
-        element.removeAttribute("aria-readonly");
-      } else {
-        element.setAttribute("aria-readonly", session.originalAriaReadonly);
+      if (session) {
+        const { element, target } = session.registration;
+        if (restoreOriginal && target.kind !== "magic") {
+          target.preview(session.originalValue);
+        }
+        delete element.dataset.prismRefractState;
+        if (session.originalAriaBusy === null) {
+          element.removeAttribute("aria-busy");
+        } else {
+          element.setAttribute("aria-busy", session.originalAriaBusy);
+        }
+        if (session.originalAriaReadonly === null) {
+          element.removeAttribute("aria-readonly");
+        } else {
+          element.setAttribute("aria-readonly", session.originalAriaReadonly);
+        }
       }
       document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
+      anchorRef.current?.removeAttribute("data-refracting");
       const returnPosition =
         refractReturnPositionRef.current ?? positionRef.current;
       refractReturnPositionRef.current = null;
@@ -564,6 +569,7 @@ export default function PrismCompanion({
       setRefractPrompt("");
       setRefractStatus("");
       if (
+        session &&
         refractTutorialRunRef.current &&
         refractTutorialStageRef.current === "settle"
       ) {

@@ -185,7 +185,10 @@ export interface PrismRefractBinding {
   onClickCapture: (
     event: Pick<
       ReactPointerEvent<HTMLElement>,
-      "preventDefault" | "stopPropagation"
+      | "button"
+      | "shiftKey"
+      | "preventDefault"
+      | "stopPropagation"
     >,
   ) => void;
 }
@@ -237,8 +240,20 @@ export function PrismRefractTarget({
       event.stopPropagation();
     },
     onClickCapture: (event) => {
-      if (!suppressClickRef.current) return;
-      suppressClickRef.current = false;
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (
+        event.button !== 0 ||
+        !event.shiftKey ||
+        targetRef.current.disabled?.() ||
+        !requestPrismRefract(target.id, "shift-click")
+      ) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
     },

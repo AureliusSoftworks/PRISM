@@ -5,9 +5,11 @@ import {
   buildReplaySceneCheckpointsV2,
   compileReplayTimelineV1,
   compileReplayTimelineV2,
+  replayCameraPresentationAtV2,
   replayManifestToMarkdownV1,
   replayManifestToMarkdownV2,
   replayManifestV2IsValid,
+  replayMouthShapeAtV2,
   replaySceneAtV2,
   replayTimelineToWebVttV1,
   type ReplayManifestV1,
@@ -278,6 +280,8 @@ const manifestV2: ReplayManifestV2 = {
   utterances: manifest.utterances,
   initialScene: {
     camera: "wide",
+    cameraTransitionMode: "animated",
+    cameraTransitionPreset: "signal-camera-v1",
     segment: "opening",
     introActive: true,
     outroActive: false,
@@ -381,10 +385,25 @@ const manifestV2: ReplayManifestV2 = {
       atMs: 1_500,
       kind: "camera",
       sourceMessageId: "message-1",
-      payload: { shot: "left" },
+      payload: {
+        shot: "left",
+        transitionMode: "animated",
+        transitionPreset: "signal-camera-v1",
+      },
     },
     {
       sequence: 6,
+      atMs: 1_800,
+      kind: "camera",
+      sourceMessageId: "message-1",
+      payload: {
+        shot: "left",
+        transitionMode: "instant",
+        transitionPreset: "signal-camera-v1",
+      },
+    },
+    {
+      sequence: 7,
       atMs: 2_000,
       endMs: 3_500,
       kind: "overlap",
@@ -395,7 +414,7 @@ const manifestV2: ReplayManifestV2 = {
       },
     },
     {
-      sequence: 7,
+      sequence: 8,
       atMs: 4_500,
       endMs: 5_200,
       kind: "sip",
@@ -403,14 +422,14 @@ const manifestV2: ReplayManifestV2 = {
       payload: { participantId: "guest", active: true },
     },
     {
-      sequence: 8,
+      sequence: 9,
       atMs: 6_000,
       kind: "departure",
       sourceMessageId: null,
       payload: { participantId: "guest" },
     },
     {
-      sequence: 9,
+      sequence: 10,
       atMs: 8_000,
       endMs: 12_000,
       kind: "outro",
@@ -418,6 +437,23 @@ const manifestV2: ReplayManifestV2 = {
       payload: { active: true },
     },
   ],
+  presentation: {
+    voiceSelection: {
+      voiceMode: "english",
+      englishVoiceEngine: "builtin",
+    },
+    mouthTracks: [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 0, shape: "closed" },
+          { atMs: 1_000, shape: "open-wide" },
+          { atMs: 1_200, shape: "narrow" },
+          { atMs: 1_600, shape: "closed" },
+        ],
+      },
+    ],
+  },
   visual: manifest.visual,
 };
 
@@ -469,6 +505,73 @@ test("V2 direction seeks deterministically through speech, overlaps, sips, depar
   assert.equal(departed.participants.guest?.visible, false);
   assert.equal(replaySceneAtV2(manifestV2, 9_000).outroActive, true);
   assert.equal(replaySceneAtV2(manifestV2, 12_500).outroActive, false);
+});
+
+test("V2 seeks exact baked mouths and mode-only camera transitions", () => {
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 999), "closed");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 1_000), "open-wide");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 1_350), "narrow");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "host", 1_600), "closed");
+  assert.equal(replayMouthShapeAtV2(manifestV2, "guest", 1_350), null);
+
+  assert.deepEqual(replayCameraPresentationAtV2(manifestV2, 1_700), {
+    shot: "left",
+    transitionMode: "animated",
+    transitionPreset: "signal-camera-v1",
+  });
+  assert.deepEqual(replayCameraPresentationAtV2(manifestV2, 1_900), {
+    shot: "left",
+    transitionMode: "instant",
+    transitionPreset: "signal-camera-v1",
+  });
+});
+
+test("V2 presentation validation requires coalesced mouth shapes", () => {
+  const duplicatedShapeManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    presentation: {
+      ...manifestV2.presentation!,
+      mouthTracks: [
+        {
+          participantId: "host",
+          cues: [
+            { atMs: 0, shape: "closed" },
+            { atMs: 100, shape: "closed" },
+          ],
+        },
+      ],
+    },
+  };
+  assert.equal(replayManifestV2IsValid(duplicatedShapeManifest), false);
+});
+
+test("legacy V2 manifests default to CRT reconstruction and Animated cameras", () => {
+  const legacyManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    presentation: undefined,
+    initialScene: {
+      ...manifestV2.initialScene,
+      cameraTransitionMode: undefined,
+      cameraTransitionPreset: undefined,
+    },
+    direction: manifestV2.direction
+      .filter(
+        (event) =>
+          event.kind !== "camera" || event.atMs !== 1_800,
+      )
+      .map((event) =>
+        event.kind === "camera"
+          ? { ...event, payload: { shot: event.payload.shot } }
+          : event,
+      )
+      .map((event, index) => ({ ...event, sequence: index + 1 })),
+  };
+  assert.equal(replayManifestV2IsValid(legacyManifest), true);
+  assert.equal(replayMouthShapeAtV2(legacyManifest, "host", 2_000), null);
+  assert.equal(
+    replayCameraPresentationAtV2(legacyManifest, 2_000).transitionMode,
+    "animated",
+  );
 });
 
 test("V2 compiles only captured speech timing and exports a readable private-safe transcript", () => {

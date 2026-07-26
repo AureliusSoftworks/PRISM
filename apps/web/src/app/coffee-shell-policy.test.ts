@@ -6,13 +6,13 @@ import {
 } from "./coffee-shell-policy.ts";
 
 describe("Coffee shell policy", () => {
-  it("locks the full Coffee utility strip while keeping Voice available live", () => {
+  it("locks the full Coffee utility strip including Voice while recording", () => {
     for (const phase of ["arriving", "live"] as const) {
       const policy = coffeeShellPolicy({ conversationActive: true, phase });
       assert.equal(policy.liveSessionActive, true);
       assert.equal(policy.showEndSessionInSwitcher, true);
       assert.equal(policy.disabledNavbarActions.settings, true);
-      assert.equal(policy.disabledNavbarActions.voice, undefined);
+      assert.equal(policy.disabledNavbarActions.voice, true);
       assert.equal(policy.disabledNavbarActions.memories, true);
       assert.equal(policy.disabledNavbarActions.usage, true);
       assert.equal(policy.disabledNavbarActions.theme, true);
@@ -20,6 +20,7 @@ describe("Coffee shell policy", () => {
         promptCenter: true,
         refresh: true,
         settings: true,
+        voice: true,
         usage: true,
         memories: true,
         images: true,
@@ -30,12 +31,16 @@ describe("Coffee shell policy", () => {
         policy.disabledNavbarActionTooltips.settings,
         "End the Coffee session before opening Settings.",
       );
+      assert.match(
+        policy.disabledNavbarActionTooltips.voice ?? "",
+        /recorded speaking type is baked/u,
+      );
     }
   });
 
-  it("locks the full Signal utility strip while keeping Voice available live", () => {
+  it("locks the full Signal utility strip including Voice while recording", () => {
     const policy = liveSessionChromePolicy("Signal");
-    assert.equal(policy.disabledNavbarActions.voice, undefined);
+    assert.equal(policy.disabledNavbarActions.voice, true);
     assert.equal(policy.disabledNavbarActions.memories, true);
     assert.equal(policy.disabledNavbarActions.usage, true);
     assert.equal(policy.disabledNavbarActions.theme, true);
@@ -43,13 +48,17 @@ describe("Coffee shell policy", () => {
       promptCenter: true,
       refresh: true,
       settings: true,
+      voice: true,
       usage: true,
       memories: true,
       images: true,
       bots: true,
       theme: true,
     });
-    assert.equal(policy.disabledNavbarActionTooltips.voice, undefined);
+    assert.match(
+      policy.disabledNavbarActionTooltips.voice ?? "",
+      /recorded speaking type is baked/u,
+    );
     assert.equal(
       policy.disabledNavbarActionTooltips.memories,
       "Cut or finish the Signal session before opening Memories.",

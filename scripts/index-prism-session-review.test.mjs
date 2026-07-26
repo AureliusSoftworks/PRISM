@@ -38,7 +38,7 @@ Review format: 2
 
 ## Private Replay Direction Log
 
-- #0001 | atMs=1000 | endMs=2500 | kind=thinking | sourceMessageId=message-1 | payload={"audible":false,"botId":"rick","camera":"host","endReason":"interrupted","followingMessageId":"message-1","participantId":"host","segment":"opening"}
+- #0001 | atMs=1000 | endMs=1001 | kind=thinking | sourceMessageId=message-1 | payload={"audible":false,"botId":"rick","camera":"host","endReason":"interrupted","followingMessageId":"message-1","participantId":"host","presentationDurationMs":1500,"segment":"opening","timelineCompacted":true}
 - #0002 | atMs=2500 | endMs=none | kind=speech | sourceMessageId=message-1 | payload={"active":true,"speakerId":"rick"}
 `;
 
@@ -124,10 +124,12 @@ describe("PRISM session review indexer", () => {
     assert.deepEqual(index.thinkingIntervals[0], {
       sequence: 1,
       atMs: 1000,
-      endMs: 2500,
+      endMs: 1001,
       sourceMessageId: "message-1",
       participantId: "host",
       botId: "rick",
+      presentationDurationMs: 1500,
+      timelineCompacted: true,
       audible: false,
       camera: "host",
       segment: "opening",

@@ -85,6 +85,8 @@ import {
   listenerReactionHasCrosstalkAudio,
   resolveListenerReactionAtMs,
   socialSilenceMessageIsMarkedV1,
+  replayCameraTransitionModeV2,
+  replayMouthShapeAtV2,
   replaySceneAtV2,
   type BotcastCameraShot,
   type BotcastEpisode,
@@ -113,6 +115,8 @@ import {
   type BotPowerVoicePresenceMode,
   type DirectionalIrritationDeliveryPlanV1,
   type ListenerReactionPlanV1,
+  type ReplayCameraDirectionPayloadV2,
+  type ReplayVoiceSelectionSnapshotV2,
   type ReplayManifestV2,
   type ReplayRecordingV1,
   type PrismRefractResponse,
@@ -171,9 +175,13 @@ import {
   SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS,
   signalHostCueShouldRedirect,
 } from "./signalHostCueTiming";
-import { signalLiveCaptionText } from "./signalLiveCaptions";
+import {
+  signalLiveCaptionText,
+  signalSilentCaptionRevealDurationMs,
+} from "./signalLiveCaptions";
 import {
   readSignalCameraTransitionMode,
+  signalCameraTransitionsShouldAnimate,
   signalLiveAutoCameraShot,
   writeSignalCameraTransitionMode,
   type SignalCameraTransitionMode,
@@ -239,6 +247,7 @@ import {
   markReplayDirectionEvent,
   primeReplayAudioMasterCapture,
   replayAudioMasterCaptureDirection,
+  replayAudioMasterCaptureMouthTracks,
   setReplayAudioMasterCompactHold,
   startReplayAudioMasterCapture,
   stopReplayAudioMasterCapture,
@@ -247,17 +256,17 @@ import {
 import {
   signalFaithfulReplayCameraState,
   signalReplayBookendAt,
+  signalReplayDefaultIntroDurationMs,
   SIGNAL_REPLAY_INTRO_LANDING_FADE_MS,
   signalReplayIntroBounds,
-  signalReplayIntroCardHoldMs,
   signalReplayIntroDurationMs,
   signalReplayIntroIsLanding,
   signalReplayIntroLandingFadeMs,
-  signalReplayIntroLandingRemainingMs,
-  signalReplayTranscriptPuppeteeringElapsedMs,
+  signalReplayInterviewFootageElapsedMs,
   signalReplayIntroVisualOffsetMs,
 } from "./signalReplayVideoFrame";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
+import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
 import styles from "./botcast.module.css";
 
 export interface BotcastBotSummary {
@@ -405,11 +414,9 @@ const SIGNAL_ATMOSPHERE_BUSES = [
   key: keyof BotcastStudioAtmosphereMix;
   label: string;
 }>;
-// ElevenLabs alignment responses are buffered before playback begins and can
-// legitimately take several seconds for a full Signal line. Keep a bounded
-// escape hatch for a genuinely stuck voice request without aborting healthy
-// provider speech before it reaches the studio.
-const SIGNAL_VOICE_START_TIMEOUT_MS = 30_000;
+// Alignment responses are buffered before playback begins, but a generated
+// line should not leave the studio waiting indefinitely for its voice.
+const SIGNAL_VOICE_START_TIMEOUT_MS = 12_000;
 // Once playback starts, a missing provider completion signal must not strand
 // the episode in a busy state and block the next on-air turn indefinitely.
 const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000;
@@ -570,11 +577,14 @@ export interface BotcastExperienceProps {
   onProducerGuestActionSfx?: (message: BotcastMessage) => void;
   introAudioEnabled?: boolean;
   introAudioVolume?: number;
+  recordingVoiceSelection: ReplayVoiceSelectionSnapshotV2;
+  onRecordingStateChange?: (active: boolean) => void;
   sidebarHeader: ReactNode;
   navigationHeader:
     | ReactNode
     | ((state: {
         liveSessionActive: boolean;
+        replayActive: boolean;
         showLiveExit: boolean;
         cuttingShow: boolean;
         onCutShow: () => void;
@@ -644,11 +654,8 @@ const SIGNAL_LIVE_CAMERA_POST_SPEECH_HOLD_MS = 900;
 const SIGNAL_REPLAY_INTRO_VISUAL_HEAD_START_MS = 1_100;
 const SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS = 50;
 const SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS = 500;
-/** Large delay range: negative picture start holds the intro art back vs audio. */
-const SIGNAL_REPLAY_CALIBRATION_PICTURE_DELAY_MAX_MS = 20_000;
-const SIGNAL_REPLAY_CALIBRATION_PICTURE_COARSE_STEP_MS = 1_000;
-const SIGNAL_REPLAY_CALIBRATION_CARD_HOLD_MIN_MS = 500;
-const SIGNAL_REPLAY_CALIBRATION_PUPPETEERING_MAX_MS = 5_000;
+const SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS = 500;
+const SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MAX_ADDITION_MS = 20_000;
 
 type SignalReviewCopyState = {
   episodeId: string;
@@ -1406,6 +1413,8 @@ export function BotcastExperience({
   onProducerGuestActionSfx,
   introAudioEnabled = true,
   introAudioVolume = 1,
+  recordingVoiceSelection,
+  onRecordingStateChange,
   sidebarHeader,
   navigationHeader,
   producerName = "You",
@@ -1530,6 +1539,8 @@ export function BotcastExperience({
   const [episodeOutro, setEpisodeOutro] = useState<SignalEpisodeOutro | null>(
     null,
   );
+  const signalRecordingActive =
+    episodePreRoll !== null || episode !== null || episodeOutro !== null;
   const [episodeOutroSfxMutedId, setEpisodeOutroSfxMutedId] = useState<
     string | null
   >(null);
@@ -1546,14 +1557,9 @@ export function BotcastExperience({
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIntroRevealed, setReplayIntroRevealed] = useState(false);
   const [
-    replayIntroCalibrationOffsetMs,
-    setReplayIntroCalibrationOffsetMs,
-  ] = useState<number | null>(null);
-  const [
-    replayPuppeteeringCalibrationOffsetMs,
-    setReplayPuppeteeringCalibrationOffsetMs,
-  ] = useState(0);
-  const [replayIntroCalibrationCardHoldMs, setReplayIntroCalibrationCardHoldMs] =
+    replayIntroCalibrationDurationMs,
+    setReplayIntroCalibrationDurationMs,
+  ] =
     useState<number | null>(null);
   const [replayIntroCalibrationCopied, setReplayIntroCalibrationCopied] =
     useState(false);
@@ -1616,6 +1622,7 @@ export function BotcastExperience({
   const signalCapturedCameraRef = useRef<{
     sourceId: string;
     shot: SignalDirectedCameraShot;
+    transitionMode: SignalCameraTransitionMode;
   } | null>(null);
   const liveCameraShiftAloneRef = useRef(false);
   const producerGuestSipTimeoutRef = useRef<number | null>(null);
@@ -1710,6 +1717,13 @@ export function BotcastExperience({
   useEffect(() => {
     onStopUtteranceRef.current = onStopUtterance;
   }, [onStopUtterance]);
+
+  useEffect(() => {
+    onRecordingStateChange?.(signalRecordingActive);
+    return () => {
+      if (signalRecordingActive) onRecordingStateChange?.(false);
+    };
+  }, [onRecordingStateChange, signalRecordingActive]);
 
   useEffect(() => {
     selectedShowIdRef.current = selectedShowId;
@@ -2073,6 +2087,9 @@ export function BotcastExperience({
       const capturedDirection = replayAudioMasterCaptureDirection(
         completedEpisode.id,
       );
+      const capturedMouthTracks = replayAudioMasterCaptureMouthTracks(
+        completedEpisode.id,
+      );
       const capture = await stopReplayAudioMasterCapture(completedEpisode.id);
       if (signalCaptureSourceIdRef.current === completedEpisode.id) {
         signalCaptureSourceIdRef.current = null;
@@ -2086,6 +2103,8 @@ export function BotcastExperience({
         audioEnabled: introAudioEnabled,
         audioVolume: introAudioVolume,
         capturedDirection: capture?.direction ?? capturedDirection,
+        capturedMouthTracks: capture?.mouthTracks ?? capturedMouthTracks,
+        voiceSelection: capture?.voiceSelection ?? recordingVoiceSelection,
       });
       try {
         await saveFaithfulReplaySession({
@@ -2105,6 +2124,7 @@ export function BotcastExperience({
       introAudioEnabled,
       introAudioVolume,
       producerName,
+      recordingVoiceSelection,
       theme,
     ],
   );
@@ -3691,9 +3711,7 @@ export function BotcastExperience({
     replayVoiceRunIdRef.current += 1;
     setReplayPlaying(false);
     setReplayIntroRevealed(false);
-    setReplayIntroCalibrationOffsetMs(null);
-    setReplayPuppeteeringCalibrationOffsetMs(0);
-    setReplayIntroCalibrationCardHoldMs(null);
+    setReplayIntroCalibrationDurationMs(null);
     setReplayIntroCalibrationCopied(false);
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
@@ -4609,6 +4627,7 @@ export function BotcastExperience({
       await startReplayAudioMasterCapture(provisionalCaptureId, {
         markIntro: true,
         compactThinkingGaps: true,
+        voiceSelection: recordingVoiceSelection,
       })
     ) {
       signalCaptureSourceIdRef.current = provisionalCaptureId;
@@ -5212,15 +5231,11 @@ export function BotcastExperience({
         marker: message.socialSilence,
         mode: "signal",
       });
-      const tokenCount = Math.max(
-        1,
-        (message.stageActionText ?? message.content).trim().split(/\s+/u).length,
-      );
       const durationMs = socialSilence
         ? message.socialSilence!.holdMs
-        : Math.min(
-            6_500,
-            Math.max(message.stageActionText ? 1_800 : 720, tokenCount * 175),
+        : signalSilentCaptionRevealDurationMs(
+            message.stageActionText ?? message.content,
+            { stageAction: Boolean(message.stageActionText) },
           );
       armListenerReactionTiming(message, durationMs);
       setLiveSpeech({
@@ -5274,11 +5289,11 @@ export function BotcastExperience({
       ) {
         onPrefetchUtterance?.(message, bot);
       }
-    setLiveSpeech({
-      messageId: message.id,
-      reveal: prepareBotcastSpeechReveal(message.content),
-    });
-    setSpeakingMessageId(message.id);
+      setLiveSpeech({
+        messageId: message.id,
+        reveal: prepareBotcastSpeechReveal(message.content),
+      });
+      setSpeakingMessageId(message.id);
     },
     [botsById, cacheListenerReactionPlan, onPrefetchUtterance],
   );
@@ -5313,7 +5328,17 @@ export function BotcastExperience({
       let voicePreparationTimer: number | null = null;
       let voiceCompletionTimer: number | null = null;
       let settleVoicePlayback: ((value: boolean) => void) | null = null;
+      let voiceAttemptActive = true;
       let guestResponsePrepared = false;
+      const voicePlaybackEligible = Boolean(
+        bot &&
+          !bot.muted &&
+          botcastMessageIsAudibleToAudienceV1(message) &&
+          !botPowerResponseIsSilentV1(message.content) &&
+          onUtterance,
+      );
+      const configuredVoicePlaybackAttempted =
+        voicePlaybackEligible && recordingVoiceSelection.voiceMode !== "mute";
       const notifyPlaybackStart = (): void => {
         if (playbackStartNotified) return;
         playbackStartNotified = true;
@@ -5339,6 +5364,7 @@ export function BotcastExperience({
       const lifecycle: VoicePlaybackLifecycle = {
         onPresenceStart: () => {
           if (
+            !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
             !episodeOperationIsCurrent(controller, runId)
           ) {
@@ -5361,6 +5387,7 @@ export function BotcastExperience({
         },
         onStart: (durationMs, alignment) => {
           if (
+            !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
             !episodeOperationIsCurrent(controller, runId)
           )
@@ -5382,6 +5409,7 @@ export function BotcastExperience({
             window.clearTimeout(voiceCompletionTimer);
           }
           voiceCompletionTimer = window.setTimeout(() => {
+            voiceAttemptActive = false;
             onStopUtterance?.();
             settleVoicePlayback?.(false);
           }, resolvedDurationMs + SIGNAL_VOICE_COMPLETION_GRACE_MS);
@@ -5397,6 +5425,7 @@ export function BotcastExperience({
         },
         onProgress: (elapsedMs, durationMs) => {
           if (
+            !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
             !episodeOperationIsCurrent(controller, runId)
           )
@@ -5434,6 +5463,7 @@ export function BotcastExperience({
         },
         onEnd: () => {
           if (
+            !voiceAttemptActive ||
             activeSpeechMessageIdRef.current !== message.id ||
             !episodeOperationIsCurrent(controller, runId)
           )
@@ -5454,16 +5484,13 @@ export function BotcastExperience({
         },
       };
       const played =
-        bot &&
-        !bot.muted &&
-        botcastMessageIsAudibleToAudienceV1(message) &&
-        !botPowerResponseIsSilentV1(message.content) &&
-        onUtterance
+        voicePlaybackEligible && bot && onUtterance
         ? await new Promise<boolean>((resolve) => {
             let settled = false;
             const settle = (value: boolean): void => {
               if (settled) return;
               settled = true;
+              voiceAttemptActive = false;
               if (voicePreparationTimer !== null) {
                 window.clearTimeout(voicePreparationTimer);
                 voicePreparationTimer = null;
@@ -5477,6 +5504,7 @@ export function BotcastExperience({
             };
             settleVoicePlayback = settle;
             voicePreparationTimer = window.setTimeout(() => {
+              voiceAttemptActive = false;
               onStopUtterance?.();
               settle(false);
             }, SIGNAL_VOICE_START_TIMEOUT_MS);
@@ -5511,6 +5539,11 @@ export function BotcastExperience({
         current === message.id ? null : current,
       );
       if (!played && !playbackStarted) {
+        if (configuredVoicePlaybackAttempted) {
+          setNotice(
+            `${bot?.name ?? "The speaker"}’s voice didn’t start. Continuing with readable captions.`,
+          );
+        }
         notifyPlaybackStart();
         await revealUtteranceWithoutAudio(message, (elapsedMs, durationMs) => {
           if (
@@ -5553,6 +5586,7 @@ export function BotcastExperience({
       onStopUtterance,
       onProducerGuestActionSfx,
       onUtterance,
+      recordingVoiceSelection.voiceMode,
       revealUtteranceWithoutAudio,
       selectedShow,
     ],
@@ -6422,9 +6456,7 @@ export function BotcastExperience({
       setReplayElapsedMs(0);
       setReplayPlaying(false);
       setReplayIntroRevealed(false);
-      setReplayIntroCalibrationOffsetMs(null);
-      setReplayPuppeteeringCalibrationOffsetMs(0);
-      setReplayIntroCalibrationCardHoldMs(null);
+      setReplayIntroCalibrationDurationMs(null);
       setReplayIntroCalibrationCopied(false);
     } catch (replayError) {
       if (replayVoiceRunIdRef.current === replayRunId) {
@@ -6476,26 +6508,12 @@ export function BotcastExperience({
           manifest: replayManifestV2,
         })
       : 0;
-  const replayIntroEffectivePictureStartMs =
-    replayIntroCalibrationOffsetMs ?? replayIntroAutomaticOffsetMs;
   const replayIntroCalibrationAvailable =
     replayFaithful &&
     Boolean(replayRecording?.timeline) &&
     Number.isFinite(replayIntroSavedPresentationMs) &&
     replayIntroSavedPresentationMs > 0 &&
     replayIntroFirstUtteranceStartMs !== null;
-  const replayIntroPictureStartMaxMs = Math.max(
-    SIGNAL_REPLAY_INTRO_VISUAL_HEAD_START_MS,
-    SIGNAL_REPLAY_CALIBRATION_PICTURE_DELAY_MAX_MS,
-    Math.round(
-      Number.isFinite(replayIntroSavedPresentationMs)
-        ? replayIntroSavedPresentationMs
-        : replayIntroAutomaticOffsetMs +
-            SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS * 2,
-    ),
-  );
-  const replayIntroPictureStartMinMs =
-    -SIGNAL_REPLAY_CALIBRATION_PICTURE_DELAY_MAX_MS;
   const replayDefaultIntroBounds =
     replayFaithful && replayRecording?.timeline
       ? signalReplayIntroBounds(replayRecording.timeline, replayManifestV2)
@@ -6503,30 +6521,35 @@ export function BotcastExperience({
   const replayIntroAutomaticFadeMs = replayDefaultIntroBounds
     ? signalReplayIntroLandingFadeMs(replayDefaultIntroBounds)
     : SIGNAL_REPLAY_INTRO_LANDING_FADE_MS;
-  const replayIntroAutomaticCardHoldMs = replayDefaultIntroBounds
-    ? signalReplayIntroCardHoldMs(
-        replayDefaultIntroBounds,
-        replayIntroAutomaticFadeMs,
-      )
-    : 0;
-  const replayIntroCardHoldMaxMs = Math.max(
-    SIGNAL_REPLAY_CALIBRATION_CARD_HOLD_MIN_MS,
-    Math.round(
-      Number.isFinite(replayIntroSavedPresentationMs)
-        ? Math.max(
-            replayIntroAutomaticCardHoldMs,
-            replayIntroSavedPresentationMs - replayIntroAutomaticFadeMs,
-          )
-        : replayIntroAutomaticCardHoldMs +
-            SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS * 4,
+  const replayIntroAutomaticDurationMs = Math.max(
+    SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS,
+    signalReplayDefaultIntroDurationMs(replayRecording?.timeline),
+  );
+  const replayIntroDurationMaxMs = Math.max(
+    SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS,
+    Math.min(
+      replayRecording?.timeline?.durationMs ?? replayDurationMs,
+      replayIntroAutomaticDurationMs +
+        SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MAX_ADDITION_MS,
     ),
   );
-  const replayIntroEffectiveCardHoldMs =
-    replayIntroCalibrationCardHoldMs ?? replayIntroAutomaticCardHoldMs;
-  // Card hold is audio-clock only. Picture start never shortens or lengthens it.
   const replayIntroEffectiveEndMs =
-    replayIntroEffectiveCardHoldMs + replayIntroAutomaticFadeMs;
-  const replayBookend =
+    replayIntroCalibrationDurationMs ?? replayIntroAutomaticDurationMs;
+  const replayIntroDurationAdjustmentMs =
+    replayIntroEffectiveEndMs - replayIntroAutomaticDurationMs;
+  const replayInterviewFootageOffsetMs =
+    replayIntroFirstUtteranceStartMs === null
+      ? 0
+      : replayIntroEffectiveEndMs - replayIntroFirstUtteranceStartMs;
+  const replayInterviewFootageElapsedMs =
+    replayFaithful && replayRecording?.timeline
+      ? signalReplayInterviewFootageElapsedMs({
+          timeline: replayRecording.timeline,
+          replayElapsedMs,
+          introCardEndMs: replayIntroEffectiveEndMs,
+        })
+      : replayElapsedMs;
+  const replayIntroBookend =
     replayFaithful && replayRecording?.timeline
       ? signalReplayBookendAt(
           replayRecording.timeline,
@@ -6535,6 +6558,21 @@ export function BotcastExperience({
           { introEndMs: replayIntroEffectiveEndMs },
         )
       : null;
+  const replayOutroBookend =
+    replayFaithful && replayRecording?.timeline
+      ? signalReplayBookendAt(
+          replayRecording.timeline,
+          replayInterviewFootageElapsedMs,
+          replayManifestV2,
+          { introEndMs: replayIntroEffectiveEndMs },
+        )
+      : null;
+  const replayBookend =
+    replayIntroBookend?.kind === "intro"
+      ? replayIntroBookend
+      : replayOutroBookend?.kind === "outro"
+        ? replayOutroBookend
+        : null;
   const replayIntroLandingActive =
     replayBookend?.kind === "intro" &&
     signalReplayIntroIsLanding({
@@ -6542,18 +6580,6 @@ export function BotcastExperience({
       elapsedMs: replayElapsedMs,
       fadeMs: replayIntroAutomaticFadeMs,
     });
-  const replayIntroLandingRemainingMs = signalReplayIntroLandingRemainingMs({
-    bookend: replayBookend,
-    elapsedMs: replayElapsedMs,
-    fadeMs: replayIntroAutomaticFadeMs,
-  });
-  const replayIntroMsUntilWide =
-    replayBookend?.kind === "intro"
-      ? Math.max(
-          0,
-          Math.round(replayIntroEffectiveCardHoldMs - replayElapsedMs),
-        )
-      : 0;
   useEffect(() => {
     if (
       !replayEpisode ||
@@ -6624,37 +6650,18 @@ export function BotcastExperience({
         : [],
     [replayManifestV2],
   );
-  const replayPuppeteeringElapsedMs =
-    replayFaithful && replayRecording?.timeline
-      ? signalReplayTranscriptPuppeteeringElapsedMs({
-          timeline: replayRecording.timeline,
-          replayElapsedMs,
-          puppeteeringOffsetMs: replayPuppeteeringCalibrationOffsetMs,
-        })
-      : replayElapsedMs;
   const replayDirectedScene = useMemo(
     () =>
       replayManifestV2
         ? replaySceneAtV2(
             replayManifestV2,
-            replayElapsedMs,
-            replaySceneCheckpoints,
-          )
-        : null,
-    [replayElapsedMs, replayManifestV2, replaySceneCheckpoints],
-  );
-  const replayPuppeteeringDirectedScene = useMemo(
-    () =>
-      replayManifestV2
-        ? replaySceneAtV2(
-            replayManifestV2,
-            replayPuppeteeringElapsedMs,
+            replayInterviewFootageElapsedMs,
             replaySceneCheckpoints,
           )
         : null,
     [
       replayManifestV2,
-      replayPuppeteeringElapsedMs,
+      replayInterviewFootageElapsedMs,
       replaySceneCheckpoints,
     ],
   );
@@ -6664,27 +6671,12 @@ export function BotcastExperience({
       true,
     [replayManifestV2],
   );
-  const replayFaithfulAudioBeat = replayFaithful
-    ? replayRecording?.timeline?.beats.find(
-        (beat) =>
-          beat.kind === "utterance" &&
-          replayElapsedMs >= beat.startMs &&
-          replayElapsedMs < beat.endMs,
-      ) ?? null
-    : null;
-  const replayFaithfulAudioMessage =
-    replayFaithfulAudioBeat?.sourceMessageId && replayEpisode
-      ? (replayEpisode.messages.find(
-          (message) =>
-            message.id === replayFaithfulAudioBeat.sourceMessageId,
-        ) ?? null)
-      : null;
   const replayFaithfulBeat = replayFaithful
     ? replayRecording?.timeline?.beats.find(
         (beat) =>
           beat.kind === "utterance" &&
-          replayPuppeteeringElapsedMs >= beat.startMs &&
-          replayPuppeteeringElapsedMs < beat.endMs,
+          replayInterviewFootageElapsedMs >= beat.startMs &&
+          replayInterviewFootageElapsedMs < beat.endMs,
       ) ?? null
     : null;
   const replayFaithfulMessageIndex =
@@ -6709,24 +6701,24 @@ export function BotcastExperience({
         ? signalFaithfulReplayCameraState({
             episode: replayEpisode,
             timeline: replayRecording.timeline,
-            replayElapsedMs,
+            replayElapsedMs: replayInterviewFootageElapsedMs,
             scene: replayDirectedScene,
-            activeMessage: replayFaithfulAudioMessage,
+            activeMessage: replayActiveMessage,
             preferDirectedCamera: replayHasCapturedCameraDirection,
           })
         : null,
     [
       replayDirectedScene,
-      replayElapsedMs,
       replayEpisode,
       replayFaithful,
-      replayFaithfulAudioMessage,
+      replayActiveMessage,
       replayHasCapturedCameraDirection,
+      replayInterviewFootageElapsedMs,
       replayRecording?.timeline,
     ],
   );
   const replayEventElapsedMs =
-    replayFaithfulCamera?.eventElapsedMs ?? replayElapsedMs;
+    replayFaithfulCamera?.eventElapsedMs ?? replayInterviewFootageElapsedMs;
   const replayBaseShot = replayEpisode
     ? replayFaithful
       ? (replayFaithfulCamera?.shot ??
@@ -6801,7 +6793,7 @@ export function BotcastExperience({
       : null;
   const replayReactionElapsedMs = Math.max(
     0,
-    replayPuppeteeringElapsedMs - replayMessageStartMs,
+    replayInterviewFootageElapsedMs - replayMessageStartMs,
   );
   const replayReactionCameraActive = Boolean(
     replayEpisode &&
@@ -7059,35 +7051,14 @@ export function BotcastExperience({
     setReplayPlaying(true);
   };
 
-  const setSignalReplayCalibrationPictureStart = (
-    nextPictureStartMs: number,
+  const setSignalReplayCalibrationIntroDuration = (
+    nextDurationMs: number,
   ): void => {
-    const boundedPictureStartMs = Math.max(
-      replayIntroPictureStartMinMs,
-      Math.min(replayIntroPictureStartMaxMs, Math.round(nextPictureStartMs)),
+    const boundedDurationMs = Math.max(
+      SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS,
+      Math.min(replayIntroDurationMaxMs, Math.round(nextDurationMs)),
     );
-    setReplayIntroCalibrationOffsetMs(boundedPictureStartMs);
-    setReplayIntroCalibrationCopied(false);
-  };
-
-  const setSignalReplayCalibrationCardHold = (nextHoldMs: number): void => {
-    const boundedHoldMs = Math.max(
-      SIGNAL_REPLAY_CALIBRATION_CARD_HOLD_MIN_MS,
-      Math.min(replayIntroCardHoldMaxMs, Math.round(nextHoldMs)),
-    );
-    setReplayIntroCalibrationCardHoldMs(boundedHoldMs);
-    setReplayIntroCalibrationCopied(false);
-  };
-
-  const setSignalReplayPuppeteeringOffset = (nextOffsetMs: number): void => {
-    const boundedOffsetMs = Math.max(
-      -SIGNAL_REPLAY_CALIBRATION_PUPPETEERING_MAX_MS,
-      Math.min(
-        SIGNAL_REPLAY_CALIBRATION_PUPPETEERING_MAX_MS,
-        Math.round(nextOffsetMs),
-      ),
-    );
-    setReplayPuppeteeringCalibrationOffsetMs(boundedOffsetMs);
+    setReplayIntroCalibrationDurationMs(boundedDurationMs);
     setReplayIntroCalibrationCopied(false);
   };
 
@@ -7097,13 +7068,12 @@ export function BotcastExperience({
       "PRISM Signal Intro Alignment",
       `recordingId: ${replayRecording.id}`,
       `episodeId: ${replayEpisode.id}`,
-      `chosenPictureStartMs: ${Math.round(replayIntroEffectivePictureStartMs)}`,
-      `automaticPictureStartMs: ${Math.round(replayIntroAutomaticOffsetMs)}`,
-      `chosenTranscriptPuppeteeringOffsetMs: ${Math.round(replayPuppeteeringCalibrationOffsetMs)}`,
-      `chosenIntroCardHoldMs: ${Math.round(replayIntroEffectiveCardHoldMs)}`,
-      `automaticIntroCardHoldMs: ${Math.round(replayIntroAutomaticCardHoldMs)}`,
+      `chosenIntroCardDurationMs: ${Math.round(replayIntroEffectiveEndMs)}`,
+      `automaticIntroCardDurationMs: ${Math.round(replayIntroAutomaticDurationMs)}`,
+      `introDurationAdjustmentMs: ${Math.round(replayIntroDurationAdjustmentMs)}`,
       `landingFadeMs: ${Math.round(replayIntroAutomaticFadeMs)}`,
-      `cutToWideAtAudioMs: ${Math.round(replayIntroEffectiveCardHoldMs)}`,
+      `interviewFootageStartsAtAudioMs: ${Math.round(replayIntroEffectiveEndMs)}`,
+      `interviewFootageSpeed: 1`,
       `landingCameraShot: wide`,
       `savedIntroDurationMs: ${Math.round(replayIntroSavedPresentationMs)}`,
       `firstUtteranceStartMs: ${replayIntroFirstUtteranceStartMs ?? "missing"}`,
@@ -7296,6 +7266,10 @@ export function BotcastExperience({
     guestDeparted?: boolean;
     hostDeparted?: boolean;
   }): React.JSX.Element => {
+    const stageCameraTransitionMode =
+      args.replay && replayFaithful
+        ? replayCameraTransitionModeV2(replayDirectedScene)
+        : cameraTransitionMode;
     const recordedGuestDeparture =
       args.guestDeparted ?? guestHasDeparted(args.currentEpisode);
     const recordedHostDeparture =
@@ -7318,7 +7292,7 @@ export function BotcastExperience({
       args.currentEpisode.audienceExperience?.participants;
     const socialPressure = botcastStrongestNegativeSocialInfluenceAt({
       events: args.currentEpisode.events,
-      elapsedMs: args.replay ? replayElapsedMs : Number.POSITIVE_INFINITY,
+      elapsedMs: args.replay ? replayEventElapsedMs : Number.POSITIVE_INFINITY,
     });
     const socialPressureSource = socialPressure
       ? socialPressure.sourceRole === "host"
@@ -7438,8 +7412,8 @@ export function BotcastExperience({
     const delayedLiveCaption =
       args.replay && activeMessageIsSocialSilence
         ? replayPlaying &&
-          replayPuppeteeringElapsedMs >= replayMessageStartMs &&
-          replayPuppeteeringElapsedMs < replayMessageEndMs
+          replayInterviewFootageElapsedMs >= replayMessageStartMs &&
+          replayInterviewFootageElapsedMs < replayMessageEndMs
           ? "..."
           : ""
         : !args.replay &&
@@ -7455,7 +7429,7 @@ export function BotcastExperience({
           ? (args.guest?.name ?? "Guest")
           : null;
     const speechElapsedMs = args.replay
-      ? Math.max(0, replayPuppeteeringElapsedMs - replayMessageStartMs)
+      ? Math.max(0, replayInterviewFootageElapsedMs - replayMessageStartMs)
       : (speechReveal?.elapsedMs ?? 0);
     const speechDurationMs = args.replay
       ? Math.max(1, replayMessageEndMs - replayMessageStartMs)
@@ -7534,7 +7508,7 @@ export function BotcastExperience({
           : args.currentEpisode.guestBotId;
       if (signalEphemeralSpeakingBotIds.has(roleBotId)) return true;
       const directedParticipant =
-        replayPuppeteeringDirectedScene?.participants[
+        replayDirectedScene?.participants[
           replayParticipantIdForRole(role)
         ];
       if (args.replay && replayFaithful && directedParticipant) {
@@ -7591,10 +7565,9 @@ export function BotcastExperience({
       ((role === "guest" &&
         (replayProducerGuestThinking || liveProducerGuestThinking)) ||
         (!args.replay &&
-          ((speechReveal?.phase === "preparing" &&
-            args.activeMessage?.id !== signalPreSpeechPresenceMessageId &&
-            args.activeMessage?.speakerRole === role) ||
-            (busy && speakingMessageId === null && thinkingRole === role))));
+          busy &&
+          speakingMessageId === null &&
+          thinkingRole === role));
     const episodeStartedAtCandidate = Date.parse(args.currentEpisode.startedAt);
     const episodeStartedAtMs = Number.isFinite(episodeStartedAtCandidate)
       ? episodeStartedAtCandidate
@@ -7613,12 +7586,12 @@ export function BotcastExperience({
     );
     const cupNowMs =
       args.replay && episodeStartedAtMs !== null
-      ? episodeStartedAtMs + replayElapsedMs
+      ? episodeStartedAtMs + replayInterviewFootageElapsedMs
       : liveEffectiveNowMs;
     const identityNowMs =
       args.replay && episodeStartedAtMs !== null
         ? episodeStartedAtMs +
-          replayElapsedMs +
+          replayInterviewFootageElapsedMs +
           (args.currentEpisode.modelWarmupHoldDurationMs ?? 0)
         : signalStageNowMs;
     const identityMirrorStates = botcastIdentityMirrorStatesAtV1(
@@ -7780,21 +7753,39 @@ export function BotcastExperience({
       sipping: boolean,
     ): ReactNode => {
       const ephemeralSpeech = signalEphemeralSpeechByBotId.get(bot.id);
-      const mouthShape = ephemeralSpeech
-        ? crtSpeechMouthShapeAtAlignedElapsedMs({
-            text: ephemeralSpeech.text,
-            elapsedMs: ephemeralSpeech.elapsedMs,
-            durationMs: ephemeralSpeech.durationMs,
-            alignment: ephemeralSpeech.alignment,
-          })
-        : talking && args.activeMessage && speechDurationMs > 0
+      const participantId = replayParticipantIdForRole(role);
+      const bakedReplayMouthShape =
+        args.replay && replayFaithful && replayManifestV2
+          ? replayMouthShapeAtV2(
+              replayManifestV2,
+              participantId,
+              replayInterviewFootageElapsedMs,
+            )
+          : null;
+      const mouthShape =
+        bakedReplayMouthShape ??
+        (ephemeralSpeech
           ? crtSpeechMouthShapeAtAlignedElapsedMs({
+              text: ephemeralSpeech.text,
+              elapsedMs: ephemeralSpeech.elapsedMs,
+              durationMs: ephemeralSpeech.durationMs,
+              alignment: ephemeralSpeech.alignment,
+            })
+          : talking && args.activeMessage && speechDurationMs > 0
+            ? crtSpeechMouthShapeAtAlignedElapsedMs({
               text: args.activeMessage.content,
               elapsedMs: speechElapsedMs,
               durationMs: speechDurationMs,
               alignment: speechReveal?.alignment,
             })
-          : "closed";
+            : "closed");
+      const mouthCapture = (
+        <ReplayMouthPresentationCapture
+          sourceId={args.replay ? null : signalCaptureSourceIdRef.current}
+          participantId={participantId}
+          shape={mouthShape}
+        />
+      );
       bot = botWithIdentityAtStageTime(bot);
       const renderedAvatar = renderAvatar?.(bot, {
         talking,
@@ -7819,29 +7810,42 @@ export function BotcastExperience({
         mouthShape,
       });
       if (renderedAvatar !== null && renderedAvatar !== undefined) {
-        return renderedAvatar;
+        return (
+          <>
+            {mouthCapture}
+            {renderedAvatar}
+          </>
+        );
       }
       if (bot.producerGuest) {
         return (
-          <div
-            className={styles.producerGuestPresence}
-            data-talking={talking ? "true" : undefined}
-            data-thinking={thinking ? "true" : undefined}
-            aria-label={`${bot.name}, Producer guest`}
-          >
-            <span aria-hidden="true">{thinking ? "THINKING" : "YOU"}</span>
-            <strong>{bot.name}</strong>
-          </div>
+          <>
+            {mouthCapture}
+            <div
+              className={styles.producerGuestPresence}
+              data-talking={talking ? "true" : undefined}
+              data-thinking={thinking ? "true" : undefined}
+              aria-label={`${bot.name}, Producer guest`}
+            >
+              <span aria-hidden="true">{thinking ? "THINKING" : "YOU"}</span>
+              <strong>{bot.name}</strong>
+            </div>
+          </>
         );
       }
-      return avatarFallback(bot);
+      return (
+        <>
+          {mouthCapture}
+          {avatarFallback(bot)}
+        </>
+      );
     };
     return (
       <section
         ref={signalStageRef}
         className={styles.stageViewport}
         data-shot={args.shot}
-        data-camera-transitions={cameraTransitionMode}
+        data-camera-transitions={stageCameraTransitionMode}
         data-replay={args.replay ? "true" : undefined}
         data-guest-presence={args.currentEpisode.guestPresenceMode}
         data-audience-guest-visible={guestVisibleToAudience ? "true" : "false"}
@@ -8338,6 +8342,7 @@ export function BotcastExperience({
                   ariaLabel: "Premise inspiration",
                   className: styles.pickAwareSetupField,
                   disabled: busy,
+                  resolvePicksToPlainText: true,
                 })}
               </div>
             ) : (
@@ -9705,19 +9710,14 @@ export function BotcastExperience({
         episode.guestKind === "producer" && liveNextSpeakerRole === "guest"
       ),
   );
-  const livePreparedMessageIsBot = Boolean(
-    liveActiveMessage && liveActiveMessage.botId !== BOTCAST_PRODUCER_GUEST_ID,
-  );
   const liveBotThinking = Boolean(
     episode &&
       episode.status === "live" &&
       liveCameraMode === "auto" &&
-      ((liveSpeech?.reveal.phase === "preparing" &&
-        livePreparedMessageIsBot) ||
-        (busy &&
-          speakingMessageId === null &&
-          (producerGuestThinkingEndedAtRef.current !== null ||
-            liveNextSpeakerIsBot))),
+      busy &&
+      speakingMessageId === null &&
+      (producerGuestThinkingEndedAtRef.current !== null ||
+        liveNextSpeakerIsBot),
   );
   const liveReactionShot =
     liveReactionCameraActive && episode
@@ -9780,6 +9780,9 @@ export function BotcastExperience({
           producerGuestThinking:
             liveProducerGuestThinking && liveCameraMode === "auto",
         });
+  const signalVoicePreparationPending =
+    liveSpeech?.reveal.phase === "preparing" &&
+    liveSpeech.messageId !== signalPreSpeechPresenceMessageId;
   const livePresentedThinkingRole: "host" | "guest" | null =
     episode?.status !== "live"
       ? null
@@ -9787,15 +9790,11 @@ export function BotcastExperience({
         ? producerGuestSipActive
           ? null
           : "guest"
-        : liveSpeech?.reveal.phase === "preparing"
-          ? liveSpeech.messageId === signalPreSpeechPresenceMessageId
+        : busy && speakingMessageId === null
+          ? producerGuestSipActive && liveNextSpeakerRole === "guest"
             ? null
-            : (liveActiveMessage?.speakerRole ?? null)
-          : busy && speakingMessageId === null
-            ? producerGuestSipActive && liveNextSpeakerRole === "guest"
-              ? null
-              : liveNextSpeakerRole
-            : null;
+            : liveNextSpeakerRole
+          : null;
   const livePresentedThinkingBot =
     livePresentedThinkingRole === "host"
       ? hostBot
@@ -9816,15 +9815,37 @@ export function BotcastExperience({
       signalCapturedCameraRef.current = null;
       return;
     }
+    const transitionMode: SignalCameraTransitionMode =
+      signalCameraTransitionsShouldAnimate(
+        cameraTransitionMode,
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ===
+          true,
+      )
+        ? "animated"
+        : "instant";
     const previous = signalCapturedCameraRef.current;
-    if (previous?.sourceId === sourceId && previous.shot === liveShot) return;
-    signalCapturedCameraRef.current = { sourceId, shot: liveShot };
+    if (
+      previous?.sourceId === sourceId &&
+      previous.shot === liveShot &&
+      previous.transitionMode === transitionMode
+    ) {
+      return;
+    }
+    signalCapturedCameraRef.current = {
+      sourceId,
+      shot: liveShot,
+      transitionMode,
+    };
     markReplayDirectionEvent({
       sourceId,
       kind: "camera",
-      payload: { shot: liveShot },
+      payload: {
+        shot: liveShot,
+        transitionMode,
+        transitionPreset: "signal-camera-v1",
+      } satisfies ReplayCameraDirectionPayloadV2,
     });
-  }, [episode, liveShot]);
+  }, [cameraTransitionMode, episode, liveShot]);
   useLayoutEffect(() => {
     if (!episode || episode.status !== "live") {
       signalAirTimeFreezeAccumulatedMsRef.current = 0;
@@ -9848,7 +9869,7 @@ export function BotcastExperience({
       return;
     }
     const now = Date.now();
-    if (livePresentedThinkingBot) {
+    if (livePresentedThinkingBot || signalVoicePreparationPending) {
       if (signalAirTimeFreezeStartedAtRef.current === null) {
         signalAirTimeFreezeStartedAtRef.current = now;
       }
@@ -9862,6 +9883,7 @@ export function BotcastExperience({
   }, [
     episode,
     livePresentedThinkingBot,
+    signalVoicePreparationPending,
     signalEphemeralSpeechByBotId,
     signalPreSpeechPresenceMessageId,
   ]);
@@ -9870,7 +9892,7 @@ export function BotcastExperience({
     const shouldHold = Boolean(
       episode?.status === "live" &&
         episodePreRoll === null &&
-        livePresentedThinkingBot &&
+        (livePresentedThinkingBot || signalVoicePreparationPending) &&
         captureSourceId,
     );
     if (shouldHold !== signalThinkingCompactHoldActiveRef.current) {
@@ -9879,7 +9901,12 @@ export function BotcastExperience({
         setReplayAudioMasterCompactHold(captureSourceId, shouldHold);
       }
     }
-  }, [episode, episodePreRoll, livePresentedThinkingBot]);
+  }, [
+    episode,
+    episodePreRoll,
+    livePresentedThinkingBot,
+    signalVoicePreparationPending,
+  ]);
   useLayoutEffect(() => {
     const captureSourceId = signalCaptureSourceIdRef.current;
     if (!episode || !captureSourceId) return;
@@ -10177,6 +10204,7 @@ export function BotcastExperience({
     typeof navigationHeader === "function"
       ? navigationHeader({
           liveSessionActive,
+          replayActive: replayEpisode !== null,
           showLiveExit,
           cuttingShow,
           onCutShow: () => {
@@ -11104,9 +11132,7 @@ export function BotcastExperience({
                     setReplayRecording(null);
                     setReplayManifestV2(null);
                     setReplayIntroRevealed(false);
-                    setReplayIntroCalibrationOffsetMs(null);
-                    setReplayPuppeteeringCalibrationOffsetMs(0);
-                    setReplayIntroCalibrationCardHoldMs(null);
+                    setReplayIntroCalibrationDurationMs(null);
                     setReplayIntroCalibrationCopied(false);
                   }}
                 >
@@ -11170,7 +11196,7 @@ export function BotcastExperience({
                   }
                   pictureStartMs={
                     replayBookend.kind === "intro"
-                      ? replayIntroEffectivePictureStartMs
+                      ? replayIntroAutomaticOffsetMs
                       : undefined
                   }
                 />
@@ -11280,58 +11306,48 @@ export function BotcastExperience({
                     <span className={styles.eyebrow}>Temporary debug tool</span>
                     <h3>Signal Intro Alignment</h3>
                     <p>
-                      Picture, transcript puppeteering, and card hold are
-                      independent. The puppeteering control moves mouths and
-                      transcript timing without seeking the recorded audio.
+                      This single control changes how long the intro card is
+                      visible. When it ends, the interview footage starts from
+                      its beginning and continues at normal speed.
                     </p>
                   </div>
                   <output>
-                    Picture{" "}
-                    {replayIntroEffectivePictureStartMs > 0
-                      ? `+${Math.round(replayIntroEffectivePictureStartMs)}`
-                      : Math.round(replayIntroEffectivePictureStartMs)}{" "}
-                    ms
+                    Intro {Math.round(replayIntroEffectiveEndMs)} ms
                   </output>
                 </div>
                 <label className={styles.replayIntroCalibrationLabel}>
-                  Picture start (animation only · negative = later)
+                  Intro card visible duration
                   <input
                     type="range"
-                    min={replayIntroPictureStartMinMs}
-                    max={replayIntroPictureStartMaxMs}
+                    min={SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS}
+                    max={replayIntroDurationMaxMs}
                     step={SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS}
-                    value={Math.max(
-                      replayIntroPictureStartMinMs,
-                      Math.min(
-                        replayIntroPictureStartMaxMs,
-                        Math.round(replayIntroEffectivePictureStartMs),
-                      ),
-                    )}
+                    value={replayIntroEffectiveEndMs}
                     onChange={(event) =>
-                      setSignalReplayCalibrationPictureStart(
+                      setSignalReplayCalibrationIntroDuration(
                         Number(event.currentTarget.value),
                       )
                     }
-                    aria-label="Signal intro animation picture offset in milliseconds; negative delays the art"
+                    aria-label="Signal intro card visible duration in milliseconds"
                   />
                 </label>
                 <div className={styles.replayIntroCalibrationActions}>
                   <button
                     type="button"
                     onClick={() =>
-                      setSignalReplayCalibrationPictureStart(
-                        replayIntroEffectivePictureStartMs -
-                          SIGNAL_REPLAY_CALIBRATION_PICTURE_COARSE_STEP_MS,
+                      setSignalReplayCalibrationIntroDuration(
+                        replayIntroEffectiveEndMs -
+                          SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
                       )
                     }
                   >
-                    Later art −1000
+                    Shorter −500
                   </button>
                   <button
                     type="button"
                     onClick={() =>
-                      setSignalReplayCalibrationPictureStart(
-                        replayIntroEffectivePictureStartMs -
+                      setSignalReplayCalibrationIntroDuration(
+                        replayIntroEffectiveEndMs -
                           SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
                       )
                     }
@@ -11348,8 +11364,8 @@ export function BotcastExperience({
                   <button
                     type="button"
                     onClick={() =>
-                      setSignalReplayCalibrationPictureStart(
-                        replayIntroEffectivePictureStartMs +
+                      setSignalReplayCalibrationIntroDuration(
+                        replayIntroEffectiveEndMs +
                           SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
                       )
                     }
@@ -11359,232 +11375,41 @@ export function BotcastExperience({
                   <button
                     type="button"
                     onClick={() =>
-                      setSignalReplayCalibrationPictureStart(
-                        replayIntroEffectivePictureStartMs +
-                          SIGNAL_REPLAY_CALIBRATION_PICTURE_COARSE_STEP_MS,
+                      setSignalReplayCalibrationIntroDuration(
+                        replayIntroEffectiveEndMs +
+                          SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
                       )
                     }
                   >
-                    Earlier art +1000
+                    Longer +500
                   </button>
-                </div>
-                <div
-                  className={styles.replayIntroCalibrationFade}
-                  data-signal-replay-puppeteering-calibration="true"
-                >
-                  <div className={styles.replayIntroCalibrationHeading}>
-                    <div>
-                      <strong>Transcript puppeteering vs recorded audio</strong>
-                      <p>
-                        Positive values move mouths later. Negative values move
-                        mouths earlier. Recorded audio and camera timing stay
-                        fixed.
-                      </p>
-                    </div>
-                    <output>
-                      Mouths{" "}
-                      {replayPuppeteeringCalibrationOffsetMs > 0
-                        ? `+${replayPuppeteeringCalibrationOffsetMs}`
-                        : replayPuppeteeringCalibrationOffsetMs}{" "}
-                      ms
-                    </output>
-                  </div>
-                  <label className={styles.replayIntroCalibrationLabel}>
-                    Transcript puppeteering offset (positive = later)
-                    <input
-                      type="range"
-                      min={-SIGNAL_REPLAY_CALIBRATION_PUPPETEERING_MAX_MS}
-                      max={SIGNAL_REPLAY_CALIBRATION_PUPPETEERING_MAX_MS}
-                      step={SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS}
-                      value={replayPuppeteeringCalibrationOffsetMs}
-                      onChange={(event) =>
-                        setSignalReplayPuppeteeringOffset(
-                          Number(event.currentTarget.value),
-                        )
-                      }
-                      aria-label="Signal transcript puppeteering offset from recorded audio in milliseconds; positive delays mouth movements"
-                    />
-                  </label>
-                  <div className={styles.replayIntroCalibrationActions}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayPuppeteeringOffset(
-                          replayPuppeteeringCalibrationOffsetMs -
-                            SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
-                        )
-                      }
-                    >
-                      Earlier −500
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayPuppeteeringOffset(
-                          replayPuppeteeringCalibrationOffsetMs -
-                            SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
-                        )
-                      }
-                    >
-                      −50
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSignalReplayPuppeteeringOffset(0)}
-                    >
-                      Reset 0
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayPuppeteeringOffset(
-                          replayPuppeteeringCalibrationOffsetMs +
-                            SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
-                        )
-                      }
-                    >
-                      +50
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayPuppeteeringOffset(
-                          replayPuppeteeringCalibrationOffsetMs +
-                            SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
-                        )
-                      }
-                    >
-                      Later +500
-                    </button>
-                  </div>
-                </div>
-                <div className={styles.replayIntroCalibrationFade}>
-                  <div className={styles.replayIntroCalibrationHeading}>
-                    <div>
-                      <strong>Intro card before wide</strong>
-                      <p>
-                        How long the branded card stays up before cutting to
-                        the wide studio. Independent from picture start.
-                      </p>
-                    </div>
-                    <output
-                      data-landing={
-                        replayIntroLandingActive ? "true" : undefined
-                      }
-                    >
-                      {replayIntroLandingActive
-                        ? `Wide dissolve · ${replayIntroLandingRemainingMs} ms`
-                        : replayIntroMsUntilWide > 0
-                          ? `${replayIntroMsUntilWide} ms until wide`
-                          : `${Math.round(replayIntroEffectiveCardHoldMs)} ms hold`}
-                    </output>
-                  </div>
-                  <label className={styles.replayIntroCalibrationLabel}>
-                    Card hold before wide
-                    <input
-                      type="range"
-                      min={SIGNAL_REPLAY_CALIBRATION_CARD_HOLD_MIN_MS}
-                      max={replayIntroCardHoldMaxMs}
-                      step={SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS}
-                      value={Math.min(
-                        replayIntroCardHoldMaxMs,
-                        Math.max(
-                          SIGNAL_REPLAY_CALIBRATION_CARD_HOLD_MIN_MS,
-                          Math.round(replayIntroEffectiveCardHoldMs),
-                        ),
-                      )}
-                      onChange={(event) =>
-                        setSignalReplayCalibrationCardHold(
-                          Number(event.currentTarget.value),
-                        )
-                      }
-                      aria-label="Signal intro card hold before wide studio in milliseconds"
-                    />
-                  </label>
-                  <div className={styles.replayIntroCalibrationActions}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayCalibrationCardHold(
-                          replayIntroEffectiveCardHoldMs -
-                            SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
-                        )
-                      }
-                    >
-                      Shorter −500
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayCalibrationCardHold(
-                          replayIntroEffectiveCardHoldMs -
-                            SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
-                        )
-                      }
-                    >
-                      −50
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setReplayIntroCalibrationCardHoldMs(null);
-                        setReplayIntroCalibrationCopied(false);
-                      }}
-                    >
-                      Reset auto
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayCalibrationCardHold(
-                          replayIntroEffectiveCardHoldMs +
-                            SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
-                        )
-                      }
-                    >
-                      +50
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSignalReplayCalibrationCardHold(
-                          replayIntroEffectiveCardHoldMs +
-                            SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
-                        )
-                      }
-                    >
-                      Longer +500
-                    </button>
-                  </div>
                 </div>
                 <div className={styles.replayIntroCalibrationReadout}>
                   <span>
-                    Auto picture start{" "}
+                    Automatic intro{" "}
                     <strong>
-                      {Math.round(replayIntroAutomaticOffsetMs)} ms
+                      {Math.round(replayIntroAutomaticDurationMs)} ms
                     </strong>
                   </span>
                   <span>
-                    Auto card hold{" "}
+                    Adjustment{" "}
                     <strong>
-                      {Math.round(replayIntroAutomaticCardHoldMs)} ms
+                      {replayIntroDurationAdjustmentMs > 0 ? "+" : ""}
+                      {Math.round(replayIntroDurationAdjustmentMs)} ms
                     </strong>
                   </span>
                   <span>
-                    Dissolve after hold{" "}
-                    <strong>{Math.round(replayIntroAutomaticFadeMs)} ms</strong>
+                    Interview visuals begin{" "}
+                    <strong>{Math.round(replayIntroEffectiveEndMs)} ms</strong>
                   </span>
                   <span>
-                    Landing camera <strong>wide</strong>
+                    Interview speed <strong>1×</strong>
                   </span>
                   <span>
-                    Saved intro{" "}
-                    <strong>
-                      {Math.round(replayIntroSavedPresentationMs)} ms
-                    </strong>
+                    Dissolve <strong>{Math.round(replayIntroAutomaticFadeMs)} ms</strong>
                   </span>
                   <span>
-                    First speech{" "}
+                    Original footage start{" "}
                     <strong>{replayIntroFirstUtteranceStartMs} ms</strong>
                   </span>
                 </div>
@@ -11605,15 +11430,17 @@ export function BotcastExperience({
                   type="button"
                   data-botcast-replay-intro-row="true"
                   data-active={
-                    replayElapsedMs < replayIntroDurationMs ? "true" : undefined
+                    replayElapsedMs < replayIntroEffectiveEndMs
+                      ? "true"
+                      : undefined
                   }
                   onClick={() => seekFaithfulReplay(0)}
                   disabled={!replayFaithful}
-                  aria-label={`Play Signal intro, ${runtimeLabel(replayIntroDurationMs)}`}
+                  aria-label={`Play Signal intro, ${runtimeLabel(replayIntroEffectiveEndMs)}`}
                 >
                   <strong>Signal intro</strong>
                   <span>
-                    Opening video · {runtimeLabel(replayIntroDurationMs)}
+                    Opening video · {runtimeLabel(replayIntroEffectiveEndMs)}
                   </span>
                 </button>
               ) : null}
@@ -11635,11 +11462,11 @@ export function BotcastExperience({
                     }
                   onClick={() => {
                     const nextMs =
-                      replayRecording?.timeline?.beats.find(
+                      (replayRecording?.timeline?.beats.find(
                         (beat) => beat.sourceMessageId === message.id,
                       )?.startMs ??
-                      replayTimeline.messageStartMs[index] ??
-                      0;
+                        replayTimeline.messageStartMs[index] ??
+                        0) + replayInterviewFootageOffsetMs;
                     seekFaithfulReplay(nextMs);
                   }}
                   disabled={!replayFaithful}
@@ -12003,6 +11830,7 @@ export function BotcastExperience({
                                   ariaLabel: "Edit show premise",
                                   className: `${styles.showLookPremiseInput} ${styles.pickAwareSetupField}`,
                                   disabled: busy,
+                                  resolvePicksToPlainText: true,
                                   onBlur: (value) =>
                                     void saveShowPremise(value),
                                 })}

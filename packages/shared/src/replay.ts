@@ -117,6 +117,10 @@ export interface ReplayThinkingDirectionPayloadV2
   botId: string;
   startMs: number;
   endMs: number;
+  /** Actual committed on-screen duration when the replay timeline is compacted. */
+  presentationDurationMs?: number;
+  /** True when startMs/endMs are a direction tick rather than wall duration. */
+  timelineCompacted?: boolean;
   audible: boolean;
   camera: string | null;
   segment: string | null;
@@ -128,6 +132,53 @@ export interface ReplayThinkingDirectionPayloadV2
     | "failed"
     | "replaced"
     | "capture_end";
+}
+
+export type ReplayMouthShapeV2 =
+  | "open-wide"
+  | "closed"
+  | "speech-closed"
+  | "narrow"
+  | "open-small"
+  | "open-round"
+  | "dot"
+  | "at"
+  | "click";
+
+export interface ReplayMouthCueV2 {
+  atMs: number;
+  shape: ReplayMouthShapeV2;
+}
+
+export interface ReplayMouthTrackV2 {
+  participantId: string;
+  cues: ReplayMouthCueV2[];
+}
+
+export type ReplayCameraTransitionModeV2 = "animated" | "instant";
+export type ReplayCameraTransitionPresetV2 = "signal-camera-v1";
+
+export interface ReplayCameraPresentationV2 {
+  shot: string | null;
+  transitionMode: ReplayCameraTransitionModeV2;
+  transitionPreset: ReplayCameraTransitionPresetV2;
+}
+
+export interface ReplayCameraDirectionPayloadV2
+  extends Record<string, unknown> {
+  shot: string;
+  transitionMode: ReplayCameraTransitionModeV2;
+  transitionPreset: ReplayCameraTransitionPresetV2;
+}
+
+export interface ReplayVoiceSelectionSnapshotV2 {
+  voiceMode: VoiceMode;
+  englishVoiceEngine: EnglishVoiceEngine;
+}
+
+export interface ReplayPresentationV2 {
+  mouthTracks: ReplayMouthTrackV2[];
+  voiceSelection?: ReplayVoiceSelectionSnapshotV2;
 }
 
 export interface ReplayParticipantSceneV2 {
@@ -147,6 +198,8 @@ export interface ReplayParticipantSceneV2 {
 
 export interface ReplaySceneSnapshotV2 {
   camera: string | null;
+  cameraTransitionMode?: ReplayCameraTransitionModeV2;
+  cameraTransitionPreset?: ReplayCameraTransitionPresetV2 | null;
   segment: string | null;
   introActive: boolean;
   outroActive: boolean;
@@ -169,6 +222,7 @@ export interface ReplayManifestV2 {
   utterances: ReplayUtteranceV1[];
   initialScene: ReplaySceneSnapshotV2;
   direction: ReplayDirectionEventV2[];
+  presentation?: ReplayPresentationV2;
   visual: ReplayManifestV1["visual"];
 }
 
@@ -630,6 +684,8 @@ export function defaultReplaySceneV2(
 ): ReplaySceneSnapshotV2 {
   return {
     camera: null,
+    cameraTransitionMode: "animated",
+    cameraTransitionPreset: "signal-camera-v1",
     segment: null,
     introActive: false,
     outroActive: false,
@@ -738,6 +794,9 @@ export function reduceReplaySceneV2(
     }
     case "camera":
       state.camera = boundedText(event.payload.shot, 80) || null;
+      state.cameraTransitionMode =
+        event.payload.transitionMode === "instant" ? "instant" : "animated";
+      state.cameraTransitionPreset = "signal-camera-v1";
       return state;
     case "segment":
       state.segment = boundedText(event.payload.segment, 120) || null;
@@ -902,6 +961,63 @@ export function replaySceneAtV2(
     state = reduceReplaySceneV2(state, event);
   }
   return state;
+}
+
+const REPLAY_MOUTH_SHAPES = new Set<ReplayMouthShapeV2>([
+  "open-wide",
+  "closed",
+  "speech-closed",
+  "narrow",
+  "open-small",
+  "open-round",
+  "dot",
+  "at",
+  "click",
+]);
+
+export function replayMouthShapeAtV2(
+  manifest: ReplayManifestV2,
+  participantId: string,
+  atMs: number,
+): ReplayMouthShapeV2 | null {
+  const track = manifest.presentation?.mouthTracks.find(
+    (candidate) => candidate.participantId === participantId,
+  );
+  if (!track || track.cues.length === 0) return null;
+  const targetMs = Math.max(0, Number.isFinite(atMs) ? atMs : 0);
+  let low = 0;
+  let high = track.cues.length - 1;
+  let resolved: ReplayMouthShapeV2 | null = null;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const cue = track.cues[middle]!;
+    if (cue.atMs <= targetMs) {
+      resolved = cue.shape;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return resolved;
+}
+
+export function replayCameraTransitionModeV2(
+  scene: ReplaySceneSnapshotV2 | null | undefined,
+): ReplayCameraTransitionModeV2 {
+  return scene?.cameraTransitionMode === "instant" ? "instant" : "animated";
+}
+
+export function replayCameraPresentationAtV2(
+  manifest: ReplayManifestV2,
+  atMs: number,
+  checkpoints?: readonly ReplaySceneCheckpointV2[],
+): ReplayCameraPresentationV2 {
+  const scene = replaySceneAtV2(manifest, atMs, checkpoints);
+  return {
+    shot: scene.camera,
+    transitionMode: replayCameraTransitionModeV2(scene),
+    transitionPreset: "signal-camera-v1",
+  };
 }
 
 const REPLAY_DIRECTION_DURATION_KINDS = new Set<ReplayDirectionEventKindV2>([
@@ -1071,6 +1187,73 @@ export function replayManifestV2IsValid(
   ) {
     return false;
   }
+  if (record.presentation !== undefined) {
+    if (
+      !record.presentation ||
+      typeof record.presentation !== "object" ||
+      Array.isArray(record.presentation)
+    ) {
+      return false;
+    }
+    const presentation = record.presentation as Record<string, unknown>;
+    if (!Array.isArray(presentation.mouthTracks)) return false;
+    const participantIds = new Set<string>();
+    for (const rawTrack of presentation.mouthTracks) {
+      if (!rawTrack || typeof rawTrack !== "object" || Array.isArray(rawTrack)) {
+        return false;
+      }
+      const track = rawTrack as Record<string, unknown>;
+      const participantId = boundedId(track.participantId);
+      if (
+        !participantId ||
+        participantIds.has(participantId) ||
+        !Array.isArray(track.cues)
+      ) {
+        return false;
+      }
+      participantIds.add(participantId);
+      let priorCueAtMs = -1;
+      let priorShape: ReplayMouthShapeV2 | null = null;
+      for (const rawCue of track.cues) {
+        if (!rawCue || typeof rawCue !== "object" || Array.isArray(rawCue)) {
+          return false;
+        }
+        const cue = rawCue as Record<string, unknown>;
+        const atMs = finiteNonNegativeNumber(cue.atMs);
+        if (
+          atMs === null ||
+          atMs < priorCueAtMs ||
+          typeof cue.shape !== "string" ||
+          !REPLAY_MOUTH_SHAPES.has(cue.shape as ReplayMouthShapeV2) ||
+          cue.shape === priorShape
+        ) {
+          return false;
+        }
+        priorCueAtMs = atMs;
+        priorShape = cue.shape as ReplayMouthShapeV2;
+      }
+    }
+    if (presentation.voiceSelection !== undefined) {
+      if (
+        !presentation.voiceSelection ||
+        typeof presentation.voiceSelection !== "object" ||
+        Array.isArray(presentation.voiceSelection)
+      ) {
+        return false;
+      }
+      const selection = presentation.voiceSelection as Record<string, unknown>;
+      if (
+        !["mute", "english", "babble", "bottish"].includes(
+          String(selection.voiceMode),
+        ) ||
+        !["builtin", "elevenlabs"].includes(
+          String(selection.englishVoiceEngine),
+        )
+      ) {
+        return false;
+      }
+    }
+  }
   let priorSequence = 0;
   let priorAtMs = -1;
   const directionKinds = new Set<ReplayDirectionEventKindV2>([
@@ -1129,6 +1312,10 @@ export function replayManifestV2IsValid(
         finiteNonNegativeNumber(payload.startMs) !== atMs ||
         endMs === null ||
         finiteNonNegativeNumber(payload.endMs) !== endMs ||
+        (payload.presentationDurationMs !== undefined &&
+          finiteNonNegativeNumber(payload.presentationDurationMs) === null) ||
+        (payload.timelineCompacted !== undefined &&
+          typeof payload.timelineCompacted !== "boolean") ||
         typeof payload.audible !== "boolean" ||
         !(
           payload.camera === null ||
@@ -1146,6 +1333,20 @@ export function replayManifestV2IsValid(
         !endReasons.has(
           payload.endReason as ReplayThinkingDirectionPayloadV2["endReason"],
         )
+      ) {
+        return false;
+      }
+    }
+    if (event.kind === "camera") {
+      const payload = event.payload as Record<string, unknown>;
+      const hasBakedTransition =
+        payload.transitionMode !== undefined ||
+        payload.transitionPreset !== undefined;
+      if (
+        hasBakedTransition &&
+        ((payload.transitionMode !== "animated" &&
+          payload.transitionMode !== "instant") ||
+          payload.transitionPreset !== "signal-camera-v1")
       ) {
         return false;
       }

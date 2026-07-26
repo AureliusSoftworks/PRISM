@@ -4,7 +4,10 @@ import type {
   ReplayDirectionEventKindV2,
   ReplayDirectionEventV2,
   ReplayEventV1,
+  ReplayMouthShapeV2,
+  ReplayMouthTrackV2,
   ReplayThinkingDirectionPayloadV2,
+  ReplayVoiceSelectionSnapshotV2,
 } from "@localai/shared";
 
 export type ReplayAudioMasterCaptureResult = {
@@ -15,6 +18,8 @@ export type ReplayAudioMasterCaptureResult = {
   /** Temporary V1 compatibility for the Coffee restoration boundary. */
   events: ReplayEventV1[];
   direction: ReplayDirectionEventV2[];
+  mouthTracks: ReplayMouthTrackV2[];
+  voiceSelection?: ReplayVoiceSelectionSnapshotV2;
 };
 
 type ReplayAudioMasterCaptureSession = {
@@ -42,6 +47,11 @@ type ReplayAudioMasterCaptureSession = {
   needsRecorderRestart: boolean;
   events: ReplayEventV1[];
   direction: ReplayDirectionEventV2[];
+  mouthCuesByParticipant: Map<
+    string,
+    ReplayMouthTrackV2["cues"]
+  >;
+  voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   thinkingByParticipant: Map<string, ReplayThinkingPresentation>;
   stopPromise: Promise<ReplayAudioMasterCaptureResult | null> | null;
 };
@@ -50,6 +60,7 @@ type ReplayThinkingPresentation = {
   participantId: string;
   botId: string;
   startMs: number;
+  startedAtWallMs: number;
   audible: boolean;
   camera: string | null;
   segment: string | null;
@@ -198,6 +209,7 @@ export async function startReplayAudioMasterCapture(
     markIntro?: boolean;
     /** Signal only — pause the master during thinking / interruption holds. */
     compactThinkingGaps?: boolean;
+    voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   } = {},
 ): Promise<boolean> {
   const normalizedSourceId = sourceId.trim();
@@ -233,6 +245,10 @@ export async function startReplayAudioMasterCapture(
       needsRecorderRestart: false,
       events: [],
       direction: [],
+      mouthCuesByParticipant: new Map(),
+      ...(options.voiceSelection
+        ? { voiceSelection: { ...options.voiceSelection } }
+        : {}),
       thinkingByParticipant: new Map(),
       stopPromise: null,
     };
@@ -297,6 +313,62 @@ export function replayAudioMasterCaptureElapsedMs(
 
 export function replayAudioMasterCaptureActive(): boolean {
   return activeCapture !== null;
+}
+
+export function markReplayMouthShape(args: {
+  sourceId: string;
+  participantId: string;
+  shape: ReplayMouthShapeV2;
+  atMs?: number;
+}): void {
+  const capture = activeCapture;
+  const participantId = args.participantId.trim();
+  if (!capture || capture.sourceId !== args.sourceId || !participantId) return;
+  const atMs = Math.max(
+    0,
+    Math.round(
+      typeof args.atMs === "number" && Number.isFinite(args.atMs)
+        ? args.atMs
+        : replayAudioMasterCaptureElapsedMs(args.sourceId) ?? 0,
+    ),
+  );
+  const cues = capture.mouthCuesByParticipant.get(participantId) ?? [];
+  const previous = cues[cues.length - 1];
+  if (previous?.shape === args.shape) return;
+  cues.push({ atMs, shape: args.shape });
+  capture.mouthCuesByParticipant.set(participantId, cues);
+}
+
+function captureMouthTracks(
+  capture: ReplayAudioMasterCaptureSession,
+  endMs?: number,
+): ReplayMouthTrackV2[] {
+  return [...capture.mouthCuesByParticipant.entries()]
+    .map(([participantId, capturedCues]) => {
+      const cues = capturedCues.map((cue) => ({ ...cue }));
+      const finalCue = cues[cues.length - 1];
+      if (
+        endMs !== undefined &&
+        finalCue &&
+        finalCue.shape !== "closed"
+      ) {
+        cues.push({
+          atMs: Math.max(finalCue.atMs, Math.round(endMs)),
+          shape: "closed",
+        });
+      }
+      return { participantId, cues };
+    })
+    .sort((left, right) =>
+      left.participantId.localeCompare(right.participantId),
+    );
+}
+
+export function replayAudioMasterCaptureMouthTracks(
+  sourceId: string,
+): ReplayMouthTrackV2[] {
+  if (activeCapture?.sourceId !== sourceId) return [];
+  return captureMouthTracks(activeCapture);
 }
 
 /** True while a Signal session is compacting thinking/interruption gaps. */
@@ -467,6 +539,7 @@ export function startReplayThinkingPresentation(args: {
           : replayAudioMasterCaptureElapsedMs(args.sourceId) ?? 0,
       ),
     ),
+    startedAtWallMs: nowMs(),
     audible: args.audible,
     camera: args.camera,
     segment: args.segment,
@@ -496,11 +569,16 @@ export function endReplayThinkingPresentation(args: {
   const endMs = compact
     ? active.startMs + 1
     : Math.max(active.startMs + 1, rawEndMs);
+  const presentationDurationMs = compact
+    ? Math.max(1, Math.round(nowMs() - active.startedAtWallMs))
+    : endMs - active.startMs;
   const payload: ReplayThinkingDirectionPayloadV2 = {
     participantId: active.participantId,
     botId: active.botId,
     startMs: active.startMs,
     endMs,
+    presentationDurationMs,
+    timelineCompacted: compact,
     audible: active.audible,
     camera: active.camera,
     segment: active.segment,
@@ -701,6 +779,10 @@ export function stopReplayAudioMasterCapture(
                 ...event,
                 payload: { ...event.payload },
               })),
+              mouthTracks: captureMouthTracks(capture, durationMs),
+              ...(capture.voiceSelection
+                ? { voiceSelection: { ...capture.voiceSelection } }
+                : {}),
             }
           : null;
       try {

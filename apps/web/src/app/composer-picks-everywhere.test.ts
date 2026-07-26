@@ -63,6 +63,18 @@ describe("composer picks everywhere", () => {
       pageSource,
       /field\.resolvePicksToPlainText[\s\S]{0,240}expandComposerDraft\([\s\S]{0,100}composerShortcutInsertionText\(command\)/u,
     );
+    assert.equal(
+      signalSource.match(/resolvePicksToPlainText: true/gu)?.length,
+      3,
+    );
+    assert.match(
+      pageSource,
+      /shortcutChipsEnabled=\{!field\.resolvePicksToPlainText\}/u,
+    );
+    assert.match(
+      pageSource,
+      /variant === "signal"[\s\S]{0,500}shortcutChipsEnabled=\{variant !== "signal"\}/u,
+    );
     assert.match(
       signalSource,
       /id: "botcast-premise-inspiration"[\s\S]{0,200}onChange: setShowPremiseInspirationDraft/u,

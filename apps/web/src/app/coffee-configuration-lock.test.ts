@@ -54,7 +54,19 @@ test("active Coffee centrally locks configuration while preserving End Session",
   assert.match(pageSource, /disabled:\s*coffeeHeaderModelControlsLocked\(\)/u);
   assert.match(
     pageSource,
-    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:\s*coffeeConfigurationLocked/u,
+    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:\s*options\.voiceDisabled/u,
+  );
+  assert.match(
+    pageSource,
+    /recordedReplay:\s*coffeeChromePolicy\.reviewActive/u,
+  );
+  assert.match(
+    pageSource,
+    /coffeeChromePolicy\.disabledNavbarActions\.voice === true/u,
+  );
+  assert.match(
+    pageSource,
+    /data-recorded-replay="true"[\s\S]*Recorded replay/u,
   );
   assert.match(
     pageSource,
@@ -73,4 +85,25 @@ test("Coffee's PRISM wordmark returns to All Bots Home", () => {
     /className=\{`\$\{styles\.coffeeHubButton\} \$\{styles\.sidebarWordmarkButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?aria-label="Open All Bots Home"[\s\S]*?<AppletHeaderLabel appletId="coffee" \/>/u,
   );
   assert.doesNotMatch(pageSource, /returnToCoffeeStart/u);
+});
+
+test("Coffee records and restores baked mouth puppeteering independently of current Voice", () => {
+  assert.match(pageSource, /startCoffeeAudioMasterCapture/u);
+  assert.match(
+    pageSource,
+    /freezeRecordingVoiceSelection\(\s*"coffee",\s*sourceId/u,
+  );
+  assert.match(
+    pageSource,
+    /replayAudioMasterCaptureMouthTracks\(conversation\.id\)/u,
+  );
+  assert.match(
+    pageSource,
+    /replayMouthShapeAtV2\([\s\S]{0,140}coffeeReplayAudioMasterElapsedMs/u,
+  );
+  assert.match(pageSource, /<ReplayMouthPresentationCapture/u);
+  assert.match(
+    pageSource,
+    /voicePlaybackSelectionRef\.current\.voiceMode ===\s*"bottish"/u,
+  );
 });

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   botcastReplayTimeline,
+  replayCameraPresentationAtV2,
+  replayMouthShapeAtV2,
   type BotcastEpisode,
   type ReplayManifestV2,
   type ReplayParticipantSceneV2,
@@ -11,6 +13,7 @@ import {
 import {
   signalFaithfulReplayCameraState,
   signalReplayBookendAt,
+  signalReplayDefaultIntroDurationMs,
   signalReplayEventElapsedMs,
   signalReplayIntroBounds,
   signalReplayIntroCardHoldMs,
@@ -18,7 +21,7 @@ import {
   signalReplayIntroIsLanding,
   signalReplayIntroLandingFadeMs,
   signalReplayIntroLandingRemainingMs,
-  signalReplayTranscriptPuppeteeringElapsedMs,
+  signalReplayInterviewFootageElapsedMs,
   signalReplayIntroVisualElapsedMs,
   signalReplayIntroVisualOffsetMs,
   signalReplayVideoEventElapsedMs,
@@ -103,40 +106,66 @@ const timeline: ReplayTimelineV1 = {
   ],
 };
 
-describe("signalReplayTranscriptPuppeteeringElapsedMs", () => {
-  it("moves transcript puppeteering independently of the recorded audio clock", () => {
+describe("signalReplayInterviewFootageElapsedMs", () => {
+  it("uses the calibrated nine-second intro as the replay default", () => {
+    assert.equal(signalReplayDefaultIntroDurationMs(timeline), 9_000);
     assert.equal(
-      signalReplayTranscriptPuppeteeringElapsedMs({
-        timeline,
-        replayElapsedMs: 5_000,
-        puppeteeringOffsetMs: 250,
+      signalReplayDefaultIntroDurationMs({
+        ...timeline,
+        durationMs: 4_000,
       }),
-      4_750,
+      4_000,
+    );
+    assert.equal(signalReplayDefaultIntroDurationMs(undefined), 9_000);
+  });
+
+  it("starts the interview footage when the adjustable intro card ends", () => {
+    assert.equal(
+      signalReplayInterviewFootageElapsedMs({
+        timeline,
+        replayElapsedMs: 3_000,
+        introCardEndMs: 3_000,
+      }),
+      2_000,
     );
     assert.equal(
-      signalReplayTranscriptPuppeteeringElapsedMs({
+      signalReplayInterviewFootageElapsedMs({
         timeline,
         replayElapsedMs: 5_000,
-        puppeteeringOffsetMs: -250,
+        introCardEndMs: 3_000,
       }),
-      5_250,
+      4_000,
     );
   });
 
-  it("clamps delayed and advanced puppeteering to the replay timeline", () => {
+  it("preserves the full interview footage speed after shifting its start", () => {
+    const earlierFrameMs = signalReplayInterviewFootageElapsedMs({
+      timeline,
+      replayElapsedMs: 4_000,
+      introCardEndMs: 3_000,
+    });
+    const laterFrameMs = signalReplayInterviewFootageElapsedMs({
+      timeline,
+      replayElapsedMs: 7_500,
+      introCardEndMs: 3_000,
+    });
+    assert.equal(laterFrameMs - earlierFrameMs, 3_500);
+  });
+
+  it("clamps shifted footage to the replay timeline", () => {
     assert.equal(
-      signalReplayTranscriptPuppeteeringElapsedMs({
+      signalReplayInterviewFootageElapsedMs({
         timeline,
         replayElapsedMs: 100,
-        puppeteeringOffsetMs: 500,
+        introCardEndMs: 3_000,
       }),
       0,
     );
     assert.equal(
-      signalReplayTranscriptPuppeteeringElapsedMs({
+      signalReplayInterviewFootageElapsedMs({
         timeline,
         replayElapsedMs: 11_900,
-        puppeteeringOffsetMs: -500,
+        introCardEndMs: 1_000,
       }),
       timeline.durationMs,
     );
@@ -251,6 +280,80 @@ function episodeWithCameraEvents(
 }
 
 describe("Signal replay video frames", () => {
+  it("translates baked mouth and camera tracks together while the audio clock stays fixed", () => {
+    const bakedManifest: ReplayManifestV2 = {
+      v: 2,
+      surface: "signal",
+      sourceId: "translated-performance",
+      title: "Translated performance",
+      createdAt: "2026-07-26T00:00:00.000Z",
+      completedAt: "2026-07-26T00:00:12.000Z",
+      privacyMode: "local",
+      participants: [],
+      utterances: [],
+      initialScene: replayScene({ host: participantScene() }),
+      direction: [
+        {
+          sequence: 1,
+          atMs: 3_200,
+          kind: "camera",
+          payload: {
+            shot: "right",
+            transitionMode: "instant",
+            transitionPreset: "signal-camera-v1",
+          },
+        },
+      ],
+      presentation: {
+        mouthTracks: [
+          {
+            participantId: "host",
+            cues: [
+              { atMs: 0, shape: "closed" },
+              { atMs: 3_000, shape: "open-wide" },
+              { atMs: 3_400, shape: "closed" },
+            ],
+          },
+        ],
+      },
+      visual: {
+        theme: "dark",
+        accentColor: null,
+        atmosphereImageUrl: null,
+      },
+    };
+    const audioElapsedMs = 3_500;
+    const originalVisualMs = signalReplayInterviewFootageElapsedMs({
+      timeline,
+      replayElapsedMs: audioElapsedMs,
+      introCardEndMs: 2_000,
+    });
+    const extendedIntroVisualMs = signalReplayInterviewFootageElapsedMs({
+      timeline,
+      replayElapsedMs: audioElapsedMs,
+      introCardEndMs: 2_500,
+    });
+    assert.equal(audioElapsedMs, 3_500);
+    assert.equal(originalVisualMs - extendedIntroVisualMs, 500);
+    assert.equal(
+      replayMouthShapeAtV2(bakedManifest, "host", originalVisualMs),
+      "closed",
+    );
+    assert.equal(
+      replayMouthShapeAtV2(bakedManifest, "host", extendedIntroVisualMs),
+      "open-wide",
+    );
+    assert.equal(
+      replayCameraPresentationAtV2(bakedManifest, originalVisualMs)
+        .transitionMode,
+      "instant",
+    );
+    assert.equal(
+      replayCameraPresentationAtV2(bakedManifest, extendedIntroVisualMs).shot,
+      null,
+    );
+  });
+
   it("measures the intro block from zero to the first recorded utterance", () => {
     assert.equal(signalReplayIntroDurationMs(timeline), 2_000);
     assert.equal(signalReplayIntroDurationMs(undefined), 0);

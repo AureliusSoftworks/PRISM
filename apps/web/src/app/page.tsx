@@ -673,11 +673,13 @@ import {
   replayAudioMasterCaptureElapsedMs,
   replayAudioMasterCaptureDirection,
   replayAudioMasterCaptureEvents,
+  replayAudioMasterCaptureMouthTracks,
   startReplayAudioMasterCapture,
   stopReplayAudioMasterCapture,
   syncReplayThinkingPresentations,
   type ReplayAudioMasterCaptureResult,
 } from "./replayAudioMasterCapture";
+import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
 import { coffeeReplayVideoFrameState } from "./coffeeReplayVideoFrame";
 import { signalStageSoundcheckMessageIsEphemeral } from "./signalStageSoundcheck";
 import {
@@ -1004,6 +1006,7 @@ import {
   normalizePrismTutorialProgress,
   prismTutorialShouldRun,
   buildReplaySceneCheckpointsV2,
+  replayMouthShapeAtV2,
   replaySceneAtV2,
   replayManifestV2IsValid,
   type BotAudioVoiceProfileV1,
@@ -1040,9 +1043,11 @@ import {
   type ReplayDirectionEventV2,
   type ReplayEventV1,
   type ReplayManifestV2,
+  type ReplayMouthTrackV2,
   type ReplayParticipantSnapshotV1,
   type ReplayRecordingV1,
   type ReplaySceneCheckpointV2,
+  type ReplayVoiceSelectionSnapshotV2,
   type ReplayTimelineV1,
   type SlateDeliberationConfig,
   type SlateProjectResponse,
@@ -27109,6 +27114,7 @@ interface ComposerInputProps {
   resolveShortcutPickToText?: (
     command: CommandCenterCommand,
   ) => string | null;
+  shortcutChipsEnabled?: boolean;
   dismissPopoversSignal?: number;
   actionInputEnabled?: boolean;
   interruptActive?: boolean;
@@ -31740,6 +31746,8 @@ interface DesktopMarkdownComposerProps {
   resolveShortcutPickToText?: (
     command: CommandCenterCommand,
   ) => string | null;
+  /** Keep autocomplete while suppressing inline shortcut chip decoration. */
+  shortcutChipsEnabled?: boolean;
   /** True while the dice button is generating a context-aware prompt. */
   generatingRandomPrompt?: boolean;
   /** When true, the editor is locked (read-only) and visually muted. */
@@ -31779,6 +31787,7 @@ const DesktopMarkdownComposer = forwardRef<
     promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     resolveShortcutPickToText,
+    shortcutChipsEnabled = true,
     onGenerateWildcardSlotValue,
     chipPointerBehavior = "resolve",
     generatingRandomPrompt = false,
@@ -32274,30 +32283,43 @@ const DesktopMarkdownComposer = forwardRef<
   }, [onFocus, onInputActivity, onValueChange]);
 
   const commandNamesForHighlight = useMemo(
-    () => commandPicks.flatMap((command) => commandInvocationNames(command)),
-    [commandPicks],
+    () =>
+      shortcutChipsEnabled
+        ? commandPicks.flatMap((command) => commandInvocationNames(command))
+        : [],
+    [commandPicks, shortcutChipsEnabled],
   );
   const toolNamesForHighlight = useMemo(
-    () => toolPicks.flatMap((command) => commandInvocationNames(command)),
-    [toolPicks],
+    () =>
+      shortcutChipsEnabled
+        ? toolPicks.flatMap((command) => commandInvocationNames(command))
+        : [],
+    [shortcutChipsEnabled, toolPicks],
   );
   const promptNamesForHighlight = useMemo(
-    () => promptPicks.flatMap((command) => commandInvocationNames(command)),
-    [promptPicks],
+    () =>
+      shortcutChipsEnabled
+        ? promptPicks.flatMap((command) => commandInvocationNames(command))
+        : [],
+    [promptPicks, shortcutChipsEnabled],
   );
   const wildcardNamesForHighlight = useMemo(
     () =>
-      wildcardPicks
-        .filter(isComposerWildcardDeckPick)
-        .flatMap((command) => commandInvocationNames(command)),
-    [wildcardPicks],
+      shortcutChipsEnabled
+        ? wildcardPicks
+            .filter(isComposerWildcardDeckPick)
+            .flatMap((command) => commandInvocationNames(command))
+        : [],
+    [shortcutChipsEnabled, wildcardPicks],
   );
   const wildcardSlotNamesForHighlight = useMemo(
     () =>
-      wildcardPicks
-        .filter(isComposerTrueWildcardSlotPick)
-        .flatMap((command) => commandInvocationNames(command)),
-    [wildcardPicks],
+      shortcutChipsEnabled
+        ? wildcardPicks
+            .filter(isComposerTrueWildcardSlotPick)
+            .flatMap((command) => commandInvocationNames(command))
+        : [],
+    [shortcutChipsEnabled, wildcardPicks],
   );
 
   const editor = useEditor(
@@ -33290,6 +33312,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
       promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       resolveShortcutPickToText,
+      shortcutChipsEnabled = true,
       dismissPopoversSignal,
       actionInputEnabled = true,
       interruptActive = false,
@@ -33448,14 +33471,23 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
       () =>
         resolveComposerTextareaChipRanges({
           value: textareaDisplayValue,
-          commandPicks,
-          toolPicks,
-          promptPicks,
-          wildcardPicks,
+          commandPicks: shortcutChipsEnabled
+            ? commandPicks
+            : EMPTY_COMPOSER_COMMAND_PICKS,
+          toolPicks: shortcutChipsEnabled
+            ? toolPicks
+            : EMPTY_COMPOSER_COMMAND_PICKS,
+          promptPicks: shortcutChipsEnabled
+            ? promptPicks
+            : EMPTY_COMPOSER_COMMAND_PICKS,
+          wildcardPicks: shortcutChipsEnabled
+            ? wildcardPicks
+            : EMPTY_COMPOSER_COMMAND_PICKS,
         }),
       [
         commandPicks,
         promptPicks,
+        shortcutChipsEnabled,
         textareaDisplayValue,
         toolPicks,
         wildcardPicks,
@@ -34375,6 +34407,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
             promptPicks={promptPicks}
             wildcardPicks={wildcardPicks}
             resolveShortcutPickToText={resolveShortcutPickToText}
+            shortcutChipsEnabled={shortcutChipsEnabled}
             generatingRandomPrompt={generatingRandomPrompt}
             disabled={disabled || generatingRandomPrompt}
             dismissPopoversSignal={dismissPopoversSignal}
@@ -43636,16 +43669,73 @@ function HomeContent(): React.JSX.Element {
   const interruptedSpeakerVoiceReadyClipRef = useRef<
     Map<string, EnglishVoiceSynthesisClip | null>
   >(new Map());
-  const voicePlaybackSelectionRef = useRef<{
-    voiceMode: VoiceMode;
-    englishVoiceEngine: EnglishVoiceEngine;
-  }>({ voiceMode: "mute", englishVoiceEngine: "builtin" });
-  voicePlaybackSelectionRef.current = {
+  const configuredVoicePlaybackSelection: ReplayVoiceSelectionSnapshotV2 = {
     voiceMode: normalizeVoiceMode(settings?.voiceMode),
     englishVoiceEngine: normalizeEnglishVoiceEngine(
       settings?.englishVoiceEngine,
     ),
   };
+  const voicePlaybackSelectionRef =
+    useRef<ReplayVoiceSelectionSnapshotV2>(configuredVoicePlaybackSelection);
+  const recordingVoiceSelectionRef = useRef<{
+    surface: "signal" | "coffee";
+    sourceId: string;
+    selection: ReplayVoiceSelectionSnapshotV2;
+  } | null>(null);
+  const [recordingVoiceSurface, setRecordingVoiceSurface] = useState<
+    "signal" | "coffee" | null
+  >(null);
+  if (recordingVoiceSelectionRef.current) {
+    voicePlaybackSelectionRef.current =
+      recordingVoiceSelectionRef.current.selection;
+  } else {
+    voicePlaybackSelectionRef.current = configuredVoicePlaybackSelection;
+  }
+  const freezeRecordingVoiceSelection = useCallback(
+    (
+      surface: "signal" | "coffee",
+      sourceId: string,
+    ): ReplayVoiceSelectionSnapshotV2 => {
+      const current = recordingVoiceSelectionRef.current;
+      if (current?.surface === surface && current.sourceId === sourceId) {
+        return current.selection;
+      }
+      const selection = { ...voicePlaybackSelectionRef.current };
+      recordingVoiceSelectionRef.current = {
+        surface,
+        sourceId,
+        selection,
+      };
+      voicePlaybackSelectionRef.current = selection;
+      setRecordingVoiceSurface(surface);
+      return selection;
+    },
+    [],
+  );
+  const releaseRecordingVoiceSelection = useCallback(
+    (surface: "signal" | "coffee"): void => {
+      if (recordingVoiceSelectionRef.current?.surface !== surface) return;
+      recordingVoiceSelectionRef.current = null;
+      voicePlaybackSelectionRef.current = {
+        voiceMode: normalizeVoiceMode(settings?.voiceMode),
+        englishVoiceEngine: normalizeEnglishVoiceEngine(
+          settings?.englishVoiceEngine,
+        ),
+      };
+      setRecordingVoiceSurface(null);
+    },
+    [settings?.englishVoiceEngine, settings?.voiceMode],
+  );
+  const handleSignalRecordingStateChange = useCallback(
+    (active: boolean): void => {
+      if (active) {
+        freezeRecordingVoiceSelection("signal", "signal-session");
+      } else {
+        releaseRecordingVoiceSelection("signal");
+      }
+    },
+    [freezeRecordingVoiceSelection, releaseRecordingVoiceSelection],
+  );
   const voicePreviewLineCacheRef = useRef<Map<string, string>>(new Map());
   const voicePreviewAudioCacheRef = useRef<
     Map<
@@ -51607,7 +51697,12 @@ function HomeContent(): React.JSX.Element {
       configuredChoice,
       premiumLocalOnly,
     );
-    const disabled = options.disabled === true || !settings;
+    const recordingLockReason = recordingVoiceSurface
+      ? `Voice is baked for this ${recordingVoiceSurface === "signal" ? "Signal episode" : "Coffee session"} until recording ends.`
+      : undefined;
+    const disabled =
+      options.disabled === true || recordingVoiceSurface !== null || !settings;
+    const disabledReason = options.disabledReason ?? recordingLockReason;
     const premiumUnavailable = settings?.elevenLabsApiKeySource === "none";
     const currentDisplayName = voiceModeDisplayName(configuredChoice, {
       localPremiumFallback: premiumLocalOnly,
@@ -51624,12 +51719,12 @@ function HomeContent(): React.JSX.Element {
         <summary
           className={styles.voiceModeSelectorButton}
           aria-label={
-            disabled && options.disabledReason
-              ? `Voice mode: ${currentDisplayName}. ${options.disabledReason}`
+            disabled && disabledReason
+              ? `Voice mode: ${currentDisplayName}. ${disabledReason}`
               : `Voice mode: ${currentDisplayName}`
           }
           aria-disabled={disabled ? "true" : undefined}
-          title={disabled ? options.disabledReason : undefined}
+          title={disabled ? disabledReason : undefined}
           onClick={(event) => {
             if (!disabled) return;
             event.preventDefault();
@@ -51690,16 +51785,33 @@ function HomeContent(): React.JSX.Element {
     );
   };
   const renderCoffeeHeaderModelChrome = (
-    options: { localPremiumFallback?: boolean } = {},
-  ): React.ReactNode => (
-    <div className={styles.chatHeaderModelPicker}>
-      {renderCoffeeProviderModeToggle()}
-      {renderCoffeeHeaderModelPicker()}
-      {renderVoiceModeSelector({
-        localPremiumFallback: options.localPremiumFallback === true,
-      })}
-    </div>
-  );
+    options: {
+      localPremiumFallback?: boolean;
+      recordedReplay?: boolean;
+      voiceDisabled?: boolean;
+      voiceDisabledReason?: string;
+    } = {},
+  ): React.ReactNode =>
+    options.recordedReplay ? (
+      <div
+        className={styles.recordedReplayBadge}
+        data-recorded-replay="true"
+        aria-label="Recorded replay. Routing, model, and voice are baked into this recording."
+        title="Routing, model, and voice controls do not affect recorded replays."
+      >
+        Recorded replay
+      </div>
+    ) : (
+      <div className={styles.chatHeaderModelPicker}>
+        {renderCoffeeProviderModeToggle()}
+        {renderCoffeeHeaderModelPicker()}
+        {renderVoiceModeSelector({
+          disabled: options.voiceDisabled,
+          disabledReason: options.voiceDisabledReason,
+          localPremiumFallback: options.localPremiumFallback === true,
+        })}
+      </div>
+    );
   const renderHeaderModelPicker = (
     options: {
       modelMenuClassName?: string;
@@ -57972,6 +58084,8 @@ function HomeContent(): React.JSX.Element {
       conversation: CoffeeConversationState,
       capturedReplayEvents: readonly ReplayEventV1[] = [],
       capturedDirection: readonly ReplayDirectionEventV2[] = [],
+      capturedMouthTracks: readonly ReplayMouthTrackV2[] = [],
+      voiceSelection?: ReplayVoiceSelectionSnapshotV2,
     ) => {
       if (!settings) {
         throw new Error("Coffee replay settings are not ready.");
@@ -57985,6 +58099,8 @@ function HomeContent(): React.JSX.Element {
         theme: resolvedTheme,
         capturedReplayEvents,
         capturedDirection,
+        capturedMouthTracks,
+        voiceSelection,
       });
     },
     [
@@ -58000,6 +58116,21 @@ function HomeContent(): React.JSX.Element {
   const coffeeReplayCaptureBySessionRef = useRef<
     Map<string, ReplayAudioMasterCaptureResult>
   >(new Map());
+  const startCoffeeAudioMasterCapture = useCallback(
+    async (sourceId: string): Promise<boolean> => {
+      const voiceSelection = freezeRecordingVoiceSelection(
+        "coffee",
+        sourceId,
+      );
+      const started = await startReplayAudioMasterCapture(sourceId, {
+        markIntro: false,
+        voiceSelection,
+      });
+      if (!started) releaseRecordingVoiceSelection("coffee");
+      return started;
+    },
+    [freezeRecordingVoiceSelection, releaseRecordingVoiceSelection],
+  );
   const finalizeCoffeeAudioMaster = useCallback(
     (conversation: CoffeeConversationState): Promise<void> => {
       const existing = coffeeReplayFinalizeBySessionRef.current.get(
@@ -58010,10 +58141,18 @@ function HomeContent(): React.JSX.Element {
         const liveEvents = replayAudioMasterCaptureEvents(conversation.id);
         const liveDirection =
           replayAudioMasterCaptureDirection(conversation.id);
+        const liveMouthTracks =
+          replayAudioMasterCaptureMouthTracks(conversation.id);
+        const liveVoiceSelection =
+          recordingVoiceSelectionRef.current?.surface === "coffee"
+            ? recordingVoiceSelectionRef.current.selection
+            : undefined;
         const provisionalManifest = buildCoffeeReplayManifest(
           conversation,
           liveEvents,
           liveDirection,
+          liveMouthTracks,
+          liveVoiceSelection,
         );
         if (!replayManifestV2IsValid(provisionalManifest)) {
           throw new Error("Coffee replay manifest is invalid.");
@@ -58029,10 +58168,13 @@ function HomeContent(): React.JSX.Element {
             );
           }
         }
+        releaseRecordingVoiceSelection("coffee");
         const manifest = buildCoffeeReplayManifest(
           conversation,
           capture?.events ?? liveEvents,
           capture?.direction ?? liveDirection,
+          capture?.mouthTracks ?? liveMouthTracks,
+          capture?.voiceSelection ?? liveVoiceSelection,
         );
         if (!replayManifestV2IsValid(manifest)) {
           throw new Error("Coffee replay manifest is invalid.");
@@ -58050,6 +58192,7 @@ function HomeContent(): React.JSX.Element {
         coffeeReplayQueuedSessionIdsRef.current.add(conversation.id);
         window.dispatchEvent(new Event(REPLAY_RECORDING_CHANGED_EVENT));
       })().catch((error) => {
+        releaseRecordingVoiceSelection("coffee");
         coffeeReplayFinalizeBySessionRef.current.delete(conversation.id);
         coffeeReplayQueuedSessionIdsRef.current.delete(conversation.id);
         throw error;
@@ -58057,7 +58200,7 @@ function HomeContent(): React.JSX.Element {
       coffeeReplayFinalizeBySessionRef.current.set(conversation.id, pending);
       return pending;
     },
-    [buildCoffeeReplayManifest],
+    [buildCoffeeReplayManifest, releaseRecordingVoiceSelection],
   );
   useEffect(() => {
     if (!coffeeConversation || coffeeSessionPhase !== "finished" || !settings) {
@@ -60777,7 +60920,9 @@ function HomeContent(): React.JSX.Element {
   ]);
   const prepareBotcastUtterance = useCallback((): void => {
     if (!settings) return;
-    primeVoiceModePlaybackFromUserGesture(settings.voiceMode);
+    primeVoiceModePlaybackFromUserGesture(
+      voicePlaybackSelectionRef.current.voiceMode,
+    );
   }, [settings]);
   const requestListenerReactionEnglishClip = useCallback(
     async (args: {
@@ -60909,11 +61054,12 @@ function HomeContent(): React.JSX.Element {
     },
     [requestInterruptedSpeakerReactionEnglishClip],
   );
-  const listenerReactionMode = settings?.voiceMode === "english"
+  const listenerReactionMode =
+    voicePlaybackSelectionRef.current.voiceMode === "english"
     ? "english"
-    : settings?.voiceMode === "babble"
+    : voicePlaybackSelectionRef.current.voiceMode === "babble"
       ? "babble"
-      : settings?.voiceMode === "bottish"
+      : voicePlaybackSelectionRef.current.voiceMode === "bottish"
         ? "bottish"
         : null;
   const prefetchBotcastListenerReaction = useCallback(
@@ -61364,7 +61510,7 @@ function HomeContent(): React.JSX.Element {
         !plan ||
         !settings ||
         !bundledActionSfxIsEligible({
-          voiceMode: settings.voiceMode,
+          voiceMode: voicePlaybackSelectionRef.current.voiceMode,
           voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
           voiceVolume: settings.voiceVolume,
         })
@@ -61492,12 +61638,16 @@ function HomeContent(): React.JSX.Element {
       const controller = new AbortController();
       signalVoiceAbortRef.current?.abort();
       signalVoiceAbortRef.current = controller;
+      const playbackIsCurrent = (): boolean =>
+        !controller.signal.aborted &&
+        signalVoiceAbortRef.current === controller;
       stopVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
       let playbackStarted = false;
       let captureSpeechStarted = false;
       const trackedLifecycle: VoicePlaybackLifecycle = {
         ...lifecycle,
         onStart: (durationMs, alignment) => {
+          if (!playbackIsCurrent()) return;
           playbackStarted = true;
           const startedAtMs =
             replayAudioMasterCaptureElapsedMs(message.episodeId);
@@ -61546,7 +61696,7 @@ function HomeContent(): React.JSX.Element {
             });
             captureSpeechStarted = false;
           }
-          lifecycle.onEnd?.();
+          if (playbackIsCurrent()) lifecycle.onEnd?.();
         },
       };
       try {
@@ -61621,6 +61771,7 @@ function HomeContent(): React.JSX.Element {
           SIGNAL_STUDIO_VOICE_ROOM_SEND,
           preSpeechBreath,
           stereoPan,
+          playbackIsCurrent,
         );
         return playbackStarted && !controller.signal.aborted;
       } catch (voiceError) {
@@ -71944,6 +72095,7 @@ function HomeContent(): React.JSX.Element {
                 }
               : undefined
           }
+          shortcutChipsEnabled={!field.resolvePicksToPlainText}
           dismissPopoversSignal={composerPopoverDismissSignal}
           onChange={(event) => {
             const next = singleLine
@@ -77350,6 +77502,17 @@ function HomeContent(): React.JSX.Element {
         toolPicks={toolPicks}
         promptPicks={promptPicks}
         wildcardPicks={wildcardPicks}
+        resolveShortcutPickToText={
+          variant === "signal"
+            ? (command) => {
+                const resolved = expandComposerDraft(
+                  composerShortcutInsertionText(command).trim(),
+                ).trim();
+                return resolved ? `${resolved} ` : "";
+              }
+            : undefined
+        }
+        shortcutChipsEnabled={variant !== "signal"}
         dismissPopoversSignal={composerPopoverDismissSignal}
         actionInputEnabled={actionInputEnabled}
         interruptActive={interruptActive}
@@ -78044,6 +78207,13 @@ function HomeContent(): React.JSX.Element {
     nextChoice: VoicePlaybackChoice,
   ): Promise<void> {
     if (!settings || voiceModeSelectionBusyRef.current) return;
+    if (recordingVoiceSelectionRef.current) {
+      showLocalCommandToast(
+        "Voice is baked",
+        "End the active recording before changing speaking type.",
+      );
+      return;
+    }
     const previousMode = normalizeVoiceMode(settings.voiceMode);
     const previousEnglishVoiceEngine = normalizeEnglishVoiceEngine(
       settings.englishVoiceEngine,
@@ -78133,6 +78303,12 @@ function HomeContent(): React.JSX.Element {
   async function saveVoiceSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!settings) return;
+    if (recordingVoiceSelectionRef.current) {
+      setPanelError(
+        "End the active Signal or Coffee recording before changing Voice.",
+      );
+      return;
+    }
     const payload = {
       voiceMode: normalizeVoiceMode(settings.voiceMode),
       voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
@@ -97430,6 +97606,7 @@ function HomeContent(): React.JSX.Element {
       };
       modelControls?: React.ReactNode;
       voiceLocalPremiumFallback?: boolean;
+      recordedReplay?: boolean;
     } = {},
   ): React.JSX.Element => {
     const liveChromePolicy = options.liveSessionActive
@@ -97469,7 +97646,16 @@ function HomeContent(): React.JSX.Element {
             })
           )}
         </div>
-        {options.modelControls ? (
+        {options.recordedReplay ? (
+          <div
+            className={styles.recordedReplayBadge}
+            data-recorded-replay="true"
+            aria-label="Recorded replay. Routing, model, and voice are baked into this recording."
+            title="Routing, model, and voice controls do not affect recorded replays."
+          >
+            Recorded replay
+          </div>
+        ) : options.modelControls ? (
           <div className={styles.chatHeaderModelPicker}>
             {options.modelControls}
             {options.showVoiceSelector
@@ -116124,7 +116310,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeBusy(true);
     setCoffeeError(null);
     primeVoiceModePlaybackFromUserGesture(
-      normalizeVoiceMode(settings?.voiceMode),
+      voicePlaybackSelectionRef.current.voiceMode,
     );
     try {
       const response = await api<{
@@ -116170,7 +116356,7 @@ function HomeContent(): React.JSX.Element {
       return false;
     }
     primeVoiceModePlaybackFromUserGesture(
-      normalizeVoiceMode(settings?.voiceMode),
+      voicePlaybackSelectionRef.current.voiceMode,
     );
     setCoffeeBusy(true);
     setCoffeeError(null);
@@ -116212,7 +116398,7 @@ function HomeContent(): React.JSX.Element {
       return false;
     }
     primeVoiceModePlaybackFromUserGesture(
-      normalizeVoiceMode(settings?.voiceMode),
+      voicePlaybackSelectionRef.current.voiceMode,
     );
     setCoffeeBusy(true);
     setCoffeeError(null);
@@ -116414,9 +116600,7 @@ function HomeContent(): React.JSX.Element {
         }),
       });
       createdSessionId = response.conversation.id;
-      await startReplayAudioMasterCapture(response.conversation.id, {
-        markIntro: false,
-      });
+      await startCoffeeAudioMasterCapture(response.conversation.id);
       void startReplayRecordingDraft({
         surface: "coffee",
         sourceId: response.conversation.id,
@@ -116479,6 +116663,7 @@ function HomeContent(): React.JSX.Element {
       if (createdSessionId) {
         await abortReplayAudioMasterCapture(createdSessionId);
       }
+      releaseRecordingVoiceSelection("coffee");
       setCoffeeError(
         err instanceof Error ? err.message : "Failed to start Coffee Session.",
       );
@@ -116701,9 +116886,7 @@ function HomeContent(): React.JSX.Element {
         }),
       });
       createdSessionId = response.conversation.id;
-      await startReplayAudioMasterCapture(response.conversation.id, {
-        markIntro: false,
-      });
+      await startCoffeeAudioMasterCapture(response.conversation.id);
       void startReplayRecordingDraft({
         surface: "coffee",
         sourceId: response.conversation.id,
@@ -116762,6 +116945,7 @@ function HomeContent(): React.JSX.Element {
       if (createdSessionId) {
         await abortReplayAudioMasterCapture(createdSessionId);
       }
+      releaseRecordingVoiceSelection("coffee");
       setCoffeeError(
         err instanceof Error ? err.message : "Failed to start Coffee Session.",
       );
@@ -116989,9 +117173,7 @@ function HomeContent(): React.JSX.Element {
           },
         );
         restartedSessionId = response.conversation.id;
-        await startReplayAudioMasterCapture(response.conversation.id, {
-          markIntro: false,
-        });
+        await startCoffeeAudioMasterCapture(response.conversation.id);
         void startReplayRecordingDraft({
           surface: "coffee",
           sourceId: response.conversation.id,
@@ -117050,6 +117232,7 @@ function HomeContent(): React.JSX.Element {
         if (restartedSessionId) {
           await abortReplayAudioMasterCapture(restartedSessionId);
         }
+        releaseRecordingVoiceSelection("coffee");
         setCoffeeError(
           err instanceof Error
             ? err.message
@@ -117416,9 +117599,7 @@ function HomeContent(): React.JSX.Element {
     const conversationStarted = coffeeSessionHasStarted(coffeeConversation);
     if (conversationStarted) return;
     primeReplayAudioMasterCapture();
-    await startReplayAudioMasterCapture(coffeeConversation.id, {
-      markIntro: false,
-    });
+    await startCoffeeAudioMasterCapture(coffeeConversation.id);
     void startReplayRecordingDraft({
       surface: "coffee",
       sourceId: coffeeConversation.id,
@@ -122617,10 +122798,22 @@ function HomeContent(): React.JSX.Element {
                 coffeeAuthoredActionReaction?.actor === "bot" &&
                 coffeeAuthoredActionReaction.botId === bot.id &&
                 coffeeActionSfxDrivesOhMouth(coffeeAuthoredActionReaction.kind);
+              const bakedReplayMouthShape =
+                coffeeReplayActive &&
+                coffeeReplayUsesAudioMaster &&
+                coffeeReplayAudioMasterRef.current?.manifest
+                  ? replayMouthShapeAtV2(
+                      coffeeReplayAudioMasterRef.current.manifest,
+                      bot.id,
+                      coffeeReplayAudioMasterElapsedMs,
+                    )
+                  : null;
               const seatMouthActive =
-                isTableTypingThisSeat ||
-                seatAmbientVocalizationActive ||
-                seatFoleyOhMouth;
+                bakedReplayMouthShape !== null
+                  ? bakedReplayMouthShape !== "closed"
+                  : isTableTypingThisSeat ||
+                    seatAmbientVocalizationActive ||
+                    seatFoleyOhMouth;
               const seatBadgeSide = coffeeSeatBadgeSide(
                 coffeeSeatLayoutCount,
                 layoutIndex,
@@ -122668,9 +122861,11 @@ function HomeContent(): React.JSX.Element {
               const seatSpeechText =
                 tableTypingAssistantSpeechText || bot.name;
               const replayMouthCharactersPerPhase =
-                settings?.voiceMode === "english"
+                coffeeReplayActive
                   ? 1
-                  : settings?.voiceMode === "bottish"
+                  : voicePlaybackSelectionRef.current.voiceMode === "english"
+                  ? 1
+                  : voicePlaybackSelectionRef.current.voiceMode === "bottish"
                     ? COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE
                     : COFFEE_SEAT_MOUTH_CHARACTERS_PER_PHASE;
               const replayMouthVisibleLength =
@@ -122684,11 +122879,13 @@ function HomeContent(): React.JSX.Element {
                       Math.max(1, Array.from(seatSpeechText).length)) +
                     1
                   : activeTypewriterLength;
-              const mouthShapeWhileTyping = zenLiveBotMouthShapeForTalkingState(
-                {
+              const mouthShapeWhileTyping =
+                bakedReplayMouthShape ??
+                zenLiveBotMouthShapeForTalkingState({
                   mouthShape: isTableTypingThisSeat
                     ? liveSeatSpeech
-                      ? settings?.voiceMode === "bottish"
+                      ? voicePlaybackSelectionRef.current.voiceMode ===
+                        "bottish"
                         ? bottishMouthShapeAtAlignedElapsedMs({
                             text: liveSeatSpeech.text,
                             elapsedMs: liveSeatSpeech.elapsedMs,
@@ -122715,8 +122912,12 @@ function HomeContent(): React.JSX.Element {
                           seatDeadAirAsideTalking
                             ? (activeCoffeeDeadAirAside?.text ?? bot.name)
                             : seatSpeechText,
-                          settings?.voiceMode === "english",
-                          settings?.voiceMode === "bottish"
+                          coffeeReplayActive ||
+                            voicePlaybackSelectionRef.current.voiceMode ===
+                              "english",
+                          !coffeeReplayActive &&
+                            voicePlaybackSelectionRef.current.voiceMode ===
+                              "bottish"
                             ? COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE
                             : undefined,
                         )
@@ -122724,10 +122925,9 @@ function HomeContent(): React.JSX.Element {
                       ? "open-small"
                       : seatAmbientVocalizationActive
                         ? coffeeAmbientBotVocalizationMouthShape(bot.id)
-                        : "closed",
+                      : "closed",
                   isTalking: seatMouthActive,
-                },
-              );
+                });
               const seatVoicePreset = coffeeSeatVoicePreset(bot);
               const identityMirrorState = identityMirrorByHolderBotId[bot.id] ?? null;
               const identityShapeshiftState =
@@ -123457,6 +123657,16 @@ function HomeContent(): React.JSX.Element {
                         data-live-body-style="zen"
                         style={coffeeHeadPlateStyle}
                       >
+                        <ReplayMouthPresentationCapture
+                          sourceId={
+                            recordingVoiceSurface === "coffee" &&
+                            !coffeeReplayActive
+                              ? (coffeeConversation?.id ?? null)
+                              : null
+                          }
+                          participantId={bot.id}
+                          shape={mouthShapeWhileTyping}
+                        />
                         <BotAmbientPresenceRig
                           theme={resolvedTheme}
                           isTalking={seatMouthActive}
@@ -125554,6 +125764,11 @@ function HomeContent(): React.JSX.Element {
               </div>
               {renderCoffeeHeaderModelChrome({
                 localPremiumFallback: coffeeBlocksOnlineCapabilities,
+                recordedReplay: coffeeChromePolicy.reviewActive,
+                voiceDisabled:
+                  coffeeChromePolicy.disabledNavbarActions.voice === true,
+                voiceDisabledReason:
+                  coffeeChromePolicy.disabledNavbarActionTooltips.voice,
               })}
               <h2
                 className={styles.chatHeaderTitlePlaceholder}
@@ -127122,6 +127337,8 @@ function HomeContent(): React.JSX.Element {
           preferredImageProvider={settings?.preferredImageProvider ?? "local"}
           modelOptions={signalModelOptions}
           responseMode={signalEpisodeResponseMode}
+          recordingVoiceSelection={voicePlaybackSelectionRef.current}
+          onRecordingStateChange={handleSignalRecordingStateChange}
           accountDefaultModel={
             signalAccountDefaultModel === AUTO_MODEL_CHOICE ||
             modelChoiceIsDisabled(signalAccountDefaultModel)
@@ -127211,7 +127428,7 @@ function HomeContent(): React.JSX.Element {
           }}
           introAudioEnabled={
             settings !== null &&
-            settings.voiceMode !== "mute" &&
+            voicePlaybackSelectionRef.current.voiceMode !== "mute" &&
             settings.voiceVolume > 0
           }
           introAudioVolume={settings?.voiceVolume ?? 1}
@@ -127516,6 +127733,7 @@ function HomeContent(): React.JSX.Element {
             cuttingShow,
             onCutShow,
             episodeModelControl,
+            replayActive,
           }) => {
             const liveChromePolicy = liveSessionActive
               ? liveSessionChromePolicy("Signal")
@@ -127526,8 +127744,9 @@ function HomeContent(): React.JSX.Element {
                 )?.label ?? signalAccountDefaultModel)
               : "Account default";
             return renderSharedAppletNavbar("Signal tools", {
-              showVoiceSelector: true,
+              showVoiceSelector: !replayActive,
               liveSessionActive,
+              recordedReplay: replayActive,
               liveSessionExit: showLiveExit
                 ? {
                     label: cuttingShow ? "■ Cut now" : "■ Cut show",
@@ -127540,7 +127759,7 @@ function HomeContent(): React.JSX.Element {
               voiceLocalPremiumFallback: blocksOnlineCapabilities(
                 signalEpisodeResponseMode,
               ),
-              modelControls: (
+              modelControls: replayActive ? undefined : (
                 <>
                   {renderProviderModeToggle(
                     styles.chatHeaderModeToggle,

@@ -40,6 +40,8 @@ const SIGNAL_REPLAY_FALLBACK_END_CARD_MS = 2_000;
 /** Reveal the studio before speech so the wide establishing shot can land. */
 const SIGNAL_REPLAY_INTRO_TO_STUDIO_LEAD_MS = 1_800;
 const SIGNAL_REPLAY_INTRO_MIN_VISIBLE_MS = 1_000;
+/** Calibrated against the faithful master so recorded mouths land on speech. */
+export const SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS = 9_000;
 /** Logo dissolves into the studio over this window when the pad is long enough. */
 export const SIGNAL_REPLAY_INTRO_LANDING_FADE_MS = 650;
 
@@ -63,6 +65,20 @@ export function signalReplayIntroDurationMs(
 ): number {
   if (!timeline) return 0;
   return Math.max(0, signalReplayFirstUtteranceStartMs(timeline) ?? 0);
+}
+
+/** Default card duration, bounded so short recordings remain seekable. */
+export function signalReplayDefaultIntroDurationMs(
+  timeline: ReplayTimelineV1 | null | undefined,
+): number {
+  if (!timeline) return SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS;
+  return Math.max(
+    0,
+    Math.min(
+      timeline.durationMs,
+      SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS,
+    ),
+  );
 }
 
 /** Pull the branded card off early without wiping very short intros. */
@@ -198,26 +214,31 @@ export function signalReplayIntroVisualElapsedMs(args: {
 }
 
 /**
- * Shift transcript-driven replay puppeteering without seeking recorded audio.
- * Positive offsets delay mouths; negative offsets advance them.
+ * Hold the interview footage behind the intro card without stretching it.
+ * When the card ends, the footage resumes at its first recorded utterance and
+ * continues at normal speed while the recorded-audio clock remains untouched.
  */
-export function signalReplayTranscriptPuppeteeringElapsedMs(args: {
+export function signalReplayInterviewFootageElapsedMs(args: {
   timeline: ReplayTimelineV1;
   replayElapsedMs: number;
-  puppeteeringOffsetMs?: number;
+  introCardEndMs: number;
 }): number {
   const boundedAudioElapsedMs = Math.max(
     0,
     Math.min(args.timeline.durationMs, args.replayElapsedMs),
   );
-  const puppeteeringOffsetMs = Number.isFinite(args.puppeteeringOffsetMs)
-    ? Math.round(args.puppeteeringOffsetMs ?? 0)
-    : 0;
+  const firstUtteranceStartMs =
+    signalReplayFirstUtteranceStartMs(args.timeline);
+  if (firstUtteranceStartMs === null) return boundedAudioElapsedMs;
+  const introCardEndMs = Number.isFinite(args.introCardEndMs)
+    ? Math.max(0, Math.round(args.introCardEndMs))
+    : firstUtteranceStartMs;
+  const footageOffsetMs = introCardEndMs - firstUtteranceStartMs;
   return Math.max(
     0,
     Math.min(
       args.timeline.durationMs,
-      boundedAudioElapsedMs - puppeteeringOffsetMs,
+      boundedAudioElapsedMs - footageOffsetMs,
     ),
   );
 }

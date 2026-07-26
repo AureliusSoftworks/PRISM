@@ -158,11 +158,41 @@ describe("replay manifests", () => {
           },
         },
       ],
+      capturedMouthTracks: [
+        {
+          participantId: "bot-1",
+          cues: [
+            { atMs: 0, shape: "closed" },
+            { atMs: 900, shape: "open-wide" },
+            { atMs: 2_100, shape: "closed" },
+          ],
+        },
+      ],
+      voiceSelection: {
+        voiceMode: "english",
+        englishVoiceEngine: "builtin",
+      },
     });
     assert.equal(manifestV2.v, 2);
     assert.equal(replayManifestV2IsValid(manifestV2), true);
     assert.equal(manifestV2.direction[0]?.kind, "scene_snapshot");
     assert.equal(manifestV2.direction[1]?.kind, "speech");
+    assert.deepEqual(manifestV2.presentation, {
+      mouthTracks: [
+        {
+          participantId: "bot-1",
+          cues: [
+            { atMs: 0, shape: "closed" },
+            { atMs: 900, shape: "open-wide" },
+            { atMs: 2_100, shape: "closed" },
+          ],
+        },
+      ],
+      voiceSelection: {
+        voiceMode: "english",
+        englishVoiceEngine: "builtin",
+      },
+    });
   });
 
   it("adds transcript-only Coffee interruption utterances without duplicate replay speech", () => {

@@ -77,11 +77,17 @@
   border-radius: 50%;
   color: #fff;
   background: transparent;
+  opacity: 1;
+  transform: none;
   filter: drop-shadow(0 14px 24px #0008);
   cursor: grab;
   isolation: isolate;
   pointer-events: auto;
   user-select: none;
+  transition:
+    opacity 180ms ease,
+    transform 240ms cubic-bezier(.2, .82, .2, 1),
+    filter 180ms ease;
 }
 
 .avatar::before {
@@ -127,10 +133,6 @@
   opacity: 0;
   transform: scale(.16);
   filter: blur(8px) saturate(1.5);
-  transition:
-    opacity 180ms ease,
-    transform 240ms cubic-bezier(.2, .82, .2, 1),
-    filter 180ms ease;
 }
 
 .refractGlyph {
