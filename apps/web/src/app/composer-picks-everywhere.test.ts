@@ -76,6 +76,14 @@ describe("composer picks everywhere", () => {
       /variant === "signal"[\s\S]{0,500}shortcutChipsEnabled=\{variant !== "signal"\}/u,
     );
     assert.match(
+      pageSource,
+      /const textareaOverlayEnabled =\s*shortcutChipsEnabled \|\| writingAssistEnabled/u,
+    );
+    assert.match(
+      pageSource,
+      /data-rich-overlay=\{[\s\S]{0,100}textareaOverlayEnabled[\s\S]{0,100}data-plain-shortcuts=/u,
+    );
+    assert.match(
       signalSource,
       /id: "botcast-premise-inspiration"[\s\S]{0,200}onChange: setShowPremiseInspirationDraft/u,
     );

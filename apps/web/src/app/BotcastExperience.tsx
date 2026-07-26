@@ -11818,50 +11818,30 @@ export function BotcastExperience({
                               ),
                           }}
                         >
-                          {(binding) =>
-                            renderPickAwareComposer ? (
-                              <div {...binding} tabIndex={-1}>
-                                {renderPickAwareComposer({
-                                  id: `signal-show-premise-${selectedShow.id}`,
-                                  value: showPremiseDraft,
-                                  onChange: setShowPremiseDraft,
-                                  placeholder: "Show premise",
-                                  multiline: true,
-                                  ariaLabel: "Edit show premise",
-                                  className: `${styles.showLookPremiseInput} ${styles.pickAwareSetupField}`,
-                                  disabled: busy,
-                                  resolvePicksToPlainText: true,
-                                  onBlur: (value) =>
-                                    void saveShowPremise(value),
-                                })}
-                              </div>
-                            ) : (
-                              <textarea
-                                {...binding}
-                                id={`signal-show-premise-${selectedShow.id}`}
-                                className={styles.showLookPremiseInput}
-                                value={showPremiseDraft}
-                                maxLength={360}
-                                rows={3}
-                                disabled={busy}
-                                aria-label="Edit show premise"
-                                onChange={(event) =>
-                                  setShowPremiseDraft(event.target.value)
+                          {(binding) => (
+                            <textarea
+                              {...binding}
+                              id={`signal-show-premise-${selectedShow.id}`}
+                              className={styles.showLookPremiseInput}
+                              value={showPremiseDraft}
+                              maxLength={360}
+                              rows={3}
+                              disabled={busy}
+                              aria-label="Edit show premise"
+                              onChange={(event) =>
+                                setShowPremiseDraft(event.target.value)
+                              }
+                              onBlur={(event) =>
+                                void saveShowPremise(event.currentTarget.value)
+                              }
+                              onKeyDown={(event) => {
+                                if (event.key === "Escape") {
+                                  setShowPremiseDraft(selectedShow.premise);
+                                  event.currentTarget.blur();
                                 }
-                                onBlur={(event) =>
-                                  void saveShowPremise(
-                                    event.currentTarget.value,
-                                  )
-                                }
-                                onKeyDown={(event) => {
-                                  if (event.key === "Escape") {
-                                    setShowPremiseDraft(selectedShow.premise);
-                                    event.currentTarget.blur();
-                                  }
-                                }}
-                              />
-                            )
-                          }
+                              }}
+                            />
+                          )}
                         </PrismRefractTarget>
                       </div>
                         <div className={styles.showLookControlGroup}>

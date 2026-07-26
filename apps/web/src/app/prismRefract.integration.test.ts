@@ -14,6 +14,10 @@ const companionStyles = readFileSync(
   new URL("./prismCompanion.module.css", import.meta.url),
   "utf8",
 );
+const signalStyles = readFileSync(
+  new URL("./botcast.module.css", import.meta.url),
+  "utf8",
+);
 const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
@@ -115,6 +119,36 @@ describe("Prism Refract Signal integration", () => {
     assert.match(
       refractSource,
       /onClickCapture: \(event\) => \{[\s\S]*if \(suppressClickRef\.current\)[\s\S]*event\.button !== 0[\s\S]*!event\.shiftKey[\s\S]*requestPrismRefract\(target\.id, "shift-click"\)/u,
+    );
+  });
+
+  it("keeps show premises as visible native multiline editors", () => {
+    assert.match(
+      signalSource,
+      /signal-show-identity-premise-[\s\S]*<textarea[\s\S]*className=\{styles\.showLookPremiseInput\}[\s\S]*value=\{showPremiseDraft\}[\s\S]*rows=\{3\}[\s\S]*onBlur/u,
+    );
+    const identityPremiseBlock =
+      signalSource.match(
+        /id: `signal-show-identity-premise-\$\{selectedShow\.id\}`[\s\S]*?<\/PrismRefractTarget>/u,
+      )?.[0] ?? "";
+    assert.doesNotMatch(identityPremiseBlock, /renderPickAwareComposer/u);
+  });
+
+  it("releases magic prompts before handing off to the normal action workflow", () => {
+    assert.match(
+      companionSource,
+      /const direction = refractPrompt\.trim\(\);[\s\S]*releasePrismRefract\(false\);[\s\S]*requestAnimationFrame\(\(\) => \{[\s\S]*target\.run\(direction\)/u,
+    );
+  });
+
+  it("uses the Zen-inspired rainbow flow while prose is generating", () => {
+    assert.match(
+      signalStyles,
+      /data-prism-refract-state="generating"[\s\S]*--signal-refract-rainbow-period[\s\S]*linear-gradient\([\s\S]*var\(--prism-p\)[\s\S]*animation: signalRefractRainbowFlow 1\.7s linear infinite/u,
+    );
+    assert.match(
+      signalStyles,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*data-prism-refract-state[\s\S]*animation: none/u,
     );
   });
 

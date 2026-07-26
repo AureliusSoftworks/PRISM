@@ -232,6 +232,7 @@ export default function PrismCompanion({
   const refractReturnPositionRef = useRef<PrismCompanionPosition | null>(null);
   const refractTimerRef = useRef<number | null>(null);
   const refractTravelFrameRef = useRef<number | null>(null);
+  const refractMagicHandoffFrameRef = useRef<number | null>(null);
   const refractAbortRef = useRef<AbortController | null>(null);
   const refractRunRef = useRef(0);
   const refractDropTargetRef = useRef<HTMLElement | null>(null);
@@ -911,12 +912,15 @@ export default function PrismCompanion({
     const target = session.registration.target;
     const direction = refractPrompt.trim();
     releasePrismRefract(false);
-    void Promise.resolve(target.run(direction)).catch((error) => {
-      onError?.(
-        error instanceof Error
-          ? error.message
-          : `Prism could not start ${target.label}.`,
-      );
+    refractMagicHandoffFrameRef.current = window.requestAnimationFrame(() => {
+      refractMagicHandoffFrameRef.current = null;
+      void Promise.resolve(target.run(direction)).catch((error) => {
+        onError?.(
+          error instanceof Error
+            ? error.message
+            : `Prism could not start ${target.label}.`,
+        );
+      });
     });
   }, [onError, refractPrompt, releasePrismRefract]);
 
@@ -1033,6 +1037,9 @@ export default function PrismCompanion({
       }
       if (refractTravelFrameRef.current !== null) {
         window.cancelAnimationFrame(refractTravelFrameRef.current);
+      }
+      if (refractMagicHandoffFrameRef.current !== null) {
+        window.cancelAnimationFrame(refractMagicHandoffFrameRef.current);
       }
       const session = refractSessionRef.current;
       if (session) {

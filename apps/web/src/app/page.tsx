@@ -33493,6 +33493,8 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
         wildcardPicks,
       ],
     );
+    const textareaOverlayEnabled =
+      shortcutChipsEnabled || writingAssistEnabled;
     const syncTextareaSelectionState = useCallback(
       (el: HTMLTextAreaElement) => {
         setTextareaSelection({
@@ -34423,24 +34425,31 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                   textareaDisplayValue.length === 0 ? "true" : undefined
                 }
               >
-                <div
-                  ref={textareaOverlayRef}
-                  className={styles.composeTextareaVisualOverlay}
-                  aria-hidden="true"
-                >
-                  {textareaDisplayValue.length > 0 ? (
-                    textareaOverlayContent
-                  ) : (
-                    <span className={styles.composeTextareaVisualPlaceholder}>
-                      {effectivePlaceholder}
-                    </span>
-                  )}
-                </div>
+                {textareaOverlayEnabled ? (
+                  <div
+                    ref={textareaOverlayRef}
+                    className={styles.composeTextareaVisualOverlay}
+                    aria-hidden="true"
+                  >
+                    {textareaDisplayValue.length > 0 ? (
+                      textareaOverlayContent
+                    ) : (
+                      <span className={styles.composeTextareaVisualPlaceholder}>
+                        {effectivePlaceholder}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
                 <textarea
                   ref={textareaRef}
                   value={textareaDisplayValue}
                   disabled={disabled || generatingRandomPrompt}
-                  data-rich-overlay="true"
+                  data-rich-overlay={
+                    textareaOverlayEnabled ? "true" : undefined
+                  }
+                  data-plain-shortcuts={
+                    !shortcutChipsEnabled ? "true" : undefined
+                  }
                   onScroll={(event) =>
                     syncTextareaOverlayScroll(event.currentTarget)
                   }
