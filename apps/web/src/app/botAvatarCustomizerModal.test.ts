@@ -1196,7 +1196,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Built-in fallback · no uploaded file · thinking only/);
   assert.match(pageSource, /aria-label="Avatar sound mode"/);
   assert.match(pageSource, /data-bot-avatar-sfx-runtime="true"/);
-  assert.match(pageSource, /avatarSfxState=\{previewMode\}/);
+  assert.match(pageSource, /avatarSfxState=\{previewAvatarSfxState\}/);
   assert.match(botAvatarSfxSource, /\/api\/avatar\/sfx\/generate/);
   assert.match(pageSource, /data-tab-count=\{visibleAvatarTabs\.length\}/);
   assert.doesNotMatch(cssSource, /data-tab-count="10"/);
@@ -1334,7 +1334,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(
     cssSource,
-    /\.botAvatarPreviewModeToggle\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\);/,
+    /\.botAvatarPreviewModeToggle\s*\{[\s\S]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);/,
   );
   assert.match(cssSource, /\.botAvatarSectionResetButton/);
   assert.match(cssSource, /\.botAvatarRangeControl/);
@@ -1697,21 +1697,36 @@ test("avatar customizer preview has explicit expression states", () => {
   );
   assert.match(
     pageSource,
-    /type BotAvatarPreviewMode = "idle" \| "blink" \| "talking" \| "thinking";/,
+    /type BotAvatarPreviewMode = "idle" \| "blink" \| "talking" \| "thinking" \| "sip";/,
   );
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MODES = \[/);
+  assert.match(pageSource, /\{ value: "talking", label: "Talk" \}/);
+  assert.match(pageSource, /\{ value: "sip", label: "Sip" \}/);
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
-    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceChoice\)[\s\S]*?: mode\.label/,
+    /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceChoice\)/,
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
-    /<BotAvatarPreviewPanel[\s\S]*?voiceChoice=\{voicePlaybackChoice\([\s\S]*?voiceMode[\s\S]*?englishVoiceEngine/,
+    /<BotAvatarPreviewPanel[\s\S]*?voiceChoice=\{voicePlaybackChoice\(/,
   );
   assert.match(
     pageSource,
     /const previewTalking = previewMode === "talking" && !previewSpeechPaused;/,
+  );
+  assert.match(pageSource, /const previewSipping = previewMode === "sip";/);
+  assert.match(
+    pageSource,
+    /plateFace=\{previewSipping \? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined\}/,
+  );
+  assert.match(
+    pageSource,
+    /coffeeCupSipAnimationTiming\(\{\s*seed: `avatar-studio-sip:\$\{scheduleKey\}`/,
+  );
+  assert.match(
+    pageSource,
+    /const previewAvatarSfxState: BotAvatarSfxState =\s*previewMode === "sip" \? "idle" : previewMode;/,
   );
   assert.match(pageSource, /buildSpeechActivityWindows\(/);
   assert.match(pageSource, /setPreviewSpeechPaused\(/);
@@ -1739,17 +1754,18 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /onPreviewModeChange=\{setPreviewMode\}/);
   assert.match(
     pageSource,
-    /mode\.value === "talking"\s*\? onPreviewVoice\(\)\s*: onPreviewModeChange\(mode\.value\)/,
+    /onClick=\{\(\) => onPreviewModeChange\(mode\.value\)\}/,
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
-    /const previewAvatarGlobalVoice = async \(\): Promise<void> => \{[\s\S]*?resolveVoicePreviewText\(\)[\s\S]*?playAvatarVoicePreview\(audioVoiceProfile, voiceMode, previewText/,
+    /mode\.value === "talking"\s*\? onPreviewVoice\(\)/,
   );
+  assert.doesNotMatch(pageSource, /const previewAvatarGlobalVoice = async/);
   assert.match(
     pageSource,
     /const playAvatarVoicePreview = async \([\s\S]*?await onVoicePreview\(profile, forcedMode, previewText,[\s\S]*?setPreviewMode\("talking"\)/,
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
     /onPreviewVoice=\{\(\) => void previewAvatarGlobalVoice\(\)\}/,
   );

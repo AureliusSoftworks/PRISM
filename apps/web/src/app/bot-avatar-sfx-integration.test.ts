@@ -44,7 +44,11 @@ test("Avatar Studio drives SFX from its idle, blink, talking, and thinking previ
     "scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}",
   );
   assert.match(previewSource, /avatarSfx=\{avatarSfx\}/);
-  assert.match(previewSource, /avatarSfxState=\{previewMode\}/);
+  assert.match(previewSource, /avatarSfxState=\{previewAvatarSfxState\}/);
+  assert.match(
+    pageSource,
+    /const previewAvatarSfxState: BotAvatarSfxState =\s*previewMode === "sip" \? "idle" : previewMode;/,
+  );
 });
 
 test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state", () => {

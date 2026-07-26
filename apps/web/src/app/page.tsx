@@ -592,6 +592,7 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  Coffee,
   Compass,
   Copy,
   Download,
@@ -35522,7 +35523,7 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
   "open-small",
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
-type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking";
+type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking" | "sip";
 type BotAvatarCustomizerTab =
   | "face"
   | "profile"
@@ -35541,8 +35542,9 @@ type BotAvatarFaceControlTab = Extract<
 const BOT_AVATAR_PREVIEW_MODES = [
   { value: "idle", label: "Idle" },
   { value: "blink", label: "Blink" },
-  { value: "talking", label: "Talking" },
+  { value: "talking", label: "Talk" },
   { value: "thinking", label: "Thinking" },
+  { value: "sip", label: "Sip" },
 ] as const satisfies readonly {
   value: BotAvatarPreviewMode;
   label: string;
@@ -35760,6 +35762,8 @@ function BotAvatarPreviewModeIcon({
     return <Play size={13} strokeWidth={2.3} aria-hidden="true" />;
   if (mode === "thinking")
     return <Timer size={13} strokeWidth={2.3} aria-hidden="true" />;
+  if (mode === "sip")
+    return <Coffee size={13} strokeWidth={2.3} aria-hidden="true" />;
   return <Pause size={13} strokeWidth={2.3} aria-hidden="true" />;
 }
 
@@ -35930,7 +35934,6 @@ function BotAvatarPreviewPanel({
   isDefaultPrismBot,
   previewTheme,
   previewMode,
-  voiceChoice,
   previewMood,
   previewTalking,
   avatarSfx,
@@ -35941,7 +35944,6 @@ function BotAvatarPreviewPanel({
   avatarDetailsColor,
   onPreviewThemeChange,
   onPreviewModeChange,
-  onPreviewVoice,
   onPreviewMoodCycle,
 }: {
   titleName: string;
@@ -35952,7 +35954,6 @@ function BotAvatarPreviewPanel({
   isDefaultPrismBot: boolean;
   previewTheme: "light" | "dark";
   previewMode: BotAvatarPreviewMode;
-  voiceChoice: VoicePlaybackChoice;
   previewMood: (typeof BOT_AVATAR_PREVIEW_MOODS)[number];
   previewTalking: boolean;
   avatarSfx: BotAvatarSfxPlayback | null;
@@ -35963,7 +35964,6 @@ function BotAvatarPreviewPanel({
   avatarDetailsColor: string;
   onPreviewThemeChange: (theme: "light" | "dark") => void;
   onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
-  onPreviewVoice: () => void;
   onPreviewMoodCycle: () => void;
 }): React.JSX.Element {
   const previewThinking = previewMode === "thinking";
@@ -35971,7 +35971,20 @@ function BotAvatarPreviewPanel({
     previewThinking &&
     !botFaceThinkingSpinnerDisabled(faceStyle.thinkingFrames);
   const previewBlink = previewMode === "blink";
+  const previewSipping = previewMode === "sip";
   const previewMoodHint = coffeeSeatZenMoodHintFromPrism(previewMood);
+  const previewAvatarSfxState: BotAvatarSfxState =
+    previewMode === "sip" ? "idle" : previewMode;
+  const previewFaceStyle = previewSipping
+    ? {
+        ...faceStyle,
+        mouthCharacter: coffeeSeatCustomMouthCharacterForSip({
+          mouthCharacter: faceStyle.mouthCharacter,
+          coffeePuckerEnabled: faceStyle.mouthCoffeePucker,
+          sipActive: true,
+        }),
+      }
+    : faceStyle;
 
   return (
     <section
@@ -36049,17 +36062,18 @@ function BotAvatarPreviewPanel({
           >
             <ZenLiveBotMannequin
               glyph={glyph}
-              faceStyle={faceStyle}
+              faceStyle={previewFaceStyle}
               voicePreset="warm"
               isTalking={previewTalking}
               avatarSfx={avatarSfx}
-              avatarSfxState={previewMode}
+              avatarSfxState={previewAvatarSfxState}
               blinkWhileTalking
               mouthShape={displayedPreviewMouthShape}
               moodHint={previewMoodHint}
               scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}
               forceBlinkPhase={previewBlink ? "closed" : undefined}
               showThinkingSpinner={previewThinkingSpinnerActive}
+              plateFace={previewSipping ? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined}
               screenMaterialSeed={screenMaterialSeed}
               frameMaterialSeed={
                 isDefaultPrismBot
@@ -36088,16 +36102,10 @@ function BotAvatarPreviewPanel({
               type="button"
               data-active={previewMode === mode.value ? "true" : undefined}
               aria-pressed={previewMode === mode.value}
-              onClick={() =>
-                mode.value === "talking"
-                  ? onPreviewVoice()
-                  : onPreviewModeChange(mode.value)
-              }
+              onClick={() => onPreviewModeChange(mode.value)}
             >
               <BotAvatarPreviewModeIcon mode={mode.value} />
-              {mode.value === "talking"
-                ? voiceModeDisplayName(voiceChoice)
-                : mode.label}
+              {mode.label}
             </button>
           ))}
         </div>
@@ -39196,6 +39204,18 @@ function BotAvatarCustomizerModal({
     setPendingDetailsSaveKey(null);
   }, [identityControlsVisible, initialTab, open, resolvedTheme]);
 
+  // One-shot Sip preview: hold Coffee's sip face, then return to Idle.
+  useEffect(() => {
+    if (!open || previewMode !== "sip") return;
+    const { durationMs } = coffeeCupSipAnimationTiming({
+      seed: `avatar-studio-sip:${scheduleKey}`,
+    });
+    const timer = window.setTimeout(() => {
+      setPreviewMode("idle");
+    }, durationMs);
+    return () => window.clearTimeout(timer);
+  }, [open, previewMode, scheduleKey]);
+
   useLayoutEffect(() => {
     if (!open || !controlStackRef.current) return;
     controlStackRef.current.scrollTop = 0;
@@ -39402,25 +39422,6 @@ function BotAvatarCustomizerModal({
         setPreviewSpeechPaused(false);
       }
     }
-  };
-
-  const previewAvatarGlobalVoice = async (): Promise<void> => {
-    if (voiceMode === "mute") {
-      setPreviewMode("talking");
-      return;
-    }
-    const previewText = await resolveVoicePreviewText();
-    await playAvatarVoicePreview(audioVoiceProfile, voiceMode, previewText, {
-      englishVoiceEngine,
-      cacheKey: [
-        "avatar-expression-preview",
-        scheduleKey,
-        voiceMode,
-        englishVoiceEngine,
-        previewText,
-        avatarVoicePlaybackCacheProfile(audioVoiceProfile),
-      ].join(":"),
-    });
   };
 
   const previewBotNamePronunciation = async (): Promise<void> => {
@@ -39870,10 +39871,6 @@ function BotAvatarCustomizerModal({
               isDefaultPrismBot={isDefaultPrismBot}
               previewTheme={previewTheme}
               previewMode={previewMode}
-              voiceChoice={voicePlaybackChoice(
-                voiceMode,
-                englishVoiceEngine,
-              )}
               previewMood={previewMood}
               previewTalking={previewTalking}
               avatarSfx={previewAvatarSfx}
@@ -39884,7 +39881,6 @@ function BotAvatarCustomizerModal({
               avatarDetailsColor={color}
               onPreviewThemeChange={setPreviewTheme}
               onPreviewModeChange={setPreviewMode}
-              onPreviewVoice={() => void previewAvatarGlobalVoice()}
               onPreviewMoodCycle={() =>
                 setPreviewMoodIndex(
                   (current) =>

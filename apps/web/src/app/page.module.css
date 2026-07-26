@@ -46807,7 +46807,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .botAvatarPreviewModeToggle {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
 }
 
