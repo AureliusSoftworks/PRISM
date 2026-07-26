@@ -6398,7 +6398,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         advanced.message?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Off-mic stage actions.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Off-mic stage actions. [sighs]",
       );
       assert.doesNotMatch(advanced.message?.content ?? "", /antennae|\*/iu);
       assert.doesNotMatch(
@@ -11431,16 +11431,17 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         advanced.message?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, [laughs] and today I'm joined by Ivo Stone to explore A performed transcript.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [sighs]",
       );
       assert.equal(
         getBotcastEpisode(db, "user-1", episode.id).messages[0]
           ?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, [laughs] and today I'm joined by Ivo Stone to explore A performed transcript.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [sighs]",
       );
       const prompt = captures[0]!.map((message) => message.content).join("\n");
       assert.match(prompt, /Use only one of these exact square-bracket tags/u);
       assert.match(prompt, /Include exactly one natural/u);
+      assert.match(prompt, /reaction at the very end/u);
     } finally {
       db.close();
     }
@@ -11501,13 +11502,13 @@ describe("Botcast persistence and isolation", () => {
       }
       assert.equal(
         turns[0]?.message?.voicePerformanceText,
-        "[breathes deeply] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reliable performed reactions.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reliable performed reactions. [breathes deeply]",
       );
       assert.equal(turns[1]?.message?.voicePerformanceText, null);
       assert.equal(turns[2]?.message?.voicePerformanceText, null);
       assert.equal(
         turns[3]?.message?.voicePerformanceText,
-        "[exhales] That is the part I find difficult.",
+        "That is the part I find difficult. [exhales]",
       );
     } finally {
       db.close();
@@ -11548,11 +11549,11 @@ describe("Botcast persistence and isolation", () => {
         );
       }
 
-      assert.match(turns[0]?.message?.voicePerformanceText ?? "", /^\[sighs\]/u);
-      assert.match(turns[3]?.message?.voicePerformanceText ?? "", /^\[exhales\]/u);
+      assert.match(turns[0]?.message?.voicePerformanceText ?? "", /\[sighs\]$/u);
+      assert.match(turns[3]?.message?.voicePerformanceText ?? "", /\[exhales\]$/u);
       assert.match(
         turns[6]?.message?.voicePerformanceText ?? "",
-        /^\[breathes deeply\]/u,
+        /\[breathes deeply\]$/u,
       );
       const secondReactionPrompt = captures[3]!
         .map((message) => message.content)
@@ -17059,7 +17060,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         snapshot.botcast?.messages[0]?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit. [sighs]",
       );
       assert.equal(
         snapshot.botcast?.messages[1]?.stageActionText,
@@ -17149,7 +17150,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         restored.messages[0]?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit. [sighs]",
       );
       assert.equal(restored.messages[1]?.content, "...");
       assert.equal(restored.messages[1]?.stageActionText, null);

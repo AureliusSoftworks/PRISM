@@ -99,6 +99,7 @@ test("app chrome text is non-selectable outside editable text surfaces", () => {
 
 test("avatar customizer supports explicit custom eye, blink, mouth, and thinking controls", () => {
   assert.match(pageSource, /faceEyeCharacter: string \| null/);
+  assert.match(pageSource, /faceEyeAnimation: BotFaceEyeMovement/);
   assert.match(pageSource, /faceMouthCharacter: string \| null/);
   assert.match(pageSource, /faceMouthAnimation: BotFaceGlyphAnimation/);
   assert.match(pageSource, /faceMouthCoffeePucker: boolean/);
@@ -396,8 +397,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /botAvatarFontOption\} \$\{styles\.botAvatarCustomOption\}/,
   );
   assert.match(eyesTabSource, /botAvatarSingleGlyphInput/);
-  assert.match(eyesTabSource, /disabled=\{!customEyeActive\}/);
-  assert.match(eyesTabSource, /label="Eye animation"/);
+  assert.doesNotMatch(eyesTabSource, /disabled=\{!customEyeActive\}/);
+  assert.match(eyesTabSource, /BotAvatarEyeMovementControl/);
   assert.match(eyesTabSource, /value=\{faceEyeAnimation\}/);
   assert.match(eyesTabSource, /botAvatarCustomMotionRowSingle/);
   assert.match(eyesTabSource, /part="eyes"/);

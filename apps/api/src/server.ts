@@ -261,16 +261,25 @@ import {
   withSignalGenerationKeywords,
 } from "./signal-generation-keywords.ts";
 import {
+  claimReplayStudioCutMix,
+  completeReplayStudioCutMix,
   deleteReplayRecordingMedia,
+  deleteReplayPremiumMedia,
+  failReplayStudioCutMix,
   finalizeReplayRecordingV2,
   getReplayRecording,
   listReplayRecordings,
   queueReplayRecording,
   replayFaithfulAudioFile,
+  replayPremiumAudioFile,
+  replayPremiumSegmentAudioFile,
+  replayStudioCutEligibility,
   replayTranscript,
   replayVoiceTakeAudioFile,
+  startReplayPremiumProduction,
   startReplayRecordingDraft,
   storeReplayFaithfulAudio,
+  storeReplayRenderAudioChunk,
   storeReplayVoiceTakeAudio,
   updateReplayVoiceTakeSnapshot,
   upsertReplayVoiceTake,
@@ -570,6 +579,7 @@ import {
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
   DEFAULT_BOT_FACE_MOUTH_CHARACTER,
   DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
@@ -602,6 +612,7 @@ import {
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthCoffeePucker,
   normalizeBotFaceMouthOffsetX,
@@ -680,6 +691,7 @@ import {
   type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
@@ -815,6 +827,7 @@ import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
 const signalArtworkJobs = new SignalArtworkJobManager();
+const replayStudioCutJobs = new Map<string, Promise<void>>();
 
 async function rebuildSignalStudioLighting(
   userId: string,
@@ -1586,6 +1599,7 @@ interface UserDbRow {
   prism_default_bot_glyph: string | null;
   prism_default_bot_face_eyes_font: string | null;
   prism_default_bot_face_eye_character: string | null;
+  prism_default_bot_face_eye_animation: string | null;
   prism_default_bot_face_mouth_font: string | null;
   prism_default_bot_face_mouth_character: string | null;
   prism_default_bot_face_mouth_animation: string | null;
@@ -3017,6 +3031,12 @@ function readBotFaceGlyphAnimationForStorage(
   return normalizeBotFaceGlyphAnimation(value);
 }
 
+function readBotFaceEyeMovementForStorage(
+  value: unknown,
+): BotFaceEyeMovement | null {
+  return normalizeBotFaceEyeMovement(value);
+}
+
 function readBotFaceMouthCoffeePuckerForStorage(value: unknown): number {
   return (
     normalizeBotFaceMouthCoffeePucker(value) ??
@@ -3170,6 +3190,10 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceEyeCharacter:
       normalizeBotFaceEyeCharacter(user.prism_default_bot_face_eye_character) ??
       DEFAULT_BOT_FACE_EYE_CHARACTER,
+    prismDefaultBotFaceEyeAnimation:
+      normalizeBotFaceEyeMovement(
+        user.prism_default_bot_face_eye_animation,
+      ) ?? DEFAULT_BOT_FACE_EYE_MOVEMENT,
     prismDefaultBotFaceMouthFont:
       normalizeBotFaceFontId(user.prism_default_bot_face_mouth_font) ??
       DEFAULT_BOT_FACE_FONT_ID,
@@ -13369,18 +13393,179 @@ function buildRoutes(): RouteDefinition[] {
       if (!file) throw new HttpError(404, "Faithful replay audio not found.");
       streamReplayFile(ctx, file, {
         range: true,
+        attachmentName:
+          ctx.query.get("download") === "1"
+            ? `prism-signal-on-air.${file.contentType === "audio/ogg" ? "ogg" : file.contentType === "audio/mp4" ? "m4a" : file.contentType === "audio/wav" ? "wav" : "webm"}`
+            : undefined,
       });
+    }),
+    route("GET", "/api/replays/:id/studio-cut/eligibility", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const eligibility = replayStudioCutEligibility(db, userId, ctx.params.id);
+      if (userBlocksOnlineCapabilities(user)) {
+        eligibility.eligible = false;
+        eligibility.blockedReason =
+          "Studio Cut is unavailable in hard LOCAL mode.";
+      } else {
+        const userKey = decryptUserKey(userId);
+        const apiKey =
+          getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+        if (!apiKey) {
+          eligibility.eligible = false;
+          eligibility.blockedReason =
+            "Connect ElevenLabs in Settings → Keys to make a Studio Cut.";
+        }
+      }
+      json(ctx.res, 200, { ok: true, eligibility });
+    }),
+    route("POST", "/api/replays/:id/studio-cut", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      if (
+        body.confirm !== "send-to-elevenlabs" ||
+        userBlocksOnlineCapabilities(user)
+      ) {
+        throw new HttpError(
+          409,
+          "Studio Cut requires AUTO or ONLINE mode and explicit confirmation before sending the canonical transcript and voice IDs to ElevenLabs.",
+        );
+      }
+      const eligibility = replayStudioCutEligibility(db, userId, ctx.params.id);
+      if (!eligibility.eligible) {
+        throw new HttpError(409, eligibility.blockedReason ?? "Studio Cut is unavailable.");
+      }
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          503,
+          "ElevenLabs is not connected. Add or verify the key in Settings → Keys.",
+        );
+      }
+      const jobKey = `${userId}:${ctx.params.id}`;
+      if (!replayStudioCutJobs.has(jobKey)) {
+        const job = startReplayPremiumProduction({
+          db,
+          userId,
+          recordingId: ctx.params.id,
+          apiKey,
+          regenerate: body.regenerate === true,
+        })
+          .then(() => undefined)
+          .catch((error) => {
+            console.error("[studio-cut] voice generation failed:", error);
+          })
+          .finally(() => {
+            replayStudioCutJobs.delete(jobKey);
+          });
+        replayStudioCutJobs.set(jobKey, job);
+      }
+      const detail = getReplayRecording(db, userId, ctx.params.id);
+      if (!detail) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 202, { ok: true, ...detail });
+    }),
+    route("POST", "/api/replays/:id/studio-cut/resume", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const detail = getReplayRecording(db, userId, ctx.params.id);
+      if (!detail) throw new HttpError(404, "Replay recording not found.");
+      if (
+        detail.recording.studioCutProduction?.phase !== "mastering_voices"
+      ) {
+        json(ctx.res, 200, { ok: true, ...detail });
+        return;
+      }
+      if (userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(409, "Studio Cut cannot resume in hard LOCAL mode.");
+      }
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(503, "ElevenLabs is not connected.");
+      }
+      const jobKey = `${userId}:${ctx.params.id}`;
+      if (!replayStudioCutJobs.has(jobKey)) {
+        const job = startReplayPremiumProduction({
+          db,
+          userId,
+          recordingId: ctx.params.id,
+          apiKey,
+        })
+          .then(() => undefined)
+          .catch((error) => {
+            console.error("[studio-cut] resume failed:", error);
+          })
+          .finally(() => replayStudioCutJobs.delete(jobKey));
+        replayStudioCutJobs.set(jobKey, job);
+      }
+      json(ctx.res, 202, { ok: true, ...detail });
+    }),
+    route("POST", "/api/replays/:id/studio-cut/mix/claim", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const claimed = claimReplayStudioCutMix(db, userId, ctx.params.id);
+      json(ctx.res, 200, { ok: true, claimed });
+    }),
+    route("POST", "/api/replays/:id/studio-cut/mix/audio-chunk", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const renderToken = readReplayRenderToken(ctx);
+      if (!(ctx.body instanceof Uint8Array)) {
+        throw new HttpError(400, "Studio Cut audio chunk must be binary.");
+      }
+      const rawPosition = ctx.req.headers["x-prism-replay-position"];
+      const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
+      const sizeBytes = storeReplayRenderAudioChunk(
+        db,
+        userId,
+        ctx.params.id,
+        renderToken,
+        position,
+        ctx.body,
+      );
+      json(ctx.res, 201, { ok: true, sizeBytes });
+    }),
+    route("POST", "/api/replays/:id/studio-cut/mix/complete", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const recording = completeReplayStudioCutMix(
+        db,
+        userId,
+        ctx.params.id,
+        String(body.renderToken ?? ""),
+        {
+          durationMs: Number(body.durationMs),
+          timeline: body.timeline as import("@localai/shared").ReplayTimelineV1,
+          manifest: body.manifest as import("@localai/shared").ReplayManifestV2,
+          warning: typeof body.warning === "string" ? body.warning : null,
+        },
+      );
+      json(ctx.res, 201, { ok: true, recording });
+    }),
+    route("POST", "/api/replays/:id/studio-cut/mix/fail", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const recording = failReplayStudioCutMix(
+        db,
+        userId,
+        ctx.params.id,
+        String(body.renderToken ?? ""),
+        body.error,
+      );
+      json(ctx.res, 200, { ok: true, recording });
     }),
     route("POST", "/api/replays/:id/premium", async (ctx) => {
       requireAuth(ctx);
       throw new HttpError(
         410,
-        "Replay enhancement is retired. Faithful sessions use the recorded live mix.",
+        "The retired replay enhancement endpoint is unavailable. Use Studio Cut.",
       );
     }),
     route("POST", "/api/replays/:id/premium/retry", async (ctx) => {
       requireAuth(ctx);
-      throw new HttpError(410, "Replay enhancement is retired.");
+      throw new HttpError(410, "The retired replay enhancement endpoint is unavailable.");
     }),
     route("POST", "/api/replays/:id/premium/audio", async (ctx) => {
       requireAuth(ctx);
@@ -13390,21 +13575,38 @@ function buildRoutes(): RouteDefinition[] {
       requireAuth(ctx);
       throw new HttpError(410, "Replay enhancement is retired.");
     }),
-    route("GET", "/api/replays/:id/premium/segments/:segmentId/audio", async (ctx) => {
-      requireAuth(ctx);
-      throw new HttpError(410, "Replay enhancement is retired.");
+    route("GET", "/api/replays/:id/studio-cut/segments/:segmentId/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayPremiumSegmentAudioFile(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.segmentId,
+      );
+      if (!file) throw new HttpError(404, "Studio Cut voice segment not found.");
+      streamReplayFile(ctx, file);
     }),
-    route("GET", "/api/replays/:id/premium/audio", async (ctx) => {
-      requireAuth(ctx);
-      throw new HttpError(410, "Replay enhancement is retired.");
+    route("GET", "/api/replays/:id/studio-cut/audio", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const file = replayPremiumAudioFile(db, userId, ctx.params.id);
+      if (!file) throw new HttpError(404, "Studio Cut audio not found.");
+      streamReplayFile(ctx, file, {
+        range: true,
+        attachmentName:
+          ctx.query.get("download") === "1"
+            ? "prism-signal-studio-cut.webm"
+            : undefined,
+      });
     }),
-    route("GET", "/api/replays/:id/premium/video", async (ctx) => {
-      requireAuth(ctx);
-      throw new HttpError(410, "Replay video is retired.");
-    }),
-    route("DELETE", "/api/replays/:id/premium", async (ctx) => {
-      requireAuth(ctx);
-      throw new HttpError(410, "Replay enhancement is retired.");
+    route("DELETE", "/api/replays/:id/studio-cut", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (body.confirm !== "delete-studio-cut") {
+        throw new HttpError(400, "Studio Cut removal requires explicit confirmation.");
+      }
+      const recording = deleteReplayPremiumMedia(db, userId, ctx.params.id);
+      if (!recording) throw new HttpError(404, "Replay recording not found.");
+      json(ctx.res, 200, { ok: true, recording });
     }),
     route("POST", "/api/replays/claim", async (ctx) => {
       requireAuth(ctx);
@@ -14817,6 +15019,9 @@ function buildRoutes(): RouteDefinition[] {
       const faceEyeCharacter = readBotFaceEyeCharacterForStorage(
         body.faceEyeCharacter,
       );
+      const faceEyeAnimation =
+        readBotFaceEyeMovementForStorage(body.faceEyeAnimation) ??
+        DEFAULT_BOT_FACE_EYE_MOVEMENT;
       const faceMouthFont =
         readBotFaceFontForStorage(body.faceMouthFont) ??
         DEFAULT_BOT_FACE_FONT_ID;
@@ -14894,6 +15099,7 @@ function buildRoutes(): RouteDefinition[] {
             prism_default_bot_glyph = NULL,
             prism_default_bot_face_eyes_font = ?,
             prism_default_bot_face_eye_character = ?,
+            prism_default_bot_face_eye_animation = ?,
             prism_default_bot_face_mouth_font = ?,
             prism_default_bot_face_mouth_character = ?,
             prism_default_bot_face_mouth_animation = ?,
@@ -14925,6 +15131,7 @@ function buildRoutes(): RouteDefinition[] {
       ).run(
         faceEyesFont,
         faceEyeCharacter,
+        faceEyeAnimation,
         faceMouthFont,
         faceMouthCharacter,
         faceMouthAnimation,
@@ -16853,6 +17060,9 @@ function buildRoutes(): RouteDefinition[] {
       const faceEyeCharacter = readBotFaceEyeCharacterForStorage(
         body.faceEyeCharacter,
       );
+      const faceEyeAnimation =
+        readBotFaceEyeMovementForStorage(body.faceEyeAnimation) ??
+        DEFAULT_BOT_FACE_EYE_MOVEMENT;
       const faceMouthFont = readBotFaceFontForStorage(body.faceMouthFont);
       const faceMouthCharacter = readBotFaceMouthCharacterForStorage(
         body.faceMouthCharacter,
@@ -16988,7 +17198,7 @@ function buildRoutes(): RouteDefinition[] {
         avatarDetailsJson,
         faceEyesFont,
         faceEyeCharacter,
-        DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+        faceEyeAnimation,
         faceMouthFont,
         faceMouthCharacter,
         faceMouthAnimation,
@@ -17070,6 +17280,7 @@ function buildRoutes(): RouteDefinition[] {
           avatarDetails: parseStoredBotAvatarDetailsV1(avatarDetailsJson),
           face_eyes_font: faceEyesFont,
           face_eye_character: faceEyeCharacter,
+          face_eye_animation: faceEyeAnimation,
           face_mouth_font: faceMouthFont,
           face_mouth_character: faceMouthCharacter,
           face_mouth_animation: faceMouthAnimation,
@@ -17262,6 +17473,16 @@ function buildRoutes(): RouteDefinition[] {
           fields.push("face_eye_character = ?");
           values.push(faceEyeCharacter);
         }
+      }
+      if (body.faceEyeAnimation !== undefined) {
+        const faceEyeAnimation = readBotFaceEyeMovementForStorage(
+          body.faceEyeAnimation,
+        );
+        if (faceEyeAnimation === null) {
+          throw new Error("Invalid face eye movement.");
+        }
+        fields.push("face_eye_animation = ?");
+        values.push(faceEyeAnimation);
       }
       if (body.faceMouthFont !== undefined) {
         if (body.faceMouthFont === null) {

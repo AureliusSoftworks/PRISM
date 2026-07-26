@@ -66068,7 +66068,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
     .zenLiveBotPresenceFaceGlyph
-  )[data-face-mouth-animation="spin"]
+  ):is(
+    [data-face-mouth-animation="wobble"],
+    [data-face-mouth-animation="spin"]
+  )
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
   display: inline-block;
@@ -66083,6 +66086,26 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   line-height: 1;
   text-align: left;
   transform-box: border-box;
+}
+
+:is(
+    .coffeeSeatPlateEmoji,
+    .messageMoodCoffeeFace,
+    .zenLiveBotPresenceFaceGlyph
+  )[data-face-mouth-animation="wobble"]
+  [data-coffee-plate-emoji-part="mouth"]
+  > [data-crt-glyph-layer="true"] {
+  transform-origin: var(--bot-face-mouth-wobble-origin-x, 50%)
+    var(--bot-face-mouth-wobble-origin-y, 0%);
+}
+
+:is(
+    .coffeeSeatPlateEmoji,
+    .messageMoodCoffeeFace,
+    .zenLiveBotPresenceFaceGlyph
+  )[data-face-mouth-animation="spin"]
+  [data-coffee-plate-emoji-part="mouth"]
+  > [data-crt-glyph-layer="true"] {
   transform-origin: var(--bot-face-mouth-spin-origin-x, 50%)
     var(--bot-face-mouth-spin-origin-y, 50%);
 }
@@ -66126,6 +66149,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :is(
+      .coffeeSeatPlateEmoji,
+      .messageMoodCoffeeFace,
+      .zenLiveBotPresenceFaceGlyph
+    ) {
+    --bot-face-gaze-x: 0px !important;
+    --bot-face-gaze-y: 0px !important;
+  }
+
   :is(
       .coffeeSeatPlateEmoji,
       .messageMoodCoffeeFace,
@@ -66228,13 +66260,16 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --bot-face-mood-eye-scale-y: 1;
   --bot-face-eye-shift-x: calc(
     (var(--zen-live-bot-eye-local-x, 0) * 10px) +
-      var(--bot-face-eye-offset-x, 0em) + var(--bot-face-optical-offset-x, 0em)
+      var(--bot-face-eye-offset-x, 0em) +
+      var(--bot-face-optical-offset-x, 0em) +
+      var(--bot-face-gaze-x, 0px)
   );
   --bot-face-eye-shift-y: calc(
     (var(--zen-live-bot-eye-local-y, 0) * 18px) +
       var(--bot-face-eye-offset-y, 0em) +
       var(--bot-face-mood-eye-shift-y, 0em) +
-      var(--bot-face-optical-offset-y, 0em)
+      var(--bot-face-optical-offset-y, 0em) +
+      var(--bot-face-gaze-y, 0px)
   );
   transform: translate(var(--bot-face-eye-shift-x), var(--bot-face-eye-shift-y))
     scale(var(--bot-face-eye-scale, 1)) scaleX(var(--eye-blink-scale-x))
@@ -66245,6 +66280,22 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part="eyes"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-part="eyes"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part="eyes"] {
+  transition: transform var(--bot-face-gaze-transition-ms, 220ms)
+    cubic-bezier(0.22, 0.72, 0.24, 1);
+}
+
+:is(
+    .coffeeSeatPlateEmoji,
+    .messageMoodCoffeeFace,
+    .zenLiveBotPresenceFaceGlyph
+  )[data-coffee-plate-emoji-blink-phase="closed"]
+  [data-coffee-plate-emoji-part="eyes"],
+:is(
+    .coffeeSeatPlateEmoji,
+    .messageMoodCoffeeFace,
+    .zenLiveBotPresenceFaceGlyph
+  )[data-face-eye-gaze-snap="true"]
+  [data-coffee-plate-emoji-part="eyes"] {
   transition: none;
 }
 

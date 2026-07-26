@@ -943,11 +943,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalReplayBookendAt\([\s\S]{0,180}replayElapsedMs[\s\S]{0,220}introEndMs: replayIntroEffectiveEndMs/u,
+      /signalReplayBookendAt\([\s\S]{0,180}replayElapsedMs[\s\S]{0,220}introEndMs: replayIntroCardEndMs/u,
     );
     assert.match(
       source,
-      /signalReplayBookendAt\([\s\S]{0,180}replayInterviewFootageElapsedMs[\s\S]{0,220}introEndMs: replayIntroEffectiveEndMs/u,
+      /signalReplayBookendAt\([\s\S]{0,180}replayInterviewFootageElapsedMs[\s\S]{0,220}introEndMs: replayIntroCardEndMs/u,
     );
     assert.match(
       source,
@@ -955,7 +955,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /signalReplayInterviewFootageElapsedMs\(\{[\s\S]{0,180}introCardEndMs: replayIntroEffectiveEndMs/u,
+      /signalReplayInterviewFootageElapsedMs\(\{[\s\S]{0,180}introCardEndMs: replayIntroCardEndMs/u,
     );
     assert.match(replayBookendSource, /data-replay-bookend=\{kind\}/u);
     assert.match(
@@ -1038,26 +1038,16 @@ describe("Signal experience shell", () => {
       source,
       /setReplayAudioMasterCompactHold\(/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       source,
       /data-signal-replay-intro-calibration="true"/u,
     );
-    assert.match(source, /Signal Intro Alignment/u);
+    assert.doesNotMatch(source, /Temporary debug tool/u);
+    assert.doesNotMatch(source, /Signal Intro Alignment/u);
     assert.match(
       source,
-      /signalReplayDefaultIntroDurationMs\(replayRecording\?\.timeline\)/u,
+      /signalReplayDefaultIntroDurationMs\(\s*replayRecording\?\.timeline/u,
     );
-    assert.match(
-      source,
-      /This single control changes how long the intro card is[\s\S]*interview footage starts from[\s\S]*normal speed/u,
-    );
-    assert.match(
-      source,
-      /Intro card visible duration/u,
-    );
-    assert.match(source, /Shorter −500/u);
-    assert.match(source, /Restart &amp; play/u);
-    assert.match(source, /Longer \+500/u);
     assert.match(
       source,
       /replayInterviewFootageElapsedMs >= beat\.startMs[\s\S]*replayInterviewFootageElapsedMs < beat\.endMs/u,
@@ -1070,26 +1060,18 @@ describe("Signal experience shell", () => {
       source,
       /replayElapsedMs: replayInterviewFootageElapsedMs,[\s\S]{0,120}activeMessage: replayActiveMessage/u,
     );
-    assert.match(source, /Interview speed <strong>1×<\/strong>/u);
+    assert.match(source, /audio\.playbackRate = 1/u);
     assert.doesNotMatch(
       source,
       /data-signal-replay-puppeteering-calibration/u,
     );
     assert.doesNotMatch(source, /Transcript puppeteering offset/u);
-    assert.match(source, /Copy timing report/u);
-    assert.match(source, /chosenIntroCardDurationMs:/u);
-    assert.match(source, /introDurationAdjustmentMs:/u);
-    assert.match(source, /interviewFootageStartsAtAudioMs:/u);
-    assert.match(source, /interviewFootageSpeed: 1/u);
-    assert.match(source, /landingCameraShot: wide/u);
+    assert.doesNotMatch(source, /Copy timing report/u);
     assert.match(
       source,
       /replayBookend\?\.kind === "intro" \|\| replayIntroLandingActive[\s\S]{0,40}\? "wide"/u,
     );
-    assert.match(
-      css,
-      /\.replayIntroCalibration\s*\{[^}]*max-width:\s*1180px/iu,
-    );
+    assert.doesNotMatch(css, /\.replayIntroCalibration/iu);
     assert.match(
       css,
       /--signal-replay-intro-landing-ms/u,
@@ -1791,12 +1773,16 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.replayTranscript\s*\{[^}]*max-height:\s*320px/u);
     assert.match(
       source,
-      /signalReplayIntroDurationMs\(replayRecording\?\.timeline\)/u,
+      /signalReplayIntroDurationMs\(replayActiveTimeline\)/u,
     );
+    assert.match(source, />\s*Studio Cut ✨\s*</u);
+    assert.match(source, /startReplayStudioCut\(replayRecording\.id, regenerate\)/u);
+    assert.match(source, /Estimated ElevenLabs use:/u);
+    assert.match(source, />\s*On Air\s*</u);
     assert.match(source, /data-botcast-replay-intro-row="true"/u);
     assert.match(
       source,
-      /replayElapsedMs < replayIntroEffectiveEndMs[\s\S]{0,80}\? "true"/u,
+      /replayElapsedMs < replayIntroCardEndMs[\s\S]{0,80}\? "true"/u,
     );
     assert.match(
       source,
@@ -1805,7 +1791,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /onClick=\{\(\) => seekFaithfulReplay\(0\)\}/u);
     assert.match(
       source,
-      /Opening video · \{runtimeLabel\(replayIntroDurationMs\)\}/u,
+      /Opening video · \{runtimeLabel\(replayIntroCardEndMs\)\}/u,
     );
     assert.match(
       css,

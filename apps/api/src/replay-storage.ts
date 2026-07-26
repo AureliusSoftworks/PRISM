@@ -65,6 +65,14 @@ export function replayPremiumAudioRelativePath(args: {
   return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/premium/master.${extension}`;
 }
 
+export function replayStudioCutAudioRelativePath(args: {
+  userId: string;
+  recordingId: string;
+  version: string;
+}): string {
+  return `${replayRecordingRelativeDirectory(args.userId, args.recordingId)}/premium/master-${assertReplayPathSegment(args.version)}.webm`;
+}
+
 export function replayFaithfulAudioRelativePath(args: {
   userId: string;
   recordingId: string;
@@ -203,6 +211,35 @@ export function finalizeReplayUpload(args: {
   mkdirSync(dirname(videoAbsolutePath), { recursive: true });
   if (existsSync(videoAbsolutePath)) unlinkSync(videoAbsolutePath);
   renameSync(uploadAbsolutePath, videoAbsolutePath);
+  return { sizeBytes };
+}
+
+export function finalizeReplayAudioUpload(args: {
+  uploadRelativePath: string;
+  audioRelativePath: string;
+}): { sizeBytes: number } {
+  const uploadAbsolutePath = resolveAbsoluteUnderDataRoot(args.uploadRelativePath);
+  const audioAbsolutePath = resolveAbsoluteUnderDataRoot(args.audioRelativePath);
+  if (!existsSync(uploadAbsolutePath)) throw new Error("Studio Cut upload is missing.");
+  const sizeBytes = statSync(uploadAbsolutePath).size;
+  if (sizeBytes < 32) throw new Error("Studio Cut upload is incomplete.");
+  const descriptor = openSync(uploadAbsolutePath, "r");
+  const header = new Uint8Array(4);
+  try {
+    readSync(descriptor, header, 0, header.byteLength, 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  if (
+    header[0] !== 0x1a ||
+    header[1] !== 0x45 ||
+    header[2] !== 0xdf ||
+    header[3] !== 0xa3
+  ) {
+    throw new Error("Studio Cut audio must use a WebM container.");
+  }
+  mkdirSync(dirname(audioAbsolutePath), { recursive: true });
+  renameSync(uploadAbsolutePath, audioAbsolutePath);
   return { sizeBytes };
 }
 

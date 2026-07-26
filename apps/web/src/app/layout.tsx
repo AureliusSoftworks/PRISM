@@ -16,6 +16,7 @@ import { PrismIntroSequenceProvider } from "./PrismIntroSequence";
 import { PRISM_BRAND_COPY } from "./prismBrand";
 import { PrismMenuProvider } from "./PrismMenu";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
+import { ReplayRenderCoordinator } from "./ReplayRenderCoordinator";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
 import "./globals.css";
 
@@ -109,6 +110,7 @@ export default function RootLayout({
             <TextFieldContextMenu />
             <BlockBrowserInspection />
             <DisableNativeTooltips />
+            <ReplayRenderCoordinator />
             {children}
             <ClientInstallCoach />
           </PrismIntroSequenceProvider>

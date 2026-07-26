@@ -795,23 +795,6 @@
 .replayControls { max-width: 1180px; margin: 12px auto; display: flex; gap: 12px; align-items: center; border: 1px solid var(--botcast-line); border-radius: 14px; padding: 10px 12px; background: var(--botcast-panel); box-shadow: 0 14px 36px var(--botcast-shadow); }
 .replayControls > button { min-width: 86px; min-height: 42px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: inherit; background: rgba(255,255,255,.04); padding: 9px 13px; font-weight: 780; cursor: pointer; }
 .replayControls > input { flex: 1; accent-color: var(--prism-m); }
-.replayIntroCalibration { max-width: 1180px; margin: 12px auto; display: grid; gap: 14px; border: 1px solid color-mix(in srgb, var(--prism-m) 42%, var(--botcast-line)); border-radius: 16px; padding: 16px; background: color-mix(in srgb, var(--prism-m) 7%, var(--botcast-panel)); box-shadow: 0 16px 42px var(--botcast-shadow), inset 0 1px rgba(255,255,255,.05); }
-.replayIntroCalibrationHeading { display: flex; align-items: end; justify-content: space-between; gap: 20px; }
-.replayIntroCalibrationHeading h3 { margin: 5px 0 3px; font-size: 1rem; }
-.replayIntroCalibrationHeading strong { display: block; margin: 0 0 3px; font-size: .92rem; }
-.replayIntroCalibrationHeading p { margin: 0; color: var(--botcast-muted); font-size: .78rem; }
-.replayIntroCalibrationHeading output { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--prism-m) 42%, transparent); border-radius: 999px; padding: 9px 13px; color: color-mix(in srgb, var(--prism-m) 70%, var(--botcast-ink)); background: color-mix(in srgb, var(--prism-m) 10%, transparent); font: 800 .78rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.replayIntroCalibrationHeading output[data-landing="true"] { border-color: color-mix(in srgb, var(--prism-m) 70%, transparent); color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-m) 22%, transparent); }
-.replayIntroCalibrationLabel { display: grid; gap: 8px; color: var(--botcast-muted); font: 700 .72rem/1 system-ui; letter-spacing: .04em; text-transform: uppercase; }
-.replayIntroCalibrationLabel input[type="range"],
-.replayIntroCalibration > input[type="range"] { width: 100%; accent-color: var(--prism-m); cursor: ew-resize; }
-.replayIntroCalibrationFade { display: grid; gap: 12px; border-top: 1px solid color-mix(in srgb, var(--prism-m) 22%, var(--botcast-line)); padding-top: 14px; }
-.replayIntroCalibrationActions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(150px, 1.2fr) auto minmax(0, 1fr); gap: 8px; }
-.replayIntroCalibrationActions button, .replayIntroCalibrationCopy { min-height: 42px; border: 1px solid var(--botcast-line); border-radius: 10px; padding: 9px 12px; color: inherit; background: var(--botcast-soft-panel); font-weight: 760; cursor: pointer; }
-.replayIntroCalibrationActions .replayIntroCalibrationRestart { border-color: color-mix(in srgb, var(--prism-m) 55%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-m) 16%, var(--botcast-soft-panel)); }
-.replayIntroCalibrationReadout { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--botcast-muted); font-size: .72rem; }
-.replayIntroCalibrationReadout strong { color: var(--botcast-ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.replayIntroCalibrationCopy { justify-self: start; }
 .replayTranscript { max-width: 1180px; max-height: 320px; margin: 0 auto; overflow: auto; padding: 8px; }
 .replayTranscript button { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; text-align: left; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
 .replayTranscript button[data-botcast-replay-intro-row="true"] { margin-bottom: 5px; border: 1px solid color-mix(in srgb, var(--prism-m) 18%, var(--botcast-line)); color: var(--botcast-muted); background: color-mix(in srgb, var(--prism-m) 5%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-m) 48%, transparent); }
@@ -1076,10 +1059,6 @@
   .stageVoiceMixer > header { align-items: flex-start; }
   .stageVoiceMixerSliders { grid-template-columns: 1fr; }
   .replayControls { flex-wrap: wrap; }.replayControls > input { order: 3; flex-basis: 100%; }
-  .replayIntroCalibrationHeading { align-items: flex-start; flex-direction: column; }
-  .replayIntroCalibrationActions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .replayIntroCalibrationActions .replayIntroCalibrationRestart { grid-column: 1 / -1; grid-row: 1; }
-  .replayIntroCalibrationCopy { width: 100%; }
   .liveCameraControls { justify-content: flex-start; flex-wrap: wrap; }
 }
 

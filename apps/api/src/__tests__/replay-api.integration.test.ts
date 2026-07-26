@@ -229,6 +229,21 @@ describe("faithful replay API", () => {
     assert.equal(finalized.status, 200);
     assert.equal((await json(finalized)).recording.availability, "faithful");
 
+    const studioEligibility = await owner.request(
+      `/api/replays/${recordingId}/studio-cut/eligibility`,
+    );
+    assert.equal(studioEligibility.status, 200);
+    assert.equal((await json(studioEligibility)).eligibility.eligible, false);
+    const blockedStudioCut = await owner.request(
+      `/api/replays/${recordingId}/studio-cut`,
+      jsonInit({ confirm: "send-to-elevenlabs" }),
+    );
+    assert.equal(blockedStudioCut.status, 409);
+    assert.match(
+      String((await json(blockedStudioCut)).error),
+      /AUTO or ONLINE|LOCAL mode/u,
+    );
+
     const ranged = await owner.request(`/api/replays/${recordingId}/audio`, {
       headers: { range: "bytes=2-5" },
     });

@@ -317,6 +317,32 @@ export interface ReplayPremiumProductionV1 {
   updatedAt: string | null;
 }
 
+/**
+ * Optional, explicitly purchased Signal re-performance. The faithful
+ * ReplayRecordingV1 audio/timeline remain the canonical "On Air" master.
+ */
+export interface ReplayStudioCutProductionV1 {
+  phase: ReplayPremiumProductionPhaseV1;
+  progress: number;
+  inputHash: string | null;
+  masterReady: boolean;
+  audioUrl: string | null;
+  timeline: ReplayTimelineV1 | null;
+  manifest: ReplayManifestV2 | null;
+  characterCost: number | null;
+  warning: string | null;
+  error: string | null;
+  updatedAt: string | null;
+}
+
+export interface ReplayStudioCutEligibilityV1 {
+  eligible: boolean;
+  blockedReason: string | null;
+  characterEstimate: number;
+  requestEstimate: number;
+  missingSpeakers: string[];
+}
+
 export interface ReplayPremiumVoiceTimingV1 {
   sourceMessageId: string;
   startMs: number;
@@ -367,6 +393,7 @@ export interface ReplayRecordingV1 {
   warning: string | null;
   error: string | null;
   premiumProduction?: ReplayPremiumProductionV1 | null;
+  studioCutProduction?: ReplayStudioCutProductionV1 | null;
   createdAt: string;
   updatedAt: string;
 }

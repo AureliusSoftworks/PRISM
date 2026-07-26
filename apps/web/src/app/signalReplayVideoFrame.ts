@@ -41,7 +41,7 @@ const SIGNAL_REPLAY_FALLBACK_END_CARD_MS = 2_000;
 const SIGNAL_REPLAY_INTRO_TO_STUDIO_LEAD_MS = 1_800;
 const SIGNAL_REPLAY_INTRO_MIN_VISIBLE_MS = 1_000;
 /** Calibrated against the faithful master so recorded mouths land on speech. */
-export const SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS = 9_000;
+export const SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS = 8_750;
 /** Logo dissolves into the studio over this window when the pad is long enough. */
 export const SIGNAL_REPLAY_INTRO_LANDING_FADE_MS = 650;
 

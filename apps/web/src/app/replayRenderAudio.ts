@@ -42,6 +42,24 @@ export async function encodeReplayRenderAudio(args: {
   title: string;
   audioBuffer: AudioBuffer;
 }): Promise<void> {
+  await encodeReplayAudioWindows({
+    recordingId: args.recordingId,
+    renderToken: args.renderToken,
+    title: args.title,
+    uploadPath: `/api/replays/${encodeURIComponent(args.recordingId)}/render-audio-chunk`,
+    windows: (async function* () {
+      yield args.audioBuffer;
+    })(),
+  });
+}
+
+export async function encodeReplayAudioWindows(args: {
+  recordingId: string;
+  renderToken: string;
+  title: string;
+  uploadPath: string;
+  windows: AsyncIterable<AudioBuffer>;
+}): Promise<void> {
   if (typeof Worker === "undefined") {
     throw new Error("This Chromium runtime cannot encode replay audio.");
   }
@@ -57,28 +75,29 @@ export async function encodeReplayRenderAudio(args: {
         recordingId: args.recordingId,
         renderToken: args.renderToken,
         authHeaders: replayAuthHeaders(),
-        sampleRate: args.audioBuffer.sampleRate,
-        numberOfChannels: args.audioBuffer.numberOfChannels,
+        sampleRate: 48_000,
+        numberOfChannels: 2,
         title: args.title,
+        uploadPath: args.uploadPath,
       },
       (response) => response.type === "ready",
     );
 
-    const channels = Array.from(
-      { length: args.audioBuffer.numberOfChannels },
-      (_, channel) => args.audioBuffer.getChannelData(channel),
-    );
-    const chunkFrames = Math.max(1, Math.round(args.audioBuffer.sampleRate));
     let sequence = 0;
-    for (let cursor = 0; cursor < args.audioBuffer.length; cursor += chunkFrames) {
-      const frameCount = Math.min(chunkFrames, args.audioBuffer.length - cursor);
+    let timestampFrames = 0;
+    for await (const audioBuffer of args.windows) {
+      if (audioBuffer.sampleRate !== 48_000 || audioBuffer.numberOfChannels !== 2) {
+        throw new Error("Studio Cut windows must be 48 kHz stereo audio.");
+      }
+      const channels = [audioBuffer.getChannelData(0), audioBuffer.getChannelData(1)];
+      const frameCount = audioBuffer.length;
       const interleaved = new Float32Array(
-        frameCount * args.audioBuffer.numberOfChannels,
+        frameCount * 2,
       );
       for (let frame = 0; frame < frameCount; frame += 1) {
         for (let channel = 0; channel < channels.length; channel += 1) {
           interleaved[frame * channels.length + channel] =
-            channels[channel]?.[cursor + frame] ?? 0;
+            channels[channel]?.[frame] ?? 0;
         }
       }
       const currentSequence = sequence++;
@@ -87,7 +106,7 @@ export async function encodeReplayRenderAudio(args: {
         {
           type: "audio",
           sequence: currentSequence,
-          timestamp: cursor / args.audioBuffer.sampleRate,
+          timestamp: timestampFrames / 48_000,
           data: interleaved.buffer,
         },
         (response) =>
@@ -95,6 +114,7 @@ export async function encodeReplayRenderAudio(args: {
           response.sequence === currentSequence,
         [interleaved.buffer],
       );
+      timestampFrames += frameCount;
     }
     await postAndWait(
       worker,

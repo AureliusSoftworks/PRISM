@@ -16,6 +16,7 @@ type InitMessage = {
   sampleRate: number;
   numberOfChannels: number;
   title: string;
+  uploadPath: string;
 };
 
 type AudioMessage = {
@@ -41,13 +42,11 @@ async function uploadAudioChunk(args: {
   recordingId: string;
   renderToken: string;
   authHeaders: Record<string, string>;
+  uploadPath: string;
   chunk: StreamTargetChunk;
 }): Promise<void> {
   const response = await fetch(
-    new URL(
-      `/api/replays/${encodeURIComponent(args.recordingId)}/render-audio-chunk`,
-      self.location.origin,
-    ),
+    new URL(args.uploadPath, self.location.origin),
     {
       method: "POST",
       credentials: "include",
@@ -92,6 +91,7 @@ async function initialize(message: InitMessage): Promise<void> {
           recordingId: message.recordingId,
           renderToken: message.renderToken,
           authHeaders: message.authHeaders,
+          uploadPath: message.uploadPath,
           chunk,
         }),
     }),

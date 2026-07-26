@@ -17,6 +17,10 @@ export const PRISM_BOT_THINKING_SFX_FALLBACK_URLS = [
   "/audio/avatar/prism-calculating-03.mp3",
   "/audio/avatar/prism-calculating-04.mp3",
 ] as const;
+export const BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS = 0.08;
+export const BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO = 0.1;
+export const BOT_AVATAR_SFX_ATTACK_MS = 120;
+export const BOT_AVATAR_SFX_RELEASE_MS = 240;
 
 export type BotAvatarSfxState = "idle" | "blink" | "talking" | "thinking";
 export type BotAvatarSfxPlayback = Pick<
@@ -31,6 +35,7 @@ export type BotAvatarSfxPlayback = Pick<
 export interface BotAvatarSfxAudioTarget {
   src: string;
   currentTime: number;
+  readonly duration?: number;
   loop: boolean;
   volume: number;
   readonly paused: boolean;
@@ -60,6 +65,32 @@ type BotAvatarSfxSpatialEngine = BotAvatarSfxSpatialConnection & {
   animationFrame: number | null;
   connected: boolean;
   lastPan: number | null;
+  loadedSource: string | null;
+  desiredSource: string | null;
+  desiredGain: number;
+  desiredPlaying: boolean;
+  gainEnvelope: BotAvatarSfxGainEnvelope | null;
+  playRequest: number;
+  releaseTimer: ReturnType<typeof globalThis.setTimeout> | null;
+};
+
+type BotAvatarSfxGainEnvelope = {
+  kind: "attack" | "release";
+  fromGain: number;
+  toGain: number;
+  startedAt: number;
+  durationSeconds: number;
+};
+
+type BotAvatarSfxSampleRuntime = {
+  desiredPlaying: boolean;
+  desiredSource: string | null;
+  fadeGeneration: number;
+  fadeTimer: ReturnType<typeof globalThis.setTimeout> | null;
+  lifecycleGeneration: number;
+  loadedSource: string | null;
+  loopFrame: number | null;
+  targetVolume: number;
 };
 
 let botAvatarSfxAudioContext: AudioContext | null = null;
@@ -67,6 +98,66 @@ const botAvatarSfxSpatialEngines = new WeakMap<
   HTMLMediaElement,
   BotAvatarSfxSpatialEngine
 >();
+const botAvatarSfxSampleRuntimes = new WeakMap<
+  HTMLMediaElement,
+  BotAvatarSfxSampleRuntime
+>();
+
+function clampBotAvatarSfxGain(value: number): number {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function clampBotAvatarSfxProgress(value: number): number {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 1));
+}
+
+export function botAvatarSfxLoopBounds(
+  durationSeconds: number,
+): { startTime: number; endTime: number } | null {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  const edgeTrim = Math.min(
+    BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
+    durationSeconds * BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO,
+  );
+  return {
+    startTime: edgeTrim,
+    endTime: Math.max(edgeTrim, durationSeconds - edgeTrim),
+  };
+}
+
+export function botAvatarSfxLoopRestartTime(
+  currentTime: number,
+  durationSeconds: number,
+): number | null {
+  const bounds = botAvatarSfxLoopBounds(durationSeconds);
+  if (!bounds || !Number.isFinite(currentTime)) return null;
+  return currentTime < bounds.startTime || currentTime >= bounds.endTime
+    ? bounds.startTime
+    : null;
+}
+
+export function botAvatarSfxAttackGainAt(
+  fromGain: number,
+  targetGain: number,
+  progress: number,
+): number {
+  const from = clampBotAvatarSfxGain(fromGain);
+  const target = clampBotAvatarSfxGain(targetGain);
+  const shapedProgress = Math.sin(
+    (clampBotAvatarSfxProgress(progress) * Math.PI) / 2,
+  );
+  return from + (target - from) * shapedProgress;
+}
+
+export function botAvatarSfxReleaseGainAt(
+  fromGain: number,
+  progress: number,
+): number {
+  return (
+    clampBotAvatarSfxGain(fromGain) *
+    Math.cos((clampBotAvatarSfxProgress(progress) * Math.PI) / 2)
+  );
+}
 
 export function botAvatarSfxStereoPanForRect(
   rect: Pick<DOMRect, "left" | "width">,
@@ -163,6 +254,13 @@ function botAvatarSfxSpatialEngineFor(
       animationFrame: null,
       connected: true,
       lastPan: null,
+      loadedSource: null,
+      desiredSource: null,
+      desiredGain: 0,
+      desiredPlaying: false,
+      gainEnvelope: null,
+      playRequest: 0,
+      releaseTimer: null,
     };
     botAvatarSfxSpatialEngines.set(audio, engine);
     return engine;
@@ -187,12 +285,27 @@ function updateBotAvatarSfxSpatialPan(engine: BotAvatarSfxSpatialEngine): void {
   );
 }
 
+function updateBotAvatarSfxLoopTime(audio: BotAvatarSfxAudioTarget): void {
+  const restartTime = botAvatarSfxLoopRestartTime(
+    audio.currentTime,
+    audio.duration ?? Number.NaN,
+  );
+  if (restartTime === null) return;
+  try {
+    audio.currentTime = restartTime;
+  } catch {
+    // Metadata can briefly become stale while a newly selected source loads.
+  }
+}
+
 function startBotAvatarSfxSpatialTracking(
   engine: BotAvatarSfxSpatialEngine,
+  audio: HTMLMediaElement,
 ): void {
   if (engine.animationFrame !== null) return;
   const tick = (): void => {
     updateBotAvatarSfxSpatialPan(engine);
+    updateBotAvatarSfxLoopTime(audio);
     engine.animationFrame = window.requestAnimationFrame(tick);
   };
   tick();
@@ -215,6 +328,260 @@ function releaseBotAvatarSfxSpatialEngine(
   engine.panner.disconnect();
   engine.output.disconnect();
   engine.connected = false;
+}
+
+function botAvatarSfxGainEnvelopeValue(
+  envelope: BotAvatarSfxGainEnvelope,
+  atTime: number,
+): number {
+  const progress =
+    envelope.durationSeconds <= 0
+      ? 1
+      : (atTime - envelope.startedAt) / envelope.durationSeconds;
+  return envelope.kind === "attack"
+    ? botAvatarSfxAttackGainAt(
+        envelope.fromGain,
+        envelope.toGain,
+        progress,
+      )
+    : botAvatarSfxReleaseGainAt(envelope.fromGain, progress);
+}
+
+function holdBotAvatarSfxSpatialGain(
+  engine: BotAvatarSfxSpatialEngine,
+): number {
+  const now = engine.context.currentTime;
+  const currentGain = engine.gainEnvelope
+    ? botAvatarSfxGainEnvelopeValue(engine.gainEnvelope, now)
+    : clampBotAvatarSfxGain(engine.output.gain.value);
+  engine.output.gain.cancelScheduledValues(now);
+  engine.output.gain.setValueAtTime(currentGain, now);
+  engine.gainEnvelope = null;
+  return currentGain;
+}
+
+function scheduleBotAvatarSfxSpatialGain(
+  engine: BotAvatarSfxSpatialEngine,
+  kind: BotAvatarSfxGainEnvelope["kind"],
+  fromGain: number,
+  toGain: number,
+  durationMs: number,
+): void {
+  const now = engine.context.currentTime;
+  const normalizedDurationMs = Math.max(0, Math.round(durationMs));
+  const normalizedFrom = clampBotAvatarSfxGain(fromGain);
+  const normalizedTo = clampBotAvatarSfxGain(toGain);
+  engine.output.gain.cancelScheduledValues(now);
+  if (normalizedDurationMs === 0 || normalizedFrom === normalizedTo) {
+    engine.output.gain.setValueAtTime(normalizedTo, now);
+    engine.gainEnvelope = null;
+    return;
+  }
+  const durationSeconds = normalizedDurationMs / 1_000;
+  const curve = Float32Array.from({ length: 32 }, (_, index) =>
+    kind === "attack"
+      ? botAvatarSfxAttackGainAt(
+          normalizedFrom,
+          normalizedTo,
+          index / 31,
+        )
+      : botAvatarSfxReleaseGainAt(normalizedFrom, index / 31),
+  );
+  engine.output.gain.setValueAtTime(normalizedFrom, now);
+  engine.output.gain.setValueCurveAtTime(curve, now, durationSeconds);
+  engine.gainEnvelope = {
+    kind,
+    fromGain: normalizedFrom,
+    toGain: normalizedTo,
+    startedAt: now,
+    durationSeconds,
+  };
+}
+
+function clearBotAvatarSfxReleaseTimer(
+  engine: BotAvatarSfxSpatialEngine,
+): void {
+  if (engine.releaseTimer === null) return;
+  globalThis.clearTimeout(engine.releaseTimer);
+  engine.releaseTimer = null;
+}
+
+function installBotAvatarSfxSource(
+  audio: HTMLMediaElement,
+  engine: BotAvatarSfxSpatialEngine,
+  source: string,
+): void {
+  engine.playRequest += 1;
+  audio.pause();
+  audio.currentTime = 0;
+  audio.src = source;
+  audio.load();
+  engine.loadedSource = source;
+}
+
+function startBotAvatarSfxSpatialPlayback(
+  audio: HTMLMediaElement,
+  engine: BotAvatarSfxSpatialEngine,
+): void {
+  if (!engine.desiredPlaying || !engine.desiredSource) return;
+  clearBotAvatarSfxReleaseTimer(engine);
+  connectBotAvatarSfxSpatialEngineNodes(engine);
+  audio.loop = true;
+  audio.volume = 1;
+  updateBotAvatarSfxLoopTime(audio);
+  startBotAvatarSfxSpatialTracking(engine, audio);
+  const fromGain = holdBotAvatarSfxSpatialGain(engine);
+  if (engine.context.state === "suspended") {
+    void engine.context.resume().catch(() => undefined);
+  }
+  if (!audio.paused) {
+    scheduleBotAvatarSfxSpatialGain(
+      engine,
+      "attack",
+      fromGain,
+      engine.desiredGain,
+      BOT_AVATAR_SFX_ATTACK_MS,
+    );
+    return;
+  }
+  engine.output.gain.setValueAtTime(0, engine.context.currentTime);
+  const playRequest = ++engine.playRequest;
+  void audio.play().then(
+    () => {
+      if (
+        playRequest !== engine.playRequest ||
+        !engine.desiredPlaying ||
+        engine.loadedSource !== engine.desiredSource
+      ) {
+        return;
+      }
+      updateBotAvatarSfxLoopTime(audio);
+      scheduleBotAvatarSfxSpatialGain(
+        engine,
+        "attack",
+        0,
+        engine.desiredGain,
+        BOT_AVATAR_SFX_ATTACK_MS,
+      );
+    },
+    () => {
+      if (playRequest !== engine.playRequest) return;
+      engine.desiredPlaying = false;
+      audio.pause();
+      audio.currentTime = 0;
+      holdBotAvatarSfxSpatialGain(engine);
+      engine.output.gain.setValueAtTime(0, engine.context.currentTime);
+      releaseBotAvatarSfxSpatialEngine(audio);
+    },
+  );
+}
+
+function finishBotAvatarSfxSpatialRelease(
+  audio: HTMLMediaElement,
+  engine: BotAvatarSfxSpatialEngine,
+): void {
+  engine.releaseTimer = null;
+  engine.playRequest += 1;
+  holdBotAvatarSfxSpatialGain(engine);
+  engine.output.gain.setValueAtTime(0, engine.context.currentTime);
+  audio.pause();
+  audio.currentTime = 0;
+  if (engine.desiredPlaying && engine.desiredSource) {
+    if (engine.loadedSource !== engine.desiredSource) {
+      installBotAvatarSfxSource(audio, engine, engine.desiredSource);
+    }
+    startBotAvatarSfxSpatialPlayback(audio, engine);
+    return;
+  }
+  releaseBotAvatarSfxSpatialEngine(audio);
+}
+
+function releaseBotAvatarSfxSpatialPlayback(
+  audio: HTMLMediaElement,
+  engine: BotAvatarSfxSpatialEngine,
+): void {
+  engine.playRequest += 1;
+  if (engine.releaseTimer !== null) return;
+  const fromGain = holdBotAvatarSfxSpatialGain(engine);
+  if (audio.paused || fromGain <= 0) {
+    finishBotAvatarSfxSpatialRelease(audio, engine);
+    return;
+  }
+  scheduleBotAvatarSfxSpatialGain(
+    engine,
+    "release",
+    fromGain,
+    0,
+    BOT_AVATAR_SFX_RELEASE_MS,
+  );
+  engine.releaseTimer = globalThis.setTimeout(
+    () => finishBotAvatarSfxSpatialRelease(audio, engine),
+    BOT_AVATAR_SFX_RELEASE_MS,
+  );
+}
+
+function syncBrowserBotAvatarSfxAudio(
+  audio: HTMLMediaElement,
+  sfx: BotAvatarSfxPlayback | null | undefined,
+  state: BotAvatarSfxState,
+  loadedSource: string | null,
+): string | null {
+  const shouldPlay = botAvatarSfxShouldPlay(sfx, state);
+  const existingEngine = botAvatarSfxSpatialEngines.get(audio);
+  if (!shouldPlay || !sfx) {
+    if (!existingEngine) {
+      audio.pause();
+      audio.currentTime = 0;
+      return loadedSource;
+    }
+    existingEngine.desiredPlaying = false;
+    existingEngine.desiredSource = null;
+    releaseBotAvatarSfxSpatialPlayback(audio, existingEngine);
+    return loadedSource;
+  }
+
+  const engine = botAvatarSfxSpatialEngineFor(audio);
+  if (!engine) {
+    audio.pause();
+    audio.currentTime = 0;
+    return sfx.audioDataUrl;
+  }
+  const previousDesiredGain = engine.desiredGain;
+  engine.desiredPlaying = true;
+  engine.desiredSource = sfx.audioDataUrl;
+  engine.desiredGain = clampBotAvatarSfxGain(sfx.volume);
+
+  if (engine.loadedSource !== engine.desiredSource) {
+    if (!audio.paused && engine.loadedSource !== null) {
+      releaseBotAvatarSfxSpatialPlayback(audio, engine);
+      return engine.desiredSource;
+    }
+    installBotAvatarSfxSource(audio, engine, engine.desiredSource);
+    startBotAvatarSfxSpatialPlayback(audio, engine);
+    return engine.desiredSource;
+  }
+
+  if (engine.releaseTimer !== null) {
+    clearBotAvatarSfxReleaseTimer(engine);
+    const fromGain = holdBotAvatarSfxSpatialGain(engine);
+    scheduleBotAvatarSfxSpatialGain(
+      engine,
+      "attack",
+      fromGain,
+      engine.desiredGain,
+      BOT_AVATAR_SFX_ATTACK_MS,
+    );
+  } else if (audio.paused) {
+    startBotAvatarSfxSpatialPlayback(audio, engine);
+  } else if (previousDesiredGain !== engine.desiredGain) {
+    holdBotAvatarSfxSpatialGain(engine);
+    engine.output.gain.setValueAtTime(
+      engine.desiredGain,
+      engine.context.currentTime,
+    );
+  }
+  startBotAvatarSfxSpatialTracking(engine, audio);
+  return engine.desiredSource;
 }
 
 export function prismBotThinkingSfxFallbackIndex(seed: string): number {
@@ -267,10 +634,12 @@ export function syncBotAvatarSfxAudio(
   state: BotAvatarSfxState,
   loadedSource: string | null,
 ): string | null {
+  if (isBrowserMediaElement(audio)) {
+    return syncBrowserBotAvatarSfxAudio(audio, sfx, state, loadedSource);
+  }
   if (!botAvatarSfxShouldPlay(sfx, state) || !sfx) {
     audio.pause();
     audio.currentTime = 0;
-    releaseBotAvatarSfxSpatialEngine(audio);
     return loadedSource;
   }
   if (loadedSource !== sfx.audioDataUrl) {
@@ -280,24 +649,8 @@ export function syncBotAvatarSfxAudio(
     loadedSource = sfx.audioDataUrl;
   }
   audio.loop = true;
-  const spatialEngine = isBrowserMediaElement(audio)
-    ? botAvatarSfxSpatialEngineFor(audio)
-    : null;
-  if (isBrowserMediaElement(audio) && !spatialEngine) {
-    audio.pause();
-    audio.currentTime = 0;
-    return loadedSource;
-  }
-  if (spatialEngine) {
-    audio.volume = 1;
-    spatialEngine.output.gain.value = sfx.volume;
-    startBotAvatarSfxSpatialTracking(spatialEngine);
-    if (spatialEngine.context.state === "suspended") {
-      void spatialEngine.context.resume().catch(() => undefined);
-    }
-  } else {
-    audio.volume = sfx.volume;
-  }
+  audio.volume = sfx.volume;
+  updateBotAvatarSfxLoopTime(audio);
   if (audio.paused) void audio.play().catch(() => undefined);
   return loadedSource;
 }
@@ -305,9 +658,204 @@ export function syncBotAvatarSfxAudio(
 export function stopBotAvatarSfxAudio(
   audio: BotAvatarSfxAudioTarget,
 ): void {
+  if (isBrowserMediaElement(audio)) {
+    const engine = botAvatarSfxSpatialEngines.get(audio);
+    if (engine) {
+      engine.desiredPlaying = false;
+      engine.desiredSource = null;
+      releaseBotAvatarSfxSpatialPlayback(audio, engine);
+      return;
+    }
+  }
   audio.pause();
   audio.currentTime = 0;
-  releaseBotAvatarSfxSpatialEngine(audio);
+}
+
+function botAvatarSfxSampleRuntimeFor(
+  audio: HTMLMediaElement,
+): BotAvatarSfxSampleRuntime {
+  const existing = botAvatarSfxSampleRuntimes.get(audio);
+  if (existing) return existing;
+  const runtime: BotAvatarSfxSampleRuntime = {
+    desiredPlaying: false,
+    desiredSource: null,
+    fadeGeneration: 0,
+    fadeTimer: null,
+    lifecycleGeneration: 0,
+    loadedSource: null,
+    loopFrame: null,
+    targetVolume: 0,
+  };
+  botAvatarSfxSampleRuntimes.set(audio, runtime);
+  return runtime;
+}
+
+function startBotAvatarSfxSampleLoopTracking(
+  audio: HTMLMediaElement,
+  runtime: BotAvatarSfxSampleRuntime,
+): void {
+  if (runtime.loopFrame !== null || typeof window === "undefined") return;
+  const tick = (): void => {
+    updateBotAvatarSfxLoopTime(audio);
+    if (!runtime.desiredPlaying && audio.paused) {
+      runtime.loopFrame = null;
+      return;
+    }
+    runtime.loopFrame = window.requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+function fadeBotAvatarSfxSampleVolume(
+  audio: HTMLMediaElement,
+  runtime: BotAvatarSfxSampleRuntime,
+  kind: "attack" | "release",
+  fromVolume: number,
+  targetVolume: number,
+  durationMs: number,
+): Promise<boolean> {
+  if (runtime.fadeTimer !== null) {
+    globalThis.clearTimeout(runtime.fadeTimer);
+    runtime.fadeTimer = null;
+  }
+  const fadeGeneration = ++runtime.fadeGeneration;
+  const startedAt = Date.now();
+  const normalizedDuration = Math.max(0, Math.round(durationMs));
+  return new Promise((resolve) => {
+    const step = (): void => {
+      if (fadeGeneration !== runtime.fadeGeneration) {
+        resolve(false);
+        return;
+      }
+      const progress =
+        normalizedDuration === 0
+          ? 1
+          : (Date.now() - startedAt) / normalizedDuration;
+      audio.volume =
+        kind === "attack"
+          ? botAvatarSfxAttackGainAt(
+              fromVolume,
+              targetVolume,
+              progress,
+            )
+          : botAvatarSfxReleaseGainAt(fromVolume, progress);
+      if (progress >= 1) {
+        runtime.fadeTimer = null;
+        resolve(true);
+        return;
+      }
+      runtime.fadeTimer = globalThis.setTimeout(step, 16);
+    };
+    step();
+  });
+}
+
+export async function playBotAvatarSfxSampleAudio(
+  audio: HTMLMediaElement,
+  sfx: BotAvatarSfxPlayback,
+): Promise<void> {
+  const runtime = botAvatarSfxSampleRuntimeFor(audio);
+  const lifecycleGeneration = ++runtime.lifecycleGeneration;
+  runtime.desiredPlaying = true;
+  runtime.desiredSource = sfx.audioDataUrl;
+  runtime.targetVolume = clampBotAvatarSfxGain(sfx.volume);
+  if (
+    runtime.loadedSource !== runtime.desiredSource &&
+    !audio.paused &&
+    audio.volume > 0
+  ) {
+    const released = await fadeBotAvatarSfxSampleVolume(
+      audio,
+      runtime,
+      "release",
+      audio.volume,
+      0,
+      BOT_AVATAR_SFX_RELEASE_MS,
+    );
+    if (
+      !released ||
+      lifecycleGeneration !== runtime.lifecycleGeneration ||
+      !runtime.desiredPlaying
+    ) {
+      return;
+    }
+    audio.pause();
+    audio.currentTime = 0;
+  }
+  if (lifecycleGeneration !== runtime.lifecycleGeneration) return;
+  if (runtime.loadedSource !== runtime.desiredSource) {
+    audio.pause();
+    audio.currentTime = 0;
+    audio.src = runtime.desiredSource;
+    audio.load();
+    runtime.loadedSource = runtime.desiredSource;
+  }
+  audio.loop = true;
+  const fromVolume = audio.paused ? 0 : audio.volume;
+  audio.volume = fromVolume;
+  updateBotAvatarSfxLoopTime(audio);
+  startBotAvatarSfxSampleLoopTracking(audio, runtime);
+  await audio.play();
+  if (
+    lifecycleGeneration !== runtime.lifecycleGeneration ||
+    !runtime.desiredPlaying ||
+    runtime.loadedSource !== runtime.desiredSource
+  ) {
+    return;
+  }
+  updateBotAvatarSfxLoopTime(audio);
+  void fadeBotAvatarSfxSampleVolume(
+    audio,
+    runtime,
+    "attack",
+    fromVolume,
+    runtime.targetVolume,
+    BOT_AVATAR_SFX_ATTACK_MS,
+  );
+}
+
+export function stopBotAvatarSfxSampleAudio(
+  audio: HTMLMediaElement,
+): void {
+  const runtime = botAvatarSfxSampleRuntimeFor(audio);
+  const lifecycleGeneration = ++runtime.lifecycleGeneration;
+  runtime.desiredPlaying = false;
+  runtime.desiredSource = null;
+  const finish = (): void => {
+    if (lifecycleGeneration !== runtime.lifecycleGeneration) return;
+    audio.pause();
+    audio.currentTime = 0;
+  };
+  if (audio.paused || audio.volume <= 0) {
+    finish();
+    return;
+  }
+  void fadeBotAvatarSfxSampleVolume(
+    audio,
+    runtime,
+    "release",
+    audio.volume,
+    0,
+    BOT_AVATAR_SFX_RELEASE_MS,
+  ).then((released) => {
+    if (released) finish();
+  });
+}
+
+export function setBotAvatarSfxSampleVolume(
+  audio: HTMLMediaElement,
+  volume: number,
+): void {
+  const runtime = botAvatarSfxSampleRuntimeFor(audio);
+  runtime.targetVolume = clampBotAvatarSfxGain(volume);
+  if (runtime.desiredPlaying && !audio.paused) {
+    runtime.fadeGeneration += 1;
+    if (runtime.fadeTimer !== null) {
+      globalThis.clearTimeout(runtime.fadeTimer);
+      runtime.fadeTimer = null;
+    }
+    audio.volume = runtime.targetVolume;
+  }
 }
 
 export function audioBlobAsDataUrl(blob: Blob): Promise<string> {

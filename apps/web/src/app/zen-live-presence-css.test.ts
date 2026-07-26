@@ -1584,9 +1584,17 @@ describe("Zen live presence CSS", () => {
     const pulsateRule = ruleForSelectorNeedles('data-face-mouth-animation="pulsate"');
     const flickerRule = ruleForSelectorNeedles('data-face-mouth-animation="flicker"');
     const wobbleRule = ruleForSelectorNeedles('data-face-mouth-animation="wobble"');
+    const wobbleOriginRule = ruleForSelectorNeedlesWithBody(
+      ['data-face-mouth-animation="wobble"'],
+      "transform-origin",
+    );
     const spinGeometryRule = ruleForSelectorNeedlesWithBody(
       ['data-face-mouth-animation="spin"'],
       "inline-size: max-content",
+    );
+    const spinOriginRule = ruleForSelectorNeedlesWithBody(
+      ['data-face-mouth-animation="spin"'],
+      "transform-origin",
     );
     const spinTalkingRule = ruleForSelectorNeedlesWithBody(
       ['data-talking="true"', 'data-face-mouth-animation="spin"'],
@@ -1597,6 +1605,10 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(flickerRule, /scale[XY]\(/);
     assert.match(wobbleRule, /--bot-face-mouth-speech-wobble/);
     assert.doesNotMatch(wobbleRule, /scale[XY]\(/);
+    assert.match(
+      wobbleOriginRule,
+      /transform-origin:\s*var\(--bot-face-mouth-wobble-origin-x,\s*50%\)\s*var\(--bot-face-mouth-wobble-origin-y,\s*0%\)\s*;/,
+    );
     assert.match(spinTalkingRule, /botFaceCustomMouthSpin/);
     assert.match(spinTalkingRule, /--bot-face-mouth-spin-turn-duration,\s*480ms/);
     assert.doesNotMatch(spinTalkingRule, /scale[XY]\(/);
@@ -1610,13 +1622,26 @@ describe("Zen live presence CSS", () => {
     assert.match(spinGeometryRule, /padding-inline:\s*0\s*;/);
     assert.match(spinGeometryRule, /margin-inline:\s*0\s*;/);
     assert.match(
-      spinGeometryRule,
+      spinOriginRule,
       /transform-origin:\s*var\(--bot-face-mouth-spin-origin-x,\s*50%\)\s*var\(--bot-face-mouth-spin-origin-y,\s*50%\)\s*;/,
     );
-    assert.match(coffeeSeatPlateEmojiSource, /function updateCustomMouthSpinOrigin/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /function updateCustomMouthMotionOrigins/,
+    );
     assert.match(coffeeSeatPlateEmojiSource, /context\.measureText\(glyph\)/);
     assert.match(coffeeSeatPlateEmojiSource, /metrics\.actualBoundingBoxLeft/);
     assert.match(coffeeSeatPlateEmojiSource, /metrics\.actualBoundingBoxAscent/);
+    assert.match(coffeeSeatPlateEmojiSource, /computed\.paddingBlockStart/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /--bot-face-mouth-wobble-origin-y/,
+    );
+    assert.match(coffeeSeatPlateEmojiSource, /const inkTopY = baselineY -/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /normalizedFaceMouthAnimation !== "spin"[\s\S]*normalizedFaceMouthAnimation !== "wobble"/,
+    );
     assert.match(coffeeSeatPlateEmojiSource, /document\.fonts\?\.ready\.then\(measure\)/);
     assert.match(coffeeSeatPlateEmojiSource, /customMouthGlyphRef/);
     assert.match(css, /--bot-face-mouth-speech-scale-x/);

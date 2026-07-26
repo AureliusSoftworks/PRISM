@@ -16,6 +16,16 @@ test("the shared full-avatar renderer owns the looping SFX lifecycle", () => {
   assert.match(pageSource, /data-bot-avatar-sfx-runtime="true"/);
 });
 
+test("Avatar Studio samples use the shared trimmed attack and release behavior", () => {
+  assert.match(pageSource, /playBotAvatarSfxSampleAudio\(/);
+  assert.match(pageSource, /stopBotAvatarSfxSampleAudio\(/);
+  assert.match(pageSource, /setBotAvatarSfxSampleVolume\(/);
+  assert.doesNotMatch(
+    pageSource,
+    /sample\.src = sampleSfx\.audioDataUrl[\s\S]{0,120}sample\.loop = true/u,
+  );
+});
+
 test("new bot paths attempt unique thinking loops while preserving the fallback", () => {
   const automaticGenerationCalls = pageSource.match(
     /generateBotThinkingSfxProfile\(/gu,

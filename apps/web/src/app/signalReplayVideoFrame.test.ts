@@ -107,8 +107,8 @@ const timeline: ReplayTimelineV1 = {
 };
 
 describe("signalReplayInterviewFootageElapsedMs", () => {
-  it("uses the calibrated nine-second intro as the replay default", () => {
-    assert.equal(signalReplayDefaultIntroDurationMs(timeline), 9_000);
+  it("uses the calibrated 8.75-second intro as the replay default", () => {
+    assert.equal(signalReplayDefaultIntroDurationMs(timeline), 8_750);
     assert.equal(
       signalReplayDefaultIntroDurationMs({
         ...timeline,
@@ -116,10 +116,48 @@ describe("signalReplayInterviewFootageElapsedMs", () => {
       }),
       4_000,
     );
-    assert.equal(signalReplayDefaultIntroDurationMs(undefined), 9_000);
+    assert.equal(signalReplayDefaultIntroDurationMs(undefined), 8_750);
   });
 
-  it("starts the interview footage when the adjustable intro card ends", () => {
+  it("pins the approved first-speech alignment without changing footage speed", () => {
+    const calibratedTimeline: ReplayTimelineV1 = {
+      ...timeline,
+      durationMs: 240_580,
+      beats: [
+        {
+          ...timeline.beats[0],
+          endMs: 8_180,
+        },
+        {
+          ...timeline.beats[1],
+          startMs: 9_327,
+          endMs: 31_192,
+        },
+        {
+          ...timeline.beats[3],
+          startMs: 240_580,
+          endMs: 240_580,
+        },
+      ],
+    };
+    const firstAnimatedMouthFrameAudioMs = 9_390;
+
+    assert.equal(
+      signalReplayDefaultIntroDurationMs(calibratedTimeline),
+      8_750,
+    );
+    assert.equal(
+      signalReplayInterviewFootageElapsedMs({
+        timeline: calibratedTimeline,
+        replayElapsedMs: firstAnimatedMouthFrameAudioMs,
+        introCardEndMs: 8_750,
+      }),
+      9_967,
+    );
+    assert.equal(firstAnimatedMouthFrameAudioMs - 9_327, 63);
+  });
+
+  it("starts the interview footage when the intro card ends", () => {
     assert.equal(
       signalReplayInterviewFootageElapsedMs({
         timeline,

@@ -3,6 +3,8 @@ import type {
   ReplayManifestV2,
   ReplayPremiumSegmentV1,
   ReplayRecordingV1,
+  ReplayStudioCutEligibilityV1,
+  ReplayTimelineV1,
   ReplayVoiceTakeRecordV1,
   ReplayVoiceTakeV1,
 } from "@localai/shared";
@@ -306,6 +308,113 @@ export async function replayRecordingDetail(recordingId: string): Promise<{
     takes: result.takes,
     premiumSegments: result.premiumSegments,
   };
+}
+
+export async function replayStudioCutEligibility(
+  recordingId: string,
+): Promise<ReplayStudioCutEligibilityV1> {
+  const result = await replayJson<{
+    ok: true;
+    eligibility: ReplayStudioCutEligibilityV1;
+  }>(
+    `/api/replays/${encodeURIComponent(recordingId)}/studio-cut/eligibility`,
+  );
+  return result.eligibility;
+}
+
+export async function startReplayStudioCut(
+  recordingId: string,
+  regenerate = false,
+): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{
+    ok: true;
+    recording: ReplayRecordingV1;
+  }>(`/api/replays/${encodeURIComponent(recordingId)}/studio-cut`, {
+    method: "POST",
+    body: JSON.stringify({
+      confirm: "send-to-elevenlabs",
+      regenerate,
+    }),
+  });
+  window.dispatchEvent(new CustomEvent("prism:replay-recording-changed"));
+  return result.recording;
+}
+
+export async function resumeReplayStudioCut(recordingId: string): Promise<void> {
+  await replayJson(
+    `/api/replays/${encodeURIComponent(recordingId)}/studio-cut/resume`,
+    { method: "POST", body: "{}" },
+  );
+}
+
+export async function claimReplayStudioCutMix(recordingId: string): Promise<{
+  recording: ReplayRecordingV1;
+  takes: ReplayVoiceTakeRecordV1[];
+  premiumSegments: ReplayPremiumSegmentV1[];
+  renderToken: string;
+} | null> {
+  const result = await replayJson<{
+    ok: true;
+    claimed: {
+      recording: ReplayRecordingV1;
+      takes: ReplayVoiceTakeRecordV1[];
+      premiumSegments: ReplayPremiumSegmentV1[];
+      renderToken: string;
+    } | null;
+  }>(
+    `/api/replays/${encodeURIComponent(recordingId)}/studio-cut/mix/claim`,
+    { method: "POST", body: "{}" },
+  );
+  return result.claimed;
+}
+
+export async function completeReplayStudioCutMix(args: {
+  recordingId: string;
+  renderToken: string;
+  durationMs: number;
+  timeline: ReplayTimelineV1;
+  manifest: ReplayManifestV2;
+  warning?: string | null;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/studio-cut/mix/complete`,
+    {
+      method: "POST",
+      body: JSON.stringify(args),
+    },
+  );
+  window.dispatchEvent(new CustomEvent("prism:replay-recording-changed"));
+  return result.recording;
+}
+
+export async function failReplayStudioCutMix(args: {
+  recordingId: string;
+  renderToken: string;
+  error: string;
+}): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(args.recordingId)}/studio-cut/mix/fail`,
+    {
+      method: "POST",
+      body: JSON.stringify(args),
+    },
+  );
+  window.dispatchEvent(new CustomEvent("prism:replay-recording-changed"));
+  return result.recording;
+}
+
+export async function removeReplayStudioCut(
+  recordingId: string,
+): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(recordingId)}/studio-cut`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: "delete-studio-cut" }),
+    },
+  );
+  window.dispatchEvent(new CustomEvent("prism:replay-recording-changed"));
+  return result.recording;
 }
 
 export async function uploadReplayFaithfulAudio(args: {

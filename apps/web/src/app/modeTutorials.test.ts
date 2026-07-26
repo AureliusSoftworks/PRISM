@@ -1115,7 +1115,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /measured Signal intro row[\s\S]*recorded duration[\s\S]*seeks back to the beginning/u,
+        /measured Signal intro row[\s\S]*calibrated duration[\s\S]*seeks back to the beginning/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -1125,13 +1125,13 @@ describe("mode tutorials", () => {
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
         /Natural room silence, interruptions, crosstalk, retorts/u,
       );
-      assert.match(
+      assert.doesNotMatch(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /intro-length slider[\s\S]*translates the complete baked transcript, mouth, camera, and transition performance/u,
+        /intro-length slider/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /calibrated nine-second Signal intro is the default/u,
+        /automatic intro is calibrated to 8\.75 seconds[\s\S]*translates the complete baked transcript, mouth, camera, and transition performance/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",

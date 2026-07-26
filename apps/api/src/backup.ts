@@ -16,6 +16,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
   DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   parseStoredBotAvatarDetailsV1,
@@ -33,6 +34,7 @@ import {
   normalizeBotFaceFontId,
   normalizeBotFaceFontWeight,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
@@ -46,6 +48,7 @@ import {
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotNamePronunciation,
@@ -205,6 +208,7 @@ export interface BackupBotSnapshot {
   avatarDetails?: BotAvatarDetailsV1 | null;
   faceEyesFont?: BotFaceFontId | null;
   faceEyeCharacter?: string | null;
+  faceEyeAnimation?: BotFaceEyeMovement | BotFaceGlyphAnimation | null;
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
@@ -2302,6 +2306,7 @@ export function exportUserSnapshot(
         avatarDetails: parseStoredBotAvatarDetailsV1(bot.avatar_details_json),
         faceEyesFont: normalizeBotFaceFontId(bot.face_eyes_font),
         faceEyeCharacter: normalizeBotFaceEyeCharacter(bot.face_eye_character),
+        faceEyeAnimation: normalizeBotFaceEyeMovement(bot.face_eye_animation),
         faceMouthFont: normalizeBotFaceFontId(bot.face_mouth_font),
       faceMouthCharacter: normalizeBotFaceMouthCharacter(
         bot.face_mouth_character,
@@ -3266,7 +3271,8 @@ function importUserSnapshotWithinTransaction(
           : serializeBotAvatarDetailsV1(bot.avatarDetails),
         normalizeBotFaceFontId(bot.faceEyesFont),
         normalizeBotFaceEyeCharacter(bot.faceEyeCharacter),
-        DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+        normalizeBotFaceEyeMovement(bot.faceEyeAnimation) ??
+          DEFAULT_BOT_FACE_EYE_MOVEMENT,
         normalizeBotFaceFontId(bot.faceMouthFont),
         normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
         normalizeBotFaceGlyphAnimation(bot.faceMouthAnimation),

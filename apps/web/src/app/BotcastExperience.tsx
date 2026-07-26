@@ -119,6 +119,7 @@ import {
   type ReplayVoiceSelectionSnapshotV2,
   type ReplayManifestV2,
   type ReplayRecordingV1,
+  type ReplayStudioCutEligibilityV1,
   type PrismRefractResponse,
   type PrismRefractSignalTextTarget,
   type SignalPersonaTemperament,
@@ -237,7 +238,10 @@ import { buildSignalReplayManifestV2 } from "./replayManifest";
 import {
   replayRecordingDetail,
   replayRecordingForSource,
+  removeReplayStudioCut,
+  replayStudioCutEligibility,
   saveFaithfulReplaySession,
+  startReplayStudioCut,
   startReplayRecordingDraft,
 } from "./replayClient";
 import { loadSessionReviewRecordingEvidence } from "./sessionReviewEvidence";
@@ -531,6 +535,8 @@ export interface BotcastExperienceProps {
       facing?: "left" | "right";
       theme?: "light" | "dark";
       mouthShape: ZenLiveBotMouthShape;
+      eyeTimelineMs?: number;
+      eyeStateStartedAtMs?: number;
     },
   ) => ReactNode;
   renderMug?: (
@@ -653,10 +659,6 @@ const SIGNAL_LIVE_CAMERA_POST_SPEECH_HOLD_MS = 900;
  * animation so that clock does not begin under the opening black curtain.
  */
 const SIGNAL_REPLAY_INTRO_VISUAL_HEAD_START_MS = 1_100;
-const SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS = 50;
-const SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS = 500;
-const SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS = 500;
-const SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MAX_ADDITION_MS = 20_000;
 
 type SignalReviewCopyState = {
   episodeId: string;
@@ -1473,8 +1475,14 @@ export function BotcastExperience({
   );
   const [replayRecording, setReplayRecording] =
     useState<ReplayRecordingV1 | null>(null);
+  const replayRecordingId = replayRecording?.id ?? null;
   const [replayManifestV2, setReplayManifestV2] =
     useState<ReplayManifestV2 | null>(null);
+  const [replayPlaybackSource, setReplayPlaybackSource] =
+    useState<"on-air" | "studio-cut">("on-air");
+  const [studioCutBusy, setStudioCutBusy] = useState(false);
+  const [studioCutEligibilityState, setStudioCutEligibilityState] =
+    useState<ReplayStudioCutEligibilityV1 | null>(null);
   const replayAudioRef = useRef<HTMLAudioElement | null>(null);
   const signalCaptureSourceIdRef = useRef<string | null>(null);
   const selectedShowRef = useRef<BotcastShow | null>(null);
@@ -1564,13 +1572,6 @@ export function BotcastExperience({
   const [replayElapsedMs, setReplayElapsedMs] = useState(0);
   const [replayPlaying, setReplayPlaying] = useState(false);
   const [replayIntroRevealed, setReplayIntroRevealed] = useState(false);
-  const [
-    replayIntroCalibrationDurationMs,
-    setReplayIntroCalibrationDurationMs,
-  ] =
-    useState<number | null>(null);
-  const [replayIntroCalibrationCopied, setReplayIntroCalibrationCopied] =
-    useState(false);
   const [replayVoicePending, setReplayVoicePending] = useState(false);
   const [replaySpeechActive, setReplaySpeechActive] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SignalDeleteTarget | null>(
@@ -3719,8 +3720,6 @@ export function BotcastExperience({
     replayVoiceRunIdRef.current += 1;
     setReplayPlaying(false);
     setReplayIntroRevealed(false);
-    setReplayIntroCalibrationDurationMs(null);
-    setReplayIntroCalibrationCopied(false);
     setReplayVoicePending(false);
     setReplaySpeechActive(false);
     setReplayElapsedMs(0);
@@ -6464,8 +6463,7 @@ export function BotcastExperience({
       setReplayElapsedMs(0);
       setReplayPlaying(false);
       setReplayIntroRevealed(false);
-      setReplayIntroCalibrationDurationMs(null);
-      setReplayIntroCalibrationCopied(false);
+      setReplayPlaybackSource("on-air");
     } catch (replayError) {
       if (replayVoiceRunIdRef.current === replayRunId) {
         setError(signalErrorToast("Load Signal replay", replayError));
@@ -6487,92 +6485,86 @@ export function BotcastExperience({
           },
     [replayEpisode],
   );
+  const studioCut = replayRecording?.studioCutProduction ?? null;
+  const studioCutReady = Boolean(
+    studioCut?.audioUrl && studioCut.timeline && studioCut.manifest,
+  );
+  const studioCutPending =
+    studioCut?.phase === "mastering_voices" ||
+    studioCut?.phase === "mixing_episode" ||
+    studioCut?.phase === "rendering_studio" ||
+    studioCut?.phase === "finalizing";
+  const replayActiveAudioUrl =
+    replayPlaybackSource === "studio-cut" && studioCutReady
+      ? studioCut?.audioUrl ?? null
+      : replayRecording?.audioUrl ?? null;
+  const replayActiveTimeline =
+    replayPlaybackSource === "studio-cut" && studioCutReady
+      ? studioCut?.timeline ?? null
+      : replayRecording?.timeline ?? null;
+  const replayPresentationManifestV2 =
+    replayPlaybackSource === "studio-cut" && studioCutReady
+      ? studioCut?.manifest ?? null
+      : replayManifestV2;
   const replayFaithful =
-    replayRecording?.availability === "faithful" &&
-    Boolean(replayRecording.audioUrl);
+    Boolean(replayActiveAudioUrl);
   const replayIntroDurationMs = replayFaithful
-    ? signalReplayIntroDurationMs(replayRecording?.timeline)
+    ? signalReplayIntroDurationMs(replayActiveTimeline)
     : 0;
   const replayProceduralAudioEnabled = false;
   const replayDurationMs = replayFaithful
     ? Math.max(
         1,
-        replayRecording?.audioDurationMs ??
-          replayRecording?.timeline?.durationMs ??
+        (replayPlaybackSource === "studio-cut"
+          ? studioCut?.timeline?.durationMs
+          : replayRecording?.audioDurationMs) ??
+          replayActiveTimeline?.durationMs ??
           replayTimeline.durationMs,
       )
     : replayTimeline.durationMs;
-  const replayIntroFirstUtteranceStartMs =
-    replayRecording?.timeline?.beats
-      .filter((beat) => beat.kind === "utterance")
-      .sort((left, right) => left.startMs - right.startMs)[0]?.startMs ?? null;
-  const replayIntroSavedPresentationMs = Number(
-    replayManifestV2?.visual.metadata?.introPresentationDurationMs,
-  );
   const replayIntroAutomaticOffsetMs =
-    replayFaithful && replayRecording?.timeline
+    replayFaithful && replayActiveTimeline
       ? signalReplayIntroVisualOffsetMs({
-          timeline: replayRecording.timeline,
-          manifest: replayManifestV2,
+          timeline: replayActiveTimeline,
+          manifest: replayPresentationManifestV2,
         })
       : 0;
-  const replayIntroCalibrationAvailable =
-    replayFaithful &&
-    Boolean(replayRecording?.timeline) &&
-    Number.isFinite(replayIntroSavedPresentationMs) &&
-    replayIntroSavedPresentationMs > 0 &&
-    replayIntroFirstUtteranceStartMs !== null;
   const replayDefaultIntroBounds =
-    replayFaithful && replayRecording?.timeline
-      ? signalReplayIntroBounds(replayRecording.timeline, replayManifestV2)
+    replayFaithful && replayActiveTimeline
+      ? signalReplayIntroBounds(replayActiveTimeline, replayPresentationManifestV2)
       : null;
   const replayIntroAutomaticFadeMs = replayDefaultIntroBounds
     ? signalReplayIntroLandingFadeMs(replayDefaultIntroBounds)
     : SIGNAL_REPLAY_INTRO_LANDING_FADE_MS;
-  const replayIntroAutomaticDurationMs = Math.max(
-    SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS,
-    signalReplayDefaultIntroDurationMs(replayRecording?.timeline),
+  const replayIntroCardEndMs = signalReplayDefaultIntroDurationMs(
+    replayActiveTimeline,
   );
-  const replayIntroDurationMaxMs = Math.max(
-    SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS,
-    Math.min(
-      replayRecording?.timeline?.durationMs ?? replayDurationMs,
-      replayIntroAutomaticDurationMs +
-        SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MAX_ADDITION_MS,
-    ),
-  );
-  const replayIntroEffectiveEndMs =
-    replayIntroCalibrationDurationMs ?? replayIntroAutomaticDurationMs;
-  const replayIntroDurationAdjustmentMs =
-    replayIntroEffectiveEndMs - replayIntroAutomaticDurationMs;
   const replayInterviewFootageOffsetMs =
-    replayIntroFirstUtteranceStartMs === null
-      ? 0
-      : replayIntroEffectiveEndMs - replayIntroFirstUtteranceStartMs;
+    replayIntroCardEndMs - replayIntroDurationMs;
   const replayInterviewFootageElapsedMs =
-    replayFaithful && replayRecording?.timeline
+    replayFaithful && replayActiveTimeline
       ? signalReplayInterviewFootageElapsedMs({
-          timeline: replayRecording.timeline,
+          timeline: replayActiveTimeline,
           replayElapsedMs,
-          introCardEndMs: replayIntroEffectiveEndMs,
+          introCardEndMs: replayIntroCardEndMs,
         })
       : replayElapsedMs;
   const replayIntroBookend =
-    replayFaithful && replayRecording?.timeline
+    replayFaithful && replayActiveTimeline
       ? signalReplayBookendAt(
-          replayRecording.timeline,
+          replayActiveTimeline,
           replayElapsedMs,
-          replayManifestV2,
-          { introEndMs: replayIntroEffectiveEndMs },
+          replayPresentationManifestV2,
+          { introEndMs: replayIntroCardEndMs },
         )
       : null;
   const replayOutroBookend =
-    replayFaithful && replayRecording?.timeline
+    replayFaithful && replayActiveTimeline
       ? signalReplayBookendAt(
-          replayRecording.timeline,
+          replayActiveTimeline,
           replayInterviewFootageElapsedMs,
-          replayManifestV2,
-          { introEndMs: replayIntroEffectiveEndMs },
+          replayPresentationManifestV2,
+          { introEndMs: replayIntroCardEndMs },
         )
       : null;
   const replayBookend =
@@ -6649,38 +6641,38 @@ export function BotcastExperience({
       audio.removeEventListener("canplay", ensurePlaying);
       audio.pause();
     };
-  }, [replayFaithful, replayPlaying, replayRecording?.audioUrl]);
+  }, [replayActiveAudioUrl, replayFaithful, replayPlaying]);
 
   const replaySceneCheckpoints = useMemo(
     () =>
-      replayManifestV2
-        ? buildReplaySceneCheckpointsV2(replayManifestV2)
+      replayPresentationManifestV2
+        ? buildReplaySceneCheckpointsV2(replayPresentationManifestV2)
         : [],
-    [replayManifestV2],
+    [replayPresentationManifestV2],
   );
   const replayDirectedScene = useMemo(
     () =>
-      replayManifestV2
+      replayPresentationManifestV2
         ? replaySceneAtV2(
-            replayManifestV2,
+            replayPresentationManifestV2,
             replayInterviewFootageElapsedMs,
             replaySceneCheckpoints,
           )
         : null,
     [
-      replayManifestV2,
+      replayPresentationManifestV2,
       replayInterviewFootageElapsedMs,
       replaySceneCheckpoints,
     ],
   );
   const replayHasCapturedCameraDirection = useMemo(
     () =>
-      replayManifestV2?.direction.some((event) => event.kind === "camera") ===
+      replayPresentationManifestV2?.direction.some((event) => event.kind === "camera") ===
       true,
-    [replayManifestV2],
+    [replayPresentationManifestV2],
   );
   const replayFaithfulBeat = replayFaithful
-    ? replayRecording?.timeline?.beats.find(
+    ? replayActiveTimeline?.beats.find(
         (beat) =>
           beat.kind === "utterance" &&
           replayInterviewFootageElapsedMs >= beat.startMs &&
@@ -6705,10 +6697,10 @@ export function BotcastExperience({
     replayEpisode?.messages[replayMessageIndex] ?? null;
   const replayFaithfulCamera = useMemo(
     () =>
-      replayEpisode && replayFaithful && replayRecording?.timeline
+      replayEpisode && replayFaithful && replayActiveTimeline
         ? signalFaithfulReplayCameraState({
             episode: replayEpisode,
-            timeline: replayRecording.timeline,
+            timeline: replayActiveTimeline,
             replayElapsedMs: replayInterviewFootageElapsedMs,
             scene: replayDirectedScene,
             activeMessage: replayActiveMessage,
@@ -6722,7 +6714,7 @@ export function BotcastExperience({
       replayActiveMessage,
       replayHasCapturedCameraDirection,
       replayInterviewFootageElapsedMs,
-      replayRecording?.timeline,
+      replayActiveTimeline,
     ],
   );
   const replayEventElapsedMs =
@@ -7006,6 +6998,99 @@ export function BotcastExperience({
     replayVoiceMessageIdRef.current = null;
   }, [replayEpisode]);
 
+  const refreshReplayRecording = useCallback(async (): Promise<void> => {
+    if (!replayEpisode) return;
+    const recording = await replayRecordingForSource("signal", replayEpisode.id);
+    if (!recording) return;
+    const detail = await replayRecordingDetail(recording.id);
+    setReplayRecording(detail.recording);
+  }, [replayEpisode]);
+
+  useEffect(() => {
+    if (!replayRecordingId) return;
+    let cancelled = false;
+    const refreshEligibility = (): void => {
+      void replayStudioCutEligibility(replayRecordingId)
+        .then((eligibility) => {
+          if (!cancelled) setStudioCutEligibilityState(eligibility);
+        })
+        .catch(() => {
+          if (!cancelled) setStudioCutEligibilityState(null);
+        });
+    };
+    refreshEligibility();
+    const timer = window.setInterval(refreshEligibility, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [replayRecordingId]);
+
+  useEffect(() => {
+    if (!replayEpisode) return;
+    const refresh = (): void => {
+      void refreshReplayRecording();
+    };
+    window.addEventListener(REPLAY_RECORDING_CHANGED_EVENT, refresh);
+    const timer = window.setInterval(() => void refreshReplayRecording(), 3_000);
+    return () => {
+      window.removeEventListener(REPLAY_RECORDING_CHANGED_EVENT, refresh);
+      window.clearInterval(timer);
+    };
+  }, [refreshReplayRecording, replayEpisode]);
+
+  const requestStudioCut = async (regenerate: boolean): Promise<void> => {
+    if (!replayRecording || studioCutBusy) return;
+    setStudioCutBusy(true);
+    try {
+      const eligibility = await replayStudioCutEligibility(replayRecording.id);
+      setStudioCutEligibilityState(eligibility);
+      if (!eligibility.eligible) {
+        setError(
+          signalErrorToast(
+            "Make Studio Cut",
+            new Error(eligibility.blockedReason ?? "Studio Cut is unavailable."),
+          ),
+        );
+        return;
+      }
+      const confirmed = window.confirm(
+        [
+          regenerate ? "Try another Studio Cut?" : "Make a Studio Cut?",
+          "",
+          `Estimated ElevenLabs use: ${eligibility.characterEstimate.toLocaleString()} characters across ${eligibility.requestEstimate} request${eligibility.requestEstimate === 1 ? "" : "s"}.`,
+          "PRISM will send the canonical episode dialogue and saved ElevenLabs voice IDs to ElevenLabs.",
+          "",
+          "This is a paid generation. Your exact On Air recording remains unchanged.",
+        ].join("\n"),
+      );
+      if (!confirmed) return;
+      const recording = await startReplayStudioCut(replayRecording.id, regenerate);
+      setReplayRecording(recording);
+    } catch (studioCutError) {
+      setError(signalErrorToast("Make Studio Cut", studioCutError));
+    } finally {
+      setStudioCutBusy(false);
+    }
+  };
+
+  const removeStudioCut = async (): Promise<void> => {
+    if (!replayRecording || studioCutBusy) return;
+    if (!window.confirm("Remove this Studio Cut? Your exact On Air recording will remain.")) {
+      return;
+    }
+    setStudioCutBusy(true);
+    try {
+      stopReplayPlayback();
+      setReplayPlaybackSource("on-air");
+      setReplayRecording(await removeReplayStudioCut(replayRecording.id));
+    } catch (studioCutError) {
+      setError(signalErrorToast("Remove Studio Cut", studioCutError));
+    } finally {
+      setStudioCutBusy(false);
+    }
+  };
+
   const stopReplayPlayback = (): void => {
     replayVoiceRunIdRef.current += 1;
     replayVoiceMessageIdRef.current = null;
@@ -7057,50 +7142,6 @@ export function BotcastExperience({
     }
     setReplayIntroRevealed(true);
     setReplayPlaying(true);
-  };
-
-  const setSignalReplayCalibrationIntroDuration = (
-    nextDurationMs: number,
-  ): void => {
-    const boundedDurationMs = Math.max(
-      SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS,
-      Math.min(replayIntroDurationMaxMs, Math.round(nextDurationMs)),
-    );
-    setReplayIntroCalibrationDurationMs(boundedDurationMs);
-    setReplayIntroCalibrationCopied(false);
-  };
-
-  const copySignalReplayCalibrationReport = async (): Promise<void> => {
-    if (!replayEpisode || !replayRecording) return;
-    const report = [
-      "PRISM Signal Intro Alignment",
-      `recordingId: ${replayRecording.id}`,
-      `episodeId: ${replayEpisode.id}`,
-      `chosenIntroCardDurationMs: ${Math.round(replayIntroEffectiveEndMs)}`,
-      `automaticIntroCardDurationMs: ${Math.round(replayIntroAutomaticDurationMs)}`,
-      `introDurationAdjustmentMs: ${Math.round(replayIntroDurationAdjustmentMs)}`,
-      `landingFadeMs: ${Math.round(replayIntroAutomaticFadeMs)}`,
-      `interviewFootageStartsAtAudioMs: ${Math.round(replayIntroEffectiveEndMs)}`,
-      `interviewFootageSpeed: 1`,
-      `landingCameraShot: wide`,
-      `savedIntroDurationMs: ${Math.round(replayIntroSavedPresentationMs)}`,
-      `firstUtteranceStartMs: ${replayIntroFirstUtteranceStartMs ?? "missing"}`,
-      `audioDurationMs: ${replayRecording.audioDurationMs ?? "missing"}`,
-      `timelineDurationMs: ${replayRecording.timeline?.durationMs ?? "missing"}`,
-    ].join("\n");
-    try {
-      await writeSignalReviewClipboard(report);
-      setReplayIntroCalibrationCopied(true);
-      setNotice("Signal intro timing report copied.");
-    } catch (copyError) {
-      setError(
-        signalErrorToast(
-          "Copy Signal intro timing",
-          copyError,
-          "replay calibration",
-        ),
-      );
-    }
   };
 
   const renderAtmosphereMixer = (show: BotcastShow): React.JSX.Element => {
@@ -7346,18 +7387,18 @@ export function BotcastExperience({
         thinkingRole === "guest",
     );
     const stageTheme =
-      args.replay && replayManifestV2?.visual.theme
-        ? replayManifestV2.visual.theme
+      args.replay && replayPresentationManifestV2?.visual.theme
+        ? replayPresentationManifestV2.visual.theme
         : theme;
     const replayVisualMetadata = args.replay
-      ? replayManifestV2?.visual.metadata
+      ? replayPresentationManifestV2?.visual.metadata
       : undefined;
     const currentStageAtmosphere = activeShowAtmosphere(args.show, stageTheme);
     const stageAtmosphere =
-      args.replay && replayManifestV2
+      args.replay && replayPresentationManifestV2
         ? {
             ...currentStageAtmosphere,
-            imageUrl: replayManifestV2.visual.atmosphereImageUrl,
+            imageUrl: replayPresentationManifestV2.visual.atmosphereImageUrl,
             microphoneTintMaskUrl:
               typeof replayVisualMetadata?.microphoneTintMaskUrl === "string"
                 ? replayVisualMetadata.microphoneTintMaskUrl
@@ -7376,7 +7417,7 @@ export function BotcastExperience({
       replayVisualMetadata?.studioLayout ?? args.show.studioLayout,
     );
     const stageVisualShow: BotcastShow =
-      args.replay && replayManifestV2
+      args.replay && replayPresentationManifestV2
         ? {
             ...args.show,
             studioGlowTuning: normalizeBotcastStudioGlowTuning(
@@ -7392,8 +7433,8 @@ export function BotcastExperience({
           }
         : args.show;
     const stageAccentColor =
-      args.replay && replayManifestV2?.visual.accentColor
-        ? replayManifestV2.visual.accentColor
+      args.replay && replayPresentationManifestV2?.visual.accentColor
+        ? replayPresentationManifestV2.visual.accentColor
         : args.show.accentColor;
     const replayMessageStartMs =
       replayFaithfulBeat?.startMs ??
@@ -7763,9 +7804,9 @@ export function BotcastExperience({
       const ephemeralSpeech = signalEphemeralSpeechByBotId.get(bot.id);
       const participantId = replayParticipantIdForRole(role);
       const bakedReplayMouthShape =
-        args.replay && replayFaithful && replayManifestV2
+        args.replay && replayFaithful && replayPresentationManifestV2
           ? replayMouthShapeAtV2(
-              replayManifestV2,
+              replayPresentationManifestV2,
               participantId,
               replayInterviewFootageElapsedMs,
             )
@@ -7816,6 +7857,11 @@ export function BotcastExperience({
         facing: signalStudioFacingForRole(studioLayout, role),
         theme: stageTheme,
         mouthShape,
+        eyeTimelineMs: args.replay
+          ? replayInterviewFootageElapsedMs
+          : undefined,
+        eyeStateStartedAtMs:
+          args.replay && talking ? replayMessageStartMs : undefined,
       });
       if (renderedAvatar !== null && renderedAvatar !== undefined) {
         return (
@@ -11142,8 +11188,6 @@ export function BotcastExperience({
                     setReplayRecording(null);
                     setReplayManifestV2(null);
                     setReplayIntroRevealed(false);
-                    setReplayIntroCalibrationDurationMs(null);
-                    setReplayIntroCalibrationCopied(false);
                   }}
                 >
                   Close replay
@@ -11191,7 +11235,7 @@ export function BotcastExperience({
                     "Guest"
                   }
                   introSource={
-                    replayManifestV2?.visual.metadata?.introAudioSource ===
+                    replayPresentationManifestV2?.visual.metadata?.introAudioSource ===
                     "elevenlabs"
                       ? "elevenlabs"
                       : selectedShow.introAudio.source
@@ -11248,10 +11292,10 @@ export function BotcastExperience({
                 </button>
               ) : null}
             </div>
-              {replayFaithful && replayRecording?.audioUrl ? (
+              {replayFaithful && replayActiveAudioUrl ? (
                 <audio
                   ref={replayAudioRef}
-                  src={replayRecording.audioUrl}
+                  src={replayActiveAudioUrl}
                   preload="auto"
                   onEnded={() => setReplayPlaying(false)}
                   onError={() => setReplayPlaying(false)}
@@ -11296,6 +11340,93 @@ export function BotcastExperience({
                 aria-label="Replay position"
                 disabled={!replayFaithful}
               />
+              {replayRecording?.audioUrl ? (
+                <a href={`${replayRecording.audioUrl}?download=1`} download>
+                  Download On Air
+                </a>
+              ) : null}
+              {studioCutReady ? (
+                <>
+                  <button
+                    type="button"
+                    aria-pressed={replayPlaybackSource === "on-air"}
+                    onClick={() => {
+                      stopReplayPlayback();
+                      setReplayElapsedMs(0);
+                      setReplayPlaybackSource("on-air");
+                    }}
+                  >
+                    On Air
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={replayPlaybackSource === "studio-cut"}
+                    onClick={() => {
+                      stopReplayPlayback();
+                      setReplayElapsedMs(0);
+                      setReplayPlaybackSource("studio-cut");
+                    }}
+                  >
+                    Studio Cut ✨
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      studioCutBusy ||
+                      studioCutPending ||
+                      studioCutEligibilityState?.eligible === false
+                    }
+                    title={studioCutEligibilityState?.blockedReason ?? undefined}
+                    onClick={() => void requestStudioCut(true)}
+                  >
+                    Try another
+                  </button>
+                  <a href={`${studioCut?.audioUrl}?download=1`} download>
+                    Download Studio Cut
+                  </a>
+                  <button
+                    type="button"
+                    disabled={studioCutBusy}
+                    onClick={() => void removeStudioCut()}
+                  >
+                    Remove
+                  </button>
+                  {studioCutPending ? (
+                    <span role="status">
+                      New Studio Cut {Math.round(studioCut.progress * 100)}%
+                    </span>
+                  ) : null}
+                  {studioCut?.phase === "failed" && studioCut.error ? (
+                    <span role="status">{studioCut.error}</span>
+                  ) : null}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={
+                    studioCutBusy ||
+                    studioCutPending ||
+                    studioCutEligibilityState?.eligible === false
+                  }
+                  title={studioCutEligibilityState?.blockedReason ?? undefined}
+                  onClick={() => void requestStudioCut(Boolean(studioCut))}
+                >
+                  {studioCut?.phase === "mastering_voices"
+                    ? `Studio Cut: voices ${Math.round(studioCut.progress * 100)}%`
+                    : studioCut?.phase === "mixing_episode" ||
+                        studioCut?.phase === "rendering_studio" ||
+                        studioCut?.phase === "finalizing"
+                      ? `Studio Cut: mixing ${Math.round(studioCut.progress * 100)}%`
+                      : studioCut?.phase === "failed"
+                        ? "Retry Studio Cut ✨"
+                        : "Studio Cut ✨"}
+                </button>
+              )}
+              {!studioCutReady &&
+              studioCutEligibilityState?.eligible === false &&
+              studioCutEligibilityState.blockedReason ? (
+                <span role="status">{studioCutEligibilityState.blockedReason}</span>
+              ) : null}
               {replayRecording?.transcriptMarkdownUrl ? (
                 <a
                   href={replayRecording.transcriptMarkdownUrl}
@@ -11305,152 +11436,23 @@ export function BotcastExperience({
                 </a>
               ) : null}
             </div>
-            {replayIntroCalibrationAvailable ? (
-              <section
-                className={styles.replayIntroCalibration}
-                data-signal-replay-intro-calibration="true"
-                aria-label="Signal intro alignment"
-              >
-                <div className={styles.replayIntroCalibrationHeading}>
-                  <div>
-                    <span className={styles.eyebrow}>Temporary debug tool</span>
-                    <h3>Signal Intro Alignment</h3>
-                    <p>
-                      This single control changes how long the intro card is
-                      visible. When it ends, the interview footage starts from
-                      its beginning and continues at normal speed.
-                    </p>
-                  </div>
-                  <output>
-                    Intro {Math.round(replayIntroEffectiveEndMs)} ms
-                  </output>
-                </div>
-                <label className={styles.replayIntroCalibrationLabel}>
-                  Intro card visible duration
-                  <input
-                    type="range"
-                    min={SIGNAL_REPLAY_CALIBRATION_INTRO_DURATION_MIN_MS}
-                    max={replayIntroDurationMaxMs}
-                    step={SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS}
-                    value={replayIntroEffectiveEndMs}
-                    onChange={(event) =>
-                      setSignalReplayCalibrationIntroDuration(
-                        Number(event.currentTarget.value),
-                      )
-                    }
-                    aria-label="Signal intro card visible duration in milliseconds"
-                  />
-                </label>
-                <div className={styles.replayIntroCalibrationActions}>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSignalReplayCalibrationIntroDuration(
-                        replayIntroEffectiveEndMs -
-                          SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
-                      )
-                    }
-                  >
-                    Shorter −500
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSignalReplayCalibrationIntroDuration(
-                        replayIntroEffectiveEndMs -
-                          SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
-                      )
-                    }
-                  >
-                    −50
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.replayIntroCalibrationRestart}
-                    onClick={() => startReplayPlayback(0)}
-                  >
-                    Restart &amp; play
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSignalReplayCalibrationIntroDuration(
-                        replayIntroEffectiveEndMs +
-                          SIGNAL_REPLAY_CALIBRATION_FINE_STEP_MS,
-                      )
-                    }
-                  >
-                    +50
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSignalReplayCalibrationIntroDuration(
-                        replayIntroEffectiveEndMs +
-                          SIGNAL_REPLAY_CALIBRATION_COARSE_STEP_MS,
-                      )
-                    }
-                  >
-                    Longer +500
-                  </button>
-                </div>
-                <div className={styles.replayIntroCalibrationReadout}>
-                  <span>
-                    Automatic intro{" "}
-                    <strong>
-                      {Math.round(replayIntroAutomaticDurationMs)} ms
-                    </strong>
-                  </span>
-                  <span>
-                    Adjustment{" "}
-                    <strong>
-                      {replayIntroDurationAdjustmentMs > 0 ? "+" : ""}
-                      {Math.round(replayIntroDurationAdjustmentMs)} ms
-                    </strong>
-                  </span>
-                  <span>
-                    Interview visuals begin{" "}
-                    <strong>{Math.round(replayIntroEffectiveEndMs)} ms</strong>
-                  </span>
-                  <span>
-                    Interview speed <strong>1×</strong>
-                  </span>
-                  <span>
-                    Dissolve <strong>{Math.round(replayIntroAutomaticFadeMs)} ms</strong>
-                  </span>
-                  <span>
-                    Original footage start{" "}
-                    <strong>{replayIntroFirstUtteranceStartMs} ms</strong>
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className={styles.replayIntroCalibrationCopy}
-                  onClick={() => void copySignalReplayCalibrationReport()}
-                >
-                  {replayIntroCalibrationCopied
-                    ? "Timing report copied"
-                    : "Copy timing report"}
-                </button>
-              </section>
-            ) : null}
             <div className={styles.replayTranscript}>
               {replayIntroDurationMs > 0 ? (
                 <button
                   type="button"
                   data-botcast-replay-intro-row="true"
                   data-active={
-                    replayElapsedMs < replayIntroEffectiveEndMs
+                    replayElapsedMs < replayIntroCardEndMs
                       ? "true"
                       : undefined
                   }
                   onClick={() => seekFaithfulReplay(0)}
                   disabled={!replayFaithful}
-                  aria-label={`Play Signal intro, ${runtimeLabel(replayIntroEffectiveEndMs)}`}
+                  aria-label={`Play Signal intro, ${runtimeLabel(replayIntroCardEndMs)}`}
                 >
                   <strong>Signal intro</strong>
                   <span>
-                    Opening video · {runtimeLabel(replayIntroEffectiveEndMs)}
+                    Opening video · {runtimeLabel(replayIntroCardEndMs)}
                   </span>
                 </button>
               ) : null}
@@ -11472,7 +11474,7 @@ export function BotcastExperience({
                     }
                   onClick={() => {
                     const nextMs =
-                      (replayRecording?.timeline?.beats.find(
+                      (replayActiveTimeline?.beats.find(
                         (beat) => beat.sourceMessageId === message.id,
                       )?.startMs ??
                         replayTimeline.messageStartMs[index] ??

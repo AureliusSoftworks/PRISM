@@ -14,6 +14,7 @@ import {
   createPrismBotArchive,
   parsePrismBotArchive,
   resolvePrismBotArchiveFaceGlyphAnimation,
+  resolvePrismBotArchiveFaceEyeMovement,
   type PrismBotArchiveJson,
 } from "./botArchive.ts";
 
@@ -78,6 +79,12 @@ describe("botArchive", () => {
     assert.equal(resolvePrismBotArchiveFaceGlyphAnimation(undefined), "none");
     assert.equal(resolvePrismBotArchiveFaceGlyphAnimation(null), "none");
     assert.equal(resolvePrismBotArchiveFaceGlyphAnimation("wobble"), "wobble");
+  });
+
+  it("migrates retired eye effects to Natural and preserves Still", () => {
+    assert.equal(resolvePrismBotArchiveFaceEyeMovement(undefined), "natural");
+    assert.equal(resolvePrismBotArchiveFaceEyeMovement("wobble"), "natural");
+    assert.equal(resolvePrismBotArchiveFaceEyeMovement("still"), "still");
   });
 
   it("round-trips a v2 zipped .bot archive", () => {

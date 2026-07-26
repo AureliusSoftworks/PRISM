@@ -1482,6 +1482,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       master_ready INTEGER NOT NULL DEFAULT 0,
       audio_rel_path TEXT,
       timeline_json TEXT,
+      manifest_json TEXT,
+      active_input_hash TEXT,
+      generation_seed TEXT,
+      character_cost INTEGER,
       render_token TEXT,
       upload_rel_path TEXT,
       video_rel_path TEXT,
@@ -1601,6 +1605,10 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
   };
   addReplayPremiumProductionColumn("timeline_json", "TEXT");
+  addReplayPremiumProductionColumn("manifest_json", "TEXT");
+  addReplayPremiumProductionColumn("active_input_hash", "TEXT");
+  addReplayPremiumProductionColumn("generation_seed", "TEXT");
+  addReplayPremiumProductionColumn("character_cost", "INTEGER");
   addReplayPremiumProductionColumn("render_token", "TEXT");
   addReplayPremiumProductionColumn("upload_rel_path", "TEXT");
   addReplayPremiumProductionColumn("video_rel_path", "TEXT");
