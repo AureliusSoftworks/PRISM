@@ -389,11 +389,12 @@
 .stageLayoutModalHeader p { margin: 0; color: var(--botcast-muted); font-size: .72rem; }
 .stageLayoutModalHeader > button { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, var(--botcast-line)); border-radius: 10px; padding: 10px 18px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-soft-panel)); font: 760 .7rem/1 system-ui; cursor: pointer; }
 .stageLayoutModalBody { width: min(1600px, 100%); height: 100%; min-height: 0; margin: 0 auto; box-sizing: border-box; overflow: hidden; padding: clamp(12px, 2vw, 28px); }
-.stageLayoutEditor { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); grid-template-rows: auto auto auto minmax(0, 1fr); gap: 12px 18px; }
-.stageLayoutModal .stageViewport { grid-column: 1; grid-row: 2 / 5; align-self: center; width: min(100%, calc((100dvh - 180px) * 1.7778)); max-width: 1320px; max-height: 100%; }
+.stageLayoutEditor { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: 12px 18px; }
+.stageLayoutModal .stageViewport { grid-column: 1; grid-row: 2 / 6; align-self: center; width: min(100%, calc((100dvh - 180px) * 1.7778)); max-width: 1320px; max-height: 100%; }
 .stageLayoutModal .stageSoundcheckStatus { grid-column: 2; grid-row: 2; }
 .stageLayoutModal .stageVoiceMixer { grid-column: 2; grid-row: 3; grid-template-columns: 1fr; gap: 9px; }
-.stageLayoutModal .atmosphereMixer { grid-column: 2; grid-row: 4; align-self: start; width: 100%; max-width: 350px; grid-template-columns: 1fr; gap: 9px; margin: 0; }
+.stageLayoutModal .stageScreenTreatment { grid-column: 2; grid-row: 4; }
+.stageLayoutModal .atmosphereMixer { grid-column: 2; grid-row: 5; align-self: start; width: 100%; max-width: 350px; grid-template-columns: 1fr; gap: 9px; margin: 0; }
 .stageLayoutModal .atmosphereMixerSliders { grid-template-columns: 1fr; gap: 8px; }
 .stageLayoutEditorHeader { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .stageLayoutEditorHeader { grid-column: 1 / -1; grid-row: 1; }
@@ -424,6 +425,29 @@
 .stageVoiceMixerSliders small { overflow: hidden; color: var(--botcast-muted); font: 650 .58rem/1 system-ui; text-overflow: ellipsis; white-space: nowrap; }
 .stageVoiceMixerSliders output { flex: 0 0 auto; color: var(--botcast-ink); font: 760 .6rem/1 system-ui; font-variant-numeric: tabular-nums; }
 .stageVoiceMixerSliders input { width: 100%; margin: 0; accent-color: var(--botcast-host-accent); }
+.stageScreenTreatment { display: grid; gap: 8px; border: 1px solid color-mix(in srgb, var(--prism-r) 22%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--prism-r) 5%, var(--botcast-soft-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-r) 40%, transparent); }
+.stageScreenTreatment > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stageScreenTreatment > header > div { min-width: 0; display: grid; gap: 3px; }
+.stageScreenTreatment > header strong { font-size: .74rem; }
+.stageScreenTreatment button { border: 1px solid var(--botcast-line); border-radius: 7px; padding: 6px 8px; color: var(--botcast-muted); background: var(--botcast-soft-panel); font: 700 .58rem/1 system-ui; cursor: pointer; }
+.stageScreenTreatment button:disabled { opacity: .42; cursor: default; }
+.stageScreenTreatment label { display: grid; gap: 5px; }
+.stageScreenTreatment label > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--botcast-muted); font: 700 .58rem/1 system-ui; }
+.stageScreenTreatment output { color: var(--botcast-ink); font-variant-numeric: tabular-nums; }
+.stageScreenTreatment input { width: 100%; margin: 0; accent-color: var(--prism-r); }
+.stageScreenTreatment > small { color: var(--botcast-muted); font-size: .56rem; line-height: 1.35; }
+.stageStudioGlowTuner { display: grid; gap: 8px; margin-top: 2px; padding-top: 9px; border-top: 1px solid color-mix(in srgb, var(--prism-r) 15%, var(--botcast-line)); }
+.stageStudioGlowTuner > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stageStudioGlowTuner > header > div { min-width: 0; display: grid; gap: 3px; }
+.stageStudioGlowTuner > header strong { font-size: .7rem; }
+.stageStudioGlowTunerRows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.stageStudioGlowTunerRow { min-width: 0; display: grid; gap: 7px; border: 1px solid var(--botcast-line); border-radius: 9px; padding: 7px 8px; background: color-mix(in srgb, var(--botcast-soft-panel) 80%, transparent); transition: border-color 120ms ease-out, box-shadow 120ms ease-out; }
+.stageStudioGlowTunerRow[data-active="true"] { border-color: color-mix(in srgb, var(--prism-r) 44%, var(--botcast-line)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--prism-r) 12%, transparent); }
+.stageStudioGlowTunerRow label > span strong { color: var(--botcast-ink); font-size: .6rem; }
+.stageStudioGlowBlendToggle { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.stageStudioGlowBlendToggle button { min-width: 0; padding: 5px 4px; }
+.stageStudioGlowBlendToggle button[aria-pressed="true"] { border-color: color-mix(in srgb, var(--prism-r) 42%, var(--botcast-line)); color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-r) 14%, var(--botcast-soft-panel)); }
+.stageStudioGlowTuner > small { color: var(--botcast-muted); font-size: .54rem; line-height: 1.35; }
 .setupGrid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 16px; margin-top: 22px; }
 .setupGrid label, .setupField { display: grid; gap: 8px; color: var(--botcast-muted); font-size: .75rem; }
 .producerBrief { grid-column: 1 / -1; }
@@ -583,7 +607,8 @@
 .liveCameraControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); box-shadow: 0 6px 18px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
 .dangerButton { border-color: color-mix(in srgb, var(--prism-p) 28%, var(--botcast-line)) !important; color: color-mix(in srgb, var(--prism-p) 70%, var(--botcast-ink)) !important; background: color-mix(in srgb, var(--prism-p) 7%, transparent) !important; }
 .dangerButton:hover { border-color: color-mix(in srgb, var(--prism-p) 52%, var(--botcast-line)) !important; background: color-mix(in srgb, var(--prism-p) 12%, transparent) !important; }
-.stageViewport { --botcast-accent: var(--prism-m); --botcast-studio-accent: var(--botcast-accent); --signal-power-accent: var(--botcast-studio-accent); --botcast-atmosphere: none; position: relative; max-width: 1180px; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: #11121a; box-shadow: 0 28px 90px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
+.stageViewport { --botcast-accent: var(--prism-m); --botcast-studio-accent: var(--botcast-accent); --signal-power-accent: var(--botcast-studio-accent); --signal-film-grain-level: 1; --botcast-atmosphere: none; position: relative; max-width: 1180px; aspect-ratio: 16 / 9; margin: 0 auto; overflow: hidden; border: 1px solid rgba(255,255,255,.14); border-radius: 20px; background: #11121a; box-shadow: 0 28px 90px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
+.stageViewport::after { position: absolute; inset: -10%; z-index: 40; content: ""; background-image: repeating-linear-gradient(to bottom, rgba(255,255,255,.1) 0 1px, rgba(5,7,12,.12) 1px 2px, transparent 2px 4px), url("/signal-film-grain.svg"); background-repeat: repeat; background-size: 100% 4px, 96px 96px; background-blend-mode: soft-light, normal; mix-blend-mode: overlay; filter: contrast(1.45) saturate(.45); opacity: calc(var(--signal-film-grain-level) * .36); pointer-events: none; animation: signalFilmGrainJitter 140ms steps(2, end) infinite; will-change: transform; }
 .liveLayout .stageViewport { max-width: 1320px; }
 .atmosphereMixer { max-width: 1180px; margin: 10px auto 14px; display: grid; grid-template-columns: minmax(220px, .55fr) minmax(0, 1fr); align-items: center; gap: 14px; box-sizing: border-box; border: 1px solid color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); border-radius: 12px; padding: 10px 12px; background: color-mix(in srgb, var(--prism-s) 4%, var(--botcast-panel)); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-s) 42%, transparent); }
 .atmosphereMixerHeader { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 9px; }
@@ -613,7 +638,26 @@
 .stageViewport[data-shot="right"] .stageScene { transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(1.42); }
 .atmosphere { position: absolute; inset: -5%; overflow: hidden; background-color: #11121a; background-size: cover; background-position: center; filter: saturate(1.08) contrast(1.04); }
 .stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
+.signalMicrophoneTintLayer { position: absolute; inset: -5%; z-index: 1; isolation: isolate; pointer-events: none; }
+.signalMicrophoneTintLayer[data-surface="dashboard"] { inset: 0; z-index: -1; transform: scale(1.035); }
+.signalMicrophoneTintLayer > span { position: absolute; inset: 0; background: var(--signal-microphone-host-color); opacity: 1; mix-blend-mode: normal; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--signal-microphone-host-color) 44%, transparent)); -webkit-mask-image: var(--signal-microphone-tint-mask); mask-image: var(--signal-microphone-tint-mask); -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: cover; mask-size: cover; clip-path: inset(0 50% 0 0); }
+.signalMicrophoneTintLayer > span[data-role="guest"] { background: var(--signal-microphone-guest-color); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--signal-microphone-guest-color) 44%, transparent)); clip-path: inset(0 0 0 50%); }
 .studioGlow { position: absolute; inset: 0; background: linear-gradient(90deg, transparent 14%, color-mix(in srgb, var(--botcast-studio-accent) 8%, transparent) 28%, transparent 46%, transparent 54%, color-mix(in srgb, var(--botcast-studio-accent) 6%, transparent) 72%, transparent 86%); mix-blend-mode: screen; }
+.studioGlow[data-generated-lighting="true"] { --signal-studio-light-host-x: var(--signal-studio-host-x); --signal-studio-light-host-y: var(--signal-studio-host-y); --signal-studio-light-guest-x: var(--signal-studio-guest-x); --signal-studio-light-guest-y: var(--signal-studio-guest-y); z-index: 1; background: none; pointer-events: none; opacity: var(--signal-studio-glow-opacity, .62); mix-blend-mode: var(--signal-studio-glow-blend-mode, screen); filter: saturate(1.15) contrast(1.08); -webkit-mask-image: var(--signal-studio-lighting-map); mask-image: var(--signal-studio-lighting-map); -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: cover; mask-size: cover; }
+.stageScene > .studioGlow[data-generated-lighting="true"] { --signal-studio-light-host-x: var(--signal-studio-stage-host-x); --signal-studio-light-host-y: var(--signal-studio-stage-host-y); --signal-studio-light-guest-x: var(--signal-studio-stage-guest-x); --signal-studio-light-guest-y: var(--signal-studio-stage-guest-y); inset: -5%; }
+.showBrandPreview > .studioGlow[data-generated-lighting="true"] { transform: scale(1.035); }
+.studioGlow[data-generated-lighting="true"]::before, .studioGlow[data-generated-lighting="true"]::after { content: ""; position: absolute; inset: 0; opacity: 1; transition: opacity 160ms ease-out; will-change: opacity; }
+.studioGlow[data-generated-lighting="true"]::before { background: radial-gradient(ellipse 44% 54% at var(--signal-studio-light-host-x) var(--signal-studio-light-host-y), color-mix(in srgb, var(--signal-studio-host-light) 86%, white 14%) 0%, color-mix(in srgb, var(--signal-studio-host-light) 48%, transparent) 40%, transparent 78%); }
+.studioGlow[data-generated-lighting="true"]::after { background: radial-gradient(ellipse 44% 54% at var(--signal-studio-light-guest-x) var(--signal-studio-light-guest-y), color-mix(in srgb, var(--signal-studio-guest-light) 86%, white 14%) 0%, color-mix(in srgb, var(--signal-studio-guest-light) 48%, transparent) 40%, transparent 78%); }
+.studioGlow[data-generated-lighting="true"][data-talk-reactive="true"]::before, .studioGlow[data-generated-lighting="true"][data-talk-reactive="true"]::after { opacity: .82; }
+.studioGlow[data-generated-lighting="true"][data-host-talking="true"]::before, .studioGlow[data-generated-lighting="true"][data-guest-talking="true"]::after { --signal-studio-talking-light-opacity-high: 1; --signal-studio-talking-light-opacity-mid: .82; --signal-studio-talking-light-opacity-low: .64; animation: signalStudioTalkingLightFlicker 780ms ease-in-out infinite; }
+.signalFloorGlowLayer { position: absolute; inset: -5%; z-index: 2; isolation: isolate; pointer-events: none; -webkit-mask-image: var(--signal-studio-lighting-map, none); mask-image: var(--signal-studio-lighting-map, none); -webkit-mask-position: center; mask-position: center; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-size: cover; mask-size: cover; }
+.signalFloorGlow { position: absolute; z-index: 2; width: 26%; height: 8.5%; border-radius: 50%; transform: translate(-50%, -50%); isolation: isolate; pointer-events: none; }
+.signalFloorGlowLayer .signalFloorGlow { z-index: 0; }
+.signalFloorGlow::before, .signalFloorGlow::after { position: absolute; border-radius: 50%; content: ""; pointer-events: none; }
+.signalFloorGlow::before { inset: 22% 17%; background: radial-gradient(ellipse at center, rgba(255,255,255,.26) 0%, color-mix(in srgb, var(--signal-floor-glow-color) 32%, transparent) 38%, transparent 76%); filter: blur(4px); opacity: .82; }
+.signalFloorGlow::after { inset: -52% -25%; background: radial-gradient(ellipse at center, color-mix(in srgb, var(--signal-floor-glow-color) 25%, rgba(255,255,255,.05)) 0%, color-mix(in srgb, var(--signal-floor-glow-color) 14%, transparent) 38%, transparent 74%); filter: blur(clamp(10px, 1.1vw, 20px)); mix-blend-mode: screen; opacity: .74; }
+.signalFloorGlow[data-talking="true"]::before, .signalFloorGlow[data-talking="true"]::after { --signal-studio-talking-light-opacity-high: .9; --signal-studio-talking-light-opacity-mid: .74; --signal-studio-talking-light-opacity-low: .58; animation: signalStudioTalkingLightFlicker 780ms ease-in-out infinite; }
 .powerPressure { --signal-power-origin-x: 50%; position: absolute; inset: 0; z-index: 6; pointer-events: none; background: radial-gradient(circle at var(--signal-power-origin-x) 48%, color-mix(in srgb, var(--signal-power-accent) 15%, transparent) 0%, transparent 31%), radial-gradient(ellipse at center, transparent 34%, rgba(1,2,7,.72) 100%); box-shadow: inset 0 0 82px color-mix(in srgb, var(--signal-power-accent) 18%, rgba(0,0,0,.58)); opacity: .24; mix-blend-mode: multiply; }
 .powerPressure[data-source="host"] { --signal-power-origin-x: 27%; }
 .powerPressure[data-source="guest"] { --signal-power-origin-x: 73%; }
@@ -676,11 +720,12 @@
 .stageLayoutHandle { position: absolute; z-index: 12; display: grid; place-items: center; transform: translate(-50%, -50%); border-radius: 20px; outline: 1px dashed color-mix(in srgb, var(--prism-s) 72%, white); outline-offset: 7px; cursor: grab; touch-action: none; user-select: none; }
 .stageLayoutHandle[data-kind="bot"] { width: 25%; aspect-ratio: 1; }
 .stageLayoutHandle[data-kind="cup"] { width: max(6.2%, 58px); aspect-ratio: 8 / 9; border-radius: 12px; }
+.stageLayoutHandle[data-kind="floor-glow"] { z-index: 13; width: 26%; height: 8.5%; border-radius: 50%; cursor: move; }
 .stageLayoutHandle[data-kind="layer"] { width: 72px; height: 52px; border-radius: 14px; background: rgba(5,7,12,.54); backdrop-filter: blur(8px); }
 .stageLayoutHandle[data-dragging="true"] { z-index: 14; outline-style: solid; cursor: grabbing; }
 .stageLayoutHandle:focus-visible { outline: 3px solid var(--prism-s); outline-offset: 7px; }
 .stageLayoutHandle * { pointer-events: none !important; }
-.stageLayoutHandleLabel { position: absolute; left: 50%; bottom: -28px; min-width: max-content; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 7px; color: rgba(255,255,255,.92); background: rgba(5,7,12,.78); backdrop-filter: blur(8px); font: 760 .52rem/1 system-ui; letter-spacing: .06em; text-transform: uppercase; pointer-events: none; }
+.stageLayoutHandleLabel { position: absolute; left: 50%; bottom: -28px; z-index: 3; min-width: max-content; transform: translateX(-50%); border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 7px; color: rgba(255,255,255,.92); background: rgba(5,7,12,.78); backdrop-filter: blur(8px); font: 760 .52rem/1 system-ui; letter-spacing: .06em; text-transform: uppercase; pointer-events: none; }
 .stageViewport[data-layout-editor="true"] { width: 100%; border-radius: 14px; box-shadow: inset 0 0 70px rgba(0,0,0,.46); }
 .stageViewport[data-layout-editor="true"] .stageScene { transition: none; }
 .stageViewport[data-layout-editor="true"] .avatarRig { animation-play-state: paused; }
@@ -901,17 +946,21 @@
   filter: saturate(.9) contrast(.94) brightness(1.04);
 }
 .shell[data-theme="light"] .stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
-.shell[data-theme="light"] .stageViewport .studioGlow { opacity: .24; mix-blend-mode: normal; }
+.shell[data-theme="light"] .stageViewport .studioGlow:not([data-generated-lighting="true"]) { opacity: .24; mix-blend-mode: normal; }
+.shell[data-theme="light"] .stageViewport .studioGlow[data-generated-lighting="true"] { opacity: var(--signal-studio-glow-opacity, .44); mix-blend-mode: var(--signal-studio-glow-blend-mode, overlay); }
+.shell[data-theme="light"] .signalFloorGlow::before, .shell[data-theme="light"] .signalFloorGlow::after, .stageLayoutModalBackdrop[data-preview-theme="light"] .signalFloorGlow::before, .stageLayoutModalBackdrop[data-preview-theme="light"] .signalFloorGlow::after { mix-blend-mode: multiply; opacity: .4; }
 .shell[data-theme="light"] .studioSpotlightBeam { background: radial-gradient(ellipse at 50% 8%, rgba(255,252,235,.48) 0%, rgba(255,229,169,.11) 32%, transparent 73%); mix-blend-mode: soft-light; opacity: .4; }
 .shell[data-theme="light"] .studioSpotlightPool { background: radial-gradient(ellipse, rgba(255,244,207,.28), color-mix(in srgb, var(--botcast-studio-accent) 6%, transparent) 48%, transparent 73%); mix-blend-mode: soft-light; opacity: .36; }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport { border-color: color-mix(in srgb, var(--botcast-accent) 16%, var(--botcast-line)); background: #e8edf4; box-shadow: 0 24px 72px rgba(55,61,90,.16), inset 0 0 70px rgba(255,255,255,.34); }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .atmosphere { background-color: #e8edf4; filter: saturate(.9) contrast(.94) brightness(1.04); }
-.stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .studioGlow { opacity: .24; mix-blend-mode: normal; }
+.stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .studioGlow:not([data-generated-lighting="true"]) { opacity: .24; mix-blend-mode: normal; }
+.stageLayoutModalBackdrop[data-preview-theme="light"] .stageViewport .studioGlow[data-generated-lighting="true"] { opacity: var(--signal-studio-glow-opacity, .44); mix-blend-mode: var(--signal-studio-glow-blend-mode, overlay); }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .studioSpotlightBeam { background: radial-gradient(ellipse at 50% 8%, rgba(255,252,235,.48) 0%, rgba(255,229,169,.11) 32%, transparent 73%); mix-blend-mode: soft-light; opacity: .4; }
 .stageLayoutModalBackdrop[data-preview-theme="light"] .studioSpotlightPool { background: radial-gradient(ellipse, rgba(255,244,207,.28), color-mix(in srgb, var(--botcast-studio-accent) 6%, transparent) 48%, transparent 73%); mix-blend-mode: soft-light; opacity: .36; }
 .shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport { border-color: rgba(255,255,255,.14); background: #11121a; box-shadow: 0 24px 72px rgba(21,15,48,.35), inset 0 0 80px rgba(0,0,0,.5); }
 .shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .atmosphere { background-color: #11121a; filter: saturate(1.08) contrast(1.04); }
-.shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .studioGlow { opacity: 1; mix-blend-mode: screen; }
+.shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .studioGlow:not([data-generated-lighting="true"]) { opacity: 1; mix-blend-mode: screen; }
+.shell[data-theme="light"] .stageLayoutModalBackdrop[data-preview-theme="dark"] .stageViewport .studioGlow[data-generated-lighting="true"] { opacity: var(--signal-studio-glow-opacity, .62); mix-blend-mode: var(--signal-studio-glow-blend-mode, screen); }
 
 .shell[data-theme="light"] .productionDesk,
 .shell[data-theme="light"] .episodeOpenButton,
@@ -1065,6 +1114,20 @@
   100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
+@keyframes signalStudioTalkingLightFlicker {
+  0%, 8%, 24%, 47%, 71%, 100% { opacity: var(--signal-studio-talking-light-opacity-high, 1); }
+  12%, 37%, 60%, 82% { opacity: var(--signal-studio-talking-light-opacity-mid, .82); }
+  15%, 55%, 87% { opacity: var(--signal-studio-talking-light-opacity-low, .64); }
+}
+
+@keyframes signalFilmGrainJitter {
+  0% { transform: translate3d(-2%, -1%, 0); }
+  25% { transform: translate3d(1%, 2%, 0); }
+  50% { transform: translate3d(2%, -2%, 0); }
+  75% { transform: translate3d(-1%, 1%, 0); }
+  100% { transform: translate3d(0, -1%, 0); }
+}
+
 @keyframes signalHostChatBubbleOut {
   0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
   100% { opacity: 0; transform: translate3d(0, -7px, 0) scale(.985); }
@@ -1195,6 +1258,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .stageViewport::after { animation: none !important; transform: none; }
+  .studioGlow[data-host-talking="true"]::before, .studioGlow[data-guest-talking="true"]::after, .signalFloorGlow[data-talking="true"]::before, .signalFloorGlow[data-talking="true"]::after { opacity: .88; animation: none !important; }
   .avatarRig[data-ghostly-presence="true"] { transition: none; }
   .shell :global([data-prism-refract-state]) { animation: none; transition-duration: 1ms; }
 }

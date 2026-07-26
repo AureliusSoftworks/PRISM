@@ -495,7 +495,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("lets producers align show-scoped bots and cups against the studio", () => {
+  it("lets producers align and cosmetically treat the show-scoped studio", () => {
     assert.match(source, />\s*Align stage\s*</u);
     assert.match(source, /data-tutorial-target="botcast-stage-layout"/u);
     assert.match(source, /data-signal-layout-stage="true"/u);
@@ -512,7 +512,7 @@ describe("Signal experience shell", () => {
     assert.match(source, />\s*Swap seats\s*</u);
     assert.match(
       source,
-      /normalizeBotcastStudioLayout\(args\.show\.studioLayout\)/u,
+      /normalizeBotcastStudioLayout\(\s*replayVisualMetadata\?\.studioLayout \?\? args\.show\.studioLayout/u,
     );
     assert.match(source, /studioLayout\.hostBot\.x/u);
     assert.match(source, /studioLayout\.guestCup\.y/u);
@@ -603,6 +603,23 @@ describe("Signal experience shell", () => {
       /\.seat\s*\{[^}]*left:\s*var\(--signal-seat-x\)[^}]*transform:\s*translateX\(-50%\)/u,
     );
     assert.match(css, /\.stageLayoutHandle\s*\{[^}]*cursor:\s*grab/u);
+    assert.match(source, /hostFloorGlow:\s*"host floor glow"/u);
+    assert.match(source, /guestFloorGlow:\s*"guest floor glow"/u);
+    assert.match(source, /signalStudioFloorGlowHandleStyle/u);
+    assert.match(source, /signalStudioMaskedFloorGlowStyle/u);
+    assert.match(source, /aria-label="Signal screen treatment"/u);
+    assert.match(source, />\s*Film treatment\s*</u);
+    assert.match(source, /Film grain strength/u);
+    assert.match(source, />\s*Underglow\s*</u);
+    assert.match(source, />\s*Lighting lab\s*</u);
+    assert.match(source, /\? "Screen"\s*:\s*"Overlay"/u);
+    assert.match(source, /studioGlowTuning: draft\.tuning/u);
+    assert.match(source, /New shows start at 100% Overlay/u);
+    assert.match(css, /\.stageScreenTreatment\s*\{/u);
+    assert.match(css, /\.stageStudioGlowTuner\s*\{/u);
+    assert.match(css, /\.signalFloorGlowLayer\s*\{/u);
+    assert.match(css, /@keyframes signalFilmGrainJitter/u);
+    assert.match(css, /@keyframes signalStudioTalkingLightFlicker/u);
     assert.match(css, /\.stageVoiceMixer\s*\{[^}]*display:\s*grid/u);
     assert.match(css, /\.stageVoiceMixerSliders\s*\{[^}]*repeat\(2/u);
     assert.match(css, /\.stagePlacement\s*\{[^}]*width:\s*25%/u);
@@ -2112,6 +2129,26 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(source, /uploadShowAsset\("microphones"/u);
     assert.doesNotMatch(source, /regenerateMicrophoneLayer/u);
     assert.doesNotMatch(css, /\.microphoneForeground\s*\{/u);
+    assert.match(source, /function SignalStudioMicrophoneTint/u);
+    assert.match(source, /if \(!atmosphere\.microphoneTintMaskUrl\) return null/u);
+    assert.match(source, /<span data-role="host" \/>/u);
+    assert.match(source, /<span data-role="guest" \/>/u);
+    assert.match(source, /function signalStudioLightingStyle/u);
+    assert.match(source, /data-generated-lighting/u);
+    assert.match(
+      source,
+      /replayVisualMetadata\?\.microphoneTintMaskUrl/u,
+    );
+    assert.match(css, /\.signalMicrophoneTintLayer\s*\{/u);
+    assert.match(
+      css,
+      /\.signalMicrophoneTintLayer > span\s*\{[^}]*clip-path:\s*inset\(0 50% 0 0\)/u,
+    );
+    assert.match(
+      css,
+      /\.signalMicrophoneTintLayer > span\[data-role="guest"\][^}]*clip-path:\s*inset\(0 0 0 50%\)/u,
+    );
+    assert.match(css, /mix-blend-mode:\s*normal/u);
   });
 
   it("shows the selected logo and studio artwork on the dashboard", () => {
@@ -2130,7 +2167,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const stageAtmosphere = activeShowAtmosphere\(args\.show, theme\)/u,
+      /const currentStageAtmosphere = activeShowAtmosphere\(args\.show, stageTheme\)/u,
     );
     assert.match(css, /\.showBrandPreview\s*\{/u);
     assert.match(css, /\.showBrandPreview\s*\{[^}]*min-height:\s*360px/iu);

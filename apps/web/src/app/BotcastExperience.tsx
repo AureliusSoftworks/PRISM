@@ -17,12 +17,17 @@ import { flushSync } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  BOTCAST_DEFAULT_STUDIO_FILM_GRAIN,
+  BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
+  BOTCAST_STUDIO_FILM_GRAIN_MAX,
+  BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX,
+  BOTCAST_STUDIO_FLOOR_GLOW_SCALE_STEP,
   BOTCAST_VOICE_LEVEL_MAX,
   BOTCAST_VOICE_LEVEL_STEP,
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
@@ -71,6 +76,7 @@ import {
   buildSignalMusicProfile,
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastStudioGlowTuning,
   normalizeBotcastStudioLayout,
   normalizeBotcastVoiceLevel,
   normalizeBotcastVoiceLevelsByBotId,
@@ -95,6 +101,8 @@ import {
   type BotcastShowHostChatResponse,
   type BotcastSessionDurationMinutes,
   type BotcastStudioAtmosphereMix,
+  type BotcastStudioGlowThemeTuning,
+  type BotcastStudioGlowTuning,
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
   type BotcastVoiceLevelsByBotId,
@@ -197,6 +205,9 @@ import { signalStageSoundcheckMessages } from "./signalStageSoundcheck";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
 import {
+  signalStudioFloorGlowHandleStyle,
+  signalStudioMaskedFloorGlowStyle,
+  signalStudioOverscanCoordinate,
   signalStudioPlacementStyle,
   signalStudioVoicePan,
 } from "./signalStudioPlacement";
@@ -591,6 +602,7 @@ export interface BotcastExperienceProps {
     ariaLabel?: string;
     className?: string;
     onBlur?: (value: string) => void;
+    resolvePicksToPlainText?: boolean;
   }) => ReactNode;
   /** Expand /prompts, !decks, and {slots}/{a|b} before booking or guest send. */
   expandComposerDraft?: (rawDraft: string) => string;
@@ -654,12 +666,29 @@ type SignalArtworkKind = SignalAssetSlot;
 const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
 
-const SIGNAL_STUDIO_LAYOUT_LABELS = {
+const SIGNAL_STUDIO_LAYOUT_LABELS: Record<BotcastStudioLayoutItem, string> = {
   hostBot: "host bot",
   guestBot: "guest bot",
   hostCup: "host cup",
   guestCup: "guest cup",
-} as const;
+  hostFloorGlow: "host floor glow",
+  guestFloorGlow: "guest floor glow",
+};
+const SIGNAL_STUDIO_FLOOR_GLOW_DRAG_SCALE_PER_STAGE = 2;
+
+function signalStudioLayoutItemIsFloorGlow(
+  item: BotcastStudioLayoutItem,
+): item is "hostFloorGlow" | "guestFloorGlow" {
+  return item === "hostFloorGlow" || item === "guestFloorGlow";
+}
+
+function signalStudioFloorGlowRole(
+  item: BotcastStudioLayoutItem,
+): "host" | "guest" | null {
+  if (item === "hostFloorGlow") return "host";
+  if (item === "guestFloorGlow") return "guest";
+  return null;
+}
 
 function signalStudioFacingForRole(
   layout: BotcastStudioLayout,
@@ -980,6 +1009,81 @@ function activeShowAtmosphere(
   theme: "light" | "dark",
 ): BotcastShow["atmosphere"] {
   return theme === "light" ? show.dayAtmosphere : show.nightAtmosphere;
+}
+
+function SignalStudioMicrophoneTint({
+  atmosphere,
+  hostColor,
+  guestColor,
+  theme,
+  surface = "stage",
+}: {
+  atmosphere: BotcastShow["atmosphere"];
+  hostColor: string;
+  guestColor: string;
+  theme: "light" | "dark";
+  surface?: "stage" | "dashboard";
+}): React.JSX.Element | null {
+  if (!atmosphere.microphoneTintMaskUrl) return null;
+  return (
+    <div
+      className={styles.signalMicrophoneTintLayer}
+      data-surface={surface}
+      style={
+        {
+          ["--signal-microphone-tint-mask" as string]:
+            `url("${atmosphere.microphoneTintMaskUrl}")`,
+          ["--signal-microphone-host-color" as string]:
+            normalizeAccentForTheme(hostColor, theme),
+          ["--signal-microphone-guest-color" as string]:
+            normalizeAccentForTheme(guestColor, theme),
+        } as CSSProperties
+      }
+      aria-hidden="true"
+    >
+      <span data-role="host" />
+      <span data-role="guest" />
+    </div>
+  );
+}
+
+function signalStudioLightingStyle(args: {
+  show: BotcastShow;
+  layout: BotcastStudioLayout;
+  hostColor: string;
+  guestColor: string;
+  theme: "light" | "dark";
+}): CSSProperties | null {
+  const lighting = args.show.studioLighting;
+  if (lighting?.status !== "ready" || !lighting.imageUrl) return null;
+  const tuning = normalizeBotcastStudioGlowTuning(
+    args.show.studioGlowTuning,
+  )[args.theme];
+  return {
+    ["--signal-studio-lighting-map" as string]: `url("${lighting.imageUrl}")`,
+    ["--signal-studio-glow-opacity" as string]: tuning.opacity,
+    ["--signal-studio-glow-blend-mode" as string]: tuning.blendMode,
+    ["--signal-studio-host-x" as string]: `${args.layout.hostBot.x}%`,
+    ["--signal-studio-host-y" as string]: `${args.layout.hostBot.y}%`,
+    ["--signal-studio-guest-x" as string]: `${args.layout.guestBot.x}%`,
+    ["--signal-studio-guest-y" as string]: `${args.layout.guestBot.y}%`,
+    ["--signal-studio-stage-host-x" as string]:
+      `${signalStudioOverscanCoordinate(args.layout.hostBot.x)}%`,
+    ["--signal-studio-stage-host-y" as string]:
+      `${signalStudioOverscanCoordinate(args.layout.hostBot.y)}%`,
+    ["--signal-studio-stage-guest-x" as string]:
+      `${signalStudioOverscanCoordinate(args.layout.guestBot.x)}%`,
+    ["--signal-studio-stage-guest-y" as string]:
+      `${signalStudioOverscanCoordinate(args.layout.guestBot.y)}%`,
+    ["--signal-studio-host-light" as string]: normalizeAccentForTheme(
+      args.hostColor,
+      args.theme,
+    ),
+    ["--signal-studio-guest-light" as string]: normalizeAccentForTheme(
+      args.guestColor,
+      args.theme,
+    ),
+  };
 }
 
 function signalIntroIdentityForShow(
@@ -1470,6 +1574,7 @@ export function BotcastExperience({
   const [studioLayoutPreviewGuestId, setStudioLayoutPreviewGuestId] =
     useState("");
   const [studioLayoutSaving, setStudioLayoutSaving] = useState(false);
+  const [studioGlowTuningSaving, setStudioGlowTuningSaving] = useState(false);
   const [studioVoiceLevelsSaving, setStudioVoiceLevelsSaving] =
     useState(false);
   const [studioAtmosphereMixSaving, setStudioAtmosphereMixSaving] =
@@ -1564,6 +1669,12 @@ export function BotcastExperience({
   } | null>(null);
   const studioLayoutSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const studioLayoutSavePendingRef = useRef(0);
+  const studioGlowTuningDraftRef = useRef<{
+    showId: string;
+    tuning: BotcastStudioGlowTuning;
+    revision: number;
+  } | null>(null);
+  const studioGlowTuningSaveInFlightRef = useRef(false);
   const studioVoiceLevelsDraftRef = useRef<{
     showId: string;
     levels: BotcastVoiceLevelsByBotId;
@@ -2683,6 +2794,15 @@ export function BotcastExperience({
   const hostShowAccent = selectedShow
     ? normalizeAccentForTheme(hostBot?.color ?? selectedShow.accentColor, theme)
     : null;
+  const dashboardStudioLightingStyle = selectedShow
+    ? signalStudioLightingStyle({
+        show: selectedShow,
+        layout: normalizeBotcastStudioLayout(selectedShow.studioLayout),
+        hostColor: hostShowAccent ?? selectedShow.accentColor,
+        guestColor: hostShowAccent ?? selectedShow.accentColor,
+        theme,
+      })
+    : null;
   const liveGuestBot = useMemo(() => {
     if (!episode) return null;
     if (episode.guestKind === "producer") {
@@ -3209,6 +3329,79 @@ export function BotcastExperience({
     studioLayoutSaveQueueRef.current = queuedSave;
   };
 
+  const flushStudioGlowTuningSave = async (): Promise<void> => {
+    if (studioGlowTuningSaveInFlightRef.current) return;
+    studioGlowTuningSaveInFlightRef.current = true;
+    setStudioGlowTuningSaving(true);
+    try {
+      while (studioGlowTuningDraftRef.current) {
+        const draft = studioGlowTuningDraftRef.current;
+        const response = await request<{ show: BotcastShow }>(
+          `/api/botcast/shows/${encodeURIComponent(draft.showId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ studioGlowTuning: draft.tuning }),
+          },
+        );
+        const latestDraft = studioGlowTuningDraftRef.current;
+        setShows((current) =>
+          current.map((show) => {
+            if (show.id !== draft.showId) return show;
+            return latestDraft?.showId === draft.showId
+              ? { ...response.show, studioGlowTuning: latestDraft.tuning }
+              : response.show;
+          }),
+        );
+        if (
+          !latestDraft ||
+          latestDraft.showId !== draft.showId ||
+          latestDraft.revision === draft.revision
+        ) {
+          studioGlowTuningDraftRef.current = null;
+          break;
+        }
+      }
+    } catch (saveError) {
+      studioGlowTuningDraftRef.current = null;
+      setError(signalErrorToast("Save studio underglow", saveError));
+    } finally {
+      studioGlowTuningSaveInFlightRef.current = false;
+      setStudioGlowTuningSaving(false);
+      if (studioGlowTuningDraftRef.current) {
+        void flushStudioGlowTuningSave();
+      }
+    }
+  };
+
+  const updateStudioGlowTuning = (
+    show: BotcastShow,
+    nextTuning: BotcastStudioGlowTuning,
+  ): void => {
+    const previousDraft = studioGlowTuningDraftRef.current;
+    const fallbackTuning =
+      previousDraft?.showId === show.id
+        ? previousDraft.tuning
+        : show.studioGlowTuning;
+    const tuning = normalizeBotcastStudioGlowTuning(
+      nextTuning,
+      normalizeBotcastStudioGlowTuning(fallbackTuning),
+    );
+    studioGlowTuningDraftRef.current = {
+      showId: show.id,
+      tuning,
+      revision:
+        previousDraft?.showId === show.id ? previousDraft.revision + 1 : 1,
+    };
+    setShows((current) =>
+      current.map((candidate) =>
+        candidate.id === show.id
+          ? { ...candidate, studioGlowTuning: tuning }
+          : candidate,
+      ),
+    );
+    void flushStudioGlowTuningSave();
+  };
+
   const flushStudioVoiceLevelsSave = async (): Promise<void> => {
     if (studioVoiceLevelsSaveInFlightRef.current) return;
     studioVoiceLevelsSaveInFlightRef.current = true;
@@ -3396,17 +3589,28 @@ export function BotcastExperience({
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
     const startPoint = drag.startLayout[drag.item];
+    const floorGlow = signalStudioLayoutItemIsFloorGlow(drag.item);
     const layout = normalizeBotcastStudioLayout(
       {
-      ...drag.startLayout,
-      [drag.item]: {
+        ...drag.startLayout,
+        [drag.item]: {
           ...startPoint,
-          x:
-            startPoint.x +
-            ((event.clientX - drag.startClientX) / drag.stageWidth) * 100,
+          x: floorGlow
+            ? startPoint.x
+            : startPoint.x +
+              ((event.clientX - drag.startClientX) / drag.stageWidth) * 100,
           y:
             startPoint.y +
             ((event.clientY - drag.startClientY) / drag.stageHeight) * 100,
+          ...(floorGlow
+            ? {
+                scale:
+                  (startPoint.scale ??
+                    BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX) +
+                  ((event.clientX - drag.startClientX) / drag.stageWidth) *
+                    SIGNAL_STUDIO_FLOOR_GLOW_DRAG_SCALE_PER_STAGE,
+              }
+            : {}),
         },
       },
       drag.startLayout,
@@ -3442,17 +3646,27 @@ export function BotcastExperience({
     if (!direction) return;
     event.preventDefault();
     if (event.repeat) return;
-    const step = event.shiftKey ? 2 : 0.5;
+    const positionStep = event.shiftKey ? 2 : 0.5;
+    const scaleStep =
+      BOTCAST_STUDIO_FLOOR_GLOW_SCALE_STEP * (event.shiftKey ? 2 : 1);
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
     const point = layout[item];
+    const floorGlow = signalStudioLayoutItemIsFloorGlow(item);
     const nextLayout = normalizeBotcastStudioLayout(
       {
-      ...layout,
-      [item]: {
-        ...point,
-        x: point.x + direction[0]! * step,
-        y: point.y + direction[1]! * step,
-      },
+        ...layout,
+        [item]: {
+          ...point,
+          x: floorGlow ? point.x : point.x + direction[0]! * positionStep,
+          y: point.y + direction[1]! * positionStep,
+          ...(floorGlow
+            ? {
+                scale:
+                  (point.scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX) +
+                  direction[0]! * scaleStep,
+              }
+            : {}),
+        },
       },
       layout,
     );
@@ -7149,13 +7363,56 @@ export function BotcastExperience({
         speakingMessageId === null &&
         thinkingRole === "guest",
     );
-    const stageAtmosphere = activeShowAtmosphere(args.show, theme);
+    const stageTheme =
+      args.replay && replayManifestV2?.visual.theme
+        ? replayManifestV2.visual.theme
+        : theme;
+    const replayVisualMetadata = args.replay
+      ? replayManifestV2?.visual.metadata
+      : undefined;
+    const currentStageAtmosphere = activeShowAtmosphere(args.show, stageTheme);
+    const stageAtmosphere =
+      args.replay && replayManifestV2
+        ? {
+            ...currentStageAtmosphere,
+            imageUrl: replayManifestV2.visual.atmosphereImageUrl,
+            microphoneTintMaskUrl:
+              typeof replayVisualMetadata?.microphoneTintMaskUrl === "string"
+                ? replayVisualMetadata.microphoneTintMaskUrl
+                : null,
+          }
+        : currentStageAtmosphere;
+    const studioMix = normalizeBotcastStudioAtmosphereMix(
+      replayVisualMetadata?.atmosphereMix ?? args.show.atmosphereMix,
+    );
     const avatarSfxMixGain = sessionAtmosphereBusVolume({
       volume: introAudioVolume,
-      mix: args.show.atmosphereMix,
+      mix: studioMix,
       bus: "foley",
     });
-    const studioLayout = normalizeBotcastStudioLayout(args.show.studioLayout);
+    const studioLayout = normalizeBotcastStudioLayout(
+      replayVisualMetadata?.studioLayout ?? args.show.studioLayout,
+    );
+    const stageVisualShow: BotcastShow =
+      args.replay && replayManifestV2
+        ? {
+            ...args.show,
+            studioGlowTuning: normalizeBotcastStudioGlowTuning(
+              replayVisualMetadata?.studioGlowTuning,
+              args.show.studioGlowTuning,
+            ),
+            studioLighting:
+              replayVisualMetadata?.studioLighting &&
+              typeof replayVisualMetadata.studioLighting === "object" &&
+              !Array.isArray(replayVisualMetadata.studioLighting)
+                ? (replayVisualMetadata.studioLighting as BotcastShow["studioLighting"])
+                : args.show.studioLighting,
+          }
+        : args.show;
+    const stageAccentColor =
+      args.replay && replayManifestV2?.visual.accentColor
+        ? replayManifestV2.visual.accentColor
+        : args.show.accentColor;
     const replayMessageStartMs =
       replayFaithfulBeat?.startMs ??
       replayTimeline.messageStartMs[replayMessageIndex] ??
@@ -7432,7 +7689,7 @@ export function BotcastExperience({
       return buildCoffeeCupVisualState({
         seed: `signal:${args.currentEpisode.id}:${bot.id}:${role}`,
         botColor: bot.color,
-        theme,
+        theme: stageTheme,
         nowMs: cupNowMs,
         sessionStartedAtMs: episodeStartedAtMs,
         durationMinutes:
@@ -7458,17 +7715,25 @@ export function BotcastExperience({
       guestCupVisual?.sipping === true && !roleIsSpeaking("guest");
     const hostCupTravel = signalCupTravelByRole.host;
     const guestCupTravel = signalCupTravelByRole.guest;
+    const studioLightingStyle = signalStudioLightingStyle({
+      show: stageVisualShow,
+      layout: studioLayout,
+      hostColor: args.host?.color ?? stageAccentColor,
+      guestColor: args.guest?.color ?? stageAccentColor,
+      theme: stageTheme,
+    });
     const atmosphereStyle = {
-      ["--botcast-accent" as string]: args.show.accentColor,
+      ["--botcast-accent" as string]: stageAccentColor,
+      ["--signal-film-grain-level" as string]: studioMix.filmGrain,
       ["--botcast-studio-accent" as string]: normalizeAccentForTheme(
-        args.host?.color ?? args.show.accentColor,
-        theme,
+        args.host?.color ?? stageAccentColor,
+        stageTheme,
       ),
       ...(socialPressureSource
         ? {
             ["--signal-power-accent" as string]: normalizeAccentForTheme(
-              socialPressureSource.color ?? args.show.accentColor,
-              theme,
+              socialPressureSource.color ?? stageAccentColor,
+              stageTheme,
             ),
           }
         : {}),
@@ -7485,7 +7750,28 @@ export function BotcastExperience({
             ["--botcast-atmosphere" as string]: `url("${stageAtmosphere.imageUrl}")`,
           }
         : {}),
+      ...(studioLightingStyle ?? {}),
     } as CSSProperties;
+    const floorGlow = (
+      role: "host" | "guest",
+      color: string | null | undefined,
+    ): ReactNode => (
+      <div
+        className={styles.signalFloorGlow}
+        data-role={role}
+        data-talking={roleIsSpeaking(role) ? "true" : undefined}
+        style={{
+          ...signalStudioMaskedFloorGlowStyle(
+            studioLayout,
+            role === "host" ? "hostFloorGlow" : "guestFloorGlow",
+          ),
+          ["--signal-floor-glow-color" as string]: normalizeAccentForTheme(
+            color ?? stageAccentColor,
+            stageTheme,
+          ),
+        }}
+      />
+    );
     const avatar = (
       bot: BotcastBotSummary,
       role: "host" | "guest",
@@ -7529,7 +7815,7 @@ export function BotcastExperience({
           }),
         sfxMixGain: avatarSfxMixGain,
         facing: signalStudioFacingForRole(studioLayout, role),
-        theme,
+        theme: stageTheme,
         mouthShape,
       });
       if (renderedAvatar !== null && renderedAvatar !== undefined) {
@@ -7579,11 +7865,34 @@ export function BotcastExperience({
               />
             ) : null}
           </div>
+          <SignalStudioMicrophoneTint
+            atmosphere={stageAtmosphere}
+            hostColor={args.host?.color ?? stageAccentColor}
+            guestColor={args.guest?.color ?? stageAccentColor}
+            theme={stageTheme}
+          />
           <div className={styles.wordmark}>
             <SignalShowLogo show={args.show} />
             <strong>{args.show.name}</strong>
           </div>
-          <div className={styles.studioGlow} aria-hidden="true" />
+          <div
+            className={styles.studioGlow}
+            data-generated-lighting={studioLightingStyle ? "true" : undefined}
+            data-talk-reactive={studioLightingStyle ? "true" : undefined}
+            data-host-talking={
+              studioLightingStyle && roleIsSpeaking("host") ? "true" : undefined
+            }
+            data-guest-talking={
+              studioLightingStyle && roleIsSpeaking("guest")
+                ? "true"
+                : undefined
+            }
+            aria-hidden="true"
+          />
+          <div className={styles.signalFloorGlowLayer} aria-hidden="true">
+            {floorGlow("host", args.host?.color)}
+            {floorGlow("guest", args.guest?.color)}
+          </div>
           {socialPressure ? (
             <div
               className={styles.powerPressure}
@@ -7592,7 +7901,7 @@ export function BotcastExperience({
               aria-hidden="true"
             />
           ) : null}
-          <SignalStudioSpotlight />
+          {!studioLightingStyle ? <SignalStudioSpotlight /> : null}
           {hostVisibleToAudience && args.host ? (
             <div
               className={styles.stagePlacement}
@@ -8064,10 +8373,34 @@ export function BotcastExperience({
   ): React.JSX.Element => {
     const previewTheme = studioLayoutPreviewTheme;
     const stageAtmosphere = activeShowAtmosphere(show, previewTheme);
+    const studioMix = normalizeBotcastStudioAtmosphereMix(show.atmosphereMix);
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
+    const studioGlowTuning = normalizeBotcastStudioGlowTuning(
+      show.studioGlowTuning,
+    );
     const hostHasCoffeeCup = botHasCoffeeCup(host);
     const guestHasCoffeeCup = guest ? botHasCoffeeCup(guest) : false;
     const studioHasCoffeeCup = hostHasCoffeeCup || guestHasCoffeeCup;
+    const studioGlowTuningIsDefault = (["dark", "light"] as const).every(
+      (glowTheme) =>
+        studioGlowTuning[glowTheme].opacity ===
+          BOTCAST_DEFAULT_STUDIO_GLOW_TUNING[glowTheme].opacity &&
+        studioGlowTuning[glowTheme].blendMode ===
+          BOTCAST_DEFAULT_STUDIO_GLOW_TUNING[glowTheme].blendMode,
+    );
+    const previewStudioGlowTuning = (
+      glowTheme: "light" | "dark",
+      update: Partial<BotcastStudioGlowThemeTuning>,
+    ): void => {
+      setStudioLayoutPreviewTheme(glowTheme);
+      updateStudioGlowTuning(show, {
+        ...studioGlowTuning,
+        [glowTheme]: {
+          ...studioGlowTuning[glowTheme],
+          ...update,
+        },
+      });
+    };
     const voiceLevelControl = (
       bot: BotcastBotSummary,
       role: "Host" | "Guest",
@@ -8098,6 +8431,7 @@ export function BotcastExperience({
     };
     const stageStyle = {
       ["--botcast-accent" as string]: show.accentColor,
+      ["--signal-film-grain-level" as string]: studioMix.filmGrain,
       ["--botcast-studio-accent" as string]: normalizeAccentForTheme(
         host.color ?? show.accentColor,
         previewTheme,
@@ -8107,26 +8441,69 @@ export function BotcastExperience({
             ["--botcast-atmosphere" as string]: `url("${stageAtmosphere.imageUrl}")`,
           }
         : {}),
+      ...(signalStudioLightingStyle({
+        show,
+        layout,
+        hostColor: host.color ?? show.accentColor,
+        guestColor: guest?.color ?? show.accentColor,
+        theme: previewTheme,
+      }) ?? {}),
     } as CSSProperties;
+    const floorGlowPreview = (
+      role: "host" | "guest",
+      color: string | null | undefined,
+    ): ReactNode => (
+      <div
+        className={styles.signalFloorGlow}
+        data-role={role}
+        style={{
+          ...signalStudioMaskedFloorGlowStyle(
+            layout,
+            role === "host" ? "hostFloorGlow" : "guestFloorGlow",
+          ),
+          ["--signal-floor-glow-color" as string]: normalizeAccentForTheme(
+            color ?? show.accentColor,
+            previewTheme,
+          ),
+        }}
+      />
+    );
     const layoutHandle = (
-      item: keyof typeof SIGNAL_STUDIO_LAYOUT_LABELS,
+      item: BotcastStudioLayoutItem,
       child: ReactNode,
     ): React.JSX.Element => {
       const label = SIGNAL_STUDIO_LAYOUT_LABELS[item];
+      const floorGlowRole = signalStudioFloorGlowRole(item);
+      const floorGlowScalePercent = floorGlowRole
+        ? Math.round(
+            (layout[item].scale ?? BOTCAST_STUDIO_FLOOR_GLOW_SCALE_MAX) * 100,
+          )
+        : null;
       return (
         <div
           key={item}
           className={styles.stageLayoutHandle}
           data-kind={
-            item.endsWith("Bot")
+            floorGlowRole
+              ? "floor-glow"
+              : item.endsWith("Bot")
               ? "bot"
               : "cup"
           }
+          data-role={floorGlowRole ?? undefined}
           data-dragging={studioLayoutDraggingItem === item ? "true" : undefined}
-          style={signalStudioPlacementStyle(layout, item)}
+          style={
+            signalStudioLayoutItemIsFloorGlow(item)
+              ? signalStudioFloorGlowHandleStyle(layout, item)
+              : signalStudioPlacementStyle(layout, item)
+          }
           role="button"
           tabIndex={0}
-          aria-label={`Move ${label}. Use arrow keys to nudge.`}
+          aria-label={
+            floorGlowRole
+              ? `Move ${label} vertically and resize it horizontally. Current size ${floorGlowScalePercent}%. Use up and down arrow keys to move; left and right resize.`
+              : `Move ${label}. Use arrow keys to nudge.`
+          }
           onPointerDown={(event) => beginStudioLayoutDrag(event, show, item)}
           onPointerMove={moveStudioLayoutDrag}
           onPointerUp={finishStudioLayoutDrag}
@@ -8134,7 +8511,12 @@ export function BotcastExperience({
           onKeyDown={(event) => nudgeStudioLayoutItem(event, show, item)}
         >
           {child}
-          <span className={styles.stageLayoutHandleLabel}>{label}</span>
+          <span className={styles.stageLayoutHandleLabel}>
+            {label}
+            {floorGlowScalePercent === null
+              ? ""
+              : ` ${floorGlowScalePercent}%`}
+          </span>
         </div>
       );
     };
@@ -8240,7 +8622,9 @@ export function BotcastExperience({
               <div className={styles.stageLayoutEditorHeader}>
                 <p>
                   Drag each bot{studioHasCoffeeCup ? " and cup" : ""} onto this
-                  show’s furniture. Arrow keys make fine adjustments.
+                  show’s furniture, then drag each floor glow vertically to meet
+                  the chair or sideways to resize it. Today’s glow size is the
+                  maximum. Arrow keys make fine adjustments.
                 </p>
                 <div>
                   <div
@@ -8265,6 +8649,7 @@ export function BotcastExperience({
                   </div>
                   <span aria-live="polite">
                     {studioLayoutSaving ||
+                    studioGlowTuningSaving ||
                     studioVoiceLevelsSaving ||
                     studioAtmosphereMixSaving
                       ? "Saving studio…"
@@ -8358,12 +8743,48 @@ export function BotcastExperience({
                       />
                     ) : null}
                   </div>
+                  <SignalStudioMicrophoneTint
+                    atmosphere={stageAtmosphere}
+                    hostColor={host.color ?? show.accentColor}
+                    guestColor={guest?.color ?? show.accentColor}
+                    theme={previewTheme}
+                  />
                   <div className={styles.wordmark}>
                     <SignalShowLogo show={show} />
                     <strong>{show.name}</strong>
                   </div>
-                  <div className={styles.studioGlow} aria-hidden="true" />
-                  <SignalStudioSpotlight />
+                  <div
+                    className={styles.studioGlow}
+                    data-generated-lighting={
+                      show.studioLighting?.status === "ready"
+                        ? "true"
+                        : undefined
+                    }
+                    data-talk-reactive="true"
+                    data-host-talking={
+                      studioSoundcheckSpeech?.botId === host.id
+                        ? "true"
+                        : undefined
+                    }
+                    data-guest-talking={
+                      guest && studioSoundcheckSpeech?.botId === guest.id
+                        ? "true"
+                        : undefined
+                    }
+                    aria-hidden="true"
+                  />
+                  <div
+                    className={styles.signalFloorGlowLayer}
+                    aria-hidden="true"
+                  >
+                    {floorGlowPreview("host", host.color)}
+                    {floorGlowPreview("guest", guest?.color)}
+                  </div>
+                  {show.studioLighting?.status !== "ready" ? (
+                    <SignalStudioSpotlight />
+                  ) : null}
+                  {layoutHandle("hostFloorGlow", null)}
+                  {layoutHandle("guestFloorGlow", null)}
                   {layoutHandle("hostBot", avatarPreview(host, "host"))}
                   {hostHasCoffeeCup
                     ? layoutHandle("hostCup", cupPreview(host, "host"))
@@ -8374,6 +8795,144 @@ export function BotcastExperience({
                   {guest && guestHasCoffeeCup
                     ? layoutHandle("guestCup", cupPreview(guest, "guest"))
                     : null}
+                </div>
+              </section>
+              <section
+                className={styles.stageScreenTreatment}
+                aria-label="Signal screen treatment"
+              >
+                <header>
+                  <div>
+                    <span className={styles.eyebrow}>Screen</span>
+                    <strong>Film treatment</strong>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      updateStudioAtmosphereMix(show, {
+                        ...studioMix,
+                        filmGrain: BOTCAST_DEFAULT_STUDIO_FILM_GRAIN,
+                      })
+                    }
+                    disabled={
+                      studioMix.filmGrain === BOTCAST_DEFAULT_STUDIO_FILM_GRAIN
+                    }
+                  >
+                    Reset
+                  </button>
+                </header>
+                <label>
+                  <span>
+                    Film grain
+                    <output>{Math.round(studioMix.filmGrain * 100)}%</output>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={BOTCAST_STUDIO_FILM_GRAIN_MAX}
+                    step={0.05}
+                    value={studioMix.filmGrain}
+                    aria-label="Film grain strength"
+                    onChange={(event) =>
+                      updateStudioAtmosphereMix(show, {
+                        ...studioMix,
+                        filmGrain: Number(event.currentTarget.value),
+                      })
+                    }
+                  />
+                </label>
+                <small>Applies to the full live and replay screen.</small>
+                <div
+                  className={styles.stageStudioGlowTuner}
+                  data-signal-studio-glow-tuner="true"
+                >
+                  <header>
+                    <div>
+                      <span className={styles.eyebrow}>Underglow</span>
+                      <strong>Lighting lab</strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateStudioGlowTuning(show, {
+                          dark: { ...BOTCAST_DEFAULT_STUDIO_GLOW_TUNING.dark },
+                          light: { ...BOTCAST_DEFAULT_STUDIO_GLOW_TUNING.light },
+                        })
+                      }
+                      disabled={studioGlowTuningIsDefault}
+                    >
+                      Reset
+                    </button>
+                  </header>
+                  <div className={styles.stageStudioGlowTunerRows}>
+                    {(["dark", "light"] as const).map((glowTheme) => {
+                      const setting = studioGlowTuning[glowTheme];
+                      const label = glowTheme === "dark" ? "Dark" : "Light";
+                      return (
+                        <div
+                          key={glowTheme}
+                          className={styles.stageStudioGlowTunerRow}
+                          data-active={
+                            previewTheme === glowTheme ? "true" : undefined
+                          }
+                        >
+                          <label>
+                            <span>
+                              <strong>{label}</strong>
+                              <output>
+                                {Math.round(setting.opacity * 100)}%
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={0}
+                              max={1}
+                              step={0.02}
+                              value={setting.opacity}
+                              aria-label={`${label} underglow opacity`}
+                              onFocus={() =>
+                                setStudioLayoutPreviewTheme(glowTheme)
+                              }
+                              onChange={(event) =>
+                                previewStudioGlowTuning(glowTheme, {
+                                  opacity: Number(event.currentTarget.value),
+                                })
+                              }
+                            />
+                          </label>
+                          <div
+                            className={styles.stageStudioGlowBlendToggle}
+                            role="group"
+                            aria-label={`${label} underglow blend mode`}
+                          >
+                            {(["screen", "overlay"] as const).map(
+                              (blendMode) => (
+                                <button
+                                  key={blendMode}
+                                  type="button"
+                                  aria-pressed={
+                                    setting.blendMode === blendMode
+                                  }
+                                  onClick={() =>
+                                    previewStudioGlowTuning(glowTheme, {
+                                      blendMode,
+                                    })
+                                  }
+                                >
+                                  {blendMode === "screen"
+                                    ? "Screen"
+                                    : "Overlay"}
+                                </button>
+                              ),
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <small>
+                    Saved for this show. New shows start at 100% Overlay.
+                  </small>
                 </div>
               </section>
               {renderAtmosphereMixer(show)}
@@ -8867,6 +9426,7 @@ export function BotcastExperience({
                       ariaLabel: "Private producer comments",
                       className: styles.pickAwareSetupField,
                       disabled: busy,
+                      resolvePicksToPlainText: true,
                     })}
                   </div>
                 ) : (
@@ -11118,6 +11678,7 @@ export function BotcastExperience({
                         "--botcast-dashboard-atmosphere": `url("${dashboardAtmosphere.imageUrl}")`,
                       }
                     : {}),
+                  ...(dashboardStudioLightingStyle ?? {}),
                 } as CSSProperties
               }
               aria-label={`${selectedShow.name} show identity`}
@@ -11133,6 +11694,20 @@ export function BotcastExperience({
                   accentVariant={selectedShow.fallbackStudioAccentVariant}
                 />
               )}
+              <SignalStudioMicrophoneTint
+                atmosphere={dashboardAtmosphere}
+                hostColor={hostShowAccent ?? selectedShow.accentColor}
+                guestColor={hostShowAccent ?? selectedShow.accentColor}
+                theme={theme}
+                surface="dashboard"
+              />
+              {dashboardStudioLightingStyle ? (
+                <div
+                  className={styles.studioGlow}
+                  data-generated-lighting="true"
+                  aria-hidden="true"
+                />
+              ) : null}
               <div className={styles.showBrandContent}>
                 <SignalShowLogo show={selectedShow} />
                 <div className={styles.showBrandIdentity}>

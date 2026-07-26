@@ -32,7 +32,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Chat | v1.33 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
 | Zen | v1.31 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Coffee | v2.37 | Active | Two-to-five-bot tables with composable identity Powers, directional interruption irritation, synthesized identity, surreal café atmospheres, and faithful replay. |
-| Signal | v1.36 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
+| Signal | v1.37 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
@@ -90,6 +90,11 @@ stages do not block the standalone preview.
 
 ### 2026-07-26
 
+- Bumped `Signal` to `v1.37` to restore the Align Studio cosmetic production
+  layer: extracted microphones take separate host and guest accent masks,
+  generated lighting uses its receiver map, floor glows can be placed and
+  resized, and Light/Dark opacity, Screen/Overlay blending, and film grain save
+  with the show for live presentation and faithful replay.
 - Bumped `Signal` to `v1.36` so a reshuffled false-name Power does not force
   identity exposition into every answer or turn a deterministic social silence
   into spoken text. Canonical `...` stays non-substantive, so Auto no longer

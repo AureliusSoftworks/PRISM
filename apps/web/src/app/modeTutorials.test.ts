@@ -1153,9 +1153,18 @@ describe("mode tutorials", () => {
       assert.match(booking?.body ?? "", /whether they have coffee at all/u);
       assert.match(booking?.body ?? "", /cups only for bots who drink coffee/u);
       assert.match(booking?.body ?? "", /drag the visible pieces/u);
+      assert.match(booking?.body ?? "", /separate Host and Guest floor glows/u);
+      assert.match(booking?.body ?? "", /extracted microphone masks/u);
+      assert.match(booking?.body ?? "", /saved film grain/u);
+      assert.match(booking?.body ?? "", /100% Overlay/u);
+      assert.match(booking?.body ?? "", /faithful replay/u);
       assert.match(
         booking?.body ?? "",
-        /Prompt Center \/prompts and !wildcard decks/u,
+        /selected Prompt Center prompts and wildcard rolls are inserted immediately as ordinary editable text/u,
+      );
+      assert.match(
+        booking?.body ?? "",
+        /premise composers keep \/prompt and !wildcard tokens until the show is saved/u,
       );
       assert.match(
         booking?.body ?? "",

@@ -45,7 +45,7 @@ describe("composer picks everywhere", () => {
     assert.match(signalSource, /expandComposerDraft\?/u);
     assert.match(
       signalSource,
-      /<input\s+id="signal-episode-topic"[\s\S]{0,200}setTopicDraft/u,
+      /<input[\s\S]{0,120}id="signal-episode-topic"[\s\S]{0,160}setTopicDraft/u,
     );
     const topicFieldSource = signalSource.slice(
       signalSource.indexOf('<label htmlFor="signal-episode-topic">'),
@@ -57,7 +57,11 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       signalSource,
-      /id: "signal-producer-brief"[\s\S]{0,200}onChange: setProducerBriefDraft/u,
+      /id: "signal-producer-brief"[\s\S]{0,260}onChange: setProducerBriefDraft[\s\S]{0,420}resolvePicksToPlainText: true/u,
+    );
+    assert.match(
+      pageSource,
+      /field\.resolvePicksToPlainText[\s\S]{0,240}expandComposerDraft\([\s\S]{0,100}composerShortcutInsertionText\(command\)/u,
     );
     assert.match(
       signalSource,
@@ -73,7 +77,7 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       signalSource,
-      /currentProducerBrief: \([\s\S]{0,80}expandComposerDraft\?\.\(producerBriefDraft\)/u,
+      /expandComposerDraft\?\.\(producerBriefDraft\)\s*\?\?\s*producerBriefDraft/u,
     );
     assert.match(
       pageSource,

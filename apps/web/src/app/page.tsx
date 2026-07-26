@@ -27106,6 +27106,9 @@ interface ComposerInputProps {
   toolPicks?: readonly CommandCenterCommand[];
   promptPicks?: readonly CommandCenterCommand[];
   wildcardPicks?: readonly CommandCenterCommand[];
+  resolveShortcutPickToText?: (
+    command: CommandCenterCommand,
+  ) => string | null;
   dismissPopoversSignal?: number;
   actionInputEnabled?: boolean;
   interruptActive?: boolean;
@@ -27706,10 +27709,12 @@ function insertComposerShortcutInEditor(
   editor: Editor,
   command: CommandCenterCommand,
   scope: ComposerShortcutScope,
+  resolvedText?: string,
 ): boolean {
   const token = getComposerShortcutFromEditor(editor, scope);
   if (!token) return false;
-  const replacement = composerShortcutInsertionText(command);
+  const replacement =
+    resolvedText ?? composerShortcutInsertionText(command);
   editor
     .chain()
     .focus()
@@ -27819,8 +27824,10 @@ function replaceTextareaComposerShortcut(
   caret: number,
   command: CommandCenterCommand,
   scope: ComposerShortcutScope,
+  resolvedText?: string,
 ): { value: string; caret: number } | null {
-  const replacement = composerShortcutInsertionText(command);
+  const replacement =
+    resolvedText ?? composerShortcutInsertionText(command);
   return replaceTextareaComposerShortcutWithText(
     text,
     caret,
@@ -31729,6 +31736,10 @@ interface DesktopMarkdownComposerProps {
   promptPicks?: readonly CommandCenterCommand[];
   /** User wildcard decks shown in the composer autocomplete menu. */
   wildcardPicks?: readonly CommandCenterCommand[];
+  /** Replace a selected prompt or wildcard shortcut with resolved plain text. */
+  resolveShortcutPickToText?: (
+    command: CommandCenterCommand,
+  ) => string | null;
   /** True while the dice button is generating a context-aware prompt. */
   generatingRandomPrompt?: boolean;
   /** When true, the editor is locked (read-only) and visually muted. */
@@ -31767,6 +31778,7 @@ const DesktopMarkdownComposer = forwardRef<
     toolPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
     wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+    resolveShortcutPickToText,
     onGenerateWildcardSlotValue,
     chipPointerBehavior = "resolve",
     generatingRandomPrompt = false,
@@ -32222,9 +32234,14 @@ const DesktopMarkdownComposer = forwardRef<
       command: CommandCenterCommand,
       scope: ComposerShortcutScope,
     ): boolean => {
-      return insertComposerShortcutInEditor(ed, command, scope);
+      return insertComposerShortcutInEditor(
+        ed,
+        command,
+        scope,
+        resolveShortcutPickToText?.(command) ?? undefined,
+      );
     },
-    [],
+    [resolveShortcutPickToText],
   );
 
   const resolveEditorComposerChipActivation = useCallback(
@@ -33272,6 +33289,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
       toolPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       promptPicks = EMPTY_COMPOSER_COMMAND_PICKS,
       wildcardPicks = EMPTY_COMPOSER_COMMAND_PICKS,
+      resolveShortcutPickToText,
       dismissPopoversSignal,
       actionInputEnabled = true,
       interruptActive = false,
@@ -33736,6 +33754,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
           el.selectionStart ?? 0,
           command,
           scope,
+          resolveShortcutPickToText?.(command) ?? undefined,
         );
         if (!next) return false;
         textareaValueRef.current = next.value;
@@ -33744,7 +33763,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
         onValueChange(next.value);
         return true;
       },
-      [onValueChange],
+      [onValueChange, resolveShortcutPickToText],
     );
 
     const replaceTextareaChipActivationTarget = useCallback(
@@ -34355,6 +34374,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
             toolPicks={toolPicks}
             promptPicks={promptPicks}
             wildcardPicks={wildcardPicks}
+            resolveShortcutPickToText={resolveShortcutPickToText}
             generatingRandomPrompt={generatingRandomPrompt}
             disabled={disabled || generatingRandomPrompt}
             dismissPopoversSignal={dismissPopoversSignal}
@@ -71871,6 +71891,7 @@ function HomeContent(): React.JSX.Element {
     className?: string;
     onBlur?: (value: string) => void;
     onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
+    resolvePicksToPlainText?: boolean;
   };
 
   /** Compact ComposerInput with Prompt Center prompts + wildcard decks only. */
@@ -71913,6 +71934,16 @@ function HomeContent(): React.JSX.Element {
           toolPicks={EMPTY_COMPOSER_COMMAND_PICKS}
           promptPicks={commandCenterPromptPicks}
           wildcardPicks={composerWildcardDeckPicks}
+          resolveShortcutPickToText={
+            field.resolvePicksToPlainText
+              ? (command) => {
+                  const resolved = expandComposerDraft(
+                    composerShortcutInsertionText(command).trim(),
+                  ).trim();
+                  return resolved ? `${resolved} ` : "";
+                }
+              : undefined
+          }
           dismissPopoversSignal={composerPopoverDismissSignal}
           onChange={(event) => {
             const next = singleLine
