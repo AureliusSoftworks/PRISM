@@ -318,7 +318,7 @@ export interface ReplayRecordingV1 {
 }
 
 const REPLAY_TITLE_CARD_MS = 2_100;
-const REPLAY_SIGNAL_INTRO_CARD_MS = 4_200;
+const REPLAY_SIGNAL_INTRO_CARD_MS = 3_000;
 const REPLAY_END_CARD_MS = 2_000;
 const REPLAY_BETWEEN_UTTERANCES_MS = 420;
 const REPLAY_MIN_UTTERANCE_MS = 1_200;
@@ -954,6 +954,42 @@ export function compileReplayTimelineV2(
       utterance,
     ]),
   );
+  const speechEndMsByStartSequence = new Map<number, number>();
+  const pendingSpeechStartsByKey = new Map<
+    string,
+    ReplayDirectionEventV2[]
+  >();
+  const speechEventKey = (event: ReplayDirectionEventV2): string => {
+    const channel =
+      event.payload.channel === "crosstalk" ||
+      event.payload.channel === "reaction"
+        ? event.payload.channel
+        : "primary";
+    return [
+      event.sourceMessageId ?? "",
+      boundedId(event.payload.speakerId),
+      channel,
+    ].join("\u0000");
+  };
+  for (const event of manifest.direction) {
+    if (event.kind !== "speech") continue;
+    const key = speechEventKey(event);
+    if (event.payload.active === false) {
+      const pending = pendingSpeechStartsByKey.get(key);
+      const start = pending?.shift();
+      if (start) {
+        speechEndMsByStartSequence.set(
+          start.sequence,
+          Math.max(start.atMs + 1, event.atMs),
+        );
+      }
+      if (pending?.length === 0) pendingSpeechStartsByKey.delete(key);
+      continue;
+    }
+    const pending = pendingSpeechStartsByKey.get(key) ?? [];
+    pending.push(event);
+    pendingSpeechStartsByKey.set(key, pending);
+  }
   const beats = manifest.direction.flatMap((event) => {
     if (event.kind !== "speech" || event.payload.active === false) return [];
     const messageId = event.sourceMessageId ?? "";
@@ -961,12 +997,14 @@ export function compileReplayTimelineV2(
     if (!utterance) return [];
     const speakerId =
       boundedId(event.payload.speakerId) || utterance.speakerId;
+    const capturedEndMs =
+      event.endMs ?? speechEndMsByStartSequence.get(event.sequence);
     return [
       {
         id: `utterance:${utterance.id}`,
         kind: "utterance" as const,
         startMs: event.atMs,
-        endMs: Math.max(event.atMs + 1, event.endMs ?? event.atMs + 1),
+        endMs: Math.max(event.atMs + 1, capturedEndMs ?? event.atMs + 1),
         utteranceId: utterance.id,
         sourceMessageId: messageId,
         speakerId,

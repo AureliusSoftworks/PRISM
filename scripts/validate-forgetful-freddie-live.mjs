@@ -4,7 +4,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   applyBotPowerEternalIntroductionResponseV1,
-  botPowerResponseIsFirstIntroductionV1,
   parseStoredBotPowersV1,
 } from "@localai/shared";
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
@@ -281,10 +280,10 @@ const signalPrompt = buildBotcastSpeakerPrompt({
 });
 
 const PASS_CRITERIA = Object.freeze([
-  "The final visible line reacts naturally to the immediate anger or repetition complaint.",
-  "The final visible line is not another canned self-introduction.",
-  "The final visible line claims no older friendship or relationship history.",
-  "Coffee and Signal production prompts exclude every older turn and the standing topic while retaining the current other-speaker message.",
+  "Production prompts keep only the current other-speaker message — no older turns or standing topic.",
+  "Production prompts contain no hard amnesia performance cue.",
+  "The visible reply is not rewritten by the runtime; organic confusion, repair, or admitting forgetfulness may appear.",
+  "The visible reply does not invent older friendship or shared-history claims from hidden context.",
 ]);
 console.error(JSON.stringify({ phase: "predeclared_pass_criteria", criteria: PASS_CRITERIA }));
 
@@ -306,22 +305,22 @@ function promptContains(messages, text) {
   return messages.some((message) => message.content.includes(text));
 }
 
+function promptHasAmnesiaCoaching(messages) {
+  return messages.some((message) =>
+    /Hard short-term-amnesia|HARD MEMORY CONTRACT|fresh first contact/iu.test(
+      message.content,
+    )
+  );
+}
+
 function responseJudgment(response) {
-  const introduction = botPowerResponseIsFirstIntroductionV1(
-    response,
-    freddie.name,
-  );
-  const forbidden = /\b(?:our friendship|known each other|old friend|longtime friend|shared history|again|introduc\w* myself|repeat\w*|repetit(?:ion|ive)|remember\w*|memory|amnesia|habit|start fresh|one conversation to the next|every time we meet|brain[^.!?]{0,40}catch(?:ing)? up)\b/iu.test(
-    response,
-  );
-  const reactsToImmediateInput = /\b(?:what do you mean|not sure what you mean|I (?:do not|don't) understand|I (?:do not|don't) think we(?:'ve| have) met|have we met|who are you|confus(?:ed|ing)|what(?:'s| is) the matter|what(?:'s| is) wrong)\b/iu.test(
-    response,
-  );
+  const inventsOlderRelationship =
+    /\b(?:our friendship|known each other|old friend|longtime friend|shared history|after all (?:these|those) years|remember when we)\b/iu.test(
+      response,
+    );
   return {
-    pass: !introduction && !forbidden && reactsToImmediateInput,
-    introduction,
-    reactsToImmediateInput,
-    noForbiddenContent: !forbidden,
+    pass: !inventsOlderRelationship && response.trim().length > 0,
+    inventsOlderRelationship,
   };
 }
 
@@ -340,12 +339,14 @@ function modeResult(prompt, rawResponse) {
     prompt,
     persistentTopicSentinel,
   );
+  const promptUncoached = !promptHasAmnesiaCoaching(prompt);
   const visibleJudgment = responseJudgment(visibleResponse);
   return {
     input: currentAgitatedLine,
     promptIsolation,
     promptHasCurrentOtherSpeakerMessage,
     promptExcludesPersistentTopic,
+    promptUncoached,
     rawResponse,
     rawJudgment: responseJudgment(rawResponse),
     visibleResponse,
@@ -354,7 +355,9 @@ function modeResult(prompt, rawResponse) {
       visibleJudgment.pass &&
       promptIsolation &&
       promptHasCurrentOtherSpeakerMessage &&
-      promptExcludesPersistentTopic,
+      promptExcludesPersistentTopic &&
+      promptUncoached &&
+      visibleResponse === String(rawResponse ?? "").trim(),
   };
 }
 

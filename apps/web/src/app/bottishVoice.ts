@@ -686,6 +686,7 @@ async function playPlan(
     roomAcoustics,
     stereoPan,
     isCurrent: () => expectedGeneration === generation,
+    onStart: lifecycle?.onPresenceStart,
   });
   if (expectedGeneration !== generation) return;
   const bytes = encodeBottishPlanWave(plan);
@@ -1048,6 +1049,7 @@ async function playBabble(
     roomAcoustics,
     stereoPan,
     isCurrent: () => expectedGeneration === generation,
+    onStart: lifecycle?.onPresenceStart,
   });
   if (expectedGeneration !== generation) return;
   const roboticPlan = buildBabbleRoboticPlan(text, normalized, seed);

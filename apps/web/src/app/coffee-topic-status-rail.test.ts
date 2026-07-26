@@ -30,6 +30,37 @@ test("Coffee topic stats share the permanent Table Talk rail", () => {
   assert.doesNotMatch(pageSource, /coffeePollBubble/);
 });
 
+test("the selected Coffee topic stays framed under the navbar", () => {
+  assert.match(pageSource, /className=\{styles\.coffeeMainChrome\}/);
+  assert.match(pageSource, /className=\{styles\.coffeeSessionTopicFrame\}/);
+  assert.match(
+    pageSource,
+    /data-tutorial-target="coffee-session-topic"/,
+  );
+  assert.match(
+    pageSource,
+    /coffeeSessionSurfaceActive &&[\s\S]*coffeeConversation\?\.coffeeTopic\?\.trim\(\)/,
+  );
+  assert.match(
+    pageSource,
+    /className=\{styles\.coffeeSessionTopicLabel\}[\s\S]*Topic/,
+  );
+  assert.doesNotMatch(
+    pageSource,
+    /coffeeThread[\s\S]{0,400}coffeeSessionTopicFrame/,
+  );
+
+  assert.match(
+    css,
+    /\.coffeeSessionTopicTitle\s*\{[\s\S]*overflow-wrap:\s*anywhere;/,
+  );
+  assert.match(css, /\.coffeeMainChrome\s*\{[\s\S]*display:\s*grid;/);
+  assert.match(
+    css,
+    /\.coffeeMain\s*\{[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\) auto;/,
+  );
+});
+
 test("the shared topic split and Table Talk rail are directly resizable", () => {
   assert.match(
     pageSource,

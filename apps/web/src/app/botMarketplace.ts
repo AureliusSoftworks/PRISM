@@ -1,8 +1,17 @@
 import { normalizeBotFaceEyeCharacter } from "@localai/shared";
 
 import { normalizeBotPowersV1, type BotPowerV1 } from "@localai/shared";
+import {
+  normalizePrismMarketplaceBranchLock,
+  prismMarketplaceBranchLockAllows,
+  type PrismMarketplaceBranchLock,
+} from "./prismDevGating.ts";
 
 export const BOT_MARKETPLACE_MANIFEST_PATH = "/bot-marketplace/manifest.json";
+
+export type BotMarketplaceVisibilityOptions = {
+  branchName?: string;
+};
 
 /**
  * Marketplace faces use one glyph for the eye row. Keep that glyph visibly
@@ -35,6 +44,8 @@ export interface BotMarketplaceTheme {
   name: string;
   description: string;
   botIds: string[];
+  /** When set, this shelf is hidden unless the build branch matches exactly. */
+  branchLock?: PrismMarketplaceBranchLock | null;
 }
 
 export interface BotMarketplaceEntry {
@@ -54,6 +65,8 @@ export interface BotMarketplaceEntry {
   replacementType: "bot" | null;
   replacementIds: string[];
   powers?: BotPowerV1[];
+  /** When set, this bot is hidden unless the build branch matches exactly. */
+  branchLock?: PrismMarketplaceBranchLock | null;
 }
 
 export interface BotMarketplaceManifest {
@@ -148,6 +161,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
     seenBotIds.add(id);
     seenHashes.add(botHash);
     const powers = normalizeBotPowersV1(botRecord.powers);
+    const branchLock = normalizePrismMarketplaceBranchLock(botRecord.branchLock);
     bots.push({
       id,
       name,
@@ -170,6 +184,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
         replacementId.toLowerCase()
       ),
       ...(powers.length > 0 ? { powers } : {}),
+      ...(branchLock ? { branchLock } : {}),
     });
   }
 
@@ -184,12 +199,14 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
     const botIds = stringList(themeRecord.botIds)
       .map((botId) => botId.toLowerCase())
       .filter((botId) => seenBotIds.has(botId));
+    const branchLock = normalizePrismMarketplaceBranchLock(themeRecord.branchLock);
     seenThemeIds.add(id);
     themes.push({
       id,
       name,
       description: stringValue(themeRecord.description),
       botIds,
+      ...(branchLock ? { branchLock } : {}),
     });
   }
 
@@ -220,28 +237,55 @@ export function marketplaceEntryInstallState(
   return installedHashes.has(entry.botHash) ? "installed" : "available";
 }
 
+function marketplaceEntryIsVisible(
+  entry: BotMarketplaceEntry,
+  options?: BotMarketplaceVisibilityOptions,
+): boolean {
+  return (
+    entry.marketplaceVisible &&
+    prismMarketplaceBranchLockAllows(entry.branchLock, options?.branchName)
+  );
+}
+
+function marketplaceThemeIsVisible(
+  theme: BotMarketplaceTheme,
+  options?: BotMarketplaceVisibilityOptions,
+): boolean {
+  return prismMarketplaceBranchLockAllows(theme.branchLock, options?.branchName);
+}
+
+export function marketplaceVisibleThemes(
+  manifest: BotMarketplaceManifest,
+  options?: BotMarketplaceVisibilityOptions,
+): BotMarketplaceTheme[] {
+  return manifest.themes.filter((theme) => marketplaceThemeIsVisible(theme, options));
+}
+
 export function marketplaceVisibleBotEntries(
-  manifest: BotMarketplaceManifest
+  manifest: BotMarketplaceManifest,
+  options?: BotMarketplaceVisibilityOptions,
 ): BotMarketplaceEntry[] {
-  return manifest.bots.filter((entry) => entry.marketplaceVisible);
+  return manifest.bots.filter((entry) => marketplaceEntryIsVisible(entry, options));
 }
 
 export function marketplaceEntriesForTheme(
   manifest: BotMarketplaceManifest,
-  themeId: string
+  themeId: string,
+  options?: BotMarketplaceVisibilityOptions,
 ): BotMarketplaceEntry[] {
   const theme = manifest.themes.find((candidate) => candidate.id === themeId);
-  if (!theme) return [];
+  if (!theme || !marketplaceThemeIsVisible(theme, options)) return [];
   const byId = new Map(manifest.bots.map((entry) => [entry.id, entry]));
   if (theme.botIds.length > 0) {
     return theme.botIds
       .map((botId) => byId.get(botId) ?? null)
       .filter((entry): entry is BotMarketplaceEntry =>
-        Boolean(entry?.marketplaceVisible)
+        Boolean(entry && marketplaceEntryIsVisible(entry, options))
       );
   }
   return manifest.bots.filter(
-    (entry) => entry.marketplaceVisible && entry.themeIds.includes(theme.id)
+    (entry) =>
+      marketplaceEntryIsVisible(entry, options) && entry.themeIds.includes(theme.id)
   );
 }
 

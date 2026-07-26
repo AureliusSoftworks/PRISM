@@ -77,4 +77,27 @@ describe("Signal delayed live captions", () => {
       "",
     );
   });
+
+  it("shows provenance-marked social silence but hides Power silence", () => {
+    const reveal = updateBotcastSpeechReveal(
+      startBotcastSpeechReveal({ text: "...", durationMs: 900 }),
+      SIGNAL_LIVE_CAPTION_DELAY_MS,
+    );
+    assert.equal(
+      signalLiveCaptionText(reveal, {
+        content: "...",
+        socialSilence: {
+          v: 1,
+          name: "socialSilence",
+          provenance: "social",
+          mode: "signal",
+          seed: "signal-social-silence:episode-1:guest-1:2",
+          volleyTurn: 1,
+          holdMs: 900,
+        },
+      }),
+      "...",
+    );
+    assert.equal(signalLiveCaptionText(reveal, { content: "..." }), "");
+  });
 });

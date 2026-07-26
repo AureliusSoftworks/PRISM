@@ -24,33 +24,30 @@ describe("live avatar mouth synchronization", () => {
     );
   });
 
-  it("keeps live Signal visemes on retained provider alignment", () => {
+  it("keeps released Signal visemes on the active message and provider alignment", () => {
     const avatar = signalSource.slice(
       signalSource.indexOf("const avatar = ("),
       signalSource.indexOf("const hostAvatar ="),
     );
     assert.match(
       avatar,
-      /primarySpeaking[\s\S]{0,160}args\.replay[\s\S]{0,180}speechReveal\?\.text/u,
+      /talking && args\.activeMessage[\s\S]{0,180}text: args\.activeMessage\.content/u,
     );
     assert.match(
       avatar,
-      /signalVoicePerformanceTranscriptText\(args\.activeMessage\)/u,
-    );
-    assert.match(
-      avatar,
-      /const mouthSpeechAlignment = primarySpeaking[\s\S]{0,80}speechReveal\?\.alignment/u,
+      /text: args\.activeMessage\.content,[\s\S]{0,180}alignment: speechReveal\?\.alignment/u,
     );
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
-    assert.match(avatar, /alignment: mouthSpeechAlignment/u);
-    assert.match(avatar, /voiceMode === "bottish"/u);
-    assert.match(avatar, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
   });
 
-  it("uses the exact primary playback text for Signal reveal and mouth timing", () => {
+  it("uses the exact primary crosstalk playback message for Signal audio", () => {
     assert.match(
       signalSource,
-      /const transcriptText =\s*signalVoicePerformanceTranscriptText\(playbackMessage\)/u,
+      /const playbackMessage = primarySpokenContent === message\.content[\s\S]{0,120}\{ \.\.\.message, content: primarySpokenContent \}/u,
+    );
+    assert.match(
+      signalSource,
+      /onUtterance\(\s*playbackMessage,/u,
     );
   });
 
@@ -87,6 +84,11 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(playback, /onProgress: \(elapsedMs: number, durationMs: number\)/u);
     assert.match(playback, /setCoffeeLiveAvatarSpeech/u);
+    assert.match(
+      playback,
+      /coffeeLiveAvatarSpeechProgressShouldCommit\(\{/u,
+      "Coffee mouth progress must not setState on every animation frame",
+    );
     assert.match(playback, /speechActivityWindows: buildSpeechActivityWindows/u);
     assert.match(seatMouth, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(seatMouth, /elapsedMs: liveSeatSpeech\.elapsedMs/u);
@@ -95,7 +97,20 @@ describe("live avatar mouth synchronization", () => {
     assert.match(seatMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
   });
 
-  it("animates prerecorded ambient vocalizations without consulting bot voice style", () => {
+  it("caches Coffee history folds across mouth/typewriter frames", () => {
+    assert.match(pageSource, /coffeeLiveBorrowedIdentityCacheRef/u);
+    assert.match(pageSource, /coffeeSeatActionStateCacheRef/u);
+    assert.match(
+      pageSource,
+      /coffeeLiveBorrowedIdentityCacheRef\.current\.messages === messages/u,
+    );
+    assert.match(
+      pageSource,
+      /cache\.timeline === seatActionTimelineMessages/u,
+    );
+  });
+
+  it("animates Coffee's prerecorded ambient vocalizations without consulting bot voice style", () => {
     assert.match(pageSource, /useAmbientBotVocalization\(\)/u);
     assert.match(
       pageSource,
@@ -105,16 +120,6 @@ describe("live avatar mouth synchronization", () => {
     assert.match(
       pageSource,
       /coffeeAmbientBotVocalizationMouthShape\(bot\.id\)/u,
-    );
-    assert.match(signalSource, /roleIsAmbientVocalizing/u);
-    assert.match(signalSource, /roleMouthIsActive/u);
-    assert.match(
-      signalSource,
-      /signalAmbientBotVocalizationMouthShape\(role\)/u,
-    );
-    assert.doesNotMatch(
-      signalSource,
-      /handleSignalAmbientBotVocalization[\s\S]{0,1600}(?:voicePreset|voiceProfile|speakingStyle)/u,
     );
   });
 });

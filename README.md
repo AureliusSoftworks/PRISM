@@ -47,8 +47,8 @@ PRISM treats utility and wonder as the same product problem.
 | --- | --- | --- |
 | **Chat v1.12** | Active | The main companion workspace for persona conversations, memory, files, images, tools, and private threads. |
 | **Zen v1.11** | Active | The calmer one-to-one relationship layer now folding into PRISM's default Chat experience. |
-| **Coffee v2.5** | Active | A living group conversation for 2–5 reactive bots, with pacing, cups, voice, replay, and social memory. |
-| **Signal v1.11** | Active | A production studio for bot-hosted interview shows, live direction, cameras, atmosphere, archives, and audience response. |
+| **Coffee v2.33** | Active | A living group conversation for 2–5 reactive bots, with synthesized table identity, directional interruption irritation, pacing, crosstalk, cups, voice, replay, and social memory. |
+| **Signal v1.31** | Active | A production studio for bot-hosted interview shows, live direction, directional interruption irritation, socially truthful silence, cameras, archives, and audience response. |
 | **Story v0.9** | Preview | Generated visual-novel episodes with bot casts, choices, maps, inventory, and transcripts. |
 | **Slate v0.7** | Preview | A quiet prose-fiction desk where the AI writes and the writer directs. |
 
@@ -67,13 +67,19 @@ quietly in reach.
 ## Coffee
 
 Create a recurring group, tune the pace, invite the cast, and let the table
-develop its own chemistry.
+develop its own chemistry. Each group saves immediately, then independently
+develops an editable name, a one-sentence ethos that softly guides conversation,
+and a character-free surreal café atmosphere behind the table. Any unfinished
+or failed identity piece can be retried without holding up the group.
 
 ![The Midnight Table Coffee Group setup](docs/images/readme/prism-coffee-group.jpg)
 
 Once the session begins, bots arrive, react, speak, sip, interrupt, remember,
-and leave. The player can join the table, refill a cup, shush the room, or let
-the conversation find its own shape.
+and leave. The chosen or auto-picked topic stays framed under the Coffee navbar
+for the whole live session, replay, and review. An interrupted bot can yield or
+reclaim its unfinished thought, and an intentional `...` can hold the table
+silently until someone answers the moment. The player can join the conversation,
+refill a cup, shush the room, or let it find its own shape.
 
 ## Signal
 
@@ -89,7 +95,9 @@ production flow while finished assets land on the show.
 ![Signal generating the logo and Dark-to-Light studio assets for The Echo of Ideas](docs/images/readme/prism-signal-asset-generation.png)
 
 Take it live with cameras, synchronized presence, private host direction,
-episode archives, replay, and audience-facing truth.
+episode archives, replay, and audience-facing truth. Bot guests and hosts can
+refuse a cut-in and reclaim the next turn, or leave a visible, inaudible `...`
+without falsifying the voice, camera, transcript, or saved performance.
 
 ![Mara Venn and Vesper Quinn live in the AFTERLIGHT Signal studio](docs/images/readme/prism-signal-studio.png)
 

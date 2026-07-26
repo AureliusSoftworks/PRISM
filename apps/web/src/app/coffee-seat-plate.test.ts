@@ -7,9 +7,11 @@ import {
   COFFEE_SEAT_SIP_FACE_ACTIVE_PROGRESS,
   COFFEE_SEAT_SIP_PLATE_GLYPH,
   coffeeSeatCustomMouthCharacterForSip,
+  coffeeSeatMouthRotationCssDeg,
   coffeeSeatMouthShapeFromVisibleLength,
   coffeeSeatPlateGlyph,
   coffeeSeatSipFaceActive,
+  coffeeSeatSipMouthTreatmentActive,
   coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
   coffeeSeatScreenRelativeMouthRotationDeg,
@@ -102,8 +104,12 @@ describe("coffeeSeatPlateGlyph", () => {
       text: ":@",
       rotateDeg: 90,
     });
+    assert.deepEqual(coffeeSeatPlateGlyph("warm", "click"), {
+      text: ":ʘ",
+      rotateDeg: 90,
+    });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "narrow"), {
-      text: ":o",
+      text: ":ɵ",
       rotateDeg: 90,
     });
     assert.deepEqual(coffeeSeatPlateGlyph("warm", "open-wide"), {
@@ -158,6 +164,31 @@ describe("coffeeSeatPlateGlyph", () => {
     );
   });
 
+  it("keeps every sip-mouth treatment behind the Coffee * option", () => {
+    assert.equal(
+      coffeeSeatSipMouthTreatmentActive({
+        sipActive: true,
+        coffeePuckerEnabled: true,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeSeatSipMouthTreatmentActive({
+        sipActive: true,
+        coffeePuckerEnabled: false,
+      }),
+      false,
+      "a disabled Coffee * leaves persistent mouths completely untouched",
+    );
+    assert.equal(
+      coffeeSeatSipMouthTreatmentActive({
+        sipActive: false,
+        coffeePuckerEnabled: true,
+      }),
+      false,
+    );
+  });
+
   it("keeps the transient sip pucker upright across left, center, and right face rotations", () => {
     for (const [faceRotationDeg, expectedMouthRotationDeg] of [
       [90, -90],
@@ -177,6 +208,65 @@ describe("coffeeSeatPlateGlyph", () => {
       coffeeSeatScreenRelativeMouthRotationDeg(27, 90),
       -63,
       "the authored mouth rotation remains recoverable after the sip layer clears",
+    );
+  });
+
+  it("keeps standard and custom-bot fallback visemes on their correct plate baselines", () => {
+    const common = {
+      faceRotationDeg: 90,
+      transientSipPucker: false,
+    };
+
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 0,
+        configuredCustomMouth: false,
+        renderedCustomMouth: false,
+      }),
+      0,
+      "standard plate mouths keep their built-in orientation",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: false,
+        renderedCustomMouth: false,
+      }),
+      27,
+      "Default speech visemes receive authored rotation as a delta",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: true,
+        renderedCustomMouth: false,
+      }),
+      0,
+      "Signal fallback visemes do not inherit a different custom glyph's angle",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: true,
+        renderedCustomMouth: true,
+      }),
+      -63,
+      "rendered custom glyphs keep their authored screen orientation",
+    );
+    assert.equal(
+      coffeeSeatMouthRotationCssDeg({
+        ...common,
+        authoredRotationDeg: 27,
+        configuredCustomMouth: true,
+        renderedCustomMouth: true,
+        transientSipPucker: true,
+      }),
+      -90,
+      "sip puckers remain upright regardless of authored mouth rotation",
     );
   });
 

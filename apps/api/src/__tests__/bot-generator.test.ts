@@ -175,6 +175,8 @@ describe("PRISM bot generator", () => {
     );
     assert.ok(parsed);
     assert.equal(parsed.name, "Mara Vale");
+    assert.equal(parsed.namePronunciation, "");
+    assert.equal(parsed.selfReferral, "");
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, "premium-mara");
     assert.equal(parsed.audioVoiceProfile.baseVoiceId, "voice-7");
     assert.equal(parsed.face.eyeCount, 1);

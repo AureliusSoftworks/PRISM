@@ -25,7 +25,7 @@ import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
-import { botPowerSourceHashV1 } from "@localai/shared";
+import { botPowerSourceHashV1, buildBotFalseNameSeedV1, parseStoredAssistantToolPayload, pickBotFalseNameFromPoolV1 } from "@localai/shared";
 import {
   createZenSessionMemoryCheckpoint,
   listZenSessionMemories,
@@ -107,7 +107,33 @@ function createChatTestDb(): DatabaseSync {
       glyph TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
-      visibility TEXT NOT NULL DEFAULT 'private'
+      visibility TEXT NOT NULL DEFAULT 'private',
+      face_eyes_font TEXT,
+      face_eye_character TEXT,
+      face_eye_count INTEGER NOT NULL DEFAULT 1,
+      face_eye_animation TEXT,
+      face_mouth_font TEXT,
+      face_mouth_character TEXT,
+      face_mouth_animation TEXT,
+      face_mouth_coffee_pucker INTEGER NOT NULL DEFAULT 0,
+      face_font_weight TEXT,
+      face_eye_scale REAL,
+      face_eye_offset_x REAL,
+      face_eye_offset_y REAL,
+      face_eye_rotation_deg REAL,
+      face_mouth_scale REAL,
+      face_mouth_offset_x REAL,
+      face_mouth_offset_y REAL,
+      face_mouth_rotation_deg REAL,
+      face_blink_bar TEXT,
+      face_blink_scale REAL,
+      face_blink_offset_x REAL,
+      face_blink_offset_y REAL,
+      face_blink_rotation_deg REAL,
+      face_thinking_frames TEXT,
+      avatar_details_json TEXT,
+      authored_audio_voice_profile TEXT,
+      audio_voice_profile_override TEXT
     );
     CREATE TABLE images (
       id TEXT PRIMARY KEY,
@@ -426,7 +452,7 @@ describe("Coffee continuity context for private chats", () => {
     });
     const chatCalls = installChatFetchStub("I meant the risk had to be named.");
 
-    await processChatMessage(
+    const result = await processChatMessage(
       db,
       "user-1",
       "What did you mean when you said the poll had teeth?",
@@ -553,6 +579,59 @@ describe("bot-locked Chat lane", () => {
     assert.equal(result.conversation.messages.at(-1)?.content, "*nods once* *sips coffee* ...");
   });
 
+  it("enforces addressed-insult Powers when the Chat provider omits the jab", async () => {
+    const db = createChatTestDb();
+    installChatFetchStub("The premise fails because its conclusion assumes itself.");
+    const intent =
+      "Every single reply contains a fresh ad hominem insult aimed at whoever the bot is addressing.";
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Does this argument work?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are Andy Hominem.",
+        userDisplayName: "Jared",
+        botPowers: [
+          {
+            version: 1,
+            id: "andy-hominem",
+            name: "Ad Hominem",
+            intent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1("Ad Hominem", intent),
+              selfCue: "Insult the current addressee.",
+              observerCue: "Andy insults whoever he addresses.",
+              effects: [
+                {
+                  type: "addressed_insult",
+                  trigger: "every_spoken_reply",
+                  target: "current_addressee",
+                  style: "fresh_tailored",
+                },
+              ],
+              ruleLabels: ["Insults every addressee"],
+            },
+          },
+        ],
+      },
+    );
+
+    assert.match(result.conversation.messages.at(-1)?.content ?? "", /^Jared,/u);
+    assert.match(
+      result.conversation.messages.at(-1)?.content ?? "",
+      /premise fails because its conclusion assumes itself/iu,
+    );
+  });
+
   it("gives Forgetful Freddie only the current message and responds to the complaint", async () => {
     const db = createChatTestDb();
     const chatCalls = installChatFetchStub(
@@ -595,8 +674,264 @@ describe("bot-locked Chat lane", () => {
     assert.doesNotMatch(joinedPrompt, /Hello for the very first time/iu);
     assert.equal(
       second.conversation.messages.at(-1)?.content,
-      "What do you mean? I don't think we've met yet.",
+      "I'm Forgetful Freddie. Everyone seems surprisingly tense, but it's nice to meet you.",
     );
+  });
+
+  it("keeps Shapeshifter sticky across Chat turns and reshuffles on amnesia", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+    ).run(
+      "shapeshifter-1",
+      "user-1",
+      "Shifty Sam",
+      "You are Shifty Sam, a restless shapeshifter waiting for a new public form.",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+    ).run(
+      "library-alpha",
+      "user-1",
+      "Alpha Avery",
+      "You are Alpha Avery. Speak with crisp librarian precision.",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+    ).run(
+      "library-bravo",
+      "user-1",
+      "Bravo Blair",
+      "You are Bravo Blair. Speak like a bold stage coach.",
+    );
+
+    const chatCalls = installChatFetchStub(
+      "I am Alpha Avery. The shelves feel steady today.",
+    );
+    const baseSettings = {
+      preferredProvider: "local" as const,
+      autoMemory: false,
+      botId: "shapeshifter-1",
+      incognito: false,
+      mode: "chat" as const,
+      botSystemPrompt:
+        "You are Shifty Sam, a restless shapeshifter waiting for a new public form.",
+      starterPromptLabel: "Shifty Sam",
+      botPowerShapeshift: true,
+    };
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "Who are you right now?",
+      CHAT_TEST_USER_KEY,
+      baseSettings,
+    );
+    const firstPayload = parseStoredAssistantToolPayload(
+      (
+        db
+          .prepare(
+            "SELECT tool_payload FROM messages WHERE role = 'assistant' ORDER BY created_at ASC LIMIT 1",
+          )
+          .get() as { tool_payload: string | null }
+      ).tool_payload,
+    );
+    const firstState = firstPayload.identityShapeshift;
+    assert.ok(firstState);
+    assert.equal(firstState.surface, "chat");
+    assert.equal(firstState.holderBotId, "shapeshifter-1");
+    assert.equal(firstState.targetSource, "library");
+    assert.notEqual(firstState.targetBotId, "shapeshifter-1");
+    const firstPrompt =
+      chatCalls
+        .map((messages) => messages.map((entry) => entry.content).join("\n"))
+        .find((joined) => /absolutely convinced that you are/iu.test(joined)) ??
+      "";
+    assert.match(firstPrompt, /absolutely convinced that you are/iu);
+    assert.match(firstPrompt, new RegExp(firstState.targetBotName, "iu"));
+    assert.doesNotMatch(
+      firstPrompt,
+      /restless shapeshifter waiting for a new public form/iu,
+    );
+
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "Still the same form?",
+      CHAT_TEST_USER_KEY,
+      baseSettings,
+      first.conversation.id,
+    );
+    const secondPayload = parseStoredAssistantToolPayload(
+      (
+        db
+          .prepare(
+            "SELECT tool_payload FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get() as { tool_payload: string | null }
+      ).tool_payload,
+    );
+    assert.equal(secondPayload.identityShapeshift?.targetBotId, firstState.targetBotId);
+    assert.equal(
+      secondPayload.identityShapeshift?.sourceMessageId,
+      firstState.sourceMessageId,
+    );
+    const stickyPrompt =
+      chatCalls
+        .map((messages) => messages.map((entry) => entry.content).join("\n"))
+        .filter((joined) => /Do not restate that you transformed/iu.test(joined))
+        .at(-1) ?? "";
+    assert.match(stickyPrompt, /Do not restate that you transformed/iu);
+    assert.match(stickyPrompt, new RegExp(firstState.targetBotName, "iu"));
+    assert.equal(
+      second.conversation.messages.at(-1)?.identityShapeshift?.targetBotId,
+      firstState.targetBotId,
+    );
+
+    const thirdCallsBefore = chatCalls.length;
+    await processChatMessage(
+      db,
+      "user-1",
+      "Nice to meet you for the first time.",
+      CHAT_TEST_USER_KEY,
+      {
+        ...baseSettings,
+        botPowerEternalIntroduction: true,
+      },
+      first.conversation.id,
+    );
+    const amnesiaPrompt =
+      chatCalls
+        .slice(thirdCallsBefore)
+        .map((messages) => messages.map((entry) => entry.content).join("\n"))
+        .find((joined) => /Announce the lived identity once/iu.test(joined)) ??
+      "";
+    assert.match(amnesiaPrompt, /Announce the lived identity once/iu);
+    const thirdPayload = parseStoredAssistantToolPayload(
+      (
+        db
+          .prepare(
+            "SELECT tool_payload FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get() as { tool_payload: string | null }
+      ).tool_payload,
+    );
+    assert.ok(thirdPayload.identityShapeshift);
+    assert.notEqual(
+      thirdPayload.identityShapeshift.sourceMessageId,
+      firstState.sourceMessageId,
+    );
+    assert.equal(thirdPayload.identityShapeshift.holderBotId, "shapeshifter-1");
+    assert.notEqual(thirdPayload.identityShapeshift.targetBotId, "shapeshifter-1");
+  });
+
+  it("keeps John/Jane Doe sticky across Chat turns and reshuffles on amnesia", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)",
+    ).run(
+      "alias-bot-1",
+      "user-1",
+      "Library Lex",
+      "You are Library Lex. Speak with calm librarian warmth.",
+    );
+
+    const chatCalls = installChatFetchStub(
+      "I am Library Lex and I know my place on the shelf.",
+    );
+    const baseSettings = {
+      preferredProvider: "local" as const,
+      autoMemory: false,
+      botId: "alias-bot-1",
+      incognito: false,
+      mode: "chat" as const,
+      botSystemPrompt: "You are Library Lex. Speak with calm librarian warmth.",
+      botPersonaPrompt: "You are Library Lex. Speak with calm librarian warmth.",
+      starterPromptLabel: "Library Lex",
+      botPowerFalseName: true,
+    };
+
+    const first = await processChatMessage(
+      db,
+      "user-1",
+      "What is your name?",
+      CHAT_TEST_USER_KEY,
+      baseSettings,
+    );
+    const expectedBelievedName = pickBotFalseNameFromPoolV1(
+      buildBotFalseNameSeedV1({
+        conversationId: first.conversation.id,
+        holderBotId: "alias-bot-1",
+      }),
+    );
+    const firstPayload = parseStoredAssistantToolPayload(
+      (
+        db
+          .prepare(
+            "SELECT tool_payload FROM messages WHERE role = 'assistant' ORDER BY created_at ASC LIMIT 1",
+          )
+          .get() as { tool_payload: string | null }
+      ).tool_payload,
+    );
+    const firstState = firstPayload.falseName;
+    assert.ok(firstState);
+    assert.equal(firstState.surface, "chat");
+    assert.equal(firstState.holderBotId, "alias-bot-1");
+    assert.equal(firstState.believedName, expectedBelievedName);
+    const firstPrompt =
+      chatCalls
+        .map((messages) => messages.map((entry) => entry.content).join("\n"))
+        .find((joined) => joined.includes(`You are ${expectedBelievedName}`)) ??
+      "";
+    assert.match(firstPrompt, new RegExp(`You are ${expectedBelievedName}`, "iu"));
+    assert.match(firstPrompt, /Hard false-name rule/iu);
+    assert.match(first.conversation.messages.at(-1)?.content ?? "", new RegExp(`I am ${expectedBelievedName}`, "iu"));
+
+    const second = await processChatMessage(
+      db,
+      "user-1",
+      "Still the same name?",
+      CHAT_TEST_USER_KEY,
+      baseSettings,
+      first.conversation.id,
+    );
+    const secondPayload = parseStoredAssistantToolPayload(
+      (
+        db
+          .prepare(
+            "SELECT tool_payload FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get() as { tool_payload: string | null }
+      ).tool_payload,
+    );
+    assert.equal(secondPayload.falseName?.believedName, expectedBelievedName);
+    assert.equal(
+      second.conversation.messages.at(-1)?.falseName?.believedName,
+      expectedBelievedName,
+    );
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Nice to meet you for the first time.",
+      CHAT_TEST_USER_KEY,
+      {
+        ...baseSettings,
+        botPowerEternalIntroduction: true,
+      },
+      first.conversation.id,
+    );
+    const thirdPayload = parseStoredAssistantToolPayload(
+      (
+        db
+          .prepare(
+            "SELECT tool_payload FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1",
+          )
+          .get() as { tool_payload: string | null }
+      ).tool_payload,
+    );
+    assert.ok(thirdPayload.falseName);
+    assert.notEqual(thirdPayload.falseName?.believedName, expectedBelievedName);
   });
 
   it("applies one holder mood hit when a Quiet Power turn takes the mute branch", async () => {
@@ -6996,12 +7331,12 @@ describe("processChatMessage Zen action prompt guidance", () => {
       }
       bodies.push(body);
       return new Response(
-        JSON.stringify({ message: { content: "Presence received." } }),
+        JSON.stringify({ message: { content: "*tilts their head* Presence received." } }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
     }) as typeof fetch;
 
-    await processChatMessage(
+    const result = await processChatMessage(
       db,
       "user-1",
       "*looks at you inquisitively*",
@@ -7019,10 +7354,16 @@ describe("processChatMessage Zen action prompt guidance", () => {
     const promptText = (chatBody.messages ?? [])
       .map((message) => `${message.role}: ${message.content}`)
       .join("\n");
-    assert.match(promptText, /single-asterisk action beat/);
-    assert.match(promptText, /2-8 words/);
-    assert.match(promptText, /no chains of motions/);
+    assert.match(promptText, /Zen stage-direction format for this/);
+    assert.match(promptText, /Write spoken words only|Prefer opening with one short 2-8 word/);
     assert.match(promptText, /performed non-verbal action/);
+    const storedPayload = db
+      .prepare("SELECT tool_payload FROM messages WHERE role = 'assistant'")
+      .get() as { tool_payload: string | null };
+    assert.equal(
+      JSON.parse(storedPayload.tool_payload ?? "{}").zenStageAction?.name,
+      "zenStageAction",
+    );
   });
 
   it("does not add Zen action guidance to Sandbox prompts", async () => {
@@ -7068,6 +7409,48 @@ describe("processChatMessage Zen action prompt guidance", () => {
       .join("\n");
     assert.doesNotMatch(promptText, /single-asterisk action beat/);
     assert.doesNotMatch(promptText, /performed non-verbal action/);
+  });
+
+  it("lets live-action context own the beat and suppresses ordinary reply actions", async () => {
+    const db = createChatTestDb();
+    const promptBodies: Array<{ messages?: Array<{ role: string; content: string }> }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role: string; content: string }>;
+      };
+      if (body.messages) promptBodies.push(body);
+      return new Response(
+        JSON.stringify({ message: { content: "*takes a breath* I hear you." } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "I need a moment.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "zen",
+        zenLiveActionContext: {
+          source: "live_action",
+          activeBotId: null,
+          botAction: "notices your pause",
+          clientSequenceId: "live-sequence-1",
+        },
+      },
+    );
+
+    const promptText = (promptBodies[0]?.messages ?? [])
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    assert.match(promptText, /Write spoken words only/u);
+    const assistant = result.conversation.messages.at(-1);
+    assert.equal(assistant?.content, "I hear you.");
+    assert.equal(assistant?.zenStageAction, undefined);
   });
 });
 

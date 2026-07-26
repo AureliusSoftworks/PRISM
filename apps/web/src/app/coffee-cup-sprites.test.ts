@@ -116,7 +116,7 @@ describe("coffee cup sprites", () => {
     }
   });
 
-  it("lets thinking finish a sip but suppresses sipping once speech begins", () => {
+  it("lets thinking and speech immediately suppress an active sip", () => {
     const thinking = buildCoffeeCupVisualState({
       seed: "thinking-cup",
       nowMs: 10_000,
@@ -139,7 +139,7 @@ describe("coffee cup sprites", () => {
       speaking: true,
     });
 
-    assert.equal(thinking.sipping, true);
+    assert.equal(thinking.sipping, false);
     assert.equal(speaking.sipping, false);
     assert.equal(idle.sipping, true);
     assert.equal(thinking.frameIndex, idle.frameIndex);
@@ -1328,7 +1328,7 @@ describe("coffee cup sprites", () => {
     );
   });
 
-  it("lets an active sip finish when the bot starts thinking", () => {
+  it("blocks ambient sips when the bot starts thinking", () => {
     const seed = "session:bot-thinking";
     let sipWindowMs: number | null = null;
     for (let nowMs = 0; nowMs <= 180_000; nowMs += 100) {
@@ -1346,7 +1346,7 @@ describe("coffee cup sprites", () => {
         progress: 0.5,
         thinking: true,
       }),
-      true,
+      false,
     );
     assert.equal(
       buildCoffeeCupVisualState({
@@ -1355,7 +1355,7 @@ describe("coffee cup sprites", () => {
         progressOverride: 0.5,
         thinking: true,
       }).sipping,
-      true,
+      false,
     );
   });
 

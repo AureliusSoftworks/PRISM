@@ -29,15 +29,15 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.30 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
-| Zen | v1.28 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.30 | Active | Two-to-five-bot tables with an off-camera player carrying the pot and shared faithful audio-master replay. |
-| Signal | v1.29 | Active | Released interview studio restored as the stable Signal baseline. |
+| Chat | v1.33 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
+| Zen | v1.31 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Coffee | v2.37 | Active | Two-to-five-bot tables with composable identity Powers, directional interruption irritation, synthesized identity, surreal café atmospheres, and faithful replay. |
+| Signal | v1.36 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
-| Story | v0.26 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
+| Story | v0.27 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
 | Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
@@ -87,6 +87,22 @@ stages do not block the standalone preview.
   perspectives.
 
 ## Changelog
+
+### 2026-07-26
+
+- Bumped `Signal` to `v1.36` so a reshuffled false-name Power does not force
+  identity exposition into every answer or turn a deterministic social silence
+  into spoken text. Canonical `...` stays non-substantive, so Auto no longer
+  mistakes those silent beats for interview progress and closes only after an
+  earned conversational handoff.
+
+### 2026-07-25
+
+- Bumped `Chat` to `v1.33`, `Zen` to `v1.31`, `Coffee` to `v2.36`, `Signal`
+  to `v1.34`, and `Story` to `v0.27` so short-term amnesia is a pure per-turn
+  context wipe: the holder receives only the current other-speaker message, with
+  no hard amnesia performance cue and no reply rewriting. Peers keep full
+  history and react organically.
 
 ### 2026-07-24
 
@@ -356,6 +372,14 @@ stages do not block the standalone preview.
   hidden continuity remain excluded while Coffee and Signal preserve replay-safe
   peer consequences.
 
+- Bumped `Coffee` to `v2.37` and `Signal` to `v1.35` so identity mirroring now
+  composes the target's active public Power consequences into the holder's
+  next turns. Borrowed amnesia can clear the holder's transcript context and
+  borrowed false-name state can generate a fresh spoken alias, while bot IDs,
+  seats, roles, UI labels, private perception permissions, providers, safety,
+  and replay attribution remain anchored. Composition is first-order so a
+  copied identity-mirror effect cannot recurse.
+
 - Bumped `Coffee` to `v2.13` and `Signal` to `v1.19` so Identity Crisis Ian
   reliably changes when a bot addresses him naturally, including a name at the
   end or inside a sentence. The copied bot's public persona now becomes Ian's
@@ -400,7 +424,7 @@ stages do not block the standalone preview.
   irrelevant, and planned applets remain deferred until they own compatible
   participant state. Hard mute always wins because no spoken turn occurred.
 
-- Bumped `Coffee` to `v2.9` and `Signal` to `v1.15` for bounded identity
+- Bumped `Coffee` to `v2.9` and `Signal` to `v1.15` for the original bounded identity
   mirroring. The latest bot to directly address a ready holder supplies only its
   public persona, normalized face, and resolved voice; the holder keeps its own
   glyph, color, role, Powers, private state, routing, and hard restrictions.

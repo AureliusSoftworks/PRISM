@@ -7,10 +7,8 @@ import {
   coffeeAutoplayWatchdogShouldWake,
   coffeeCenterFeedMessagesDuringPendingReveal,
   coffeeComposerUsesRichInput,
-  coffeeDraftChangeCountsAsTyping,
   coffeeDirectedMentionBotIds,
   coffeeEmptyTurnAutoplayRetryDelayMs,
-  coffeeGeneratedReplyRevealDeferralMs,
   coffeeLoopTimerOwnsAutoplayTurn,
   coffeePendingSubmittedUserLineVisible,
   coffeePersistedUserLineOwnsPendingReveal,
@@ -21,7 +19,7 @@ import {
   coffeeShouldWaitForPendingBotRevealBeforeNextTurn,
   coffeeSubmittedUserMessageFromTurn,
   coffeeTableMessageContentIsVisible,
-  coffeeTableTalkAutoplayDeferralMs,
+  coffeeUserTableTypingShouldRestart,
   coffeeVoicePlaybackOwnsAutoplayGate,
   coffeeVisibleDirectedMentionBotIds,
 } from "./coffee-user-reveal-flow.ts";
@@ -126,6 +124,57 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("does not restart a finished player typewriter when pending reveal deps refresh", () => {
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: true,
+        visibleLength: 0,
+        fullDisplayLength: 24,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: false,
+        visibleLength: 24,
+        fullDisplayLength: 24,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: false,
+        visibleLength: 12,
+        fullDisplayLength: 24,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeUserTableTypingShouldRestart({
+        settled: false,
+        visibleLength: 0,
+        fullDisplayLength: 0,
+      }),
+      false,
+    );
+  });
+
+  it("keeps the pending center feed seeded with the player line before the bot types", () => {
+    const pendingMessages = [
+      { id: "u1", role: "user", content: "Hello table." },
+      { id: "a1", role: "assistant", content: "Hello back." },
+    ];
+    const feed = coffeeCenterFeedMessagesDuringPendingReveal({
+      messages: pendingMessages,
+      pendingMessageId: "a1",
+      revealInProgress: true,
+    });
+    assert.deepEqual(
+      feed.map((message) => message.id),
+      ["u1"],
+    );
+  });
+
   it("hides the pending user line while it is actively typing or after finish", () => {
     assert.equal(
       coffeePendingSubmittedUserLineVisible({
@@ -194,6 +243,18 @@ describe("coffee user reveal flow", () => {
   it("hides punctuation-only interruption pause rows from the table", () => {
     assert.equal(coffeeTableMessageContentIsVisible("..."), false);
     assert.equal(coffeeTableMessageContentIsVisible(" … "), false);
+    assert.equal(
+      coffeeTableMessageContentIsVisible("...", {
+        v: 1,
+        name: "socialSilence",
+        provenance: "social",
+        mode: "coffee",
+        seed: "coffee:silence",
+        volleyTurn: 2,
+        holdMs: 1_600,
+      }),
+      true,
+    );
     assert.equal(coffeeTableMessageContentIsVisible("*pauses*"), true);
     assert.equal(coffeeTableMessageContentIsVisible("Still here."), true);
   });
@@ -306,7 +367,6 @@ describe("coffee user reveal flow", () => {
       sessionPhase: "live",
       autoplayPaused: false,
       devModeEnabled: false,
-      draft: "",
       rhythmState: "idle" as const,
       loopScheduled: false,
       requestInFlight: false,
@@ -349,12 +409,14 @@ describe("coffee user reveal flow", () => {
       }),
       false,
     );
+    // A composing player never blocks the wake path; playerComposing stays
+    // schedulable so bots keep talking while the user types.
     assert.equal(
       coffeeAutoplayWatchdogShouldWake({
         ...strandedRoom,
-        draft: "still typing",
+        rhythmState: "playerComposing",
       }),
-      false,
+      true,
     );
     assert.equal(
       coffeeAutoplayWatchdogShouldWake({
@@ -434,7 +496,6 @@ describe("coffee user reveal flow", () => {
       sessionPhase: "arriving",
       autoplayPaused: false,
       devModeEnabled: false,
-      draft: "",
       requestInFlight: false,
       pendingReveal: false,
       timerPresent: true,
@@ -482,89 +543,6 @@ describe("coffee user reveal flow", () => {
       coffeeAutoplayForceTurnShouldRun({ ...activeRoom, hasPresentBot: false }),
       false,
     );
-  });
-
-  it("defers Coffee autoplay while Table talk is active or freshly edited", () => {
-    assert.equal(
-      coffeeTableTalkAutoplayDeferralMs({
-        conversationId: "coffee-1",
-        draft: "wait",
-        lastTypedAtMs: 1000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 10_000,
-        graceMs: 5200,
-      }),
-      5200,
-    );
-    assert.equal(
-      coffeeTableTalkAutoplayDeferralMs({
-        conversationId: "coffee-1",
-        draft: "",
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      3200,
-    );
-    assert.equal(
-      coffeeTableTalkAutoplayDeferralMs({
-        conversationId: "coffee-2",
-        draft: "wait",
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      0,
-    );
-  });
-
-  it("does not hide generated bot replies behind an empty Table Talk grace window", () => {
-    assert.equal(
-      coffeeGeneratedReplyRevealDeferralMs({
-        conversationId: "coffee-1",
-        draft: "",
-        includeCooldown: false,
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      0,
-    );
-    assert.equal(
-      coffeeGeneratedReplyRevealDeferralMs({
-        conversationId: "coffee-1",
-        draft: "wait",
-        includeCooldown: false,
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      5200,
-    );
-    assert.equal(
-      coffeeGeneratedReplyRevealDeferralMs({
-        conversationId: "coffee-1",
-        draft: "wait",
-        includeCooldown: true,
-        lastTypedAtMs: 10_000,
-        lastTypedConversationId: "coffee-1",
-        nowMs: 12_000,
-        graceMs: 5200,
-      }),
-      0,
-    );
-  });
-
-  it("does not treat no-op empty Table Talk syncs as typing activity", () => {
-    assert.equal(coffeeDraftChangeCountsAsTyping("", ""), false);
-    assert.equal(coffeeDraftChangeCountsAsTyping("  ", ""), false);
-    assert.equal(coffeeDraftChangeCountsAsTyping("", "hi"), true);
-    assert.equal(coffeeDraftChangeCountsAsTyping("hi", ""), true);
-    assert.equal(coffeeDraftChangeCountsAsTyping("hi", "hi there"), true);
   });
 
   it("returns ordered unique seated bot mentions for directed Coffee rounds", () => {

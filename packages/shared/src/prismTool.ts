@@ -16,10 +16,43 @@ import {
   normalizeBotIdentityMirrorStateV1,
   type BotIdentityMirrorStateV1,
 } from "./botIdentityMirror.ts";
+import {
+  normalizeBotIdentityShapeshiftStateV1,
+  type BotIdentityShapeshiftStateV1,
+} from "./botIdentityShapeshift.ts";
+import {
+  normalizeBotFalseNameStateV1,
+  type BotFalseNameStateV1,
+} from "./botFalseName.ts";
+import {
+  normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizeCrosstalkFloorOutcome,
+  normalizeCrosstalkReclaimPlanV1,
+  normalizeListenerReactionPlanV1,
+  normalizeListenerReactionSpokenCue,
+  normalizeSocialSilenceMarkerV1,
+  type CrosstalkReclaimPlanV1,
+  type ListenerReactionPlanV1,
+  type SocialSilenceMarkerV1,
+} from "./listenerReaction.ts";
+import {
+  normalizeDirectionalIrritationDeliveryPlanV1,
+  normalizeDirectionalIrritationTransitionV1,
+  type DirectionalIrritationDeliveryPlanV1,
+  type DirectionalIrritationTransitionV1,
+} from "./directionalIrritation.ts";
+import {
+  normalizeCoffeeStageActionPayload,
+  normalizeZenStageActionPayload,
+  type CoffeeStageActionPayload,
+  type ZenStageActionPayload,
+} from "./stageActionDirector.ts";
 import type {
-  ListenerReactionPlanV1,
-  ListenerReactionVocalFoley,
-} from "./listenerReaction.js";
+  CoffeeInterruptionEvent,
+  CoffeeInterruptionSocialDelta,
+} from "./index.js";
+
+export type { CoffeeStageActionPayload, ZenStageActionPayload };
 
 function normalizeStoredAutoRecoveryTrace(
   value: unknown
@@ -300,6 +333,26 @@ export interface CoffeeReplayIdentityMirrorEventPayload {
   state: BotIdentityMirrorStateV1;
 }
 
+export interface CoffeeReplayIdentityShapeshiftEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "identityShapeshift";
+  /** Holder bot id, retained as the common replay-event bot key. */
+  botId: string;
+  occurredAt: string;
+  state: BotIdentityShapeshiftStateV1;
+}
+
+export interface CoffeeReplayFalseNameEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "falseName";
+  /** Holder bot id, retained as the common replay-event bot key. */
+  botId: string;
+  occurredAt: string;
+  state: BotFalseNameStateV1;
+}
+
 export interface CoffeeReplayBaristaDeliveryEventPayload {
   v: 1;
   name: "coffeeReplayEvent";
@@ -335,6 +388,18 @@ export interface CoffeeReplayPlayerSipEventPayload {
   imageId: string | null;
 }
 
+export interface CoffeeReplayDirectionalIrritationEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "directionalIrritation";
+  /** Subject bot that holds directed irritation (interrupted or rebuffed). */
+  botId: string;
+  targetBotId: string;
+  occurredAt: string;
+  transition: DirectionalIrritationTransitionV1;
+  delivery?: DirectionalIrritationDeliveryPlanV1;
+}
+
 export type CoffeeReplayEventPayload =
   | CoffeeReplayArrivalEventPayload
   | CoffeeReplayMoodEventPayload
@@ -347,8 +412,11 @@ export type CoffeeReplayEventPayload =
   | CoffeeReplayListenerReactionEventPayload
   | CoffeeReplayPerceptionOverlapEventPayload
   | CoffeeReplayIdentityMirrorEventPayload
+  | CoffeeReplayIdentityShapeshiftEventPayload
+  | CoffeeReplayFalseNameEventPayload
   | CoffeeReplayBaristaDeliveryEventPayload
-  | CoffeeReplayPlayerSipEventPayload;
+  | CoffeeReplayPlayerSipEventPayload
+  | CoffeeReplayDirectionalIrritationEventPayload;
 
 export type ZenDisplayAlign = "start" | "center" | "end";
 
@@ -406,14 +474,28 @@ export interface StoredAssistantToolEnvelope {
   webSearch?: WebSearchPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only canonical stage action (Director / LLM / Power) for exact-once display. */
+  coffeeStageAction?: CoffeeStageActionPayload;
+  /** Zen-only canonical stage action provenance for reload and plate presentation. */
+  zenStageAction?: ZenStageActionPayload;
   /** Coffee-only user action cue shown as ambient context, not a table turn. */
   coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only spoken interruption metadata carried by a hidden pause row. */
+  coffeeInterruption?: CoffeeInterruptionEvent;
   /** Coffee-only hidden state beats used by replay, not visible transcript prose. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Privacy-safe record of a successful Auto recovery. */
   autoRecovery?: AutoRecoveryTraceV1;
   /** Internal marker for deterministic Power output that must not be sanitized on reload. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Chat/Zen sticky Library/Marketplace shapeshift form for the speaking holder. */
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  /** Chat/Zen sticky John/Jane Doe alias for the speaking holder. */
+  falseName?: BotFalseNameStateV1;
+  /** Provenance for an exact ordinary social-silence turn. */
+  socialSilence?: SocialSilenceMarkerV1;
+  /** Links a protected reclaim turn to its audience-heard source fragment. */
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
 }
 
 /** Narrow storage shape for SQLite `messages.tool_payload` rows. */
@@ -447,10 +529,28 @@ export interface ParsedStoredAssistantToolPayload {
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeStageAction?: CoffeeStageActionPayload;
+  zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeInterruption?: CoffeeInterruptionEvent;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  falseName?: BotFalseNameStateV1;
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+}
+
+function normalizeStoredFalseNameStateV1(
+  root: Record<string, unknown> | null | undefined,
+): BotFalseNameStateV1 | undefined {
+  if (!root) return undefined;
+  return (
+    normalizeBotFalseNameStateV1(root.falseName) ??
+    normalizeBotFalseNameStateV1(root.identityFalseName) ??
+    undefined
+  );
 }
 
 /// Many models wrap the envelope in a markdown fence; raw fences make JSON.parse fail
@@ -761,6 +861,158 @@ function normalizeCoffeeUserActionPayload(value: unknown): CoffeeUserActionPaylo
   };
 }
 
+function normalizeCoffeeInterruptionId(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim();
+  return normalized.length > 0 && normalized.length <= 160
+    ? normalized
+    : undefined;
+}
+
+function normalizeCoffeeInterruptionText(
+  value: unknown,
+  maxLength = 8_000,
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > 0 && normalized.length <= maxLength
+    ? normalized
+    : undefined;
+}
+
+function normalizeCoffeeInterruptionSocialDelta(
+  value: unknown,
+): CoffeeInterruptionSocialDelta | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const botId = normalizeCoffeeInterruptionId(row.botId);
+  const dispositionDelta =
+    typeof row.dispositionDelta === "number" &&
+    Number.isFinite(row.dispositionDelta)
+      ? Math.max(-1, Math.min(1, row.dispositionDelta))
+      : null;
+  const valuesFrictionDelta =
+    typeof row.valuesFrictionDelta === "number" &&
+    Number.isFinite(row.valuesFrictionDelta)
+      ? Math.max(-1, Math.min(1, row.valuesFrictionDelta))
+      : null;
+  if (!botId || dispositionDelta === null || valuesFrictionDelta === null) {
+    return null;
+  }
+  return { botId, dispositionDelta, valuesFrictionDelta };
+}
+
+/**
+ * Normalize persisted Coffee interruption metadata without turning its
+ * transcript-only cues into ordinary assistant conversation rows.
+ */
+export function normalizeCoffeeInterruptionEvent(
+  value: unknown,
+): CoffeeInterruptionEvent | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const kind =
+    row.kind === "playerInterruptsBot" ||
+    row.kind === "botInterruptsPlayer" ||
+    row.kind === "botInterruptsBot"
+      ? row.kind
+      : null;
+  const interruptedBotId = normalizeCoffeeInterruptionId(row.interruptedBotId);
+  const interrupterBotId = normalizeCoffeeInterruptionId(row.interrupterBotId);
+  if (
+    !kind ||
+    !interruptedBotId ||
+    (kind === "botInterruptsBot" && !interrupterBotId)
+  ) {
+    return undefined;
+  }
+
+  const activeTurnId = normalizeCoffeeInterruptionId(row.activeTurnId);
+  const interruptedMessageId = normalizeCoffeeInterruptionId(
+    row.interruptedMessageId,
+  );
+  const targetPhase =
+    row.targetPhase === "thinking" || row.targetPhase === "speaking"
+      ? row.targetPhase
+      : undefined;
+  const visibleTokenCount =
+    typeof row.visibleTokenCount === "number" &&
+    Number.isFinite(row.visibleTokenCount)
+      ? Math.max(0, Math.floor(row.visibleTokenCount))
+      : undefined;
+  const visibleProgress =
+    typeof row.visibleProgress === "number" &&
+    Number.isFinite(row.visibleProgress)
+      ? Math.max(0, Math.min(1, row.visibleProgress))
+      : undefined;
+  const reactionOutcome =
+    row.reactionOutcome === "silence" ||
+    row.reactionOutcome === "react" ||
+    row.reactionOutcome === "yield" ||
+    row.reactionOutcome === "resume"
+      ? row.reactionOutcome
+      : row.reactionOutcome === "reclaim"
+        ? "resume"
+        : undefined;
+  const resumeOutcome =
+    row.resumeOutcome === "none" ||
+    row.resumeOutcome === "yielded" ||
+    row.resumeOutcome === "continued" ||
+    row.resumeOutcome === "invited"
+      ? row.resumeOutcome
+      : undefined;
+  const reclaim =
+    normalizeCrosstalkReclaimPlanV1(row.reclaim) ?? undefined;
+  const floorOutcome =
+    normalizeCrosstalkFloorOutcome(
+      row.floorOutcome ?? row.reactionOutcome,
+    ) ?? (reclaim ? "reclaim" : undefined);
+  const interruptedSnippet = normalizeCoffeeInterruptionText(
+    row.interruptedSnippet,
+  );
+  const reactionText = normalizeCoffeeInterruptionText(row.reactionText);
+  const interrupterCue =
+    normalizeListenerReactionSpokenCue(row.interrupterCue) ?? undefined;
+  const interruptedSpeakerCue =
+    normalizeBotCrosstalkInterruptedSpeakerCue(
+      row.interruptedSpeakerCue,
+    ) ?? undefined;
+  const socialConsequences = Array.isArray(row.socialConsequences)
+    ? row.socialConsequences
+        .slice(0, 50)
+        .map(normalizeCoffeeInterruptionSocialDelta)
+        .filter(
+          (
+            consequence,
+          ): consequence is CoffeeInterruptionSocialDelta =>
+            consequence !== null,
+        )
+    : [];
+
+  return {
+    kind,
+    interruptedBotId,
+    ...(interrupterBotId ? { interrupterBotId } : {}),
+    ...(activeTurnId ? { activeTurnId } : {}),
+    ...(targetPhase ? { targetPhase } : {}),
+    ...(interruptedMessageId ? { interruptedMessageId } : {}),
+    ...(visibleTokenCount !== undefined ? { visibleTokenCount } : {}),
+    ...(visibleProgress !== undefined ? { visibleProgress } : {}),
+    ...(interruptedSnippet ? { interruptedSnippet } : {}),
+    ...(row.pauseBeat === true ? { pauseBeat: true } : {}),
+    ...(reactionOutcome ? { reactionOutcome } : {}),
+    ...(resumeOutcome ? { resumeOutcome } : {}),
+    ...(floorOutcome ? { floorOutcome } : {}),
+    ...(reclaim ? { reclaim } : {}),
+    ...(reactionText ? { reactionText } : {}),
+    ...(interrupterCue ? { interrupterCue } : {}),
+    ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
+    socialConsequences,
+  };
+}
+
 function clampCoffeeReplayUnitValue(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   return Math.max(0, Math.min(1, value));
@@ -809,61 +1061,6 @@ function normalizeCoffeeReplaySocialSnapshot(
     restraint,
     engagement,
     leavePressure,
-  };
-}
-
-function normalizeStoredListenerReactionPlan(
-  value: unknown,
-): ListenerReactionPlanV1 | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const row = value as Record<string, unknown>;
-  const id = (candidate: unknown): string | undefined =>
-    typeof candidate === "string" && candidate.trim() && candidate.trim().length <= 160
-      ? candidate.trim()
-      : undefined;
-  const speakerBotId = id(row.speakerBotId);
-  const listenerBotId = id(row.listenerBotId);
-  const messageId = id(row.messageId);
-  const seed = id(row.seed);
-  const targetSource = row.targetSource === "role" ||
-      row.targetSource === "direct" || row.targetSource === "inferred"
-    ? row.targetSource
-    : undefined;
-  const visualAction = row.visualAction === "nod" ||
-      row.visualAction === "lean_in" || row.visualAction === "head_tilt" ||
-      row.visualAction === "soft_smile" || row.visualAction === "thoughtful_hmm"
-    ? row.visualAction
-    : undefined;
-  const spokenCue = row.spokenCue === "mm-hm" || row.spokenCue === "I see" ||
-      row.spokenCue === "hmm" || row.spokenCue === "right" ||
-      row.spokenCue === "oh" || row.spokenCue === "go on"
-    ? row.spokenCue
-    : undefined;
-  const vocalFoley = row.vocalFoley === "clears throat" ||
-      row.vocalFoley === "coughs" || row.vocalFoley === "sighs" ||
-      row.vocalFoley === "exhales" || row.vocalFoley === "chuckles"
-    ? row.vocalFoley as ListenerReactionVocalFoley
-    : undefined;
-  if (
-    row.v !== 1 || row.name !== "listenerReaction" || !speakerBotId ||
-    !listenerBotId || speakerBotId === listenerBotId || !messageId || !seed ||
-    !targetSource || !visualAction || typeof row.targetProgress !== "number" ||
-    !Number.isFinite(row.targetProgress) || row.targetProgress < 0.3 ||
-    row.targetProgress > 0.75 || typeof row.cameraCutEligible !== "boolean"
-  ) return undefined;
-  return {
-    v: 1,
-    name: "listenerReaction",
-    speakerBotId,
-    listenerBotId,
-    messageId,
-    targetSource,
-    visualAction,
-    ...(spokenCue ? { spokenCue } : {}),
-    ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
-    targetProgress: row.targetProgress,
-    seed,
-    cameraCutEligible: row.cameraCutEligible,
   };
 }
 
@@ -1009,8 +1206,46 @@ export function normalizeCoffeeReplayEventPayload(
       state,
     };
   }
+  if (row.kind === "identityShapeshift") {
+    const state = normalizeBotIdentityShapeshiftStateV1(row.state);
+    if (
+      !state ||
+      state.surface !== "coffee" ||
+      state.holderBotId !== botId ||
+      state.occurredAt !== occurredAt
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "identityShapeshift",
+      botId,
+      occurredAt,
+      state,
+    };
+  }
+  if (row.kind === "falseName") {
+    const state = normalizeBotFalseNameStateV1(row.state);
+    if (
+      !state ||
+      state.surface !== "coffee" ||
+      state.holderBotId !== botId ||
+      state.occurredAt !== occurredAt
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "falseName",
+      botId,
+      occurredAt,
+      state,
+    };
+  }
   if (row.kind === "listenerReaction") {
-    const plan = normalizeStoredListenerReactionPlan(row.plan);
+    const plan = normalizeListenerReactionPlanV1(row.plan) ?? undefined;
     if (!plan || plan.listenerBotId !== botId) return undefined;
     return {
       v: 1,
@@ -1049,6 +1284,37 @@ export function normalizeCoffeeReplayEventPayload(
       startRatio,
       maxSimultaneousVoices: 2,
       occurredAt,
+    };
+  }
+  if (row.kind === "directionalIrritation") {
+    const targetBotId = normalizeCoffeeReplayBotId(row.targetBotId);
+    const transition = normalizeDirectionalIrritationTransitionV1(row.transition);
+    if (
+      !targetBotId ||
+      targetBotId === botId ||
+      !transition ||
+      transition.subjectBotId !== botId ||
+      transition.targetBotId !== targetBotId ||
+      transition.occurredAt !== occurredAt
+    ) {
+      return undefined;
+    }
+    const delivery = normalizeDirectionalIrritationDeliveryPlanV1(row.delivery);
+    if (
+      delivery &&
+      (delivery.subjectBotId !== botId || delivery.targetBotId !== targetBotId)
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "directionalIrritation",
+      botId,
+      targetBotId,
+      occurredAt,
+      transition,
+      ...(delivery ? { delivery } : {}),
     };
   }
   if (row.kind === "botDeparture") {
@@ -1803,8 +2069,17 @@ export function parseStoredAssistantToolPayload(
       const coffeeAmbientAction = root
         ? normalizeCoffeeAmbientActionPayload(root.coffeeAmbientAction)
         : undefined;
+      const coffeeStageAction = root
+        ? normalizeCoffeeStageActionPayload(root.coffeeStageAction)
+        : undefined;
+      const zenStageAction = root
+        ? normalizeZenStageActionPayload(root.zenStageAction)
+        : undefined;
       const coffeeUserAction = root
         ? normalizeCoffeeUserActionPayload(root.coffeeUserAction)
+        : undefined;
+      const coffeeInterruption = root
+        ? normalizeCoffeeInterruptionEvent(root.coffeeInterruption)
         : undefined;
       const coffeeReplayEvents = root
         ? normalizeCoffeeReplayEventPayloads(root.coffeeReplayEvents)
@@ -1819,6 +2094,16 @@ export function parseStoredAssistantToolPayload(
         root?.botPowerExactResponse === "speech_obfuscation"
           ? root.botPowerExactResponse
           : undefined;
+      const identityShapeshift = root
+        ? normalizeBotIdentityShapeshiftStateV1(root.identityShapeshift) ?? undefined
+        : undefined;
+      const falseName = root ? normalizeStoredFalseNameStateV1(root) : undefined;
+      const socialSilence = root
+        ? normalizeSocialSilenceMarkerV1(root.socialSilence) ?? undefined
+        : undefined;
+      const crosstalkReclaim = root
+        ? normalizeCrosstalkReclaimPlanV1(root.crosstalkReclaim) ?? undefined
+        : undefined;
       return {
         askQuestion: normalizedAsk,
         ...(sent ? { sentGeneratedImage: sent } : {}),
@@ -1827,10 +2112,17 @@ export function parseStoredAssistantToolPayload(
         ...(zenDisplay ? { zenDisplay } : {}),
         ...(zenTurn ? { zenTurn } : {}),
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+        ...(coffeeStageAction ? { coffeeStageAction } : {}),
+        ...(zenStageAction ? { zenStageAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
+        ...(coffeeInterruption ? { coffeeInterruption } : {}),
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(identityShapeshift ? { identityShapeshift } : {}),
+        ...(falseName ? { falseName } : {}),
+        ...(socialSilence ? { socialSilence } : {}),
+        ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
     }
     if (!parsed || typeof parsed !== "object") return {};
@@ -1842,7 +2134,12 @@ export function parseStoredAssistantToolPayload(
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
     const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(row.coffeeAmbientAction);
+    const coffeeStageAction = normalizeCoffeeStageActionPayload(row.coffeeStageAction);
+    const zenStageAction = normalizeZenStageActionPayload(row.zenStageAction);
     const coffeeUserAction = normalizeCoffeeUserActionPayload(row.coffeeUserAction);
+    const coffeeInterruption = normalizeCoffeeInterruptionEvent(
+      row.coffeeInterruption,
+    );
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
     const botPowerExactResponse =
@@ -1852,6 +2149,13 @@ export function parseStoredAssistantToolPayload(
       row.botPowerExactResponse === "speech_obfuscation"
         ? row.botPowerExactResponse
         : undefined;
+    const identityShapeshift =
+      normalizeBotIdentityShapeshiftStateV1(row.identityShapeshift) ?? undefined;
+    const falseName = normalizeStoredFalseNameStateV1(row);
+    const socialSilence =
+      normalizeSocialSilenceMarkerV1(row.socialSilence) ?? undefined;
+    const crosstalkReclaim =
+      normalizeCrosstalkReclaimPlanV1(row.crosstalkReclaim) ?? undefined;
     const moodRow = row.mood;
     let moodKey: StoredMoodKey | undefined;
     let moodConfidence: number | undefined;
@@ -1882,10 +2186,17 @@ export function parseStoredAssistantToolPayload(
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
       ...(webSearch ? { webSearch } : {}),
       ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+      ...(coffeeStageAction ? { coffeeStageAction } : {}),
+      ...(zenStageAction ? { zenStageAction } : {}),
       ...(coffeeUserAction ? { coffeeUserAction } : {}),
+      ...(coffeeInterruption ? { coffeeInterruption } : {}),
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       ...(autoRecovery ? { autoRecovery } : {}),
       ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+      ...(identityShapeshift ? { identityShapeshift } : {}),
+      ...(falseName ? { falseName } : {}),
+      ...(socialSilence ? { socialSilence } : {}),
+      ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
     };
   } catch {
     return {};
@@ -1905,10 +2216,17 @@ export function hydrateAssistantMessageParts(args: {
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeStageAction?: CoffeeStageActionPayload;
+  zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
+  coffeeInterruption?: CoffeeInterruptionEvent;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  falseName?: BotFalseNameStateV1;
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
 } {
   const stored = parseStoredAssistantToolPayload(args.toolPayload);
   const reparsed = parseAssistantPrismTools(args.content);
@@ -1929,13 +2247,28 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.coffeeAmbientAction
       ? { coffeeAmbientAction: stored.coffeeAmbientAction }
       : {}),
+    ...(stored.coffeeStageAction
+      ? { coffeeStageAction: stored.coffeeStageAction }
+      : {}),
+    ...(stored.zenStageAction ? { zenStageAction: stored.zenStageAction } : {}),
     ...(stored.coffeeUserAction ? { coffeeUserAction: stored.coffeeUserAction } : {}),
+    ...(stored.coffeeInterruption
+      ? { coffeeInterruption: stored.coffeeInterruption }
+      : {}),
     ...(stored.coffeeReplayEvents && stored.coffeeReplayEvents.length > 0
       ? { coffeeReplayEvents: stored.coffeeReplayEvents }
       : {}),
     ...(stored.autoRecovery ? { autoRecovery: stored.autoRecovery } : {}),
     ...(stored.botPowerExactResponse
       ? { botPowerExactResponse: stored.botPowerExactResponse }
+      : {}),
+    ...(stored.identityShapeshift
+      ? { identityShapeshift: stored.identityShapeshift }
+      : {}),
+    ...(stored.falseName ? { falseName: stored.falseName } : {}),
+    ...(stored.socialSilence ? { socialSilence: stored.socialSilence } : {}),
+    ...(stored.crosstalkReclaim
+      ? { crosstalkReclaim: stored.crosstalkReclaim }
       : {}),
   };
 }
@@ -1956,10 +2289,16 @@ export function serializeAssistantToolPayload(args: {
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  coffeeStageAction?: CoffeeStageActionPayload;
+  zenStageAction?: ZenStageActionPayload;
   coffeeUserAction?: CoffeeUserActionPayload;
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  falseName?: BotFalseNameStateV1;
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
 }): string | null {
   const hasAsk = args.askQuestion !== undefined;
   const hasStory = args.tellFictionalStory !== undefined;
@@ -1973,6 +2312,10 @@ export function serializeAssistantToolPayload(args: {
   const hasZenTurn = zenTurn !== undefined;
   const coffeeAmbientAction = normalizeCoffeeAmbientActionPayload(args.coffeeAmbientAction);
   const hasCoffeeAmbientAction = coffeeAmbientAction !== undefined;
+  const coffeeStageAction = normalizeCoffeeStageActionPayload(args.coffeeStageAction);
+  const hasCoffeeStageAction = coffeeStageAction !== undefined;
+  const zenStageAction = normalizeZenStageActionPayload(args.zenStageAction);
+  const hasZenStageAction = zenStageAction !== undefined;
   const coffeeUserAction = normalizeCoffeeUserActionPayload(args.coffeeUserAction);
   const hasCoffeeUserAction = coffeeUserAction !== undefined;
   const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(args.coffeeReplayEvents);
@@ -1987,6 +2330,17 @@ export function serializeAssistantToolPayload(args: {
       ? args.botPowerExactResponse
       : undefined;
   const hasBotPowerExactResponse = botPowerExactResponse !== undefined;
+  const identityShapeshift =
+    normalizeBotIdentityShapeshiftStateV1(args.identityShapeshift) ?? undefined;
+  const hasIdentityShapeshift = identityShapeshift !== undefined;
+  const falseName = normalizeBotFalseNameStateV1(args.falseName) ?? undefined;
+  const hasFalseName = falseName !== undefined;
+  const socialSilence =
+    normalizeSocialSilenceMarkerV1(args.socialSilence) ?? undefined;
+  const hasSocialSilence = socialSilence !== undefined;
+  const crosstalkReclaim =
+    normalizeCrosstalkReclaimPlanV1(args.crosstalkReclaim) ?? undefined;
+  const hasCrosstalkReclaim = crosstalkReclaim !== undefined;
   if (
     !hasAsk &&
     !hasStory &&
@@ -1996,10 +2350,16 @@ export function serializeAssistantToolPayload(args: {
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
+    !hasCoffeeStageAction &&
+    !hasZenStageAction &&
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
-    !hasBotPowerExactResponse
+    !hasBotPowerExactResponse &&
+    !hasIdentityShapeshift &&
+    !hasFalseName &&
+    !hasSocialSilence &&
+    !hasCrosstalkReclaim
   ) {
     return null;
   }
@@ -2012,10 +2372,16 @@ export function serializeAssistantToolPayload(args: {
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
+    !hasCoffeeStageAction &&
+    !hasZenStageAction &&
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasBotPowerExactResponse &&
+    !hasIdentityShapeshift &&
+    !hasFalseName &&
+    !hasSocialSilence &&
+    !hasCrosstalkReclaim &&
     hasImage
   ) {
     return JSON.stringify({ v: 1 as const, sentGeneratedImage: args.sentGeneratedImage! });
@@ -2029,10 +2395,16 @@ export function serializeAssistantToolPayload(args: {
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
+    !hasCoffeeStageAction &&
+    !hasZenStageAction &&
     !hasCoffeeUserAction &&
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
-    !hasBotPowerExactResponse
+    !hasBotPowerExactResponse &&
+    !hasIdentityShapeshift &&
+    !hasFalseName &&
+    !hasSocialSilence &&
+    !hasCrosstalkReclaim
   ) {
     return serializeAskQuestionTool(args.askQuestion!);
   }
@@ -2057,10 +2429,16 @@ export function serializeAssistantToolPayload(args: {
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
     ...(hasWebSearch ? { webSearch } : {}),
     ...(hasCoffeeAmbientAction ? { coffeeAmbientAction } : {}),
+    ...(hasCoffeeStageAction ? { coffeeStageAction } : {}),
+    ...(hasZenStageAction ? { zenStageAction } : {}),
     ...(hasCoffeeUserAction ? { coffeeUserAction } : {}),
     ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
     ...(hasAutoRecovery ? { autoRecovery } : {}),
     ...(hasBotPowerExactResponse ? { botPowerExactResponse } : {}),
+    ...(hasIdentityShapeshift ? { identityShapeshift } : {}),
+    ...(hasFalseName ? { falseName } : {}),
+    ...(hasSocialSilence ? { socialSilence } : {}),
+    ...(hasCrosstalkReclaim ? { crosstalkReclaim } : {}),
   };
   return JSON.stringify(payload);
 }

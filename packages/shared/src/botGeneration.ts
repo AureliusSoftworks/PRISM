@@ -14,8 +14,6 @@ import {
 } from "./botAvatar.ts";
 import {
   normalizeBotAudioVoiceProfileV1,
-  normalizeBotNamePronunciation,
-  normalizeBotSelfReferral,
   type BotAudioVoiceProfileV2,
 } from "./audioVoice.ts";
 import {
@@ -403,8 +401,9 @@ export function normalizeBotGeneratedDraftV1(
   return {
     v: BOT_GENERATION_DRAFT_VERSION,
     name,
-    namePronunciation: normalizeBotNamePronunciation(value.namePronunciation),
-    selfReferral: normalizeBotSelfReferral(value.selfReferral),
+    // Keep schema fields for archive compatibility, but never auto-fill them.
+    namePronunciation: "",
+    selfReferral: "",
     profile,
     color: normalizeGeneratedHexColor(value.color),
     glyph: normalizeGeneratedGlyph(value.glyph),

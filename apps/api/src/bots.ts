@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  botFalseNameSelfCueV1,
   botPowerAddressedFandomCueV1,
   botPowerBotNamingCueV1,
   botPowerSelfCueLinesV1,
@@ -127,8 +128,17 @@ export function composeBotSystemPrompt(
   systemPrompt: string | null | undefined,
   flirtEnabled?: boolean,
   powers?: unknown,
+  options?: {
+    /** Session-sticky John/Jane Doe alias; Library name stays for routing. */
+    believedName?: string | null;
+  },
 ): string | undefined {
   const savedName = typeof name === "string" ? name.trim() : "";
+  const believedName =
+    typeof options?.believedName === "string"
+      ? options.believedName.trim()
+      : "";
+  const displayName = believedName || savedName;
   const namingCue = botPowerBotNamingCueV1(savedName, powers);
   const trimmedName = savedName;
   const trimmedPrompt =
@@ -141,14 +151,22 @@ export function composeBotSystemPrompt(
     "the user speaking with you",
     "Direct conversation",
   );
+  const falseNameCue = believedName ? botFalseNameSelfCueV1(believedName) : "";
   const powersPrompt = buildBotPowersPromptBlock([
     ...(namingCue ? [namingCue] : []),
-    ...botPowerSelfCueLinesV1(powers),
+    ...(falseNameCue ? [falseNameCue] : []),
+    ...botPowerSelfCueLinesV1(powers).filter((line) => {
+      // Prefer the concrete believed-name cue over the generic compiled selfCue.
+      if (!believedName) return true;
+      return !/\bfalse[- ]name\b|\brandom persona name\b|\bjohn(?:\/| |-)jane doe\b/iu.test(
+        line,
+      );
+    }),
     ...(directFandomCue ? [directFandomCue] : []),
   ]);
   if (!trimmedName && !trimmedPrompt && !powersPrompt) return undefined;
-  const preamble = trimmedName.length > 0
-    ? `You are ${trimmedName}. When the user addresses you as ${trimmedName}, respond as ${trimmedName}.`
+  const preamble = displayName.length > 0
+    ? `You are ${displayName}. When the user addresses you as ${displayName}, respond as ${displayName}.`
     : "";
   const interactionPolicy = flirtEnabled === undefined
     ? ""

@@ -110,8 +110,8 @@ describe("bot voice randomizer", () => {
     );
     assert.match(pageSource, /setNewBotColor\(DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR\)/);
     assert.match(pageSource, /setNewBotGlyph\(DEFAULT_BOT_GLYPH\)/);
-    assert.match(pageSource, /const createdAudioVoiceProfile = normalizeBotAudioVoiceProfileV1\(/);
-    assert.doesNotMatch(pageSource, /const createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities\(/);
+    assert.match(pageSource, /let createdAudioVoiceProfile = normalizeBotAudioVoiceProfileV1\(/);
+    assert.doesNotMatch(pageSource, /let createdAudioVoiceProfile = fillMissingBotAudioVoiceIdentities\(/);
     assert.match(pageSource, /authoredAudioVoiceProfile: createdAudioVoiceProfile/);
   });
 });

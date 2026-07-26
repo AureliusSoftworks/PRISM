@@ -168,6 +168,34 @@ function insertCoffeeImage(args: {
   return localRelPath;
 }
 
+function insertCoffeeGroupImage(args: {
+  db: ReturnType<typeof createTestDatabase>;
+  userId: string;
+  imageId: string;
+  memberBotIds: string[];
+  bytes: Buffer;
+}): string {
+  const localRelPath = buildGeneratedImageRelativePath(args.userId, args.imageId);
+  writeGeneratedImageBytes(localRelPath, args.bytes);
+  args.db.prepare(
+    `INSERT INTO images
+       (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+        prompt, revised_prompt, url, size, quality, provider, model,
+        local_rel_path, purpose, created_at)
+     VALUES (?, ?, NULL, NULL, ?, 'bot_group_room', ?, NULL, ?, '1536x1024',
+             'high', 'openai', 'gpt-image-2', ?, 'group-room-wallpaper', ?)`,
+  ).run(
+    args.imageId,
+    args.userId,
+    JSON.stringify(args.memberBotIds),
+    "A portable character-free café room",
+    `/api/images/${args.imageId}/file`,
+    localRelPath,
+    "2026-07-16T16:00:00.000Z",
+  );
+  return localRelPath;
+}
+
 function archiveFromExport(payload: Record<string, any>): Uint8Array {
   const projectOwnedAssets = payload.projectOwnedAssets as ProjectOwnedAssetExportPayloadV1;
   const files: Record<string, Uint8Array> = {
@@ -242,6 +270,14 @@ describe("portable project-owned account backup assets", () => {
         background: { r: 158, g: 109, b: 180, alpha: 1 },
       },
     }).png().toBuffer();
+    const coffeeGroupBytes = await sharp({
+      create: {
+        width: 6,
+        height: 4,
+        channels: 4,
+        background: { r: 69, g: 113, b: 96, alpha: 1 },
+      },
+    }).png().toBuffer();
 
     const sourceDb = createTestDatabase();
     const sourceServer = await startTestServer(sourceDb, "prism_backup_source");
@@ -308,6 +344,49 @@ describe("portable project-owned account backup assets", () => {
         origin: "images_panel",
         prompt: "Unrelated gallery image",
       });
+      insertCoffeeGroupImage({
+        db: sourceDb,
+        userId: sourceUserId,
+        imageId: "coffee-group-atmosphere",
+        memberBotIds: ["signal-host"],
+        bytes: coffeeGroupBytes,
+      });
+      sourceDb.prepare(
+        `INSERT INTO coffee_groups
+           (id, user_id, name, ethos, atmosphere_json, synthesis_json,
+            coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+            starter_topics, mood_summary, archived_at, created_at, updated_at)
+         VALUES ('portable-coffee-group', ?, 'Portable Table',
+                 'Stories carried carefully between worlds.', ?, ?, ?,
+                 'auto', 'auto', ?, ?, ?, NULL, ?, ?)`,
+      ).run(
+        sourceUserId,
+        JSON.stringify({
+          imageId: "coffee-group-atmosphere",
+          prompt: "A portable character-free café room",
+          revision: 2,
+          updatedAt: now,
+        }),
+        JSON.stringify({
+          version: 1,
+          items: {
+            name: { status: "ready", revision: 1, updatedAt: now },
+            ethos: { status: "ready", revision: 1, updatedAt: now },
+            atmosphere: { status: "ready", revision: 2, updatedAt: now },
+          },
+        }),
+        JSON.stringify(normalizeCoffeeSessionSettings({ historyLimit: 18 })),
+        JSON.stringify({ local: "qwen3:8b" }),
+        JSON.stringify({ version: 2, topics: ["Portable places"] }),
+        JSON.stringify({ warmth: 0.9 }),
+        now,
+        now,
+      );
+      sourceDb.prepare(
+        `INSERT INTO coffee_group_seats
+           (user_id, group_id, seat_index, bot_id, updated_at)
+         VALUES (?, 'portable-coffee-group', 0, 'signal-host', ?)`,
+      ).run(sourceUserId, now);
 
       const atmosphereJson = JSON.stringify({
         seed: "night-seed",
@@ -397,8 +476,9 @@ describe("portable project-owned account backup assets", () => {
       sourceDb.prepare(
         `INSERT INTO conversations
            (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
-            coffee_duration_minutes, created_at, updated_at)
-         VALUES ('portable-coffee', ?, 'Portable Coffee', 'coffee', ?, ?, NULL, ?, ?)`,
+            coffee_group_id, coffee_duration_minutes, created_at, updated_at)
+         VALUES ('portable-coffee', ?, 'Portable Coffee', 'coffee', ?, ?,
+                 'portable-coffee-group', NULL, ?, ?)`,
       ).run(
         sourceUserId,
         JSON.stringify(["signal-host", null, null, null, null]),
@@ -418,8 +498,8 @@ describe("portable project-owned account backup assets", () => {
       const exported = await json(exportedResponse);
       assert.equal(exportedResponse.status, 200, JSON.stringify(exported));
       const projectAssets = exported.projectOwnedAssets as ProjectOwnedAssetExportPayloadV1;
-      assert.equal(projectAssets.manifest.entries.length, 7);
-      assert.equal(Object.keys(projectAssets.files).length, 6, "identical studio bytes deduplicate");
+      assert.equal(projectAssets.manifest.entries.length, 8);
+      assert.equal(Object.keys(projectAssets.files).length, 7, "identical studio bytes deduplicate");
       assert.deepEqual(
         projectAssets.manifest.entries
           .filter((entry) => entry.ownerType === "signal-show" && entry.mediaType === "image")
@@ -443,6 +523,18 @@ describe("portable project-owned account backup assets", () => {
           ? exportedCoffee.restore.sourceImageId
           : null,
         "coffee-surface",
+      );
+      const exportedCoffeeGroup = (
+        projectAssets.manifest.entries as Array<Record<string, any>>
+      ).find((entry) => entry.ownerType === "coffee-group");
+      assert.equal(exportedCoffeeGroup?.logicalSlot, "atmosphere");
+      assert.equal(
+        exportedCoffeeGroup?.restore?.schema,
+        "prism-coffee-group-image-restore-v1",
+      );
+      assert.equal(
+        exportedCoffeeGroup?.restore?.sourceImageId,
+        "coffee-group-atmosphere",
       );
       assert.equal(
         "audioBase64" in exported.snapshot.botcast.shows[0].introAudio,
@@ -488,7 +580,7 @@ describe("portable project-owned account backup assets", () => {
       assert.equal(importedResponse.status, 200, JSON.stringify(imported));
       assert.equal(
         (targetDb.prepare("SELECT COUNT(*) AS count FROM images").get() as { count: number }).count,
-        4,
+        5,
       );
       assert.equal(
         targetDb.prepare("SELECT id FROM images WHERE id IN ('replaced-generation', 'gallery-only')").get(),
@@ -559,6 +651,63 @@ describe("portable project-owned account backup assets", () => {
       assert.deepEqual(
         Buffer.from(await coffeeResponse.arrayBuffer()),
         coffeeBytes,
+      );
+      const restoredCoffeeGroup = targetDb.prepare(
+        `SELECT atmosphere_json, synthesis_json, ethos
+           FROM coffee_groups
+          WHERE id = 'portable-coffee-group'`,
+      ).get() as {
+        atmosphere_json: string;
+        synthesis_json: string;
+        ethos: string;
+      };
+      const restoredCoffeeGroupAtmosphere = JSON.parse(
+        restoredCoffeeGroup.atmosphere_json,
+      ) as { imageId: string; prompt: string; revision: number };
+      assert.notEqual(
+        restoredCoffeeGroupAtmosphere.imageId,
+        "coffee-group-atmosphere",
+      );
+      assert.equal(restoredCoffeeGroupAtmosphere.revision, 2);
+      assert.equal(
+        restoredCoffeeGroup.ethos,
+        "Stories carried carefully between worlds.",
+      );
+      assert.equal(
+        (JSON.parse(restoredCoffeeGroup.synthesis_json) as {
+          items: { atmosphere: { status: string } };
+        }).items.atmosphere.status,
+        "ready",
+      );
+      assert.deepEqual(
+        {
+          ...targetDb.prepare(
+            `SELECT conversation_id, bot_id, related_bot_ids, origin, purpose
+               FROM images
+              WHERE id = ?`,
+          ).get(restoredCoffeeGroupAtmosphere.imageId),
+        },
+        {
+          conversation_id: null,
+          bot_id: null,
+          related_bot_ids: '["signal-host"]',
+          origin: "bot_group_room",
+          purpose: "group-room-wallpaper",
+        },
+      );
+      const coffeeGroupResponse = await targetClient.request(
+        `/api/images/${encodeURIComponent(restoredCoffeeGroupAtmosphere.imageId)}/file`,
+      );
+      assert.equal(coffeeGroupResponse.status, 200);
+      assert.deepEqual(
+        Buffer.from(await coffeeGroupResponse.arrayBuffer()),
+        coffeeGroupBytes,
+      );
+      assert.equal(
+        (targetDb.prepare(
+          "SELECT coffee_group_id FROM conversations WHERE id = 'portable-coffee'",
+        ).get() as { coffee_group_id: string | null }).coffee_group_id,
+        "portable-coffee-group",
       );
       const introResponse = await targetClient.request(
         "/api/botcast/shows/signal-show/intro-audio",

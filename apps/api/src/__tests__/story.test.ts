@@ -1079,13 +1079,15 @@ describe("Story API helpers", () => {
 
     assert.equal(freddieScenes.length, 2);
     assert.ok(freddieScenes.every(
-      (scene) => scene.narration === "I'm sorry, but I don't think we've met before.",
+      (scene) =>
+        scene.narration ===
+        "As I said earlier, the key is in the archive. Do you remember?",
     ));
     assert.ok(freddieScenes.every((scene) => scene.spritePose === "speaking"));
     assert.match(prompt, /Story adaptation for Forgetful Freddie/iu);
     assert.match(prompt, /current other-speaker beat/iu);
-    assert.match(prompt, /does not retain the episode premise or topic/iu);
-    assert.match(prompt, /responds directly to its concrete content/iu);
+    assert.match(prompt, /Do not add amnesia performance coaching/iu);
+    assert.doesNotMatch(prompt, /fresh first contact|explains the memory rule/iu);
   });
 
   it("hard-echoes the prior bot-authored Story scene for powered speakers", async () => {

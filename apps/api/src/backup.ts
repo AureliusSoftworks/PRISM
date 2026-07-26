@@ -108,6 +108,7 @@ import {
   cleanupPreparedProjectOwnedAssetFiles,
   prepareProjectOwnedAssetImport,
   stagePreparedProjectOwnedAssetFiles,
+  type PreparedProjectOwnedAssetImport,
   type ProjectOwnedAssetArchiveBundleV1,
 } from "./project-owned-assets.ts";
 
@@ -240,6 +241,34 @@ export interface BackupBotSnapshot {
  */
 export type BackupSlateRow = Record<string, string | number | null>;
 
+const BACKUP_COFFEE_GROUP_SEAT_COUNT = 5;
+const BACKUP_COFFEE_GROUP_ETHOS_MAX_LENGTH = 280;
+
+export interface BackupCoffeeGroupAtmosphere {
+  imageId: string;
+  prompt?: string;
+  revision: number;
+  updatedAt: string;
+}
+
+export interface BackupCoffeeGroupSnapshot {
+  id: string;
+  name: string;
+  seatBotIds: Array<string | null>;
+  coffeeSettings: CoffeeSessionSettings;
+  presetMode: "manual" | "auto";
+  topicSelectionMode: "manual" | "auto";
+  modelChoice: Record<string, unknown>;
+  starterTopics: Record<string, unknown>;
+  moodSummary: Record<string, unknown>;
+  ethos: string;
+  atmosphere: BackupCoffeeGroupAtmosphere | null;
+  synthesis: Record<string, unknown>;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface BackupSlateSnapshot {
   series: BackupSlateRow[];
   projects: BackupSlateRow[];
@@ -267,6 +296,8 @@ export interface BackupSnapshot {
   exportedAt: string;
   settings?: BackupUserSettings;
   bots?: BackupBotSnapshot[];
+  /** Optional in older v1 snapshots. Only active Coffee Groups are exported. */
+  coffeeGroups?: BackupCoffeeGroupSnapshot[];
   conversations: Array<{
     id: string;
     title: string;
@@ -446,6 +477,122 @@ export interface BackupSnapshot {
       createdAt: string;
       updatedAt: string;
     }>;
+  };
+}
+
+function backupJsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function parseBackupJsonObject(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw?.trim()) return {};
+  try {
+    return backupJsonObject(JSON.parse(raw) as unknown);
+  } catch {
+    return {};
+  }
+}
+
+function backupCoffeeGroupAtmosphere(
+  value: unknown,
+  fallbackUpdatedAt: string,
+): BackupCoffeeGroupAtmosphere | null {
+  const record = backupJsonObject(value);
+  const imageId =
+    typeof record.imageId === "string" ? record.imageId.trim() : "";
+  if (!/^[a-zA-Z0-9_-]{1,256}$/u.test(imageId)) return null;
+  const prompt =
+    typeof record.prompt === "string"
+      ? record.prompt.replace(/\s+/gu, " ").trim().slice(0, 100_000)
+      : "";
+  const revision =
+    typeof record.revision === "number" && Number.isFinite(record.revision)
+      ? Math.min(1_000_000, Math.max(1, Math.floor(record.revision)))
+      : 1;
+  const updatedAt =
+    typeof record.updatedAt === "string" && record.updatedAt.trim()
+      ? record.updatedAt.trim().slice(0, 100)
+      : fallbackUpdatedAt;
+  return {
+    imageId,
+    ...(prompt ? { prompt } : {}),
+    revision,
+    updatedAt,
+  };
+}
+
+function parseBackupCoffeeGroupAtmosphere(
+  raw: string | null | undefined,
+  fallbackUpdatedAt: string,
+): BackupCoffeeGroupAtmosphere | null {
+  if (!raw?.trim()) return null;
+  try {
+    return backupCoffeeGroupAtmosphere(
+      JSON.parse(raw) as unknown,
+      fallbackUpdatedAt,
+    );
+  } catch {
+    return null;
+  }
+}
+
+function normalizedBackupCoffeeGroupSeats(
+  value: unknown,
+  ownedBotIds?: ReadonlySet<string>,
+): Array<string | null> {
+  const source = Array.isArray(value) ? value : [];
+  return Array.from({ length: BACKUP_COFFEE_GROUP_SEAT_COUNT }, (_, index) => {
+    const botId =
+      typeof source[index] === "string" ? source[index].trim() : "";
+    return botId && (!ownedBotIds || ownedBotIds.has(botId)) ? botId : null;
+  });
+}
+
+function coffeeGroupSynthesisForRestore(args: {
+  value: unknown;
+  atmosphereWasReferenced: boolean;
+  atmosphereIsPortable: boolean;
+  updatedAt: string;
+}): Record<string, unknown> {
+  const synthesis = backupJsonObject(args.value);
+  const rawItems = synthesis.items;
+  if (!rawItems || typeof rawItems !== "object" || Array.isArray(rawItems)) {
+    return synthesis;
+  }
+  const items = { ...(rawItems as Record<string, unknown>) };
+  const interruptedError =
+    "Generation did not continue across the backup restore. Retry this item.";
+  for (const item of ["name", "ethos"] as const) {
+    const state = backupJsonObject(items[item]);
+    if (state.status !== "pending" && state.status !== "running") continue;
+    items[item] = {
+      ...state,
+      status: "failed",
+      updatedAt: args.updatedAt,
+      error: interruptedError,
+    };
+  }
+  const atmosphereState = backupJsonObject(items.atmosphere);
+  const atmosphereNeedsRetry =
+    atmosphereState.status === "pending" ||
+    atmosphereState.status === "running" ||
+    (!args.atmosphereIsPortable &&
+      (args.atmosphereWasReferenced || atmosphereState.status === "ready"));
+  if (atmosphereNeedsRetry) {
+    items.atmosphere = {
+      ...atmosphereState,
+      status: "failed",
+      updatedAt: args.updatedAt,
+      error: args.atmosphereWasReferenced && !args.atmosphereIsPortable
+        ? "The atmosphere image was not included in this backup. Generate it again."
+        : interruptedError,
+    };
+  }
+  return {
+    ...synthesis,
+    items,
   };
 }
 
@@ -1777,6 +1924,89 @@ export function exportUserSnapshot(
     updated_at: string;
   }>;
 
+  const coffeeGroups = db
+    .prepare(
+      `SELECT id, name, ethos, atmosphere_json, synthesis_json,
+              coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+              starter_topics, mood_summary, archived_at, created_at, updated_at
+         FROM coffee_groups
+        WHERE user_id = ? AND archived_at IS NULL
+        ORDER BY created_at, id`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    name: string;
+    ethos: string;
+    atmosphere_json: string;
+    synthesis_json: string;
+    coffee_settings: string;
+    preset_mode: string;
+    coffee_topic_mode: string;
+    model_choice: string;
+    starter_topics: string;
+    mood_summary: string;
+    archived_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  const coffeeGroupPayload = coffeeGroups.map(
+    (group): BackupCoffeeGroupSnapshot => {
+      const seatRows = db
+        .prepare(
+          `SELECT seat_index, bot_id
+             FROM coffee_group_seats
+            WHERE user_id = ? AND group_id = ?
+            ORDER BY seat_index`,
+        )
+        .all(userId, group.id) as Array<{
+        seat_index: number;
+        bot_id: string | null;
+      }>;
+      const seats: Array<string | null> = Array.from(
+        { length: BACKUP_COFFEE_GROUP_SEAT_COUNT },
+        () => null,
+      );
+      for (const seat of seatRows) {
+        if (
+          Number.isInteger(seat.seat_index) &&
+          seat.seat_index >= 0 &&
+          seat.seat_index < BACKUP_COFFEE_GROUP_SEAT_COUNT
+        ) {
+          seats[seat.seat_index] = seat.bot_id?.trim() || null;
+        }
+      }
+      let coffeeSettings: CoffeeSessionSettings;
+      try {
+        coffeeSettings = normalizeCoffeeSessionSettings(
+          JSON.parse(group.coffee_settings) as unknown,
+        );
+      } catch {
+        coffeeSettings = normalizeCoffeeSessionSettings(undefined);
+      }
+      return {
+        id: group.id,
+        name: group.name,
+        seatBotIds: seats,
+        coffeeSettings,
+        presetMode: group.preset_mode === "auto" ? "auto" : "manual",
+        topicSelectionMode:
+          group.coffee_topic_mode === "auto" ? "auto" : "manual",
+        modelChoice: parseBackupJsonObject(group.model_choice),
+        starterTopics: parseBackupJsonObject(group.starter_topics),
+        moodSummary: parseBackupJsonObject(group.mood_summary),
+        ethos: typeof group.ethos === "string" ? group.ethos : "",
+        atmosphere: parseBackupCoffeeGroupAtmosphere(
+          group.atmosphere_json,
+          group.updated_at,
+        ),
+        synthesis: parseBackupJsonObject(group.synthesis_json),
+        archivedAt: group.archived_at,
+        createdAt: group.created_at,
+        updatedAt: group.updated_at,
+      };
+    },
+  );
+
   const conversations = db
     .prepare(
       `SELECT id, title, conversation_mode, bot_group_ids, coffee_settings,
@@ -2125,6 +2355,7 @@ export function exportUserSnapshot(
         createdAt: bot.created_at,
         updatedAt: bot.updated_at,
       })),
+    coffeeGroups: coffeeGroupPayload,
     conversations: conversationPayload,
     slate: exportSlateSnapshot(db, userId),
     botcast: {
@@ -2371,6 +2602,7 @@ function assertSnapshotIdsStayWithinTenant(
   const assertIds = (
     table:
       | "bots"
+      | "coffee_groups"
       | "conversations"
       | "messages"
       | "memories"
@@ -2414,6 +2646,37 @@ function assertSnapshotIdsStayWithinTenant(
         )
       : [],
   );
+  const coffeeGroups = Array.isArray(snapshot.coffeeGroups)
+    ? snapshot.coffeeGroups
+    : [];
+  assertIds(
+    "coffee_groups",
+    coffeeGroups.flatMap((group) =>
+      group && typeof group.id === "string" ? [group.id] : [],
+    ),
+  );
+  const coffeeGroupIds = new Set(
+    coffeeGroups.flatMap((group) =>
+      group && typeof group.id === "string" && group.id.trim()
+        ? [group.id.trim()]
+        : [],
+    ),
+  );
+  const findCoffeeGroupOwner = db.prepare(
+    "SELECT user_id FROM coffee_groups WHERE id = ?",
+  );
+  for (const conversation of conversations) {
+    const groupId = conversation?.coffee?.groupId?.trim();
+    if (!groupId || coffeeGroupIds.has(groupId)) continue;
+    const owner = findCoffeeGroupOwner.get(groupId) as
+      | { user_id: string }
+      | undefined;
+    if (owner && owner.user_id !== userId) {
+      throw new Error(
+        "Account backup Coffee Group reference belongs to another user.",
+      );
+    }
+  }
   assertIds(
     "conversations",
     conversations.flatMap((conversation) =>
@@ -2577,7 +2840,13 @@ export function importUserSnapshot(
     db.exec("BEGIN IMMEDIATE;");
     transactionStarted = true;
     assertSnapshotIdsStayWithinTenant(db, userId, snapshot);
-    importUserSnapshotWithinTransaction(db, userId, snapshot, userKey);
+    importUserSnapshotWithinTransaction(
+      db,
+      userId,
+      snapshot,
+      userKey,
+      preparedAssets,
+    );
     if (preparedAssets) {
       applyPreparedProjectOwnedAssetsWithinTransaction(
         db,
@@ -2599,6 +2868,7 @@ function importUserSnapshotWithinTransaction(
   userId: string,
   snapshot: BackupSnapshot,
   userKey: Buffer,
+  preparedAssets: PreparedProjectOwnedAssetImport | null,
 ): void {
   if (snapshot.settings) {
     const settings = snapshot.settings;
@@ -3053,6 +3323,107 @@ function importUserSnapshotWithinTransaction(
     }
   }
 
+  const restorableCoffeeGroupImageIds = new Map(
+    (preparedAssets?.coffeeGroupImageReferences ?? []).map((reference) => [
+      reference.groupId,
+      reference.sourceImageId,
+    ] as const),
+  );
+  if (Array.isArray(snapshot.coffeeGroups)) {
+    const ownedBotIds = new Set(
+      (db
+        .prepare("SELECT id FROM bots WHERE user_id = ?")
+        .all(userId) as Array<{ id: string }>).map((row) => row.id),
+    );
+    const insertCoffeeGroup = db.prepare(
+      `INSERT OR REPLACE INTO coffee_groups
+         (id, user_id, name, ethos, atmosphere_json, synthesis_json,
+          coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+          starter_topics, mood_summary, archived_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const insertCoffeeGroupSeat = db.prepare(
+      `INSERT INTO coffee_group_seats
+         (user_id, group_id, seat_index, bot_id, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const group of snapshot.coffeeGroups) {
+      const groupId =
+        typeof group?.id === "string" ? group.id.trim() : "";
+      if (!groupId) continue;
+      const now = new Date().toISOString();
+      const createdAt =
+        typeof group.createdAt === "string" && group.createdAt.trim()
+          ? group.createdAt.trim()
+          : now;
+      const updatedAt =
+        typeof group.updatedAt === "string" && group.updatedAt.trim()
+          ? group.updatedAt.trim()
+          : createdAt;
+      const atmosphere = backupCoffeeGroupAtmosphere(
+        group.atmosphere,
+        updatedAt,
+      );
+      const portableAtmosphere =
+        atmosphere &&
+        restorableCoffeeGroupImageIds.get(groupId) === atmosphere.imageId
+          ? atmosphere
+          : null;
+      const synthesis = coffeeGroupSynthesisForRestore({
+        value: group.synthesis,
+        atmosphereWasReferenced: atmosphere !== null,
+        atmosphereIsPortable: portableAtmosphere !== null,
+        updatedAt,
+      });
+      const name =
+        typeof group.name === "string"
+          ? group.name.replace(/\s+/gu, " ").trim().slice(0, 80)
+          : "";
+      const ethos =
+        typeof group.ethos === "string"
+          ? group.ethos
+              .replace(/\s+/gu, " ")
+              .trim()
+              .slice(0, BACKUP_COFFEE_GROUP_ETHOS_MAX_LENGTH)
+          : "";
+      const seats = normalizedBackupCoffeeGroupSeats(
+        group.seatBotIds,
+        ownedBotIds,
+      );
+      insertCoffeeGroup.run(
+        groupId,
+        userId,
+        name || "Imported Coffee Group",
+        ethos,
+        JSON.stringify(portableAtmosphere ?? {}),
+        JSON.stringify(synthesis),
+        JSON.stringify(normalizeCoffeeSessionSettings(group.coffeeSettings)),
+        group.presetMode === "auto" ? "auto" : "manual",
+        group.topicSelectionMode === "auto" ? "auto" : "manual",
+        JSON.stringify(backupJsonObject(group.modelChoice)),
+        JSON.stringify(backupJsonObject(group.starterTopics)),
+        JSON.stringify(backupJsonObject(group.moodSummary)),
+        typeof group.archivedAt === "string" && group.archivedAt.trim()
+          ? group.archivedAt.trim()
+          : null,
+        createdAt,
+        updatedAt,
+      );
+      db.prepare(
+        "DELETE FROM coffee_group_seats WHERE user_id = ? AND group_id = ?",
+      ).run(userId, groupId);
+      for (let seatIndex = 0; seatIndex < seats.length; seatIndex += 1) {
+        insertCoffeeGroupSeat.run(
+          userId,
+          groupId,
+          seatIndex,
+          seats[seatIndex],
+          updatedAt,
+        );
+      }
+    }
+  }
+
   if (snapshot.botcast) {
     const botcast = snapshot.botcast;
     const showIds = new Set(botcast.shows.map((show) => show.id));
@@ -3286,6 +3657,11 @@ function importUserSnapshotWithinTransaction(
     importSlateSnapshot(db, userId, snapshot.slate);
   }
 
+  const ownedCoffeeGroupIds = new Set(
+    (db
+      .prepare("SELECT id FROM coffee_groups WHERE user_id = ?")
+      .all(userId) as Array<{ id: string }>).map((row) => row.id),
+  );
   const insertConversation = db.prepare(`
     INSERT OR REPLACE INTO conversations
       (id, user_id, title, conversation_mode, bot_group_ids, coffee_settings,
@@ -3313,7 +3689,9 @@ function importUserSnapshotWithinTransaction(
       coffee
         ? JSON.stringify(normalizeCoffeeSessionSettings(coffee.settings))
         : null,
-      coffee?.groupId ?? null,
+      coffee?.groupId && ownedCoffeeGroupIds.has(coffee.groupId)
+        ? coffee.groupId
+        : null,
       coffee?.durationMinutes ?? null,
       coffee?.presetId ?? null,
       coffee?.topic ?? null,

@@ -49,7 +49,7 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth.ts";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
-import { coffeeSeatScreenRelativeMouthRotationDeg } from "./coffee-seat-plate.ts";
+import { coffeeSeatMouthRotationCssDeg } from "./coffee-seat-plate.ts";
 
 function randomBetween(lo: number, hi: number): number {
   return lo + Math.random() * (hi - lo);
@@ -351,8 +351,9 @@ export function CoffeeSeatPlateEmoji({
   const normalizedFaceMouthAnimation =
     normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
   // Default means the authored glyph is the resting mouth while speech uses
-  // the same |/./@/o/0/O viseme sequence as every standard bot mouth. Alternate
-  // effects keep the custom glyph visible and reinterpret those speech beats.
+  // the same |/./ɵ/o/O/@/0/ʘ viseme sequence as every standard bot mouth.
+  // Alternate effects keep the custom glyph visible and reinterpret those
+  // speech beats. Sip mouths stay on ⁎ only.
   const renderedFaceMouthCharacter =
     isTalking && normalizedFaceMouthAnimation === "none"
       ? null
@@ -588,21 +589,13 @@ export function CoffeeSeatPlateEmoji({
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
-  const faceMouthRotationCssDeg =
-    normalizedFaceMouthCharacter && !renderedFaceMouthCharacter
-      ? undefined
-      : normalizedFaceMouthRotationDeg === undefined
-        ? transientSipPucker
-          ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
-          : undefined
-        : transientSipPucker
-          ? coffeeSeatScreenRelativeMouthRotationDeg(0, rotateDeg)
-          : renderedFaceMouthCharacter
-            ? coffeeSeatScreenRelativeMouthRotationDeg(
-                normalizedFaceMouthRotationDeg,
-                rotateDeg,
-              )
-            : normalizedFaceMouthRotationDeg;
+  const faceMouthRotationCssDeg = coffeeSeatMouthRotationCssDeg({
+    authoredRotationDeg: normalizedFaceMouthRotationDeg ?? 0,
+    faceRotationDeg: rotateDeg,
+    configuredCustomMouth: normalizedFaceMouthCharacter !== null,
+    renderedCustomMouth: renderedFaceMouthCharacter !== null,
+    transientSipPucker,
+  });
   const faceEyeRotationCssDeg =
     normalizedFaceEyeRotationDeg === undefined
       ? undefined

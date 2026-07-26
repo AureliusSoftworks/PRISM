@@ -12,7 +12,8 @@ export type ZenLiveBotMouthShape =
   | "open-small"
   | "open-round"
   | "dot"
-  | "at";
+  | "at"
+  | "click";
 
 /** Keeps mood-specific resting mouths out of active speech's closed beats. */
 export function zenLiveBotMouthShapeForTalkingState({
@@ -33,8 +34,9 @@ const ZEN_LIVE_TALKING_MOUTH_TRANSITIONS = {
   dot: ["speech-closed", "speech-closed", "open-small"],
   "open-small": ["speech-closed", "speech-closed", "open-wide", "open-round"],
   "open-wide": ["narrow", "narrow", "open-small", "open-round"],
-  "open-round": ["open-small", "open-small", "open-wide", "at"],
+  "open-round": ["open-small", "open-small", "open-wide", "at", "click"],
   at: ["open-round"],
+  click: ["open-round", "open-small"],
 } as const satisfies Record<
   ZenLiveTalkingMouthShape,
   readonly ZenLiveTalkingMouthShape[]
@@ -47,7 +49,8 @@ function zenLiveMouthShapeIsOpen(
     mouthShape === "open-small" ||
     mouthShape === "open-wide" ||
     mouthShape === "open-round" ||
-    mouthShape === "at"
+    mouthShape === "at" ||
+    mouthShape === "click"
   );
 }
 
@@ -203,14 +206,6 @@ const ENGLISH_CRT_OH_UH_WORDS = new Set([
   "one",
   "so",
   "some",
-]);
-const ENGLISH_CRT_LONG_E_WORDS = new Set([
-  "be",
-  "he",
-  "me",
-  "recipe",
-  "she",
-  "we",
 ]);
 const ENGLISH_CRT_SHORT_OO_WORDS = new Set([
   "book",
@@ -527,7 +522,8 @@ function englishCrtVowelRuleAt(
       return { length: 1, steps: [smallRound, transition("dot")] };
     }
     if (current === "u") return { length: 1, steps: [tightRound] };
-    return { length: 1, steps: [narrow] };
+    // Magic-e "e" (theme) is a sustained eee, not a short eh.
+    return { length: 1, steps: [wide] };
   }
 
   if (triple === "igh") {
@@ -550,7 +546,10 @@ function englishCrtVowelRuleAt(
             options.wordText,
           ) ||
           options.wordText.endsWith("ey")
-        ? { length: 2, steps: [narrow] }
+        ? {
+            length: 2,
+            steps: [englishCrtVisemeStep("open-wide", 2.15, "vowel")],
+          }
         : { length: 2, steps: [wide, transition("narrow")] };
   }
   if (pair === "ie") {
@@ -558,7 +557,10 @@ function englishCrtVowelRuleAt(
       ENGLISH_CRT_LONG_IE_WORDS,
       options.wordText,
     )
-      ? { length: 2, steps: [narrow] }
+      ? {
+          length: 2,
+          steps: [englishCrtVisemeStep("open-wide", 2.15, "vowel")],
+        }
       : { length: 2, steps: [wide, transition("narrow")] };
   }
   if (/^(ou|ow)$/u.test(pair)) {
@@ -589,7 +591,7 @@ function englishCrtVowelRuleAt(
     return {
       length: 2,
       steps: [
-        englishCrtVisemeStep("narrow", 2.15, "vowel"),
+        englishCrtVisemeStep("open-wide", 2.15, "vowel"),
       ],
     };
   }
@@ -633,7 +635,7 @@ function englishCrtVowelRuleAt(
   if (/^(er|ir|ur)$/u.test(pair)) {
     return {
       length: 2,
-      steps: [englishCrtVisemeStep("narrow", 1.95, "vowel")],
+      steps: [englishCrtVisemeStep("open-small", 1.95, "vowel")],
     };
   }
   if (pair === "ar") {
@@ -644,17 +646,7 @@ function englishCrtVowelRuleAt(
   }
 
   if (current === "a") return { length: 1, steps: [wide] };
-  if (current === "e") {
-    return {
-      length: 1,
-      steps: [
-        englishCrtWordSetHas(ENGLISH_CRT_LONG_E_WORDS, options.wordText) &&
-        index === word.length - 1
-          ? narrow
-          : wide,
-      ],
-    };
-  }
+  if (current === "e") return { length: 1, steps: [wide] };
   if (current === "i") return { length: 1, steps: [narrow] };
   if (current === "o") {
     return {
@@ -668,7 +660,7 @@ function englishCrtVowelRuleAt(
   }
   if (current === "u") return { length: 1, steps: [smallRound] };
   if (current === "y" && !(index === 0 && /[aeiou]/u.test(next))) {
-    return { length: 1, steps: [narrow] };
+    return { length: 1, steps: [wide] };
   }
   return null;
 }
@@ -710,6 +702,124 @@ function englishCrtNextVowelShape(
     if (rule) return rule.steps[0]?.shape ?? null;
   }
   return null;
+}
+
+type EnglishCrtLVowelAperture = "broad" | "tight";
+
+/**
+ * Classifies the next vowel for clear/dark-style L coloring.
+ * Uses vowel family (not mouth glyph) so eh/eee both count as tight even though
+ * both render as open-wide `:0`.
+ */
+function englishCrtFollowingVowelApertureForL(
+  word: readonly string[],
+  fromIndex: number,
+  options: Parameters<typeof englishCrtVowelRuleAt>[2],
+): EnglishCrtLVowelAperture | null {
+  for (let index = fromIndex; index < word.length; index += 1) {
+    if (index === options.silentFinalEIndex) continue;
+    const rule = englishCrtVowelRuleAt(word, index, options);
+    if (!rule) continue;
+    return englishCrtVowelApertureForLAt(word, index, rule, options);
+  }
+  return null;
+}
+
+function englishCrtVowelApertureForLAt(
+  word: readonly string[],
+  index: number,
+  rule: EnglishCrtGraphemeRule,
+  options: Parameters<typeof englishCrtVowelRuleAt>[2],
+): EnglishCrtLVowelAperture {
+  const current = word[index] ?? "";
+  const next = word[index + 1] ?? "";
+  const third = word[index + 2] ?? "";
+  const pair = `${current}${next}`;
+  const triple = `${pair}${third}`;
+
+  // Tight / close followers → ʘ (lean, level, lull, lute, lunch, lurking).
+  if (/^(ee|ea|ei)$/u.test(pair) && rule.length >= 2) return "tight";
+  if (
+    pair === "ie" &&
+    englishCrtWordSetHas(ENGLISH_CRT_LONG_IE_WORDS, options.wordText)
+  ) {
+    return "tight";
+  }
+  if (
+    pair === "ey" &&
+    !englishCrtWordSetHas(ENGLISH_CRT_LONG_A_EY_WORDS, options.wordText) &&
+    (englishCrtWordSetHas(ENGLISH_CRT_LONG_EY_WORDS, options.wordText) ||
+      options.wordText.endsWith("ey"))
+  ) {
+    return "tight";
+  }
+  if (/^(er|ir|ur|oo|ue|ui|ew)$/u.test(pair) && rule.length >= 2) {
+    return "tight";
+  }
+  if (
+    rule.length === 1 &&
+    (current === "e" ||
+      current === "i" ||
+      current === "u" ||
+      current === "y")
+  ) {
+    return "tight";
+  }
+  if (
+    index === options.magicELeadIndex &&
+    (current === "e" || current === "u")
+  ) {
+    return "tight";
+  }
+
+  // Broad / open followers → @ (land, law, low, load, loud).
+  if (
+    /^(ai|ay|aw|au|oa|oe|oh|ou|ow|oi|oy|ar|or|ah)$/u.test(pair) &&
+    rule.length >= 2
+  ) {
+    return "broad";
+  }
+  if (triple === "igh" || triple === "air" || /^eigh/u.test(triple)) {
+    return "broad";
+  }
+  if (
+    pair === "ey" &&
+    englishCrtWordSetHas(ENGLISH_CRT_LONG_A_EY_WORDS, options.wordText)
+  ) {
+    return "broad";
+  }
+  if (
+    pair === "ie" &&
+    !englishCrtWordSetHas(ENGLISH_CRT_LONG_IE_WORDS, options.wordText)
+  ) {
+    return "broad";
+  }
+  if (rule.length === 1 && (current === "a" || current === "o")) {
+    return "broad";
+  }
+  if (
+    index === options.magicELeadIndex &&
+    (current === "a" || current === "i" || current === "o")
+  ) {
+    return "broad";
+  }
+
+  const shape = rule.steps[0]?.shape ?? null;
+  if (shape === "narrow" || shape === "dot" || shape === "open-small") {
+    return "tight";
+  }
+  return "broad";
+}
+
+function englishCrtLMouthShape(
+  word: readonly string[],
+  fromIndex: number,
+  options: Parameters<typeof englishCrtVowelRuleAt>[2],
+): ZenLiveBotMouthShape {
+  return englishCrtFollowingVowelApertureForL(word, fromIndex, options) ===
+    "tight"
+    ? "click"
+    : "at";
 }
 
 function englishCrtWordVisemeBeats(
@@ -842,7 +952,16 @@ function englishCrtWordVisemeBeats(
       length = 2;
       shape = "dot";
       durationUnits = 0.82;
-    } else if (/^(sh|ch|zh|ng|ck)$/u.test(pair)) {
+    } else if (/^(sh|ch|zh)$/u.test(pair)) {
+      length = 2;
+      shape =
+        englishCrtNextVowelShape(
+          wordCharacters,
+          index + length,
+          options,
+        ) ??
+        "narrow";
+    } else if (/^(ng|ck)$/u.test(pair)) {
       length = 2;
       shape =
         englishCrtNextVowelShape(
@@ -858,10 +977,18 @@ function englishCrtWordVisemeBeats(
       shape = "dot";
       durationUnits = 0.68;
     } else if (current === "l") {
-      shape = "at";
+      shape = englishCrtLMouthShape(wordCharacters, index + 1, options);
       durationUnits = 0.86;
+    } else if (/[td]/u.test(current)) {
+      shape = "at";
+      durationUnits = 0.82;
+    } else if (current === "n") {
+      shape =
+        englishCrtNextVowelShape(wordCharacters, index + 1, options) ??
+        "click";
+      durationUnits = 0.8;
     } else if (current === "r") {
-      shape = "narrow";
+      shape = "open-small";
       durationUnits = 0.84;
     } else if (current === "w" || current === "q") {
       shape = "dot";
@@ -1076,6 +1203,39 @@ export function crtSpeechMouthShapeAtElapsedMs({
     Number.isFinite(phaseMs) ? phaseMs : ZEN_LIVE_MOUTH_PHASE_MS,
   );
   return englishCrtVisemeShapeAtUnit(beats, safeElapsedMs / safePhaseMs);
+}
+
+/**
+ * Coffee speech progress used to call setState every animation frame and
+ * re-render the whole Home tree. Only commit when the visible mouth shape
+ * (or duration) actually changes.
+ */
+export function coffeeLiveAvatarSpeechProgressShouldCommit(args: {
+  text: string;
+  previousElapsedMs: number;
+  previousDurationMs: number;
+  nextElapsedMs: number;
+  nextDurationMs: number;
+  alignment?: {
+    characters: readonly string[];
+    characterStartTimesSeconds: readonly number[];
+    characterEndTimesSeconds: readonly number[];
+  } | null;
+}): boolean {
+  if (args.previousDurationMs !== args.nextDurationMs) return true;
+  const previousShape = crtSpeechMouthShapeAtAlignedElapsedMs({
+    text: args.text,
+    elapsedMs: args.previousElapsedMs,
+    durationMs: args.previousDurationMs,
+    alignment: args.alignment,
+  });
+  const nextShape = crtSpeechMouthShapeAtAlignedElapsedMs({
+    text: args.text,
+    elapsedMs: args.nextElapsedMs,
+    durationMs: args.nextDurationMs,
+    alignment: args.alignment,
+  });
+  return previousShape !== nextShape;
 }
 
 /**

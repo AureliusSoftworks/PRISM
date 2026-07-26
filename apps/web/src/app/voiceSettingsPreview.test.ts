@@ -50,7 +50,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
     assert.match(
       pageSource,
-      /onStart: \(\) => options\.onPlaybackStart\?\.\(\)/,
+      /onStart: \(durationMs\) =>\s*options\.onPlaybackStart\?\.\(\s*durationMs,\s*previewClip\.alignment,/,
     );
   });
 
@@ -397,7 +397,7 @@ describe("voice settings preview", () => {
     );
     assert.match(
       performanceSource,
-      /<label htmlFor="bot-voice-effect">Voice effect<\/label>/,
+      /<label htmlFor="bot-voice-effect">Voice effect[\s\S]*?label="voice effect"[\s\S]*?<\/label>/,
     );
     assert.match(performanceSource, /aria-label="Voice effect"/);
     assert.match(performanceSource, /VOICE_EFFECTS\.map/);
@@ -603,14 +603,14 @@ describe("voice settings preview", () => {
   it("synthesizes one canonical message and requests exact provider timing", () => {
     assert.match(
       pageSource,
-      /const requestEnglishClip = async \(input: \{[\s\S]*?messageId: string;[\s\S]*?messageId: input\.messageId,/,
+      /const requestEnglishResponse = async \(input: \{[\s\S]*?messageId: string;[\s\S]*?messageId: input\.messageId,/,
     );
     assert.match(
       pageSource,
-      /const clip = await requestEnglishClip\(\{[\s\S]*?messageId: message\.id,[\s\S]*?await enqueueEnglishVoice\([\s\S]*?message\.id,/,
+      /const response = await requestEnglishResponse\(\{[\s\S]*?messageId: message\.id,[\s\S]*?const clip = await readEnglishVoiceSynthesisClip\(response\);[\s\S]*?await enqueueEnglishVoice\([\s\S]*?message\.id,/,
     );
     assert.doesNotMatch(pageSource, /startChatSpeechRevealPhrase\(/);
-    assert.match(pageSource, /includeAlignment: true/);
+    assert.match(pageSource, /includeAlignment: !requestStreamingEnglishVoice/);
     assert.match(pageSource, /readEnglishVoiceSynthesisClip\(response\)/);
   });
 

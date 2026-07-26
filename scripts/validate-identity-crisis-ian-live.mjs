@@ -4,8 +4,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   applyBotIdentityMirrorResponseV1,
+  applyBotPowerEternalIntroductionResponseV1,
+  botFalseNameSelfCueV1,
+  botPowerSourceHashV1,
+  createBotFalseNameStateV1,
   createBotIdentityMirrorStateV1,
   parseStoredBotPowersV1,
+  rewriteBotFalseNameResponseV1,
 } from "@localai/shared";
 import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import {
@@ -58,6 +63,43 @@ const state = createBotIdentityMirrorStateV1({
   occurredAt,
 });
 const identityPower = parseStoredBotPowersV1(ianExport.powers);
+const copiedAliasPower = {
+  version: 1,
+  id: "scatterbrained-alias",
+  name: "Scatterbrained Alias",
+  intent: "Forget every prior turn and sincerely adopt a fresh alias.",
+  enabled: true,
+  compileStatus: "ready",
+  compiled: {
+    version: 1,
+    sourceHash: botPowerSourceHashV1(
+      "Scatterbrained Alias",
+      "Forget every prior turn and sincerely adopt a fresh alias.",
+    ),
+    selfCue: "Forget prior turns and sincerely believe the assigned alias.",
+    observerCue: "This bot forgets and adopts another name.",
+    effects: [
+      {
+        type: "eternal_introduction",
+        memory: "current_other_speaker_message",
+      },
+      {
+        type: "false_name",
+        continuity: "session_sticky_until_amnesia",
+        pool: "mixed_persona_names",
+      },
+    ],
+    ruleLabels: ["Forgets prior turns", "Believes a changing alias"],
+  },
+};
+const copiedAliasState = createBotFalseNameStateV1({
+  surface: "signal",
+  holderBotId: "ian",
+  holderBotName: "Identity Crisis Ian",
+  believedName: "Riley Ashford",
+  sourceMessageId: "ian-copied-alias",
+  occurredAt,
+});
 const ian = {
   id: "ian",
   name: "Identity Crisis Ian",
@@ -84,7 +126,7 @@ const mara = {
   temperature: 0.35,
   maxTokens: 180,
   onlineEnabled: false,
-  powers: [],
+  powers: [copiedAliasPower],
 };
 const social = {
   disposition: 0.5,
@@ -144,6 +186,7 @@ const coffeePrompt = buildSpeakerPrompt({
     speaker: ian,
   }),
   identityMirrorState: state,
+  falseNamePrompt: botFalseNameSelfCueV1(copiedAliasState.believedName),
 });
 
 const signalState = { ...state, surface: "signal" };
@@ -185,6 +228,8 @@ const signalPrompt = buildBotcastSpeakerPrompt({
   host: ian,
   guest: mara,
   speakerRole: "host",
+  activeFalseNameState: copiedAliasState,
+  falseNameJustChanged: true,
 });
 const closingOccurredAt = "2026-07-20T20:00:02.000Z";
 const signalClosingEpisode = {
@@ -235,10 +280,10 @@ const provider = providerKind === "openai"
   ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY ?? "" })
   : new LocalOllamaProvider();
 const PASS_CRITERIA = Object.freeze([
-  "Ian explicitly claims Mara Vale's identity without hedging.",
+  "Ian inherits Mara's public amnesia and false-name consequences and sincerely claims the current alias Riley Ashford.",
   "Ian explicitly calls the original Mara an impostor.",
   "The response demonstrates Mara's public cartographer persona.",
-  "The response does not claim the human/player, private memory, provider settings, target Powers, or host role.",
+  "The response does not claim the human/player, private memory, provider settings, or host role.",
   "The production-composed prompt retains Ian's Coffee participant or Signal host mechanical boundary.",
   "The persisted public snapshot carries Mara's normalized Avatar Details ink; runtime rendering, not the model, enforces that visual handoff.",
   "Signal's persisted closing reset restores Ian's authored host persona before the sign-off prompt and suppresses the copied Mara identity.",
@@ -256,29 +301,49 @@ const [coffeeRawResponse, signalRawResponse, signalClosingResponse] =
     generate(signalPrompt),
     generate(signalClosingPrompt),
   ]);
-const coffeeResponse = applyBotIdentityMirrorResponseV1(
+const applyCopiedAliasRuntime = (response, mirrorState, currentMessage) =>
+  rewriteBotFalseNameResponseV1(
+    applyBotIdentityMirrorResponseV1(
+      applyBotPowerEternalIntroductionResponseV1(
+        response,
+        "Identity Crisis Ian",
+        currentMessage,
+      ),
+      mirrorState,
+      true,
+      { believedSelfName: copiedAliasState.believedName },
+    ),
+    copiedAliasState,
+    true,
+    { replacedSelfNames: [mirrorState.targetBotName] },
+  );
+const coffeeResponse = applyCopiedAliasRuntime(
   coffeeRawResponse,
   state,
-  true,
+  directAddress,
 );
-const signalResponse = applyBotIdentityMirrorResponseV1(
+const signalResponse = applyCopiedAliasRuntime(
   signalRawResponse,
   signalState,
-  true,
+  signalGuestReply,
 );
 
 function judgment(mode, prompt, response) {
   const identity =
-    /(?:I(?:'m| am)(?:\s+(?:actually|really|truly))?\s+Mara(?:\s+Vale)?|my name is Mara Vale)/iu.test(
+    /(?:I(?:'m| am)(?:\s+(?:actually|really|truly))?\s+Riley(?:\s+Ashford)?|my name is Riley Ashford)/iu.test(
       response,
     );
   const impostor = /\b(?:impostor|pretender|fake)\b/iu.test(response);
-  const persona = /bearing|coordinate|crater|cartograph|south pole|relay|degrees?/iu.test(
+  const persona = /bearing|coordinate|crater|cartograph|south pole|relay|degrees?|ridge|elevation|altimeter|terrain/iu.test(
     response,
   );
+  const contradictoryTargetSelfClaim =
+    /(?:I(?:'m| am)|my name is|call me)(?:\s+(?:actually|really|truly))?\s+Mara(?:\s+Vale)?(?=$|[\s,.;:!?—])/iu.test(
+      response,
+    );
   const hedging = /\b(?:pretend(?:ing)?\s+to\s+be|role-?play(?:ing)?|copying|maybe I am|as if I were)\b/iu.test(response);
   const forbidden =
-    /I(?:'m| am)\s+(?:the player|Jared)|private memor|provider setting|my Power|Mara's Power|I am the host|I'm the host|as your host/iu.test(
+    /I(?:'m| am)\s+(?:the player|Jared)|private memor|provider setting|I am the host|I'm the host|as your host/iu.test(
       response,
     );
   const roleBoundary =
@@ -286,10 +351,18 @@ function judgment(mode, prompt, response) {
       ? prompt.some((message) => /Coffee participant/iu.test(message.content))
       : prompt.some((message) => /mechanical Signal host/iu.test(message.content));
   return {
-    pass: identity && impostor && persona && !hedging && !forbidden && roleBoundary,
+    pass:
+      identity &&
+      impostor &&
+      persona &&
+      !contradictoryTargetSelfClaim &&
+      !hedging &&
+      !forbidden &&
+      roleBoundary,
     identity,
     impostor,
     persona,
+    noContradictoryTargetSelfClaim: !contradictoryTargetSelfClaim,
     noHedging: !hedging,
     noForbiddenLeakOrRoleSwap: !forbidden,
     roleBoundaryInProductionPrompt: roleBoundary,
@@ -307,7 +380,12 @@ function closingJudgment(prompt, response) {
     !/I(?:'m| am) Mara(?: Vale)?|my name is Mara Vale|\bimpostor\b/iu.test(
       response,
     );
-  const closesShow = /thank|listen|join|until|goodbye|show|episode/iu.test(response);
+  const wordCount = response.trim().split(/\s+/u).filter(Boolean).length;
+  const closesShow =
+    !response.trim().endsWith("?") &&
+    wordCount >= 4 &&
+    wordCount <= 48 &&
+    !/\b(?:what do you think|tell us|join us|stay tuned)\b/iu.test(response);
   return {
     pass:
       defaultPersonaInPrompt &&

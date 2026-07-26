@@ -4,6 +4,8 @@ const COFFEE_REPLY_DELAY_MIN_MS = 12_000;
 const COFFEE_REPLY_DELAY_MAX_MS = 28_000;
 const COFFEE_REPLY_DELAY_FAST_MIN_MS = 650;
 const COFFEE_REPLY_DELAY_FAST_MAX_MS = 2_600;
+/** Small gap for max-speed pileup so the UI can paint and accept End clicks. */
+const COFFEE_PILEUP_MAX_SPEED_GAP_MS = 320;
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -13,9 +15,9 @@ function clampUnit(value: number): number {
  * Delay before requesting the next autonomous Coffee turn.
  *
  * A max-speed, zero-breathing-room pileup already pays model and voice
- * preparation latency, so adding an artificial pause makes interruptions feel
- * like orderly turn-taking. Let that preset begin preparing the next beat
- * immediately after the current line lands.
+ * preparation latency, so a long artificial pause makes interruptions feel
+ * like orderly turn-taking. Keep only a short paint/input gap so End clicks
+ * and seat updates can land between beats.
  */
 export function coffeeAutonomousTurnDelayMs(
   settings: CoffeeSessionSettings,
@@ -33,7 +35,7 @@ export function coffeeAutonomousTurnDelayMs(
     settings.responseDelayBias >= 95 &&
     settings.breathingRoom <= 5
   ) {
-    return 0;
+    return COFFEE_PILEUP_MAX_SPEED_GAP_MS;
   }
 
   const minMs = Math.round(

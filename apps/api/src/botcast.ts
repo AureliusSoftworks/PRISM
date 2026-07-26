@@ -55,15 +55,25 @@ import type {
   BotPowerObserverPerspectiveV1,
   PrismReviewArtifactV1,
   ListenerReactionPlanV1,
+  CrosstalkFloorOutcome,
+  CrosstalkReclaimPlanV1,
+  BotCrosstalkInterruptedSpeakerCue,
+  DirectionalIrritationDeliveryPlanV1,
+  DirectionalIrritationEdgeV1,
+  DirectionalIrritationTransitionV1,
+  SocialSilenceExclusionV1,
+  SocialSilenceMarkerV1,
   SignalPersonaTemperament,
   BotIdentityMirrorStateV1,
+  BotIdentityShapeshiftStateV1,
+  BotFalseNameStateV1,
   BotAvatarDetailsV1,
   VoiceDeliveryMood,
+  StageActionExclusionV1,
 } from "@localai/shared";
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
-  BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS,
   BOTCAST_HOST_RECOVERY_QUESTION_TARGET,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
   BOTCAST_LOCAL_INTRO_DURATION_MS,
@@ -81,29 +91,55 @@ import {
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
   BOT_POWER_CANONICAL_SILENCE_V1,
+  applyDirectionalIrritationCleanTurnDecay,
+  applyDirectionalIrritationCutoff,
+  applyDirectionalIrritationRebuff,
+  biasReclaimChanceWithDirectionalIrritation,
+  botcastDirectionalIrritationAppliedTransitionIdsFromEvents,
+  botcastDirectionalIrritationEdgesFromEvents,
+  normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizeDirectionalIrritationDeliveryPlanV1,
+  planDirectionalIrritationDeliveryV1,
+  readDirectionalIrritationIntensity,
   applyBotIdentityMirrorResponseV1,
+  applyBotIdentityShapeshiftResponseV1,
+  applyBotPowerAddressedInsultV1,
   applyBotPowerBotNamesV1,
   applyBotcastProducerCueToTension,
   applyBotPowerResponseBudgetV1,
   botDirectlyAddressesBotV1,
   botNaturalAddressAliasesV1,
+  botFalseNameObserverCueV1,
+  botFalseNameSelfCueV1,
   botIdentityMirrorFaceV1,
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorTargetChangesV1,
+  botIdentityShapeshiftHolderPromptV1,
+  botIdentityShapeshiftObserverPromptV1,
+  botIdentityShapeshiftTargetChangesV1,
+  botPowerBelievesFalseNameV1,
   botPowerMirrorsIdentityV1,
+  botPowerShapeshiftsIdentityV1,
+  createBotFalseNameStateV1,
   createBotIdentityMirrorStateV1,
+  composeBotIdentityMirrorPowersV1,
+  normalizeBotFalseNameStateV1,
   normalizeBotIdentityMirrorStateV1,
+  normalizeBotIdentityShapeshiftStateV1,
   normalizeBotcastIdentityMirrorResetV1,
   normalizeBotcastStudioGlowTuning,
   parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
+  rewriteBotFalseNameResponseV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerMumbledResponseV1,
   anthropicModelSupportsReasoningEffort,
   activeBotPowersV1,
   botPowerAddressedFandomCueV1,
+  botPowerRequiresAddressedInsultV1,
+  botPowerResponseHasAddressedInsultV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
   botPowerBotNamingCueV1,
@@ -127,13 +163,18 @@ import {
   strongestBotPowerMoodBoostEffectV1,
   strongestBotPowerMoodDrainEffectV1,
   botcastAutoCameraLeadInMs,
+  botcastConsecutiveSocialSilenceTurns,
   botcastFallbackStudioAccentVariantForSeed,
   botcastHostInterruptionLineAt,
   botcastHostInterruptionLinesForSeed,
+  botcastEchoHostInterruptPhrase,
   botcastInterruptedGuestContent,
-  appendBotCrosstalkInterruptedSpeakerCue,
+  botcastPendingCrosstalkReclaimV1,
+  botCrosstalkPrimarySpeakerContent,
   botCrosstalkInterruptedSpeakerCueForSeed,
   buildBotCrosstalkListenerReactionPlanV1,
+  crosstalkInterruptionIsMeaningfulV1,
+  botcastListenerReactionForMessage,
   botcastMessageIsAudibleToAudienceV1,
   botcastDirectorSuggestion,
   botcastEpisodeDepartureOutcome,
@@ -167,8 +208,10 @@ import {
   normalizeBotcastVoiceLevelsByBotId,
   normalizeBotcastHostInterruptionLines,
   normalizeBotcastHostRecoveryQuestions,
-  normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizeCrosstalkReclaimPlanV1,
+  normalizeSocialSilenceMarkerV1,
   parseStoredBotPowersV1,
+  planSocialSilenceV1,
   rankSignalPersonaTemperaments,
   signalPicklesLineIndex,
   signalPicklesMagicEnabled,
@@ -177,14 +220,26 @@ import {
   signalPicklesTriggerMessageCount,
   signalProducerBriefWithoutPickles,
   signalPersonaTemperamentFor,
+  socialSilenceMessageIsMarkedV1,
   autoFallbackResolvedChain,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
+  planStageActionV1,
+  resolveFinalStageActionV1,
+  stageActionPersonaInvitePromptV1,
+  stageActionSpeechOnlyPromptV1,
 } from "@localai/shared";
 import {
   buildCloneFamilyIdentityPrompt,
   withPrismRuntimeGrounding,
 } from "./bots.ts";
+import {
+  buildIdentityShapeshiftSeedV1,
+  createIdentityShapeshiftStateFromCandidateV1,
+  pickIdentityShapeshiftCandidateV1,
+  resolveIdentityShapeshiftCandidatesV1,
+} from "./bot-identity-shapeshift.ts";
+import { resolveBotFalseNameStateV1 } from "./bot-false-name.ts";
 import {
   retrieveRecentBotMemoriesForStarter,
   retrieveRecentMemoriesForStarter,
@@ -739,6 +794,8 @@ export interface BotcastGenerationOptions {
   signal?: AbortSignal;
   /** Test and host override; normal Signal turns use the bounded default. */
   signalLocalTurnTimeoutMs?: number;
+  /** Test-only deterministic override; normal Signal turns use mood/flow weighting. */
+  signalSocialSilenceChanceOverride?: number;
   /** Keep current image slots intact while completing only text identity. */
   preserveArtwork?: boolean;
   /** Up to five short producer cues that influence this generation only. */
@@ -813,6 +870,151 @@ function stableHash(raw: string): number {
     value = Math.imul(value, 16777619);
   }
   return value >>> 0;
+}
+
+const SIGNAL_CROSSTALK_RECLAIM_BASE_CHANCE = 0.34;
+const SIGNAL_CROSSTALK_RECLAIM_MIN_CHANCE = 0.12;
+const SIGNAL_CROSSTALK_RECLAIM_MAX_CHANCE = 0.78;
+const SIGNAL_SOCIAL_SILENCE_BASE_CHANCE = 0.12;
+const SIGNAL_SOCIAL_SILENCE_MIN_CHANCE = 0.04;
+const SIGNAL_SOCIAL_SILENCE_MAX_CHANCE = 0.3;
+
+function stableUnitValue(seed: string): number {
+  return stableHash(seed) / 0x1_0000_0000;
+}
+
+/**
+ * Makes the interrupted Signal bot's floor decision from stable persona,
+ * current social tension, and the interruption itself. Directed irritation
+ * may bias reclaim chance upward without replacing Powers or the floor planner.
+ */
+export function botcastCrosstalkFloorOutcomeV1(args: {
+  seed: string;
+  speaker: Pick<BotcastBotProfile, "id" | "systemPrompt">;
+  tension: Pick<BotcastTensionState, "level">;
+  canReclaim: boolean;
+  /** Interrupted bot's directed irritation toward the interrupter (0…1). */
+  irritationTowardInterrupter?: number;
+}): CrosstalkFloorOutcome {
+  if (!args.canReclaim) return "yield";
+  const personaDisposition =
+    (stableUnitValue(
+      `signal-reclaim-persona:${args.speaker.id}:${args.speaker.systemPrompt}`,
+    ) -
+      0.5) *
+    0.32;
+  const tensionAdjustment = args.tension.level * 0.09;
+  const baseChance = Math.max(
+    SIGNAL_CROSSTALK_RECLAIM_MIN_CHANCE,
+    Math.min(
+      SIGNAL_CROSSTALK_RECLAIM_MAX_CHANCE,
+      SIGNAL_CROSSTALK_RECLAIM_BASE_CHANCE +
+        personaDisposition +
+        tensionAdjustment,
+    ),
+  );
+  const chance = biasReclaimChanceWithDirectionalIrritation({
+    baseChance,
+    intensity: args.irritationTowardInterrupter ?? 0,
+  });
+  return stableUnitValue(`${args.seed}:floor-outcome`) < chance
+    ? "reclaim"
+    : "yield";
+}
+
+/**
+ * Plan episode-scoped directed irritation transitions for a meaningful Signal
+ * power cutoff (and optional reclaim rebuff). Producer cuts / late overlaps
+ * must not call this path.
+ */
+export function botcastPlanDirectionalIrritationForMeaningfulCutoffV1(args: {
+  edges: Record<string, DirectionalIrritationEdgeV1>;
+  appliedTransitionIds: ReadonlySet<string>;
+  episodeId: string;
+  interruptedBotId: string;
+  interrupterBotId: string;
+  messageId: string;
+  heardRatio?: number | null;
+  floorOutcome: CrosstalkFloorOutcome;
+  occurredAt: string;
+}): {
+  edges: Record<string, DirectionalIrritationEdgeV1>;
+  transitions: DirectionalIrritationTransitionV1[];
+  delivery: DirectionalIrritationDeliveryPlanV1 | null;
+} {
+  const applied = new Set(args.appliedTransitionIds);
+  let edges = args.edges;
+  const transitions: DirectionalIrritationTransitionV1[] = [];
+  const cutoff = applyDirectionalIrritationCutoff({
+    edges,
+    appliedTransitionIds: applied,
+    sessionId: args.episodeId,
+    interruptedBotId: args.interruptedBotId,
+    interrupterBotId: args.interrupterBotId,
+    causeId: args.messageId,
+    heardRatio: args.heardRatio,
+    occurredAt: args.occurredAt,
+  });
+  if (cutoff) {
+    edges = cutoff.edges;
+    transitions.push(cutoff.transition);
+    applied.add(cutoff.transition.transitionId);
+  }
+  if (args.floorOutcome === "reclaim") {
+    const rebuff = applyDirectionalIrritationRebuff({
+      edges,
+      appliedTransitionIds: applied,
+      sessionId: args.episodeId,
+      interrupterBotId: args.interrupterBotId,
+      interruptedBotId: args.interruptedBotId,
+      causeId: args.messageId,
+      occurredAt: args.occurredAt,
+    });
+    if (rebuff) {
+      edges = rebuff.edges;
+      transitions.push(rebuff.transition);
+      applied.add(rebuff.transition.transitionId);
+    }
+  }
+  const intensity = readDirectionalIrritationIntensity({
+    edges,
+    subjectBotId: args.interruptedBotId,
+    targetBotId: args.interrupterBotId,
+  });
+  const delivery = planDirectionalIrritationDeliveryV1({
+    subjectBotId: args.interruptedBotId,
+    targetBotId: args.interrupterBotId,
+    intensity,
+    seed: `signal-dir-irritation-delivery:${args.episodeId}:${args.messageId}`,
+    role: "interrupted",
+  });
+  return { edges, transitions, delivery };
+}
+
+/** Mood/flow weighting supplied to the shared deterministic silence planner. */
+export function botcastSocialSilenceChanceV1(args: {
+  speaker: Pick<BotcastBotProfile, "id" | "systemPrompt">;
+  speakerRole: BotcastSpeakerRole;
+  tension: Pick<BotcastTensionState, "level">;
+}): number {
+  const personaDisposition =
+    (stableUnitValue(
+      `signal-social-silence-persona:${args.speaker.id}:${args.speaker.systemPrompt}`,
+    ) -
+      0.5) *
+    0.14;
+  const tensionAdjustment = args.tension.level * 0.035;
+  const hostAdjustment = args.speakerRole === "host" ? -0.02 : 0;
+  return Math.max(
+    SIGNAL_SOCIAL_SILENCE_MIN_CHANCE,
+    Math.min(
+      SIGNAL_SOCIAL_SILENCE_MAX_CHANCE,
+      SIGNAL_SOCIAL_SILENCE_BASE_CHANCE +
+        personaDisposition +
+        tensionAdjustment +
+        hostAdjustment,
+    ),
+  );
 }
 
 export interface BotcastPowerInterruptionPlanV1 {
@@ -1491,6 +1693,10 @@ const BOTCAST_LOGO_DESIGN_DISTANCE_MIN = 4;
 const BOTCAST_LOGO_DESIGN_ATTEMPTS = 256;
 const BOTCAST_LOGO_DESIGN_HISTORY_MAX = 16;
 
+// Only `lineLanguage` and `composition` reach the image prompt; the LLM
+// showThesis is the primary art direction there. The remaining genome fields
+// still drive per-user distinctiveness (signature/distance history) and the
+// fallback thesis for shows that predate generated identity.
 const BOTCAST_LOGO_DESIGN_FIELDS = [
   "personaMotif",
   "broadcastArchetype",
@@ -1631,13 +1837,9 @@ function logoPromptForDesign(
     ...(personaFingerprint
       ? [`Provider-safe persona fingerprint: ${personaFingerprint}.`]
       : []),
-    `Show-specific persona design brief: ${design.showThesis}`,
-    "Treat the persona fingerprint and persona design brief as the highest-priority art direction. Make them visibly determine the chosen subject, what that subject is doing, material character, silhouette, balance, edge behavior, and emotional temperature. At least three independent design decisions must trace directly to this persona rather than to generic podcast aesthetics.",
-    "Wrong-host test: the finished mark should feel inevitable for this host and conspicuously wrong for a host with a different worldview or temperament. If the same mark could be reassigned to an unrelated podcast after a palette swap, redesign it.",
-    "Primary-read rule: show exactly one familiar, nameable visual subject or action from that thesis. An unfamiliar viewer must be able to describe the central idea in a short noun phrase before knowing the show name. If the thesis is written in abstract design language, translate it into the clearest concrete subject that preserves its meaning.",
-    `Use ${design.personaMotif} only as supporting structural direction; it must serve the richer persona brief instead of replacing it. Use ${design.broadcastArchetype} only as a secondary transformation within the concrete subject; keep it small and never let it become the main idea.`,
-    `Fuse them into one inseparable symbol: ${design.fusionMechanic}. Never place two icons beside each other. Keep the show-specific subject plainly recognizable; the broadcast cue may simplify into one edge, cut, pulse, or interval and does not need to read as standalone audio clip art. Do not dissolve the idea into ambiguous geometry.`,
-    `Render that visual sentence with ${design.lineLanguage}. Let the persona override this formal recipe whenever they conflict. Do not add extra motifs from the style phrase. Persona fidelity comes first; subject clarity wins over formal novelty.`,
+    `Design brief, the primary art direction: ${design.showThesis}`,
+    "Draw exactly what the brief describes: one familiar, nameable visual subject or action, doing the one thing the brief says is happening to it. An unfamiliar viewer must be able to describe the mark in a short noun phrase. If any part of the brief reads as abstract design language, translate it into the clearest concrete subject that preserves its meaning; never render abstract geometry in place of a real subject.",
+    `Style: render the subject with ${design.lineLanguage}, composed as ${design.composition}. Wherever this style conflicts with the brief, the brief wins.`,
     `Anchor the restrained palette in ${normalizeAccentColor(accentColor)} with only one or two complementary tones.`,
     "Do not use a standalone microphone, headphones, waveform, play button, RSS arcs, radio tower, speech bubble, vinyl record, or generic frequency ring. Do not draw an app-icon tile, circular badge, shield, crest, monogram, or podcast seal. A viewer must see a singular editorial symbol, never podcast clip art.",
     "Keep the identity visually independent from existing entertainment properties, character designs, signature objects, insignia, and existing logos.",
@@ -2228,6 +2430,11 @@ function repairBotcastShowHostAuthoredLines(
 function mapMessage(
   row: BotcastMessageRow,
   moodKey: unknown = "neutral",
+  metadata: {
+    socialSilence?: SocialSilenceMarkerV1;
+    crosstalkReclaim?: CrosstalkReclaimPlanV1;
+    directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+  } = {},
 ): BotcastMessage {
   const silentResponse = botPowerResponseIsSilentV1(row.content);
   const stageActionText = silentResponse
@@ -2242,6 +2449,18 @@ function mapMessage(
     stageActionText,
     voicePerformanceText: row.voice_performance_text ?? null,
     moodKey: normalizeVoiceDeliveryMood(moodKey),
+    ...(metadata.socialSilence
+      ? { socialSilence: metadata.socialSilence }
+      : {}),
+    ...(metadata.crosstalkReclaim
+      ? { crosstalkReclaim: metadata.crosstalkReclaim }
+      : {}),
+    ...(metadata.directionalIrritationDelivery
+      ? {
+          directionalIrritationDelivery:
+            metadata.directionalIrritationDelivery,
+        }
+      : {}),
     createdAt: row.created_at,
   };
 }
@@ -3299,7 +3518,8 @@ export function listBotcastShows(
     .prepare(
     `SELECT s.*,
             (SELECT COUNT(*) FROM botcast_episodes e
-              WHERE e.user_id = s.user_id AND e.show_id = s.id) AS episode_count,
+              WHERE e.user_id = s.user_id AND e.show_id = s.id
+                AND e.status = 'completed') AS episode_count,
             (SELECT b.powers_json FROM bots b
               WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_powers_json,
             (SELECT b.system_prompt FROM bots b
@@ -3457,7 +3677,8 @@ export function getBotcastShow(
     .prepare(
     `SELECT s.*,
             (SELECT COUNT(*) FROM botcast_episodes e
-              WHERE e.user_id = s.user_id AND e.show_id = s.id) AS episode_count,
+              WHERE e.user_id = s.user_id AND e.show_id = s.id
+                AND e.status = 'completed') AS episode_count,
             (SELECT b.powers_json FROM bots b
               WHERE b.user_id = s.user_id AND b.id = s.host_bot_id) AS host_powers_json,
             (SELECT b.system_prompt FROM bots b
@@ -5788,7 +6009,7 @@ export function deleteBotcastEpisode(
 ): boolean {
   const result = db
     .prepare(
-      "DELETE FROM botcast_episodes WHERE id = ? AND user_id = ? AND status = 'completed'",
+      "DELETE FROM botcast_episodes WHERE id = ? AND user_id = ?",
     )
     .run(episodeId, userId);
   return Number(result.changes ?? 0) > 0;
@@ -5855,6 +6076,83 @@ export function getBotcastEpisode(
         : [];
     }),
   );
+  const metadataByMessageId = new Map<
+    string,
+    {
+      socialSilence?: SocialSilenceMarkerV1;
+      crosstalkReclaim?: CrosstalkReclaimPlanV1;
+      directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+    }
+  >();
+  const mergeMessageMetadata = (
+    messageId: string,
+    metadata: {
+      socialSilence?: SocialSilenceMarkerV1;
+      crosstalkReclaim?: CrosstalkReclaimPlanV1;
+      directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
+    },
+  ) => {
+    if (!messageId) return;
+    metadataByMessageId.set(messageId, {
+      ...metadataByMessageId.get(messageId),
+      ...metadata,
+    });
+  };
+  for (const event of mappedEvents) {
+    if (event.kind === "utterance") {
+      const messageId =
+        typeof event.payload.messageId === "string"
+          ? event.payload.messageId
+          : "";
+      const socialSilence =
+        normalizeSocialSilenceMarkerV1(event.payload.socialSilence) ??
+        undefined;
+      const crosstalkReclaim =
+        normalizeCrosstalkReclaimPlanV1(event.payload.crosstalkReclaim) ??
+        undefined;
+      const directionalIrritationDelivery =
+        normalizeDirectionalIrritationDeliveryPlanV1(
+          event.payload.directionalIrritationDelivery,
+        ) ?? undefined;
+      if (socialSilence || crosstalkReclaim || directionalIrritationDelivery) {
+        mergeMessageMetadata(messageId, {
+          ...(socialSilence ? { socialSilence } : {}),
+          ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
+          ...(directionalIrritationDelivery
+            ? { directionalIrritationDelivery }
+            : {}),
+        });
+      }
+      continue;
+    }
+    if (event.kind === "listener_reaction") {
+      const crosstalkReclaim =
+        normalizeCrosstalkReclaimPlanV1(event.payload.reclaim) ?? undefined;
+      const directionalIrritationDelivery =
+        normalizeDirectionalIrritationDeliveryPlanV1(
+          event.payload.directionalIrritationDelivery,
+        ) ?? undefined;
+      const planMessageId =
+        event.payload.plan &&
+        typeof event.payload.plan === "object" &&
+        !Array.isArray(event.payload.plan) &&
+        typeof (event.payload.plan as { messageId?: unknown }).messageId ===
+          "string"
+          ? String((event.payload.plan as { messageId: string }).messageId)
+          : "";
+      if (crosstalkReclaim) {
+        mergeMessageMetadata(crosstalkReclaim.interruptedMessageId, {
+          crosstalkReclaim,
+        });
+      }
+      if (directionalIrritationDelivery && planMessageId) {
+        mergeMessageMetadata(planMessageId, {
+          directionalIrritationDelivery,
+        });
+      }
+      continue;
+    }
+  }
   const summary = hideIneligibleBotcastPersonaReview(
     db,
     userId,
@@ -5866,13 +6164,18 @@ export function getBotcastEpisode(
     guestContext: row.guest_context ?? "",
     guestPresenceMode,
     messages: messages.map((message) =>
-      mapMessage(message, moodByMessageId.get(message.id)),
+      mapMessage(
+        message,
+        moodByMessageId.get(message.id),
+        metadataByMessageId.get(message.id),
+      ),
     ),
     segments: segments.map(mapSegment),
     events: mappedEvents,
   };
 }
 
+/** Returns an interrupted speaker's unconsumed, one-turn Signal reclaim link. */
 function normalizeBotcastShowHostChatRequest(
   raw: unknown,
 ): {
@@ -6715,6 +7018,41 @@ function botcastLatestPowerInterruption(
     : null;
 }
 
+/**
+ * Finds an ask_about producer cue whose carrying host turn was sanitizer-
+ * repaired, meaning the producer's direction never actually aired. Only the
+ * latest cue qualifies, and a redelivered cue is never re-armed twice.
+ */
+function botcastUndeliveredAskAboutCue(
+  episode: Pick<BotcastEpisode, "events">,
+): BotcastProducerCue | null {
+  const cueEvent = [...episode.events]
+    .reverse()
+    .find((event) => event.kind === "producer_cue");
+  if (!cueEvent) return null;
+  const payload = cueEvent.payload;
+  const detail =
+    typeof payload.detail === "string" ? payload.detail.trim() : "";
+  if (
+    payload.kind !== "ask_about" ||
+    payload.delivery !== "next_host_turn" ||
+    payload.redelivery === true ||
+    !detail
+  ) {
+    return null;
+  }
+  const hostUtterancesSinceCue = episode.events.filter(
+    (event) =>
+      event.sequence > cueEvent.sequence &&
+      event.kind === "utterance" &&
+      event.payload.speakerRole === "host",
+  );
+  if (hostUtterancesSinceCue.length !== 1) return null;
+  return hostUtterancesSinceCue[0]!.payload.utteranceRepair
+    ? { kind: "ask_about", detail }
+    : null;
+}
+
 function persistProducerCue(
   db: DatabaseSync,
   userId: string,
@@ -6724,6 +7062,7 @@ function persistProducerCue(
   now: string,
   hostRedirect?: BotcastHostRedirectContext,
   guestInterruption?: BotcastGuestInterruptionContext,
+  redelivery = false,
 ): BotcastTensionState {
   const normalizedCue = normalizeBotcastProducerCue(cue);
   recordEvent(
@@ -6735,6 +7074,7 @@ function persistProducerCue(
     ...normalizedCue,
     delivery,
     audience: "host",
+    ...(redelivery ? { redelivery: true } : {}),
     ...(delivery === "redirect_host" && hostRedirect
       ? { interruptedMessageId: hostRedirect.messageId }
       : {}),
@@ -6754,6 +7094,8 @@ function persistProducerCue(
     now,
   );
   const before = currentTension(episode);
+  // A redelivered cue already applied its tension the first time it was sent.
+  if (redelivery) return before;
   const after = applyBotcastProducerCueToTension(before, normalizedCue);
   if (
     after.level !== before.level ||
@@ -6844,7 +7186,7 @@ function applyBotcastGuestInterruption(
   interruption: BotcastGuestInterruptionContext,
   now: string,
 ): BotcastEpisode {
-  const bridgeLine = cleanText(interruption.bridgeLine, "", 64);
+  const bridgeLine = cleanText(interruption.bridgeLine, "", BOTCAST_TEXT_MAX);
   if (!bridgeLine) {
     throw new Error("A guest interruption requires a host bridge line.");
   }
@@ -6866,18 +7208,16 @@ function applyBotcastGuestInterruption(
       throw new Error("A completed guest line cannot be interrupted.");
     }
     if (interruptedContent) {
-      const storedContent = interruption.interruptedSpeakerCue
-        ? appendBotCrosstalkInterruptedSpeakerCue(
-            interruptedContent,
-            interruption.interruptedSpeakerCue,
-          )
-        : interruptedContent;
+      // Keep the stock crosstalk retort on the producer_cue / plan only. Canonical
+      // message content is the audience-heard prefix ending at the cut.
       db.prepare(
         `UPDATE botcast_messages
             SET content = ?, voice_performance_text = NULL
           WHERE id = ? AND user_id = ? AND episode_id = ?`,
-      ).run(storedContent, latest.id, userId, episode.id);
+      ).run(interruptedContent, latest.id, userId, episode.id);
     } else if (!spokenContent.trim()) {
+      // Drop utterance, listener-reaction, and utterance-tagged camera events for
+      // the unheard guest line so Auto hysteresis cannot keep framing an empty chair.
       db.prepare(
         `DELETE FROM botcast_events
           WHERE user_id = ? AND episode_id = ?
@@ -6905,6 +7245,24 @@ function applyBotcastGuestInterruption(
   // Do not also persist a normal message/utterance here: it has no visible
   // transcript content and otherwise becomes an audible phantom turn in
   // replay/export.
+  //
+  // Force Auto onto the host immediately so a just-deleted (or cut-off) guest
+  // shot cannot win director hysteresis on the interrupt follow-up.
+  const episodeAfterCut = getBotcastEpisode(db, userId, episode.id);
+  const previousCamera = lastCameraSuggestion(episodeAfterCut.events);
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "camera_suggestion",
+    {
+      shot: "left",
+      reason: "speaker",
+      atMs: previousCamera?.atMs ?? 0,
+      minimumHoldMs: BOTCAST_DIRECTOR_MIN_SHOT_MS,
+    },
+    now,
+  );
   return getBotcastEpisode(db, userId, episode.id);
 }
 
@@ -6942,6 +7300,12 @@ export interface BotcastPromptBuildArgs {
   departureRequired?: boolean;
   /** The Producer requested an expedited close after the current line finishes. */
   producerCut?: boolean;
+  /** Active Library/Marketplace form for the speaking holder (sticky or freshly reshuffled). */
+  activeIdentityShapeshiftState?: BotIdentityShapeshiftStateV1 | null;
+  identityShapeshiftJustChanged?: boolean;
+  /** Active believed-name alias for the speaking holder (sticky or freshly reshuffled). */
+  activeFalseNameState?: BotFalseNameStateV1 | null;
+  falseNameJustChanged?: boolean;
 }
 
 /** Latest persisted mirror target per holder, including explicit closing resets. */
@@ -6982,6 +7346,213 @@ export function botcastIdentityMirrorPromptV1(args: {
           }),
     )
     .join("\n\n");
+}
+
+function botcastProfileWithBorrowedMirrorPowersV1<
+  T extends Pick<BotcastBotProfile, "id" | "name" | "powers">,
+>(
+  profile: T,
+  peer: Pick<BotcastBotProfile, "id" | "powers">,
+  states: ReadonlyMap<string, BotIdentityMirrorStateV1>,
+): T {
+  const state = states.get(profile.id);
+  if (!state || state.targetBotId !== peer.id) return profile;
+  return {
+    ...profile,
+    powers: composeBotIdentityMirrorPowersV1(profile.powers, peer.powers),
+  };
+}
+
+/** Latest persisted Library/Marketplace form per holder for Signal. */
+export function botcastIdentityShapeshiftStatesV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): Map<string, BotIdentityShapeshiftStateV1> {
+  const states = new Map<string, BotIdentityShapeshiftStateV1>();
+  for (const event of events) {
+    if (event.kind !== "power_effect") continue;
+    const state = normalizeBotIdentityShapeshiftStateV1(event.payload.state);
+    if (!state || state.surface !== "signal") continue;
+    states.set(state.holderBotId, state);
+  }
+  return states;
+}
+
+export function botcastIdentityShapeshiftPromptV1(args: {
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  speaker: Pick<BotcastBotProfile, "id" | "name">;
+  speakerRole: BotcastSpeakerRole;
+  /** When set, overrides sticky history for the speaking holder (fresh reshape). */
+  activeHolderState?: BotIdentityShapeshiftStateV1 | null;
+  identityJustChanged?: boolean;
+  /** When mirror presentation is active, keep sticky state but skip the holder inhabit cue. */
+  skipHolderPrompt?: boolean;
+}): string {
+  const states = new Map(botcastIdentityShapeshiftStatesV1(args.events));
+  if (args.activeHolderState) {
+    states.set(args.activeHolderState.holderBotId, args.activeHolderState);
+  }
+  if (states.size === 0) return "";
+  return [...states.values()]
+    .map((state) => {
+      if (state.holderBotId === args.speaker.id) {
+        if (args.skipHolderPrompt) return "";
+        return botIdentityShapeshiftHolderPromptV1({
+          holderName: args.speaker.name,
+          roleLabel: `mechanical Signal ${args.speakerRole}`,
+          state,
+          identityJustChanged: Boolean(
+            args.identityJustChanged &&
+              args.activeHolderState?.holderBotId === args.speaker.id,
+          ),
+        });
+      }
+      return botIdentityShapeshiftObserverPromptV1({
+        observerBotId: args.speaker.id,
+        state,
+      });
+    })
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** Resolve sticky or freshly reshuffled shapeshift form for the speaking holder. */
+export function resolveBotcastIdentityShapeshiftForSpeakerV1(args: {
+  db: DatabaseSync;
+  userId: string;
+  episodeId: string;
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  speaker: Pick<BotcastBotProfile, "id" | "name" | "powers">;
+  speakerEternallyIntroduces: boolean;
+  messageCount: number;
+  latestMessageId?: string | null;
+  now: string;
+}): {
+  activeState: BotIdentityShapeshiftStateV1 | null;
+  justChanged: boolean;
+  pendingState: BotIdentityShapeshiftStateV1 | null;
+} {
+  if (!botPowerShapeshiftsIdentityV1(args.speaker.powers)) {
+    return { activeState: null, justChanged: false, pendingState: null };
+  }
+  const sticky =
+    botcastIdentityShapeshiftStatesV1(args.events).get(args.speaker.id) ?? null;
+  const reshuffleToken = args.speakerEternallyIntroduces
+    ? `${args.messageCount}:${args.latestMessageId ?? "opening"}`
+    : null;
+  const reuseSticky = !args.speakerEternallyIntroduces && sticky !== null;
+  if (reuseSticky) {
+    return { activeState: sticky, justChanged: false, pendingState: null };
+  }
+  const candidates = resolveIdentityShapeshiftCandidatesV1({
+    db: args.db,
+    userId: args.userId,
+    holderBotId: args.speaker.id,
+  });
+  const candidate = pickIdentityShapeshiftCandidateV1({
+    candidates,
+    seed: buildIdentityShapeshiftSeedV1({
+      conversationId: args.episodeId,
+      holderBotId: args.speaker.id,
+      reshuffleToken,
+    }),
+  });
+  if (!candidate) {
+    return { activeState: sticky, justChanged: false, pendingState: null };
+  }
+  const nextState = createIdentityShapeshiftStateFromCandidateV1({
+    surface: "signal",
+    holderBotId: args.speaker.id,
+    holderBotName: args.speaker.name,
+    candidate,
+    sourceMessageId: `shapeshift-pending:${args.episodeId}:${args.speaker.id}:${args.messageCount}`,
+    occurredAt: args.now,
+  });
+  if (
+    botIdentityShapeshiftTargetChangesV1(sticky, candidate.id) ||
+    args.speakerEternallyIntroduces ||
+    !sticky
+  ) {
+    return {
+      activeState: nextState,
+      justChanged: true,
+      pendingState: nextState,
+    };
+  }
+  return { activeState: sticky, justChanged: false, pendingState: null };
+}
+
+/** Latest persisted believed-name alias per holder for Signal. */
+export function botcastFalseNameStatesV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): Map<string, BotFalseNameStateV1> {
+  const states = new Map<string, BotFalseNameStateV1>();
+  for (const event of events) {
+    if (event.kind !== "power_effect") continue;
+    if (event.payload.effect !== "false_name") continue;
+    const state = normalizeBotFalseNameStateV1(event.payload.state);
+    if (!state || state.surface !== "signal") continue;
+    states.set(state.holderBotId, state);
+  }
+  return states;
+}
+
+export function botcastFalseNamePromptV1(args: {
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  speaker: Pick<BotcastBotProfile, "id" | "name">;
+  /** When set, overrides sticky history for the speaking holder (fresh alias). */
+  activeHolderState?: BotFalseNameStateV1 | null;
+}): string {
+  const states = new Map(botcastFalseNameStatesV1(args.events));
+  if (args.activeHolderState) {
+    states.set(args.activeHolderState.holderBotId, args.activeHolderState);
+  }
+  if (states.size === 0) return "";
+  return [...states.values()]
+    .map((state) =>
+      state.holderBotId === args.speaker.id
+        ? botFalseNameSelfCueV1(state.believedName)
+        : botFalseNameObserverCueV1(state.holderBotName, state.believedName),
+    )
+    .join("\n\n");
+}
+
+/** Resolve sticky or freshly reshuffled believed name for the speaking holder. */
+export function resolveBotcastFalseNameForSpeakerV1(args: {
+  episodeId: string;
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[];
+  speaker: Pick<BotcastBotProfile, "id" | "name" | "powers">;
+  speakerEternallyIntroduces: boolean;
+  messageCount: number;
+  latestMessageId?: string | null;
+  now: string;
+}): {
+  activeState: BotFalseNameStateV1 | null;
+  justChanged: boolean;
+  pendingState: BotFalseNameStateV1 | null;
+} {
+  if (!botPowerBelievesFalseNameV1(args.speaker.powers)) {
+    return { activeState: null, justChanged: false, pendingState: null };
+  }
+  const sticky =
+    botcastFalseNameStatesV1(args.events).get(args.speaker.id) ?? null;
+  const reshuffleToken = args.speakerEternallyIntroduces
+    ? `${args.messageCount}:${args.latestMessageId ?? "opening"}`
+    : null;
+  const resolution = resolveBotFalseNameStateV1({
+    surface: "signal",
+    conversationId: args.episodeId,
+    holderBotId: args.speaker.id,
+    holderBotName: args.speaker.name,
+    sticky: args.speakerEternallyIntroduces ? null : sticky,
+    reshuffleToken,
+    sourceMessageId: `false-name-pending:${args.episodeId}:${args.speaker.id}:${args.messageCount}`,
+    occurredAt: args.now,
+  });
+  return {
+    activeState: resolution.state,
+    justChanged: resolution.justChanged,
+    pendingState: resolution.pending,
+  };
 }
 
 /** Runtime gate for bot-only, perceivable, audible Signal identity theft. */
@@ -7340,6 +7911,41 @@ function botcastHostPrematurelyClosesTimedSilentInterview(
   return BOTCAST_TIMED_SILENT_GUEST_PREMATURE_CLOSE_PATTERN.test(content);
 }
 
+const BOTCAST_HOST_HARD_SIGNOFF_PATTERN =
+  /\bgood\s?(?:night|bye)\b|\bthanks?\s+for\s+(?:listening|joining|tuning\s+in|watching)\b|\bthank\s+you\s+for\s+(?:listening|joining|tuning\s+in|watching)\b|\bthat(?:['’]s|\s+is)\s+(?:our|the)\s+show\b|\b(?:see|catch)\s+you\s+next\s+(?:time|week|episode)\b|\buntil\s+next\s+time\b|\bthat(?:['’]s|\s+is)\s+all\s+the\s+time\s+we\s+have\b|\bsigning\s+off\b/iu;
+
+/**
+ * Only the wrap cue and the closing segment may end the show. When the model
+ * has the host sign off mid-interview, drop the trailing sign-off sentences
+ * (including an adjacent "I'm <host>" re-introduction) and keep the rest.
+ * Returns an empty string when the whole turn was a sign-off.
+ */
+function botcastStripPrematureHostSignoff(
+  content: string,
+  hostName: string,
+): string {
+  const sentences = content.split(/(?<=[.!?…])\s+/u).filter(Boolean);
+  if (sentences.length === 0) return content;
+  const selfIdentPattern = new RegExp(
+    `\\bI(?:['’]m|\\s+am)\\s+${hostName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}\\b`,
+    "iu",
+  );
+  let cut = sentences.length;
+  let sawHardSignoff = false;
+  for (let index = sentences.length - 1; index >= 0; index -= 1) {
+    const sentence = sentences[index]!;
+    // A trailing question keeps the interview open — never treat it as a sign-off.
+    if (/\?\s*["'”’)\]]*$/u.test(sentence)) break;
+    const hard = BOTCAST_HOST_HARD_SIGNOFF_PATTERN.test(sentence);
+    const selfIdent = selfIdentPattern.test(sentence);
+    if (!hard && !selfIdent) break;
+    cut = index;
+    if (hard) sawHardSignoff = true;
+  }
+  if (!sawHardSignoff || cut === sentences.length) return content;
+  return sentences.slice(0, cut).join(" ").trim();
+}
+
 /**
  * Builds a prompt from persistent show configuration plus the current episode only.
  * Deliberately accepts no archive, relationship, memory, synopsis, or prior-episode input.
@@ -7347,10 +7953,21 @@ function botcastHostPrematurelyClosesTimedSilentInterview(
 export function buildBotcastSpeakerPrompt(
   args: BotcastPromptBuildArgs,
 ): ProviderMessage[] {
-  const speaker = args.speakerRole === "host" ? args.host : args.guest;
-  const peer = args.speakerRole === "host" ? args.guest : args.host;
-  const hostNamesGuest = botPowerTargetNameV1(args.guest.name, args.host.powers);
-  const guestNamesHost = botPowerTargetNameV1(args.host.name, args.guest.powers);
+  const mirrorStates = botcastIdentityMirrorStatesV1(args.episode.events);
+  const host = botcastProfileWithBorrowedMirrorPowersV1(
+    args.host,
+    args.guest,
+    mirrorStates,
+  );
+  const guest = botcastProfileWithBorrowedMirrorPowersV1(
+    args.guest,
+    args.host,
+    mirrorStates,
+  );
+  const speaker = args.speakerRole === "host" ? host : guest;
+  const peer = args.speakerRole === "host" ? guest : host;
+  const hostNamesGuest = botPowerTargetNameV1(guest.name, host.powers);
+  const guestNamesHost = botPowerTargetNameV1(host.name, guest.powers);
   const peerAddressName = args.speakerRole === "host" ? hostNamesGuest : guestNamesHost;
   const speakerEternallyIntroduces = botPowerEternallyIntroducesV1(
     speaker.powers,
@@ -7420,13 +8037,19 @@ export function buildBotcastSpeakerPrompt(
   const genericSpeakerCuePowers = activeBotPowersV1(speaker.powers).filter(
     (power) =>
       !power.compiled?.effects.some(
-        (effect) => effect.type === "identity_mirror",
+        (effect) =>
+          effect.type === "identity_mirror" ||
+          effect.type === "identity_shapeshift" ||
+          effect.type === "false_name",
       ),
   );
   const genericPeerCuePowers = activeBotPowersV1(peer.powers).filter(
     (power) =>
       !power.compiled?.effects.some(
-        (effect) => effect.type === "identity_mirror",
+        (effect) =>
+          effect.type === "identity_mirror" ||
+          effect.type === "identity_shapeshift" ||
+          effect.type === "false_name",
       ),
   );
   const powersPrompt = buildBotPowersPromptBlock([
@@ -7440,25 +8063,57 @@ export function buildBotcastSpeakerPrompt(
       ? [botPowerBotNamingCueV1(speaker.name, speaker.powers, [peer.name])!]
       : []),
   ]);
-  const identityMirrorPrompt = speakerEternallyIntroduces
-    ? null
-    : botcastIdentityMirrorPromptV1({
-        events: args.episode.events,
-        speaker,
-        speakerRole: args.speakerRole,
-      });
-  const activeIdentityMirrorState = speakerEternallyIntroduces
-    ? null
-    : botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
+  const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
+    events: args.episode.events,
+    speaker,
+    speakerRole: args.speakerRole,
+  });
+  const activeIdentityMirrorState =
+    botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
   const identityMirrorJustChanged = Boolean(
     activeIdentityMirrorState &&
       activeIdentityMirrorState.sourceMessageId ===
         args.episode.messages.at(-1)?.id,
   );
+  const activeIdentityShapeshiftState =
+    args.activeIdentityShapeshiftState !== undefined
+      ? args.activeIdentityShapeshiftState
+      : botcastIdentityShapeshiftStatesV1(args.episode.events).get(speaker.id) ??
+        null;
+  const identityShapeshiftJustChanged = Boolean(
+    args.identityShapeshiftJustChanged,
+  );
+  const identityShapeshiftPrompt = botcastIdentityShapeshiftPromptV1({
+    events: args.episode.events,
+    speaker,
+    speakerRole: args.speakerRole,
+    activeHolderState: activeIdentityShapeshiftState,
+    identityJustChanged:
+      !activeIdentityMirrorState && identityShapeshiftJustChanged,
+    skipHolderPrompt: Boolean(activeIdentityMirrorState),
+  });
+  const activeFalseNameState =
+    args.activeFalseNameState !== undefined
+      ? args.activeFalseNameState
+      : botcastFalseNameStatesV1(args.episode.events).get(speaker.id) ?? null;
+  const falseNameJustChanged = Boolean(args.falseNameJustChanged);
+  const falseNamePrompt = botcastFalseNamePromptV1({
+    events: args.episode.events,
+    speaker,
+    activeHolderState: activeFalseNameState,
+  });
+  /** Mirror presentation wins over shapeshift when both are active. */
   const effectivePersonaName =
-    activeIdentityMirrorState?.targetBotName ?? speaker.name;
+    activeIdentityMirrorState?.targetBotName ??
+    activeIdentityShapeshiftState?.targetBotName ??
+    speaker.name;
   const effectivePersonaPrompt =
-    activeIdentityMirrorState?.targetPersonaPrompt ?? speaker.systemPrompt;
+    activeIdentityMirrorState?.targetPersonaPrompt ??
+    activeIdentityShapeshiftState?.targetPersonaPrompt ??
+    speaker.systemPrompt;
+  const shapeshiftIsActivePersonaSource = Boolean(
+    activeIdentityShapeshiftState && !activeIdentityMirrorState,
+  );
   const powerEncounterRule = speakerEternallyIntroduces
     ? null
     : botcastPowerEncounterRule({
@@ -7532,14 +8187,14 @@ export function buildBotcastSpeakerPrompt(
   const openingIntroductionRule =
     firstHostOpening
     ? botPowerIsMutedV1(args.guest.powers)
-      ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Complete all three introductions, but do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
-      : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Complete all three introductions before asking the first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+      ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook. Do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+      : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook or first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
     : null;
   const openingTopicFramingRule = firstHostOpening
     ? "Treat the public Topic field as a raw editorial title, not a line of dialogue: it is a label, not a sentence topic to parrot. Build the opening around one meaningful premise, tension, tradeoff, event, or question that the title suggests; expand or grammatically reframe it as needed, preserve its meaning, and let the host persona flavor the framing. The exact title does not need to appear verbatim. Do not treat verbatim wording as a requirement or fall back to a fixed topic-announcement template. Never announce the title with a canned Today-plus-talk-about template, and never merely restate the title as the subject of the first question."
     : null;
   const privateProducerBrief = signalProducerBriefWithoutPickles(
-    args.episode.producerBrief,
+    args.episode.producerBrief ?? "",
   );
   const producerBriefRule =
     args.speakerRole === "host" &&
@@ -7579,7 +8234,7 @@ export function buildBotcastSpeakerPrompt(
   const askAboutCueRule =
     args.speakerRole === "host" &&
     args.cue?.kind === "ask_about"
-      ? "Binding private live objective: on this exact host turn, make the requested subject, event, offer, or question in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote it, mention a producer, cue, or control room, or address the user."
+      ? "Binding private live objective: on this exact host turn, make the requested subject, event, offer, or question in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote the cue detail verbatim, never echo producer cadence words such as \"anyway,\" never mention a producer, cue, or control room, and never address the user. Paraphrase into your own host voice. Do not import absolute real-world calendar years or dated timestamps from the cue; ask the substance in-world so the guest's persona timeline stays intact."
       : null;
   const refocusCueRule =
     args.speakerRole === "host" &&
@@ -7590,7 +8245,7 @@ export function buildBotcastSpeakerPrompt(
     ? null
     : botcastLatestPowerInterruption(args.episode, speaker.id);
   const powerInterruptionFollowUpRule = latestPowerInterruption
-    ? "Your interruption Power just cut the other speaker at the exact audience-heard prefix saved in the transcript. Take the mic immediately and continue from only those heard words. Do not invent, complete, paraphrase, or react to an unheard ending; do not name the Power or explain the cutoff."
+    ? "Your interruption Power just cut the other speaker at the exact audience-heard prefix saved in the transcript (the words before the cut-off dash). Take the mic immediately and continue from only those heard words. Do not invent, complete, paraphrase, or react to an unheard ending. If a trailing stock retort such as \"Apparently we're moving on\" or \"I'll leave it\" appears after the dash in older transcript text, ignore it — that is crosstalk performance, not the speaker's claim. Do not name the Power or explain the cutoff."
     : null;
   const producerCutRule = producerCut
     ? "The transmission now needs one prompt, natural closing beat. If the latest line was broken off or a short host bridge just cut in, continue naturally from that interruption without repeating the bridge or pretending the unfinished thought was completed. Otherwise treat this as a normal handoff. Close with tact in your own voice using one or two very short sentences. Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction."
@@ -7598,7 +8253,7 @@ export function buildBotcastSpeakerPrompt(
   const closingOwnershipRule =
     args.episode.segment === "closing"
       ? args.speakerRole === "host"
-        ? "Binding show contract: this is the final host-owned beat, and the episode ends immediately after this turn. Never yield the sign-off, invite another response, or give the guest the last word."
+        ? "Binding show contract: this is the final host-owned beat, and the episode ends immediately after this turn. Never yield the sign-off, invite another response, or give the guest the last word. Stay in the host's established diction and attitude: one or two short sentences, usually 8 to 32 words, built around one sharp topic-specific observation and an optional brief thanks. Do not address listeners at home, announce that the conversation is ending, prescribe reflection, summarize a lesson, moralize, turn the guest into a cautionary tale, or drift into ceremonial farewell language. Do not explain, redefine, or contradict persona lore or catchphrases; omit a lore reference unless its persisted meaning is certain."
         : "Binding show contract: only the host may close Signal. Give a final response without presenting it as the sign-off; the host must speak last."
       : null;
   const echoingPeerTurnRule =
@@ -7651,10 +8306,14 @@ export function buildBotcastSpeakerPrompt(
         !visible || (audible && canonicalSilentResponse)
           ? null
           : message.stageActionText;
-      const content = silentResponse
+      const listenerPlan = botcastListenerReactionForMessage(
+        args.episode.events,
+        message.id,
+      );
+      const spokenClaim = silentResponse
         ? BOT_POWER_CANONICAL_SILENCE_V1
-        : message.content;
-      return `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${stageActionText ? `*${stageActionText}* ` : ""}${content}`;
+        : botCrosstalkPrimarySpeakerContent(message.content, listenerPlan);
+      return `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${stageActionText ? `*${stageActionText}* ` : ""}${spokenClaim}`;
     })
     .join("\n");
   const roleRules = audienceOnlyGuest
@@ -7711,7 +8370,7 @@ export function buildBotcastSpeakerPrompt(
                   : voluntaryGuestDeparture
                     ? "The guest has ended the interview and is visibly leaving. Let the exit land, then briefly reflect and close the episode without asking another question."
                     : "The guest has walked out. Let the exit land without calling after them, then react in character, briefly reflect without grandstanding, and close the episode."
-                : "Close with one earned final thought and thank the guest."
+                : "Close with one short, earned, topic-specific thought in your established persona; optionally thank the guest without turning the sign-off into a lesson or ceremony."
               : "Ask one specific question or concise follow-up. Avoid stacked questions and generic praise.",
         ]
       : [
@@ -7747,9 +8406,7 @@ export function buildBotcastSpeakerPrompt(
       ? "Echo opening exception: nobody has addressed speech to you yet, so originate this one required opening in your own voice. After this first phrase, the hard echo rule takes over."
       : "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line after your opening, return only `...`. This overrides every later question, answer, closing, and vocal-reaction instruction."
     : null;
-  const eternalIntroductionRule = !muteRule && speakerEternallyIntroduces
-    ? `Hard short-term-amnesia rule: receive and understand only the current other-speaker on-air message below. Respond directly to its concrete content as fresh first contact. You do not know the episode topic unless that message states it, and you do not know prior turns or your own earlier messages. Immutable identity: you are "${speaker.name}", and the other speaker is "${peerAddressName}". Never call yourself "${peerAddressName}", adopt their identity, or swap your assigned host or guest role. Never claim older familiarity, use private episode history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it.`
-    : null;
+  // eternal_introduction: transcript wipe only — no hard amnesia performance cue.
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(speaker.powers);
   const responseBudgetRule = responseBudget
     ? responseBudget.mode === "minimal"
@@ -7789,10 +8446,15 @@ export function buildBotcastSpeakerPrompt(
             ? "Keep this expedited sign-off extremely brief: one or two short sentences, usually 8 to 24 spoken words."
             : firstHostOpening
               ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
+              : args.speakerRole === "host" &&
+                  args.episode.segment === "closing"
+                ? "Keep this final host sign-off sharp: one or two short sentences, usually 8 to 32 spoken words."
               : "Keep this turn conversational and brisk: one to three concise sentences, usually 12 to 45 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${effectivePersonaPrompt}`,
         ...(identityMirrorPrompt ? [identityMirrorPrompt] : []),
+        ...(identityShapeshiftPrompt ? [identityShapeshiftPrompt] : []),
+        ...(falseNamePrompt ? [falseNamePrompt] : []),
         ...(cloneIdentityPrompt ? [cloneIdentityPrompt] : []),
         ...(powersPrompt ? [powersPrompt] : []),
         ...(peerPerceptionRule ? [peerPerceptionRule] : []),
@@ -7819,7 +8481,6 @@ export function buildBotcastSpeakerPrompt(
         ...(responseBudgetRule ? [responseBudgetRule] : []),
         ...(muteRule ? [muteRule] : []),
         ...(echoRule ? [echoRule] : []),
-        ...(eternalIntroductionRule ? [eternalIntroductionRule] : []),
       ].join("\n\n")),
     },
     {
@@ -7830,9 +8491,8 @@ export function buildBotcastSpeakerPrompt(
             `Your assigned on-air role: ${args.speakerRole}.`,
             `${peerAddressName} is the person in front of you now.`,
             transcript
-              ? `Only this current other-speaker on-air message is available to you:\n${transcript}`
+              ? `Current other-speaker on-air message:\n${transcript}`
               : "No other-speaker on-air message is available yet; this may be the opening.",
-            `Respond directly to the available message as ${speaker.name} without inventing older familiarity or repeating a canned introduction.`,
           ]
         : [
         `Show: ${args.show.name}`,
@@ -7876,6 +8536,12 @@ export function buildBotcastSpeakerPrompt(
           ? `The identity change just occurred. First state plainly that you are ${activeIdentityMirrorState.targetBotName}, call the original ${activeIdentityMirrorState.targetBotName} an impostor, then continue in that public persona while remaining the mechanical ${args.speakerRole}.`
           : activeIdentityMirrorState
             ? `Continue in your active copied identity while remaining the mechanical ${args.speakerRole}. Do not repeat that you are ${activeIdentityMirrorState.targetBotName} or that the original is an impostor; demonstrate the copied persona by advancing the substantive conversation.`
+            : identityShapeshiftJustChanged &&
+                shapeshiftIsActivePersonaSource &&
+                activeIdentityShapeshiftState
+              ? `The shapeshift just occurred. First state plainly that you are ${activeIdentityShapeshiftState.targetBotName}, then continue inhabiting that public form while remaining the mechanical ${args.speakerRole}.`
+              : shapeshiftIsActivePersonaSource && activeIdentityShapeshiftState
+                ? `Continue inhabiting ${activeIdentityShapeshiftState.targetBotName} while remaining the mechanical ${args.speakerRole}. Do not restate the transformation; advance the substantive conversation.`
             : args.episode.segment === "closing"
               ? `Close the show now as ${speaker.name}. This is the final sign-off, not another substantive answer or question.`
               : `Continue as ${speaker.name}.`,
@@ -7900,7 +8566,7 @@ export function buildBotcastOpeningIntroPrompt(
     "Ground the intro in the persisted show premise, hosting style, and studio identity; let those details shape the host's angle and rhythm rather than listing or describing the set.",
     `Let ${args.host.name}'s actual persona determine the degree and manner of anticipation. It may be delighted, wary, hungry, amused, precise, or quietly compelled, but it must feel earned by this host rather than uniformly enthusiastic. Whatever the register, convey a genuine personal desire to be on mic for this particular episode; never sound bored, procedural, or obligated.`,
     `Treat ${hostNamesGuest}'s persona as a real source of friction, expertise, or intrigue when a guest is present. Use the episode topic and any private producer direction as the immediate reason this particular conversation needs to begin now.`,
-    "Choose a fresh opening architecture that fits this episode: for example, begin with a provocation, vivid image, contradiction, confession, urgent observation, or pointed guest-specific hook. The required show, host, and guest identities may land naturally after that hook instead of always leading the first sentence.",
+    "Choose a fresh opening architecture that fits this episode, but lead with a concise, persona-shaped identity sentence naming the show and host, then identify the guest immediately. After that protected identity lead, move into a provocation, vivid image, contradiction, confession, urgent observation, or pointed guest-specific hook.",
     "Naturally launch the conversation with a concrete invitation, proposition, or first question. Avoid stock welcome language, generic podcast boilerplate, routine Today-we-are-here phrasing, and all variants of asking for the meaning of the topic or the lesson behind the topic.",
     "Return only the spoken on-air intro. Do not explain the creative choices, mention this authoring pass, or write the guest's response.",
   ].join("\n\n");
@@ -7929,23 +8595,54 @@ const BOTCAST_ESTABLISHED_RELATIONSHIP_HISTORY_PATTERNS = [
 ] as const;
 const BOTCAST_LEADING_STAGE_ACTION_PATTERN =
   /^((?:\s*\[[^\]\n]{1,48}\]\s*)*)\*(?:lean(?:s|ing)?|sit(?:s|ting)?|stand(?:s|ing)?|nod(?:s|ding)?|shak(?:es|ing)|tilt(?:s|ing)?|turn(?:s|ing)?|glanc(?:es|ing)|look(?:s|ing)?|smil(?:es|ing)|frown(?:s|ing)?|rais(?:es|ing)|lower(?:s|ing)?|fold(?:s|ing)?|tap(?:s|ping)?|adjust(?:s|ing)?|paus(?:es|ing)|shrug(?:s|ging)?|recoil(?:s|ing)?|winc(?:es|ing)|grin(?:s|ning)?|laugh(?:s|ing)?|sigh(?:s|ing)?|breath(?:es|ing)|twitch(?:es|ing)?)\b[^*\n]{0,160}\*\s*/iu;
+// Parenthetical body-language directions like "(leaning back in his chair)"
+// are stagecraft, not speech — Signal schedules performance separately.
+const BOTCAST_PARENTHETICAL_STAGE_DIRECTION_PATTERN =
+  /\(\s*(?:lean(?:s|ing)?|sit(?:s|ting)?|stand(?:s|ing)?|nod(?:s|ding)?|shak(?:es|ing)|tilt(?:s|ing)?|turn(?:s|ing)?|glanc(?:es|ing)|look(?:s|ing)?|smil(?:es|ing)|frown(?:s|ing)?|rais(?:es|ing)|lower(?:s|ing)?|fold(?:s|ing)?|tap(?:s|ping)?|adjust(?:s|ing)?|paus(?:es|ing)|shrug(?:s|ging)?|recoil(?:s|ing)?|winc(?:es|ing)|wink(?:s|ing)?|grin(?:s|ning)?|laugh(?:s|ing)?|chuckl(?:es|ing)|sigh(?:s|ing)?|breath(?:es|ing)|gestur(?:es|ing)|settl(?:es|ing)|narrow(?:s|ing)?|star(?:es|ing)|twitch(?:es|ing)?)\b[^()\n]{0,80}\)\s*/giu;
 
 function extractBotcastVoicePerformance(
   value: string,
   enabled: boolean,
   recentTags: readonly string[] = [],
 ): { content: string; voicePerformanceText: string | null } {
-  void enabled;
-  void recentTags;
-  const content = value
+  const directionSafeValue = value.replace(
+    BOTCAST_PARENTHETICAL_STAGE_DIRECTION_PATTERN,
+    " ",
+  );
+  const content = directionSafeValue
     .replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " ")
     .trimStart()
     .replace(BOTCAST_LEADING_STAGE_ACTION_PATTERN, " ")
     .replace(/\s+/gu, " ")
     .trim();
+  const rawPerformanceText = enabled
+    ? voicePerformanceTextFromActionCues(directionSafeValue)
+    : null;
+  const fallbackTag = botcastFallbackImmersiveVoiceTag("guest", recentTags);
+  const authoredAsteriskPerformanceTags = new Set(
+    [...directionSafeValue.matchAll(/(\*{1,3})[^*\r\n]{1,240}\1/gu)]
+      .flatMap((match) =>
+        [
+          ...(voicePerformanceTextFromActionCues(match[0]) ?? "").matchAll(
+            BOTCAST_BRACKETED_DIRECTION_PATTERN,
+          ),
+        ].map((tagMatch) => (tagMatch[1] ?? "").trim().toLowerCase()),
+      ),
+  );
+  const voicePerformanceText = rawPerformanceText?.replace(
+    BOTCAST_BRACKETED_DIRECTION_PATTERN,
+    (match, rawTag: string) => {
+      const tag = rawTag.trim().toLowerCase();
+      if (authoredAsteriskPerformanceTags.has(tag)) return match;
+      return (BOTCAST_IMMERSIVE_VOICE_TAGS as readonly string[]).includes(tag) &&
+        !recentTags.includes(tag)
+        ? match
+        : `[${fallbackTag}]`;
+    },
+  ) ?? null;
   return {
     content,
-    voicePerformanceText: voicePerformanceTextFromActionCues(value),
+    voicePerformanceText,
   };
 }
 
@@ -7954,9 +8651,34 @@ function botcastUtteranceAppearsIncomplete(value: string): boolean {
     value.replace(BOTCAST_BRACKETED_DIRECTION_PATTERN, " "),
   );
   const wordCount = spokenContent.split(/\s+/u).filter(Boolean).length;
-  if (wordCount < 24) return false;
   const withoutClosingMarks = spokenContent.replace(/["'”’\)\]\}*_]+$/u, "");
-  return !/[.!?…]$/u.test(withoutClosingMarks);
+  if (/[.!?…]$/u.test(withoutClosingMarks)) return false;
+  // Dangling conjunctions / articles are incomplete at any length ("…and that").
+  if (
+    /\b(?:and|but|or|so|because|if|when|while|that|which|who|whom|whose|to|of|for|with|the|a|an)\s*$/iu.test(
+      withoutClosingMarks,
+    )
+  ) {
+    return true;
+  }
+  // Trailing "and we'll see" / "we'll see" cuts mid-promise without a landing.
+  if (
+    /\b(?:and|but)\s+we(?:['’]ll| will)\s+\w+$/iu.test(withoutClosingMarks) ||
+    /\bwe(?:['’]ll| will)\s+see$/iu.test(withoutClosingMarks)
+  ) {
+    return true;
+  }
+  // Unfinished predicates ("The mounting theory is") — keep very short answers like "Yes I am".
+  if (
+    wordCount >= 4 &&
+    /\b(?:am|is|are|was|were|be|been|being|has|have|had|will|would|can|could|should|must|may|might|do|does|did)\s*$/iu.test(
+      withoutClosingMarks,
+    )
+  ) {
+    return true;
+  }
+  if (wordCount < 24) return false;
+  return true;
 }
 
 function removeRepeatedBotcastInterruptionBridge(
@@ -8038,6 +8760,44 @@ function botcastLatestDirectQuestion(args: {
   return null;
 }
 
+function botcastClipSpokenRecoveryFragment(
+  value: string,
+  maxWords: number,
+  preferEnd = false,
+): string {
+  const words = value.replace(/\s+/gu, " ").trim().split(/\s+/u).filter(Boolean);
+  if (words.length <= maxWords) return words.join(" ");
+  // Host questions usually land their ask at the end — keep that punch on mic.
+  if (preferEnd) {
+    return `…${words.slice(-maxWords).join(" ")}`;
+  }
+  return `${words.slice(0, maxWords).join(" ")}…`;
+}
+
+/**
+ * Quotes a clipped question without doubling punctuation: a question that
+ * already ends in ?/!/… must not gain a trailing period or comma ("why?.").
+ */
+function botcastRecoveryQuestionQuote(
+  question: string,
+  position: "sentence_end" | "mid_sentence",
+): string {
+  const trimmed = question.trim();
+  if (/[.!?…]$/u.test(trimmed)) return `“${trimmed}”`;
+  return `“${trimmed}${position === "sentence_end" ? "." : ","}”`;
+}
+
+/** Capitalizes the first letter so mid-sentence claim anchors can open a line. */
+function botcastCapitalizeSpokenLine(value: string): string {
+  const index = value.search(/\p{L}/u);
+  if (index === -1) return value;
+  return (
+    value.slice(0, index) +
+    value.charAt(index).toUpperCase() +
+    value.slice(index + 1)
+  );
+}
+
 function botcastGuestRecoveryFallbacks(args: {
   topicWithPunctuation: string;
   openingSubject: string;
@@ -8045,33 +8805,77 @@ function botcastGuestRecoveryFallbacks(args: {
   latestGuestClaimAnchor: string | null;
   latestHostQuestion: string | null;
 }): string[] {
-  const { latestGuestClaimAnchor, latestHostQuestion, peerName } = args;
-  if (latestGuestClaimAnchor && latestHostQuestion) {
+  const { latestGuestClaimAnchor, latestHostQuestion } = args;
+  // Keep recovery sounding spoken — no "To answer X: start from Y" scaffolding on mic.
+  const candidates = (() => {
+    if (latestGuestClaimAnchor && latestHostQuestion) {
+      const claim = botcastClipSpokenRecoveryFragment(latestGuestClaimAnchor, 18);
+      const question = botcastClipSpokenRecoveryFragment(
+        latestHostQuestion,
+        16,
+        true,
+      );
+      return [
+        `${claim}—that still answers ${botcastRecoveryQuestionQuote(question, "sentence_end")} Judge it by what it grants, what it costs, and whether refusal stays real.`,
+        `You asked ${botcastRecoveryQuestionQuote(question, "sentence_end")} I keep coming back to this: ${claim}. The cost lands on whoever has to live with the result.`,
+        `${claim}. For ${botcastRecoveryQuestionQuote(question, "mid_sentence")} control of the result, the consequence that follows, and who can still say no—that's the practical answer.`,
+      ];
+    }
+    if (latestGuestClaimAnchor) {
+      const claim = botcastClipSpokenRecoveryFragment(latestGuestClaimAnchor, 18);
+      return [
+        `My answer starts here: ${claim}. The practical line is the first irreversible choice and the person forced to pay for it.`,
+        `I stand by this: ${claim}. Judge that by the power it grants, the cost it imposes, and whether refusal remains real.`,
+        `${claim} is still my answer. Its consequence appears when an abstract position begins directing somebody's actual choice.`,
+      ];
+    }
+    if (latestHostQuestion) {
+      const question = botcastClipSpokenRecoveryFragment(
+        latestHostQuestion,
+        16,
+        true,
+      );
+      return [
+        `For ${botcastRecoveryQuestionQuote(question, "mid_sentence")} I start with the concrete decision, its cost, and who has to live with both.`,
+        `You asked ${botcastRecoveryQuestionQuote(question, "sentence_end")} My answer begins with the first real tradeoff: what someone chooses, gives up, or accepts.`,
+        `On ${botcastRecoveryQuestionQuote(question, "mid_sentence")} I would judge the answer by what changes once somebody acts on it and who pays for that change.`,
+      ];
+    }
     return [
-      `${peerName}, you asked “${latestHostQuestion}.” My answer follows from “${latestGuestClaimAnchor}”: judge the proposal by what it grants, what it costs, and whether refusal remains real.`,
-      `On “${latestHostQuestion},” I stand by “${latestGuestClaimAnchor}.” The practical answer turns on the first irreversible choice and the person left to pay for it.`,
-      `To answer “${latestHostQuestion}”: start from “${latestGuestClaimAnchor}.” The decisive issue is who controls the result, what consequence follows, and who can still say no.`,
+      `${args.topicWithPunctuation} I would start with the concrete decision, its cost, and who has to live with both.`,
+      `For me, ${args.openingSubject} becomes real at the first tradeoff: what someone chooses, gives up, or accepts.`,
+      `The useful test for ${args.openingSubject} is the consequence—what changes once somebody acts on it.`,
+      `I would make ${args.openingSubject} concrete: identify the choice, the person making it, and the price that follows.`,
+    ];
+  })();
+  return candidates.map(botcastCapitalizeSpokenLine);
+}
+
+function botcastHostRecoveryFallbacks(args: {
+  topicWithPunctuation: string;
+  peerName: string;
+  latestGuestClaimAnchor: string | null;
+}): string[] {
+  const claim = args.latestGuestClaimAnchor
+    ? botcastClipSpokenRecoveryFragment(args.latestGuestClaimAnchor, 16, true)
+    : null;
+  if (!claim) {
+    const topic =
+      args.topicWithPunctuation.replace(/[.!?]+$/u, "").trim() ||
+      "this subject";
+    return [
+      `${args.peerName}, on ${topic}, which consequence is easiest to ignore?`,
+      `What concrete choice would settle your position on ${topic}?`,
+      `Where does ${topic} stop being abstract and become somebody's cost?`,
+      `What evidence about ${topic} would force you to change your answer?`,
     ];
   }
-  if (latestGuestClaimAnchor) {
-    return [
-      `My answer starts with “${latestGuestClaimAnchor}.” The practical line is the first irreversible choice and the person forced to pay for it.`,
-      `I stand by “${latestGuestClaimAnchor}.” Judge that answer by the power it grants, the cost it imposes, and whether refusal remains real.`,
-      `“${latestGuestClaimAnchor}” is still my answer. Its consequence appears when an abstract position begins directing somebody's actual choice.`,
-    ];
-  }
-  if (latestHostQuestion) {
-    return [
-      `To answer “${latestHostQuestion}”: start with the concrete decision, its cost, and who has to live with both.`,
-      `On “${latestHostQuestion},” my answer begins with the first real tradeoff: what someone chooses, gives up, or accepts.`,
-      `For “${latestHostQuestion},” I would judge the answer by what changes once somebody acts on it and who pays for that change.`,
-    ];
-  }
+  const quotedClaim = botcastRecoveryQuestionQuote(claim, "sentence_end");
   return [
-    `${args.topicWithPunctuation} I would start with the concrete decision, its cost, and who has to live with both.`,
-    `For me, ${args.openingSubject} becomes real at the first tradeoff: what someone chooses, gives up, or accepts.`,
-    `The useful test for ${args.openingSubject} is the consequence—what changes once somebody acts on it.`,
-    `I would make ${args.openingSubject} concrete: identify the choice, the person making it, and the price that follows.`,
+    `${args.peerName}, you said ${quotedClaim} Who actually pays for that choice?`,
+    `You called it ${quotedClaim} What evidence would make you change that answer?`,
+    `${quotedClaim} Where does that claim become a concrete consequence?`,
+    `If ${quotedClaim} is the answer, who has to live with the part it leaves out?`,
   ];
 }
 
@@ -8090,6 +8894,7 @@ type BotcastUtteranceRepairReason =
   | "anthology_history"
   | "empty"
   | "empty_after_cleanup"
+  | "generic_closing"
   | "incomplete"
   | "non_answering_deferral"
   | "peer_label"
@@ -8120,6 +8925,24 @@ function botcastSpeakerClaimsPeerIdentity(
     `(?:^|[.!?…]\\s+)[“"'‘’]?\\s*(?:hello[,!—\\s-]*)?(?:i\\s*(?:am|['’]m)|my\\s+name\\s+is)\\s+${peerIdentity}(?=$|[\\s,;:.!?…—-])`,
     "iu",
   ).test(content);
+}
+
+function botcastSpeakerLabelAlternatives(name: string): string[] {
+  const trimmed = name.trim();
+  if (!trimmed) return [];
+  const tokens = trimmed
+    .split(/\s+/u)
+    .map((token) => token.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/gu, ""))
+    .filter((token) => token.length >= 3);
+  return [...new Set([trimmed, ...tokens])];
+}
+
+function botcastPeerLabeledHostQuestionIsSafe(content: string): boolean {
+  const spoken = extractBotcastVoicePerformance(content, false).content.trim();
+  if (!spoken.endsWith("?") || spoken.length > 360) return false;
+  // Preserve only one direct question. A labeled mini-monologue ending in a
+  // question can still be the model scripting the guest and must be rejected.
+  return !/[.!…]/u.test(spoken.slice(0, -1));
 }
 
 function sanitizeUtteranceWithRepair(
@@ -8162,20 +8985,67 @@ function sanitizeUtteranceWithRepair(
   ) {
     return repaired("anthology_history");
   }
-  const escapedPeerName = peerName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const speakerLabelOptions = botcastSpeakerLabelAlternatives(speakerName)
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+    .join("|");
+  const peerLabelOptions = botcastSpeakerLabelAlternatives(peerName)
+    .map((label) => label.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"))
+    .join("|");
   const peerRole = speakerRole === "host" ? "guest" : "host";
   const peerLabelPattern = new RegExp(
-    `^\\s*(?:\\[[^\\]\\n]{1,48}\\]\\s*)*[\"“]?\\s*(?:${peerRole}|${escapedPeerName})\\s*:\\s*`,
+    `^\\s*(?:\\[[^\\]\\n]{1,48}\\]\\s*)*[\"“]?\\s*(?:${peerRole}${peerLabelOptions ? `|${peerLabelOptions}` : ""})\\s*:\\s*`,
     "iu",
   );
-  if (peerLabelPattern.test(narrationSafeRaw)) return repaired("peer_label");
+  if (peerLabelPattern.test(narrationSafeRaw)) {
+    const withoutPeerLabel = narrationSafeRaw
+      .replace(peerLabelPattern, "")
+      .trimStart();
+    // Small local models sometimes format a direct host question as
+    // "Guest Name: question". Preserve the question without the screenplay
+    // label; declarative peer speech remains unsafe and still uses recovery.
+    if (
+      speakerRole === "host" &&
+      botcastPeerLabeledHostQuestionIsSafe(withoutPeerLabel)
+    ) {
+      narrationSafeRaw = withoutPeerLabel;
+    } else {
+      return repaired("peer_label");
+    }
+  }
+  // Strip "Assistant I'm…" / "Speaker: …" / "assistant] …" role framing even
+  // without a colon — a truncated chat template can leave only the closing
+  // bracket. Keep bot-name labels colon-gated below so "Ivo, wait—" stays.
+  const roleFramingPattern =
+    /^\s*["“]?\s*(?:assistant|speaker|bot|system)(?=$|\s|[:：\-–—[\]{})])/iu;
+  let withoutRoleFraming = narrationSafeRaw;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const before = withoutRoleFraming;
+    withoutRoleFraming = withoutRoleFraming
+      .replace(roleFramingPattern, "")
+      .replace(/^\s*[:：\-–—\]})]+\s*/u, "")
+      .trimStart();
+    if (withoutRoleFraming === before) break;
+  }
   const labelPattern = new RegExp(
-    `^\\s*[\"“]?\\s*(?:${speakerRole}|assistant|speaker|${escapedSpeakerName})\\s*:\\s*`,
+    `^\\s*[\"“]?\\s*(?:${speakerRole}|assistant|speaker${speakerLabelOptions ? `|${speakerLabelOptions}` : ""})\\s*:\\s*`,
     "iu",
   );
-  const withoutLabel = narrationSafeRaw.replace(labelPattern, "");
-  if (peerLabelPattern.test(withoutLabel)) return repaired("peer_label");
-  const cleaned = withoutLabel
+  const withoutLabel = withoutRoleFraming.replace(labelPattern, "");
+  let peerLabelSafeContent = withoutLabel;
+  if (peerLabelPattern.test(withoutLabel)) {
+    const withoutPeerLabel = withoutLabel
+      .replace(peerLabelPattern, "")
+      .trimStart();
+    if (
+      speakerRole === "host" &&
+      botcastPeerLabeledHostQuestionIsSafe(withoutPeerLabel)
+    ) {
+      peerLabelSafeContent = withoutPeerLabel;
+    } else {
+      return repaired("peer_label");
+    }
+  }
+  const cleaned = peerLabelSafeContent
     .replace(withoutLabel === narrationSafeRaw ? /$^/u : /["”]\s*$/u, "")
     .replace(
       /\b(?:the )?producer (?:asked|said|wants|told me|is telling me)[^.!?]*[.!?]?/giu,
@@ -8192,6 +9062,10 @@ function sanitizeUtteranceWithRepair(
     (pattern) => pattern.test(spokenContent),
   );
   if (!cleaned) return repaired("empty_after_cleanup");
+  // Bare ellipsis from the model is not a substantive interview beat.
+  if (/^\.{3,}$/u.test(spokenContent.trim())) {
+    return repaired("empty_after_cleanup");
+  }
   if (policyStyleRefusal) return repaired("policy_refusal");
   if (nonAnsweringDeferral) return repaired("non_answering_deferral");
   if (
@@ -8204,6 +9078,28 @@ function sanitizeUtteranceWithRepair(
     return repaired("incomplete");
   }
   return { content: cleaned, repairReason: null };
+}
+
+const BOTCAST_GENERIC_HOST_CLOSING_PATTERNS = [
+  /\b(?:my|our|the)\s+listeners?\s+at\s+home\b/iu,
+  /\b(?:in|as)\s+(?:ending|we\s+(?:end|close))\s+(?:this|our)\s+(?:conversation|discussion|interview)\b/iu,
+  /\b(?:cautionary tale|I bid you farewell|true weight|enduring impact|what we can learn)\b/iu,
+  /\b(?:please\s+)?(?:remember|reflect on|consider)\s+(?:the|its|this|what)\b/iu,
+] as const;
+
+function botcastHostClosingNeedsPersonaRetry(content: string): boolean {
+  const spoken = extractBotcastVoicePerformance(content, false).content.trim();
+  if (!spoken) return true;
+  const wordCount = spoken.split(/\s+/u).filter(Boolean).length;
+  if (wordCount > 40) return true;
+  const sentenceCount =
+    spoken.match(/[.!?…]+(?:["”'’])?(?=\s|$)/gu)?.length ?? 0;
+  return (
+    sentenceCount > 2 ||
+    BOTCAST_GENERIC_HOST_CLOSING_PATTERNS.some((pattern) =>
+      pattern.test(spoken),
+    )
+  );
 }
 
 function sanitizeUtterance(
@@ -8226,12 +9122,29 @@ function sanitizeUtterance(
   ).content;
 }
 
+const BOTCAST_SIGNAL_HISTORY_CLAIM_PATTERNS = [
+  /\b(?:last|previous|prior|earlier)\s+(?:signal\s+)?episodes?\b/iu,
+  /\b(?:back|return(?:ing)?)\s+(?:on|to)\s+(?:this|the|our)\s+(?:show|podcast)\b/iu,
+  /\b(?:as|like)\s+(?:we|you|I)\s+(?:said|discussed|learned|covered|established)\s+(?:last time|before|previously)\b/iu,
+  /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:episodes?|installments?)\s+(?:in|ago|later)\b/iu,
+  /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+parts?\s+in\b[^.!?]{0,80}\b(?:show|episode|lesson)\b/iu,
+] as const;
+
+/** Detects invented continuity with Signal episodes outside the current anthology meeting. */
+export function botcastUtteranceClaimsSignalHistory(content: string): boolean {
+  return BOTCAST_SIGNAL_HISTORY_CLAIM_PATTERNS.some((pattern) =>
+    pattern.test(content),
+  );
+}
+
 function validateBotcastAutoSpeakerUtterance(input: {
   raw: string;
   speakerName: string;
   peerName: string;
   speakerRole: BotcastSpeakerRole;
+  hostClosing?: boolean;
   rejectPeerIdentityClaim?: boolean;
+  requireAddressedInsult?: boolean;
 }):
   | { ok: true; value: string }
   | { ok: false; reason: "empty" | "refusal" | "invalid_output" } {
@@ -8249,6 +9162,11 @@ function validateBotcastAutoSpeakerUtterance(input: {
   const spokenContent = extractBotcastVoicePerformance(sanitized, false).content;
   if (
     !spokenContent ||
+    botcastUtteranceClaimsSignalHistory(spokenContent) ||
+    (input.hostClosing &&
+      botcastHostClosingNeedsPersonaRetry(spokenContent)) ||
+    (input.requireAddressedInsult &&
+      !botPowerResponseHasAddressedInsultV1(spokenContent, input.peerName)) ||
     BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS.some((pattern) =>
       pattern.test(spokenContent),
     )
@@ -8308,6 +9226,35 @@ function botcastOpeningIntroducesCast(input: {
   // the host persona and the episode-specific opening hook.
   const identifiesGuest = content.includes(guestName);
   return content.includes(showName) && identifiesHost && identifiesGuest;
+}
+
+function botcastOpeningInterruptionTargetProgress(input: {
+  content: string;
+  showName: string;
+  hostName: string;
+  guestName: string;
+  targetProgress: number;
+  certainty: "always" | "probabilistic";
+}): number | null {
+  const words = input.content.trim().split(/\s+/u).filter(Boolean);
+  if (words.length < 2) return null;
+  const maximumProgress = input.certainty === "always" ? 0.88 : 0.66;
+  for (let heardWordCount = 1; heardWordCount < words.length; heardWordCount += 1) {
+    if (
+      !botcastOpeningIntroducesCast({
+        content: words.slice(0, heardWordCount).join(" "),
+        showName: input.showName,
+        hostName: input.hostName,
+        guestName: input.guestName,
+      })
+    ) {
+      continue;
+    }
+    const requiredProgress = heardWordCount / words.length;
+    if (requiredProgress > maximumProgress) return null;
+    return Math.max(input.targetProgress, requiredProgress);
+  }
+  return null;
 }
 
 function generationProvider(
@@ -8740,38 +9687,38 @@ function botcastProviderReturnedEmptyResponse(
   );
 }
 
-/** A deterministic, host-shaped recovery when the dedicated opening pass fails. */
+/**
+ * A deterministic, plain-spoken recovery when the dedicated opening pass fails.
+ * Kept intentionally short and voice-neutral: canned "personality" sentences
+ * read as fake voice the moment a real persona has to deliver them.
+ */
 function botcastOpeningIntroFallback(args: {
   episode: Pick<BotcastEpisode, "id" | "topic" | "guestPresenceMode">;
-  show: Pick<BotcastShow, "name" | "premise" | "hostingStyle">;
-  host: Pick<BotcastBotProfile, "id" | "name" | "systemPrompt">;
+  show: Pick<BotcastShow, "name">;
+  host: Pick<BotcastBotProfile, "id" | "name">;
   guestName: string;
   guestMuted: boolean;
 }): string {
-  const persona = args.host.systemPrompt.toLocaleLowerCase();
-  const anticipation = /(?:wry|dry|sarcastic|comic|irreverent)/u.test(persona)
-    ? "There is a sharp edge in this subject, and I have no intention of sanding it down."
-    : /(?:calm|measured|gentle|patient|quiet)/u.test(persona)
-      ? "There is something worth taking slowly here, because the first easy answer is rarely the honest one."
-      : /(?:skeptic|skeptical|precise|analytical|logical|scientific)/u.test(persona)
-        ? "The claim is interesting only if it survives contact with a real decision."
-        : "This subject has been waiting for a serious conversation, and I am glad to start one now.";
+  const showName = args.show.name.trim();
+  // Show names like "What Grinds Your Gears?" already end a sentence.
+  const showNameSentenceEnd = /[.!?…]$/u.test(showName) ? "" : ".";
   const openings = [
-    `${args.show.name} is live. I'm ${args.host.name}, and ${args.guestName} is with me.`,
-    `This is ${args.show.name}. I'm ${args.host.name}, joined by ${args.guestName}.`,
-    `The microphones are open at ${args.show.name}. I'm ${args.host.name}, here with ${args.guestName}.`,
+    `${showName} is live. I'm ${args.host.name}, and ${args.guestName} is with me.`,
+    `This is ${showName}${showNameSentenceEnd} I'm ${args.host.name}, joined by ${args.guestName}.`,
+    `The microphones are open at ${showName}${showNameSentenceEnd} I'm ${args.host.name}, here with ${args.guestName}.`,
   ] as const;
   const opening = openings[
     stableHash(`signal-opening-fallback:${args.episode.id}:${args.host.id}`) %
       openings.length
   ]!;
+  const topic = args.episode.topic.trim().replace(/[.!?…]+$/u, "");
   if (args.episode.guestPresenceMode === "audience_only") {
-    return `${opening} ${args.guestName} was booked, but the guest chair is empty. ${anticipation} I will begin with the pressure inside ${JSON.stringify(args.episode.topic)}: what changes when somebody has to act on it?`;
+    return `${opening} ${args.guestName} was booked, but the guest chair is empty. So I'll open the subject myself: ${topic} — what changes when somebody actually has to act on it?`;
   }
   if (args.guestMuted) {
-    return `${opening} ${anticipation} ${args.guestName}, you are under no obligation to speak; I will begin with the pressure inside ${JSON.stringify(args.episode.topic)} and leave room for whatever response you choose to make.`;
+    return `${opening} ${args.guestName}, you're under no obligation to speak. Let's open with ${topic}, and you can answer however you choose.`;
   }
-  return `${opening} ${anticipation} ${args.guestName}, before ${JSON.stringify(args.episode.topic)} becomes an abstraction, where does it become a choice somebody cannot avoid?`;
+  return `${opening} ${args.guestName}, let's get right into it: ${topic} — what's your honest answer?`;
 }
 
 function botcastBookingGenerationOptions(
@@ -8805,11 +9752,16 @@ function lastCameraSuggestion(
   const reason = event.payload.reason;
   if (shot !== "left" && shot !== "right" && shot !== "wide") return null;
   if (typeof reason !== "string") return null;
+  const messageId =
+    typeof event.payload.messageId === "string" && event.payload.messageId
+      ? event.payload.messageId
+      : undefined;
   return {
     shot,
     reason: reason as BotcastCameraSuggestion["reason"],
     atMs: Number(event.payload.atMs) || 0,
     minimumHoldMs: Number(event.payload.minimumHoldMs) || 3_200,
+    ...(messageId ? { messageId } : {}),
   };
 }
 
@@ -8842,15 +9794,16 @@ function ensureBotcastFinalHostBeat(
     .slice()
     .reverse()
     .find((message) => message.speakerRole === "guest")?.content;
+  const plainSignoff = force
+    ? "Sorry, gotta go!"
+    : "That is where we will leave it. Thank you for listening.";
   const content = botPowerIsMutedV1(hostPowers)
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : botPowerEchoesAddressedSpeechV1(hostPowers)
       ? applyBotPowerEchoResponseV1(previousGuestLine ?? "")
       : botPowerMumblesSpeechV1(hostPowers)
-        ? applyBotPowerMumbledResponseV1(
-            "That is where we will leave it. Thank you for listening.",
-          )
-        : "That is where we will leave it. Thank you for listening.";
+        ? applyBotPowerMumbledResponseV1(plainSignoff)
+        : plainSignoff;
   const hostMumbles = botPowerMumblesSpeechV1(hostPowers);
   const hostMuted = botPowerIsMutedV1(hostPowers);
   const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
@@ -8961,7 +9914,7 @@ export function setBotcastModelWarmupHold(
   active: boolean,
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
-  if (episode.status === "completed") return episode;
+  if (episode.status !== "live") return episode;
   const now = new Date().toISOString();
   if (active) {
     db.prepare(
@@ -8982,7 +9935,7 @@ function beginBotcastProducerCut(
   episodeId: string,
 ): { episode: BotcastEpisode; started: boolean } {
   let episode = getBotcastEpisode(db, userId, episodeId);
-  if (episode.status === "completed") return { episode, started: false };
+  if (episode.status !== "live") return { episode, started: false };
   if (
     episode.events.some(
       (event) =>
@@ -9034,7 +9987,7 @@ export function forceEndBotcastEpisode(
   options: { forceFinalHostBeat?: boolean } = {},
 ): BotcastEpisode {
   let episode = getBotcastEpisode(db, userId, episodeId);
-  if (episode.status === "completed") return episode;
+  if (episode.status !== "live") return episode;
   episode = beginBotcastProducerCut(db, userId, episodeId).episode;
   const now = new Date().toISOString();
   completeEpisode(
@@ -9044,6 +9997,40 @@ export function forceEndBotcastEpisode(
     botcastEpisodeDepartureOutcome(episode.events) ?? "completed",
     now,
     options,
+  );
+  return getBotcastEpisode(db, userId, episode.id);
+}
+
+/**
+ * Permanently cancels a Signal episode without retaining its generated close
+ * as an archive. The row remains only so its booking can be reused.
+ */
+export function cancelBotcastEpisode(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status === "cancelled") return episode;
+  const now = new Date().toISOString();
+  closeActiveBotcastModelWarmupHold(db, userId, episode.id, now);
+  db.prepare(
+    `UPDATE botcast_episodes
+        SET status = 'cancelled', outcome = NULL, completed_at = NULL,
+            runtime_ms = NULL, updated_at = ?
+      WHERE id = ? AND user_id = ? AND status != 'cancelled'`,
+  ).run(now, episode.id, userId);
+  db.prepare(
+    `UPDATE botcast_episode_segments SET ended_at = ?
+      WHERE user_id = ? AND episode_id = ? AND ended_at IS NULL`,
+  ).run(now, userId, episode.id);
+  recordEvent(
+    db,
+    userId,
+    episode.id,
+    "episode_cancelled",
+    { reason: "producer_ended_early" },
+    now,
   );
   return getBotcastEpisode(db, userId, episode.id);
 }
@@ -9173,16 +10160,39 @@ function applyBotcastProducerCutInterruption(
     const host = loadBotProfile(db, userId, episode.hostBotId);
     const hostPowers =
       botcastEpisodePowerSnapshotForRole(episode, "host") ?? host.powers;
-    if (
-      botPowerIsMutedV1(hostPowers) ||
-      botPowerEchoesAddressedSpeechV1(hostPowers)
-    ) {
+    if (botPowerIsMutedV1(hostPowers)) {
       throw new Error(
         "The Signal host cannot speak an interruption bridge under the active Power contract.",
       );
     }
-    const bridgeLine = cleanText(interruption.bridgeLine, "", 64);
-    if (!show.hostInterruptionLines.includes(bridgeLine)) {
+    const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
+    const expectedEchoBridge = hostEchoes
+      ? applyBotPowerEchoResponseV1(
+          botcastEchoHostInterruptPhrase({
+            messages: episode.messages,
+            interruption: {
+              messageId: latest.id,
+              spokenContent,
+            },
+          }),
+        )
+      : null;
+    const bridgeLine = cleanText(
+      interruption.bridgeLine,
+      "",
+      hostEchoes ? BOTCAST_TEXT_MAX : 64,
+    );
+    if (hostEchoes) {
+      if (
+        !expectedEchoBridge ||
+        expectedEchoBridge === BOT_POWER_CANONICAL_SILENCE_V1 ||
+        bridgeLine !== cleanText(expectedEchoBridge, "", BOTCAST_TEXT_MAX)
+      ) {
+        throw new Error(
+          "An echo-bound Signal host must interrupt by repeating the last audience-heard phrase.",
+        );
+      }
+    } else if (!show.hostInterruptionLines.includes(bridgeLine)) {
       throw new Error(
         "Signal producer cut host interruption is not stored for this show.",
       );
@@ -9250,7 +10260,7 @@ export async function endBotcastEpisodeOnProducerCut(
 ): Promise<BotcastEpisodeAdvanceResponse> {
   if (options.audienceCheckpoint) {
     const current = getBotcastEpisode(db, userId, episodeId);
-    if (current.status !== "completed") {
+    if (current.status === "live") {
       restoreBotcastEpisodeToAudienceCheckpoint(
         db,
         userId,
@@ -9261,7 +10271,7 @@ export async function endBotcastEpisodeOnProducerCut(
   }
   if (options.interruption) {
     const current = getBotcastEpisode(db, userId, episodeId);
-    if (current.status !== "completed") {
+    if (current.status === "live") {
       applyBotcastProducerCutInterruption(
         db,
         userId,
@@ -9315,7 +10325,7 @@ export async function endBotcastEpisodeOnProducerCut(
       error,
     );
     const episode = getBotcastEpisode(db, userId, episodeId);
-    if (episode.status !== "completed") {
+    if (episode.status === "live") {
       const now = new Date().toISOString();
       completeEpisode(
         db,
@@ -9495,6 +10505,9 @@ export async function advanceBotcastEpisode(
   context: { producerCut?: boolean } = {},
 ): Promise<BotcastEpisodeAdvanceResponse> {
   let episode = getBotcastEpisode(db, userId, episodeId);
+  if (episode.status === "cancelled") {
+    throw new Error("A cancelled Signal episode cannot be continued.");
+  }
   if (episode.status === "completed") {
     await ensureBotcastEpisodePersonaReview(db, userId, episode.id, generation);
     return {
@@ -9566,6 +10579,24 @@ export async function advanceBotcastEpisode(
     requestedCue = undefined;
     guestInterruption = undefined;
   }
+  // A cue that rode a sanitizer-repaired host turn never actually aired.
+  // Re-arm it once for the host's next turn instead of losing the direction.
+  let cueRedelivery = false;
+  if (!requestedCue && !input.cue && episode.segment !== "closing") {
+    const undeliveredCue = botcastUndeliveredAskAboutCue(episode);
+    if (
+      undeliveredCue &&
+      botcastNextSpeakerRole({
+        messages: episode.messages,
+        segment: episode.segment,
+        guestDeparted:
+          botcastEpisodeDepartureOutcome(episode.events) === "guest_departed",
+      }) === "host"
+    ) {
+      requestedCue = undeliveredCue;
+      cueRedelivery = true;
+    }
+  }
   if (requestedCue) {
     if (cueDelivery === "redirect_host") {
       if (!hostRedirect) {
@@ -9621,18 +10652,43 @@ export async function advanceBotcastEpisode(
       if (botPowerIsMutedV1(hostPowers)) {
         throw new Error("A muted Signal host cannot interrupt aloud.");
       }
-      if (botPowerEchoesAddressedSpeechV1(hostPowers)) {
-        throw new Error(
-          "An echo-bound Signal host cannot originate an interruption.",
-        );
-      }
+      const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
       if (!guestHasTheMic) {
         throw new Error(
           "The guest must be speaking or next before the host can interrupt.",
         );
       }
       const show = getBotcastShow(db, userId, episode.showId);
-      if (!guestInterruption) {
+      if (hostEchoes) {
+        const echoPhrase = botcastEchoHostInterruptPhrase({
+          messages: episode.messages,
+          interruption: guestInterruption,
+        });
+        const echoBridge = applyBotPowerEchoResponseV1(echoPhrase);
+        if (
+          !echoPhrase.trim() ||
+          echoBridge === BOT_POWER_CANONICAL_SILENCE_V1
+        ) {
+          throw new Error(
+            "An echo-bound Signal host needs a prior on-air phrase to interrupt with.",
+          );
+        }
+        const bridgeLine = cleanText(echoBridge, "", BOTCAST_TEXT_MAX);
+        guestInterruption = {
+          ...(guestInterruption?.messageId
+            ? { messageId: guestInterruption.messageId }
+            : {}),
+          ...(guestInterruption?.spokenContent !== undefined
+            ? { spokenContent: guestInterruption.spokenContent }
+            : {}),
+          bridgeLine,
+          ...(guestInterruption?.interruptedSpeakerCue
+            ? {
+                interruptedSpeakerCue: guestInterruption.interruptedSpeakerCue,
+              }
+            : {}),
+        };
+      } else if (!guestInterruption) {
         if (nextRole !== "guest") {
           throw new Error(
             "A live guest interruption requires the current message, spoken prefix, and host bridge.",
@@ -9650,8 +10706,15 @@ export async function advanceBotcastEpisode(
           ),
         };
       }
-      const bridgeLine = cleanText(guestInterruption.bridgeLine, "", 64);
-      if (!show.hostInterruptionLines.includes(bridgeLine)) {
+      const bridgeLine = cleanText(
+        guestInterruption.bridgeLine,
+        "",
+        hostEchoes ? BOTCAST_TEXT_MAX : 64,
+      );
+      if (
+        !hostEchoes &&
+        !show.hostInterruptionLines.includes(bridgeLine)
+      ) {
         throw new Error(
           "The host interruption bridge is not stored for this host.",
         );
@@ -9661,7 +10724,28 @@ export async function advanceBotcastEpisode(
           "Only a queued guest turn can be interrupted without its current message.",
         );
       }
-      const interruptedSpeakerCue = guestInterruption.messageId
+      const interruptedMessage = guestInterruption.messageId
+        ? episode.messages.find(
+            (message) => message.id === guestInterruption?.messageId,
+          )
+        : null;
+      const originalWordCount =
+        interruptedMessage?.content.trim().split(/\s+/u).filter(Boolean).length ??
+        0;
+      const heardWordCount =
+        guestInterruption.spokenContent
+          ?.trim()
+          .split(/\s+/u)
+          .filter(Boolean).length ?? 0;
+      const meaningfulCutoff =
+        guestInterruption.messageId && interruptedMessage
+          ? crosstalkInterruptionIsMeaningfulV1({
+              originalWordCount,
+              heardWordCount,
+            })
+          : false;
+      const interruptedSpeakerCue =
+        guestInterruption.messageId && meaningfulCutoff
         ? (normalizeBotCrosstalkInterruptedSpeakerCue(
             guestInterruption.interruptedSpeakerCue,
           ) ??
@@ -9670,7 +10754,12 @@ export async function advanceBotcastEpisode(
           ))
         : undefined;
       guestInterruption = {
-        ...guestInterruption,
+        ...(guestInterruption.messageId
+          ? { messageId: guestInterruption.messageId }
+          : {}),
+        ...(guestInterruption.spokenContent
+          ? { spokenContent: guestInterruption.spokenContent }
+          : {}),
         bridgeLine,
         ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
       };
@@ -9692,6 +10781,7 @@ export async function advanceBotcastEpisode(
       now,
       hostRedirect,
       guestInterruption,
+      cueRedelivery,
     );
     episode = getBotcastEpisode(db, userId, episodeId);
     if (cueDelivery === "interrupt_guest" && guestInterruption) {
@@ -9706,6 +10796,10 @@ export async function advanceBotcastEpisode(
   }
   const producerCut = context.producerCut === true;
   const wrapUpCue = producerCut ? null : activeBotcastWrapUpCue(episode);
+  const pendingCrosstalkReclaim =
+    !producerCut && !requestedCue && !wrapUpCue
+      ? botcastPendingCrosstalkReclaimV1(episode.messages)
+      : null;
   const guestAlreadyDeparted =
     botcastEpisodeDepartureOutcome(episode.events) === "guest_departed";
   // A third pressure cue is resolved by the guest before the ordinary turn-count
@@ -9716,6 +10810,7 @@ export async function advanceBotcastEpisode(
     !guestAlreadyDeparted &&
     botcastGuestDepartureEligible(tension);
   const sessionShouldClose =
+    !pendingCrosstalkReclaim &&
     episode.segment === "interview" &&
     botcastSessionShouldClose({
       messages: episode.messages,
@@ -9835,6 +10930,14 @@ export async function advanceBotcastEpisode(
     segment: episode.segment,
     guestDeparted: guestAlreadyDeparted,
   });
+  if (pendingCrosstalkReclaim) {
+    scheduledSpeakerRole =
+      pendingCrosstalkReclaim.speakerBotId === episode.hostBotId
+        ? "host"
+        : pendingCrosstalkReclaim.speakerBotId === episode.guestBotId
+          ? "guest"
+          : scheduledSpeakerRole;
+  }
   const mutedHostNeedsGuestLedSoloContinuation = Boolean(
     !producerCut &&
       episode.segment === "interview" &&
@@ -9880,12 +10983,23 @@ export async function advanceBotcastEpisode(
         )
       : loadBotProfile(db, userId, episode.guestBotId);
   const powerSnapshot = botcastEpisodePowerSnapshot(episode);
-  const host = powerSnapshot
+  const baseHost = powerSnapshot
     ? { ...currentHost, powers: powerSnapshot.hostPowers }
     : currentHost;
-  const guest = powerSnapshot
+  const baseGuest = powerSnapshot
     ? { ...currentGuest, powers: powerSnapshot.guestPowers }
     : currentGuest;
+  const mirrorStates = botcastIdentityMirrorStatesV1(episode.events);
+  const host = botcastProfileWithBorrowedMirrorPowersV1(
+    baseHost,
+    baseGuest,
+    mirrorStates,
+  );
+  const guest = botcastProfileWithBorrowedMirrorPowersV1(
+    baseGuest,
+    baseHost,
+    mirrorStates,
+  );
   const hostNamesGuest = botPowerTargetNameV1(guest.name, host.powers);
   const guestNamesHost = botPowerTargetNameV1(host.name, guest.powers);
   const speaker = speakerRole === "host" ? host : guest;
@@ -9929,13 +11043,24 @@ export async function advanceBotcastEpisode(
   const speakerEchoesAddressedSpeech = botPowerEchoesAddressedSpeechV1(
     speaker.powers,
   );
+  const peerEchoesAddressedSpeech = botPowerEchoesAddressedSpeechV1(peer.powers);
   const speakerHardResponseBudget =
     strongestHardBotPowerResponseBudgetEffectV1(speaker.powers);
+  const speakerRequiresAddressedInsult =
+    botPowerRequiresAddressedInsultV1(speaker.powers);
   const latestOnAirMessage = episode.messages.at(-1) ?? null;
-  const addressedSpeechForEcho =
-    latestOnAirMessage && latestOnAirMessage.speakerRole !== speakerRole
-      ? latestOnAirMessage.content
+  const echoHostInterruptPhrase =
+    cueDelivery === "interrupt_guest" &&
+    speakerRole === "host" &&
+    speakerEchoesAddressedSpeech &&
+    guestInterruption?.bridgeLine
+      ? guestInterruption.bridgeLine
       : null;
+  const addressedSpeechForEcho =
+    echoHostInterruptPhrase ??
+    (latestOnAirMessage && latestOnAirMessage.speakerRole !== speakerRole
+      ? latestOnAirMessage.content
+      : null);
   const speakerHasSpoken = episode.messages.some(
     (message) => message.botId === speaker.id,
   );
@@ -9994,6 +11119,174 @@ export async function advanceBotcastEpisode(
   );
   const turnMoodBoost = botcastMoodBoostForTurn(episode, speaker);
   const turnMoodDrain = botcastMoodDrainForTurn(episode, speaker);
+  const activeCrosstalkReclaim =
+    pendingCrosstalkReclaim?.speakerBotId === speaker.id
+      ? pendingCrosstalkReclaim
+      : null;
+  const requiredPowerInterruptionFollowUp =
+    botcastLatestPowerInterruption(episode, speaker.id);
+  // Reclaims and producer interrupt_guest follow-ups keep the current speaker's
+  // floor. An always-interrupt Power still gets an audible/visible attempt;
+  // protection blocks the cutoff rather than making the interrupter disappear.
+  const hostFollowUpAfterProducerGuestInterrupt =
+    speakerRole === "host" &&
+    cueDelivery === "interrupt_guest" &&
+    Boolean(requestedCue);
+  const powerInterruptionAttemptProtected = Boolean(
+    activeCrosstalkReclaim?.protectFromImmediateReinterruption ||
+      hostFollowUpAfterProducerGuestInterrupt,
+  );
+  const plannedInterruptionCandidate =
+    !picklesBeatKind &&
+    !producerCut &&
+    episode.guestKind === "bot" &&
+    episode.guestPresenceMode === "present" &&
+    (episode.segment === "opening" || episode.segment === "interview") &&
+    !wrapUpCue &&
+    !departureRequired &&
+    !guestAlreadyDeparted &&
+    !speakerIsMutedForTurn &&
+    !speakerEternallyIntroduces &&
+    !speakerRepeatsForHearingPower &&
+    !botPowerIsMutedV1(peer.powers) &&
+    !botcastPowerRestriction(speaker, peer, "speech_audience")
+      ? strongestBotPowerInterruptionEffectV1(
+          peer.powers,
+          (target) => botcastPowerTargetMatches(target, speaker),
+        )
+      : null;
+  const plannedInterruptionMatch =
+    plannedInterruptionCandidate &&
+    (plannedInterruptionCandidate.certainty === "always" ||
+      (episode.segment === "interview" && !requestedCue && tension.level < 2))
+      ? plannedInterruptionCandidate
+      : null;
+  const plannedPowerInterruption = plannedInterruptionMatch
+    ? botcastPowerInterruptionPlanV1({
+        episodeId: episode.id,
+        targetTurnOrdinal: episode.messages.filter(
+          (message) => message.speakerRole === speakerRole,
+        ).length,
+        powerId: plannedInterruptionMatch.powerId,
+        powerName: plannedInterruptionMatch.powerName,
+        frequency: plannedInterruptionMatch.frequency,
+        strength: plannedInterruptionMatch.strength,
+        certainty: plannedInterruptionMatch.certainty,
+        targetTurnsSinceLastInterruption:
+          botcastSpeakerTurnsSinceLastPowerInterruption(
+            episode,
+            speakerRole,
+            peer.id,
+          ),
+      })
+    : null;
+  const socialSilenceExclusions: SocialSilenceExclusionV1[] = [];
+  if (episode.segment === "opening") socialSilenceExclusions.push("opening");
+  if (episode.segment === "closing") socialSilenceExclusions.push("closing");
+  if (episode.guestKind === "producer" || requestedCue || producerCut) {
+    socialSilenceExclusions.push("producer_control");
+  }
+  if (wrapUpCue) socialSilenceExclusions.push("required_wrap");
+  if (departureRequired || guestAlreadyDeparted) {
+    socialSilenceExclusions.push("departure");
+  }
+  if (activeCrosstalkReclaim) socialSilenceExclusions.push("reclaim");
+  if (plannedPowerInterruption || requiredPowerInterruptionFollowUp) {
+    // Taking the floor creates a response obligation. The interrupter cannot
+    // cut somebody off and then route the seized mic to deterministic silence;
+    // nor can the current speaker disappear during an active Power cutoff.
+    socialSilenceExclusions.push("power_interruption");
+  }
+  if (speakerIsMutedForTurn) {
+    socialSilenceExclusions.push("power_silence");
+  }
+  // Speech-copy bots only mirror the latest addressed line. Feeding them
+  // intentional silence creates a visible "..." ↔ "..." standoff on air.
+  if (speakerEchoesAddressedSpeech || peerEchoesAddressedSpeech) {
+    socialSilenceExclusions.push("power_silence");
+  }
+  if (picklesBeatKind) socialSilenceExclusions.push("producer_control");
+  const socialSilencePlan = planSocialSilenceV1({
+    mode: "signal",
+    seed: `signal-social-silence:${episode.id}:${speaker.id}:${episode.messages.length}`,
+    chance:
+      generation.signalSocialSilenceChanceOverride ??
+      botcastSocialSilenceChanceV1({
+        speaker,
+        speakerRole,
+        tension,
+      }),
+    consecutiveSocialSilenceTurns:
+      botcastConsecutiveSocialSilenceTurns(episode.messages),
+    exclusions: socialSilenceExclusions,
+  });
+  const socialSilenceMarker =
+    socialSilencePlan.decision === "social_silence"
+      ? socialSilencePlan.marker
+      : null;
+  const stageActionExclusions: StageActionExclusionV1[] = [];
+  if (socialSilenceMarker) stageActionExclusions.push("social_silence");
+  if (activeCrosstalkReclaim) stageActionExclusions.push("crosstalk_reclaim");
+  if (episode.segment === "opening") stageActionExclusions.push("opening");
+  if (episode.segment === "closing") stageActionExclusions.push("closing");
+  if (
+    episode.guestKind === "producer" ||
+    requestedCue ||
+    producerCut ||
+    picklesBeatKind
+  ) {
+    stageActionExclusions.push("producer_control");
+  }
+  if (wrapUpCue) stageActionExclusions.push("required_wrap");
+  if (departureRequired || guestAlreadyDeparted) {
+    stageActionExclusions.push("departure");
+  }
+  if (
+    speakerIsMutedForTurn ||
+    speakerEternallyIntroduces ||
+    speakerRepeatsForHearingPower ||
+    speakerEchoesForTurn ||
+    speakerMumblesSpeech
+  ) {
+    stageActionExclusions.push("power_silence");
+  }
+  if (plannedPowerInterruption) {
+    stageActionExclusions.push("power_interruption");
+  }
+  const stageActionPlan = planStageActionV1({
+    lane: "signal",
+    seed: `signal-stage-action:${episode.id}:${speaker.id}:${episode.messages.length}`,
+    exclusions: stageActionExclusions,
+  });
+  const forceSocialSilencePayoff =
+    socialSilencePlan.decision === "substantive" &&
+    socialSilencePlan.forceSubstantive;
+  const shapeshiftResolution = resolveBotcastIdentityShapeshiftForSpeakerV1({
+    db,
+    userId,
+    episodeId: episode.id,
+    events: episode.events,
+    speaker,
+    speakerEternallyIntroduces,
+    messageCount: episode.messages.length,
+    latestMessageId: episode.messages.at(-1)?.id ?? null,
+    now,
+  });
+  const activeIdentityShapeshiftState = shapeshiftResolution.activeState;
+  const identityShapeshiftJustChanged = shapeshiftResolution.justChanged;
+  const pendingIdentityShapeshiftState = shapeshiftResolution.pendingState;
+  const falseNameResolution = resolveBotcastFalseNameForSpeakerV1({
+    episodeId: episode.id,
+    events: episode.events,
+    speaker,
+    speakerEternallyIntroduces,
+    messageCount: episode.messages.length,
+    latestMessageId: episode.messages.at(-1)?.id ?? null,
+    now,
+  });
+  const activeFalseNameState = falseNameResolution.activeState;
+  const falseNameJustChanged = falseNameResolution.justChanged;
+  const pendingFalseNameState = falseNameResolution.pendingState;
   const promptArgs: BotcastPromptBuildArgs = {
     show,
     episode,
@@ -10013,10 +11306,79 @@ export async function advanceBotcastEpisode(
       : {}),
     departureRequired,
     ...(producerCut ? { producerCut: true } : {}),
+    activeIdentityShapeshiftState,
+    identityShapeshiftJustChanged,
+    activeFalseNameState,
+    falseNameJustChanged,
   };
-  const prompt = firstHostOpening
+  const basePrompt = firstHostOpening
     ? buildBotcastOpeningIntroPrompt(promptArgs)
     : buildBotcastSpeakerPrompt(promptArgs);
+  const hostClosingTurn =
+    speakerRole === "host" && episode.segment === "closing";
+  const signalStageDirection =
+    stageActionPlan.decision === "persona_invite"
+      ? stageActionPersonaInvitePromptV1("signal")
+      : stageActionSpeechOnlyPromptV1("signal");
+  const prompt: ProviderMessage[] = [
+    ...basePrompt.map((message) =>
+      message.role === "system" && stageActionPlan.decision === "persona_invite"
+        ? {
+            ...message,
+            content: message.content.replace(
+              "Speak only the on-air line. Never narrate the room, silence, pauses, body movement, facial expression, or your own delivery in third person; Signal schedules supported performance separately.",
+              "Speak only the on-air line. Do not narrate the room, silence, pauses, or your own delivery. This invited turn may begin with the one short physical `*action*` described below; never add other body narration.",
+            ),
+          }
+        : message,
+    ),
+    {
+      role: "system",
+      content: signalStageDirection,
+    },
+    ...(activeCrosstalkReclaim
+      ? [
+          {
+            role: "system" as const,
+            content: [
+              "Protected crosstalk reclaim turn.",
+              `The exact audience-heard prefix is: ${JSON.stringify(activeCrosstalkReclaim.heardFragment)}.`,
+              "Reclaim the floor immediately in your persona with a new substantive sentence that follows naturally from only that heard fragment.",
+              "Never reconstruct, quote, or rely on an unheard suffix. Do not yield, apologize for speaking, use an ellipsis-only response, or write a stage direction.",
+            ].join(" "),
+          },
+        ]
+      : []),
+    ...(forceSocialSilencePayoff
+      ? [
+          {
+            role: "system" as const,
+            content:
+              "Four consecutive ordinary silent beats just occurred. Give the substantive conversational payoff now. Do not answer with ellipses, silence, a vocalization, or a stage direction.",
+          },
+        ]
+      : []),
+  ];
+  const validationRetryInstruction = [
+    "The previous draft was rejected before it could go on air.",
+    hostClosingTurn
+      ? `Write a completely new final sign-off in ${speaker.name}'s established persona. Use one or two short sentences, 8 to 32 words, with one sharp topic-specific observation and at most a brief thanks. Do not explain a lesson, address listeners at home, prescribe reflection, use ceremonial farewell language, or explain or reinterpret persona lore or catchphrases.`
+      : `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
+    "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
+    "This is one anthology meeting. Ignore sequel numbering in the topic and do not claim earlier episodes, appearances, shared lessons, or prior Signal history.",
+    ...(speakerEternallyIntroduces
+      ? [
+          `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
+        ]
+      : []),
+    ...(speakerRequiresAddressedInsult
+      ? [
+          `Open early with a fresh, tailored personal insult aimed at ${peerAddressName}, then answer substantively. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs.`,
+        ]
+      : []),
+    "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
+    "Do not add speaker labels, production notes, stage directions, or private instructions.",
+  ].join(" ");
   const turnStartEventSequence = episode.events.at(-1)?.sequence ?? -1;
   const selected = generationProvider(
     generation,
@@ -10075,6 +11437,10 @@ export async function advanceBotcastEpisode(
     raw = BOT_POWER_CANONICAL_SILENCE_V1;
     providerUsed = "deterministic";
     modelUsed = "mute-power";
+  } else if (socialSilenceMarker) {
+    raw = BOT_POWER_CANONICAL_SILENCE_V1;
+    providerUsed = "deterministic";
+    modelUsed = "social-silence";
   } else if (hearingRepeatDirective) {
     raw = hearingRepeatDirective.repeatedContent;
   } else if (speakerEchoesForTurn) {
@@ -10139,7 +11505,9 @@ export async function advanceBotcastEpisode(
                   speakerName: speaker.name,
                   peerName: peer.name,
                   speakerRole,
+                  hostClosing: hostClosingTurn,
                   rejectPeerIdentityClaim: speakerEternallyIntroduces,
+                  requireAddressedInsult: speakerRequiresAddressedInsult,
                 }),
             }),
       });
@@ -10177,20 +11545,11 @@ export async function advanceBotcastEpisode(
             speakerName: speaker.name,
             peerName: peer.name,
             speakerRole,
+            hostClosing: hostClosingTurn,
             rejectPeerIdentityClaim: speakerEternallyIntroduces,
+            requireAddressedInsult: speakerRequiresAddressedInsult,
           }),
-        validationRetryInstruction: [
-          "The previous draft was rejected before it could go on air.",
-          `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
-          "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
-          ...(speakerEternallyIntroduces
-            ? [
-                `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
-              ]
-            : []),
-          "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
-          "Do not add speaker labels, production notes, stage directions, or private instructions.",
-        ].join(" "),
+        validationRetryInstruction,
       });
       raw = onlineTurn.value;
     } catch (error) {
@@ -10248,24 +11607,56 @@ export async function advanceBotcastEpisode(
     }
   } else {
     try {
+      const localTurnOptions = {
+        ...generationOptions,
+        ...(selected.model ? { model: selected.model } : {}),
+        maxTokens: botcastSpeakerMaxTokensForModel(
+          speaker.maxTokens,
+          selected.providerName,
+          modelUsed,
+          turnMaxTokens,
+        ),
+      };
       const localTurn = await runSignalLocalTurn({
         provider: selected.provider,
         messages: prompt,
-        options: {
-          ...generationOptions,
-          ...(selected.model ? { model: selected.model } : {}),
-          maxTokens: botcastSpeakerMaxTokensForModel(
-            speaker.maxTokens,
-            selected.providerName,
-            modelUsed,
-            turnMaxTokens,
-          ),
-        },
+        options: localTurnOptions,
         ...(generation.signalLocalTurnTimeoutMs !== undefined
           ? { timeoutMs: generation.signalLocalTurnTimeoutMs }
           : {}),
       });
       raw = localTurn.value;
+      if (
+        (hostClosingTurn || speakerRequiresAddressedInsult) &&
+        !speakerIsMutedForTurn &&
+        !validateBotcastAutoSpeakerUtterance({
+          raw,
+          speakerName: speaker.name,
+          peerName: peer.name,
+          speakerRole,
+          hostClosing: hostClosingTurn,
+          requireAddressedInsult: speakerRequiresAddressedInsult,
+          rejectPeerIdentityClaim: speakerEternallyIntroduces,
+        }).ok
+      ) {
+        try {
+          const retry = await runSignalLocalTurn({
+            provider: selected.provider,
+            messages: [
+              ...prompt,
+              { role: "system", content: validationRetryInstruction },
+            ],
+            options: localTurnOptions,
+            ...(generation.signalLocalTurnTimeoutMs !== undefined
+              ? { timeoutMs: generation.signalLocalTurnTimeoutMs }
+              : {}),
+          });
+          raw = retry.value;
+        } catch (error) {
+          if (generation.signal?.aborted) throw error;
+          raw = "";
+        }
+      }
     } catch (error) {
       if (generation.signal?.aborted) throw error;
       const timedOut = error instanceof SignalLocalTurnTimeoutError;
@@ -10311,7 +11702,7 @@ export async function advanceBotcastEpisode(
         provider: selected.providerName,
         model: modelUsed,
         turnOrdinal: episode.messages.length,
-        outcome: "succeeded",
+        outcome: onlineTurn.validationFailureReason ? "rejected" : "succeeded",
         attempts: onlineTurn.attempts,
         totalDurationMs: onlineTurn.totalDurationMs,
       },
@@ -10392,10 +11783,15 @@ export async function advanceBotcastEpisode(
   const savedHostRecoveryQuestions = normalizeBotcastHostRecoveryQuestions(
     show.hostRecoveryQuestions,
   );
+  const contextualHostRecoveryQuestions = botcastHostRecoveryFallbacks({
+    topicWithPunctuation,
+    peerName: peerAddressName,
+    latestGuestClaimAnchor,
+  });
   const hostRecoveryFallback = chooseRecoveryFallback(
     savedHostRecoveryQuestions.length
       ? savedHostRecoveryQuestions
-      : BOTCAST_HOST_RECOVERY_QUESTION_FALLBACKS,
+      : contextualHostRecoveryQuestions,
     `signal-host-recovery:${episode.id}:${speaker.id}:${episode.messages.length}`,
   );
   const guestRecoveryFallbacks = botcastGuestRecoveryFallbacks({
@@ -10484,7 +11880,7 @@ export async function advanceBotcastEpisode(
           ? `The final point I would leave with your listeners is this: ${topicWithPunctuation} Judge it by the choice it demands and the consequence that follows.`
           : silentGuestFallback ??
             guestRecoveryFallback);
-  const generatedUtterance = sanitizeUtteranceWithRepair(
+  const sanitizedGeneratedUtterance = sanitizeUtteranceWithRepair(
     removeRepeatedBotcastInterruptionBridge(
       raw,
       guestInterruption?.bridgeLine,
@@ -10496,10 +11892,35 @@ export async function advanceBotcastEpisode(
     true,
     speakerEternallyIntroduces,
   );
+  const generatedUtterance =
+    hostClosingTurn &&
+    !sanitizedGeneratedUtterance.repairReason &&
+    botcastHostClosingNeedsPersonaRetry(sanitizedGeneratedUtterance.content)
+      ? {
+          content: fallback,
+          repairReason: "generic_closing" as const,
+        }
+      : sanitizedGeneratedUtterance;
   const generatedContent = generatedUtterance.content;
+  // Pull physical beats before the legacy voice cleanup removes leading actions.
+  // Vocal square-bracket tags remain exclusively in voicePerformanceText.
+  const resolvedStageAction = resolveFinalStageActionV1({
+    plan: stageActionPlan,
+    lane: "signal",
+    replyText: generatedContent,
+    moodHint: botcastVoiceMoodForTension(tension),
+    recentActions: episode.messages
+      .filter((message) => message.botId === speaker.id)
+      .map((message) => message.stageActionText)
+      .filter((action): action is string => Boolean(action))
+      .slice(-8),
+    participantNames: [host.name, guest.name],
+    allowCupActions: false,
+  });
   const performance = extractBotcastVoicePerformance(
-    generatedContent,
-    immersiveVoiceEffectRequired,
+    resolvedStageAction.spokenText,
+    immersiveVoiceEffectRequired ||
+      stageActionPlan.decision === "persona_invite",
     botcastRecentImmersiveVoiceTags(episode),
   );
   const cleanGeneratedContent = performance.content || fallback;
@@ -10531,9 +11952,23 @@ export async function advanceBotcastEpisode(
         ? (silentGuestHostFallback ?? fallback)
         : silentHostSpeechSafeContent
       : silentHostSpeechSafeContent;
-  const stageActionText: string | null = null;
+  // Muted-guest flows above own their deliberate "leave it there" endings;
+  // everywhere else the wrap cue and closing segment decide when the show ends.
+  const prematureSignoffSafeContent =
+    speakerRole === "host" &&
+    episode.segment === "interview" &&
+    !wrapUpCue &&
+    !producerCut &&
+    !departureRequired &&
+    !guestAlreadyDeparted &&
+    silentPeerTurnCount === 0
+      ? botcastStripPrematureHostSignoff(silentGuestAnswerSafeContent, host.name) ||
+        fallback
+      : silentGuestAnswerSafeContent;
   const unbudgetedContent = picklesBeatKind
     ? cleanGeneratedContent
+    : socialSilenceMarker
+      ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerIsMutedForTurn
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerEternallyIntroduces
@@ -10551,23 +11986,25 @@ export async function advanceBotcastEpisode(
     episode.guestPresenceMode === "audience_only" &&
     botcastAudienceOnlyHostRepeatsAbsence({
       episode,
-      content: silentGuestAnswerSafeContent,
+      content: prematureSignoffSafeContent,
     })
       ? fallback
       : speakerRole === "host" &&
     episode.segment === "closing" &&
-    (/\?\s*$/u.test(silentGuestAnswerSafeContent) ||
+    (/\?\s*$/u.test(prematureSignoffSafeContent) ||
       /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
-        silentGuestAnswerSafeContent,
+        prematureSignoffSafeContent,
       ))
       ? fallback
-      : silentGuestAnswerSafeContent;
-  const activeIdentityMirrorState = speakerEternallyIntroduces
-    ? null
-    : botcastIdentityMirrorStatesV1(episode.events).get(speaker.id) ?? null;
+      : prematureSignoffSafeContent;
+  const activeIdentityMirrorState =
+    botcastIdentityMirrorStatesV1(episode.events).get(speaker.id) ?? null;
   const identityMirrorJustChanged = Boolean(
     activeIdentityMirrorState &&
       activeIdentityMirrorState.sourceMessageId === episode.messages.at(-1)?.id,
+  );
+  const shapeshiftIsActivePersonaSource = Boolean(
+    activeIdentityShapeshiftState && !activeIdentityMirrorState,
   );
   const identitySafeContent =
     activeIdentityMirrorState &&
@@ -10578,8 +12015,37 @@ export async function advanceBotcastEpisode(
           unbudgetedContent,
           activeIdentityMirrorState,
           identityMirrorJustChanged,
+          { believedSelfName: activeFalseNameState?.believedName },
         )
+      : shapeshiftIsActivePersonaSource &&
+          activeIdentityShapeshiftState &&
+          !speakerIsMutedForTurn &&
+          !speakerRepeatsForHearingPower &&
+          !speakerEchoesForTurn
+        ? applyBotIdentityShapeshiftResponseV1(
+            unbudgetedContent,
+            activeIdentityShapeshiftState,
+            identityShapeshiftJustChanged,
+          )
       : unbudgetedContent;
+  const falseNameSafeContent =
+    activeFalseNameState &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn
+      ? rewriteBotFalseNameResponseV1(
+          identitySafeContent,
+          activeFalseNameState,
+          falseNameJustChanged,
+          {
+            replacedSelfNames: activeIdentityMirrorState
+              ? [activeIdentityMirrorState.targetBotName]
+              : [],
+            announceIdentityOnChange: false,
+          },
+        )
+      : identitySafeContent;
   const responseBudgetMayUseSecondSentence =
     firstHostOpening ||
     episode.segment === "closing" ||
@@ -10591,23 +12057,40 @@ export async function advanceBotcastEpisode(
     speakerEternallyIntroduces ||
     speakerRepeatsForHearingPower ||
     speakerEchoesForTurn
-      ? identitySafeContent
+      ? falseNameSafeContent
       : applyBotPowerResponseBudgetV1(
-          identitySafeContent,
+          falseNameSafeContent,
           speakerHardResponseBudget,
           speakerHardResponseBudget?.mode === "minimal" &&
             !responseBudgetMayUseSecondSentence
             ? 1
             : 2,
         );
-  const responseBudgetAdjusted = baseContent !== identitySafeContent;
+  const responseBudgetAdjusted = baseContent !== falseNameSafeContent;
+  const addressedInsultEligible =
+    speakerRequiresAddressedInsult &&
+    !picklesBeatKind &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !speakerEternallyIntroduces &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn;
+  const powerAdjustedContent = addressedInsultEligible
+    ? applyBotPowerAddressedInsultV1(
+        baseContent,
+        peerAddressName,
+        `${episode.id}:${speaker.id}:${episode.messages.length}`,
+      )
+    : baseContent;
+  const addressedInsultInserted =
+    addressedInsultEligible && powerAdjustedContent !== baseContent;
   const namingAdjustedContent =
     picklesBeatKind ||
     speakerIsMutedForTurn ||
     speakerRepeatsForHearingPower ||
     speakerEchoesForTurn
-      ? baseContent
-      : applyBotPowerBotNamesV1(baseContent, speaker.powers, [peer.name]);
+      ? powerAdjustedContent
+      : applyBotPowerBotNamesV1(powerAdjustedContent, speaker.powers, [peer.name]);
   const namingAdjustedGeneratedContent = applyBotPowerBotNamesV1(
     cleanGeneratedContent,
     speaker.powers,
@@ -10622,59 +12105,56 @@ export async function advanceBotcastEpisode(
       segment: episode.segment,
       priorUtteranceCount: episode.messages.length,
     });
-  const interruptionCandidate =
-    !picklesBeatKind &&
-    !producerCut &&
+  const generatedHostSignOffIntent =
+    speakerRole === "host" &&
     episode.guestKind === "bot" &&
-    episode.guestPresenceMode === "present" &&
-    (episode.segment === "opening" || episode.segment === "interview") &&
+    episode.durationMinutes === null &&
+    !producerCut &&
     !wrapUpCue &&
-    !departureRequired &&
-    !baseVoluntaryDeparture &&
-    !guestAlreadyDeparted &&
     !speakerIsMutedForTurn &&
     !speakerEternallyIntroduces &&
     !speakerRepeatsForHearingPower &&
-    !botPowerIsMutedV1(peer.powers) &&
-    !botcastPowerRestriction(speaker, peer, "speech_audience")
-      ? strongestBotPowerInterruptionEffectV1(
-          peer.powers,
-          (target) => botcastPowerTargetMatches(target, speaker),
-        )
+    !speakerEchoesForTurn &&
+    botcastHostSignOffIntent({
+      content: namingAdjustedContent,
+      segment: episode.segment,
+      priorUtteranceCount: episode.messages.length,
+    });
+  const protectedOpeningInterruptionProgress =
+    firstHostOpening && plannedPowerInterruption
+      ? botcastOpeningInterruptionTargetProgress({
+          content: namingAdjustedContent,
+          showName: show.name,
+          hostName: host.name,
+          guestName: hostNamesGuest,
+          targetProgress: plannedPowerInterruption.targetProgress,
+          certainty: plannedPowerInterruption.certainty,
+        })
       : null;
-  const interruptionMatch =
-    interruptionCandidate &&
-    (interruptionCandidate.certainty === "always" ||
-      (episode.segment === "interview" && !requestedCue && tension.level < 2))
-      ? interruptionCandidate
-      : null;
-  const powerInterruptionPlan = interruptionMatch
-    ? botcastPowerInterruptionPlanV1({
-        episodeId: episode.id,
-        targetTurnOrdinal: episode.messages.filter(
-          (message) => message.speakerRole === speakerRole,
-        ).length,
-        powerId: interruptionMatch.powerId,
-        powerName: interruptionMatch.powerName,
-        frequency: interruptionMatch.frequency,
-        strength: interruptionMatch.strength,
-        certainty: interruptionMatch.certainty,
-        targetTurnsSinceLastInterruption:
-          botcastSpeakerTurnsSinceLastPowerInterruption(
-            episode,
-            speakerRole,
-            peer.id,
-          ),
-      })
-    : null;
-  const powerInterruptedContent = powerInterruptionPlan
+  const powerInterruptionPlan = baseVoluntaryDeparture || generatedHostSignOffIntent
+    ? null
+    : firstHostOpening && plannedPowerInterruption
+      ? protectedOpeningInterruptionProgress === null
+        ? null
+        : {
+            ...plannedPowerInterruption,
+            targetProgress: protectedOpeningInterruptionProgress,
+          }
+      : plannedPowerInterruption;
+  const powerInterruptedContent =
+    powerInterruptionPlan && !powerInterruptionAttemptProtected
     ? botcastPowerInterruptedContentV1(
         namingAdjustedContent,
         powerInterruptionPlan.targetProgress,
         powerInterruptionPlan.certainty,
       )
     : null;
-  const intendedContent = powerInterruptedContent?.content ?? namingAdjustedContent;
+  const powerInterruptionIsMeaningful = powerInterruptedContent
+    ? crosstalkInterruptionIsMeaningfulV1(powerInterruptedContent)
+    : false;
+  const intendedContent = powerInterruptionIsMeaningful && powerInterruptedContent
+    ? powerInterruptedContent.content
+    : namingAdjustedContent;
   const content =
     !picklesBeatKind &&
     speakerMumblesSpeech &&
@@ -10698,15 +12178,7 @@ export async function advanceBotcastEpisode(
       priorUtteranceCount: episode.messages.length,
     });
   const hostSignsOffThisTurn =
-    speakerRole === "host" &&
-    episode.guestKind === "bot" &&
-    episode.durationMinutes === null &&
-    !producerCut &&
-    !wrapUpCue &&
-    !speakerIsMutedForTurn &&
-    !speakerEternallyIntroduces &&
-    !speakerRepeatsForHearingPower &&
-    !speakerEchoesForTurn &&
+    generatedHostSignOffIntent &&
     botcastHostSignOffIntent({
       content,
       segment: episode.segment,
@@ -10716,8 +12188,13 @@ export async function advanceBotcastEpisode(
   const guestDepartsThisTurn = departureRequired || voluntaryDeparture;
   const participantDepartsThisTurn =
     guestDepartsThisTurn || hostRageQuitsThisTurn;
+  const stageActionText =
+    participantDepartsThisTurn || hostSignsOffThisTurn
+      ? null
+      : resolvedStageAction.action?.action ?? null;
   const voicePerformanceText =
     !picklesBeatKind &&
+    !socialSilenceMarker &&
     !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesForTurn &&
@@ -10735,7 +12212,10 @@ export async function advanceBotcastEpisode(
                 botcastRecentImmersiveVoiceTags(episode),
               )}] ${content}`
             : null)
-    : !powerInterruptedContent && responseBudgetAdjusted && immersiveVoiceEffectRequired
+    : !socialSilenceMarker &&
+        !powerInterruptedContent &&
+        responseBudgetAdjusted &&
+        immersiveVoiceEffectRequired
       ? `[${botcastFallbackImmersiveVoiceTag(
           speakerRole,
           botcastRecentImmersiveVoiceTags(episode),
@@ -10778,6 +12258,83 @@ export async function advanceBotcastEpisode(
           tensionMoodKey === "neutral"
         ? "guarded"
       : tensionMoodKey;
+  // Episode-scoped directed irritation: bias reclaim and plan transitions before
+  // the utterance event so delivery metadata can ride on that payload.
+  let irritationEdges = botcastDirectionalIrritationEdgesFromEvents(
+    episode.events,
+  );
+  const appliedIrritationTransitionIds =
+    botcastDirectionalIrritationAppliedTransitionIdsFromEvents(episode.events);
+  const irritationTowardInterrupter = readDirectionalIrritationIntensity({
+    edges: irritationEdges,
+    subjectBotId: speaker.id,
+    targetBotId: peer.id,
+  });
+  const crosstalkFloorSeed = [
+    "signal-power-crosstalk-floor-v1",
+    episode.id,
+    speakerRole,
+    episode.messages.filter((message) => message.speakerRole === speakerRole)
+      .length,
+    peer.id,
+  ].join(":");
+  const crosstalkFloorOutcome =
+    !producerCut &&
+    powerInterruptionIsMeaningful &&
+    powerInterruptionPlan
+      ? botcastCrosstalkFloorOutcomeV1({
+          seed: crosstalkFloorSeed,
+          speaker,
+          tension,
+          canReclaim:
+            !speakerEchoesAddressedSpeech &&
+            !botPowerIntermittentMuteTurnIsIgnoredV1(
+              speaker.powers,
+              `${episode.id}:${speaker.id}:${episode.messages.length + 1}`,
+            ),
+          irritationTowardInterrupter,
+        })
+      : null;
+  const powerCutoffHeardRatio =
+    powerInterruptedContent && powerInterruptedContent.originalWordCount > 0
+      ? powerInterruptedContent.heardWordCount /
+        powerInterruptedContent.originalWordCount
+      : null;
+  const irritationCutoffPlan =
+    !producerCut &&
+    powerInterruptionIsMeaningful &&
+    powerInterruptionPlan &&
+    crosstalkFloorOutcome
+      ? botcastPlanDirectionalIrritationForMeaningfulCutoffV1({
+          edges: irritationEdges,
+          appliedTransitionIds: appliedIrritationTransitionIds,
+          episodeId: episode.id,
+          interruptedBotId: speaker.id,
+          interrupterBotId: peer.id,
+          messageId,
+          heardRatio: powerCutoffHeardRatio,
+          floorOutcome: crosstalkFloorOutcome,
+          occurredAt: now,
+        })
+      : null;
+  if (irritationCutoffPlan) {
+    irritationEdges = irritationCutoffPlan.edges;
+    for (const transition of irritationCutoffPlan.transitions) {
+      appliedIrritationTransitionIds.add(transition.transitionId);
+    }
+  }
+  const directionalIrritationDelivery =
+    irritationCutoffPlan?.delivery ?? null;
+  const preferredInterruptedSpeakerCue =
+    crosstalkFloorOutcome === "yield" &&
+    directionalIrritationDelivery?.snarkCue
+      ? (normalizeBotCrosstalkInterruptedSpeakerCue(
+          directionalIrritationDelivery.snarkCue,
+        ) ??
+        (directionalIrritationDelivery.snarkCue as BotCrosstalkInterruptedSpeakerCue))
+      : undefined;
+  const utteranceMoodKey =
+    directionalIrritationDelivery?.moodKey ?? messageMoodKey;
   if (hostSignsOffThisTurn) {
     transitionEpisodeSegment(db, userId, episode, "closing", now);
     episode = getBotcastEpisode(db, userId, episode.id);
@@ -10815,8 +12372,28 @@ export async function advanceBotcastEpisode(
       ? { publicSpeechEffect: "speech_obfuscation" }
       : {}),
     ...(stageActionText ? { stageActionText } : {}),
+    ...(stageActionText && resolvedStageAction.action
+      ? {
+          stageAction: {
+            v: resolvedStageAction.action.v,
+            source: resolvedStageAction.action.source,
+            category: resolvedStageAction.action.category,
+            action: resolvedStageAction.action.action,
+            seed: resolvedStageAction.action.seed,
+            lane: resolvedStageAction.action.lane,
+          },
+        }
+      : {}),
     ...(picklesBeatKind ? { picklesBeat: picklesBeatKind } : {}),
-    moodKey: messageMoodKey,
+    ...(socialSilenceMarker ? { socialSilence: socialSilenceMarker } : {}),
+    ...(socialSilenceMarker ? { substantive: false } : {}),
+    ...(activeCrosstalkReclaim
+      ? { crosstalkReclaim: activeCrosstalkReclaim }
+      : {}),
+    moodKey: utteranceMoodKey,
+    ...(directionalIrritationDelivery
+      ? { directionalIrritationDelivery }
+      : {}),
     ...(speakerRepeatsForHearingPower
       ? {
           powerOutcome: {
@@ -10852,9 +12429,23 @@ export async function advanceBotcastEpisode(
               heardWordCount: powerInterruptedContent.heardWordCount,
             },
           }
+      : addressedInsultEligible
+        ? {
+            powerOutcome: {
+              effect: "addressed_insult",
+              outcome: addressedInsultInserted ? "inserted" : "preserved",
+              botId: speaker.id,
+              targetBotId: peer.id,
+              targetName: peerAddressName,
+            },
+          }
       : {}),
     ...(autoRecovery ? { autoRecovery } : {}),
-    ...(generatedUtterance.repairReason
+    // Intentional silence/mute already owns the on-air content; ellipsis cleanup
+    // must not look like a failed model repair in the production log.
+    ...(generatedUtterance.repairReason &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn
       ? {
           utteranceRepair: {
             v: 1,
@@ -10929,7 +12520,8 @@ export async function advanceBotcastEpisode(
   const currentIdentityMirrorState =
     botcastIdentityMirrorStatesV1(episode.events).get(peer.id) ?? null;
   const identityMirrorState =
-    episode.segment === "closing" && listenerRole === "host"
+    socialSilenceMarker ||
+    (episode.segment === "closing" && listenerRole === "host")
       ? null
       : botcastIdentityMirrorCanTriggerV1({
           guestKind: episode.guestKind,
@@ -10979,6 +12571,59 @@ export async function advanceBotcastEpisode(
       now,
     );
   }
+  if (pendingIdentityShapeshiftState) {
+    const identityShapeshiftState = createIdentityShapeshiftStateFromCandidateV1({
+      surface: "signal",
+      holderBotId: pendingIdentityShapeshiftState.holderBotId,
+      holderBotName: pendingIdentityShapeshiftState.holderBotName,
+      candidate: {
+        id: pendingIdentityShapeshiftState.targetBotId,
+        name: pendingIdentityShapeshiftState.targetBotName,
+        source: pendingIdentityShapeshiftState.targetSource,
+        personaPrompt: pendingIdentityShapeshiftState.targetPersonaPrompt,
+        face: pendingIdentityShapeshiftState.targetFace,
+        avatarDetails:
+          pendingIdentityShapeshiftState.targetAvatarDetails ?? null,
+        voice: pendingIdentityShapeshiftState.targetVoice,
+      },
+      sourceMessageId: messageId,
+      occurredAt: now,
+    });
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "identity_shapeshift",
+        state: identityShapeshiftState,
+      },
+      now,
+    );
+  }
+  if (pendingFalseNameState) {
+    const falseNameState = createBotFalseNameStateV1({
+      surface: "signal",
+      holderBotId: pendingFalseNameState.holderBotId,
+      holderBotName: pendingFalseNameState.holderBotName,
+      believedName: pendingFalseNameState.believedName,
+      sourceMessageId: messageId,
+      occurredAt: now,
+    });
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "false_name",
+        state: falseNameState,
+      },
+      now,
+    );
+  }
   let deliveredContent = content;
   let deliveredVoicePerformanceText = voicePerformanceText;
   const listener = listenerRole === "host" ? host : guest;
@@ -10987,17 +12632,51 @@ export async function advanceBotcastEpisode(
     (target) => botcastPowerTargetMatches(target, listener),
     { holderSpeaking: true },
   );
-  let listenerReactionCandidate = powerInterruptedContent && powerInterruptionPlan
+  const plannedCrosstalkReclaim =
+    powerInterruptionIsMeaningful &&
+    powerInterruptedContent &&
+    crosstalkFloorOutcome === "reclaim"
+      ? normalizeCrosstalkReclaimPlanV1({
+          v: 1,
+          name: "crosstalkReclaim",
+          interruptedMessageId: messageId,
+          speakerBotId: speaker.id,
+          heardFragment: powerInterruptedContent.content,
+          protectFromImmediateReinterruption: true,
+        })
+      : null;
+  if (irritationCutoffPlan) {
+    for (const transition of irritationCutoffPlan.transitions) {
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "irritation",
+        { transition },
+        now,
+      );
+    }
+  }
+  let listenerReactionCandidate = powerInterruptionPlan
     ? buildBotCrosstalkListenerReactionPlanV1({
         seed: `signal-power-crosstalk-v1:${episode.id}:${messageId}:${listener.id}`,
         messageId,
         speakerBotId: speaker.id,
         interrupterBotId: listener.id,
         targetProgress: powerInterruptionPlan.targetProgress,
+        floorOutcome: powerInterruptionAttemptProtected
+          ? "reclaim"
+          : (crosstalkFloorOutcome ?? "yield"),
         interruptedSpeakerCuePlayback: "crosstalk",
+        includeInterruptedSpeakerCue:
+          powerInterruptionAttemptProtected || powerInterruptionIsMeaningful,
+        ...(preferredInterruptedSpeakerCue
+          ? { interruptedSpeakerCue: preferredInterruptedSpeakerCue }
+          : {}),
       })
     : !(
         picklesBeatKind ||
+        socialSilenceMarker ||
         episode.guestKind === "producer" ||
         speakerQuietIgnored ||
         (listenerRole === "guest" && guestAlreadyDeparted) ||
@@ -11010,40 +12689,60 @@ export async function advanceBotcastEpisode(
           listenerBotId: listener.id,
           listenerRole,
           segment: episode.segment,
-          mood: messageMoodKey,
+          mood: utteranceMoodKey,
           tensionLevel: tension.level,
         })
       : null;
   if (
     listenerReactionCandidate?.interjectionAttempt &&
-    !botPowerIsMutedV1(listener.powers)
+    !botPowerIsMutedV1(listener.powers) &&
+    !powerInterruptionAttemptProtected
   ) {
     const cutoff = powerInterruptedContent ??
       botcastPowerInterruptedContentV1(
         content,
         listenerReactionCandidate.targetProgress,
       );
-    if (!cutoff || !listenerReactionCandidate.interruptedSpeakerCue) {
+    if (!cutoff) {
+      listenerReactionCandidate = null;
+    } else if (!crosstalkInterruptionIsMeaningfulV1(cutoff)) {
+      listenerReactionCandidate = {
+        ...listenerReactionCandidate,
+        floorOutcome: "yield",
+        interruptedSpeakerCue: undefined,
+        interruptedSpeakerCuePlayback: undefined,
+        targetProgress: Number(
+          Math.max(
+            0.3,
+            Math.min(0.9, listenerReactionCandidate.targetProgress),
+          ).toFixed(3),
+        ),
+      };
+    } else if (
+      listenerReactionCandidate.floorOutcome !== "reclaim" &&
+      !listenerReactionCandidate.interruptedSpeakerCue
+    ) {
       listenerReactionCandidate = null;
     } else {
-      const crosstalkContent = appendBotCrosstalkInterruptedSpeakerCue(
-        cutoff.content,
-        listenerReactionCandidate.interruptedSpeakerCue,
-      );
+      // Canonical transcript keeps only the audience-heard cutoff. The stock
+      // interrupted-speaker retort lives on the listener_reaction plan and plays
+      // on the crosstalk channel — putting it in content poisons follow-up turns
+      // (guests argue with "Apparently we're moving on" as if it were a claim).
       db.prepare(
         `UPDATE botcast_messages
             SET content = ?, voice_performance_text = NULL
           WHERE id = ? AND user_id = ? AND episode_id = ?`,
-      ).run(crosstalkContent, messageId, userId, episode.id);
-      deliveredContent = crosstalkContent;
+      ).run(cutoff.content, messageId, userId, episode.id);
+      deliveredContent = cutoff.content;
       deliveredVoicePerformanceText = null;
-      const cutoffProgress = Math.max(
-        0.3,
-        Math.min(0.75, cutoff.content.length / Math.max(1, crosstalkContent.length)),
-      );
       listenerReactionCandidate = {
         ...listenerReactionCandidate,
-        targetProgress: Number(cutoffProgress.toFixed(3)),
+        targetProgress: Number(
+          Math.max(
+            0.3,
+            Math.min(0.9, listenerReactionCandidate.targetProgress),
+          ).toFixed(3),
+        ),
       };
     }
   }
@@ -11058,9 +12757,48 @@ export async function advanceBotcastEpisode(
       userId,
       episode.id,
       "listener_reaction",
-      { plan: listenerReaction },
+      {
+        plan: listenerReaction,
+        ...(plannedCrosstalkReclaim
+          ? { reclaim: plannedCrosstalkReclaim }
+          : {}),
+        ...(directionalIrritationDelivery
+          ? { directionalIrritationDelivery }
+          : {}),
+      },
       now,
     );
+  }
+
+  // Cool the speaker's outgoing irritation edges after an uninterrupted
+  // substantive turn. Producer cuts and power cutoffs skip this path.
+  if (
+    !producerCut &&
+    !powerInterruptionPlan &&
+    !powerInterruptedContent &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn
+  ) {
+    const decay = applyDirectionalIrritationCleanTurnDecay({
+      edges: irritationEdges,
+      appliedTransitionIds: appliedIrritationTransitionIds,
+      sessionId: episode.id,
+      speakerBotId: speaker.id,
+      causeId: messageId,
+      occurredAt: now,
+    });
+    irritationEdges = decay.edges;
+    for (const transition of decay.transitions) {
+      appliedIrritationTransitionIds.add(transition.transitionId);
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "irritation",
+        { transition },
+        now,
+      );
+    }
   }
 
   if (wrapUpCue && speakerRole === "guest") {
@@ -11121,7 +12859,9 @@ export async function advanceBotcastEpisode(
   episode = getBotcastEpisode(db, userId, episode.id);
   const previousCamera = lastCameraSuggestion(episode.events);
   const wordCount = deliveredContent.split(/\s+/u).filter(Boolean).length;
-  const utteranceDurationMs = Math.max(1_400, wordCount * 310);
+  const utteranceDurationMs = socialSilenceMarker
+    ? socialSilenceMarker.holdMs
+    : Math.max(1_400, wordCount * 310);
   const firstOpeningHost =
     episode.messages.length === 1 &&
     episode.segment === "opening" &&
@@ -11164,6 +12904,7 @@ export async function advanceBotcastEpisode(
   }
   const afterSpeechPowerEffects =
     episode.guestKind === "producer" ||
+    socialSilenceMarker ||
     speakerIsMutedForTurn ||
     (listenerRole === "guest" && guestAlreadyDeparted)
       ? []
@@ -11188,6 +12929,7 @@ export async function advanceBotcastEpisode(
   }
   const moodBoostEvent =
     episode.guestKind === "producer" ||
+    socialSilenceMarker ||
     speakerIsMutedForTurn ||
     (listenerRole === "guest" && guestAlreadyDeparted)
       ? null
@@ -11214,6 +12956,7 @@ export async function advanceBotcastEpisode(
   }
   const moodDrainEvent =
     episode.guestKind === "producer" ||
+    socialSilenceMarker ||
     speakerIsMutedForTurn ||
     (listenerRole === "guest" && guestAlreadyDeparted)
       ? null
@@ -11238,64 +12981,91 @@ export async function advanceBotcastEpisode(
       now,
     );
   }
-  const atMs = firstOpeningHost
-    ? 1_400
-    : messageStartMs + botcastAutoCameraLeadInMs(utteranceDurationMs);
-  const speakerVisibleToAudience = botcastObserverProjectionForRoleV2({
-    episode,
-    role: speakerRole,
-    perspective: "live",
-  }).visible;
-  const suggestion = botcastDirectorSuggestion({
-    previous: firstOpeningHost ? null : previousCamera,
-    atMs,
-    speakerRole,
-    speakerVisible: speakerVisibleToAudience,
-    utteranceDurationMs,
-    segment: episode.segment,
-    event: "utterance",
-  });
-  recordEvent(
-    db,
-    userId,
-    episode.id,
-    "camera_suggestion",
-    { ...suggestion },
-    now,
-  );
-  if (participantDepartsThisTurn) {
-    const departureSuggestion = botcastDirectorSuggestion({
-      previous: suggestion,
-      atMs:
-        messageStartMs +
-        Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, utteranceDurationMs),
+  if (!socialSilenceMarker) {
+    const atMs = firstOpeningHost
+      ? 1_400
+      : messageStartMs + botcastAutoCameraLeadInMs(utteranceDurationMs);
+    const speakerVisibleToAudience = botcastObserverProjectionForRoleV2({
+      episode,
+      role: speakerRole,
+      perspective: "live",
+    }).visible;
+    const suggestion = botcastDirectorSuggestion({
+      previous: firstOpeningHost ? null : previousCamera,
+      atMs,
       speakerRole,
+      speakerVisible: speakerVisibleToAudience,
       utteranceDurationMs,
       segment: episode.segment,
-      event: "departure",
+      event: "utterance",
     });
     recordEvent(
       db,
       userId,
       episode.id,
       "camera_suggestion",
-      { ...departureSuggestion, speakerRole },
+      { ...suggestion, messageId },
       now,
     );
-    recordEvent(
-      db,
-      userId,
-      episode.id,
-      "camera_suggestion",
-      {
-        shot: "wide",
-        reason: "empty_chair",
+    if (participantDepartsThisTurn) {
+      const departureSuggestion = botcastDirectorSuggestion({
+        previous: suggestion,
+        atMs:
+          messageStartMs +
+          Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, utteranceDurationMs),
         speakerRole,
-        atMs: departureSuggestion.atMs + 900,
-        minimumHoldMs: 3_200,
-      },
-      now,
-    );
+        utteranceDurationMs,
+        segment: episode.segment,
+        event: "departure",
+      });
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "camera_suggestion",
+        { ...departureSuggestion, speakerRole, messageId },
+        now,
+      );
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "camera_suggestion",
+        {
+          shot: "wide",
+          reason: "empty_chair",
+          speakerRole,
+          atMs: departureSuggestion.atMs + 900,
+          minimumHoldMs: 3_200,
+        },
+        now,
+      );
+    }
+  } else {
+    // Show the freeze: cut to the visibly silent speaker for the short hold
+    // so the audience sees who went quiet before the reply lands.
+    const silentSpeakerVisible = botcastObserverProjectionForRoleV2({
+      episode,
+      role: speakerRole,
+      perspective: "live",
+    }).visible;
+    const silenceShot = speakerRole === "guest" ? "right" : "left";
+    if (silentSpeakerVisible && previousCamera?.shot !== silenceShot) {
+      recordEvent(
+        db,
+        userId,
+        episode.id,
+        "camera_suggestion",
+        {
+          shot: silenceShot,
+          reason: "silence",
+          atMs: Math.max(0, Math.round(messageStartMs)),
+          minimumHoldMs: socialSilenceMarker.holdMs,
+          messageId,
+        },
+        now,
+      );
+    }
   }
   const message = mapMessage(
     {
@@ -11308,7 +13078,19 @@ export async function advanceBotcastEpisode(
     voice_performance_text: deliveredVoicePerformanceText,
     created_at: now,
     },
-    messageMoodKey,
+    utteranceMoodKey,
+    {
+      ...(socialSilenceMarker ? { socialSilence: socialSilenceMarker } : {}),
+      ...(activeCrosstalkReclaim || plannedCrosstalkReclaim
+        ? {
+            crosstalkReclaim:
+              activeCrosstalkReclaim ?? plannedCrosstalkReclaim!,
+          }
+        : {}),
+      ...(directionalIrritationDelivery
+        ? { directionalIrritationDelivery }
+        : {}),
+    },
   );
   episode = getBotcastEpisode(db, userId, episode.id);
   if (episode.segment === "closing" && speakerRole === "host") {

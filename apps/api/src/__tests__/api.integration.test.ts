@@ -256,34 +256,97 @@ describe("API request integration", () => {
       .get(email) as { id: string };
     const conversationId = "developer-export-conversation";
     const createdAt = "2026-07-14T19:00:00.000Z";
+    const speakerBotId = "developer-export-speaker";
+    const interrupterBotId = "developer-export-interrupter";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+    );
+    insertBot.run(
+      speakerBotId,
+      user.id,
+      "Speaker",
+      "You are the speaker.",
+      createdAt,
+      createdAt,
+    );
+    insertBot.run(
+      interrupterBotId,
+      user.id,
+      "Interrupter",
+      "You are the interrupter.",
+      createdAt,
+      createdAt,
+    );
     db.prepare(
       `INSERT INTO conversations
-         (id, user_id, title, conversation_mode, coffee_topic, created_at, updated_at)
-       VALUES (?, ?, ?, 'coffee', ?, ?, ?)`
+         (id, user_id, title, conversation_mode, bot_group_ids, coffee_topic, created_at, updated_at)
+       VALUES (?, ?, ?, 'coffee', ?, ?, ?, ?)`
     ).run(
       conversationId,
       user.id,
       "Export fixture",
+      JSON.stringify([speakerBotId, interrupterBotId]),
       "A useful disagreement",
       createdAt,
       createdAt
     );
     db.prepare(
       `INSERT INTO messages
-         (id, conversation_id, user_id, role, content, provider, model,
+         (id, conversation_id, user_id, role, content, provider, model, bot_id,
           coffee_audience_bot_ids, tool_payload, created_at)
-       VALUES (?, ?, ?, 'assistant', ?, 'openai', 'gpt-test', ?, ?, ?)`
+       VALUES (?, ?, ?, 'assistant', ?, 'openai', 'gpt-test', ?, ?, ?, ?)`
     ).run(
       "developer-export-message",
       conversationId,
       user.id,
       "Visible answer",
+      speakerBotId,
       '["bot-2"]',
       JSON.stringify({
         webSearch: { query: "today's news" },
         coffeeAmbientAction: { action: "*sips*" },
       }),
       "2026-07-14T19:00:01.000Z"
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, bot_id, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, ?, ?)`,
+    ).run(
+      "developer-export-cutoff",
+      conversationId,
+      user.id,
+      "I had one point—",
+      speakerBotId,
+      "2026-07-14T19:00:02.000Z",
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at)
+       VALUES (?, ?, ?, 'assistant', '...', ?, ?, ?)`,
+    ).run(
+      "developer-export-interruption",
+      conversationId,
+      user.id,
+      speakerBotId,
+      JSON.stringify({
+        v: 1,
+        coffeeInterruption: {
+          kind: "botInterruptsBot",
+          interruptedBotId: speakerBotId,
+          interrupterBotId,
+          interruptedMessageId: "developer-export-cutoff",
+          interruptedSnippet: "I had one point—",
+          pauseBeat: true,
+          floorOutcome: "yield",
+          interrupterCue: "Hold on.",
+          interruptedSpeakerCue: "... sure. Go ahead.",
+          socialConsequences: [],
+        },
+      }),
+      "2026-07-14T19:00:03.000Z",
     );
     const secret = "integration-secret-value-123";
     process.env.PRISM_TEST_EXPORT_API_KEY = secret;
@@ -325,6 +388,25 @@ describe("API request integration", () => {
       assert.equal(standardPayload.format, "standard");
       assert.match(standardPayload.markdown, /^# Export fixture/u);
       assert.doesNotMatch(standardPayload.markdown, /PRISM Developer Transcript/u);
+      assert.match(standardPayload.markdown, /- Messages: 2/u);
+      assert.match(standardPayload.markdown, /- Bot replies: 2/u);
+      const cutoffAt = standardPayload.markdown.indexOf("I had one point—");
+      const cutInAt = standardPayload.markdown.indexOf("Hold on.");
+      const followUpAt = standardPayload.markdown.indexOf(
+        "... sure. Go ahead.",
+      );
+      assert.ok(cutoffAt >= 0);
+      assert.ok(cutInAt > cutoffAt);
+      assert.ok(followUpAt > cutInAt);
+      assert.match(
+        standardPayload.markdown,
+        /\*\*Interrupter\*\*[\s\S]*Hold on\./u,
+      );
+      assert.match(
+        standardPayload.markdown,
+        /\*\*Speaker\*\*[\s\S]*\.\.\. sure\. Go ahead\./u,
+      );
+      assert.doesNotMatch(standardPayload.markdown, /\n\.\.\.\n/u);
 
       const developer = await client.request(
         `/api/conversations/${conversationId}/export`,
@@ -582,6 +664,35 @@ describe("API request integration", () => {
     const createdGroupPayload = await json(createdGroup);
     assert.equal(createdGroup.status, 201, JSON.stringify(createdGroupPayload));
     const groupId = createdGroupPayload.group.id as string;
+    assert.equal(createdGroupPayload.group.ethos, "");
+    assert.equal(createdGroupPayload.group.atmosphere, null);
+    assert.equal(
+      createdGroupPayload.group.synthesis.items.name.status,
+      "ready",
+    );
+    assert.equal(
+      createdGroupPayload.group.synthesis.items.name.source,
+      "manual",
+    );
+    assert.equal(
+      createdGroupPayload.group.synthesis.items.ethos.status,
+      "pending",
+    );
+    assert.equal(
+      createdGroupPayload.group.synthesis.items.atmosphere.status,
+      "pending",
+    );
+
+    const retryEthos = await client.request(
+      `/api/coffee/groups/${groupId}/synthesis/ethos`,
+      { method: "POST" },
+    );
+    const retryEthosPayload = await json(retryEthos);
+    assert.equal(retryEthos.status, 202, JSON.stringify(retryEthosPayload));
+    assert.equal(
+      retryEthosPayload.group.synthesis.items.ethos.status,
+      "running",
+    );
 
     const savedGroupSession = await client.request(
       `/api/coffee/groups/${encodeURIComponent(groupId)}/sessions`,
@@ -2061,7 +2172,10 @@ describe("API request integration", () => {
       { method: "DELETE" }
     );
     assert.equal(episodeDelete.status, 200);
-    assert.deepEqual(await json(episodeDelete), { ok: true });
+    assert.deepEqual(await json(episodeDelete), {
+      ok: true,
+      discarded: true,
+    });
     assert.equal(
       (await owner.request(`/api/botcast/episodes/${encodeURIComponent(episodeId)}`, {
         method: "DELETE",

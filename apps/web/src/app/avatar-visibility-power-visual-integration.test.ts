@@ -47,10 +47,10 @@ describe("avatar visibility Power visual contract", () => {
     );
   });
 
-  it("freezes Signal visibility and applies its live or replay observer projection", () => {
+  it("freezes Signal visibility in the episode snapshot", () => {
     assert.match(
       signalSource,
-      /const roleAvatarVisibilityMode[\s\S]{0,220}observerParticipants\?\.\[role\]\.visibility[\s\S]{0,260}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
+      /const roleAvatarVisibilityMode[\s\S]{0,300}botcastSnapshotPowersForRoleV1\([\s\S]{0,180}snapshot !== null[\s\S]{0,120}botPowerAvatarVisibilityModeV1\(snapshot\)/u,
     );
     assert.match(
       signalSource,

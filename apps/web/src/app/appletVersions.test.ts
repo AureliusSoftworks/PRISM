@@ -10,6 +10,8 @@ import {
   BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY,
   BOT_POWER_HEARING_REPEAT_MODE_POLICY,
   BOT_POWER_IDENTITY_MIRROR_MODE_POLICY,
+  BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY,
+  BOT_POWER_FALSE_NAME_MODE_POLICY,
   BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY,
   BOT_POWER_INTERRUPTION_MODE_POLICY,
   BOT_POWER_GHOST_MODE_POLICY,
@@ -59,20 +61,20 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.30");
-    assert.equal(PRISM_APPLETS.zen.version, "1.28");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.30");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.29");
+    assert.equal(PRISM_APPLETS.chat.version, "1.33");
+    assert.equal(PRISM_APPLETS.zen.version, "1.31");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.37");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.36");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.26");
+    assert.equal(PRISM_APPLETS.story.version, "0.27");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.30");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.28");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.30");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.29");
-    assert.equal(prismAppletVersionLabel("story"), "v0.26");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.33");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.31");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.37");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.36");
+    assert.equal(prismAppletVersionLabel("story"), "v0.27");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });
 
@@ -459,6 +461,50 @@ describe("applet version helpers", () => {
       feed: "deferred",
       games: "deferred",
       story: "cue",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("covers Library/Marketplace shapeshift across every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("covers John/Jane Doe false names across every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_FALSE_NAME_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_FALSE_NAME_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
       gym: "deferred",
       slate: "irrelevant",
       pseudo: "deferred",

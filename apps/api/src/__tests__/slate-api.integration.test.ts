@@ -182,8 +182,11 @@ describe("Slate API", () => {
     const chatResponse = await owner.request(
       `/api/slate/projects/${created.id}/chat`,
     );
-    assert.equal(chatResponse.status, 200);
-    assert.deepEqual((await body(chatResponse)).messages, []);
+    assert.equal(chatResponse.status, 410);
+    assert.match(
+      String((await body(chatResponse)).error),
+      /moved to the global Prism companion/u,
+    );
 
     const lockedShape = await owner.request(
       `/api/slate/projects/${created.id}/shape`,

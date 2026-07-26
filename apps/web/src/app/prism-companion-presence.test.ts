@@ -40,14 +40,13 @@ test("suppresses the floating assistant throughout bot creation and full-screen 
   assert.match(page, /reason="story-loading"/u);
   assert.match(warmup, /reason=\{`\$\{props\.experience\}-model-warmup`\}/u);
   assert.match(blocking, /reason="blocking-loader"/u);
-  assert.match(signal, /reason="signal-episode-loading"/u);
   assert.match(slate, /reason="slate-loading"/u);
 });
 
 test("suppresses the floating assistant only during live Signal and Coffee sessions", () => {
   assert.match(
     signal,
-    /const liveSessionActive = episode\?\.status === "live"/u,
+    /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,160}episode\?\.status === "cancelled"/u,
   );
   assert.match(
     signal,

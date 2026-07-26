@@ -8,17 +8,18 @@ export type CoffeeSessionClockPhase =
   | "finished";
 
 export type CoffeeSessionClockHoldReason =
-  | "player_composing"
   | "manual_autoplay_pause"
   | "model_warmup";
 
+/**
+ * A composing player no longer holds the countdown: bots keep talking while
+ * the player types, so session time keeps flowing with them.
+ */
 export function coffeeSessionClockHoldReasons(args: {
-  playerComposing: boolean;
   autoplayPaused: boolean;
   modelWarmup: boolean;
 }): CoffeeSessionClockHoldReason[] {
   const reasons: CoffeeSessionClockHoldReason[] = [];
-  if (args.playerComposing) reasons.push("player_composing");
   if (args.autoplayPaused) reasons.push("manual_autoplay_pause");
   if (args.modelWarmup) reasons.push("model_warmup");
   return reasons;

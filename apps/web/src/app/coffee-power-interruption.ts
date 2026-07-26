@@ -1,7 +1,10 @@
 import type {
   BotPowerEffectV1,
   CoffeeBotSocialSnapshot,
+  CoffeeInterruptionEvent,
   CoffeePowerPlanV1,
+  DirectionalIrritationDeliveryPlanV1,
+  ListenerReactionPlanV1,
 } from "@localai/shared";
 
 type CoffeeInterruptionEffect = Extract<
@@ -15,6 +18,78 @@ export interface CoffeeAutomaticCutInCandidate {
   powerEffect: CoffeeInterruptionEffect | null;
   directlyAddressed: boolean;
   chance: number;
+}
+
+/** Play only the interrupter's lead-in until the server decides the floor. */
+export function coffeeInterrupterLeadPlanV1(
+  plan: ListenerReactionPlanV1,
+): ListenerReactionPlanV1 {
+  return {
+    ...plan,
+    interruptedSpeakerCue: undefined,
+    interruptedSpeakerCuePlayback: undefined,
+  };
+}
+
+/** Build the yielding tail only when the server authoritatively chose yield. */
+export function coffeeAuthoritativeYieldTailPlanV1(
+  leadPlan: ListenerReactionPlanV1,
+  interruption: CoffeeInterruptionEvent,
+): ListenerReactionPlanV1 | null {
+  if (
+    interruption.floorOutcome !== "yield" ||
+    !interruption.interruptedSpeakerCue
+  ) {
+    return null;
+  }
+  return {
+    ...leadPlan,
+    floorOutcome: "yield",
+    spokenCue: undefined,
+    vocalFoley: undefined,
+    interruptedSpeakerCue: interruption.interruptedSpeakerCue,
+    interruptedSpeakerCuePlayback: "crosstalk",
+  };
+}
+
+/**
+ * Find irritation delivery attached to the pause carrier for a live yield
+ * retort. Prefers the interrupted bot's cutoff delivery over rebuff rows.
+ */
+export function coffeeDirectionalIrritationDeliveryForPlan(
+  conversation:
+    | {
+        messages?: Array<{
+          coffeeInterruption?: CoffeeInterruptionEvent | null;
+          coffeeReplayEvents?: Array<{
+            kind?: string;
+            botId?: string;
+            delivery?: DirectionalIrritationDeliveryPlanV1;
+          }> | null;
+        }> | null;
+      }
+    | null
+    | undefined,
+  plan: Pick<ListenerReactionPlanV1, "messageId" | "speakerBotId">,
+): DirectionalIrritationDeliveryPlanV1 | null {
+  const messages = conversation?.messages;
+  if (!messages?.length) return null;
+  const pauseMessage = [...messages].reverse().find(
+    (message) =>
+      message.coffeeInterruption?.interruptedMessageId === plan.messageId ||
+      message.coffeeInterruption?.interruptedBotId === plan.speakerBotId,
+  );
+  const events = pauseMessage?.coffeeReplayEvents ?? [];
+  for (const event of events) {
+    if (
+      event.kind === "directionalIrritation" &&
+      event.botId === plan.speakerBotId &&
+      event.delivery
+    ) {
+      return event.delivery;
+    }
+  }
+  return null;
 }
 
 export function coffeeInterruptionTriggerProgressV1(

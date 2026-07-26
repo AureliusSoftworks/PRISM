@@ -3,6 +3,7 @@ import {
   botcastSnapshotPowersForRoleV1,
   botPowerResponseIsSilentV1,
   buildSignalMusicProfile,
+  coffeeInterruptionTranscriptSegments,
   voiceSpokenText,
   type BotcastEpisode,
   type BotcastReplayEvent,
@@ -11,6 +12,8 @@ import {
   type BotAvatarSfxV1,
   type BotFaceStyle,
   type BotVoicePreset,
+  type CoffeeInterruptionEvent,
+  type CoffeeStageActionPayload,
   type SignalPersonaTemperament,
   type ReplayEventV1,
   type ReplayDirectionEventV2,
@@ -25,7 +28,7 @@ import {
   SIGNAL_SYNTH_IDENT_DURATION_MS,
 } from "./signalIntroAudio.ts";
 
-const SIGNAL_REPLAY_PRE_ROLL_MIN_MS = 4_200;
+const SIGNAL_REPLAY_PRE_ROLL_MIN_MS = 3_000;
 
 export const COFFEE_REPLAY_RENDER_CONTRACT =
   "coffee-table-playwright-v1" as const;
@@ -139,6 +142,14 @@ export function buildSignalReplayManifestV1(args: {
     metadata: {
       stageActionText: message.stageActionText,
       audienceDelivery: message.audienceDelivery ?? null,
+      socialSilence: message.socialSilence ?? null,
+      crosstalkReclaim: message.crosstalkReclaim ?? null,
+      ...(message.directionalIrritationDelivery
+        ? {
+            directionalIrritationDelivery:
+              message.directionalIrritationDelivery,
+          }
+        : {}),
     },
   }));
   const episodeEvents = [...args.episode.events];
@@ -270,9 +281,11 @@ interface CoffeeReplayMessageInput {
   botGlyph?: string;
   provider?: string;
   moodKey?: "joyful" | "warm" | "neutral" | "guarded" | "strained";
+  coffeeInterruption?: CoffeeInterruptionEvent;
   coffeeReplayEvents?: Array<{ kind: string }>;
   coffeeObserverProjection?: { audible?: boolean; visible?: boolean };
   coffeeAmbientAction?: object;
+  coffeeStageAction?: CoffeeStageActionPayload;
   coffeeUserAction?: object;
 }
 
@@ -331,40 +344,74 @@ export function buildCoffeeReplayManifestV1(args: {
       },
     },
   ];
-  const utterances: ReplayUtteranceV1[] = args.conversation.messages
-    .filter(
-      (message) =>
-        (message.role === "assistant" || message.role === "user") &&
-        message.content.trim().length > 0,
-    )
-    .map((message) => {
-      return {
-        id: message.id,
+  const utterances: ReplayUtteranceV1[] = args.conversation.messages.flatMap(
+    (message) => {
+      const isSpokenRole =
+        message.role === "assistant" || message.role === "user";
+      const isInterruptionCarrier =
+        message.coffeeInterruption?.pauseBeat === true &&
+        message.content.trim() === "...";
+      const primaryUtterance =
+        isSpokenRole &&
+        message.content.trim().length > 0 &&
+        !message.coffeeUserAction &&
+        !isInterruptionCarrier
+          ? [{
+              id: message.id,
+              sourceMessageId: message.id,
+              speakerId:
+                message.role === "user"
+                  ? "coffee-player"
+                  : message.botId ?? message.botName ?? "table",
+              speakerRole:
+                message.role === "user"
+                  ? "player" as const
+                  : "table-guest" as const,
+              text: message.content,
+              spokenText: voiceSpokenText(message.content),
+              moodKey: message.moodKey ?? "neutral",
+              audible:
+                message.coffeeObserverProjection?.audible !== false &&
+                voiceSpokenText(message.content).length > 0 &&
+                message.content.trim() !== "...",
+              visible:
+                message.coffeeObserverProjection?.visible !== false,
+              createdAt: message.createdAt,
+              metadata: {
+                botColor: message.botColor ?? null,
+                botGlyph: message.botGlyph ?? null,
+              },
+            } satisfies ReplayUtteranceV1]
+          : [];
+      const interruptionUtterances = coffeeInterruptionTranscriptSegments({
         sourceMessageId: message.id,
-        speakerId:
-          message.role === "user"
-            ? "coffee-player"
-            : message.botId ?? message.botName ?? "table",
-        speakerRole:
-          message.role === "user"
-            ? "player"
-            : "table-guest",
-        text: message.content,
-        spokenText: voiceSpokenText(message.content),
-        moodKey: message.moodKey ?? "neutral",
-        audible:
-          message.coffeeObserverProjection?.audible !== false &&
-          voiceSpokenText(message.content).length > 0 &&
-          message.content.trim() !== "...",
-        visible:
-          message.coffeeObserverProjection?.visible !== false,
-        createdAt: message.createdAt,
-        metadata: {
-          botColor: message.botColor ?? null,
-          botGlyph: message.botGlyph ?? null,
-        },
-      };
-    });
+        sourceContent: message.content,
+        interruption: message.coffeeInterruption,
+      }).map((segment) => {
+        const bot = botsById.get(segment.speakerBotId);
+        return {
+          id: segment.id,
+          sourceMessageId: segment.id,
+          speakerId: segment.speakerBotId,
+          speakerRole: "table-guest",
+          text: segment.text,
+          spokenText: segment.text,
+          moodKey: "neutral",
+          audible: false,
+          visible: true,
+          createdAt: message.createdAt,
+          metadata: {
+            transcriptOnly: true,
+            sourceInterruptionMessageId: segment.sourceMessageId,
+            interruptionSegment: segment.kind,
+            botColor: bot?.color ?? null,
+            botGlyph: bot?.glyph ?? null,
+          },
+        } satisfies ReplayUtteranceV1;
+      });
+      return [...primaryUtterance, ...interruptionUtterances];
+    },
+  );
   const savedEvents: ReplayEventV1[] = args.conversation.messages.flatMap(
     (message) => {
       const replayEvents = (message.coffeeReplayEvents ?? []).map(
@@ -376,14 +423,15 @@ export function buildCoffeeReplayManifestV1(args: {
           payload: { ...event },
         }),
       );
-      const ambient = message.coffeeAmbientAction
+      const ambientAction = message.coffeeStageAction ?? message.coffeeAmbientAction;
+      const ambient = ambientAction
         ? [
             {
               id: `${message.id}:ambient`,
               kind: "ambientAction",
               sourceMessageId: message.id,
               occurredAt: message.createdAt,
-              payload: { ...message.coffeeAmbientAction },
+              payload: { ...ambientAction },
             },
           ]
         : [];

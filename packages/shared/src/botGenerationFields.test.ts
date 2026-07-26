@@ -12,6 +12,14 @@ test("Avatar Studio field registry covers every creative surface and explicit sa
     assert.ok(keys.some((key) => key.startsWith(prefix)), `missing ${prefix}`);
   }
   assert.equal(botGenerationFieldDefinitionV1("power.prompt").policy, "semantic");
+  assert.equal(
+    botGenerationFieldDefinitionV1("identity.namePronunciation").policy,
+    "excluded",
+  );
+  assert.equal(
+    botGenerationFieldDefinitionV1("identity.selfReferral").policy,
+    "excluded",
+  );
   assert.equal(botGenerationFieldDefinitionV1("power.sigil").policy, "bounded");
   assert.equal(botGenerationFieldDefinitionV1("details.stamp.id").policy, "excluded");
   assert.equal(botGenerationFieldDefinitionV1("details.stamp.offsetX").policy, "excluded");

@@ -5,6 +5,7 @@ import {
 } from "./botIdentityMirror.ts";
 import {
   hydrateAssistantMessageParts,
+  normalizeCoffeeInterruptionEvent,
   parseAssistantPrismTools,
   parseStoredAssistantToolPayload,
   parseStoredToolPayload,
@@ -619,6 +620,49 @@ describe("hydrateAssistantMessageParts", () => {
     assert.deepEqual(h.coffeeAmbientAction, coffeeAmbientAction);
   });
 
+  it("hydrates persisted Coffee and Zen stage-action metadata from tool_payload", () => {
+    const coffeeStageAction = {
+      v: 1 as const,
+      name: "coffeeStageAction" as const,
+      source: "director" as const,
+      category: "judgemental" as const,
+      action: "raises an eyebrow",
+      seed: "coffee:bot:1",
+    };
+    const zenStageAction = {
+      v: 1 as const,
+      name: "zenStageAction" as const,
+      source: "llm" as const,
+      category: "warm" as const,
+      action: "takes a breath",
+      seed: "zen:bot:1",
+    };
+    const coffeeStored = serializeAssistantToolPayload({ coffeeStageAction });
+    const zenStored = serializeAssistantToolPayload({ zenStageAction });
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(coffeeStored).coffeeStageAction,
+      coffeeStageAction,
+    );
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(zenStored).zenStageAction,
+      zenStageAction,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "Fine.",
+        toolPayload: coffeeStored,
+      }).coffeeStageAction,
+      coffeeStageAction,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "I hear you.",
+        toolPayload: zenStored,
+      }).zenStageAction,
+      zenStageAction,
+    );
+  });
+
   it("hydrates persisted Coffee user actions from tool_payload", () => {
     const coffeeUserAction: CoffeeUserActionPayload = {
       v: 1,
@@ -635,6 +679,58 @@ describe("hydrateAssistantMessageParts", () => {
     });
     assert.equal(h.content, "*leans back and folds arms*");
     assert.deepEqual(h.coffeeUserAction, coffeeUserAction);
+  });
+
+  it("normalizes and hydrates persisted Coffee interruption metadata", () => {
+    const stored = JSON.stringify({
+      v: 1,
+      coffeeInterruption: {
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        interrupterBotId: "interrupter",
+        interruptedMessageId: "message-1",
+        interruptedSnippet: "The thought stops—",
+        pauseBeat: true,
+        reactionOutcome: "reclaim",
+        interrupterCue: "Hold on.",
+        interruptedSpeakerCue: "... sure. Go ahead.",
+        socialConsequences: [
+          {
+            botId: "speaker",
+            dispositionDelta: -0.2,
+            valuesFrictionDelta: 0.1,
+          },
+          { botId: "", dispositionDelta: 99, valuesFrictionDelta: 99 },
+        ],
+      },
+    });
+    const interruption =
+      parseStoredAssistantToolPayload(stored).coffeeInterruption;
+
+    assert.equal(interruption?.reactionOutcome, "resume");
+    assert.equal(interruption?.floorOutcome, "reclaim");
+    assert.deepEqual(interruption?.socialConsequences, [
+      {
+        botId: "speaker",
+        dispositionDelta: -0.2,
+        valuesFrictionDelta: 0.1,
+      },
+    ]);
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "...",
+        toolPayload: stored,
+      }).coffeeInterruption,
+      interruption,
+    );
+    assert.equal(
+      normalizeCoffeeInterruptionEvent({
+        kind: "botInterruptsBot",
+        interruptedBotId: "speaker",
+        socialConsequences: [],
+      }),
+      undefined,
+    );
   });
 
   it("hydrates persisted Coffee replay events from tool_payload", () => {
@@ -687,6 +783,10 @@ describe("hydrateAssistantMessageParts", () => {
           targetSource: "direct",
           visualAction: "nod",
           spokenCue: "mm-hm",
+          interjectionAttempt: true,
+          floorOutcome: "yield",
+          interruptedSpeakerCue: "... sure. Go ahead.",
+          interruptedSpeakerCuePlayback: "crosstalk",
           targetProgress: 0.52,
           seed: "coffee-listener-v1:test",
           cameraCutEligible: false,
@@ -833,6 +933,60 @@ describe("hydrateAssistantMessageParts", () => {
       autoRecovery
     );
     assert.equal(stored.includes("rawError"), false);
+  });
+
+  it("round-trips provenance-marked social silence independently of Power silence", () => {
+    const socialSilence = {
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "coffee" as const,
+      seed: "coffee:turn-4:rick",
+      volleyTurn: 4 as const,
+      holdMs: 900,
+    };
+    const stored = serializeAssistantToolPayload({ socialSilence });
+    assert.ok(stored);
+    assert.deepEqual(
+      parseStoredAssistantToolPayload(stored).socialSilence,
+      socialSilence,
+    );
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "...",
+        toolPayload: stored,
+      }).socialSilence,
+      socialSilence,
+    );
+    assert.equal(
+      parseStoredAssistantToolPayload(
+        JSON.stringify({
+          v: 1,
+          socialSilence: { ...socialSilence, provenance: "power" },
+        }),
+      ).socialSilence,
+      undefined,
+    );
+  });
+
+  it("round-trips a protected crosstalk reclaim link", () => {
+    const crosstalkReclaim = {
+      v: 1 as const,
+      name: "crosstalkReclaim" as const,
+      interruptedMessageId: "message-1",
+      speakerBotId: "rick",
+      heardFragment: "So if you are—",
+      protectFromImmediateReinterruption: true as const,
+    };
+    const stored = serializeAssistantToolPayload({ crosstalkReclaim });
+    assert.ok(stored);
+    assert.deepEqual(
+      hydrateAssistantMessageParts({
+        content: "No. I was saying—why the mustache?",
+        toolPayload: stored,
+      }).crosstalkReclaim,
+      crosstalkReclaim,
+    );
   });
 });
 

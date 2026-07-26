@@ -23,6 +23,10 @@ describe("composer picks everywhere", () => {
       pageSource,
       /promptPicks=\{commandCenterPromptPicks\}[\s\S]{0,120}wildcardPicks=\{composerWildcardDeckPicks\}/u,
     );
+    assert.match(
+      pageSource,
+      /const renderPickAwareComposer = [\s\S]{0,1200}?chipPointerBehavior="delete"/u,
+    );
   });
 
   it("wires Coffee table composers to prompts and wildcard decks", () => {

@@ -6,9 +6,17 @@ import {
   buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
   buildSignalListenerReactionPlanV1,
+  crosstalkInterruptionIsMeaningfulV1,
+  normalizeBotCrosstalkInterruptedSpeakerCue,
+  normalizeCrosstalkFloorOutcome,
+  normalizeCrosstalkReclaimPlanV1,
   normalizeListenerReactionPlanV1,
+  normalizeSocialSilenceMarkerV1,
+  planSocialSilenceV1,
   resolveListenerReactionAtMs,
+  socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
+import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 describe("listener reaction planning", () => {
   it("is deterministic and keeps Signal opening and closing reactions visual-only", () => {
@@ -79,7 +87,7 @@ describe("listener reaction planning", () => {
     );
   });
 
-  it("builds deterministic bot crosstalk with a transcript-safe annoyed cutoff", () => {
+  it("builds deterministic bot crosstalk with a plan-held annoyed cutoff", () => {
     const input = {
       seed: "coffee-bot-crosstalk-v1:session:turn:a:b",
       messageId: "message-1",
@@ -90,6 +98,7 @@ describe("listener reaction planning", () => {
     const plan = buildBotCrosstalkListenerReactionPlanV1(input);
     assert.deepEqual(plan, buildBotCrosstalkListenerReactionPlanV1(input));
     assert.equal(plan.interjectionAttempt, true);
+    assert.equal(plan.floorOutcome, "yield");
     assert.equal(plan.interruptedSpeakerCuePlayback, "crosstalk");
     assert.ok(plan.spokenCue);
     assert.ok(plan.interruptedSpeakerCue);
@@ -106,6 +115,185 @@ describe("listener reaction planning", () => {
         plan,
       ),
       "That's why the lemons are never ripe enou—",
+    );
+  });
+
+  it("keeps late cut-ins but suppresses offended follow-up behavior", () => {
+    assert.equal(
+      crosstalkInterruptionIsMeaningfulV1({
+        originalWordCount: 16,
+        heardWordCount: 13,
+      }),
+      true,
+    );
+    assert.equal(
+      crosstalkInterruptionIsMeaningfulV1({
+        originalWordCount: 16,
+        heardWordCount: 14,
+      }),
+      false,
+    );
+    const latePlan = buildBotCrosstalkListenerReactionPlanV1({
+      seed: "late-signal-cut",
+      messageId: "message-late",
+      speakerBotId: "speaker",
+      interrupterBotId: "interrupter",
+      targetProgress: 0.875,
+      includeInterruptedSpeakerCue: false,
+    });
+    assert.equal(latePlan.interjectionAttempt, true);
+    assert.equal(latePlan.targetProgress, 0.875);
+    assert.equal(latePlan.interruptedSpeakerCue, undefined);
+    assert.equal(latePlan.interruptedSpeakerCuePlayback, undefined);
+  });
+
+  it("normalizes reclaim while keeping yielding retorts out of reclaim speech", () => {
+    assert.equal(normalizeCrosstalkFloorOutcome("resume"), "reclaim");
+    assert.equal(normalizeCrosstalkFloorOutcome("reclaim"), "reclaim");
+    assert.equal(normalizeCrosstalkFloorOutcome("yield"), "yield");
+    assert.equal(normalizeCrosstalkFloorOutcome("react"), null);
+
+    const plan = normalizeListenerReactionPlanV1({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "interrupter",
+      messageId: "message",
+      targetSource: "role",
+      visualAction: "lean_in",
+      spokenCue: "Hold on.",
+      interjectionAttempt: true,
+      floorOutcome: "reclaim",
+      interruptedSpeakerCue: "... sure. Go ahead.",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "reclaim",
+      cameraCutEligible: true,
+    });
+    assert.equal(plan?.floorOutcome, "reclaim");
+    assert.equal(plan?.interruptedSpeakerCue, undefined);
+  });
+
+  it("accepts directional irritation snark cues in the interrupted-speaker bank", () => {
+    for (const cue of DIRECTIONAL_IRRITATION_SNARK_CUES) {
+      assert.equal(normalizeBotCrosstalkInterruptedSpeakerCue(cue), cue);
+    }
+    assert.equal(
+      normalizeBotCrosstalkInterruptedSpeakerCue("... sure. Go ahead."),
+      "... sure. Go ahead.",
+    );
+  });
+
+  it("accepts only protected reclaim plans built from an audience-heard fragment", () => {
+    const reclaim = normalizeCrosstalkReclaimPlanV1({
+      v: 1,
+      name: "crosstalkReclaim",
+      interruptedMessageId: "message-1",
+      speakerBotId: "rick",
+      heardFragment: "So if you are—",
+      protectFromImmediateReinterruption: true,
+    });
+    assert.deepEqual(reclaim, {
+      v: 1,
+      name: "crosstalkReclaim",
+      interruptedMessageId: "message-1",
+      speakerBotId: "rick",
+      heardFragment: "So if you are—",
+      protectFromImmediateReinterruption: true,
+    });
+    assert.ok(reclaim);
+    assert.equal(
+      normalizeCrosstalkReclaimPlanV1({
+        ...reclaim,
+        protectFromImmediateReinterruption: false,
+      }),
+      null,
+    );
+  });
+
+  it("plans deterministic provenance-marked social silence and caps the volley", () => {
+    const social = planSocialSilenceV1({
+      mode: "coffee",
+      seed: "coffee:turn-4:rick",
+      chance: 1,
+      consecutiveSocialSilenceTurns: 3,
+    });
+    assert.deepEqual(
+      social,
+      planSocialSilenceV1({
+        mode: "coffee",
+        seed: "coffee:turn-4:rick",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 3,
+      }),
+    );
+    assert.equal(social.decision, "social_silence");
+    if (social.decision !== "social_silence") return;
+    assert.equal(social.marker.volleyTurn, 4);
+    assert.deepEqual(
+      normalizeSocialSilenceMarkerV1(social.marker),
+      social.marker,
+    );
+    assert.equal(
+      socialSilenceMessageIsMarkedV1({
+        content: "...",
+        marker: social.marker,
+        mode: "coffee",
+      }),
+      true,
+    );
+    assert.equal(
+      socialSilenceMessageIsMarkedV1({
+        content: "...",
+        marker: social.marker,
+        mode: "signal",
+      }),
+      false,
+    );
+
+    assert.deepEqual(
+      planSocialSilenceV1({
+        mode: "coffee",
+        seed: "coffee:turn-5:bill",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 4,
+      }),
+      {
+        decision: "substantive",
+        forceSubstantive: true,
+        reason: "cap",
+      },
+    );
+  });
+
+  it("honors social-silence exclusions without affecting Power silence", () => {
+    assert.deepEqual(
+      planSocialSilenceV1({
+        mode: "signal",
+        seed: "signal:power-silence",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 4,
+        exclusions: ["power_silence"],
+      }),
+      {
+        decision: "substantive",
+        forceSubstantive: false,
+        reason: "excluded",
+      },
+    );
+    assert.deepEqual(
+      planSocialSilenceV1({
+        mode: "signal",
+        seed: "signal:opening",
+        chance: 1,
+        consecutiveSocialSilenceTurns: 0,
+        exclusions: ["opening"],
+      }),
+      {
+        decision: "substantive",
+        forceSubstantive: false,
+        reason: "excluded",
+      },
     );
   });
 

@@ -24,6 +24,7 @@ import {
   coffeePlayerMessageSignalsSessionEnd,
   coffeeStageActionTimelineMessages,
   coffeeSystemSynopsisIsDisplayable,
+  coffeeTranscriptMessagesWithInterruptions,
   coffeeTranscriptVisibleMessages,
   collectCoffeeReplayActionsForBot,
   formatCoffeeReviewClipboardText,
@@ -127,6 +128,118 @@ describe("coffee replay helpers", () => {
     });
     assert.match(foleyReview, /listenerReaction: Listener \(listener\) nod \+ \[clears throat\]/u);
     assert.doesNotMatch(foleyReview, /Listener: clears throat/u);
+  });
+
+  it("projects Coffee interruption speech once for Table Talk and copied review text", () => {
+    const messages = [
+      {
+        id: "heard-fragment",
+        role: "assistant",
+        content: "I was making one point—",
+        botId: "speaker",
+        botName: "Speaker",
+      },
+      {
+        id: "pause-1",
+        role: "assistant",
+        content: "...",
+        botId: "speaker",
+        botName: "Speaker",
+        coffeeInterruption: {
+          kind: "botInterruptsBot" as const,
+          interruptedBotId: "speaker",
+          interrupterBotId: "interrupter",
+          interruptedMessageId: "heard-fragment",
+          pauseBeat: true,
+          interrupterCue: "Hold on." as const,
+          interruptedSpeakerCue: "... sure. Go ahead." as const,
+          reactionText: "Metadata-only duplicate.",
+          socialConsequences: [],
+        },
+      },
+      {
+        id: "follow-on",
+        role: "assistant",
+        content: "I will continue with the actual answer.",
+        botId: "speaker",
+        botName: "Speaker",
+      },
+      {
+        id: "action-1",
+        role: "user",
+        content: "*raises a hand*",
+        coffeeUserAction: {
+          v: 1 as const,
+          name: "coffeeUserAction" as const,
+          source: "user" as const,
+          action: "raises a hand",
+          occurredAt: "2026-07-24T20:00:00.000Z",
+        },
+      },
+    ];
+    const bots = [
+      { id: "speaker", name: "Speaker" },
+      { id: "interrupter", name: "Interrupter" },
+    ];
+    const projected = coffeeTranscriptMessagesWithInterruptions({
+      messages,
+      bots,
+    });
+    assert.deepEqual(
+      coffeeTranscriptVisibleMessages(projected).map((message) => ({
+        id: message.id,
+        botName: message.botName,
+        content: message.content,
+      })),
+      [
+        {
+          id: "heard-fragment",
+          botName: "Speaker",
+          content: "I was making one point—",
+        },
+        {
+          id: "pause-1:coffee-interruption:interrupter",
+          botName: "Interrupter",
+          content: "Hold on.",
+        },
+        {
+          id: "pause-1:coffee-interruption:interrupted",
+          botName: "Speaker",
+          content: "... sure. Go ahead.",
+        },
+        {
+          id: "follow-on",
+          botName: "Speaker",
+          content: "I will continue with the actual answer.",
+        },
+      ],
+    );
+    const projectedTwice = coffeeTranscriptMessagesWithInterruptions({
+      messages: projected,
+      bots,
+    });
+    assert.equal(
+      projectedTwice.filter((message) => message.content === "Hold on.").length,
+      1,
+    );
+
+    const review = formatCoffeeReviewClipboardText({
+      messages,
+      context: { bots },
+    });
+    const fragmentAt = review.indexOf("Speaker: I was making one point—");
+    const cutInAt = review.indexOf("Interrupter: Hold on.");
+    const followUpAt = review.indexOf("Speaker: ... sure. Go ahead.");
+    const continuationAt = review.indexOf(
+      "Speaker: I will continue with the actual answer.",
+    );
+    assert.ok(fragmentAt >= 0);
+    assert.ok(cutInAt > fragmentAt);
+    assert.ok(followUpAt > cutInAt);
+    assert.ok(continuationAt > followUpAt);
+    assert.equal(review.match(/Interrupter: Hold on\./gu)?.length, 1);
+    assert.doesNotMatch(review, /Metadata-only duplicate/u);
+    assert.doesNotMatch(review, /You: \*raises a hand\*/u);
   });
 
   it("clamps replay indexes to the saved transcript", () => {
@@ -688,6 +801,27 @@ describe("coffee replay helpers", () => {
     );
   });
 
+  it("keeps provenance-marked social silence visible and holds it in replay", () => {
+    const socialSilence = {
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "coffee" as const,
+      seed: "coffee:social-silence",
+      volleyTurn: 3 as const,
+      holdMs: 1_600,
+    };
+    const message = {
+      id: "social-silence",
+      role: "assistant",
+      content: "...",
+      socialSilence,
+    };
+
+    assert.deepEqual(coffeeTranscriptVisibleMessages([message]), [message]);
+    assert.equal(coffeeReplayCompletionHoldMs(message, false), 1_600);
+  });
+
   it("hides stale account-metadata synopsis rows from Table talk", () => {
     const leakedSynopsis =
       "Session synopsis: The poll leans True (3-2), and the system noted your account display name is admin.";
@@ -753,6 +887,27 @@ describe("coffee replay helpers", () => {
                 leavePressure: 0.02,
               },
             },
+            {
+              v: 1 as const,
+              name: "coffeeReplayEvent" as const,
+              kind: "directionalIrritation" as const,
+              botId: "bot-sponge",
+              targetBotId: "bot-krabs",
+              occurredAt: "2026-07-02T15:00:05.000Z",
+              transition: {
+                v: 1 as const,
+                name: "directionalIrritation" as const,
+                transitionId: "tr-1",
+                reason: "meaningful_cutoff" as const,
+                subjectBotId: "bot-sponge",
+                targetBotId: "bot-krabs",
+                before: 0.1,
+                after: 0.35,
+                delta: 0.25,
+                tier: "low" as const,
+                occurredAt: "2026-07-02T15:00:05.000Z",
+              },
+            },
           ],
         },
         {
@@ -776,16 +931,109 @@ describe("coffee replay helpers", () => {
     });
 
     assert.match(text, /^# PRISM Coffee Review Export/u);
+    assert.match(text, /Review format: 2/u);
     assert.match(text, /Topic: When helpful gets chaotic/u);
     assert.match(text, /Roster: SpongeBob \(bot-sponge\), Mr\. Krabs \(bot-krabs\)/u);
     assert.match(text, /Settings: .*responseLength=detailed.*stayOnThread=yes/u);
     assert.match(text, /Observed models\/providers: local:llama3\.2/u);
-    assert.match(text, /Replay events: mood=1; topOff=1/u);
+    assert.match(text, /Replay events: mood=1; directionalIrritation=1; topOff=1/u);
     assert.match(text, /You: Start with a concrete example\./u);
     assert.match(text, /SpongeBob: Help gets chaotic when nobody owns the limit\./u);
-    assert.match(text, /topOff: Mr\. Krabs \(bot-krabs\) cup 62% -> 4%/u);
+    assert.match(text, /topOff: Mr\. Krabs \(bot-krabs\) cup 38% -> 96%/u);
     assert.match(text, /mood: SpongeBob \(bot-sponge\).*engagement=0\.77/u);
+    assert.match(
+      text,
+      /directionalIrritation: SpongeBob \(bot-sponge\) -> Mr\. Krabs \(bot-krabs\) 0\.10 -> 0\.35 \(meaningful_cutoff\)/u,
+    );
+    assert.match(text, /## Detailed Turns/u);
+    assert.match(text, /- Message ID: m2/u);
+    assert.match(text, /- Turn routing: local -> llama3\.2/u);
+    assert.match(text, /Recording diagnostics: unavailable/u);
+    assert.match(text, /## Replay Event Log/u);
     assert.doesNotMatch(text, /\*leans in\*/u);
+  });
+
+  it("exports per-turn provenance and private silent-thinking direction", () => {
+    const text = formatCoffeeReviewClipboardText({
+      context: {
+        conversationId: "coffee-evidence",
+        topic: "What makes help become control?",
+        createdAt: "2026-07-25T10:00:00.000Z",
+        bots: [{ id: "bot-1", name: "Nova" }],
+        recordingEvidence: {
+          state: "recorded",
+          recordingId: "recording-coffee",
+          availability: "faithful",
+          status: "ready",
+          manifestVersion: 2,
+          audioDurationMs: 9_000,
+          timelineDurationMs: 9_000,
+          warningPresent: false,
+          errorPresent: false,
+          direction: [
+            {
+              sequence: 1,
+              atMs: 1_000,
+              endMs: 2_800,
+              kind: "thinking",
+              sourceMessageId: "message-1",
+              payload: {
+                participantId: "bot-1",
+                botId: "bot-1",
+                startMs: 1_000,
+                endMs: 2_800,
+                audible: false,
+                camera: "seat-1",
+                segment: "table",
+                followingMessageId: "message-1",
+                endReason: "interrupted",
+              },
+            },
+          ],
+        },
+      },
+      messages: [
+        {
+          id: "message-1",
+          role: "assistant",
+          botId: "bot-1",
+          botName: "Nova",
+          provider: "local",
+          model: "gemma",
+          createdAt: "2026-07-25T10:00:03.000Z",
+          moodKey: "guarded",
+          autoRecovery: {
+            v: 1,
+            finalProvider: "local",
+            finalModel: "gemma",
+            crossedOnline: false,
+            attempts: [],
+          },
+          coffeeObserverProjection: { audible: true, visible: true },
+          crosstalkReclaim: { sourceMessageId: "interrupted-1" },
+          content: "*sets the cup down* Help becomes control when consent disappears.",
+        },
+      ],
+    });
+
+    assert.match(text, /### Turn 01 \| 00:03\.000 \| Nova \(assistant\)/u);
+    assert.match(text, /- Message ID: message-1/u);
+    assert.match(text, /- Turn routing: local -> gemma/u);
+    assert.match(text, /- AUTO recovery: .*"finalModel":"gemma"/u);
+    assert.match(text, /- Delivery mood: guarded/u);
+    assert.match(text, /- Observer projection: .*"audible":true/u);
+    assert.match(text, /- Crosstalk reclaim: .*interrupted-1/u);
+    assert.match(text, /- Action:\n    sets the cup down/u);
+    assert.match(
+      text,
+      /- Visible transcript:\n    Help becomes control when consent disappears\./u,
+    );
+    assert.match(text, /- Replay availability: faithful/u);
+    assert.match(
+      text,
+      /kind=thinking \| sourceMessageId=message-1 \| payload=.*"audible":false/u,
+    );
+    assert.match(text, /"endReason":"interrupted"/u);
   });
 
   it("distinguishes attended departures from true Coffee no-shows", () => {

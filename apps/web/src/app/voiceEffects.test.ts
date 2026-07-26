@@ -143,6 +143,21 @@ describe("engine-agnostic voice effects", () => {
     assert.ok(stopAt > currentGuardAt);
   });
 
+  it("announces pre-speech presence before breath foley reaches the master", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const englishSource = readFileSync(
+      new URL("./englishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    const bottishSource = readFileSync(
+      new URL("./bottishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /args\.onStart\?\.\(\);\s*source\.start\(startedAt\)/u);
+    assert.match(englishSource, /onStart: lifecycle\?\.onPresenceStart/u);
+    assert.match(bottishSource, /onStart: lifecycle\?\.onPresenceStart/u);
+  });
+
   it("keeps listener reactions on an independent, quieter, time-bounded channel", () => {
     const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     const reactionSource = readFileSync(
@@ -180,6 +195,20 @@ describe("engine-agnostic voice effects", () => {
     assert.match(pageSource, /channel: "crosstalk"/u);
     assert.match(source, /VOICE_PLAYBACK_TAIL_FLUSH_MS = 120/u);
     assert.match(source, /Math\.max\(lifecycleOutputLatencyMs, tailFlushMs\)/u);
+    assert.match(source, /scheduledStartAtPerformanceMs/u);
+    assert.match(
+      source,
+      /args\.scheduledStartAtPerformanceMs - performance\.now\(\)/u,
+    );
+    assert.match(
+      source,
+      /startDelayMs: scheduledStartDelayMs \+ lifecycleOutputLatencyMs/u,
+    );
+    assert.match(source, /args\.lifecycle\?\.onCancel\?\.\(\)/u);
+    assert.match(
+      reactionSource,
+      /compensateLifecycleForOutputLatency: true/u,
+    );
   });
 });
 
@@ -306,7 +335,7 @@ describe("voice performance", () => {
       "const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);",
     );
     const playbackClockAt = source.indexOf(
-      "const now = context.currentTime;",
+      "const playbackClockStartedAt = context.currentTime;",
       workletReadyAt,
     );
 

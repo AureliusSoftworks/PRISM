@@ -16,7 +16,7 @@ describe("universal voice selector", () => {
     assert.match(pageSource, /className=\{styles\.voiceModeSelector\}/);
     assert.match(
       pageSource,
-      /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{voiceModeDisplayName\(currentChoice\)\}<\/strong>/,
+      /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{currentDisplayName\}<\/strong>/,
     );
     assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\) =>/);
     assert.match(pageSource, /role="radiogroup" aria-label="Voice mode"/);
@@ -76,7 +76,10 @@ describe("universal voice selector", () => {
   });
 
   it("moves the same five choices into the constrained tools menu", () => {
-    assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\): PrismMenuEntry => \(\{/);
+    assert.match(
+      pageSource,
+      /VOICE_PLAYBACK_CHOICES\.map\(\(choice\): PrismMenuEntry => \{/,
+    );
     assert.match(pageSource, /kind: "radio"/);
     assert.match(pageSource, /group: "voice-mode"/);
     assert.match(
@@ -153,7 +156,7 @@ describe("Coffee voice authorization", () => {
       );
       assert.match(
         source,
-        /stopVoicePlaybackPreservingPreparedMode\(settings\.voiceMode\)/,
+      /stopVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
       );
     }
     const replayEffect = pageSource.slice(

@@ -9,10 +9,14 @@ import {
   markReplayDirectionEvent,
   prismAudioContext,
   prismAudioOutputNode,
+  replayAudioMasterCaptureCompactsThinkingGaps,
+  replayAudioMasterCaptureElapsedMs,
   routeAudioElementToPrismOutput,
+  setReplayAudioMasterCompactHold,
   startReplayAudioMasterCapture,
   startReplayThinkingPresentation,
   stopReplayAudioMasterCapture,
+  syncReplayThinkingPresentations,
 } from "./replayAudioMasterCapture.ts";
 
 class FakeAudioNode {
@@ -80,6 +84,8 @@ class FakeAudioContext {
 class FakeMediaRecorder {
   static constructed = 0;
   static started = 0;
+  static paused = 0;
+  static resumed = 0;
   static isTypeSupported(): boolean {
     return true;
   }
@@ -88,6 +94,7 @@ class FakeMediaRecorder {
   readonly listeners = new Map<string, Set<(event: { data: Blob }) => void>>();
   readonly stream: object;
   readonly options?: MediaRecorderOptions;
+  state: "inactive" | "recording" | "paused" = "inactive";
 
   constructor(stream: object, options?: MediaRecorderOptions) {
     FakeMediaRecorder.constructed += 1;
@@ -106,6 +113,23 @@ class FakeMediaRecorder {
 
   start(): void {
     FakeMediaRecorder.started += 1;
+    this.state = "recording";
+  }
+
+  pause(): void {
+    if (this.state !== "recording") {
+      throw new Error("Invalid state");
+    }
+    FakeMediaRecorder.paused += 1;
+    this.state = "paused";
+  }
+
+  resume(): void {
+    if (this.state !== "paused") {
+      throw new Error("Invalid state");
+    }
+    FakeMediaRecorder.resumed += 1;
+    this.state = "recording";
   }
 
   requestData(): void {
@@ -115,6 +139,7 @@ class FakeMediaRecorder {
   }
 
   stop(): void {
+    this.state = "inactive";
     for (const listener of this.listeners.get("stop") ?? []) {
       listener({ data: new Blob() });
     }
@@ -277,6 +302,10 @@ test("thinking intervals retain presentation timing, silence, interruption, over
       }),
       true,
     );
+    assert.equal(
+      replayAudioMasterCaptureCompactsThinkingGaps("thinking-session"),
+      false,
+    );
     startReplayThinkingPresentation({
       sourceId: "thinking-session",
       participantId: "host",
@@ -372,6 +401,169 @@ test("thinking intervals retain presentation timing, silence, interruption, over
     assert.equal(thinking[3]?.payload.endReason, "failed");
     assert.equal(thinking[4]?.payload.endReason, "capture_end");
     assert.ok(Number(thinking[4]?.endMs) > 700);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      value: originalMediaRecorder,
+    });
+  }
+});
+
+test("Signal compactThinkingGaps pauses the master clock across thinking holds", async () => {
+  const originalWindow = globalThis.window;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  const originalNow = performance.now;
+  let fakeNow = 1_000;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      AudioContext: FakeAudioContext,
+      setTimeout: (fn: () => void, _ms?: number) => {
+        fn();
+        return 1;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: FakeMediaRecorder,
+  });
+  performance.now = () => fakeNow;
+
+  try {
+    FakeMediaRecorder.paused = 0;
+    FakeMediaRecorder.resumed = 0;
+    assert.equal(
+      await startReplayAudioMasterCapture("signal-compact", {
+        markIntro: false,
+        compactThinkingGaps: true,
+      }),
+      true,
+    );
+    assert.equal(
+      replayAudioMasterCaptureCompactsThinkingGaps("signal-compact"),
+      true,
+    );
+    fakeNow = 1_500;
+    assert.equal(replayAudioMasterCaptureElapsedMs("signal-compact"), 500);
+    startReplayThinkingPresentation({
+      sourceId: "signal-compact",
+      participantId: "host",
+      audible: true,
+      camera: "wide",
+      segment: "interview",
+    });
+    // Compact hold is driven explicitly (not by thinking presentation start).
+    setReplayAudioMasterCompactHold("signal-compact", true);
+    assert.equal(FakeMediaRecorder.paused, 1);
+    fakeNow = 4_500;
+    // Logical clock frozen while thinking — wall advanced 3s, capture did not.
+    assert.equal(replayAudioMasterCaptureElapsedMs("signal-compact"), 500);
+    markReplayAudioMasterCapture({
+      sourceId: "signal-compact",
+      phase: "speech_start",
+      messageId: "line-1",
+    });
+    endReplayThinkingPresentation({
+      sourceId: "signal-compact",
+      participantId: "host",
+      followingMessageId: "line-1",
+    });
+    setReplayAudioMasterCompactHold("signal-compact", false);
+    assert.equal(FakeMediaRecorder.resumed, 1);
+    fakeNow = 5_000;
+    assert.equal(replayAudioMasterCaptureElapsedMs("signal-compact"), 1_000);
+    const result = await stopReplayAudioMasterCapture("signal-compact");
+    assert.ok(result);
+    const thinking = result.direction.filter(
+      (event) => event.kind === "thinking",
+    );
+    assert.equal(thinking.length, 1);
+    assert.equal(thinking[0]?.atMs, 500);
+    assert.equal(thinking[0]?.endMs, 501);
+    assert.equal(
+      result.events.find((event) => event.payload.phase === "speech_start")
+        ?.payload.atMs,
+      500,
+    );
+  } finally {
+    performance.now = originalNow;
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: originalWindow,
+    });
+    Object.defineProperty(globalThis, "MediaRecorder", {
+      configurable: true,
+      value: originalMediaRecorder,
+    });
+  }
+});
+
+test("camera flicker during thinking updates in place without thrashing the recorder", async () => {
+  const originalWindow = globalThis.window;
+  const originalMediaRecorder = globalThis.MediaRecorder;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      AudioContext: FakeAudioContext,
+      setTimeout: (fn: () => void) => {
+        fn();
+        return 1;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, "MediaRecorder", {
+    configurable: true,
+    value: FakeMediaRecorder,
+  });
+
+  try {
+    FakeMediaRecorder.paused = 0;
+    FakeMediaRecorder.resumed = 0;
+    assert.equal(
+      await startReplayAudioMasterCapture("signal-camera", {
+        markIntro: false,
+        compactThinkingGaps: true,
+      }),
+      true,
+    );
+    setReplayAudioMasterCompactHold("signal-camera", true);
+    startReplayThinkingPresentation({
+      sourceId: "signal-camera",
+      participantId: "host",
+      audible: true,
+      camera: "wide",
+      segment: "interview",
+    });
+    syncReplayThinkingPresentations({
+      sourceId: "signal-camera",
+      presentations: [
+        {
+          participantId: "host",
+          audible: true,
+          camera: "left",
+          segment: "interview",
+        },
+      ],
+    });
+    syncReplayThinkingPresentations({
+      sourceId: "signal-camera",
+      presentations: [
+        {
+          participantId: "host",
+          audible: true,
+          camera: "right",
+          segment: "interview",
+        },
+      ],
+    });
+    assert.equal(FakeMediaRecorder.paused, 1);
+    assert.equal(FakeMediaRecorder.resumed, 0);
+    await stopReplayAudioMasterCapture("signal-camera");
   } finally {
     Object.defineProperty(globalThis, "window", {
       configurable: true,

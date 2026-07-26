@@ -29,7 +29,10 @@ describe("Loud and Quiet Power presentation", () => {
   it("carries Signal's frozen voice gain into captured replay audio", () => {
     assert.match(signalSource, /botcastSnapshotPowersForRoleV1\(episode, "host"\)[\s\S]{0,260}voiceGainMultiplier:\s*botPowerVoiceGainMultiplierV1\(powers\)/u);
     assert.match(pageSource, /botSummary\.voiceGainMultiplier\s*\?\?/u);
-    assert.doesNotMatch(signalSource, /className=\{styles\.replayTranscript\}/u);
+    assert.match(
+      signalSource,
+      /className=\{styles\.replayTranscript\}[\s\S]{0,1600}data-power-voice-presence=\{[\s\S]{0,100}messageBot\?\.voicePresence/u,
+    );
   });
 
   it("adapts the same text and playback treatment to Story dialogue", () => {

@@ -609,11 +609,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipPresentation\.active \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
+      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipMouthTreatmentActive \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
     );
     assert.match(
       pageSource,
-      /inkTalking=\{avatarState\.talking \|\| sipPresentation\.active\}/,
+      /inkTalking=\{avatarState\.talking \|\| sipMouthTreatmentActive\}/,
     );
   });
 });

@@ -107,7 +107,7 @@ describe("pre-speech breath integration", () => {
     }
     assert.match(
       pageSource,
-      /authoredPerformanceText: \[[\s\S]{0,120}performanceText,[\s\S]{0,120}profile\.elevenLabsDirection/u,
+      /surface: "signal"[\s\S]{0,120}authoredPerformanceText: message\.voicePerformanceText/u,
     );
     assert.match(pageSource, /!signalStageSoundcheckMessageIsEphemeral\(message\)/u);
     assert.match(pageSource, /const preSpeechBreath = playerMessage\s*\? null/u);

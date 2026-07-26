@@ -29,12 +29,16 @@ describe("generated image prompt retry integration", () => {
     );
     const slate = sourceSlice(
       serverSource,
-      "async function generateAndPersistSlateCoverAsset",
+      "async function generateAndPersistStandaloneImageAsset",
       "function buildRoutes",
     );
 
     assert.ok(countMatches(signal, /runImagePromptAttempts/gu) >= 2);
     assert.ok(countMatches(slate, /runImagePromptAttempts/gu) >= 2);
+    assert.match(
+      slate,
+      /async function generateAndPersistSlateCoverAsset[\s\S]*?generateAndPersistStandaloneImageAsset/u,
+    );
     assert.match(signal, /promptOnlyFallback: localPrompt/u);
     assert.match(
       signal,
@@ -84,4 +88,3 @@ describe("generated image prompt retry integration", () => {
     assert.match(onlineRecovery, /generateImage\(attempt\.prompt/u);
   });
 });
-

@@ -130,6 +130,8 @@ describe("normalizeBotGeneratedDraftV1", () => {
     });
     assert.ok(draft);
     assert.equal(draft.name, "Nyx");
+    assert.equal(draft.namePronunciation, "");
+    assert.equal(draft.selfReferral, "");
     assert.equal(draft.profile.core.communicationStyle, "warm");
     assert.equal(draft.profile.facts.customFacts.length, 1);
     assert.equal(draft.color, "#7a5cff");

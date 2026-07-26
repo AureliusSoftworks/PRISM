@@ -30,6 +30,8 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "coffee_presets",
   "coffee_cup_top_offs",
   "coffee_bot_social_state",
+  "coffee_directional_irritation_ledger",
+  "coffee_directional_irritation",
   "prism_mood_events",
   "prism_mood_state",
   "session_opinions",

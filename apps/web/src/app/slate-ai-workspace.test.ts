@@ -59,7 +59,7 @@ describe("Slate AI workspace controls", () => {
       globalCompanion,
       /className=\{styles\.composer\}[\s\S]{0,3000}enterKeyHint="send"/u,
     );
-    assert.match(globalCompanion, /<path d="M16 5\.2 27 25H5Z"/u);
+    assert.match(globalCompanion, /<PrismOrb aura=\{false\} className=\{styles\.orb\} \/>/u);
     assert.match(globalCompanionStyles, /\.avatar\s*\{/u);
     assert.match(globalCompanionStyles, /\.avatar::before\s*\{/u);
     assert.match(globalCompanionStyles, /\.bubble,/u);

@@ -121,7 +121,8 @@ test("desaturates and pauses every app shell behind the open companion", () => {
     page,
     /coffeeAutoplayPausedRef\.current =\s*coffeeAutoplayPaused \|\| prismSystemPaused/u,
   );
-  assert.match(page, /systemPaused=\{prismSystemPaused\}/u);
+  assert.match(page, /const prismSystemPaused = useSyncExternalStore\(/u);
+  assert.match(page, /<PrismVisualLifecycleBridge \/>/u);
 });
 
 test("gives only the companion orb momentum", () => {

@@ -53,6 +53,10 @@ import {
   loadBotRelationshipsForBots,
   loadCoffeeBotSocialState,
   loadCoffeeCupTopOffState,
+  loadCoffeeDirectionalIrritationAppliedIds,
+  loadCoffeeDirectionalIrritationEdges,
+  persistCoffeeDirectionalIrritationTransition,
+  persistCoffeeDirectionalIrritationTransitions,
   readBotRelationship,
   type BotRelationshipSnapshot,
   upsertCoffeeBotSocialState,
@@ -63,18 +67,25 @@ import type {
   ChatMessage,
   Conversation,
   CoffeeAmbientActionPayload,
+  CoffeeStageActionPayload,
   CoffeeBotSocialSnapshot,
   CoffeeCupTopOffSnapshot,
   CoffeeArrivalScenario,
   CoffeeBarDrink,
   CoffeeBarRitualState,
   CoffeeBarRole,
+  CoffeeGroupAtmosphere,
   CoffeeGroup,
   CoffeeGroupModelChoice,
+  CoffeeGroupSynthesisItem,
+  CoffeeGroupSynthesisItemState,
+  CoffeeGroupSynthesisSource,
+  CoffeeGroupSynthesisState,
   CoffeeGroupStarterTopicsByBotId,
   CoffeeInterruptionEvent,
   CoffeeInterruptionSocialDelta,
   CoffeePlayerInterruptionInput,
+  BotCrosstalkInterruptedSpeakerCue,
   CoffeePoll,
   CoffeePollDeliberation,
   CoffeePollOptionTally,
@@ -103,25 +114,41 @@ import type {
   CoffeePowerPlanV1,
   CoffeeReactionOutcome,
   CoffeeReactionTone,
+  CrosstalkFloorOutcome,
+  CrosstalkReclaimPlanV1,
+  SocialSilenceExclusionV1,
+  SocialSilenceMarkerV1,
   BotVoicePreset,
   OpinionTrend,
   ReasoningEffort,
   AutoFallbackChainV1,
   AutoRecoveryTraceV1,
   BotIdentityMirrorStateV1,
+  BotIdentityShapeshiftStateV1,
+  BotFalseNameStateV1,
   BotAvatarDetailsV1,
   ResponseMode,
+  StageActionExclusionV1,
+  StageActionMoodHintV1,
+  StageActionPlanV1,
 } from "@localai/shared";
 import {
+  applyBotPowerAddressedInsultV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
   applyBotIdentityMirrorResponseV1,
+  applyBotIdentityShapeshiftResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  applyDirectionalIrritationCleanTurnDecay,
+  applyDirectionalIrritationCutoff,
+  applyDirectionalIrritationRebuff,
+  biasReclaimChanceWithDirectionalIrritation,
   botDirectAddressIndexV1,
   botDirectlyAddressesBotV1,
   botPowerObserverProjectionFromEffectsV1,
+  botPowerRequiresAddressedInsultFromEffectsV1,
   botPowerTargetNameFromEffectsV1,
   botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
@@ -130,24 +157,33 @@ import {
   botIdentityMirrorHolderPromptV1,
   botIdentityMirrorObserverPromptV1,
   botIdentityMirrorTargetChangesV1,
+  botIdentityShapeshiftHolderPromptV1,
+  botIdentityShapeshiftObserverPromptV1,
+  botIdentityShapeshiftTargetChangesV1,
+  botFalseNameObserverCueV1,
+  botFalseNameSelfCueV1,
+  createBotFalseNameStateV1,
+  coffeeStageActionFromStageAction,
   createBotIdentityMirrorStateV1,
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
   COFFEE_AUTO_HARD_CAP_MS,
   COFFEE_BAR_ORDER_MAX_LENGTH,
+  COFFEE_GROUP_ETHOS_MAX_LENGTH,
   COFFEE_TOPIC_MAX_LENGTH,
+  CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO,
   DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   COFFEE_POLL_FINALIZE_REMAINING_MS,
   COFFEE_POLL_OPTION_COUNT_MAX,
   COFFEE_POLL_OPTION_COUNT_MIN,
   COFFEE_POLL_PLAYER_VOTER_ID,
+  DIRECTIONAL_IRRITATION_RECLAIM_CEILING,
   coffeeCupProgressAfterTopOff,
   coffeeCupProgressFromSessionTiming,
   coffeeCupPacedProgress,
   coffeeEmptyCupAttemptState,
   coffeeCupPromptCueForStatus,
   coffeeCupSeedWithTempoRole,
-  coffeeCupSipLikelihoodForProgress,
   coffeeCupStatusForProgress,
   coffeeCupTempoRoleForBot,
   coffeeCupTopOffSnapshotForProgress,
@@ -161,18 +197,31 @@ import {
   coffeeRouterTailMessageCount,
   coffeeRouterTemperature,
   coffeeSocialSnapshotIsNearDesaturated,
-  appendBotCrosstalkInterruptedSpeakerCue,
   botCrosstalkInterrupterCueForSeed,
   botCrosstalkInterruptedSpeakerCueForSeed,
+  normalizeBotCrosstalkInterruptedSpeakerCue,
   buildCoffeeListenerReactionPlanV1,
+  coffeeInterruptionFloorOutcome,
+  directionalIrritationEdgeKey,
+  formatDirectionalIrritationPromptLines,
+  normalizeCrosstalkReclaimPlanV1,
   normalizeCoffeeReplayEventPayload,
+  planDirectionalIrritationDeliveryV1,
+  planStageActionV1,
+  planSocialSilenceV1,
+  readDirectionalIrritationIntensity,
+  socialSilenceMessageIsMarkedV1,
   autoFallbackResolvedChain,
   normalizeCoffeeSessionSettings,
   modelSupportsNativeReasoningEffort,
   parseStoredAssistantToolPayload,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotPrompt,
+  resolveFinalStageActionV1,
   resolveBotAudioVoiceProfileV1,
+  rewriteBotFalseNameResponseV1,
+  stageActionPersonaInvitePromptV1,
+  stageActionSpeechOnlyPromptV1,
   pickCoffeeInterruptionReaction,
   serializeAssistantToolPayload,
 } from "@localai/shared";
@@ -225,6 +274,7 @@ import {
   coffeePowerHistoryLimitForSpeaker,
   coffeePowerHearingRepeatDirective,
   coffeePowerMessageAudience,
+  coffeePowerPlanWithIdentityMirrorBorrowingV1,
   coffeePowerRouterPromptLines,
   coffeePowerResponseBudgetForBot,
   coffeePowerSpeakerOverride,
@@ -232,10 +282,27 @@ import {
   parseCoffeePowerPlan,
   resolveCoffeePowersForSession,
 } from "./coffee-powers.ts";
+import {
+  buildIdentityShapeshiftSeedV1,
+  createIdentityShapeshiftStateFromCandidateV1,
+  pickIdentityShapeshiftCandidateV1,
+  resolveIdentityShapeshiftCandidatesV1,
+} from "./bot-identity-shapeshift.ts";
+import { resolveBotFalseNameStateV1 } from "./bot-false-name.ts";
 
 /** Coffee groups must have at least 2 and at most 5 bots. */
 export const COFFEE_GROUP_MIN_SIZE = 2;
 export const COFFEE_GROUP_MAX_SIZE = 5;
+const COFFEE_GROUP_SYNTHESIS_ERROR_MAX_LENGTH = 240;
+const COFFEE_GROUP_ATMOSPHERE_PROMPT_MAX_LENGTH = 4_096;
+const COFFEE_GROUP_SYNTHESIS_RUNNING_STALE_MS = 5 * 60 * 1_000;
+const COFFEE_GROUP_SYNTHESIS_PENDING_STALE_MS = 10 * 60 * 1_000;
+const COFFEE_GROUP_ETHOS_MIN_WORDS = 14;
+const COFFEE_GROUP_ETHOS_MAX_WORDS = 32;
+const COFFEE_GROUP_FALLBACK_ETHOS =
+  "They gather to compare unlikely perspectives, challenge easy answers, and leave room for warmth and surprise.";
+const COFFEE_GROUP_ETHOS_FORMAT_ERROR =
+  "The generated Ethos included formatting debris or missed the one-sentence 14–32-word limit. Retry this item.";
 
 /** Default tabletop cap when callers omit an explicit limit (tests + legacy). */
 export const COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS = 110;
@@ -265,7 +332,6 @@ const COFFEE_SESSION_SYNOPSIS_MAX_TRANSCRIPT_LINES = 36;
 const COFFEE_SESSION_SYNOPSIS_MAX_CHARS = 900;
 const COFFEE_SESSION_SYNOPSIS_MAX_TOKENS = 260;
 const COFFEE_AMBIENT_EMPTY_PROGRESS = 0.96;
-const COFFEE_AMBIENT_SIP_MAX_PROGRESS = 0.96;
 const COFFEE_AMBIENT_RECENT_ACTION_LIMIT = 3;
 
 type CoffeeTurnKind = "user" | "autonomous";
@@ -506,6 +572,46 @@ function sanitizeCoffeeSocialStateMap(
     out[botId] = sanitizeCoffeeSocialSnapshot(snapshot);
   }
   return out;
+}
+
+/** Skip tiny mood replay ticks that only restate an unchanged social snapshot. */
+export const COFFEE_REPLAY_MOOD_DELTA_THRESHOLD = 0.04;
+
+export function coffeeSocialSnapshotChangedMeaningfully(
+  previous: CoffeeBotSocialSnapshot | undefined,
+  next: CoffeeBotSocialSnapshot,
+  threshold = COFFEE_REPLAY_MOOD_DELTA_THRESHOLD,
+): boolean {
+  if (!previous) return true;
+  const delta = Math.max(
+    Math.abs(next.disposition - previous.disposition),
+    Math.abs(next.valuesFriction - previous.valuesFriction),
+    Math.abs(next.restraint - previous.restraint),
+    Math.abs(next.engagement - previous.engagement),
+    Math.abs(next.leavePressure - previous.leavePressure),
+  );
+  return delta > threshold;
+}
+
+export function buildCoffeeReplayMoodEvents(args: {
+  previousByBotId: Record<string, CoffeeBotSocialSnapshot> | undefined;
+  nextByBotId: Record<string, CoffeeBotSocialSnapshot> | undefined;
+  occurredAt: string;
+}): CoffeeReplayEventPayload[] {
+  const previous = sanitizeCoffeeSocialStateMap(args.previousByBotId);
+  const next = sanitizeCoffeeSocialStateMap(args.nextByBotId);
+  return Object.entries(next)
+    .filter(([botId, social]) =>
+      coffeeSocialSnapshotChangedMeaningfully(previous[botId], social),
+    )
+    .map(([botId, social]) => ({
+      v: 1 as const,
+      name: "coffeeReplayEvent" as const,
+      kind: "mood" as const,
+      botId,
+      occurredAt: args.occurredAt,
+      social,
+    }));
 }
 
 function readCoffeeSocialSnapshotInput(raw: unknown): CoffeeBotSocialSnapshot {
@@ -2248,12 +2354,73 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function coffeeDelimitedActionEnd(
+  text: string,
+  open: "[" | "{",
+  close: "]" | "}",
+): number {
+  let depth = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === open) depth += 1;
+    if (text[index] !== close) continue;
+    depth -= 1;
+    if (depth === 0) return index;
+  }
+  return -1;
+}
+
+/**
+ * Removes chat-template role framing without changing ordinary character
+ * speech. Bracketed actions glued to the role become Coffee stage actions.
+ */
+export function stripCoffeeChatRoleFraming(raw: string): string {
+  let text = raw.trim();
+  let removedRoleFraming = false;
+  for (let pass = 0; pass < 2; pass += 1) {
+    const before = text;
+    const role = text.match(/^(?:assistant|bot|system)(?=$|\s|[:：\-–—[{])/iu);
+    if (role) {
+      text = text
+        .slice(role[0].length)
+        .replace(/^\s*[:：\-–—]\s*/u, "")
+        .trim();
+    } else {
+      text = text
+        .replace(
+          /^(?:assistant|bot)(?=(?:raises|watches|nods|smirks|sighs|looks|leans|turns|folds|tilts|gasps|chuckles|scoffs|burps)\b)/iu,
+          "",
+        )
+        .trim();
+    }
+    if (text !== before) removedRoleFraming = true;
+    if (text === before) break;
+  }
+
+  if (!removedRoleFraming) return text;
+  const open = text[0];
+  if (open !== "[" && open !== "{") return text;
+  const close = open === "[" ? "]" : "}";
+  const actionEnd = coffeeDelimitedActionEnd(text, open, close);
+  if (actionEnd < 1) return text;
+  const rawAction = text.slice(1, actionEnd).trim();
+  const speech = text.slice(actionEnd + 1).trim();
+  if (!rawAction) return speech;
+  const action =
+    /^(?:adjusts|blinks|burps|chuckles|clears|coughs|exhales|folds|gasps|gives|glances|glares|grins|leans|looks|narrows|nods|raises|scoffs|shakes|sighs|smiles|smirks|stares|tilts|turns|watches)\b/iu.test(
+      rawAction,
+    )
+      ? rawAction
+      : `gives a ${rawAction}`;
+  return `*${action}*${speech ? ` ${speech}` : ""}`;
+}
+
 /**
  * Remove speaker labels that small models sometimes copy from the transcript
  * prompt into the visible reply.
  */
 export function stripCoffeeSpeakerPrefix(raw: string, speakerName: string | null | undefined): string {
-  let text = raw.trim();
+  let text = stripCoffeeChatRoleFraming(raw);
+
   const names = [speakerName, "assistant", "bot"]
     .map((name) => (typeof name === "string" ? name.trim() : ""))
     .filter((name) => name.length > 0);
@@ -2300,6 +2467,16 @@ function stripCoffeeLeadingOrphanPunctuation(raw: string): string {
     .trim();
 }
 
+export function stripCoffeeOrphanPrismBotTargets(raw: string): string {
+  return raw
+    .replace(
+      /\(\s*prism-bot:\/\/[^)\s]+\s*\)\s*,?\s*/giu,
+      (match: string, offset: number, source: string) =>
+        source.slice(0, offset).trimEnd().endsWith("]") ? match : "",
+    )
+    .trim();
+}
+
 function stripCoffeeSelfAddressNoise(
   raw: string,
   speakerName: string | null | undefined
@@ -2313,6 +2490,37 @@ function stripCoffeeSelfAddressNoise(
     .replace(new RegExp(`\\s+${escaped}\\s*[—-]\\s*`, "gi"), " ")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function coffeeReplyTreatsSpeakerAsAnotherParticipant(
+  raw: string,
+  speakerName: string | null | undefined,
+): boolean {
+  const name = typeof speakerName === "string" ? speakerName.trim() : "";
+  if (!name) return false;
+  const firstName = name.split(/\s+/u)[0]?.replace(/[^\p{L}\p{N}'’-]/gu, "") ?? "";
+  const variants = [
+    name,
+    ...(firstName.length >= 3 && !/^(?:the|mr|mrs|ms|dr)$/iu.test(firstName)
+      ? [firstName]
+      : []),
+  ];
+  return variants.some((variant) => {
+    const escaped = escapeRegExp(variant);
+    return (
+      new RegExp(
+        `\\b(?:what|where|whether)\\s+${escaped}\\s+and\\s+(?:the\\s+)?others\\b`,
+        "iu",
+      ).test(raw) ||
+      new RegExp(`\\b(?:agree|disagree)\\s+with\\s+${escaped}\\b`, "iu").test(
+        raw,
+      ) ||
+      new RegExp(
+        `\\b${escaped}(?:['’]s)?\\s+(?:answer|idea|point|argument)\\b`,
+        "iu",
+      ).test(raw)
+    );
+  });
 }
 
 const COFFEE_PROMPT_LEAK_PREFIX_PATTERNS = [
@@ -2409,7 +2617,7 @@ const COFFEE_CHARACTER_IMMERSION_BREAK_PATTERNS = [
 ] as const;
 
 const COFFEE_STAGE_ACTION_VERB_RE =
-  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:adjusts?|arches?|arranges?|arrives?|beams?|blinks?|bounces?|brightens?|breathes?|chuckles?|crosses?|drums?|eyes?|eyeing|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|heads?|laughs?|leans?|looks?|mutters?|narrows?|nods?|nudges?|opens?|pauses?|picks?|places?|plucks?|points?|pokes?|ponders?|pours?|pulls?|pulling|pushes?|pushing|raises?|rests?|rolls?|rubs?|scoffs?|scratches?|sets?|settles?|shakes?|shifts?|shrugs?|sighs?|sips?|sits?|slaps?|slides?|sliding|smiles?|smirks?|snorts?|squints?|stacks?|stands?|stares?|stirs?|straightens?|stretches?|strokes?|takes?|taking|taps?|thumbs?|tilts?|touches?|traces?|turns?|waves?|winces?|winks?)\b/i;
+  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:adjusts?|arches?|arranges?|arrives?|beams?|blinks?|bounces?|brightens?|breathes?|burps?|chuckles?|crosses?|drums?|eyes?|eyeing|folds?|frowns?|gazes?|gestures?|glances?|grins?|grimaces?|heads?|laughs?|leans?|looks?|mutters?|narrows?|nods?|nudges?|opens?|pauses?|picks?|places?|plucks?|points?|pokes?|ponders?|pours?|pulls?|pulling|pushes?|pushing|raises?|rests?|rolls?|rubs?|scoffs?|scratches?|sets?|settles?|shakes?|shifts?|shrugs?|sighs?|sips?|sits?|slaps?|slides?|sliding|smiles?|smirks?|snorts?|squints?|stacks?|stands?|stares?|stirs?|straightens?|stretches?|strokes?|takes?|taking|taps?|thumbs?|tilts?|touches?|traces?|turns?|waves?|winces?|winks?)\b/i;
 const COFFEE_STAGE_ACTION_ADVERB_RE =
   /^(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+/iu;
 const COFFEE_STAGE_ACTION_IRREGULAR_THIRD_PERSON_VERBS = new Set([
@@ -2456,7 +2664,7 @@ const COFFEE_NARRATED_FIRST_PERSON_STAGE_PRELUDE_RE =
 const COFFEE_INLINE_FIRST_PERSON_STAGE_ACTION_RE =
   /([.!?]\s+)I\s+(adjust|blink|breathe|chuckle|cross|drum|fold|frown|gesture|glance|grin|grimace|laugh|lean|nod|pause|place|raise|roll|rub|settle|shake|shift|shrug|sigh|sit|smile|smirk|stare|straighten|stretch|tap|tilt|turn|wave|wince)\b([^.!?:\n]{1,100})[.!?](?=\s+(?:[A-Z"“'‘(\[]|\*)|$)/gu;
 const COFFEE_TRAILING_STAGE_ACTION_RE =
-  /^(.+\S)\s+(blinks?|chuckles?|frowns?|glances?|grins?|grimaces?|laughs?|nods?|pauses?|scoffs?|shrugs?|sighs?|smiles?|smirks?|snorts?|squints?|stares?|winks?)\.?$/iu;
+  /^(.+\S)\s+(blinks?|burps?|chuckles?|frowns?|glances?|grins?|grimaces?|laughs?|nods?|pauses?|scoffs?|shrugs?|sighs?|smiles?|smirks?|snorts?|squints?|stares?|winks?)\.?$/iu;
 const COFFEE_INLINE_STAGE_ACTION_RE =
   /^(.+[.!?])\s+((?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|excitedly|gently|nervously)\s+)?(?:glances?|grins?|heads?|leans?|looks?|nods?|pauses?|rests?|sets?|sighs?|smiles?|stands?|stirs?|stretches?|strokes?|taps?|turns?)\b.{0,100}?)\s+((?:[A-Z"“'‘(\[]).*)$/u;
 const COFFEE_TRAILING_STAGE_ACTION_PHRASE_RE =
@@ -2796,6 +3004,16 @@ function normalizeCoffeeUnmarkedStageActionOpener(
   return `${prefix}*${split.action}* ${split.spoken}`;
 }
 
+function normalizeCoffeeNounStageActionOpener(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.includes("*")) return raw;
+  const match = trimmed.match(
+    /^(?:A|An)\s+((?:(?:haughty|skeptical|slow|small|sharp|quiet|dry|dismissive|theatrical)\s+)?(?:scoff|smirk|nod|sigh|glare|frown))\s+((?:[A-Z"“'‘(]).*)$/u,
+  );
+  if (!match?.[1] || !match[2]) return raw;
+  return `*gives a ${match[1].toLowerCase()}* ${match[2].trim()}`;
+}
+
 function normalizeCoffeeInlineUnmarkedStageAction(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed || trimmed.includes("*")) return raw;
@@ -2820,6 +3038,22 @@ function normalizeCoffeeUnmarkedTrailingStageAction(raw: string): string {
   const action = normalizeCoffeeStageActionText(match[2]);
   if (!spoken || !isValidCoffeeStageAction(action)) return raw;
   return `${spoken}. *${action}*`;
+}
+
+function normalizeCoffeeVisibleActionFormatting(
+  raw: string,
+  speakerName: string | null | undefined,
+  knownSpeakerNames: readonly string[] = [],
+): string {
+  return normalizeCoffeeUnmarkedTrailingStageAction(
+    normalizeCoffeeInlineUnmarkedStageAction(
+      normalizeCoffeeUnmarkedStageActionOpener(
+        normalizeCoffeeNounStageActionOpener(raw),
+        speakerName,
+        knownSpeakerNames,
+      ),
+    ),
+  );
 }
 
 /**
@@ -2923,6 +3157,7 @@ const COFFEE_LOW_VALUE_TABLE_LINE_PATTERNS = [
   /^maybe[.!?]?$/i,
   /^fair question[.!?]?$/i,
   /^hold that thought[.!?]?$/i,
+  /^(?:just\s+)?one second[.!?]?$/i,
   /^let'?s ground it[.!?]?$/i,
   /^let'?s keep this simple[.!?]?$/i,
   /^okay,?\s*keep it moving[.!?]?$/i,
@@ -3156,7 +3391,10 @@ export function sanitizeCoffeeTableReply(
   maxChars: number = COFFEE_TABLE_REPLY_DEFAULT_MAX_CHARS,
   knownSpeakerNames: readonly string[] = []
 ): string {
-  const stripped = stripCoffeeSpeakerPrefix(raw, speakerName);
+  const stripped = stripCoffeeSpeakerPrefix(
+    stripCoffeeOrphanPrismBotTargets(raw),
+    speakerName,
+  );
   if (!stripped) return "";
   if (coffeeReplyIsPunctuationOnly(stripped)) return "";
   const withoutSelfAddressNoise = stripCoffeeLeadingOrphanPunctuation(
@@ -3166,22 +3404,18 @@ export function sanitizeCoffeeTableReply(
     normalizeCoffeeNamedThirdPersonStageActionOpener(withoutSelfAddressNoise, speakerName)
   );
   const withStageActionsSanitized = stripCoffeeSelfNameFromStageActions(
-    normalizeCoffeeUnmarkedTrailingStageAction(
-      normalizeCoffeeInlineUnmarkedStageAction(
-        normalizeCoffeeUnmarkedStageActionOpener(
-          normalizeCoffeeFirstPersonStageActionOpener(
-            normalizeCoffeeFirstPersonStageActionOnly(
-              normalizeCoffeeInlineFirstPersonStageActions(
-                normalizeCoffeeNarratedFirstPersonStagePrelude(
-                  sanitizeCoffeeStageActions(withThirdPersonActions)
-                )
-              )
+    normalizeCoffeeVisibleActionFormatting(
+      normalizeCoffeeFirstPersonStageActionOpener(
+        normalizeCoffeeFirstPersonStageActionOnly(
+          normalizeCoffeeInlineFirstPersonStageActions(
+            normalizeCoffeeNarratedFirstPersonStagePrelude(
+              sanitizeCoffeeStageActions(withThirdPersonActions)
             )
-          ),
-          speakerName,
-          knownSpeakerNames
+          )
         )
-      )
+      ),
+      speakerName,
+      knownSpeakerNames,
     ),
     speakerName
   );
@@ -3192,6 +3426,9 @@ export function sanitizeCoffeeTableReply(
   }
   const withoutQuoteMarks = stripCoffeeVisibleQuoteMarks(withoutCupDrinkingActions);
   const spokenText = visibleCoffeeSpeechForValueScan(withoutQuoteMarks);
+  if (coffeeReplyTreatsSpeakerAsAnotherParticipant(withoutQuoteMarks, speakerName)) {
+    return "";
+  }
   if (coffeeReplyLooksLikePromptLeak(withoutQuoteMarks)) return "";
   if (spokenText && coffeeReplyLooksLikePromptLeak(spokenText)) return "";
   if (coffeeReplyBreaksCharacterImmersion(withoutQuoteMarks)) return "";
@@ -3201,43 +3438,6 @@ export function sanitizeCoffeeTableReply(
   if (coffeeReplyLooksUnfinished(withoutQuoteMarks)) return "";
   if (spokenText && coffeeReplyLooksUnfinished(spokenText)) return "";
   return clampCoffeeTableReplyText(withoutQuoteMarks, maxChars);
-}
-
-type ScriptedCoffeeAmbientActionEntry = Pick<CoffeeAmbientActionPayload, "category" | "action">;
-
-const SCRIPTED_COFFEE_AMBIENT_ACTIONS: readonly ScriptedCoffeeAmbientActionEntry[] = [
-  { category: "cup", action: "sets the cup down" },
-  { category: "cup", action: "turns the cup once" },
-  { category: "cup", action: "stirs the coffee" },
-  { category: "cup", action: "nudges the cup closer" },
-  { category: "cup", action: "slides the cup aside" },
-  { category: "gesture", action: "raises an eyebrow" },
-  { category: "gesture", action: "judges the table in silence" },
-  { category: "gesture", action: "narrows their eyes" },
-  { category: "gesture", action: "tilts their head" },
-  { category: "gesture", action: "presses their lips thin" },
-  { category: "gesture", action: "gives a pointed look" },
-  { category: "gesture", action: "folds their arms" },
-  { category: "gesture", action: "stifles a scoff" },
-] as const;
-
-function coffeeAmbientActionChance(settings: CoffeeSessionSettings): number {
-  switch (settings.tableEnergy) {
-    case "still":
-      return 0.22;
-    case "relaxed":
-      return 0.34;
-    case "buzzy":
-      return 0.42;
-    case "theatre":
-      return 0.4;
-    case "afterparty":
-      return 0.48;
-  }
-}
-
-function coffeeReplyContainsStageAction(replyText: string): boolean {
-  return /\*+[^*\n]+?\*+/.test(replyText);
 }
 
 function coffeeReplySpokenText(replyText: string): string {
@@ -3274,8 +3474,9 @@ function loadRecentCoffeeAmbientActionTexts(args: {
     ) as unknown as Array<{ tool_payload: string | null }>;
   const actions: string[] = [];
   for (const row of rows) {
-    const action = parseStoredAssistantToolPayload(row.tool_payload).coffeeAmbientAction;
-    if (action?.source === "scripted" && action.action.trim()) {
+    const stored = parseStoredAssistantToolPayload(row.tool_payload);
+    const action = stored.coffeeStageAction ?? stored.coffeeAmbientAction;
+    if (action?.action.trim()) {
       actions.push(action.action.trim());
     }
     if (actions.length >= COFFEE_AMBIENT_RECENT_ACTION_LIMIT) break;
@@ -3283,128 +3484,71 @@ function loadRecentCoffeeAmbientActionTexts(args: {
   return actions;
 }
 
-function buildScriptedCoffeeAmbientAction(args: {
-  db: DatabaseSync;
-  userId: string;
-  conversationId: string;
-  speaker: Pick<CoffeeBotProfile, "id">;
-  replyText: string;
-  historyLength: number;
-  sessionSettings: CoffeeSessionSettings;
-  sessionRemainingMs?: number | null;
-  durationMinutes?: CoffeeSessionDurationMinutes | null;
-  coffeeCupSeed: string;
-  activePoll: CoffeePoll | null;
-  interruptionEvent?: CoffeeInterruptionEvent;
-  departurePersisted: boolean;
-  coffeeCupRateMultiplier?: number;
-  actionBias?: { cue: string; frequency: "occasional" | "frequent" } | null;
-}): CoffeeAmbientActionPayload | null {
-  if (args.activePoll) return null;
-  if (args.interruptionEvent) return null;
-  if (args.departurePersisted) return null;
-  if (!coffeeReplySpokenText(args.replyText)) return null;
-  if (coffeeReplyContainsStageAction(args.replyText)) return null;
-  if (args.actionBias) {
-    const actionRoll = stableUnitValue(
-      `${args.conversationId}:${args.speaker.id}:${args.historyLength}:coffee-power-action`
-    );
-    const chance = args.actionBias.frequency === "frequent" ? 0.62 : 0.32;
-    if (actionRoll <= chance) {
-      return {
-        v: 1,
-        name: "coffeeAmbientAction",
-        source: "scripted",
-        category: "power",
-        action: args.actionBias.cue.replace(/\s+/g, " ").trim().slice(0, 80),
-      };
-    }
-  }
-  if (args.coffeeCupRateMultiplier === 0) return null;
-  const baseProgress = coffeeCupProgressFromSessionTiming({
-    sessionRemainingMs: args.sessionRemainingMs,
-    durationMinutes: args.durationMinutes,
-  });
-  if (baseProgress === null) return null;
-  const pacedProgress = coffeeCupPacedProgress(
-    baseProgress,
-    args.coffeeCupSeed,
-    args.durationMinutes,
-    args.coffeeCupRateMultiplier
-  );
-  if (pacedProgress >= COFFEE_AMBIENT_EMPTY_PROGRESS) return null;
-  const chance = coffeeAmbientActionChance(args.sessionSettings);
-  const roll = stableUnitValue(
-    `${args.conversationId}:${args.speaker.id}:${args.historyLength}:coffee-ambient-roll`
-  );
-  if (roll > chance) return null;
-
-  const sipLikelihood = coffeeCupSipLikelihoodForProgress(pacedProgress);
-  const sipRoll = stableUnitValue(
-    `${args.conversationId}:${args.speaker.id}:${args.historyLength}:coffee-ambient-sip`
-  );
-  const pool = SCRIPTED_COFFEE_AMBIENT_ACTIONS.filter((entry) => {
-    if (entry.category !== "sip") return true;
-    if (pacedProgress >= COFFEE_AMBIENT_SIP_MAX_PROGRESS) return false;
-    if (sipLikelihood <= 0) return false;
-    return sipRoll <= sipLikelihood;
-  });
-  if (pool.length === 0) return null;
-
-  const recent = new Set(
-    loadRecentCoffeeAmbientActionTexts({
-      db: args.db,
-      userId: args.userId,
-      conversationId: args.conversationId,
-      botId: args.speaker.id,
-    })
-  );
-  const startIndex =
-    Math.floor(
-      stableUnitValue(
-        `${args.conversationId}:${args.speaker.id}:${args.historyLength}:coffee-ambient-action`
-      ) * pool.length
-    ) % pool.length;
-  for (let offset = 0; offset < pool.length; offset += 1) {
-    const candidate = pool[(startIndex + offset) % pool.length]!;
-    if (recent.has(candidate.action)) continue;
-    return {
-      v: 1,
-      name: "coffeeAmbientAction",
-      source: "scripted",
-      category: candidate.category,
-      action: candidate.action,
-    };
-  }
-  return null;
-}
-
 function serializeCoffeeAssistantToolPayload(args: {
   interruptionEvent?: CoffeeInterruptionEvent;
   coffeeAmbientAction?: CoffeeAmbientActionPayload | null;
+  coffeeStageAction?: CoffeeStageActionPayload | null;
   coffeeDebugTurnSnapshot?: CoffeeDebugTurnSnapshotPayload | null;
   coffeeReplayEvents?: CoffeeReplayEventPayload[] | null;
   autoRecovery?: AutoRecoveryTraceV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  socialSilence?: SocialSilenceMarkerV1;
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
 }): string | null {
   const coffeeAmbientAction = args.coffeeAmbientAction ?? undefined;
+  const coffeeStageAction = args.coffeeStageAction ?? undefined;
   const coffeeDebugTurnSnapshot = args.coffeeDebugTurnSnapshot ?? undefined;
   const coffeeReplayEvents = args.coffeeReplayEvents ?? undefined;
-  if (!coffeeDebugTurnSnapshot && !args.interruptionEvent && !args.botPowerExactResponse && (coffeeAmbientAction || coffeeReplayEvents || args.autoRecovery)) {
-    return serializeAssistantToolPayload({ coffeeAmbientAction, coffeeReplayEvents, autoRecovery: args.autoRecovery });
+  if (
+    !coffeeDebugTurnSnapshot &&
+    !args.interruptionEvent &&
+    (
+      coffeeAmbientAction ||
+      coffeeStageAction ||
+      coffeeReplayEvents ||
+      args.autoRecovery ||
+      args.botPowerExactResponse ||
+      args.socialSilence ||
+      args.crosstalkReclaim
+    )
+  ) {
+    return serializeAssistantToolPayload({
+      coffeeAmbientAction,
+      coffeeStageAction,
+      coffeeReplayEvents,
+      autoRecovery: args.autoRecovery,
+      botPowerExactResponse: args.botPowerExactResponse,
+      socialSilence: args.socialSilence,
+      crosstalkReclaim: args.crosstalkReclaim,
+    });
   }
-  if (!coffeeDebugTurnSnapshot && !args.interruptionEvent && !coffeeAmbientAction && !coffeeReplayEvents && !args.autoRecovery && !args.botPowerExactResponse) {
+  if (
+    !coffeeDebugTurnSnapshot &&
+    !args.interruptionEvent &&
+    !coffeeAmbientAction &&
+    !coffeeStageAction &&
+    !coffeeReplayEvents &&
+    !args.autoRecovery &&
+    !args.botPowerExactResponse &&
+    !args.socialSilence &&
+    !args.crosstalkReclaim
+  ) {
     return null;
   }
   return JSON.stringify({
     v: 1,
     ...(args.interruptionEvent ? { coffeeInterruption: args.interruptionEvent } : {}),
     ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+    ...(coffeeStageAction ? { coffeeStageAction } : {}),
     ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
     ...(coffeeDebugTurnSnapshot ? { coffeeDebugTurnSnapshot } : {}),
     ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
     ...(args.botPowerExactResponse
       ? { botPowerExactResponse: args.botPowerExactResponse }
+      : {}),
+    ...(args.socialSilence ? { socialSilence: args.socialSilence } : {}),
+    ...(args.crosstalkReclaim
+      ? { crosstalkReclaim: args.crosstalkReclaim }
       : {}),
   });
 }
@@ -4134,6 +4278,43 @@ export function coffeeReplyNeedsTopicAnchor(args: {
   return ![...topicTokens].some((token) => replyTokens.has(token));
 }
 
+export function coffeeTopicRequiresDirectPersonalAnswer(
+  coffeeTopic: string | null | undefined,
+): boolean {
+  const topic = coffeeTopic?.replace(/\s+/g, " ").trim() ?? "";
+  if (!topic) return false;
+  return (
+    /\b(?:everyone|everybody|each (?:person|participant|bot))\s+must\s+answer\b/iu.test(
+      topic,
+    ) ||
+    /\b(?:failure|refusal)\s+to\s+answer\b/iu.test(topic) ||
+    /\b(?:do not|don'?t)\s+(?:dodge|evade|avoid)\b/iu.test(topic)
+  );
+}
+
+export function coffeeReplyGivesDirectPersonalAnswer(raw: string): boolean {
+  const spoken = visibleCoffeeSpeechForValueScan(raw)
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:my answer is\s*[:—-]|one thing i\s+(?:hate|love|fear|want|value|regret|resent|despise|appreciate)|i\s+(?:hate|love|fear|want|value|regret|resent|despise|appreciate|cannot stand|can'?t stand|am grateful for)\b)/iu.test(
+    spoken,
+  );
+}
+
+function coffeeSpeakerAlreadyGaveDirectPersonalAnswer(args: {
+  history: readonly ChatMessage[];
+  speaker: Pick<CoffeeBotProfile, "id" | "name">;
+}): boolean {
+  return args.history.some(
+    (message) =>
+      message.role === "assistant" &&
+      (message.botId === args.speaker.id ||
+        message.botName === args.speaker.name ||
+        message.content.startsWith(`${args.speaker.name}:`)) &&
+      coffeeReplyGivesDirectPersonalAnswer(message.content),
+  );
+}
+
 function detectCoffeeRepeatedShape(
   recentAssistantMessages: readonly ChatMessage[]
 ): boolean {
@@ -4406,11 +4587,21 @@ export function pickCoffeeSpeakerBalanceOverride(args: {
 function sanitizeLoadedCoffeeAssistantContent(
   row: Pick<MessageRow, "content" | "bot_name" | "tool_payload">
 ): string {
+  const storedToolPayload = parseStoredAssistantToolPayload(row.tool_payload);
+  const exactResponse = storedToolPayload.botPowerExactResponse;
   if (
-    parseStoredAssistantToolPayload(row.tool_payload).botPowerExactResponse !==
-    undefined
+    exactResponse === "speech_copy" &&
+    parseCoffeeDebugTurnSnapshot(row.tool_payload)
   ) {
-    return row.content;
+    return row.content || "...";
+  }
+  if (exactResponse !== undefined) {
+    return (
+      normalizeCoffeeVisibleActionFormatting(
+        stripCoffeeChatRoleFraming(row.content),
+        row.bot_name ?? "Bot",
+      ) || "..."
+    );
   }
   const speakerName = row.bot_name ?? "Bot";
   const visible = sanitizeCoffeeTableReply(row.content, speakerName);
@@ -4496,14 +4687,75 @@ function latestCoffeeUserActionPayload(
   return null;
 }
 
+const COFFEE_CROSSTALK_RECLAIM_MIN_CHANCE = 0.1;
+const COFFEE_CROSSTALK_RECLAIM_MAX_CHANCE = 0.72;
+const COFFEE_CROSSTALK_RECLAIM_BASE_CHANCE = 0.12;
+
+/** Resolve whether an interrupted Coffee bot yields or reclaims the floor. */
+export function coffeeCrosstalkFloorOutcomeV1(args: {
+  seed: string;
+  social: CoffeeBotSocialSnapshot;
+  communicationStyle: BotVoicePreset;
+  canReclaim?: boolean;
+  /** Directed irritation the interrupted bot holds toward the interrupter. */
+  irritationTowardInterrupter?: number;
+}): CrosstalkFloorOutcome {
+  if (args.canReclaim === false) return "yield";
+  const styleAdjustment =
+    args.communicationStyle === "concise" ||
+      args.communicationStyle === "formal"
+      ? 0.05
+      : args.communicationStyle === "playful"
+        ? 0.03
+        : args.communicationStyle === "warm"
+          ? -0.04
+          : 0;
+  const rawChance =
+    COFFEE_CROSSTALK_RECLAIM_BASE_CHANCE +
+    args.social.engagement * 0.34 +
+    (1 - args.social.restraint) * 0.2 +
+    args.social.valuesFriction * 0.16 +
+    (0.5 - args.social.disposition) * 0.08 -
+    args.social.leavePressure * 0.22 +
+    styleAdjustment;
+  const baseChance = Math.max(
+    COFFEE_CROSSTALK_RECLAIM_MIN_CHANCE,
+    Math.min(COFFEE_CROSSTALK_RECLAIM_MAX_CHANCE, rawChance),
+  );
+  const hasIrritationBias =
+    typeof args.irritationTowardInterrupter === "number" &&
+    Number.isFinite(args.irritationTowardInterrupter) &&
+    args.irritationTowardInterrupter > 0;
+  const chance = hasIrritationBias
+    ? Math.min(
+        DIRECTIONAL_IRRITATION_RECLAIM_CEILING,
+        Math.max(
+          COFFEE_CROSSTALK_RECLAIM_MIN_CHANCE,
+          biasReclaimChanceWithDirectionalIrritation({
+            baseChance,
+            intensity: args.irritationTowardInterrupter!,
+          }),
+        ),
+      )
+    : baseChance;
+  return stableUnitValue(`${args.seed}:floor-outcome`) < chance
+    ? "reclaim"
+    : "yield";
+}
+
 export function coffeeMessageBelongsInBotPromptHistory(message: {
   role: string;
   content: string;
   coffeeReplayEvents?: readonly unknown[] | null;
   coffeeUserAction?: unknown;
+  socialSilence?: unknown;
 }): boolean {
   if (message.role === "assistant" && /^(?:\.\.\.|…)$/u.test(message.content.trim())) {
-    return false;
+    return socialSilenceMessageIsMarkedV1({
+      content: message.content,
+      marker: message.socialSilence,
+      mode: "coffee",
+    });
   }
   if (message.role === "assistant" && coffeeReplyLooksUnfinished(message.content)) {
     return false;
@@ -4520,6 +4772,11 @@ export function coffeeMessageBelongsInBotPromptHistory(message: {
   return !coffeeMessageIsPrivatePlayerTeamChoiceMarker(message);
 }
 
+export interface CoffeeInterruptionPauseResult {
+  conversation: Conversation;
+  interruption: CoffeeInterruptionEvent;
+}
+
 /** Persist the visible pause beat for a thinking/speaking Coffee interruption. */
 export function recordCoffeeInterruptionPause(args: {
   db: DatabaseSync;
@@ -4531,9 +4788,10 @@ export function recordCoffeeInterruptionPause(args: {
   interrupterBotId?: string;
   activeTurnId?: string;
   targetPhase?: "thinking" | "speaking";
-}): Conversation {
+}): CoffeeInterruptionPauseResult {
   const { row, group } = loadCoffeeConversationGroup(args.db, args.userId, args.conversationId);
-  if (!group.some((bot) => bot.id === args.interruptedBotId)) {
+  const interruptedBot = group.find((bot) => bot.id === args.interruptedBotId);
+  if (!interruptedBot) {
     throw new Error("Interrupted bot is not seated at this Coffee table.");
   }
   if (
@@ -4553,30 +4811,208 @@ export function recordCoffeeInterruptionPause(args: {
   const interrupterCue = args.interrupterBotId
     ? botCrosstalkInterrupterCueForSeed(crosstalkSeed)
     : undefined;
-  const interruptedSpeakerCue = args.interrupterBotId
-    ? botCrosstalkInterruptedSpeakerCueForSeed(crosstalkSeed)
-    : undefined;
   let interruptedSnippet: string | undefined;
+  let originalInterruptedContent: string | undefined;
   if (args.interruptedMessageId) {
     const message = loadMessages(args.db, args.userId, row.id, 200).find(
       (candidate) => candidate.id === args.interruptedMessageId && candidate.role === "assistant"
     );
     if (message) {
-      const cutoffSnippet = interruptedSnippetFromTokenCount(
+      originalInterruptedContent = message.content;
+      // Keep the annoyed follow-up in interruption metadata / audio only.
+      // The saved table line stops at the cutoff the player actually heard.
+      const snippet = interruptedSnippetFromTokenCount(
         message.content,
         Math.max(1, Math.floor(args.visibleTokenCount ?? 1))
       );
-      const snippet = interruptedSpeakerCue
-        ? appendBotCrosstalkInterruptedSpeakerCue(
-            cutoffSnippet,
-            interruptedSpeakerCue,
-          )
-        : cutoffSnippet;
       args.db.prepare("UPDATE messages SET content = ? WHERE id = ? AND user_id = ?")
         .run(snippet, message.id, args.userId);
       interruptedSnippet = snippet;
     }
   }
+  const coffeePowerPlan = resolveCoffeePowersForSession(
+    args.db,
+    args.userId,
+    row.id,
+  );
+  let irritationEdges = args.interrupterBotId
+    ? loadCoffeeDirectionalIrritationEdges(args.db, args.userId, row.id)
+    : {};
+  const irritationTowardInterrupter = args.interrupterBotId
+    ? readDirectionalIrritationIntensity({
+        edges: irritationEdges,
+        subjectBotId: args.interruptedBotId,
+        targetBotId: args.interrupterBotId,
+      })
+    : 0;
+  const floorOutcome = args.interrupterBotId
+    ? coffeeCrosstalkFloorOutcomeV1({
+        seed: crosstalkSeed,
+        social:
+          loadCoffeeBotSocialState(
+            args.db,
+            args.userId,
+            row.id,
+            group.map((bot) => bot.id),
+          )[interruptedBot.id] ?? DEFAULT_COFFEE_SOCIAL,
+        communicationStyle:
+          readCoffeeConversationalPersonaProfile(interruptedBot)
+            .communicationStyle,
+        canReclaim:
+          Boolean(args.interruptedMessageId && interruptedSnippet) &&
+          coffeePowerBotCanSpeak(coffeePowerPlan, interruptedBot.id) &&
+          !coffeePowerBotIsMuted(coffeePowerPlan, interruptedBot.id),
+        irritationTowardInterrupter,
+      })
+    : undefined;
+  const reclaim =
+    floorOutcome === "reclaim" &&
+      args.interruptedMessageId &&
+      interruptedSnippet
+      ? {
+          v: 1 as const,
+          name: "crosstalkReclaim" as const,
+          interruptedMessageId: args.interruptedMessageId,
+          speakerBotId: interruptedBot.id,
+          heardFragment: interruptedSnippet,
+          protectFromImmediateReinterruption: true as const,
+        }
+      : undefined;
+  const now = new Date().toISOString();
+  const coffeeReplayEvents: CoffeeReplayEventPayload[] = [];
+  let interruptedDeliverySnark: string | undefined;
+  let interruptedDeliveryFoleyOnly = false;
+  if (args.interrupterBotId) {
+    const heardRatio = coffeeDirectionalIrritationHeardRatio({
+      visibleTokenCount: args.visibleTokenCount,
+      originalContent: originalInterruptedContent,
+      interruptedSnippet,
+    });
+    const isMeaningfulCutoff =
+      heardRatio === null
+        ? Boolean(interruptedSnippet)
+        : heardRatio < CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO;
+    if (isMeaningfulCutoff) {
+      const appliedIds = loadCoffeeDirectionalIrritationAppliedIds(
+        args.db,
+        args.userId,
+        row.id,
+      );
+      const causeId =
+        args.interruptedMessageId?.trim() ||
+        args.activeTurnId?.trim() ||
+        `${args.interruptedBotId}:${args.interrupterBotId}`;
+      const cutoff = applyDirectionalIrritationCutoff({
+        edges: irritationEdges,
+        appliedTransitionIds: appliedIds,
+        sessionId: row.id,
+        interruptedBotId: args.interruptedBotId,
+        interrupterBotId: args.interrupterBotId,
+        causeId,
+        heardRatio,
+        occurredAt: now,
+      });
+      if (cutoff) {
+        irritationEdges = cutoff.edges;
+        appliedIds.add(cutoff.transition.transitionId);
+        const edgeKey = directionalIrritationEdgeKey(
+          cutoff.transition.subjectBotId,
+          cutoff.transition.targetBotId,
+        );
+        const edge = irritationEdges[edgeKey];
+        if (edge) {
+          persistCoffeeDirectionalIrritationTransition(
+            args.db,
+            args.userId,
+            row.id,
+            edge,
+            cutoff.transition,
+          );
+        }
+        const delivery = planDirectionalIrritationDeliveryV1({
+          subjectBotId: cutoff.transition.subjectBotId,
+          targetBotId: cutoff.transition.targetBotId,
+          intensity: cutoff.transition.after,
+          seed: `${crosstalkSeed}:dir-irritation:cutoff`,
+          role: "interrupted",
+        });
+        if (delivery?.snarkCue) {
+          interruptedDeliverySnark = delivery.snarkCue;
+        } else if (delivery?.vocalFoley) {
+          // CoffeeInterruptionEvent cannot carry Foley; skip canned yield cue.
+          interruptedDeliveryFoleyOnly = true;
+        }
+        coffeeReplayEvents.push({
+          v: 1,
+          name: "coffeeReplayEvent",
+          kind: "directionalIrritation",
+          botId: cutoff.transition.subjectBotId,
+          targetBotId: cutoff.transition.targetBotId,
+          occurredAt: now,
+          transition: cutoff.transition,
+          ...(delivery ? { delivery } : {}),
+        });
+      }
+      if (floorOutcome === "reclaim") {
+        const rebuff = applyDirectionalIrritationRebuff({
+          edges: irritationEdges,
+          appliedTransitionIds: appliedIds,
+          sessionId: row.id,
+          interrupterBotId: args.interrupterBotId,
+          interruptedBotId: args.interruptedBotId,
+          causeId,
+          occurredAt: now,
+        });
+        if (rebuff) {
+          irritationEdges = rebuff.edges;
+          const edgeKey = directionalIrritationEdgeKey(
+            rebuff.transition.subjectBotId,
+            rebuff.transition.targetBotId,
+          );
+          const edge = irritationEdges[edgeKey];
+          if (edge) {
+            persistCoffeeDirectionalIrritationTransition(
+              args.db,
+              args.userId,
+              row.id,
+              edge,
+              rebuff.transition,
+            );
+          }
+          const delivery = planDirectionalIrritationDeliveryV1({
+            subjectBotId: rebuff.transition.subjectBotId,
+            targetBotId: rebuff.transition.targetBotId,
+            intensity: rebuff.transition.after,
+            seed: `${crosstalkSeed}:dir-irritation:rebuff`,
+            role: "interrupter",
+          });
+          coffeeReplayEvents.push({
+            v: 1,
+            name: "coffeeReplayEvent",
+            kind: "directionalIrritation",
+            botId: rebuff.transition.subjectBotId,
+            targetBotId: rebuff.transition.targetBotId,
+            occurredAt: now,
+            transition: rebuff.transition,
+            ...(delivery ? { delivery } : {}),
+          });
+        }
+      }
+    }
+  }
+  // Prefer verbal-forward snark from irritation delivery over the canned yield cue.
+  // Foley-only delivery leaves the cue unset (event cannot carry vocalFoley).
+  const interruptedSpeakerCue =
+    args.interrupterBotId && floorOutcome !== "reclaim"
+      ? interruptedDeliverySnark
+        ? (normalizeBotCrosstalkInterruptedSpeakerCue(
+            interruptedDeliverySnark,
+          ) ??
+          (interruptedDeliverySnark as BotCrosstalkInterruptedSpeakerCue))
+        : interruptedDeliveryFoleyOnly
+          ? undefined
+          : botCrosstalkInterruptedSpeakerCueForSeed(crosstalkSeed)
+      : undefined;
   const interruptionEvent: CoffeeInterruptionEvent = {
     kind: args.interrupterBotId ? "botInterruptsBot" : "playerInterruptsBot",
     interruptedBotId: args.interruptedBotId,
@@ -4590,19 +5026,69 @@ export function recordCoffeeInterruptionPause(args: {
     ...(interruptedSnippet ? { interruptedSnippet } : {}),
     ...(interrupterCue ? { interrupterCue } : {}),
     ...(interruptedSpeakerCue ? { interruptedSpeakerCue } : {}),
+    ...(floorOutcome
+      ? {
+          floorOutcome,
+          reactionOutcome:
+            floorOutcome === "reclaim" ? "resume" as const : "yield" as const,
+          resumeOutcome:
+            floorOutcome === "reclaim"
+              ? "continued" as const
+              : "yielded" as const,
+        }
+      : { resumeOutcome: "none" as const }),
+    ...(reclaim ? { reclaim } : {}),
     pauseBeat: true,
-    resumeOutcome: "none",
     socialConsequences: [],
   };
-  const toolPayload = serializeCoffeeAssistantToolPayload({ interruptionEvent });
-  const now = new Date().toISOString();
+  const toolPayload = serializeCoffeeAssistantToolPayload({
+    interruptionEvent,
+    coffeeReplayEvents:
+      coffeeReplayEvents.length > 0 ? coffeeReplayEvents : undefined,
+  });
   args.db.prepare(
     `INSERT INTO messages (id, conversation_id, user_id, role, content, bot_id, tool_payload, created_at)
      VALUES (?, ?, ?, 'assistant', '...', ?, ?, ?)`
   ).run(randomId(12), row.id, args.userId, args.interruptedBotId, toolPayload, now);
   args.db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?")
     .run(now, row.id, args.userId);
-  return buildCurrentCoffeeConversationResponse(args.db, args.userId, row.id);
+  return {
+    conversation: buildCurrentCoffeeConversationResponse(
+      args.db,
+      args.userId,
+      row.id,
+    ),
+    interruption: interruptionEvent,
+  };
+}
+
+/**
+ * Estimate how much of an interrupted line the audience heard (0…1), or null
+ * when the ratio cannot be computed from token/snippet evidence.
+ */
+function coffeeDirectionalIrritationHeardRatio(args: {
+  visibleTokenCount?: number;
+  originalContent?: string;
+  interruptedSnippet?: string;
+}): number | null {
+  const original = args.originalContent?.trim();
+  if (!original) return null;
+  const originalTokens = original.match(/\S+\s*/g) ?? [];
+  if (
+    typeof args.visibleTokenCount === "number" &&
+    Number.isFinite(args.visibleTokenCount) &&
+    originalTokens.length > 0
+  ) {
+    return Math.max(
+      0,
+      Math.min(1, Math.floor(args.visibleTokenCount) / originalTokens.length),
+    );
+  }
+  const snippet = args.interruptedSnippet?.replace(/—$/u, "").trim();
+  if (snippet && original.length > 0) {
+    return Math.max(0, Math.min(1, snippet.length / original.length));
+  }
+  return null;
 }
 
 function coffeeBotPromptHistory(messages: readonly ChatMessage[]): ChatMessage[] {
@@ -5200,15 +5686,19 @@ export interface CoffeeSessionCreateInput {
 
 export interface CoffeeGroupCreateInput {
   name?: unknown;
+  ethos?: unknown;
   groupBotIds?: Array<string | null>;
   coffeeSettings?: unknown;
   modelChoiceByProvider?: unknown;
   starterTopics?: unknown;
   starterTopicsByBotId?: unknown;
+  /** Internal creation flag: persist first, then let item synthesis run independently. */
+  synthesisPending?: boolean | readonly CoffeeGroupSynthesisItem[];
 }
 
 export interface CoffeeGroupUpdateInput {
   name?: unknown;
+  ethos?: unknown;
   groupBotIds?: Array<string | null>;
   coffeeSettings?: unknown;
   presetMode?: unknown;
@@ -6512,6 +7002,258 @@ function normalizeCoffeeGroupName(raw: unknown, fallback: string): string {
   return base.length > 80 ? `${base.slice(0, 77).trimEnd()}...` : base;
 }
 
+function normalizeCoffeeGroupEthos(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw.replace(/\s+/gu, " ").trim().slice(0, COFFEE_GROUP_ETHOS_MAX_LENGTH);
+}
+
+function coffeeGroupEthosWordCount(value: string): number {
+  return (
+    value.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0
+  );
+}
+
+function coffeeGroupEthosMeetsGeneratedContract(value: string): boolean {
+  const normalized = normalizeCoffeeGroupEthos(value);
+  const wordCount = coffeeGroupEthosWordCount(normalized);
+  const sentenceEndings = normalized.match(/[.!?]+/gu) ?? [];
+  return (
+    wordCount >= COFFEE_GROUP_ETHOS_MIN_WORDS &&
+    wordCount <= COFFEE_GROUP_ETHOS_MAX_WORDS &&
+    sentenceEndings.length === 1 &&
+    /[.!?]["'”’]?\s*$/u.test(normalized) &&
+    !/[{}\[\]]/u.test(normalized)
+  );
+}
+
+function validatedGeneratedCoffeeGroupEthos(raw: unknown): string | null {
+  const normalized = normalizeCoffeeGroupEthos(raw);
+  return coffeeGroupEthosMeetsGeneratedContract(normalized)
+    ? normalized
+    : null;
+}
+
+function normalizeCoffeeGroupSynthesisError(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const normalized = raw.replace(/\s+/gu, " ").trim();
+  return normalized
+    ? normalized.slice(0, COFFEE_GROUP_SYNTHESIS_ERROR_MAX_LENGTH)
+    : undefined;
+}
+
+const COFFEE_GROUP_SYNTHESIS_ITEMS: readonly CoffeeGroupSynthesisItem[] = [
+  "name",
+  "ethos",
+  "atmosphere",
+];
+
+function coffeeGroupSynthesisItemState(args: {
+  status: CoffeeGroupSynthesisItemState["status"];
+  revision?: number;
+  updatedAt: string;
+  source?: CoffeeGroupSynthesisSource;
+  error?: string;
+}): CoffeeGroupSynthesisItemState {
+  return {
+    status: args.status,
+    revision: Math.max(0, Math.floor(args.revision ?? 0)),
+    updatedAt: args.updatedAt,
+    ...(args.source ? { source: args.source } : {}),
+    ...(args.error ? { error: args.error } : {}),
+  };
+}
+
+function defaultCoffeeGroupSynthesisState(args: {
+  updatedAt: string;
+  nameReady: boolean;
+  ethosReady: boolean;
+  atmosphereReady: boolean;
+}): CoffeeGroupSynthesisState {
+  return {
+    version: 1,
+    items: {
+      name: coffeeGroupSynthesisItemState({
+        status: args.nameReady ? "ready" : "pending",
+        revision: args.nameReady ? 1 : 0,
+        updatedAt: args.updatedAt,
+        ...(args.nameReady ? { source: "fallback" as const } : {}),
+      }),
+      ethos: coffeeGroupSynthesisItemState({
+        status: args.ethosReady ? "ready" : "pending",
+        revision: args.ethosReady ? 1 : 0,
+        updatedAt: args.updatedAt,
+        ...(args.ethosReady ? { source: "manual" as const } : {}),
+      }),
+      atmosphere: coffeeGroupSynthesisItemState({
+        status: args.atmosphereReady ? "ready" : "pending",
+        revision: args.atmosphereReady ? 1 : 0,
+        updatedAt: args.updatedAt,
+        ...(args.atmosphereReady ? { source: "generated" as const } : {}),
+      }),
+    },
+  };
+}
+
+function parseCoffeeGroupSynthesisItemState(
+  raw: unknown,
+  fallback: CoffeeGroupSynthesisItemState,
+): CoffeeGroupSynthesisItemState {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return fallback;
+  const record = raw as Record<string, unknown>;
+  const status =
+    record.status === "pending" ||
+    record.status === "running" ||
+    record.status === "ready" ||
+    record.status === "failed"
+      ? record.status
+      : fallback.status;
+  const source =
+    record.source === "generated" ||
+    record.source === "manual" ||
+    record.source === "fallback"
+      ? record.source
+      : fallback.source;
+  const revision =
+    typeof record.revision === "number" && Number.isFinite(record.revision)
+      ? Math.max(0, Math.floor(record.revision))
+      : fallback.revision;
+  const updatedAt =
+    typeof record.updatedAt === "string" && record.updatedAt.trim()
+      ? record.updatedAt.trim()
+      : fallback.updatedAt;
+  const updatedAtMs = Date.parse(updatedAt);
+  const ageMs = Number.isFinite(updatedAtMs) ? Date.now() - updatedAtMs : 0;
+  const interrupted =
+    (status === "running" &&
+      ageMs >= COFFEE_GROUP_SYNTHESIS_RUNNING_STALE_MS) ||
+    (status === "pending" &&
+      ageMs >= COFFEE_GROUP_SYNTHESIS_PENDING_STALE_MS);
+  const resolvedStatus = interrupted ? "failed" : status;
+  const error =
+    normalizeCoffeeGroupSynthesisError(record.error) ??
+    (interrupted
+      ? "Generation was interrupted before this item finished."
+      : undefined);
+  return coffeeGroupSynthesisItemState({
+    status: resolvedStatus,
+    revision,
+    updatedAt,
+    ...(source ? { source } : {}),
+    ...(error ? { error } : {}),
+  });
+}
+
+function parseStoredCoffeeGroupSynthesis(
+  raw: string | null | undefined,
+  fallback: CoffeeGroupSynthesisState,
+): CoffeeGroupSynthesisState {
+  let parsed: unknown;
+  try {
+    parsed = raw && raw.trim() ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  const record =
+    parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  const items =
+    record?.items && typeof record.items === "object" && !Array.isArray(record.items)
+      ? (record.items as Record<string, unknown>)
+      : null;
+  const settledFallback = {
+    version: 1,
+    items: {
+      name:
+        fallback.items.name.status === "pending"
+          ? coffeeGroupSynthesisItemState({
+              ...fallback.items.name,
+              status: "failed",
+            })
+          : fallback.items.name,
+      ethos:
+        fallback.items.ethos.status === "pending"
+          ? coffeeGroupSynthesisItemState({
+              ...fallback.items.ethos,
+              status: "failed",
+            })
+          : fallback.items.ethos,
+      atmosphere:
+        fallback.items.atmosphere.status === "pending"
+          ? coffeeGroupSynthesisItemState({
+              ...fallback.items.atmosphere,
+              status: "failed",
+            })
+          : fallback.items.atmosphere,
+    },
+  } satisfies CoffeeGroupSynthesisState;
+  if (!items) return settledFallback;
+  return {
+    version: 1,
+    items: {
+      name: parseCoffeeGroupSynthesisItemState(
+        items.name,
+        settledFallback.items.name,
+      ),
+      ethos: parseCoffeeGroupSynthesisItemState(
+        items.ethos,
+        settledFallback.items.ethos,
+      ),
+      atmosphere: parseCoffeeGroupSynthesisItemState(
+        items.atmosphere,
+        settledFallback.items.atmosphere,
+      ),
+    },
+  };
+}
+
+function coffeeGroupSynthesisWithItem(
+  current: CoffeeGroupSynthesisState,
+  item: CoffeeGroupSynthesisItem,
+  next: CoffeeGroupSynthesisItemState,
+): CoffeeGroupSynthesisState {
+  return {
+    version: 1,
+    items: {
+      ...current.items,
+      [item]: next,
+    },
+  };
+}
+
+function parseStoredCoffeeGroupAtmosphere(
+  raw: string | null | undefined,
+): CoffeeGroupAtmosphere | null {
+  if (!raw || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const imageId = typeof record.imageId === "string" ? record.imageId.trim() : "";
+    if (!imageId) return null;
+    const prompt =
+      typeof record.prompt === "string"
+        ? record.prompt.trim().slice(0, COFFEE_GROUP_ATMOSPHERE_PROMPT_MAX_LENGTH)
+        : "";
+    const revision =
+      typeof record.revision === "number" && Number.isFinite(record.revision)
+        ? Math.max(1, Math.floor(record.revision))
+        : 1;
+    const updatedAt =
+      typeof record.updatedAt === "string" && record.updatedAt.trim()
+        ? record.updatedAt.trim()
+        : new Date(0).toISOString();
+    return {
+      imageId,
+      ...(prompt ? { prompt } : {}),
+      revision,
+      updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeCoffeePresetName(raw: unknown, fallback: string): string {
   const value = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
   const base = value.length > 0 ? value : fallback;
@@ -6679,10 +7421,55 @@ function mapCoffeeGroupRow(
   const legacyStarterTopics = starterTopics.length > 0
     ? {}
     : parseStoredCoffeeGroupStarterTopics(row.starter_topics, resolvedProfiles.profiles);
+  const storedEthos = normalizeCoffeeGroupEthos(row.ethos);
+  const atmosphere = parseStoredCoffeeGroupAtmosphere(row.atmosphere_json);
+  const storedSynthesis = parseStoredCoffeeGroupSynthesis(
+    row.synthesis_json,
+    defaultCoffeeGroupSynthesisState({
+      updatedAt: row.updated_at || row.created_at,
+      nameReady: row.name.trim().length > 0,
+      ethosReady: storedEthos.length > 0,
+      atmosphereReady: atmosphere !== null,
+    }),
+  );
+  const storedEthosState = storedSynthesis.items.ethos;
+  const generatedEthosNeedsRecovery =
+    storedEthos.length > 0 &&
+    storedEthosState.source !== "manual" &&
+    !coffeeGroupEthosMeetsGeneratedContract(storedEthos);
+  const ethos = generatedEthosNeedsRecovery
+    ? COFFEE_GROUP_FALLBACK_ETHOS
+    : storedEthos;
+  const synthesis = generatedEthosNeedsRecovery
+    ? coffeeGroupSynthesisWithItem(
+        storedSynthesis,
+        "ethos",
+        coffeeGroupSynthesisItemState({
+          status:
+            storedEthosState.status === "pending" ||
+            storedEthosState.status === "running"
+              ? storedEthosState.status
+              : "failed",
+          revision: storedEthosState.revision,
+          updatedAt: storedEthosState.updatedAt,
+          source: "fallback",
+          ...(storedEthosState.status === "pending" ||
+          storedEthosState.status === "running"
+            ? {}
+            : {
+                error:
+                  storedEthosState.error ?? COFFEE_GROUP_ETHOS_FORMAT_ERROR,
+              }),
+        }),
+      )
+    : storedSynthesis;
   return {
     id: row.id,
     userId: row.user_id,
     name: row.name,
+    ethos,
+    atmosphere,
+    synthesis,
     botGroupIds,
     coffeeSeatBotIds,
     coffeeSettings: parseStoredCoffeeSessionSettings(row.coffee_settings),
@@ -6740,17 +7527,27 @@ function loadCoffeeGroupRow(
 ): CoffeeGroupRow | undefined {
   return db
     .prepare(
-      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, model_choice, starter_topics, mood_summary, archived_at, created_at, updated_at
+      `SELECT id, user_id, name, ethos, atmosphere_json, synthesis_json, coffee_settings, preset_mode, coffee_topic_mode, model_choice, starter_topics, mood_summary, archived_at, created_at, updated_at
          FROM coffee_groups
         WHERE id = ? AND user_id = ? AND archived_at IS NULL`
     )
     .get(groupId, userId) as CoffeeGroupRow | undefined;
 }
 
+/** Load one active Coffee Group with its normalized identity synthesis state. */
+export function getCoffeeGroup(
+  db: DatabaseSync,
+  userId: string,
+  groupId: string,
+): CoffeeGroup | null {
+  const row = loadCoffeeGroupRow(db, userId, groupId);
+  return row ? mapCoffeeGroupRow(db, row) : null;
+}
+
 export function listCoffeeGroups(db: DatabaseSync, userId: string): CoffeeGroup[] {
   const rows = db
     .prepare(
-      `SELECT id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, model_choice, starter_topics, mood_summary, archived_at, created_at, updated_at
+      `SELECT id, user_id, name, ethos, atmosphere_json, synthesis_json, coffee_settings, preset_mode, coffee_topic_mode, model_choice, starter_topics, mood_summary, archived_at, created_at, updated_at
          FROM coffee_groups
         WHERE user_id = ? AND archived_at IS NULL
         ORDER BY updated_at DESC, created_at DESC`
@@ -6897,6 +7694,7 @@ export function createCoffeeGroup(
     normalizeCoffeeSessionSettings(input.coffeeSettings),
   );
   const name = normalizeCoffeeGroupName(input.name, generateCoffeeTitle("", group));
+  const ethos = normalizeCoffeeGroupEthos(input.ethos);
   const modelChoice = normalizeCoffeeGroupModelChoice(input.modelChoiceByProvider);
   const providedStarterTopics = normalizeCanonicalCoffeeGroupStarterTopics(
     input.starterTopics,
@@ -6906,18 +7704,57 @@ export function createCoffeeGroup(
     input.starterTopicsByBotId,
     group
   );
-  const starterTopics = completeStoredCanonicalCoffeeGroupStarterTopics(
-    providedStarterTopics.length > 0 ? providedStarterTopics : legacyStarterTopics,
-    group
+  const providedTopics =
+    providedStarterTopics.length > 0 ? providedStarterTopics : legacyStarterTopics;
+  const pendingSynthesisItems = new Set<CoffeeGroupSynthesisItem>(
+    input.synthesisPending === true
+      ? COFFEE_GROUP_SYNTHESIS_ITEMS
+      : Array.isArray(input.synthesisPending)
+        ? input.synthesisPending.filter((item) =>
+            COFFEE_GROUP_SYNTHESIS_ITEMS.includes(item),
+          )
+        : [],
   );
+  const starterTopics =
+    pendingSynthesisItems.size > 0 && providedTopics.length === 0
+      ? []
+      : completeStoredCanonicalCoffeeGroupStarterTopics(
+          providedTopics,
+          group,
+          settings,
+        );
+  let synthesis = defaultCoffeeGroupSynthesisState({
+    updatedAt: now,
+    nameReady: !pendingSynthesisItems.has("name"),
+    ethosReady: ethos.length > 0,
+    atmosphereReady: false,
+  });
+  if (
+    !pendingSynthesisItems.has("name") &&
+    typeof input.name === "string" &&
+    input.name.trim()
+  ) {
+    synthesis = coffeeGroupSynthesisWithItem(
+      synthesis,
+      "name",
+      coffeeGroupSynthesisItemState({
+        status: "ready",
+        revision: 1,
+        updatedAt: now,
+        source: "manual",
+      }),
+    );
+  }
   db.prepare(
     `INSERT INTO coffee_groups
-       (id, user_id, name, coffee_settings, preset_mode, coffee_topic_mode, model_choice, starter_topics, mood_summary, archived_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'manual', 'manual', ?, ?, '{}', NULL, ?, ?)`
+       (id, user_id, name, ethos, atmosphere_json, synthesis_json, coffee_settings, preset_mode, coffee_topic_mode, model_choice, starter_topics, mood_summary, archived_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, '{}', ?, ?, 'manual', 'manual', ?, ?, '{}', NULL, ?, ?)`
   ).run(
     groupId,
     userId,
     name,
+    ethos,
+    JSON.stringify(synthesis),
     JSON.stringify(settings),
     JSON.stringify(modelChoice),
     serializeCanonicalCoffeeGroupStarterTopics(starterTopics),
@@ -6930,7 +7767,7 @@ export function createCoffeeGroup(
     userId,
     groupId,
     "created",
-    { name, botGroupIds: groupIds, coffeeSeatBotIds: seatBotIds },
+    { name, ethos, botGroupIds: groupIds, coffeeSeatBotIds: seatBotIds },
     now
   );
   const row = loadCoffeeGroupRow(db, userId, groupId);
@@ -6938,6 +7775,7 @@ export function createCoffeeGroup(
   return mapCoffeeGroupRow(db, row);
 }
 
+/** Decide whether creation copy is only a placeholder and should be synthesized. */
 export function shouldGenerateCoffeeGroupNameFromInput(
   rawName: string | null | undefined,
   group: CoffeeBotProfile[]
@@ -6983,7 +7821,8 @@ export async function createCoffeeGroupWithGeneratedName(
     providedStarterTopics.length > 0 || legacyStarterTopics.length > 0
       ? completeStoredCanonicalCoffeeGroupStarterTopics(
           providedStarterTopics.length > 0 ? providedStarterTopics : legacyStarterTopics,
-          group
+          group,
+          settings
         )
       : await inferCoffeeGroupStarterTopics({
           provider,
@@ -7023,6 +7862,18 @@ export function updateCoffeeGroup(
   const updates: string[] = [];
   const values: SQLInputValue[] = [];
   let nextSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  const currentEthos = normalizeCoffeeGroupEthos(row.ethos);
+  const currentAtmosphere = parseStoredCoffeeGroupAtmosphere(row.atmosphere_json);
+  let nextSynthesis = parseStoredCoffeeGroupSynthesis(
+    row.synthesis_json,
+    defaultCoffeeGroupSynthesisState({
+      updatedAt: row.updated_at || row.created_at,
+      nameReady: row.name.trim().length > 0,
+      ethosReady: currentEthos.length > 0,
+      atmosphereReady: currentAtmosphere !== null,
+    }),
+  );
+  let synthesisChanged = false;
 
   if (input.name !== undefined) {
     const name = normalizeCoffeeGroupName(input.name, row.name);
@@ -7030,6 +7881,35 @@ export function updateCoffeeGroup(
     values.push(name);
     if (name !== row.name) {
       insertCoffeeGroupEvent(db, userId, groupId, "renamed", { from: row.name, to: name }, now);
+      nextSynthesis = coffeeGroupSynthesisWithItem(
+        nextSynthesis,
+        "name",
+        coffeeGroupSynthesisItemState({
+          status: "ready",
+          revision: nextSynthesis.items.name.revision + 1,
+          updatedAt: now,
+          source: "manual",
+        }),
+      );
+      synthesisChanged = true;
+    }
+  }
+  if (input.ethos !== undefined) {
+    const ethos = normalizeCoffeeGroupEthos(input.ethos);
+    updates.push("ethos = ?");
+    values.push(ethos);
+    if (ethos !== currentEthos) {
+      nextSynthesis = coffeeGroupSynthesisWithItem(
+        nextSynthesis,
+        "ethos",
+        coffeeGroupSynthesisItemState({
+          status: "ready",
+          revision: nextSynthesis.items.ethos.revision + 1,
+          updatedAt: now,
+          source: "manual",
+        }),
+      );
+      synthesisChanged = true;
     }
   }
   if (input.coffeeSettings !== undefined) {
@@ -7092,7 +7972,8 @@ export function updateCoffeeGroup(
     );
     const starterTopics = completeStoredCanonicalCoffeeGroupStarterTopics(
       providedStarterTopics.length > 0 ? providedStarterTopics : legacyStarterTopics,
-      groupProfiles
+      groupProfiles,
+      nextSettings
     );
     updates.push("starter_topics = ?");
     values.push(serializeCanonicalCoffeeGroupStarterTopics(starterTopics));
@@ -7105,6 +7986,20 @@ export function updateCoffeeGroup(
       { botGroupIds: groupIds, coffeeSeatBotIds: seatBotIds },
       now
     );
+    for (const item of COFFEE_GROUP_SYNTHESIS_ITEMS) {
+      const previous = nextSynthesis.items[item];
+      nextSynthesis = coffeeGroupSynthesisWithItem(
+        nextSynthesis,
+        item,
+        coffeeGroupSynthesisItemState({
+          status: "pending",
+          revision: previous.revision,
+          updatedAt: now,
+          ...(previous.source ? { source: previous.source } : {}),
+        }),
+      );
+    }
+    synthesisChanged = true;
   } else if (
     input.starterTopics !== undefined ||
     input.starterTopicsByBotId !== undefined
@@ -7125,9 +8020,22 @@ export function updateCoffeeGroup(
       serializeCanonicalCoffeeGroupStarterTopics(
         completeStoredCanonicalCoffeeGroupStarterTopics(
           providedStarterTopics.length > 0 ? providedStarterTopics : legacyStarterTopics,
-          groupProfiles
+          groupProfiles,
+          nextSettings
         )
       )
+    );
+  }
+  if (synthesisChanged) {
+    updates.push("synthesis_json = ?");
+    values.push(JSON.stringify(nextSynthesis));
+    insertCoffeeGroupEvent(
+      db,
+      userId,
+      groupId,
+      "synthesis_updated",
+      { items: nextSynthesis.items },
+      now,
     );
   }
   if (updates.length > 0) {
@@ -7196,11 +8104,251 @@ export async function updateCoffeeGroupWithGeneratedTopics(
     provider,
     group,
     sessionSettings: nextSettings,
+    ethos: row.ethos,
   });
   return updateCoffeeGroup(db, userId, groupId, {
     ...input,
     starterTopics,
   });
+}
+
+function persistCoffeeGroupSynthesisItem(args: {
+  db: DatabaseSync;
+  userId: string;
+  groupId: string;
+  item: CoffeeGroupSynthesisItem;
+  status: CoffeeGroupSynthesisItemState["status"];
+  updatedAt: string;
+  source?: CoffeeGroupSynthesisSource;
+  error?: string;
+  incrementRevision?: boolean;
+  name?: string;
+  ethos?: string;
+  atmosphere?: CoffeeGroupAtmosphere;
+  expectedRevision?: number;
+}): CoffeeGroup {
+  const row = loadCoffeeGroupRow(args.db, args.userId, args.groupId);
+  if (!row) throw new Error("Coffee group not found.");
+  const group = mapCoffeeGroupRow(args.db, row);
+  const previous = group.synthesis.items[args.item];
+  if (
+    args.expectedRevision !== undefined &&
+    (previous.status !== "running" ||
+      previous.revision !== args.expectedRevision)
+  ) {
+    return group;
+  }
+  const source =
+    args.source ??
+    (args.status === "running" || args.status === "failed"
+      ? previous.source
+      : undefined);
+  const nextItem = coffeeGroupSynthesisItemState({
+    status: args.status,
+    revision: previous.revision + (args.incrementRevision ? 1 : 0),
+    updatedAt: args.updatedAt,
+    ...(source ? { source } : {}),
+    ...(args.error
+      ? { error: normalizeCoffeeGroupSynthesisError(args.error) }
+      : {}),
+  });
+  const synthesis = coffeeGroupSynthesisWithItem(
+    group.synthesis,
+    args.item,
+    nextItem,
+  );
+  const updates = ["synthesis_json = ?", "updated_at = ?"];
+  const values: SQLInputValue[] = [JSON.stringify(synthesis), args.updatedAt];
+  if (args.name !== undefined) {
+    updates.push("name = ?");
+    values.push(normalizeCoffeeGroupName(args.name, row.name));
+  }
+  if (args.ethos !== undefined) {
+    updates.push("ethos = ?");
+    values.push(normalizeCoffeeGroupEthos(args.ethos));
+  }
+  if (args.atmosphere !== undefined) {
+    updates.push("atmosphere_json = ?");
+    values.push(JSON.stringify(args.atmosphere));
+  }
+  values.push(args.groupId, args.userId);
+  args.db
+    .prepare(
+      `UPDATE coffee_groups
+          SET ${updates.join(", ")}
+        WHERE id = ? AND user_id = ? AND archived_at IS NULL`,
+    )
+    .run(...values);
+  insertCoffeeGroupEvent(
+    args.db,
+    args.userId,
+    args.groupId,
+    "synthesis_updated",
+    {
+      item: args.item,
+      status: nextItem.status,
+      revision: nextItem.revision,
+      source: nextItem.source ?? null,
+      error: nextItem.error ?? null,
+    },
+    args.updatedAt,
+  );
+  const updated = loadCoffeeGroupRow(args.db, args.userId, args.groupId);
+  if (!updated) throw new Error("Coffee group not found.");
+  return mapCoffeeGroupRow(args.db, updated);
+}
+
+/** Mark one Coffee Group identity item as actively generating. */
+export function markCoffeeGroupSynthesisItemRunning(
+  db: DatabaseSync,
+  userId: string,
+  groupId: string,
+  item: CoffeeGroupSynthesisItem,
+): CoffeeGroup {
+  return persistCoffeeGroupSynthesisItem({
+    db,
+    userId,
+    groupId,
+    item,
+    status: "running",
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Preserve the current value while exposing an independently retryable failure. */
+export function failCoffeeGroupSynthesisItem(
+  db: DatabaseSync,
+  userId: string,
+  groupId: string,
+  item: CoffeeGroupSynthesisItem,
+  error: unknown,
+  expectedRevision?: number,
+): CoffeeGroup {
+  return persistCoffeeGroupSynthesisItem({
+    db,
+    userId,
+    groupId,
+    item,
+    status: "failed",
+    updatedAt: new Date().toISOString(),
+    error: error instanceof Error ? error.message : String(error),
+    ...(expectedRevision === undefined ? {} : { expectedRevision }),
+  });
+}
+
+/** Persist a synthesized Coffee Group name and its generation provenance. */
+export function saveSynthesizedCoffeeGroupName(args: {
+  db: DatabaseSync;
+  userId: string;
+  groupId: string;
+  name: string;
+  generated: boolean;
+  error?: string;
+  expectedRevision?: number;
+}): CoffeeGroup {
+  return persistCoffeeGroupSynthesisItem({
+    ...args,
+    item: "name",
+    status: args.generated ? "ready" : "failed",
+    source: args.generated ? "generated" : "fallback",
+    updatedAt: new Date().toISOString(),
+    incrementRevision: true,
+  });
+}
+
+/** Persist a synthesized Coffee Group ethos and its generation provenance. */
+export function saveSynthesizedCoffeeGroupEthos(args: {
+  db: DatabaseSync;
+  userId: string;
+  groupId: string;
+  ethos: string;
+  generated: boolean;
+  error?: string;
+  expectedRevision?: number;
+}): CoffeeGroup {
+  const {
+    ethos: requestedEthos,
+    generated: requestedGenerated,
+    error: requestedError,
+    ...persistenceArgs
+  } = args;
+  const generatedEthos = requestedGenerated
+    ? validatedGeneratedCoffeeGroupEthos(requestedEthos)
+    : null;
+  const generated = requestedGenerated && generatedEthos !== null;
+  const ethos = requestedGenerated
+    ? generatedEthos ?? COFFEE_GROUP_FALLBACK_ETHOS
+    : normalizeCoffeeGroupEthos(requestedEthos);
+  const error =
+    requestedError ??
+    (requestedGenerated && !generated
+      ? COFFEE_GROUP_ETHOS_FORMAT_ERROR
+      : undefined);
+  return persistCoffeeGroupSynthesisItem({
+    ...persistenceArgs,
+    ethos,
+    item: "ethos",
+    status: generated ? "ready" : "failed",
+    source: generated ? "generated" : "fallback",
+    updatedAt: new Date().toISOString(),
+    incrementRevision: true,
+    ...(error ? { error } : {}),
+  });
+}
+
+/** Persist generated character-free café artwork for a Coffee Group. */
+export function saveSynthesizedCoffeeGroupAtmosphere(args: {
+  db: DatabaseSync;
+  userId: string;
+  groupId: string;
+  imageId: string;
+  prompt: string;
+  expectedRevision?: number;
+}): CoffeeGroup {
+  const current = getCoffeeGroup(args.db, args.userId, args.groupId);
+  if (!current) throw new Error("Coffee group not found.");
+  const atmosphere: CoffeeGroupAtmosphere = {
+    imageId: args.imageId.trim(),
+    prompt: args.prompt.trim().slice(0, COFFEE_GROUP_ATMOSPHERE_PROMPT_MAX_LENGTH),
+    revision: (current.atmosphere?.revision ?? 0) + 1,
+    updatedAt: new Date().toISOString(),
+  };
+  return persistCoffeeGroupSynthesisItem({
+    ...args,
+    item: "atmosphere",
+    atmosphere,
+    status: "ready",
+    source: "generated",
+    updatedAt: atmosphere.updatedAt,
+    incrementRevision: true,
+  });
+}
+
+/** Build the image brief for a group's surreal, unoccupied shared café. */
+export function buildCoffeeGroupAtmospherePrompt(args: {
+  groupName: string;
+  ethos: string;
+  group: CoffeeBotProfile[];
+}): string {
+  const memberMotifs = args.group.map((bot) => {
+    const context = formatCoffeeBotContextSummary(bot);
+    return `- ${bot.name}${context ? `: ${context}` : ""}`;
+  });
+  return [
+    "Create a wide, character-free environmental background for a recurring Coffee Group.",
+    "Visual language: a surreal shared café with recognizable, inviting architecture and subtle motifs translated from the group's personalities.",
+    "The room should feel calm, intimate, slightly dreamlike, and genuinely usable as a gathering place—not a theatrical stage or a fantasy battle scene.",
+    "Leave generous low-detail negative space through the lower center and middle foreground so a five-seat conversation table and UI remain legible.",
+    "Use soft atmospheric depth, restrained contrast, gently luminous practical lighting, and blended painterly edges suitable for a translucent Zen-style backdrop.",
+    "No people, characters, creatures, faces, bodies, silhouettes, portraits, mannequins, photographs, logos, lettering, signage, captions, or readable text.",
+    `Internal group name, for mood only: ${normalizeCoffeeGroupName(args.groupName, "Coffee Group")}.`,
+    `Soft group ethos, for emotional tone only: ${normalizeCoffeeGroupEthos(args.ethos) || COFFEE_GROUP_FALLBACK_ETHOS}`,
+    "Participant references must become only small environmental echoes—materials, objects, lighting, geometry, color relationships, or architectural details. Never depict the participants themselves:",
+    ...memberMotifs,
+    "Compose as a wide landscape café interior with the strongest detail toward the side walls and upper architecture, keeping the table zone quiet.",
+  ]
+    .join("\n")
+    .slice(0, COFFEE_GROUP_ATMOSPHERE_PROMPT_MAX_LENGTH);
 }
 
 /**
@@ -7318,6 +8466,9 @@ const COFFEE_GROUP_NAME_INFER_MAX_TOKENS = 140;
 const COFFEE_GROUP_NAME_INFER_TEMPERATURE = 0.7;
 const COFFEE_GROUP_NAME_INFER_ATTEMPTS = 2;
 const COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE = 5;
+const COFFEE_GROUP_ETHOS_INFER_MAX_TOKENS = 180;
+const COFFEE_GROUP_ETHOS_INFER_TEMPERATURE = 0.58;
+const COFFEE_GROUP_ETHOS_INFER_ATTEMPTS = 2;
 const COFFEE_GROUP_STARTER_TOPICS_PER_BOT = 4;
 const COFFEE_GROUP_STARTER_TOPIC_MAX = COFFEE_GROUP_MAX_SIZE * COFFEE_GROUP_STARTER_TOPICS_PER_BOT;
 const COFFEE_GROUP_STARTER_TOPIC_INFER_MAX_TOKENS = 900;
@@ -8488,11 +9639,11 @@ function formatCoffeeStarterFacetContext(group: CoffeeBotProfile[]): string[] {
   return lines.length > 1 ? lines : ["Hidden bot facets: deterministic fallback only."];
 }
 
-export async function inferCoffeeGroupName(args: {
+export async function inferCoffeeGroupNameDetailed(args: {
   provider: LlmProvider;
   group: CoffeeBotProfile[];
   fallbackName: string;
-}): Promise<string> {
+}): Promise<{ name: string; generated: boolean }> {
   const { provider, group, fallbackName } = args;
   const deterministicFallback = buildDeterministicCoffeeGroupName(group);
   const relevance = collectCoffeeGroupNameRelevance(group);
@@ -8541,7 +9692,10 @@ export async function inferCoffeeGroupName(args: {
         .sort((a, b) => b.score - a.score);
       const winner = ranked[0];
       if (winner && winner.score >= 0 && winner.relevanceScore >= COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE) {
-        return normalizeCoffeeGroupName(winner.candidate, fallbackName);
+        return {
+          name: normalizeCoffeeGroupName(winner.candidate, fallbackName),
+          generated: true,
+        };
       }
       const parsedSingle = parseCoffeeGroupNamePayload(raw);
       const parsedScore = parsedSingle
@@ -8555,14 +9709,192 @@ export async function inferCoffeeGroupName(args: {
         parsedScore.score >= 0 &&
         parsedScore.relevanceScore >= COFFEE_GROUP_NAME_MIN_RELEVANCE_SCORE
       ) {
-        return normalizeCoffeeGroupName(parsedSingle, fallbackName);
+        return {
+          name: normalizeCoffeeGroupName(parsedSingle, fallbackName),
+          generated: true,
+        };
       }
     } catch {
       // Non-fatal retry; fallback below if all attempts fail.
     }
   }
-  return normalizeCoffeeGroupName(deterministicFallback, fallbackName);
+  return {
+    name: normalizeCoffeeGroupName(deterministicFallback, fallbackName),
+    generated: false,
+  };
 }
+
+/** Generate a Coffee Group name while preserving the historical string API. */
+export async function inferCoffeeGroupName(args: {
+  provider: LlmProvider;
+  group: CoffeeBotProfile[];
+  fallbackName: string;
+}): Promise<string> {
+  return (await inferCoffeeGroupNameDetailed(args)).name;
+}
+
+function parseCoffeeGroupEthosPayload(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const candidates = [trimmed];
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/u);
+  if (objectMatch && objectMatch[0] !== trimmed) candidates.push(objectMatch[0]);
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      const ethos = normalizeCoffeeGroupEthos(
+        (parsed as { ethos?: unknown }).ethos,
+      );
+      const validated = validatedGeneratedCoffeeGroupEthos(ethos);
+      if (validated) return validated;
+    } catch {
+      // Try the next candidate or the narrow malformed-field recovery below.
+    }
+  }
+  // Small local models sometimes close a JSON string with a curly quote and
+  // then append token-count notes. Recover only the field, never the full reply.
+  const looseFieldMatch = trimmed.match(
+    /["'“”]?ethos["'“”]?\s*:\s*["'“]([\s\S]*?)["'”](?=\s*(?:[,}]|$))/iu,
+  );
+  const looseField = validatedGeneratedCoffeeGroupEthos(looseFieldMatch?.[1]);
+  if (looseField) return looseField;
+  if (/[{}]/u.test(trimmed) || /["'“”]?ethos["'“”]?\s*:/iu.test(trimmed)) {
+    return null;
+  }
+  return validatedGeneratedCoffeeGroupEthos(
+    trimmed.replace(/^["'“”‘’]+|["'“”‘’]+$/gu, ""),
+  );
+}
+
+/** Synthesize the soft one-sentence reason this exact Coffee Group gathers. */
+export async function inferCoffeeGroupEthos(args: {
+  provider: LlmProvider;
+  group: CoffeeBotProfile[];
+}): Promise<{ ethos: string; generated: boolean }> {
+  const botLines = args.group.map((bot) => {
+    const contextSummary = formatCoffeeBotContextSummary(bot);
+    return `- ${bot.name}${contextSummary ? ` — ${contextSummary}` : ""}`;
+  });
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content:
+        "You write subtle one-sentence table premises for PRISM Coffee Groups. Reply with JSON only and no extra text.",
+    },
+    {
+      role: "user",
+      content: [
+        "Explain why these exact personalities keep choosing to meet for coffee.",
+        `Write one warm, specific sentence of ${COFFEE_GROUP_ETHOS_MIN_WORDS}-${COFFEE_GROUP_ETHOS_MAX_WORDS} words.`,
+        "Treat it as a soft ethos that can influence conversation without becoming an agenda, slogan, ritual, or recurring topic.",
+        "Ground it in shared curiosity, useful contrast, mutual tension, or a reason they make one another more interesting.",
+        "Do not list participant names. Do not mention bots, AI, PRISM, prompts, or software.",
+        "Do not quote dialogue and do not instruct anyone what to discuss.",
+        "Seated personalities:",
+        ...botLines,
+        "",
+        'Respond exactly as {"ethos":"One sentence."}',
+      ].join("\n"),
+    },
+  ];
+  for (
+    let attempt = 0;
+    attempt < COFFEE_GROUP_ETHOS_INFER_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const raw = await args.provider.generateResponse(messages, {
+        temperature: COFFEE_GROUP_ETHOS_INFER_TEMPERATURE + attempt * 0.1,
+        maxTokens: COFFEE_GROUP_ETHOS_INFER_MAX_TOKENS,
+        jsonMode: true,
+        usagePurpose: "coffee_router",
+      });
+      const ethos = parseCoffeeGroupEthosPayload(raw);
+      if (ethos) return { ethos, generated: true };
+    } catch {
+      // A usable fallback keeps the group available while the item remains retryable.
+    }
+  }
+  return {
+    ethos: COFFEE_GROUP_FALLBACK_ETHOS,
+    generated: false,
+  };
+}
+
+/**
+ * Static fallback quartets used when no LLM-crafted topics are available.
+ * Kept as named constants so `coffeeGroupStarterTopicsLookCanned` can detect
+ * stored topic sets that never received real generation.
+ */
+const COFFEE_DETERMINISTIC_STARTER_TOPIC_QUARTETS = {
+  wizarding: [
+    "When rules protect people",
+    "The burden of being chosen",
+    "Courage under supervision",
+    "Magic under pressure",
+  ],
+  spongebob: [
+    "Krusty Krab closing shift",
+    "Jellyfish Fields after work",
+    "Bikini Bottom rumor mill",
+    "A clarinet nobody asked for",
+  ],
+  powerAndMercy: [
+    "Power without cruelty",
+    "Duty versus forgiveness",
+    "When mercy has limits",
+    "Justice after surrender",
+  ],
+  philosophy: [
+    "Is free will an illusion?",
+    "The cost of being right",
+    "A rule worth breaking",
+    "Wisdom after contradiction",
+  ],
+  engineering: [
+    "When systems fight back",
+    "The cost of clean logic",
+    "A bug worth keeping",
+    "When abstractions leak",
+  ],
+  art: [
+    "What art owes truth",
+    "A beautiful lie",
+    "When style becomes substance",
+    "What beauty permits",
+  ],
+  commerce: [
+    "What loyalty costs",
+    "A secret worth protecting",
+    "When profit needs mercy",
+    "A bargain with conscience",
+  ],
+  afterparty: [
+    "The argument nobody will drop",
+    "A rule worth breaking",
+    "When kindness backfires",
+    "The joke that got serious",
+  ],
+  theatre: [
+    "The cost of being right",
+    "A rule worth breaking",
+    "When kindness backfires",
+    "A line nobody forgives",
+  ],
+  still: [
+    "What silence protects",
+    "The cost of being right",
+    "A truth worth keeping",
+    "A silence worth breaking",
+  ],
+  default: [
+    "The cost of being right",
+    "When kindness backfires",
+    "A rule worth breaking",
+    "A truth worth keeping",
+  ],
+} as const;
 
 function buildDeterministicCoffeeStarterTopics(
   group: CoffeeBotProfile[],
@@ -8581,83 +9913,29 @@ function buildDeterministicCoffeeStarterTopics(
   const hasPowerAndMercy =
     /\b(power|empire|command|control|strategy)\b/u.test(hints) &&
     /\b(compassion|forgive|forgiveness|mercy|grace|love|service)\b/u.test(hints);
-  const fallback =
+  const quartets = COFFEE_DETERMINISTIC_STARTER_TOPIC_QUARTETS;
+  const fallback: readonly string[] =
     hasWizarding
-      ? [
-          "When rules protect people",
-          "The burden of being chosen",
-          "Courage under supervision",
-          "Magic under pressure",
-        ]
+      ? quartets.wizarding
       : hasSpongeBob
-      ? [
-          "Krusty Krab closing shift",
-          "Jellyfish Fields after work",
-          "Bikini Bottom rumor mill",
-          "A clarinet nobody asked for",
-        ]
+      ? quartets.spongebob
       : hasPowerAndMercy
-      ? [
-          "Power without cruelty",
-          "Duty versus forgiveness",
-          "When mercy has limits",
-          "Justice after surrender",
-        ]
+      ? quartets.powerAndMercy
       : /\b(philosoph|stoic|ethic|wisdom|metaphysic|logic|reason|free will)\b/u.test(hints)
-        ? [
-            "Is free will an illusion?",
-            "The cost of being right",
-            "A rule worth breaking",
-            "Wisdom after contradiction",
-          ]
+        ? quartets.philosophy
         : /\b(engineer|debug|code|system|build|logic)\b/u.test(hints)
-          ? [
-              "When systems fight back",
-              "The cost of clean logic",
-              "A bug worth keeping",
-              "When abstractions leak",
-            ]
+          ? quartets.engineering
           : /\b(art|artist|story|music|beauty|style|design|performance)\b/u.test(hints)
-            ? [
-                "What art owes truth",
-                "A beautiful lie",
-                "When style becomes substance",
-                "What beauty permits",
-              ]
+            ? quartets.art
             : /\b(money|profit|business|restaurant|secret|protect)\b/u.test(hints)
-              ? [
-                  "What loyalty costs",
-                  "A secret worth protecting",
-                  "When profit needs mercy",
-                  "A bargain with conscience",
-                ]
+              ? quartets.commerce
               : sessionSettings.tableEnergy === "afterparty"
-                ? [
-                    "The argument nobody will drop",
-                    "A rule worth breaking",
-                    "When kindness backfires",
-                    "The joke that got serious",
-                  ]
+                ? quartets.afterparty
                 : sessionSettings.tableEnergy === "theatre"
-                ? [
-                    "The cost of being right",
-                    "A rule worth breaking",
-                    "When kindness backfires",
-                    "A line nobody forgives",
-                  ]
+                ? quartets.theatre
                 : sessionSettings.tableEnergy === "still"
-                  ? [
-                      "What silence protects",
-                      "The cost of being right",
-                      "A truth worth keeping",
-                      "A silence worth breaking",
-                    ]
-                  : [
-                      "The cost of being right",
-                      "When kindness backfires",
-                      "A rule worth breaking",
-                      "A truth worth keeping",
-                    ];
+                  ? quartets.still
+                  : quartets.default;
   const facetTopics = coffeeFacetStarterTopicCandidates(group);
   const topicCandidates = hasWizarding || (hasPowerAndMercy && !hasSpongeBob)
     ? [
@@ -8847,43 +10125,61 @@ function completeCoffeeGroupStarterTopics(
   return completed;
 }
 
+/**
+ * Static persona topic lists. Also feed the canned-label detector so groups
+ * stuck with these exact labels can be upgraded once real generation works.
+ */
+const COFFEE_KNOWN_PERSONA_STARTER_TOPICS = {
+  epictetus: ["Freedom inside constraint", "The discipline of desire", "Choosing your chains"],
+  marcusAurelius: ["Power under self-command", "A ruler's private doubts", "Duty after exhaustion"],
+  socrates: ["The courage to question", "Ignorance as a compass", "When certainty becomes arrogance"],
+  plato: ["Shadows mistaken for truth", "Justice outside the cave", "The ideal versus the real"],
+  aristotle: ["Virtue as practiced habit", "Friendship and the good life", "When moderation fails"],
+  plankton: ["A plan too clever", "Envy at tiny scale", "Stealing what cannot satisfy"],
+  spongebob: [
+    "Relentless optimism on shift",
+    "When optimism runs the shift",
+    "A spatula worth defending",
+    "Kindness before competence",
+  ],
+  patrick: ["Simple wisdom under pressure", "Being wrong with confidence", "Friendship without strategy"],
+  squidward: ["Art versus customer service", "The dignity of irritation", "Beauty after closing time"],
+  krabs: ["Profit with a conscience", "A secret worth protecting", "Loyalty on the ledger"],
+} as const;
+
 function buildKnownPersonaCoffeeStarterTopics(bot: CoffeeBotProfile): string[] {
   const name = bot.name.toLowerCase();
   const hints = collectCoffeeBotTopicHints(bot).join(" ").toLowerCase();
+  const personas = COFFEE_KNOWN_PERSONA_STARTER_TOPICS;
   if (/\bepictetus\b/u.test(name)) {
-    return ["Freedom inside constraint", "The discipline of desire", "Choosing your chains"];
+    return [...personas.epictetus];
   }
   if (/\bmarcus\s+aurelius\b/u.test(name)) {
-    return ["Power under self-command", "A ruler's private doubts", "Duty after exhaustion"];
+    return [...personas.marcusAurelius];
   }
   if (/\bsocrates\b/u.test(name)) {
-    return ["The courage to question", "Ignorance as a compass", "When certainty becomes arrogance"];
+    return [...personas.socrates];
   }
   if (/\bplato\b/u.test(name)) {
-    return ["Shadows mistaken for truth", "Justice outside the cave", "The ideal versus the real"];
+    return [...personas.plato];
   }
   if (/\baristotle\b/u.test(name)) {
-    return ["Virtue as practiced habit", "Friendship and the good life", "When moderation fails"];
+    return [...personas.aristotle];
   }
   if (/\bplankton\b/u.test(name) || /\bchum bucket|schem|envy|formula heist\b/u.test(hints)) {
-    return ["A plan too clever", "Envy at tiny scale", "Stealing what cannot satisfy"];
+    return [...personas.plankton];
   }
   if (/\bspongebob|squarepants\b/u.test(name) || /\bfry cook|optimism\b/u.test(hints)) {
-    return [
-      "Relentless optimism on shift",
-      "When optimism runs the shift",
-      "A spatula worth defending",
-      "Kindness before competence",
-    ];
+    return [...personas.spongebob];
   }
   if (/\bpatrick\b/u.test(name) || /\bunder a rock|simple wisdom\b/u.test(hints)) {
-    return ["Simple wisdom under pressure", "Being wrong with confidence", "Friendship without strategy"];
+    return [...personas.patrick];
   }
   if (/\bsquidward\b/u.test(name) || /\bclarinet|artist|cashier\b/u.test(hints)) {
-    return ["Art versus customer service", "The dignity of irritation", "Beauty after closing time"];
+    return [...personas.squidward];
   }
   if (/\bkrabs\b/u.test(name) || /\bprofit|restaurant|secret formula\b/u.test(hints)) {
-    return ["Profit with a conscience", "A secret worth protecting", "Loyalty on the ledger"];
+    return [...personas.krabs];
   }
   return [];
 }
@@ -9006,14 +10302,70 @@ const CANONICAL_COFFEE_GROUP_FALLBACK_TOPICS = [
   "Who gets to define good work?",
 ] as const;
 
+/**
+ * Every label PRISM can emit from a static pool, lowercased. A stored group
+ * quartet drawn entirely from this set means the group never received real
+ * LLM-crafted topics (the helper model was down or mis-parsed at save time).
+ */
+const COFFEE_CANNED_STARTER_TOPIC_LABELS: ReadonlySet<string> = new Set(
+  [
+    ...Object.values(COFFEE_DETERMINISTIC_STARTER_TOPIC_QUARTETS).flat(),
+    ...Object.values(COFFEE_KNOWN_PERSONA_STARTER_TOPICS).flat(),
+    ...COFFEE_DISTINCT_FILL_TOPICS,
+    ...CANONICAL_COFFEE_GROUP_FALLBACK_TOPICS,
+  ].map((label) => label.toLocaleLowerCase())
+);
+
+/**
+ * True when every stored starter topic comes from the static fallback pools.
+ * Such groups are eligible for a one-shot regeneration on the next session
+ * start, so a temporary helper-model outage never pins canned topics forever.
+ */
+export function coffeeGroupStarterTopicsLookCanned(
+  topics: readonly string[] | null | undefined
+): boolean {
+  if (!topics || topics.length === 0) return false;
+  return topics.every((topic) =>
+    COFFEE_CANNED_STARTER_TOPIC_LABELS.has(
+      topic.replace(/\s+/g, " ").trim().toLocaleLowerCase()
+    )
+  );
+}
+
+/**
+ * Pad incomplete canonical group topics without jumping straight to the
+ * fixed canned quartet. Prefer bot-grounded deterministic labels, then a
+ * group-seeded rotation of fill topics, and only then the shared fallback.
+ */
+function coffeeCanonicalGroupStarterTopicPadding(
+  group: CoffeeBotProfile[],
+  sessionSettings: CoffeeSessionSettings
+): CoffeeStarterTopicCandidate[] {
+  const groupSeed = group
+    .map((bot) => bot.id)
+    .filter((botId) => botId.length > 0)
+    .sort()
+    .join(":");
+  return [
+    ...buildDeterministicCoffeeStarterTopics(group, sessionSettings).map((label) => ({
+      label,
+    })),
+    ...rotatedCoffeeDistinctFillTopics(groupSeed || "coffee-group").map((label) => ({
+      label,
+    })),
+    ...CANONICAL_COFFEE_GROUP_FALLBACK_TOPICS.map((label) => ({ label })),
+  ];
+}
+
 function completeStoredCanonicalCoffeeGroupStarterTopics(
   topics: readonly string[],
-  group: CoffeeBotProfile[]
+  group: CoffeeBotProfile[],
+  sessionSettings: CoffeeSessionSettings = normalizeCoffeeSessionSettings(undefined)
 ): string[] {
   return selectCoffeeStarterTopicLabels(
     [
       ...topics.map((label) => ({ label })),
-      ...CANONICAL_COFFEE_GROUP_FALLBACK_TOPICS.map((label) => ({ label })),
+      ...coffeeCanonicalGroupStarterTopicPadding(group, sessionSettings),
     ],
     group,
     COFFEE_STARTER_TOPIC_COUNT
@@ -9022,31 +10374,49 @@ function completeStoredCanonicalCoffeeGroupStarterTopics(
 
 function completeCanonicalCoffeeGroupStarterTopics(
   candidates: readonly CoffeeStarterTopicCandidate[],
-  group: CoffeeBotProfile[]
+  group: CoffeeBotProfile[],
+  sessionSettings: CoffeeSessionSettings = normalizeCoffeeSessionSettings(undefined)
 ): string[] {
   const groupBotIds = new Set(group.map((bot) => bot.id));
-  const multiParticipantCandidates = candidates.filter((candidate) => {
+  const multiParticipantCandidates: CoffeeStarterTopicCandidate[] = [];
+  const otherCandidates: CoffeeStarterTopicCandidate[] = [];
+  for (const candidate of candidates) {
     const participants = new Set(
       (candidate.participantBotIds ?? []).filter((botId) => groupBotIds.has(botId))
     );
-    return participants.size >= 2;
-  });
+    // Prefer explicitly multi-seat tagged prompts, but keep unlabeled /
+    // single-tag labels as secondary signal instead of discarding them.
+    if (participants.size >= 2) {
+      multiParticipantCandidates.push(candidate);
+    } else {
+      otherCandidates.push(candidate);
+    }
+  }
   return selectCoffeeStarterTopicLabels(
     [
       ...rankCoffeeStarterTopicCandidates(multiParticipantCandidates, group),
-      ...CANONICAL_COFFEE_GROUP_FALLBACK_TOPICS.map((label) => ({ label })),
+      ...rankCoffeeStarterTopicCandidates(otherCandidates, group),
+      ...coffeeCanonicalGroupStarterTopicPadding(group, sessionSettings),
     ],
     group,
     COFFEE_STARTER_TOPIC_COUNT
   );
 }
 
-export async function inferCoffeeGroupStarterTopics(args: {
+/**
+ * Generate canonical group starter topics, reporting whether the helper LLM
+ * actually contributed candidates. `llmBacked: false` means the returned
+ * quartet is purely deterministic padding and should not be treated as the
+ * group's permanent canonical topics.
+ */
+export async function inferCoffeeGroupStarterTopicsDetailed(args: {
   provider: LlmProvider;
   group: CoffeeBotProfile[];
   sessionSettings: CoffeeSessionSettings;
-}): Promise<string[]> {
+  ethos?: string | null;
+}): Promise<{ topics: string[]; llmBacked: boolean }> {
   const { provider, group, sessionSettings } = args;
+  const ethos = normalizeCoffeeGroupEthos(args.ethos);
   const botLines = group.map((bot) => {
     const contextSummary = formatCoffeeBotContextSummary(bot);
     return `- botId=${bot.id}; name=${bot.name}${contextSummary ? `; ${contextSummary}` : ""}`;
@@ -9072,6 +10442,13 @@ export async function inferCoffeeGroupStarterTopics(args: {
         "",
         ...formatCoffeeStarterFacetContext(group),
         "",
+        ...(ethos
+          ? [
+              `Soft Coffee Group ethos: "${ethos}"`,
+              "Let the ethos influence fit and tone without quoting it, restating it, or making every topic about it.",
+              "",
+            ]
+          : []),
         'Respond exactly as {"candidates":[{"label":"...","kind":"reflective","rationale":"...","participantBotIds":["...","..."],"scores":{"relevance":0,"depth":0,"novelty":0,"balance":0,"fit":0}}]}.',
         "Generate exactly eight candidates: two shared-curiosity, two productive-tension, two concrete scenario, and two surprising wildcard prompts.",
         "Score every candidate from 0-5 for relevance, depth, novelty, conversational balance, and fit with this exact group.",
@@ -9091,13 +10468,30 @@ export async function inferCoffeeGroupStarterTopics(args: {
       maxTokens: COFFEE_GROUP_STARTER_TOPIC_INFER_MAX_TOKENS,
       usagePurpose: "coffee_router",
     });
-    return completeCanonicalCoffeeGroupStarterTopics(
-      parseCoffeeStarterTopicCandidatesPayload(raw, group),
-      group
-    );
+    const candidates = parseCoffeeStarterTopicCandidatesPayload(raw, group);
+    return {
+      topics: completeCanonicalCoffeeGroupStarterTopics(
+        candidates,
+        group,
+        sessionSettings
+      ),
+      llmBacked: candidates.length > 0,
+    };
   } catch {
-    return completeCanonicalCoffeeGroupStarterTopics([], group);
+    return {
+      topics: completeCanonicalCoffeeGroupStarterTopics([], group, sessionSettings),
+      llmBacked: false,
+    };
   }
+}
+
+export async function inferCoffeeGroupStarterTopics(args: {
+  provider: LlmProvider;
+  group: CoffeeBotProfile[];
+  sessionSettings: CoffeeSessionSettings;
+  ethos?: string | null;
+}): Promise<string[]> {
+  return (await inferCoffeeGroupStarterTopicsDetailed(args)).topics;
 }
 
 /**
@@ -9108,6 +10502,8 @@ export async function inferCoffeeStarterTopics(args: {
   provider: LlmProvider;
   group: CoffeeBotProfile[];
   sessionSettings: CoffeeSessionSettings;
+  /** Soft Coffee Group ethos; influences fit without becoming the visible topic. */
+  groupEthos?: string | null;
   presetLabel?: string | null;
   memoryContext?: readonly CoffeeStarterMemoryContextEntry[];
   attendanceContext?: CoffeeAttendanceContext | null;
@@ -9120,6 +10516,7 @@ export async function inferCoffeeStarterTopics(args: {
     provider,
     group,
     sessionSettings,
+    groupEthos,
     presetLabel,
     memoryContext,
     attendanceContext,
@@ -9140,6 +10537,7 @@ export async function inferCoffeeStarterTopics(args: {
     crossTalk: sessionSettings.crossTalk,
     stayOnThread: sessionSettings.stayOnThread,
   });
+  const ethos = normalizeCoffeeGroupEthos(groupEthos);
   const rankedCandidatePool = selectCoffeeStarterTopicLabels(
     rankCoffeeStarterTopicCandidates(
       (candidatePool ?? []).map((label) => ({
@@ -9173,6 +10571,13 @@ export async function inferCoffeeStarterTopics(args: {
         "",
         ...formatCoffeeStarterFacetContext(group),
         "",
+        ...(ethos
+          ? [
+              `Soft Coffee Group ethos: "${ethos}"`,
+              "Use it only as quiet context for relevance and chemistry. Do not quote it, summarize it, or force candidates to repeat its subject.",
+              "",
+            ]
+          : []),
         ...storedCandidateLines,
         "",
         ...formatCoffeeStarterMemoryContext(memoryContext),
@@ -9373,6 +10778,65 @@ function coffeeSpeakerAllowsAuthoredImperfection(
 }
 
 const coffeeRecentInterruptionReactions = new Map<string, string[]>();
+
+const COFFEE_SOCIAL_SILENCE_MIN_CHANCE = 0.02;
+const COFFEE_SOCIAL_SILENCE_MAX_CHANCE = 0.22;
+const COFFEE_SOCIAL_SILENCE_BASE_CHANCE = 0.025;
+
+/** Mood/flow weight for an ordinary autonomous Coffee silence beat. */
+export function coffeeSocialSilenceChanceV1(args: {
+  social: CoffeeBotSocialSnapshot;
+  tableEnergy: CoffeeSessionSettings["tableEnergy"];
+  crossTalk: CoffeeSessionSettings["crossTalk"];
+}): number {
+  const energyAdjustment =
+    args.tableEnergy === "still"
+      ? 0.055
+      : args.tableEnergy === "relaxed"
+        ? 0.025
+        : args.tableEnergy === "afterparty"
+          ? -0.02
+          : 0;
+  const crosstalkAdjustment =
+    args.crossTalk === "rare"
+      ? 0.025
+      : args.crossTalk === "pileup"
+        ? -0.02
+        : 0;
+  const rawChance =
+    COFFEE_SOCIAL_SILENCE_BASE_CHANCE +
+    args.social.restraint * 0.055 +
+    (1 - args.social.engagement) * 0.07 +
+    args.social.valuesFriction * 0.035 +
+    args.social.leavePressure * 0.025 +
+    energyAdjustment +
+    crosstalkAdjustment;
+  return Math.max(
+    COFFEE_SOCIAL_SILENCE_MIN_CHANCE,
+    Math.min(COFFEE_SOCIAL_SILENCE_MAX_CHANCE, rawChance),
+  );
+}
+
+export function consecutiveCoffeeSocialSilenceTurns(
+  history: readonly ChatMessage[],
+): number {
+  let count = 0;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (
+      message?.role !== "assistant" ||
+      !socialSilenceMessageIsMarkedV1({
+        content: message.content,
+        marker: message.socialSilence,
+        mode: "coffee",
+      })
+    ) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
 
 function coffeeCannedInterruptionReaction(args: {
   conversationId: string;
@@ -9968,8 +11432,6 @@ const COFFEE_STAGE_DIRECTION_APPENDIX = [
   "Action section = a short non-spoken beat wrapped in single asterisks. Spoken table words = the plain unwrapped text that appears on the table.",
   "Coffee Mode is not Markdown-formatted chat. Do NOT use asterisks for emphasis in ordinary dialogue — write plain words instead (`the thought that counts`, not `the *thought* that counts`).",
   "Only use single asterisks for a complete non-verbal action, gesture, or aside (anything that isn't spoken dialogue), like `*tilts head*` or `*glances at the door*`. Every action section must begin immediately after the opening asterisk with a third-person present verb ending in `s`; do not begin it with `I`, an adverb, a noun, or an `-ing` form. Do not put ordinary sentence words inside asterisks.",
-  "Prefer opening most ordinary turns with one short `*action*` before the spoken line (`*raises an eyebrow* That is optimistic.`, `*judges quietly* Fine.`, `*narrows their eyes* Say that again.`). Keep the action brief; the spoken line still carries the substance.",
-  "Judgemental, dry, or social micro-reactions are welcome when they fit the character (`*raises an eyebrow*`, `*judges the claim*`, `*stifles a scoff*`, `*gives a pointed look*`) — do not force them every turn, but use them more often than cup ambience.",
   "If your turn has both action and speech, format it as `*action* Spoken line.` Never leave non-spoken narration unwrapped at the start/end of the line (for example, write `*straightens napkin* The plan still needs a limit.`, not `I straighten my napkin The plan still needs a limit.`).",
   "Asterisk-wrapped actions are presented separately from your spoken line, so keep them short, in third person, and self-contained. The bulk of your reply should still be one short spoken line in plain prose with no Markdown styling.",
   "Do not output another participant as a speaker label, and do not write hidden coach/director language such as `show me`, `put a real case`, or `with a receipt attached` as your table line.",
@@ -10005,6 +11467,8 @@ export function buildRouterPrompt(args: {
   coffeePowerPlan?: CoffeePowerPlanV1 | null;
   /** When set, router should prefer speakers who can advance this shared subject. */
   coffeeTopic?: string | null;
+  /** Soft saved group premise; shapes chemistry without becoming a rigid topic. */
+  coffeeGroupEthos?: string | null;
   /** Optional closed opening-poll result, used to pick a speaker who can analyze it. */
   pollSummary?: string | null;
   /** Active in-session poll context while bots are still deliberating. */
@@ -10036,6 +11500,7 @@ export function buildRouterPrompt(args: {
     sessionSettings,
     coffeePowerPlan = null,
     coffeeTopic,
+    coffeeGroupEthos,
     pollSummary,
     activePollContext,
     coffeeTeams,
@@ -10056,6 +11521,15 @@ export function buildRouterPrompt(args: {
           "For value topics like virtue, dignity, quiet, trust, beauty, duty, or peace, prefer a speaker who can show what the value protects, costs, or reveals; do not let nearby props become a new unrelated adventure.",
           "For abstract nature-of topics like Nature of Virtue, prefer a speaker who can ground the idea in a lived decision, practice, consequence, or disagreement instead of drifting into decorative objects.",
           "For contrast topics like art versus customer service or X versus Y, prefer a speaker who can show the concrete tradeoff: where both sides coexist or clash, who pays or benefits, and what choice reveals the tension.",
+        ]
+      : [];
+  const ethos = normalizeCoffeeGroupEthos(coffeeGroupEthos);
+  const ethosLines =
+    ethos.length > 0
+      ? [
+          "",
+          `Soft Coffee Group ethos: "${ethos}"`,
+          "Use this only as a quiet tie-breaker for speaker chemistry and conversational fit. Do not quote it, announce it, or keep dragging the table back to its wording.",
         ]
       : [];
   const pollSummaryTrim = typeof pollSummary === "string" ? pollSummary.trim() : "";
@@ -10216,6 +11690,7 @@ export function buildRouterPrompt(args: {
     earlyThreadHint,
     ...(kickoffRouterHint ? [kickoffRouterHint] : []),
     ...topicAnchorLines,
+    ...ethosLines,
     ...pollLines,
     ...activePollLines,
     ...coffeeTeamLines,
@@ -10467,6 +11942,36 @@ export function coffeeIdentityMirrorStatesFromHistory(
   return states;
 }
 
+/** Latest persisted Library/Marketplace form per holder. */
+export function coffeeIdentityShapeshiftStatesFromHistory(
+  history: readonly Pick<ChatMessage, "coffeeReplayEvents">[],
+): Map<string, BotIdentityShapeshiftStateV1> {
+  const states = new Map<string, BotIdentityShapeshiftStateV1>();
+  for (const message of history) {
+    for (const event of message.coffeeReplayEvents ?? []) {
+      if (event.kind === "identityShapeshift") {
+        states.set(event.state.holderBotId, event.state);
+      }
+    }
+  }
+  return states;
+}
+
+/** Latest persisted believed-name alias per holder. */
+export function coffeeFalseNameStatesFromHistory(
+  history: readonly Pick<ChatMessage, "coffeeReplayEvents">[],
+): Map<string, BotFalseNameStateV1> {
+  const states = new Map<string, BotFalseNameStateV1>();
+  for (const message of history) {
+    for (const event of message.coffeeReplayEvents ?? []) {
+      if (event.kind === "falseName") {
+        states.set(event.state.holderBotId, event.state);
+      }
+    }
+  }
+  return states;
+}
+
 export function coffeeIdentityMirrorPromptForSpeaker(args: {
   history: readonly Pick<ChatMessage, "coffeeReplayEvents">[];
   speaker: Pick<CoffeeBotProfile, "id" | "name">;
@@ -10485,6 +11990,58 @@ export function coffeeIdentityMirrorPromptForSpeaker(args: {
             observerBotId: args.speaker.id,
             state,
           }),
+    )
+    .join("\n\n");
+}
+
+export function coffeeIdentityShapeshiftPromptForSpeaker(args: {
+  history: readonly Pick<ChatMessage, "coffeeReplayEvents">[];
+  speaker: Pick<CoffeeBotProfile, "id" | "name">;
+  /** When set, overrides sticky history for the speaking holder (fresh reshape). */
+  activeHolderState?: BotIdentityShapeshiftStateV1 | null;
+  identityJustChanged?: boolean;
+}): string {
+  const states = new Map(coffeeIdentityShapeshiftStatesFromHistory(args.history));
+  if (args.activeHolderState) {
+    states.set(args.activeHolderState.holderBotId, args.activeHolderState);
+  }
+  if (states.size === 0) return "";
+  return [...states.values()]
+    .map((state) =>
+      state.holderBotId === args.speaker.id
+        ? botIdentityShapeshiftHolderPromptV1({
+            holderName: args.speaker.name,
+            roleLabel: "Coffee participant",
+            state,
+            identityJustChanged: Boolean(
+              args.identityJustChanged &&
+                args.activeHolderState?.holderBotId === args.speaker.id,
+            ),
+          })
+        : botIdentityShapeshiftObserverPromptV1({
+            observerBotId: args.speaker.id,
+            state,
+          }),
+    )
+    .join("\n\n");
+}
+
+export function coffeeFalseNamePromptForSpeaker(args: {
+  history: readonly Pick<ChatMessage, "coffeeReplayEvents">[];
+  speaker: Pick<CoffeeBotProfile, "id" | "name">;
+  /** When set, overrides sticky history for the speaking holder (fresh alias). */
+  activeHolderState?: BotFalseNameStateV1 | null;
+}): string {
+  const states = new Map(coffeeFalseNameStatesFromHistory(args.history));
+  if (args.activeHolderState) {
+    states.set(args.activeHolderState.holderBotId, args.activeHolderState);
+  }
+  if (states.size === 0) return "";
+  return [...states.values()]
+    .map((state) =>
+      state.holderBotId === args.speaker.id
+        ? botFalseNameSelfCueV1(state.believedName)
+        : botFalseNameObserverCueV1(state.holderBotName, state.believedName),
     )
     .join("\n\n");
 }
@@ -10527,6 +12084,8 @@ export function buildSpeakerPrompt(args: {
   firstContactIntro?: boolean;
   sessionSettings?: CoffeeSessionSettings;
   coffeeTopic?: string | null;
+  /** Soft saved group premise; influences tone without becoming dialogue. */
+  coffeeGroupEthos?: string | null;
   pollSummary?: string | null;
   /** Active in-session poll context while bots are still deliberating. */
   activePollContext?: string | null;
@@ -10556,6 +12115,8 @@ export function buildSpeakerPrompt(args: {
   departureOpportunity?: string | null;
   /** Explicit interruption metadata from the turn pipeline, when a cutoff is real. */
   interruptionEvent?: CoffeeInterruptionEvent | null;
+  /** Soft directed-irritation prompt lines for this speaker only. */
+  irritationPromptLines?: readonly string[] | null;
   /** Speaker-scoped preferred display labels for peers, keyed by peer bot id. */
   peerAddressByBotId?: ReadonlyMap<string, string>;
   /** Compact, already-resolved Coffee-only power context for this speaker. */
@@ -10564,10 +12125,18 @@ export function buildSpeakerPrompt(args: {
   identityMirrorPrompt?: string | null;
   /** Active holder snapshot; its public target persona replaces the holder's base persona. */
   identityMirrorState?: BotIdentityMirrorStateV1 | null;
+  /** Library/Marketplace shapeshift cues for holder and observers. */
+  identityShapeshiftPrompt?: string | null;
+  /** Active shapeshift snapshot used when identity mirroring is not overriding. */
+  identityShapeshiftState?: BotIdentityShapeshiftStateV1 | null;
+  /** John/Jane Doe believed-name cues for holder and observers. */
+  falseNamePrompt?: string | null;
   /** Resolved cup consumption multiplier from this session's immutable power plan. */
   coffeeCupRateMultiplier?: number;
   /** Physical vessel state is separate from the hidden Auto-session stay clock. */
   coffeeVesselMode?: "coffee" | "none";
+  /** Stage Action Director decision made after speaker selection. */
+  stageActionMode?: "director" | "persona_invite" | "excluded";
 }): ProviderMessage[] {
   const {
     speaker,
@@ -10583,6 +12152,7 @@ export function buildSpeakerPrompt(args: {
     firstContactIntro = false,
     sessionSettings,
     coffeeTopic,
+    coffeeGroupEthos,
     pollSummary,
     activePollContext,
     activePoll,
@@ -10598,12 +12168,17 @@ export function buildSpeakerPrompt(args: {
     refillRequestOpportunity,
     departureOpportunity,
     interruptionEvent,
+    irritationPromptLines,
     peerAddressByBotId,
     coffeePowersPrompt,
     identityMirrorPrompt,
     identityMirrorState,
+    identityShapeshiftPrompt,
+    identityShapeshiftState,
+    falseNamePrompt,
     coffeeCupRateMultiplier = 1,
     coffeeVesselMode = "coffee",
+    stageActionMode = "director",
   } = args;
   const settings = sessionSettings ?? normalizeCoffeeSessionSettings(undefined);
   const moodDrainTurnActive = /\bCoffee Power drag:/u.test(
@@ -10613,9 +12188,13 @@ export function buildSpeakerPrompt(args: {
   const { tableReplyMaxChars } = coffeeReplyLengthCaps(settings);
   const peerNameFor = (bot: Pick<CoffeeBotProfile, "id" | "name">): string =>
     peerAddressByBotId?.get(bot.id)?.trim() || bot.name;
+  const borrowedPersonaPrompt =
+    identityMirrorState?.targetPersonaPrompt ??
+    identityShapeshiftState?.targetPersonaPrompt ??
+    speaker.systemPrompt;
   const speakerSystemPrompt = composeBotSystemPrompt(
     speaker.name,
-    identityMirrorState?.targetPersonaPrompt ?? speaker.systemPrompt,
+    borrowedPersonaPrompt,
     speaker.flirtEnabled === true,
   );
   const cloneIdentityPrompt = buildCloneFamilyIdentityPrompt(speaker, group);
@@ -10678,20 +12257,39 @@ export function buildSpeakerPrompt(args: {
     ? ["", speakerRelationshipPrompt]
     : [];
   const topicTrim = typeof coffeeTopic === "string" ? coffeeTopic.trim() : "";
+  const directPersonalAnswerRequired =
+    coffeeTopicRequiresDirectPersonalAnswer(topicTrim) &&
+    !coffeeSpeakerAlreadyGaveDirectPersonalAnswer({ history, speaker });
   const topicLines: string[] =
     topicTrim.length > 0
       ? [
           "",
           `Table topic anchor: "${topicTrim}".`,
+          ...(directPersonalAnswerRequired
+            ? [
+                "MANDATORY PERSONAL ANSWER: You have not answered this topic yet. Begin your next line with `My answer is: ...`, or a plain first-person sentence such as `I hate ...` / `I love ...`, and name one concrete thing before any explanation.",
+                "Do not reinterpret the question, moralize about asking it, answer for another participant, or ask a follow-up before giving your own answer. If you truly will not answer, say `My answer is: I refuse to name one.` plainly.",
+              ]
+            : []),
           settings.stayOnThread
             ? "Stay on this topic until the user explicitly changes it. If the user signals confusion or asks what the table is talking about, explain the connection plainly in character instead of pivoting to a new subject."
             : "Let your line relate to this topic in a natural, character-true way unless the transcript has clearly moved on.",
+          "If the topic explicitly demands evidence, an example, a named decision, a cause, or another concrete answer shape, preserve that demand—not just its subject. Either supply one requested item, test a prior answer against the demand, or identify exactly what requested item is still missing. Do not substitute adjacent abstraction for the requested proof.",
           "If the topic is phrased as a pattern, like `when helpful gets chaotic`, keep the line tied to that pattern: what starts as help, what tips it into chaos, who feels the consequence, or what limit would keep it helpful.",
           "If the topic is a value phrase, like `the dignity of quiet` or `nature of virtue`, keep detours tied to what that value protects, costs, or reveals. Do not turn props, treasure, maps, recipes, or schemes into a new unrelated adventure.",
           "For abstract nature-of topics, ground your point in a lived decision, practice, consequence, or disagreement; a garden, lyre, recipe, or tool should illuminate the value, not become the new topic.",
           "If the topic is a contrast, like `art versus customer service`, keep the line tied to the concrete tradeoff: where both sides coexist or clash, who pays or benefits, and what choice reveals the tension.",
           "If the topic is a Teams debate, like `Teams: Pineapple vs No Pineapple`, keep each line tied to the two named sides: defend one side with a concrete reason, challenge the other side, ask what would change a team member's mind, or make a switch explicit.",
           "Do not flatten strong claims into bland agreement; if you align, add your own concrete reason, and if you differ, contrast with warmth.",
+        ]
+      : [];
+  const ethos = normalizeCoffeeGroupEthos(coffeeGroupEthos);
+  const ethosLines =
+    ethos.length > 0
+      ? [
+          "",
+          `Quiet Coffee Group ethos: "${ethos}"`,
+          "Let it subtly shape warmth, tension, and what feels relevant. Never quote or explain the ethos, treat it as a mandatory subject, or imply the table agreed to an agenda.",
         ]
       : [];
   const pollSummaryTrim = typeof pollSummary === "string" ? pollSummary.trim() : "";
@@ -10860,6 +12458,7 @@ export function buildSpeakerPrompt(args: {
       ? "This table is still warming up. You can see the other participants' names, but do not act as if you already know them unless the transcript proves it."
       : "Use the current table transcript as your shared history with the user and the other bots.",
     ...topicLines,
+    ...ethosLines,
     ...pollLines,
     ...activePollLines,
     ...speakerTeamLines,
@@ -10904,11 +12503,17 @@ export function buildSpeakerPrompt(args: {
     `- You (${speaker.name}): disposition=${speakerSocial.disposition.toFixed(2)}, valuesFriction=${speakerSocial.valuesFriction.toFixed(2)}, restraint=${speakerSocial.restraint.toFixed(2)}, engagement=${speakerSocial.engagement.toFixed(2)}, leavePressure=${speakerSocial.leavePressure.toFixed(2)}`,
     "- If your valuesFriction and restraint are both high, set calm boundaries, be brief, or politely step back. Avoid insults or hostile escalation.",
     "- If leavePressure is high, prefer short grounded replies and occasional gentle withdrawal language.",
+    ...(irritationPromptLines && irritationPromptLines.length > 0
+      ? ["", ...irritationPromptLines]
+      : []),
     ...peerAddressPreferenceLines,
     ...(prismBotMentionHint ? ["", PRISM_BOT_MENTION_COFFEE_APPENDIX] : []),
     ...(speakerMentionRosterAppendix ? ["", speakerMentionRosterAppendix] : []),
     "",
     COFFEE_STAGE_DIRECTION_APPENDIX,
+    stageActionMode === "persona_invite"
+      ? stageActionPersonaInvitePromptV1("coffee")
+      : stageActionSpeechOnlyPromptV1("coffee"),
   ];
 
   const messages: ProviderMessage[] = [];
@@ -10924,6 +12529,12 @@ export function buildSpeakerPrompt(args: {
   }
   if (identityMirrorPrompt?.trim()) {
     messages.push({ role: "system", content: identityMirrorPrompt.trim() });
+  }
+  if (identityShapeshiftPrompt?.trim()) {
+    messages.push({ role: "system", content: identityShapeshiftPrompt.trim() });
+  }
+  if (falseNamePrompt?.trim()) {
+    messages.push({ role: "system", content: falseNamePrompt.trim() });
   }
   messages.push({
     role: "system",
@@ -11047,6 +12658,9 @@ interface CoffeeGroupRow {
   id: string;
   user_id: string;
   name: string;
+  ethos: string;
+  atmosphere_json: string | null;
+  synthesis_json: string | null;
   coffee_settings: string;
   preset_mode: string;
   coffee_topic_mode: string | null;
@@ -11226,11 +12840,16 @@ function loadMessages(
       const storedToolPayload = parseStoredAssistantToolPayload(row.tool_payload);
       const coffeeAmbientAction =
         row.role === "assistant" ? storedToolPayload.coffeeAmbientAction : undefined;
+      const coffeeStageAction =
+        row.role === "assistant" ? storedToolPayload.coffeeStageAction : undefined;
       const coffeeUserAction =
         row.role === "user" ? storedToolPayload.coffeeUserAction : undefined;
+      const coffeeInterruption = storedToolPayload.coffeeInterruption;
       const coffeeReplayEvents = storedToolPayload.coffeeReplayEvents;
       const autoRecovery = storedToolPayload.autoRecovery;
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
+      const socialSilence = storedToolPayload.socialSilence;
+      const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
       return {
         id: row.id,
         role: row.role,
@@ -11249,13 +12868,17 @@ function loadMessages(
         botColor: row.bot_color ?? undefined,
         botGlyph: row.bot_glyph ?? undefined,
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+        ...(coffeeStageAction ? { coffeeStageAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
+        ...(coffeeInterruption ? { coffeeInterruption } : {}),
         ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(row.coffee_audience_bot_ids === null
           ? { coffeeAudienceBotIds: null }
           : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(socialSilence ? { socialSilence } : {}),
+        ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
     });
 }
@@ -11281,11 +12904,16 @@ function loadAllMessages(
       const storedToolPayload = parseStoredAssistantToolPayload(row.tool_payload);
       const coffeeAmbientAction =
         row.role === "assistant" ? storedToolPayload.coffeeAmbientAction : undefined;
+      const coffeeStageAction =
+        row.role === "assistant" ? storedToolPayload.coffeeStageAction : undefined;
       const coffeeUserAction =
         row.role === "user" ? storedToolPayload.coffeeUserAction : undefined;
+      const coffeeInterruption = storedToolPayload.coffeeInterruption;
       const coffeeReplayEvents = storedToolPayload.coffeeReplayEvents;
       const autoRecovery = storedToolPayload.autoRecovery;
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
+      const socialSilence = storedToolPayload.socialSilence;
+      const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
       return {
         id: row.id,
         role: row.role,
@@ -11304,13 +12932,17 @@ function loadAllMessages(
         botColor: row.bot_color ?? undefined,
         botGlyph: row.bot_glyph ?? undefined,
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
+        ...(coffeeStageAction ? { coffeeStageAction } : {}),
         ...(coffeeUserAction ? { coffeeUserAction } : {}),
+        ...(coffeeInterruption ? { coffeeInterruption } : {}),
         ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(row.coffee_audience_bot_ids === null
           ? { coffeeAudienceBotIds: null }
           : { coffeeAudienceBotIds: parseStoredBotGroupIds(row.coffee_audience_bot_ids) }),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
+        ...(socialSilence ? { socialSilence } : {}),
+        ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
     });
 }
@@ -11361,13 +12993,27 @@ export function getCoffeeConversationTranscript(
   });
 }
 
-export function coffeeMessagesVisibleInExport<T extends { role: string; content: string }>(
+export function coffeeMessagesVisibleInExport<
+  T extends {
+    role: string;
+    content: string;
+    socialSilence?: SocialSilenceMarkerV1;
+  },
+>(
   messages: readonly T[]
 ): T[] {
   return messages.filter(
     (message) =>
       !(message.role === "system" && message.content.trim().length === 0) &&
-      !(message.role === "assistant" && coffeeReplyIsPunctuationOnly(message.content))
+      !(
+        message.role === "assistant" &&
+        coffeeReplyIsPunctuationOnly(message.content) &&
+        !socialSilenceMessageIsMarkedV1({
+          content: message.content,
+          marker: message.socialSilence,
+          mode: "coffee",
+        })
+      )
   );
 }
 
@@ -11421,6 +13067,50 @@ function loadLatestCoffeeMessageId(
     return row.id;
   }
   return null;
+}
+
+function loadPendingCoffeeCrosstalkReclaim(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): CrosstalkReclaimPlanV1 | null {
+  const latest = db.prepare(
+    `SELECT role, content, tool_payload
+       FROM messages
+      WHERE conversation_id = ? AND user_id = ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1`,
+  ).get(conversationId, userId) as
+    | { role: string; content: string; tool_payload: string | null }
+    | undefined;
+  if (
+    latest?.role !== "assistant" ||
+    latest.content.trim() !== "..." ||
+    !latest.tool_payload
+  ) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(latest.tool_payload) as Record<string, unknown>;
+    const interruption =
+      payload.coffeeInterruption &&
+        typeof payload.coffeeInterruption === "object" &&
+        !Array.isArray(payload.coffeeInterruption)
+        ? payload.coffeeInterruption as Record<string, unknown>
+        : null;
+    if (
+      !interruption ||
+      interruption.kind !== "botInterruptsBot" ||
+      coffeeInterruptionFloorOutcome(
+          interruption.floorOutcome ?? interruption.reactionOutcome,
+        ) !== "reclaim"
+    ) {
+      return null;
+    }
+    return normalizeCrosstalkReclaimPlanV1(interruption.reclaim);
+  } catch {
+    return null;
+  }
 }
 
 export function coffeeLatestMessageIdChanged(
@@ -13885,6 +15575,10 @@ export async function createCoffeeConversation(
           model: llm?.prismDefaultLlmModel ?? null,
           group,
           sessionSettings,
+          groupEthos:
+            input.coffeeGroupId
+              ? loadCoffeeGroupRow(db, userId, input.coffeeGroupId)?.ethos ?? null
+              : null,
           presetLabel,
           memoryContext: starterMemoryContext,
           attendanceContext,
@@ -13977,6 +15671,163 @@ const coffeeGroupStarterTopicUpgradeFlights = new WeakMap<
   Map<string, Promise<string[]>>
 >();
 
+/**
+ * Immediate session-start topics for a saved Coffee group: prefer stored
+ * labels (including canned), then legacy per-bot maps, then deterministic
+ * padding. Personalized LLM refresh happens in the background.
+ */
+function resolveImmediateCoffeeGroupStarterTopics(
+  group: CoffeeGroup,
+  profiles: CoffeeBotProfile[]
+): string[] {
+  const stored = group.starterTopics ?? [];
+  if (stored.length > 0) {
+    return completeStoredCanonicalCoffeeGroupStarterTopics(
+      stored,
+      profiles,
+      group.coffeeSettings
+    );
+  }
+  const legacy = group.starterTopicsByBotId
+    ? canonicalCoffeeGroupTopicsFromLegacyMap(group.starterTopicsByBotId, profiles)
+    : [];
+  if (legacy.length > 0) {
+    return completeStoredCanonicalCoffeeGroupStarterTopics(
+      legacy,
+      profiles,
+      group.coffeeSettings
+    );
+  }
+  return completeCanonicalCoffeeGroupStarterTopics(
+    [],
+    profiles,
+    group.coffeeSettings
+  );
+}
+
+function coffeeGroupStarterTopicsNeedPersonalizedRefresh(
+  topics: readonly string[]
+): boolean {
+  return topics.length === 0 || coffeeGroupStarterTopicsLookCanned(topics);
+}
+
+/**
+ * Await in-flight background starter-topic upgrades for tests. Production
+ * session creation must never wait on this path.
+ */
+export async function awaitCoffeeGroupStarterTopicRefreshFlightsForTests(
+  db: DatabaseSync
+): Promise<void> {
+  const flights = coffeeGroupStarterTopicUpgradeFlights.get(db);
+  if (!flights || flights.size === 0) return;
+  await Promise.allSettled([...flights.values()]);
+}
+
+function scheduleCoffeeGroupStarterTopicRefresh(args: {
+  db: DatabaseSync;
+  userId: string;
+  groupId: string;
+  llm?: CoffeeAuxiliaryOptions | null;
+  expectedStarterTopicsRaw: string | null;
+  expectedRosterSignature: string;
+  expectedEthos: string;
+  expectedSettingsJson: string;
+}): void {
+  const {
+    db,
+    userId,
+    groupId,
+    llm,
+    expectedStarterTopicsRaw,
+    expectedRosterSignature,
+    expectedEthos,
+    expectedSettingsJson,
+  } = args;
+  let flights = coffeeGroupStarterTopicUpgradeFlights.get(db);
+  if (!flights) {
+    flights = new Map<string, Promise<string[]>>();
+    coffeeGroupStarterTopicUpgradeFlights.set(db, flights);
+  }
+  const flightKey = `${userId}:${groupId}`;
+  if (flights.has(flightKey)) return;
+
+  const flight = (async () => {
+    const currentRow = loadCoffeeGroupRow(db, userId, groupId);
+    if (!currentRow) return [];
+    const currentGroup = mapCoffeeGroupRow(db, currentRow);
+    const currentTopics = currentGroup.starterTopics ?? [];
+    if (!coffeeGroupStarterTopicsNeedPersonalizedRefresh(currentTopics)) {
+      return currentTopics;
+    }
+    const groupProfiles = attachCoffeeBotSemanticFacets(
+      db,
+      userId,
+      loadCoffeeGroupProfiles(db, userId, currentGroup.botGroupIds),
+      llm?.prismDefaultLlmModel,
+      llm ? coffeeAuxiliaryProvider(llm) : undefined
+    );
+    const { topics: generated, llmBacked } =
+      await inferCoffeeGroupStarterTopicsDetailed({
+        provider: coffeeAuxiliaryProvider(llm),
+        group: groupProfiles,
+        sessionSettings: currentGroup.coffeeSettings,
+        ethos: currentGroup.ethos,
+      });
+    if (!llmBacked) {
+      // Keep canned/deterministic labels for this session; retry next start.
+      return currentTopics.length > 0 ? currentTopics : generated;
+    }
+
+    // Re-check before persist so a slow refresh cannot overwrite later edits.
+    const latestRow = loadCoffeeGroupRow(db, userId, groupId);
+    if (!latestRow) return generated;
+    const latestGroup = mapCoffeeGroupRow(db, latestRow);
+    const latestTopics = latestGroup.starterTopics ?? [];
+    if (!coffeeGroupStarterTopicsNeedPersonalizedRefresh(latestTopics)) {
+      return latestTopics;
+    }
+    if (
+      coffeeGroupRosterSignature(latestGroup.coffeeSeatBotIds) !==
+        expectedRosterSignature ||
+      normalizeCoffeeGroupEthos(latestGroup.ethos) !== expectedEthos ||
+      JSON.stringify(latestGroup.coffeeSettings) !== expectedSettingsJson ||
+      latestRow.starter_topics !== expectedStarterTopicsRaw
+    ) {
+      return latestTopics.length > 0 ? latestTopics : generated;
+    }
+
+    const now = new Date().toISOString();
+    const result = db
+      .prepare(
+        `UPDATE coffee_groups
+            SET starter_topics = ?, updated_at = ?
+          WHERE id = ? AND user_id = ? AND starter_topics IS ?`
+      )
+      .run(
+        serializeCanonicalCoffeeGroupStarterTopics(generated),
+        now,
+        groupId,
+        userId,
+        expectedStarterTopicsRaw
+      );
+    if (Number(result.changes ?? 0) > 0) return generated;
+    const winningRow = loadCoffeeGroupRow(db, userId, groupId);
+    if (!winningRow) return generated;
+    const winningTopics = parseStoredCanonicalCoffeeGroupStarterTopics(
+      winningRow.starter_topics,
+      groupProfiles
+    );
+    return winningTopics.length > 0 ? winningTopics : generated;
+  })();
+
+  flights.set(flightKey, flight);
+  void flight.finally(() => {
+    if (flights.get(flightKey) === flight) {
+      flights.delete(flightKey);
+    }
+  });
+}
+
 async function ensureCanonicalCoffeeGroupStarterTopics(args: {
   db: DatabaseSync;
   userId: string;
@@ -13987,63 +15838,27 @@ async function ensureCanonicalCoffeeGroupStarterTopics(args: {
   const firstRow = loadCoffeeGroupRow(db, userId, groupId);
   if (!firstRow) throw new Error("Coffee group not found.");
   const firstGroup = mapCoffeeGroupRow(db, firstRow);
-  if ((firstGroup.starterTopics?.length ?? 0) > 0) {
-    return firstGroup.starterTopics!;
+  const firstTopics = firstGroup.starterTopics ?? [];
+  const profiles = loadCoffeeGroupProfiles(db, userId, firstGroup.botGroupIds);
+  // Authored LLM topics are stable; return them without background work.
+  if (
+    firstTopics.length > 0 &&
+    !coffeeGroupStarterTopicsLookCanned(firstTopics)
+  ) {
+    return firstTopics;
   }
-  let flights = coffeeGroupStarterTopicUpgradeFlights.get(db);
-  if (!flights) {
-    flights = new Map<string, Promise<string[]>>();
-    coffeeGroupStarterTopicUpgradeFlights.set(db, flights);
-  }
-  const flightKey = `${userId}:${groupId}`;
-  const active = flights.get(flightKey);
-  if (active) return active;
-  const flight = (async () => {
-    const currentRow = loadCoffeeGroupRow(db, userId, groupId);
-    if (!currentRow) throw new Error("Coffee group not found.");
-    const currentGroup = mapCoffeeGroupRow(db, currentRow);
-    if ((currentGroup.starterTopics?.length ?? 0) > 0) {
-      return currentGroup.starterTopics!;
-    }
-    const groupProfiles = attachCoffeeBotSemanticFacets(
-      db,
-      userId,
-      loadCoffeeGroupProfiles(db, userId, currentGroup.botGroupIds),
-      llm?.prismDefaultLlmModel,
-      llm ? coffeeAuxiliaryProvider(llm) : undefined
-    );
-    const generated = await inferCoffeeGroupStarterTopics({
-      provider: coffeeAuxiliaryProvider(llm),
-      group: groupProfiles,
-      sessionSettings: currentGroup.coffeeSettings,
-    });
-    const now = new Date().toISOString();
-    const result = db.prepare(
-      `UPDATE coffee_groups
-          SET starter_topics = ?, updated_at = ?
-        WHERE id = ? AND user_id = ? AND starter_topics IS ?`
-    ).run(
-      serializeCanonicalCoffeeGroupStarterTopics(generated),
-      now,
-      groupId,
-      userId,
-      currentRow.starter_topics
-    );
-    if (Number(result.changes ?? 0) > 0) return generated;
-    const winningRow = loadCoffeeGroupRow(db, userId, groupId);
-    if (!winningRow) throw new Error("Coffee group not found.");
-    const winningTopics = parseStoredCanonicalCoffeeGroupStarterTopics(
-      winningRow.starter_topics,
-      groupProfiles
-    );
-    return winningTopics.length > 0 ? winningTopics : generated;
-  })();
-  flights.set(flightKey, flight);
-  try {
-    return await flight;
-  } finally {
-    flights.delete(flightKey);
-  }
+  // Canned or missing topics: open the session immediately, then refresh.
+  scheduleCoffeeGroupStarterTopicRefresh({
+    db,
+    userId,
+    groupId,
+    llm,
+    expectedStarterTopicsRaw: firstRow.starter_topics,
+    expectedRosterSignature: coffeeGroupRosterSignature(firstGroup.coffeeSeatBotIds),
+    expectedEthos: normalizeCoffeeGroupEthos(firstGroup.ethos),
+    expectedSettingsJson: JSON.stringify(firstGroup.coffeeSettings),
+  });
+  return resolveImmediateCoffeeGroupStarterTopics(firstGroup, profiles);
 }
 
 export async function createCoffeeConversationFromGroup(
@@ -14243,7 +16058,9 @@ async function generateCoffeeBotReply(args: {
   playerInterruption?: CoffeePlayerInterruptionInput;
   userIsComposing?: boolean;
   directedSpeakerBotId?: string;
+  directPlayerObligation?: boolean;
   presentBotIds?: string[];
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
   playerDepartureEpilogue?: { turnIndex: number; totalTurns: number };
   staleGuard?: {
     expectedLatestMessageId: string | null;
@@ -14260,15 +16077,24 @@ async function generateCoffeeBotReply(args: {
     playerInterruption,
     userIsComposing = false,
     directedSpeakerBotId,
+    directPlayerObligation = false,
     presentBotIds,
+    crosstalkReclaim,
     playerDepartureEpilogue,
     staleGuard,
   } = args;
   settings.onPhase?.("routing", null);
   throwIfCoffeeTurnCancelled(settings.signal);
   const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  const coffeeGroupEthos =
+    row.coffee_group_id
+      ? normalizeCoffeeGroupEthos(
+          loadCoffeeGroupRow(db, userId, row.coffee_group_id)?.ethos,
+        )
+      : "";
   const turnGroup = coffeePresentGroupForTurn(group, presentBotIds, directedSpeakerBotId);
-  const coffeePowerPlan = resolveCoffeePowersForSession(db, userId, row.id);
+  let coffeePowerPlan: CoffeePowerPlanV1 | null =
+    resolveCoffeePowersForSession(db, userId, row.id);
   const routableTurnGroup = turnGroup.filter((bot) =>
     coffeePowerBotCanSpeak(coffeePowerPlan, bot.id)
   );
@@ -14304,6 +16130,11 @@ async function generateCoffeeBotReply(args: {
         })
       : null;
   let history = loadMessages(db, userId, row.id, historyLimit);
+  coffeePowerPlan = coffeePowerPlanWithIdentityMirrorBorrowingV1({
+    plan: coffeePowerPlan,
+    states: coffeeIdentityMirrorStatesFromHistory(history),
+    botNamesById: new Map(turnGroup.map((bot) => [bot.id, bot.name])),
+  });
   const latestUserAction = latestCoffeeUserActionPayload(history);
   const persistedSocialByBotId = loadCoffeeBotSocialState(
     db,
@@ -14363,6 +16194,11 @@ async function generateCoffeeBotReply(args: {
           userId,
           group.map((bot) => bot.id)
         );
+  const directionalIrritationEdges = loadCoffeeDirectionalIrritationEdges(
+    db,
+    userId,
+    row.id,
+  );
   let socialByBotId = initializeCoffeeSocialState(group, persistedSocialByBotId);
   if (
     Object.keys(persistedSocialByBotId).length === 0 &&
@@ -14520,8 +16356,14 @@ async function generateCoffeeBotReply(args: {
     routerReason = `Hard-of-hearing Power made ${requesterName}'s prior speaker repeat.`;
   } else if (explicitDirectedSpeaker) {
     pickedBotId = explicitDirectedSpeaker.id;
-    routerReason = `Director mode picked ${explicitDirectedSpeaker.name}.`;
-    routerDirective = "Start a fresh concrete beat tied to the latest table moment.";
+    routerReason =
+      crosstalkReclaim?.speakerBotId === explicitDirectedSpeaker.id
+        ? `Interrupted speaker ${explicitDirectedSpeaker.name} reclaimed the floor for one protected turn.`
+        : `Director mode picked ${explicitDirectedSpeaker.name}.`;
+    routerDirective =
+      crosstalkReclaim?.speakerBotId === explicitDirectedSpeaker.id
+        ? "Reclaim the floor with a new substantive line based only on the audience-heard fragment. Do not reconstruct or reveal the unheard suffix."
+        : "Start a fresh concrete beat tied to the latest table moment.";
   } else if (currentUserAddressedSpeaker) {
     pickedBotId = currentUserAddressedSpeaker.id;
     routerReason = `Followed the player's direct address to ${currentUserAddressedSpeaker.name}.`;
@@ -14554,6 +16396,7 @@ async function generateCoffeeBotReply(args: {
         sessionSettings,
         coffeePowerPlan,
         coffeeTopic: row.coffee_topic,
+        coffeeGroupEthos,
         pollSummary: latestPollSummary,
         activePollContext,
         coffeeTeams,
@@ -14831,6 +16674,73 @@ async function generateCoffeeBotReply(args: {
             : "none",
     };
   }
+  const socialSilenceExclusions: SocialSilenceExclusionV1[] = [];
+  if (turnKind !== "autonomous" || directPlayerObligation || interruptionEvent) {
+    socialSilenceExclusions.push("direct_player_obligation");
+  }
+  if (sessionKickoff) socialSilenceExclusions.push("kickoff");
+  if (activePoll) socialSilenceExclusions.push("poll");
+  if (crosstalkReclaim) socialSilenceExclusions.push("reclaim");
+  if (
+    playerDepartureEpilogue ||
+    coffeeDepartureOpportunityRequiresExit(departureOpportunity)
+  ) {
+    socialSilenceExclusions.push("departure");
+  }
+  if (
+    emptyCupGroupWrapRequired ||
+    coffeeSessionIsInWrapUpWindow(settings.sessionRemainingMs)
+  ) {
+    socialSilenceExclusions.push("required_wrap");
+  }
+  if (speakerUsesHardResponse || speakerMumblesForTurn) {
+    socialSilenceExclusions.push("power_silence");
+  }
+  const socialSilencePlan = planSocialSilenceV1({
+    mode: "coffee",
+    seed: `${row.id}:${speaker.id}:${history.length}:social-silence`,
+    chance: coffeeSocialSilenceChanceV1({
+      social: preTurnSocialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL,
+      tableEnergy: sessionSettings.tableEnergy,
+      crossTalk: sessionSettings.crossTalk,
+    }),
+    consecutiveSocialSilenceTurns:
+      consecutiveCoffeeSocialSilenceTurns(history),
+    exclusions: socialSilenceExclusions,
+  });
+  const socialSilenceMarker: SocialSilenceMarkerV1 | undefined =
+    socialSilencePlan.decision === "social_silence"
+      ? socialSilencePlan.marker
+      : undefined;
+  const stageActionExclusions: StageActionExclusionV1[] = [];
+  if (socialSilenceMarker) stageActionExclusions.push("social_silence");
+  if (activePoll) stageActionExclusions.push("poll");
+  if (interruptionEvent) stageActionExclusions.push("power_interruption");
+  if (sessionKickoff) stageActionExclusions.push("kickoff");
+  if (
+    speakerUsesHardResponse ||
+    speakerIsMutedForTurn ||
+    speakerMumblesForTurn ||
+    speakerRepeatsForHearingPower ||
+    speakerEchoesForTurn
+  ) {
+    stageActionExclusions.push("power_silence");
+  }
+  if (crosstalkReclaim) stageActionExclusions.push("crosstalk_reclaim");
+  if (coffeeDepartureOpportunityRequiresExit(departureOpportunity)) {
+    stageActionExclusions.push("departure");
+  }
+  if (emptyCupGroupWrapRequired || coffeeSessionIsInWrapUpWindow(settings.sessionRemainingMs)) {
+    stageActionExclusions.push("required_wrap");
+  }
+  const stageActionPlan: StageActionPlanV1 = planStageActionV1({
+    lane: "coffee",
+    seed: `${row.id}:${speaker.id}:${history.length}:stage-action`,
+    exclusions: stageActionExclusions,
+  });
+  const forceSocialSilencePayoff =
+    socialSilencePlan.decision === "substantive" &&
+    socialSilencePlan.forceSubstantive;
   const offlineOnlyTable = group.some((bot) => !bot.onlineEnabled);
   const responsePreferredProvider =
     settings.responseMode === "local" ||
@@ -14958,14 +16868,110 @@ async function generateCoffeeBotReply(args: {
           !tableFocus.startsWith("The user directly addressed")
         ? "The latest participant visibly spoke, but you heard no words. Continue from visible action only; do not infer or answer their hidden speech."
       : tableFocus;
-  const activeIdentityMirrorState = speakerEternallyIntroduces
-    ? null
-    : coffeeIdentityMirrorStatesFromHistory(speakerVisibleHistory).get(speaker.id) ??
-      null;
+  const addressedInsultTargetName =
+    turnKind === "user"
+      ? settings.userDisplayName?.trim() || "you"
+      : (speakerPromptGroup.find(
+          (candidate) => candidate.id === priorAssistantSpeakerBotId,
+        )?.name ?? "the table");
+  const activeIdentityMirrorState =
+    coffeeIdentityMirrorStatesFromHistory(speakerVisibleHistory).get(speaker.id) ??
+    null;
   const identityMirrorJustChanged = Boolean(
     activeIdentityMirrorState &&
       activeIdentityMirrorState.sourceMessageId === latestAssistantBeforeTurn?.id,
   );
+  const speakerHasShapeshiftPower = Boolean(
+    coffeePowerPlan?.bots[speaker.id]?.effects.some(
+      (effect) => effect.type === "identity_shapeshift",
+    ),
+  );
+  const stickyShapeshiftState = coffeeIdentityShapeshiftStatesFromHistory(
+    speakerVisibleHistory,
+  ).get(speaker.id) ?? null;
+  const shapeshiftReshuffleToken = speakerEternallyIntroduces
+    ? `${speakerVisibleHistory.length}:${latestAssistantBeforeTurn?.id ?? "kickoff"}`
+    : null;
+  let activeIdentityShapeshiftState: BotIdentityShapeshiftStateV1 | null = null;
+  let identityShapeshiftJustChanged = false;
+  let pendingIdentityShapeshiftState: BotIdentityShapeshiftStateV1 | null = null;
+  if (speakerHasShapeshiftPower) {
+    const reuseSticky =
+      !speakerEternallyIntroduces && stickyShapeshiftState !== null;
+    if (reuseSticky) {
+      activeIdentityShapeshiftState = stickyShapeshiftState;
+    } else {
+      const candidates = resolveIdentityShapeshiftCandidatesV1({
+        db,
+        userId,
+        holderBotId: speaker.id,
+      });
+      const candidate = pickIdentityShapeshiftCandidateV1({
+        candidates,
+        seed: buildIdentityShapeshiftSeedV1({
+          conversationId: row.id,
+          holderBotId: speaker.id,
+          reshuffleToken: shapeshiftReshuffleToken,
+        }),
+      });
+      if (candidate) {
+        const nextState = createIdentityShapeshiftStateFromCandidateV1({
+          surface: "coffee",
+          holderBotId: speaker.id,
+          holderBotName: speaker.name,
+          candidate,
+          sourceMessageId: `shapeshift-pending:${row.id}:${speaker.id}:${speakerVisibleHistory.length}`,
+          occurredAt: new Date().toISOString(),
+        });
+        if (
+          botIdentityShapeshiftTargetChangesV1(stickyShapeshiftState, candidate.id) ||
+          speakerEternallyIntroduces ||
+          !stickyShapeshiftState
+        ) {
+          activeIdentityShapeshiftState = nextState;
+          identityShapeshiftJustChanged = true;
+          pendingIdentityShapeshiftState = nextState;
+        } else {
+          activeIdentityShapeshiftState = stickyShapeshiftState;
+        }
+      }
+    }
+  }
+  const speakerHasFalseNamePower = Boolean(
+    coffeePowerPlan?.bots[speaker.id]?.effects.some(
+      (effect) => effect.type === "false_name",
+    ),
+  );
+  const stickyFalseNameState = coffeeFalseNameStatesFromHistory(
+    speakerVisibleHistory,
+  ).get(speaker.id) ?? null;
+  const falseNameReshuffleToken = speakerEternallyIntroduces
+    ? `${speakerVisibleHistory.length}:${latestAssistantBeforeTurn?.id ?? "kickoff"}`
+    : null;
+  let activeFalseNameState: BotFalseNameStateV1 | null = null;
+  let falseNameJustChanged = false;
+  let pendingFalseNameState: BotFalseNameStateV1 | null = null;
+  if (speakerHasFalseNamePower) {
+    const falseNameResolution = resolveBotFalseNameStateV1({
+      surface: "coffee",
+      conversationId: row.id,
+      holderBotId: speaker.id,
+      holderBotName: speaker.name,
+      sticky: speakerEternallyIntroduces ? null : stickyFalseNameState,
+      reshuffleToken: falseNameReshuffleToken,
+      sourceMessageId: `false-name-pending:${row.id}:${speaker.id}:${speakerVisibleHistory.length}`,
+      occurredAt: new Date().toISOString(),
+    });
+    activeFalseNameState = falseNameResolution.state;
+    falseNameJustChanged = falseNameResolution.justChanged;
+    pendingFalseNameState = falseNameResolution.pending;
+  }
+  /** Identity mirror overrides shapeshift presentation while active. */
+  const effectiveBorrowedIdentityState = activeIdentityMirrorState
+    ? { kind: "mirror" as const, state: activeIdentityMirrorState }
+    : activeIdentityShapeshiftState
+      ? { kind: "shapeshift" as const, state: activeIdentityShapeshiftState }
+      : null;
   const speakerPerceptionPrompt = turnGroup.flatMap((peer) => {
     if (peer.id === speaker.id) return [];
     const visible = coffeePowerBotVisibleTo(coffeePowerPlan, peer.id, speaker.id);
@@ -14995,6 +17001,7 @@ async function generateCoffeeBotReply(args: {
     firstContactIntro: turnKind === "user" && !speakerHasSpokenInSession,
     sessionSettings,
     coffeeTopic: speakerEternallyIntroduces ? null : row.coffee_topic,
+    coffeeGroupEthos: speakerEternallyIntroduces ? null : coffeeGroupEthos,
     pollSummary:
       speakerEternallyIntroduces || speakerHasHiddenPeers ? null : latestPollSummary,
     activePollContext: speakerEternallyIntroduces ? null : activePollContext,
@@ -15021,6 +17028,15 @@ async function generateCoffeeBotReply(args: {
       : refillRequestOpportunity,
     departureOpportunity: speakerEternallyIntroduces ? null : departureOpportunity,
     interruptionEvent: speakerEternallyIntroduces ? null : interruptionEvent,
+    irritationPromptLines: speakerEternallyIntroduces
+      ? null
+      : formatDirectionalIrritationPromptLines({
+          speakerBotId: speaker.id,
+          edges: directionalIrritationEdges,
+          botNamesById: Object.fromEntries(
+            group.map((bot) => [bot.id, bot.name] as const),
+          ),
+        }),
     peerAddressByBotId: speakerEternallyIntroduces ? new Map() : peerAddressByBotId,
     coffeePowersPrompt: [
       coffeePowersPromptForSpeaker(
@@ -15061,19 +17077,60 @@ async function generateCoffeeBotReply(args: {
         group: speakerPromptGroup,
       }) ?? "" : "",
     ].filter(Boolean).join("\n"),
-    identityMirrorPrompt: speakerEternallyIntroduces
-      ? null
-      : coffeeIdentityMirrorPromptForSpeaker({
+    identityMirrorPrompt: coffeeIdentityMirrorPromptForSpeaker({
+      history: speakerVisibleHistory,
+      speaker,
+    }),
+    identityMirrorState: activeIdentityMirrorState,
+    identityShapeshiftPrompt: coffeeIdentityShapeshiftPromptForSpeaker({
+      history: speakerVisibleHistory,
+      speaker,
+      activeHolderState: activeIdentityShapeshiftState,
+      identityJustChanged: identityShapeshiftJustChanged,
+    }),
+    identityShapeshiftState:
+      effectiveBorrowedIdentityState?.kind === "shapeshift"
+        ? activeIdentityShapeshiftState
+        : null,
+    falseNamePrompt: speakerHasFalseNamePower
+      ? coffeeFalseNamePromptForSpeaker({
           history: speakerVisibleHistory,
           speaker,
-        }),
-    identityMirrorState: activeIdentityMirrorState,
+          activeHolderState: activeFalseNameState,
+        })
+      : null,
     coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
     coffeeVesselMode: coffeePowerVesselMode(coffeePowerPlan, speaker.id),
+    stageActionMode: stageActionPlan.decision,
   });
+  if (crosstalkReclaim) {
+    speakerMessages = [
+      ...speakerMessages,
+      {
+        role: "system",
+        content: [
+          "Floor reclaim: the interrupting bot has finished its short cut-in, and you immediately take your turn back.",
+          `The audience heard only this fragment from you: "${crosstalkReclaim.heardFragment}"`,
+          "Write one new, substantive in-character utterance based only on that heard fragment and the public transcript. You may briefly refuse the interruption, then continue the thought naturally.",
+          "Do not quote, reconstruct, or reveal any unheard suffix from the interrupted draft. Do not answer with silence or only punctuation.",
+        ].join("\n"),
+      },
+    ];
+  }
+  if (forceSocialSilencePayoff) {
+    speakerMessages = [
+      ...speakerMessages,
+      {
+        role: "system",
+        content:
+          "The table has already held four consecutive ordinary silent beats. Provide the substantive conversational payoff now. Do not answer with an ellipsis, silence, or only a stage direction.",
+      },
+    ];
+  }
   if (
     !speakerUsesHardResponse &&
     !cannedInterruptionReaction &&
+    !socialSilenceMarker &&
     effectiveProvider === "local" &&
     settings.experimentalAllModelEffortEnabled === true &&
     effectiveReasoningEffort &&
@@ -15111,7 +17168,8 @@ async function generateCoffeeBotReply(args: {
   const primarySpeakerModel = speakerModel ?? defaultModelIdForProvider(effectiveProvider);
   const resolvedAutoChain =
     !speakerRepeatsForHearingPower && !speakerEchoesForTurn &&
-    settings.responseMode === "auto" && !offlineOnlyTable && !cannedInterruptionReaction
+    settings.responseMode === "auto" && !offlineOnlyTable &&
+    !cannedInterruptionReaction && !socialSilenceMarker
       ? autoFallbackResolvedChain(
           { provider: effectiveProvider, model: primarySpeakerModel },
           settings.autoFallbackChain ?? null
@@ -15119,7 +17177,8 @@ async function generateCoffeeBotReply(args: {
       : null;
   const autoRequested =
     !speakerRepeatsForHearingPower && !speakerEchoesForTurn &&
-    settings.responseMode === "auto" && !offlineOnlyTable && !cannedInterruptionReaction;
+    settings.responseMode === "auto" && !offlineOnlyTable &&
+    !cannedInterruptionReaction && !socialSilenceMarker;
   if (autoRequested && !resolvedAutoChain) {
     throw new AutoFallbackExhaustedError([]);
   }
@@ -15135,7 +17194,9 @@ async function generateCoffeeBotReply(args: {
     mode: "coffee",
     surface: "coffee",
   });
-  if (speakerRepeatsForHearingPower) {
+  if (socialSilenceMarker) {
+    speakerReply = "...";
+  } else if (speakerRepeatsForHearingPower) {
     speakerReply = hearingRepeatDirective?.repeatedContent ?? "";
   } else if (speakerEchoesForTurn) {
     speakerReply = applyBotPowerEchoResponseV1(speakerEchoSource);
@@ -15263,6 +17324,7 @@ async function generateCoffeeBotReply(args: {
     if (
       !speakerUsesHardResponse &&
       !cannedInterruptionReaction &&
+      !socialSilenceMarker &&
       typeof speakerReply === "string" &&
       coffeeReplyIsPunctuationOnly(stripCoffeeSpeakerPrefix(speakerReply, speaker.name))
     ) {
@@ -15300,8 +17362,9 @@ async function generateCoffeeBotReply(args: {
   const speakerReplyWasUnfinished =
     typeof speakerReplyRepaired === "string" &&
     coffeeReplyLooksUnfinished(stripCoffeeSpeakerPrefix(speakerReplyRepaired, speaker.name));
-  let replyText =
-    typeof speakerReplyRepaired === "string"
+  let replyText = socialSilenceMarker
+    ? "..."
+    : typeof speakerReplyRepaired === "string"
       ? sanitizeCoffeeTableReply(
           speakerReplyRepaired,
           speaker.name,
@@ -15324,6 +17387,7 @@ async function generateCoffeeBotReply(args: {
   }
   if (
     !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
     !autoAttemptAccepted &&
     !punctuationOnlyRetryAttempted &&
     !replyText &&
@@ -15342,19 +17406,12 @@ async function generateCoffeeBotReply(args: {
       // Ignore repair failures and fall through to the emergency fallback.
     }
   }
-  if (!speakerUsesHardResponse && !autoAttemptAccepted && !replyText) {
-    replyText = buildCoffeeEmergencyFallbackReply({
-      tableFocus: speakerTableFocus,
-      topic: row.coffee_topic,
-      speaker,
-      conversationId: row.id,
-      historyLength: history.length,
-      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
-      maxChars: replyCaps.tableReplyMaxChars,
-      activePoll,
-    });
-  }
-  if (!speakerUsesHardResponse && !autoAttemptAccepted && (coffeeReplyLooksLikePromptLeak(replyText) || coffeeReplyIsLowValueTableLine(replyText))) {
+  if (
+    !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
+    !autoAttemptAccepted &&
+    !replyText
+  ) {
     replyText = buildCoffeeEmergencyFallbackReply({
       tableFocus: speakerTableFocus,
       topic: row.coffee_topic,
@@ -15368,6 +17425,25 @@ async function generateCoffeeBotReply(args: {
   }
   if (
     !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
+    !autoAttemptAccepted &&
+    (coffeeReplyLooksLikePromptLeak(replyText) ||
+      coffeeReplyIsLowValueTableLine(replyText))
+  ) {
+    replyText = buildCoffeeEmergencyFallbackReply({
+      tableFocus: speakerTableFocus,
+      topic: row.coffee_topic,
+      speaker,
+      conversationId: row.id,
+      historyLength: history.length,
+      avoidTexts: recentCoffeeAssistantTexts(speakerVisibleHistory),
+      maxChars: replyCaps.tableReplyMaxChars,
+      activePoll,
+    });
+  }
+  if (
+    !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
     !autoAttemptAccepted &&
     replyText &&
     (coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
@@ -15389,6 +17465,7 @@ async function generateCoffeeBotReply(args: {
   }
   if (
     !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
     !autoAttemptAccepted &&
     (!replyText ||
     coffeeReplyNeedsRepeatRepair(replyText, speakerVisibleHistory) ||
@@ -15407,6 +17484,7 @@ async function generateCoffeeBotReply(args: {
   }
   if (
     !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
     !autoAttemptAccepted &&
     (!replyText ||
     coffeeReplyLooksLikePromptLeak(replyText) ||
@@ -15423,9 +17501,55 @@ async function generateCoffeeBotReply(args: {
   );
   const deterministicTopicExemption =
     speakerUsesHardResponse ||
+    Boolean(socialSilenceMarker) ||
     Boolean(cannedInterruptionReaction) ||
     speakerRepeatsForHearingPower ||
     speakerEchoesForTurn;
+  const directPersonalAnswerRequiredForReply =
+    !deterministicTopicExemption &&
+    coffeeTopicRequiresDirectPersonalAnswer(row.coffee_topic) &&
+    !coffeeSpeakerAlreadyGaveDirectPersonalAnswer({
+      history: speakerVisibleHistory,
+      speaker,
+    });
+  const replyNeedsDirectPersonalAnswer = (candidate: string): boolean =>
+    directPersonalAnswerRequiredForReply &&
+    !coffeeReplyGivesDirectPersonalAnswer(candidate);
+  if (replyText && replyNeedsDirectPersonalAnswer(replyText)) {
+    const topic = row.coffee_topic?.trim() ?? "";
+    try {
+      const retry = await speakerProvider.generateResponse(
+        [
+          ...speakerMessages,
+          {
+            role: "system",
+            content: `The topic requires your personal answer: "${topic}". Retry once. Your first sentence must directly name one concrete answer in first person, using \`My answer is: ...\` or \`I ...\`. Explain only after that sentence.`,
+          },
+        ],
+        { ...speakerOptions, usagePurpose: "coffee_turn" },
+      );
+      const repairedRetry = repairBotMentionBrackets(retry, peersForRepair);
+      const sanitizedRetry = sanitizeCoffeeTableReply(
+        repairedRetry,
+        speaker.name,
+        replyCaps.tableReplyMaxChars,
+        knownCoffeeSpeakerNames,
+      );
+      if (
+        sanitizedRetry &&
+        !coffeeReplyLooksLikePromptLeak(sanitizedRetry) &&
+        !coffeeReplyIsLowValueTableLine(sanitizedRetry) &&
+        !replyNeedsDirectPersonalAnswer(sanitizedRetry)
+      ) {
+        replyText = sanitizedRetry;
+      }
+    } catch (error) {
+      if (settings.signal?.aborted) throw error;
+    }
+    if (replyNeedsDirectPersonalAnswer(replyText)) {
+      replyText = "My answer is: I refuse to name one.";
+    }
+  }
   const replyNeedsTopicAnchor = (candidate: string): boolean =>
     coffeeReplyNeedsTopicAnchor({
       coffeeTopic: row.coffee_topic,
@@ -15534,7 +17658,7 @@ async function generateCoffeeBotReply(args: {
       groupIds: group.map((bot) => bot.id),
     });
   }
-  if (!speakerUsesHardResponse) {
+  if (!speakerUsesHardResponse && !socialSilenceMarker) {
     replyText = maybeInjectAutonomousPeerAddress({
       replyText,
       turnKind,
@@ -15552,7 +17676,7 @@ async function generateCoffeeBotReply(args: {
         )
       : cannedInterruptionReaction.text;
   }
-  if (!speakerUsesHardResponse) {
+  if (!speakerUsesHardResponse && !socialSilenceMarker) {
     const requiredBeat =
       Boolean(cannedInterruptionReaction) ||
       coffeeDepartureOpportunityRequiresExit(departureOpportunity) ||
@@ -15579,18 +17703,76 @@ async function generateCoffeeBotReply(args: {
       : speakerEchoesForTurn
         ? applyBotPowerEchoResponseV1(speakerEchoSource)
         : replyText;
-  if (activeIdentityMirrorState && !speakerUsesHardResponse) {
+  if (
+    activeIdentityMirrorState &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn &&
+    !socialSilenceMarker
+  ) {
     replyText = clampCoffeeTableReplyText(
       applyBotIdentityMirrorResponseV1(
         replyText,
         activeIdentityMirrorState,
         identityMirrorJustChanged,
+        { believedSelfName: activeFalseNameState?.believedName },
+      ),
+      replyCaps.tableReplyMaxChars,
+    );
+  } else if (
+    effectiveBorrowedIdentityState?.kind === "shapeshift" &&
+    activeIdentityShapeshiftState &&
+    !speakerUsesHardResponse &&
+    !socialSilenceMarker
+  ) {
+    replyText = clampCoffeeTableReplyText(
+      applyBotIdentityShapeshiftResponseV1(
+        replyText,
+        activeIdentityShapeshiftState,
+        identityShapeshiftJustChanged,
+      ),
+      replyCaps.tableReplyMaxChars,
+    );
+  }
+  if (
+    activeFalseNameState &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn &&
+    !socialSilenceMarker
+  ) {
+    replyText = clampCoffeeTableReplyText(
+      rewriteBotFalseNameResponseV1(
+        replyText,
+        activeFalseNameState,
+        falseNameJustChanged,
+        {
+          replacedSelfNames: activeIdentityMirrorState
+            ? [activeIdentityMirrorState.targetBotName]
+            : [],
+        },
+      ),
+      replyCaps.tableReplyMaxChars,
+    );
+  }
+  if (
+    botPowerRequiresAddressedInsultFromEffectsV1(
+      coffeePowerPlan?.bots[speaker.id]?.effects,
+    ) &&
+    !speakerUsesHardResponse &&
+    !socialSilenceMarker
+  ) {
+    replyText = clampCoffeeTableReplyText(
+      applyBotPowerAddressedInsultV1(
+        replyText,
+        addressedInsultTargetName,
+        `${row.id}:${speaker.id}:${history.length}`,
       ),
       replyCaps.tableReplyMaxChars,
     );
   }
   const identityMirrorAddressSourceText = replyText;
-  if (!speakerUsesHardResponse) {
+  if (!speakerUsesHardResponse && !socialSilenceMarker) {
     replyText = autoTagPeerMentionsInCoffeeReply(
       replyText,
       speaker,
@@ -15605,7 +17787,19 @@ async function generateCoffeeBotReply(args: {
   ) {
     replyText = applyBotPowerMumbledResponseV1(replyText);
   }
-  const relationshipSignals = speakerUsesHardResponse
+  // Power and exact-response paths may replace the sanitized model draft.
+  // Speech-copy is deliberately byte-for-byte; the ordinary role/action gate
+  // trims surrounding whitespace and would weaken that Power's core promise.
+  // Apply the gate only to responses whose semantics allow normalization.
+  replyText = speakerEchoesForTurn
+    ? applyBotPowerEchoResponseV1(speakerEchoSource)
+    : normalizeCoffeeVisibleActionFormatting(
+        stripCoffeeChatRoleFraming(replyText),
+        speaker.name,
+        knownCoffeeSpeakerNames,
+      );
+  if (!replyText) replyText = "...";
+  const relationshipSignals = speakerUsesHardResponse || socialSilenceMarker
     ? []
     : extractCoffeeRelationshipSignals({
         speaker,
@@ -15626,14 +17820,15 @@ async function generateCoffeeBotReply(args: {
     speakerBotId: speaker.id,
     signals: relationshipSignals,
   });
-  if (!speakerIsMutedForTurn) {
+  if (!speakerIsMutedForTurn && !socialSilenceMarker) {
     nextSocialByBotId = applyCoffeePowerAfterSpeech({
       plan: coffeePowerPlan,
       speakerBotId: speaker.id,
       socialByBotId: nextSocialByBotId,
     });
   }
-  const moodBoostRecipientBotIds = !speakerIsMutedForTurn
+  const moodBoostRecipientBotIds =
+    !speakerIsMutedForTurn && !socialSilenceMarker
     ? resolveCoffeeMoodBoostRecipientIdsV1({
         line: replyText,
         speakerBotId: speaker.id,
@@ -15647,7 +17842,7 @@ async function generateCoffeeBotReply(args: {
         event.kind === "powerMoodBoost",
     ),
   );
-  const moodBoostOutcome = !speakerIsMutedForTurn
+  const moodBoostOutcome = !speakerIsMutedForTurn && !socialSilenceMarker
     ? applyCoffeePowerMoodBoostAfterSpeech({
         plan: coffeePowerPlan,
         speakerBotId: speaker.id,
@@ -15661,7 +17856,8 @@ async function generateCoffeeBotReply(args: {
       })
     : { socialByBotId: nextSocialByBotId, events: [] };
   nextSocialByBotId = moodBoostOutcome.socialByBotId;
-  const moodDrainHolderBotIds = !speakerIsMutedForTurn
+  const moodDrainHolderBotIds =
+    !speakerIsMutedForTurn && !socialSilenceMarker
     ? resolveCoffeeMoodDrainHolderIdsV1({
         line: identityMirrorAddressSourceText,
         speakerBotId: speaker.id,
@@ -15717,15 +17913,16 @@ async function generateCoffeeBotReply(args: {
     speakerBotId: speaker.id,
     seatedBotIds: new Set(turnGroup.map((bot) => bot.id)),
   });
-  const identityMirrorAddressedBotId =
-    resolveCoffeeIdentityMirrorDirectAddresseeV1({
-      line: identityMirrorAddressSourceText,
-      speakerBotId: speaker.id,
-      seatedBots: turnGroup,
-      peerAddressByBotId,
-      speakerMuted: speakerIsMutedForTurn,
-      speakerMumbles: speakerMumblesForTurn,
-    });
+  const identityMirrorAddressedBotId = socialSilenceMarker
+    ? null
+    : resolveCoffeeIdentityMirrorDirectAddresseeV1({
+        line: identityMirrorAddressSourceText,
+        speakerBotId: speaker.id,
+        seatedBots: turnGroup,
+        peerAddressByBotId,
+        speakerMuted: speakerIsMutedForTurn,
+        speakerMumbles: speakerMumblesForTurn,
+      });
   const identityMirrorHolder = identityMirrorAddressedBotId
     ? turnGroup.find(
         (bot) =>
@@ -15807,23 +18004,36 @@ async function generateCoffeeBotReply(args: {
   const replayDepartureSeatIndex =
     departurePersistence?.seatIndex ??
     (playerDepartureEpilogue ? activeSeatBotIds.indexOf(speaker.id) : -1);
-  const coffeeAmbientAction = buildScriptedCoffeeAmbientAction({
-    db,
-    userId,
-    conversationId: row.id,
-    speaker,
-    replyText,
-    historyLength: history.length,
-    sessionSettings,
-    sessionRemainingMs: settings.sessionRemainingMs,
-    durationMinutes: row.coffee_duration_minutes,
-    coffeeCupSeed,
-    activePoll,
-    interruptionEvent,
-    departurePersisted: departurePersistence !== null,
-    coffeeCupRateMultiplier: coffeePowerCupRateMultiplier(coffeePowerPlan, speaker.id),
-    actionBias: coffeePowerActionBias(coffeePowerPlan, speaker.id),
-  });
+  const coffeeCupRateMultiplier = coffeePowerCupRateMultiplier(
+    coffeePowerPlan,
+    speaker.id,
+  );
+  const coffeeCupBaseProgress =
+    coffeePowerVesselMode(coffeePowerPlan, speaker.id) === "none" ||
+    coffeeCupRateMultiplier === 0
+      ? null
+      : coffeeCupProgressFromSessionTiming({
+          sessionRemainingMs: settings.sessionRemainingMs,
+          durationMinutes: row.coffee_duration_minutes,
+        });
+  const coffeeCupProgress =
+    coffeeCupBaseProgress === null
+      ? null
+      : coffeeCupProgressAfterTopOff({
+          progress: coffeeCupPacedProgress(
+            coffeeCupBaseProgress,
+            coffeeCupSeed,
+            row.coffee_duration_minutes,
+            coffeeCupRateMultiplier,
+          ),
+          topOff: cupTopOffsByBotId[speaker.id] ?? null,
+          nowMs: Date.now(),
+          durationMinutes: row.coffee_duration_minutes,
+          seed: coffeeCupSeed,
+        });
+  const allowCupStageActions =
+    coffeeCupProgress !== null &&
+    coffeeCupProgress < COFFEE_AMBIENT_EMPTY_PROGRESS;
   const coffeeDebugTurnSnapshot: CoffeeDebugTurnSnapshotPayload = {
     v: 1,
     name: "coffeeDebugTurnSnapshot",
@@ -15837,16 +18047,11 @@ async function generateCoffeeBotReply(args: {
     speakerBotId: speaker.id,
     createdAt: assistantNow,
   };
-  const coffeeReplayMoodEvents: CoffeeReplayEventPayload[] = Object.entries(
-    sanitizeCoffeeSocialStateMap(nextSocialByBotId)
-  ).map(([botId, social]) => ({
-    v: 1,
-    name: "coffeeReplayEvent",
-    kind: "mood",
-    botId,
+  const coffeeReplayMoodEvents = buildCoffeeReplayMoodEvents({
+    previousByBotId: preTurnSocialByBotId,
+    nextByBotId: nextSocialByBotId,
     occurredAt: assistantNow,
-    social,
-  }));
+  });
   const perceptionOverlapEvent: CoffeeReplayEventPayload | null =
     turnKind === "autonomous" &&
     latestAssistantBeforeTurn?.role === "assistant" &&
@@ -15902,6 +18107,7 @@ async function generateCoffeeBotReply(args: {
         eligible:
           turnKind === "autonomous" &&
           !speakerIsMutedForTurn &&
+          !socialSilenceMarker &&
           !sessionKickoff &&
           turnGroup.length === group.length &&
           activePoll === null &&
@@ -15914,6 +18120,56 @@ async function generateCoffeeBotReply(args: {
         previousAudibleListenerBotId: lastCoffeeAudibleListenerBotId(history),
       })
     : null;
+  const stageActionMoodHint: StageActionMoodHintV1 = derivePrismMoodKey(
+    coffeeSocialSnapshotToPrismMoodState(
+      nextSocialByBotId[speaker.id] ?? preTurnSocialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL,
+    ),
+  );
+  const resolvedStageAction = resolveFinalStageActionV1({
+    plan: stageActionPlan,
+    lane: "coffee",
+    replyText,
+    recentActions: loadRecentCoffeeAmbientActionTexts({
+      db,
+      userId,
+      conversationId: row.id,
+      botId: speaker.id,
+    }),
+    participantNames: group.map((bot) => bot.name),
+    userDisplayName: settings.userDisplayName,
+    moodHint: stageActionMoodHint,
+    powerAction: coffeePowerActionBias(coffeePowerPlan, speaker.id),
+    postGenerationExclusions: [
+      ...(departurePersistence ? ["departure" as const] : []),
+      ...(listenerReaction ? ["listener_reaction" as const] : []),
+    ],
+    allowCupActions: allowCupStageActions,
+  });
+  const canStoreActionOnlyReply = userActionOnly;
+  const coffeeStageAction =
+    resolvedStageAction.action &&
+    (resolvedStageAction.spokenText || canStoreActionOnlyReply)
+      ? coffeeStageActionFromStageAction(resolvedStageAction.action)
+      : undefined;
+  if (coffeeStageAction) {
+    replyText = resolvedStageAction.spokenText;
+  }
+  const coffeeAmbientAction: CoffeeAmbientActionPayload | undefined =
+    coffeeStageAction &&
+    (coffeeStageAction.source === "director" || coffeeStageAction.source === "power")
+      ? {
+          v: 1,
+          name: "coffeeAmbientAction",
+          source: "scripted",
+          category:
+            coffeeStageAction.category === "cup"
+              ? "cup"
+              : coffeeStageAction.category === "power"
+                ? "power"
+                : "gesture",
+          action: coffeeStageAction.action,
+        }
+      : undefined;
   const identityMirrorReplayEvents: CoffeeReplayEventPayload[] = identityMirrorState
     ? [
         {
@@ -15926,11 +18182,117 @@ async function generateCoffeeBotReply(args: {
         },
       ]
     : [];
+  const identityShapeshiftReplayEvents: CoffeeReplayEventPayload[] = (() => {
+    if (!pendingIdentityShapeshiftState) return [];
+    const state = createIdentityShapeshiftStateFromCandidateV1({
+      surface: "coffee",
+      holderBotId: pendingIdentityShapeshiftState.holderBotId,
+      holderBotName: pendingIdentityShapeshiftState.holderBotName,
+      candidate: {
+        id: pendingIdentityShapeshiftState.targetBotId,
+        name: pendingIdentityShapeshiftState.targetBotName,
+        source: pendingIdentityShapeshiftState.targetSource,
+        personaPrompt: pendingIdentityShapeshiftState.targetPersonaPrompt,
+        face: pendingIdentityShapeshiftState.targetFace,
+        avatarDetails: pendingIdentityShapeshiftState.targetAvatarDetails ?? null,
+        voice: pendingIdentityShapeshiftState.targetVoice,
+      },
+      sourceMessageId: assistantMessageId,
+      occurredAt: assistantNow,
+    });
+    return [
+      {
+        v: 1,
+        name: "coffeeReplayEvent" as const,
+        kind: "identityShapeshift" as const,
+        botId: state.holderBotId,
+        occurredAt: state.occurredAt,
+        state,
+      },
+    ];
+  })();
+  const falseNameReplayEvents: CoffeeReplayEventPayload[] = (() => {
+    if (!pendingFalseNameState) return [];
+    const state = createBotFalseNameStateV1({
+      surface: "coffee",
+      holderBotId: pendingFalseNameState.holderBotId,
+      holderBotName: pendingFalseNameState.holderBotName,
+      believedName: pendingFalseNameState.believedName,
+      sourceMessageId: assistantMessageId,
+      occurredAt: assistantNow,
+    });
+    return [
+      {
+        v: 1,
+        name: "coffeeReplayEvent" as const,
+        kind: "falseName" as const,
+        botId: state.holderBotId,
+        occurredAt: state.occurredAt,
+        state,
+      },
+    ];
+  })();
+  const directionalIrritationReplayEvents: CoffeeReplayEventPayload[] = [];
+  const hadBotToBotInterruptionThisTurn =
+    interruptionEvent?.kind === "botInterruptsBot";
+  const replyIsSubstantiveCleanTurn =
+    !hadBotToBotInterruptionThisTurn &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    !botPowerResponseIsSilentV1(replyText) &&
+    replyText.trim() !== "..." &&
+    replyText.trim().length > 0;
+  if (replyIsSubstantiveCleanTurn) {
+    const appliedIds = loadCoffeeDirectionalIrritationAppliedIds(
+      db,
+      userId,
+      row.id,
+    );
+    const decay = applyDirectionalIrritationCleanTurnDecay({
+      edges: directionalIrritationEdges,
+      appliedTransitionIds: appliedIds,
+      sessionId: row.id,
+      speakerBotId: speaker.id,
+      causeId: assistantMessageId,
+      occurredAt: assistantNow,
+    });
+    if (decay.transitions.length > 0) {
+      persistCoffeeDirectionalIrritationTransitions(
+        db,
+        userId,
+        row.id,
+        decay.edges,
+        decay.transitions,
+      );
+      for (const transition of decay.transitions) {
+        const delivery = planDirectionalIrritationDeliveryV1({
+          subjectBotId: transition.subjectBotId,
+          targetBotId: transition.targetBotId,
+          intensity: transition.after,
+          seed: `${row.id}:dir-irritation:decay:${assistantMessageId}:${transition.targetBotId}`,
+          role: "speaker",
+        });
+        directionalIrritationReplayEvents.push({
+          v: 1,
+          name: "coffeeReplayEvent",
+          kind: "directionalIrritation",
+          botId: transition.subjectBotId,
+          targetBotId: transition.targetBotId,
+          occurredAt: assistantNow,
+          transition,
+          ...(delivery ? { delivery } : {}),
+        });
+      }
+    }
+  }
   const baseCoffeeReplayEvents: CoffeeReplayEventPayload[] =
     departureSignaled && replayDepartureSeatIndex >= 0
       ? [
           ...emptyCupAttemptUpdate.replayEvents,
           ...identityMirrorReplayEvents,
+          ...identityShapeshiftReplayEvents,
+          ...falseNameReplayEvents,
+          ...directionalIrritationReplayEvents,
           ...(perceptionOverlapEvent ? [perceptionOverlapEvent] : []),
           ...moodBoostOutcome.events,
           ...moodDrainOutcome.events,
@@ -15947,6 +18309,9 @@ async function generateCoffeeBotReply(args: {
       : [
           ...emptyCupAttemptUpdate.replayEvents,
           ...identityMirrorReplayEvents,
+          ...identityShapeshiftReplayEvents,
+          ...falseNameReplayEvents,
+          ...directionalIrritationReplayEvents,
           ...(perceptionOverlapEvent ? [perceptionOverlapEvent] : []),
           ...moodBoostOutcome.events,
           ...moodDrainOutcome.events,
@@ -15968,9 +18333,12 @@ async function generateCoffeeBotReply(args: {
   const assistantToolPayload = serializeCoffeeAssistantToolPayload({
     interruptionEvent,
     coffeeAmbientAction,
+    coffeeStageAction,
     coffeeDebugTurnSnapshot,
     coffeeReplayEvents,
     autoRecovery,
+    socialSilence: socialSilenceMarker,
+    crosstalkReclaim,
     botPowerExactResponse: speakerRepeatsForHearingPower
       ? "hearing_repeat"
       : speakerQuietIgnored
@@ -15990,8 +18358,8 @@ async function generateCoffeeBotReply(args: {
     row.id,
     userId,
     replyText,
-    finalProvider,
-    finalModel,
+    socialSilenceMarker ? null : finalProvider,
+    socialSilenceMarker ? null : finalModel,
     speaker.id,
     assistantToolPayload,
     coffeeAudienceBotIds === null ? null : JSON.stringify(coffeeAudienceBotIds),
@@ -17449,16 +19817,25 @@ export async function processCoffeeAutonomousTurn(
   const history = loadMessages(db, userId, row.id, historyLimit);
   const promptHistory = coffeeBotPromptHistory(history);
   const latest = promptHistory[promptHistory.length - 1];
+  const crosstalkReclaim = loadPendingCoffeeCrosstalkReclaim(
+    db,
+    userId,
+    row.id,
+  );
+  const effectiveDirectedSpeakerBotId =
+    crosstalkReclaim?.speakerBotId ?? directedSpeakerBotId;
   const expectedLatestMessageId = loadLatestCoffeeMessageId(db, userId, row.id);
   const directedUserFocus =
-    directedSpeakerBotId && typeof directedUserMessage === "string"
+    effectiveDirectedSpeakerBotId && typeof directedUserMessage === "string"
       ? directedUserMessage.replace(/\s+/g, " ").trim().slice(0, 700)
       : "";
   const normalizedAutonomousFocus =
     typeof autonomousFocus === "string"
       ? autonomousFocus.replace(/\s+/gu, " ").trim().slice(0, 900)
       : "";
-  const tableFocus = normalizedAutonomousFocus
+  const tableFocus = crosstalkReclaim
+    ? `The audience heard you begin: "${crosstalkReclaim.heardFragment}"`
+    : normalizedAutonomousFocus
     ? normalizedAutonomousFocus
     : playerDepartureEpilogue
     ? coffeePlayerDepartureEpilogueFocus(
@@ -17484,9 +19861,11 @@ export async function processCoffeeAutonomousTurn(
     settings,
     turnKind: "autonomous",
     userIsComposing,
-    directedSpeakerBotId,
+    directedSpeakerBotId: effectiveDirectedSpeakerBotId,
+    directPlayerObligation: Boolean(directedUserFocus),
     presentBotIds,
     playerDepartureEpilogue,
+    crosstalkReclaim: crosstalkReclaim ?? undefined,
     staleGuard: { expectedLatestMessageId },
   });
 }

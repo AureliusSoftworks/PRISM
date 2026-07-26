@@ -1098,17 +1098,17 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /function BotAvatarIdentityControls\(/);
   assert.match(
     pageSource,
-    /const \[nameDetailsExpanded, setNameDetailsExpanded\] = useState\(false\)/,
-  );
-  assert.match(
-    pageSource,
     /const \[pronunciationExpanded, setPronunciationExpanded\] = useState\(false\)/,
   );
-  assert.match(pageSource, /\{nameDetailsExpanded \? "Full Name" : "Name"\}/);
-  assert.match(pageSource, /aria-label="Bot spoken name"/);
-  assert.match(pageSource, /Leave blank to use the full\s+name\./);
+  assert.doesNotMatch(pageSource, /nameDetailsExpanded/);
+  assert.doesNotMatch(pageSource, /aria-label="Bot spoken name"/);
+  assert.doesNotMatch(pageSource, /Leave blank to use the full\s+name\./);
+  assert.doesNotMatch(pageSource, /Show spoken name options/);
   assert.match(pageSource, /Show optional pronunciation/);
-  assert.match(pageSource, /Only needed when speech gets the name wrong\./);
+  assert.match(
+    pageSource,
+    /Only needed when speech gets the name wrong\. Leave blank unless\s+you type a phonetic spelling\./,
+  );
   assert.match(pageSource, /aria-label="Bot name pronunciation"/);
   assert.match(pageSource, /placeholder="Phonetic spelling, if needed"/);
   assert.match(pageSource, /aria-label="Preview bot name pronunciation"/);
@@ -1896,7 +1896,12 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
     pageSource,
     /<BotPowerNameplateIndicator[\s\S]{0,120}powers=\{bot\.powers\}[\s\S]{0,120}resolved=\{coffeePowerPlan\?\.bots\[bot\.id\] \?\? null\}/u,
   );
-  assert.doesNotMatch(pageSource, /<BotPowerBadge/u);
+  assert.equal(
+    [...pageSource.matchAll(/<BotPowerBadge\b/gu)].length,
+    1,
+    "the released Signal render callback retains its passive legacy badge",
+  );
+  assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
   assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
   assert.match(
     pageSource,
@@ -1904,7 +1909,7 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
   );
   assert.match(
     pageSource,
-    /coffeeCupRefused \|\| refillSipLocked \|\| seatIsThinking/u,
+    /coffeeCupRefused \|\|\s*refillSipLocked \|\|\s*coffeeSipTalkGateActive \|\|\s*seatIsThinking/u,
   );
   assert.match(pageSource, /How it plays out/u);
   assert.match(pageSource, /For other bots/u);
@@ -1964,8 +1969,6 @@ test("Power indicators stay unboxed inside glyph-bearing nameplates", () => {
     pageSource,
     /className=\{styles\.coffeeMessageBotLabel\}[\s\S]{0,180}<BotPowerNameplateIndicator/u,
   );
-  assert.doesNotMatch(pageSource, /powerCount=|botPowerSurfaceBadge/u);
-  assert.doesNotMatch(cssSource, /botPowerSurfaceBadge|botPowerSurfacePopover/u);
   assert.match(
     cssSource,
     /\.botPowerNameplateIndicator\s*\{[\s\S]{0,220}opacity:\s*0\.68/u,

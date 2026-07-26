@@ -168,8 +168,12 @@ describe("zenLiveActionPlateFace", () => {
       text: ":@",
       rotateDeg: 90,
     });
+    assert.deepEqual(zenLiveActionPlateFace("warm", "click"), {
+      text: ":ʘ",
+      rotateDeg: 90,
+    });
     assert.deepEqual(zenLiveActionPlateFace("warm", "narrow"), {
-      text: ":o",
+      text: ":ɵ",
       rotateDeg: 90,
     });
     assert.deepEqual(zenLiveActionPlateFace("warm", "open-wide"), {

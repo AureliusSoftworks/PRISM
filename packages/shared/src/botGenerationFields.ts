@@ -35,8 +35,12 @@ const excluded = (reason: string): BotGenerationFieldDefinitionV1 => ({
 /** Single source of truth for every stored creative value in Avatar Studio. */
 export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "identity.name": prose(80),
-  "identity.namePronunciation": prose(160),
-  "identity.selfReferral": prose(120),
+  "identity.namePronunciation": excluded(
+    "Pronunciation is player-authored only after expanding the optional field.",
+  ),
+  "identity.selfReferral": excluded(
+    "Spoken-name authoring was removed; bots use their display name when speaking.",
+  ),
   "identity.color": bounded("string"),
   "identity.glyph": bounded("string"),
 

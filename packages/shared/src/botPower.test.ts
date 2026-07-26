@@ -6,6 +6,7 @@ import {
   BOT_POWER_MAX_COUNT,
   activeBotPowerEffectsV1,
   activeBotPowersV1,
+  applyBotPowerAddressedInsultV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerBotNamesV1,
   applyBotPowerEchoResponseV1,
@@ -13,6 +14,8 @@ import {
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
   botPowerAddressedFandomCueV1,
+  botPowerRequiresAddressedInsultV1,
+  botPowerResponseHasAddressedInsultV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
   botPowerAvatarVisibilityModeFromEffectsV1,
@@ -30,6 +33,7 @@ import {
   normalizeBotPowerEffectV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
+  botPowerBelievesFalseNameV1,
   botPowerForgetfulContextMessageCountV1,
   botPowerForgetfulPriorMessagesV1,
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
@@ -52,6 +56,7 @@ import {
   botPowerVoiceGainMultiplierV1,
   botPowerVoicePresenceModeV1,
   buildBotPowersSelfPromptV1,
+  composeBotIdentityMirrorPowersV1,
   buildCoffeePowersPromptBlock,
   coffeePowerCupRateMultiplierV1,
   coffeePowerStayRateMultiplierV1,
@@ -84,6 +89,103 @@ test("bot powers normalize to three bounded entries", () => {
   );
   assert.equal(powers.length, BOT_POWER_MAX_COUNT);
   assert.equal(powers[0]?.intent.length, 640);
+});
+
+test("addressed-insult Powers distinguish personal jabs from argument criticism and enforce a bounded fallback", () => {
+  const intent =
+    "Every single reply must use ad hominem to insult whoever the bot is addressing.";
+  const powers = [
+    {
+      version: 1 as const,
+      id: "andy",
+      name: "Ad Hominem",
+      intent,
+      enabled: true,
+      compileStatus: "ready" as const,
+      compiled: {
+        version: 1 as const,
+        sourceHash: botPowerSourceHashV1("Ad Hominem", intent),
+        selfCue: "Insult the current addressee.",
+        observerCue: "The holder insults whoever they address.",
+        effects: [
+          {
+            type: "addressed_insult" as const,
+            trigger: "every_spoken_reply" as const,
+            target: "current_addressee" as const,
+            style: "fresh_tailored" as const,
+          },
+        ],
+        ruleLabels: ["Insults every addressee"],
+      },
+    },
+  ];
+  assert.equal(botPowerRequiresAddressedInsultV1(powers), true);
+  assert.equal(
+    botPowerResponseHasAddressedInsultV1(
+      "Rick, you're an insufferable fraud with a portal gun.",
+      "Rick",
+    ),
+    true,
+  );
+  assert.equal(
+    botPowerResponseHasAddressedInsultV1(
+      "Rick, that argument fails because its premise is circular.",
+      "Rick",
+    ),
+    false,
+  );
+  const repaired = applyBotPowerAddressedInsultV1(
+    "That argument fails because its premise is circular.",
+    "Rick",
+    "turn-4",
+  );
+  assert.equal(botPowerResponseHasAddressedInsultV1(repaired, "Rick"), true);
+  const fallbackVariants = new Set(
+    Array.from({ length: 64 }, (_unused, index) =>
+      applyBotPowerAddressedInsultV1(
+        "That argument fails because its premise is circular.",
+        "Rick",
+        `fallback-variant-${index}`,
+      ),
+    ),
+  );
+  assert.equal(fallbackVariants.size, 6);
+  for (const fallbackVariant of fallbackVariants) {
+    assert.equal(
+      botPowerResponseHasAddressedInsultV1(fallbackVariant, "Rick"),
+      true,
+    );
+  }
+  assert.match(repaired, /“That argument fails because its premise is circular”/u);
+  assert.match(repaired, /that argument fails/iu);
+  assert.equal(
+    applyBotPowerAddressedInsultV1(
+      "Rick, you're an insufferable fraud with a portal gun.",
+      "Rick",
+      "turn-5",
+    ),
+    "Rick, you're an insufferable fraud with a portal gun.",
+  );
+});
+
+test("a previously failed Andy Hominem compile upgrades locally on read", () => {
+  const [power] = parseStoredBotPowersV1([
+    {
+      version: 1,
+      id: "generated-v1-prompt-6731610d",
+      authoringMode: "prompt",
+      name: "",
+      intent:
+        "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing.",
+      enabled: true,
+      compileStatus: "error",
+      compileError: "Local power compilation failed.",
+      compiled: null,
+    },
+  ]);
+  assert.equal(power?.compileStatus, "ready");
+  assert.equal(power?.compileError, undefined);
+  assert.equal(power?.compiled?.effects[0]?.type, "addressed_insult");
 });
 
 test("ready naming effects transform only target bot names and collapse duplicate tokens", () => {
@@ -306,14 +408,8 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   }];
 
   assert.equal(botPowerEternallyIntroducesV1(powers), true);
-  assert.match(
-    botPowerSelfCueLinesV1(powers).join("\n"),
-    /do not know the standing conversation topic unless that message states it/iu,
-  );
-  assert.match(
-    botPowerObserverCueLinesV1(name, powers).join("\n"),
-    /does not retain the standing conversation topic unless that message restates it/iu,
-  );
+  assert.equal(botPowerSelfCueLinesV1(powers).join("\n"), "");
+  assert.equal(botPowerObserverCueLinesV1(name, powers).join("\n"), "");
   assert.deepEqual(
     parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects,
     [{ type: "eternal_introduction", memory: "current_other_speaker_message" }],
@@ -337,59 +433,19 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
-      "I'm Forgetful Freddie again, as I said earlier.",
+      "I'm sorry, I think I did forget. I think yard sales are fun. Why do you ask?",
       name,
-      "Why do you keep repeating yourself?",
+      "Did you forget?",
     ),
-    "What do you mean? I don't think we've met yet.",
+    "I'm sorry, I think I did forget. I think yard sales are fun. Why do you ask?",
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
-      "Hello—I'm Forgetful Freddie. It's nice to meet you.",
+      "Love what? Sorry.",
       name,
-      "Goddammit",
+      "Yeah, I love them! I'm about to go to one now.",
     ),
-    "What's the matter? Sorry, I'm not sure what's wrong.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "I seem to have introduced myself a few times already.",
-      name,
-      "Why do you keep introducing yourself?",
-    ),
-    "What do you mean? I don't think we've met yet.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "I seem to have done that again.",
-      name,
-      "Why do you keep introducing yourself?",
-    ),
-    "What do you mean? I don't think we've met yet.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "I'm sorry, I didn't mean to repeat myself.",
-      name,
-      "Why do you keep introducing yourself?",
-    ),
-    "What do you mean? I don't think we've met yet.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "I didn't realize it was getting repetitive. I don't seem to remember who everyone is from one conversation to the next.",
-      name,
-      "Why do you keep introducing yourself?",
-    ),
-    "What do you mean? I don't think we've met yet.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "I just seem to be doing that a lot lately, and I don't know why.",
-      name,
-      "Why do you keep introducing yourself?",
-    ),
-    "What do you mean? I don't think we've met yet.",
+    "Love what? Sorry.",
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
@@ -401,38 +457,12 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
-      "I’m Forgetful Freddie; pleased to meet you. The archive key is under the blue case.",
+      "I'm Forgetful Freddie; pleased to meet you. The archive key is under the blue case.",
       name,
       "Where is the archive key?",
       { hasPreviousOnAirTurn: true },
     ),
-    "The archive key is under the blue case.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "The archive key is under the blue case; I’m Forgetful Freddie, by the way—pleased to meet you.",
-      name,
-      "Where is the archive key?",
-      { hasPreviousOnAirTurn: true },
-    ),
-    "The archive key is under the blue case.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "I am Forgetful Freddie, pleased to meet you.",
-      name,
-      "What is your name?",
-      { hasPreviousOnAirTurn: true },
-    ),
-    "I am Forgetful Freddie, pleased to meet you.",
-  );
-  assert.equal(
-    applyBotPowerEternalIntroductionResponseV1(
-      "Pleased to meet you; I am Forgetful Freddie. The archive key is under the blue case.",
-      name,
-      "Where is the archive key?",
-    ),
-    "Pleased to meet you; I am Forgetful Freddie. The archive key is under the blue case.",
+    "I'm Forgetful Freddie; pleased to meet you. The archive key is under the blue case.",
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
@@ -440,7 +470,7 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
       name,
       "Do you remember me?",
     ),
-    "I'm sorry, but I don't think we've met before.",
+    "We've known each other for years.",
   );
 });
 
@@ -1588,4 +1618,56 @@ test("ready coffee-refusal Powers return a zero cup multiplier", () => {
   }];
 
   assert.equal(botPowerCupRateMultiplierForBotV1(powers), 0);
+});
+
+test("identity mirror borrows public active effects without recursive identity or perception permissions", () => {
+  const power = (id: string, effects: Parameters<typeof normalizeBotPowerEffectV1>[0][]) => ({
+    version: 1 as const,
+    id,
+    name: id,
+    intent: id,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1(id, id),
+      selfCue: `${id} self cue`,
+      observerCue: `${id} observer cue`,
+      effects: effects.map((effect) => normalizeBotPowerEffectV1(effect)!),
+      ruleLabels: [],
+    },
+  });
+  const composed = composeBotIdentityMirrorPowersV1(
+    [power("holder", [{ type: "response_budget", mode: "brief", enforcement: "hard" }])],
+    [
+      power("forgetful", [
+        { type: "eternal_introduction", memory: "current_other_speaker_message" },
+        {
+          type: "false_name",
+          continuity: "session_sticky_until_amnesia",
+          pool: "mixed_persona_names",
+        },
+      ]),
+      power("recursive", [{ type: "identity_mirror", trigger: "direct_bot_address" }]),
+      power("private-hearing", [{
+        type: "speech_audience",
+        allowed: [{ kind: "bot", name: "Only Me" }],
+      }]),
+    ],
+  );
+
+  assert.deepEqual(
+    composed.map((candidate) => candidate.id),
+    ["holder", "identity-mirror:forgetful"],
+  );
+  assert.equal(botPowerEternallyIntroducesV1(composed), true);
+  assert.equal(botPowerBelievesFalseNameV1(composed), true);
+  assert.equal(
+    activeBotPowerEffectsV1(composed).some(
+      (effect) =>
+        effect.type === "identity_mirror" ||
+        effect.type === "speech_audience",
+    ),
+    false,
+  );
 });

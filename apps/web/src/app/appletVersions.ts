@@ -49,6 +49,8 @@ export type BotPowerIntermittentMuteModePolicy =
 export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
 export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIdentityMirrorModePolicy = BotPowerGhostModePolicy;
+export type BotPowerIdentityShapeshiftModePolicy = BotPowerGhostModePolicy;
+export type BotPowerFalseNameModePolicy = BotPowerGhostModePolicy;
 export type BotPowerEternalIntroductionModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodBoostModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodDrainModePolicy = BotPowerGhostModePolicy;
@@ -67,13 +69,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.30",
+    version: "1.33",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.28",
+    version: "1.31",
     status: "active",
   },
   arena: {
@@ -91,13 +93,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.30",
+    version: "2.37",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.29",
+    version: "1.36",
     status: "active",
   },
   feed: {
@@ -115,7 +117,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.26",
+    version: "0.27",
     status: "planned",
   },
   gym: {
@@ -198,6 +200,46 @@ export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
   feed: "deferred",
   games: "deferred",
   story: "cue",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Session-sticky Library/Marketplace public form; reshuffles with short-term amnesia. */
+export const BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIdentityShapeshiftModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Session-sticky believed persona name; reshuffles with short-term amnesia. */
+export const BOT_POWER_FALSE_NAME_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerFalseNameModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
   gym: "deferred",
   slate: "irrelevant",
   pseudo: "deferred",

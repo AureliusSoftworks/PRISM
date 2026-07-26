@@ -13,6 +13,7 @@ import {
   resolveLatestZenActionPreview,
   resolvePersistentZenActionPreview,
   resolveZenActionPresentation,
+  resolveZenActionPresentationFromMessage,
   resolveZenActionPreview,
   ZEN_ACTION_REVEAL_LEAD_DISPLAY_LENGTH,
 } from "./zenActions.ts";
@@ -282,6 +283,35 @@ describe("resolveZenActionPresentation", () => {
       resolveZenActionPresentation("*SMILES AT YOU* Hello.").cues[0]?.action,
       "Smiles at you",
     );
+  });
+
+  it("prefers canonical stage-action metadata over inline legacy cues", () => {
+    const presentation = resolveZenActionPresentationFromMessage({
+      content: "*looks away* Spoken reply.",
+      zenStageAction: {
+        v: 1,
+        name: "zenStageAction",
+        source: "director",
+        category: "warm",
+        action: "offers a small smile",
+        seed: "conversation:bot:1:stage-action",
+      },
+    });
+
+    assert.equal(presentation.mainText, "*looks away* Spoken reply.");
+    assert.deepEqual(
+      presentation.cues.map((cue) => cue.action),
+      ["Offers a small smile"],
+    );
+  });
+
+  it("keeps inline action parsing for legacy messages without metadata", () => {
+    const presentation = resolveZenActionPresentationFromMessage({
+      content: "*takes a breath* Spoken reply.",
+    });
+
+    assert.equal(presentation.mainText, "Spoken reply.");
+    assert.equal(presentation.cues[0]?.action, "Takes a breath");
   });
 });
 

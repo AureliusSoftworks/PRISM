@@ -186,7 +186,7 @@ describe("shared composer actions", () => {
   it("presents a user's sent action above their accompanying Zen message", () => {
     assert.match(
       pageSource,
-      /zenActionsEnabled === true &&[\s\S]{0,140}\(messageRole === "assistant" \|\| messageRole === "user"\)[\s\S]{0,120}resolveZenActionPresentation\(source\)/u,
+      /zenActionsEnabled === true &&[\s\S]{0,140}\(messageRole === "assistant" \|\| messageRole === "user"\)[\s\S]{0,180}resolveZenActionPresentationFromMessage\(\{[\s\S]{0,100}content: source,[\s\S]{0,100}zenStageAction/u,
     );
     assert.doesNotMatch(
       pageSource,

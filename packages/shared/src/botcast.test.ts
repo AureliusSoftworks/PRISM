@@ -24,8 +24,10 @@ import {
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
+  botcastEchoHostInterruptPhrase,
   botcastEpisodeDepartureOutcome,
   botcastGuestDepartureEligible,
+  botcastGuestAnswerAdvancesInterview,
   botcastGuestVoluntaryDepartureIntent,
   botcastGuestHasDepartedAt,
   botcastHostHasDepartedAt,
@@ -44,6 +46,7 @@ import {
   botcastSoundboardCueLabel,
   botcastSignalStandardCadenceDurationMs,
   botcastNextSpeakerRole,
+  botcastPendingCrosstalkReclaimV1,
   botcastSegmentForTurn,
   botcastSessionShouldClose,
   botcastSocialInfluenceEventsAt,
@@ -110,6 +113,66 @@ describe("Signal fallback studio accents", () => {
       replayTimeline.messageEndMs[0]! - replayTimeline.messageStartMs[0]!,
       botcastSignalStandardCadenceDurationMs(replayLine),
     );
+    const socialSilence = {
+      v: 1,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "signal" as const,
+      seed: "signal-social-silence:episode-1:guest-1:2",
+      volleyTurn: 2 as const,
+      holdMs: 900,
+    };
+    assert.equal(
+      botcastSignalStandardCadenceDurationMs("...", socialSilence),
+      900,
+    );
+    const socialTimeline = botcastReplayTimeline(
+      [{ content: "...", socialSilence }],
+      [],
+    );
+    assert.equal(
+      socialTimeline.messageEndMs[0]! - socialTimeline.messageStartMs[0]!,
+      900,
+    );
+    assert.equal(
+      botcastGuestAnswerAdvancesInterview({
+        content: "...",
+        socialSilence,
+      }),
+      false,
+    );
+  });
+
+  it("exposes only an immediate, source-linked Signal reclaim", () => {
+    const reclaim = {
+      v: 1,
+      name: "crosstalkReclaim" as const,
+      interruptedMessageId: "cutoff-1",
+      speakerBotId: "guest-1",
+      heardFragment: "The part everyone heard—",
+      protectFromImmediateReinterruption: true as const,
+    };
+    assert.deepEqual(
+      botcastPendingCrosstalkReclaimV1([
+        {
+          id: "cutoff-1",
+          botId: "guest-1",
+          crosstalkReclaim: reclaim,
+        },
+      ]),
+      reclaim,
+    );
+    assert.equal(
+      botcastPendingCrosstalkReclaimV1([
+        {
+          id: "cutoff-1",
+          botId: "guest-1",
+          crosstalkReclaim: reclaim,
+        },
+        { id: "later-1", botId: "host-1" },
+      ]),
+      null,
+    );
   });
 
   it("recognizes the one Echo dashboard joke across persona wording", () => {
@@ -149,6 +212,39 @@ describe("Signal fallback studio accents", () => {
     assert.equal(
       botcastMessageIsEphemeralInterruptionBridge({ id }),
       true,
+    );
+  });
+
+  it("picks the audience-heard phrase for an echo-bound host interrupt", () => {
+    const messages = [
+      { id: "host-open", content: "Welcome to the show." },
+      {
+        id: "guest-1",
+        content: "The part you have heard and the hidden remainder.",
+      },
+    ];
+    assert.equal(
+      botcastEchoHostInterruptPhrase({
+        messages,
+        interruption: {
+          messageId: "guest-1",
+          spokenContent: "The part you have heard",
+        },
+      }),
+      "The part you have heard—",
+    );
+    assert.equal(
+      botcastEchoHostInterruptPhrase({
+        messages,
+        interruption: { messageId: "guest-1", spokenContent: "" },
+      }),
+      "Welcome to the show.",
+    );
+    assert.equal(
+      botcastEchoHostInterruptPhrase({
+        messages: messages.slice(0, 1),
+      }),
+      "Welcome to the show.",
     );
   });
 
@@ -525,12 +621,12 @@ describe("Signal studio layout", () => {
   it("defaults missing positions and clamps saved props inside the stage", () => {
     assert.deepEqual(normalizeBotcastStudioLayout(undefined), BOTCAST_DEFAULT_STUDIO_LAYOUT);
     assert.deepEqual(BOTCAST_DEFAULT_STUDIO_LAYOUT, {
-      hostBot: { x: 18.5, y: 66 },
-      guestBot: { x: 81.5, y: 66 },
-      hostCup: { x: 36.25, y: 86 },
-      guestCup: { x: 63.75, y: 86 },
-      hostFloorGlow: { x: 18.5, y: 84, scale: 1 },
-      guestFloorGlow: { x: 81.5, y: 84, scale: 1 },
+      hostBot: { x: 22.5, y: 71.25 },
+      guestBot: { x: 77.5, y: 71.25 },
+      hostCup: { x: 36.25, y: 90 },
+      guestCup: { x: 63.75, y: 90 },
+      hostFloorGlow: { x: 22.5, y: 84, scale: 1 },
+      guestFloorGlow: { x: 77.5, y: 84, scale: 1 },
     });
     assert.deepEqual(
       normalizeBotcastStudioLayout({
@@ -837,6 +933,38 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
+  it("does not let marked social silence make an Auto interview look settled", () => {
+    const socialSilence = (seed: string) => ({
+      v: 1 as const,
+      name: "socialSilence" as const,
+      provenance: "social" as const,
+      mode: "signal" as const,
+      seed,
+      volleyTurn: 1 as const,
+      holdMs: 900,
+    });
+    const messages = [
+      { speakerRole: "host" as const, content: "Does forgetting an insult make the grudge feel pointless, or does it make the whole thing more personal for the person carrying it?" },
+      { speakerRole: "guest" as const, content: "If someone truly cannot recall the offense, holding the grudge seems more punishing to the grudge-holder than to anyone else." },
+      { speakerRole: "host" as const, content: "What happens when the reason disappears but the habit of being angry remains in place?" },
+      { speakerRole: "guest" as const, content: "...", socialSilence: socialSilence("silence-1") },
+      { speakerRole: "host" as const, content: "Have you ever hated someone so long that you forgot why and simply kept the feeling alive out of habit?" },
+      { speakerRole: "guest" as const, content: "Honestly, no, because if I forgot why I hated someone, I suspect the hating itself would disappear along with the reason." },
+      { speakerRole: "host" as const, content: "If the hate leaves with the memory, should a grudge be forgiven or written down so the reason can never disappear?" },
+      { speakerRole: "guest" as const, content: "If the grudge needs writing down to survive, it may not be worth the ink or the attention required to preserve it." },
+      { speakerRole: "host" as const, content: "If a grudge is not worth preserving in writing, what deserves that space instead, and what would make it worth remembering?" },
+      { speakerRole: "guest" as const, content: "...", socialSilence: socialSilence("silence-2") },
+      { speakerRole: "host" as const, content: "Write down the people who consistently show up for you. What is one thing you would genuinely hate to forget?" },
+      { speakerRole: "guest" as const, content: "I would hate to forget the people who are kind to me, because kindness deserves remembering even when all the surrounding details slip away." },
+    ];
+    assert.equal(botcastSessionShouldClose({
+      messages,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), false);
+  });
+
   it("recognizes earned voluntary exits without treating conditional warnings as departures", () => {
     assert.equal(botcastGuestVoluntaryDepartureIntent({
       content: "I should probably get going and let you two have this conversation.",
@@ -935,6 +1063,12 @@ describe("Botcast episode state", () => {
     assert.equal(botcastHostSignOffIntent({
       content:
         "Storming the wing factory — hehehehehehe, that's the most romantic thing anyone's ever said to me. That's it for What Grinds Your Gears — Rick Sanchez, everybody, the guy who killed money and made my change jar cry. Freakin' sweet, goodnight Quahog!",
+      segment: "interview",
+      priorUtteranceCount: 14,
+    }), true);
+    assert.equal(botcastHostSignOffIntent({
+      content:
+        "Dishes and losing at chess — that's the dream? Kid, you just described my Tuesday, and I'd trade it for one autograph line. Anyway, that's What Grinds Your Gears — Harry Potter, everybody, the only guy who's famous and mad about it. Hehehehehehe. Goodnight!",
       segment: "interview",
       priorUtteranceCount: 14,
     }), true);
@@ -1095,6 +1229,26 @@ describe("Botcast episode state", () => {
     });
     assert.equal(departed.stage, "departed");
     assert.equal(botcastGuestDepartureEligible(departed), true);
+  });
+
+  it("treats psychological diagnosis cues as personal boundary pressure", () => {
+    const warning = {
+      level: 2 as const,
+      warningCount: 1,
+      stage: "warning" as const,
+    };
+    for (const detail of [
+      "Ask if he is actually afraid.",
+      "Ask whether he is a narcissist.",
+      "Diagnose why she seems anxious.",
+    ]) {
+      const departed = applyBotcastProducerCueToTension(warning, {
+        kind: "ask_about",
+        detail,
+      });
+      assert.equal(departed.stage, "departed", detail);
+      assert.equal(botcastGuestDepartureEligible(departed), true, detail);
+    }
   });
 });
 

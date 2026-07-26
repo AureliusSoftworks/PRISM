@@ -1,4 +1,35 @@
 export const SIGNAL_ONLINE_VOICE_TIMEOUT_MS = 15_000;
+export const SIGNAL_ONLINE_VOICE_TIMEOUT_MAX_MS = 45_000;
+/** Extra preferred-voice patience for long closings and tagged performance text. */
+export const SIGNAL_ONLINE_VOICE_TIMEOUT_MS_PER_CHAR = 35;
+
+/**
+ * Scales the ElevenLabs wait so a long closing line is not aborted into the
+ * builtin pack while a shorter mid-show line keeps the snappy 15s floor.
+ */
+export function signalOnlineVoiceTimeoutMs(textLength: number): number {
+  const length = Number.isFinite(textLength)
+    ? Math.max(0, Math.floor(textLength))
+    : 0;
+  return Math.min(
+    SIGNAL_ONLINE_VOICE_TIMEOUT_MAX_MS,
+    SIGNAL_ONLINE_VOICE_TIMEOUT_MS +
+      length * SIGNAL_ONLINE_VOICE_TIMEOUT_MS_PER_CHAR,
+  );
+}
+
+/**
+ * Prefetch must not poison playback with a builtin clip when Premium was
+ * requested — playback can still retry ElevenLabs with a fresh timeout.
+ */
+export function signalPreferredVoiceClipReady(
+  clip: { engineUsed: string | null } | null | undefined,
+  preferredEngine: string,
+): boolean {
+  if (!clip) return false;
+  if (preferredEngine !== "elevenlabs") return true;
+  return clip.engineUsed === "elevenlabs";
+}
 
 export async function requestSignalVoiceWithFallback<T>(args: {
   requestPreferred: (signal: AbortSignal) => Promise<T>;

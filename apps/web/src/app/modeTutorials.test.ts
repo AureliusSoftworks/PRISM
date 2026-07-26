@@ -14,13 +14,13 @@ describe("mode tutorials", () => {
       }
     });
 
-  it("teaches the full-screen Coffee Group creation handoff", () => {
+  it("teaches the non-blocking Coffee Group identity synthesis flow", () => {
       const groupCreationCopy = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
-      assert.match(
-        groupCreationCopy,
-        /Creating a new Coffee Group opens a full-screen PRISM handoff/u,
-      );
-      assert.match(groupCreationCopy, /name and conversation starters take shape/u);
+      assert.match(groupCreationCopy, /saves the table immediately/u);
+      assert.match(groupCreationCopy, /Name, one-sentence Ethos/u);
+      assert.match(groupCreationCopy, /character-free Atmosphere/u);
+      assert.match(groupCreationCopy, /softly shapes topic ideas, routing, and replies/u);
+      assert.match(groupCreationCopy, /independently retryable/u);
     });
 
   it("explains that Coffee cross-talk controls audible backchannels", () => {
@@ -37,6 +37,17 @@ describe("mode tutorials", () => {
         /one bot cuts off another.*interrupter speaks a short hold-on.*interrupted bot takes a brief processing beat.*annoyed, abandoned ending/u,
       );
       assert.match(joinCopy, /hold-on over the outgoing voice before that voice releases/u);
+      assert.match(joinCopy, /reject the cut-in and immediately reclaim/u);
+      assert.match(joinCopy, /only the words the table actually heard/u);
+      assert.match(joinCopy, /one protected handoff/u);
+      assert.match(joinCopy, /Repeated cutoffs build session-local irritation/u);
+      assert.match(joinCopy, /reclaim grows more likely/u);
+      assert.match(joinCopy, /short verbal snark/u);
+      assert.match(joinCopy, /visible \.\.\. as an intentional social beat/u);
+      assert.match(joinCopy, /without voice or mouth movement/u);
+      assert.match(joinCopy, /up to four ordinary turns/u);
+      assert.match(joinCopy, /requires a substantive reply/u);
+      assert.match(joinCopy, /hard mute Powers keep their existing precedence/u);
       assert.match(joinCopy, /sparse mic-ready breath/u);
     });
 
@@ -66,6 +77,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /does not re-synthesize voices/u);
     assert.match(copy, /or generate a video/u);
     assert.match(copy, /without its exact master remains transcript-only/u);
+    assert.match(copy, /offers Coffee home to return to setup/u);
     assert.match(copy, /one readable transcript download/u);
   });
 
@@ -121,6 +133,10 @@ describe("mode tutorials", () => {
         MODE_TUTORIALS.slate.steps[6]?.body ?? "",
         /Voice on[\s\S]*pace of its voice[\s\S]*mute the widget/i,
       );
+      assert.match(
+        MODE_TUTORIALS.slate.steps[6]?.body ?? "",
+        /Type \/ for Prompt Center prompts and ! for wildcard decks in the companion composer/u,
+      );
       assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
       assert.match(
         MODE_TUTORIALS.slate.steps[0]?.body ?? "",
@@ -133,10 +149,6 @@ describe("mode tutorials", () => {
       assert.match(
         MODE_TUTORIALS.slate.steps[0]?.body ?? "",
         /waits for your confirmation or another try/i,
-      );
-      assert.match(
-        MODE_TUTORIALS.slate.steps[6]?.body ?? "",
-        /Type \/ for Prompt Center prompts and ! for wildcard decks in the companion composer/u,
       );
       assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /privacy-matched book cover/i);
       assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /regenerate either title or cover/i);
@@ -192,10 +204,12 @@ describe("mode tutorials", () => {
 
       assert.deepEqual({
         ...chooseRelationship,
-        body: chooseRelationship?.body.replace(/ A bot-name prefix or suffix changes only how its holder names other bots:.*$/u, ""),
+        body: chooseRelationship?.body
+          .replace(/ A Shapeshifter sincerely becomes.*$/u, "")
+          .replace(/ A bot-name prefix or suffix changes only how its holder names other bots:.*$/u, ""),
       }, {
         heading: "Choose a relationship",
-        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, does not retain the broader topic unless your current message states it, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona only sees your current message each turn—no earlier replies or broader topic unless that message states it—and answers naturally without amnesia coaching. A John/Jane Doe persona sincerely believes a random persona name for the session and reshuffles that name whenever short-term amnesia clears continuity. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
         clickLabel: "a PRISM or persona tile",
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       });
@@ -340,6 +354,7 @@ describe("mode tutorials", () => {
       );
 
       assert.match(topicStep?.body ?? "", /four prompts created for this group/);
+      assert.match(topicStep?.body ?? "", /framed under the Coffee navbar/);
       assert.doesNotMatch(topicStep?.body ?? "", /regenerate/i);
       assert.doesNotMatch(topicStep?.clickLabel ?? "", /regenerate/i);
     });
@@ -359,6 +374,10 @@ describe("mode tutorials", () => {
         joinStep?.body ?? "",
         /drag its left edge or the topic divider/,
       );
+      assert.match(
+        joinStep?.body ?? "",
+        /Type \/ for Prompt Center prompts and ! for wildcard decks/u,
+      );
     });
 
   it("explains Coffee's off-camera player and bot-only replay departures", () => {
@@ -372,10 +391,6 @@ describe("mode tutorials", () => {
       );
       assert.match(joinStep?.body ?? "", /Review stays quiet/u);
       assert.match(joinStep?.body ?? "", /remain off camera/u);
-      assert.match(
-        joinStep?.body ?? "",
-        /Type \/ for Prompt Center prompts and ! for wildcard decks/u,
-      );
       assert.doesNotMatch(joinStep?.body ?? "", /Prism leave first/u);
       assert.match(joinStep?.body ?? "", /each bot physically depart/u);
     });
@@ -427,6 +442,10 @@ describe("mode tutorials", () => {
       assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /Obsessed bot/u);
       assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /player or peer/u);
       assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /peer or audience/u);
+      assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /Shapeshifter sincerely becomes/u);
+      assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /Shapeshifter sincerely becomes/u);
+      assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /Shapeshifter sincerely becomes/u);
+      assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Shapeshifter sincerely becomes/u);
       const copy = [
         MODE_TUTORIALS.zen.steps[0]?.body,
         MODE_TUTORIALS.chat.steps[0]?.body,
@@ -837,6 +856,18 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+        /interruption cuts directly to the interrupter only when Instant is selected[\s\S]*Animated holds the current shot/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+        /Arrow keys cut live too: Left, Right, Down for Wide, and Up for Auto/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+        /press Shift alone/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
         /reduced-motion always uses instant cuts/u,
       );
       assert.match(
@@ -877,11 +908,55 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /at least 85 percent[\s\S]*does not add an annoyed ending or reclaim the floor/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /reject the cut-in and reclaim the next turn/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /only its audience-heard fragment/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /protects that single reclaim from another immediate interruption/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /Repeated cutoffs build episode-local irritation/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /short verbal snark/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /visible \.\.\. as an intentional silent beat/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /without voice, mouth movement, or a speaker camera cut/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /up to four ordinary turns/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /requires a substantive on-air payoff/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
         /every cue is private to the host/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
         /guest only hears what the host says on mic/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /Tab selects or deselects the Ask about… box[\s\S]*Enter sends that cue[\s\S]*Enter again runs Interrupt guest now/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -893,7 +968,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-        /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*guest takes a brief processing beat before the annoyed cutoff retort[\s\S]*unheard remainder of the guest’s line is discarded/u,
+        /Interrupt guest now plays one of that host’s saved short interjections immediately[\s\S]*An echo-bound host instead cuts in by repeating the last audience-heard on-air phrase[\s\S]*at least 85 percent of the guest’s line has been heard[\s\S]*omits that annoyed follow-on[\s\S]*unheard remainder of the guest’s line is discarded/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -913,15 +988,15 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-        /session-changing navbar tools stay locked/u,
+        /shows rail hides and the utility strip locks like Coffee[\s\S]*through the closing card until you Return to show/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+        /Voice remains available for the next line/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
         /restores the full chrome/u,
-      );
-      assert.match(
-        MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-        /left rail while on air makes the same producer cut/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -993,7 +1068,15 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /thinking intervals/u,
+        /measured Signal intro row[\s\S]*recorded duration[\s\S]*seeks back to the beginning/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+        /omit only the intervals where a bot is visibly and audibly thinking/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
+        /Natural room silence, interruptions, crosstalk, retorts/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -1016,6 +1099,10 @@ describe("mode tutorials", () => {
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
         /normal host owns that opening even when echo-bound/u,
+      );
+      assert.match(
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+        /Interrupt guest now still works for an echo-bound host[\s\S]*last audience-heard phrase/u,
       );
       assert.match(
         MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
@@ -1059,6 +1146,10 @@ describe("mode tutorials", () => {
         booking?.body ?? "",
         /Topic field remains a single-line title input/u,
       );
+      assert.match(
+        booking?.body ?? "",
+        /also with \/prompts and !decks/u,
+      );
     });
 
   it("teaches automatic ElevenLabs mood delivery in every mood-aware voice lane", () => {
@@ -1085,6 +1176,7 @@ describe("mode tutorials", () => {
 
       assert.match(coffee?.body ?? "", /dead air/);
       assert.match(coffee?.body ?? "", /without stealing the slow bot’s turn/);
+      assert.match(coffee?.body ?? "", /heard, with mouth motion, not shown as a seat action/);
       assert.match(coffee?.body ?? "", /Ambient sips continue through quiet beats and listening moments/);
       assert.match(coffee?.body ?? "", /active speaker keeps their cup down/);
       assert.match(coffee?.body ?? "", /cup-return sounds stay synchronized/);

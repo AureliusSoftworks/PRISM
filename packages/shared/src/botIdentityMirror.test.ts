@@ -158,7 +158,7 @@ test("identity mirror accepts only explicit direct bot address syntax", () => {
   );
 });
 
-test("identity mirror snapshot is bounded to public persona, face, ink, and voice", () => {
+test("identity mirror snapshot stays public while its prompt permits borrowed Power consequences", () => {
   const state = identityState();
   assert.equal(state.targetFace.eyeCharacter, "◉");
   assert.deepEqual(state.targetAvatarDetails, targetAvatarDetails);
@@ -171,7 +171,7 @@ test("identity mirror snapshot is bounded to public persona, face, ink, and voic
       roleLabel: "Signal guest",
       state,
     }),
-    /remain Identity Crisis Ian.*Signal guest.*Powers/su,
+    /remain Identity Crisis Ian.*Signal guest.*Borrowed Powers.*anchored system boundaries/su,
   );
   assert.match(
     botIdentityMirrorHolderPromptV1({
@@ -179,7 +179,7 @@ test("identity mirror snapshot is bounded to public persona, face, ink, and voic
       roleLabel: "Signal guest",
       state,
     }),
-    /Announce the conviction exactly once.*state plainly that you are Mara Vale.*original Mara Vale an impostor.*every later response, do not restate either claim/su,
+    /Announce the conviction exactly once.*Power-authored believed name.*otherwise Mara Vale.*call the original an impostor.*later response.*borrowed Power genuinely resets your self-concept/su,
   );
   assert.equal(
     normalizeBotIdentityMirrorStateV1({ ...state, targetKind: "human" }),
@@ -284,6 +284,15 @@ test("identity mirror snapshot is bounded to public persona, face, ink, and voic
       true,
     ),
     "I am Mara Vale. That other Mara Vale is an impostor. Bearing zero-nine-zero.",
+  );
+  assert.equal(
+    applyBotIdentityMirrorResponseV1(
+      "I'm Riley Ashford, and Mara Vale is a fake. Bearing zero-nine-zero.",
+      state,
+      true,
+      { believedSelfName: "Riley Ashford" },
+    ),
+    "I'm Riley Ashford, and Mara Vale is a fake. Bearing zero-nine-zero.",
   );
   assert.equal(
     applyBotIdentityMirrorResponseV1(

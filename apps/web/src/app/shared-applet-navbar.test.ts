@@ -42,11 +42,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(navbarHelper, /liveSessionChromePolicy\("Signal"\)/);
   assert.match(
     navbarHelper,
-    /renderAppSwitcher\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
-  );
-  assert.match(
-    navbarHelper,
-    /renderAppSwitcher\(\{[\s\S]*disabled:\s*options\.liveSessionActive/u,
+    /options\.liveSessionActive && options\.liveSessionExit[\s\S]{0,120}coffeeExitSessionButton[\s\S]{0,400}renderAppSwitcher/u,
   );
   assert.match(
     navbarHelper,
@@ -70,7 +66,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   }
   assert.match(
     pageSource,
-    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,/,
+    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*showLiveExit,[\s\S]*cuttingShow,[\s\S]*onCutShow,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,[\s\S]*liveSessionExit: showLiveExit/u,
   );
   assert.match(
     pageSource,
@@ -109,11 +105,11 @@ test("Signal gives shared navigation its own aligned shell row", () => {
   assert.match(signalSource, /sidebarHeader:\s*ReactNode/);
   assert.match(
     signalSource,
-    /navigationHeader:[\s\S]*ReactNode[\s\S]*liveSessionActive: boolean/u,
+    /navigationHeader:[\s\S]*ReactNode[\s\S]*liveSessionActive: boolean[\s\S]*showLiveExit: boolean/u,
   );
   assert.match(
     signalSource,
-    /typeof navigationHeader === "function"[\s\S]*navigationHeader\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl:/u,
+    /typeof navigationHeader === "function"[\s\S]*navigationHeader\(\{[\s\S]*liveSessionActive,[\s\S]*showLiveExit,[\s\S]*cuttingShow,[\s\S]*onCutShow:[\s\S]*episodeModelControl:/u,
   );
   assert.match(
     signalSource,

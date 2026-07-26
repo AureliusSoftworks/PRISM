@@ -35,6 +35,14 @@ export interface CoffeeSeatSipPresentation {
   mouthOffsetY: string;
 }
 
+/** Keeps every sip-specific mouth effect behind the bot's explicit Coffee * option. */
+export function coffeeSeatSipMouthTreatmentActive(args: {
+  sipActive: boolean;
+  coffeePuckerEnabled: boolean;
+}): boolean {
+  return args.sipActive && args.coffeePuckerEnabled;
+}
+
 export function coffeeSeatCustomMouthCharacterForSip(args: {
   mouthCharacter: string | null;
   coffeePuckerEnabled: boolean;
@@ -58,6 +66,36 @@ export function coffeeSeatScreenRelativeMouthRotationDeg(
     ((((authoredRotationDeg - faceRotationDeg + 180) % 360) + 360) % 360) -
     180;
   return Object.is(wrapped, -0) ? 0 : Number(wrapped.toFixed(3));
+}
+
+/**
+ * Resolves the shared Coffee/Signal mouth rendering cases.
+ *
+ * Custom glyphs and sip puckers counter-rotate against the plate. Generated
+ * visemes for standard bots may apply a plate-relative authored delta, while
+ * fallback visemes temporarily replacing a configured custom glyph keep the
+ * neutral plate baseline because the custom glyph's angle is not transferable.
+ */
+export function coffeeSeatMouthRotationCssDeg(args: {
+  authoredRotationDeg: number;
+  faceRotationDeg: number;
+  configuredCustomMouth: boolean;
+  renderedCustomMouth: boolean;
+  transientSipPucker: boolean;
+}): number {
+  if (args.transientSipPucker) {
+    return coffeeSeatScreenRelativeMouthRotationDeg(0, args.faceRotationDeg);
+  }
+  if (args.renderedCustomMouth) {
+    return coffeeSeatScreenRelativeMouthRotationDeg(
+      args.authoredRotationDeg,
+      args.faceRotationDeg,
+    );
+  }
+  if (args.configuredCustomMouth) {
+    return 0;
+  }
+  return args.authoredRotationDeg;
 }
 
 export function coffeeSeatMouthShapeFromVisibleLength(
@@ -199,7 +237,8 @@ function coffeeSeatOpenMouthGlyph(
   if (mouthShape === "speech-closed") return ":|";
   if (mouthShape === "dot") return ":.";
   if (mouthShape === "at") return ":@";
-  if (mouthShape === "narrow") return ":o";
+  if (mouthShape === "click") return ":ʘ";
+  if (mouthShape === "narrow") return ":ɵ";
   if (mouthShape === "open-wide") return ":0";
   if (mouthShape === "open-small") return ":o";
   if (mouthShape === "open-round") return ":O";

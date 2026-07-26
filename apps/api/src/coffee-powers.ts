@@ -25,6 +25,7 @@ import {
   coffeePowerStayRateMultiplierV1,
   coffeePowerVesselModeV1,
   type BotPowerEffectV1,
+  type BotIdentityMirrorStateV1,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResolvedThemeV1,
   type BotPowerStrength,
@@ -47,6 +48,83 @@ interface CoffeePowerBotRow {
   system_prompt: string;
   semantic_facets: string | null;
   powers_json: string | null;
+}
+
+function rebaseBorrowedCoffeeEffectV1(
+  effect: BotPowerEffectV1,
+  holderBotId: string,
+  targetBotId: string,
+  botNamesById: ReadonlyMap<string, string>,
+): BotPowerEffectV1 {
+  if (!("targets" in effect) || !Array.isArray(effect.targets)) return effect;
+  return {
+    ...effect,
+    targets: effect.targets.map((target) => {
+      if (target.kind !== "bot" || !target.botId) return target;
+      const botId =
+        target.botId === holderBotId
+          ? targetBotId
+          : target.botId === targetBotId
+            ? holderBotId
+            : target.botId;
+      return {
+        ...target,
+        botId,
+        name: botNamesById.get(botId) ?? target.name,
+      };
+    }),
+  } as BotPowerEffectV1;
+}
+
+/**
+ * Rebase first-order public Powers from each mirror target onto its holder.
+ * The frozen Coffee plan remains immutable; private perception permissions and
+ * recursive identity-mirror effects stay with their authored owner.
+ */
+export function coffeePowerPlanWithIdentityMirrorBorrowingV1(args: {
+  plan: CoffeePowerPlanV1 | null;
+  states: ReadonlyMap<string, BotIdentityMirrorStateV1>;
+  botNamesById: ReadonlyMap<string, string>;
+}): CoffeePowerPlanV1 | null {
+  if (!args.plan || args.states.size === 0) return args.plan;
+  const base = args.plan;
+  const bots = { ...base.bots };
+  for (const [holderBotId, state] of args.states) {
+    const holder = base.bots[holderBotId];
+    const target = base.bots[state.targetBotId];
+    if (!holder || !target) continue;
+    const effects = target.effects
+      .filter(
+        (effect) =>
+          effect.type !== "identity_mirror" &&
+          effect.type !== "awareness" &&
+          effect.type !== "speech_audience",
+      )
+      .map((effect) =>
+        rebaseBorrowedCoffeeEffectV1(
+          effect,
+          holderBotId,
+          state.targetBotId,
+          args.botNamesById,
+        ),
+      );
+    if (effects.length === 0) continue;
+    bots[holderBotId] = {
+      ...holder,
+      powerIds: [
+        ...holder.powerIds,
+        ...target.powerIds.map((id) => `identity-mirror:${id}`.slice(0, 128)),
+      ],
+      powerNames: [
+        ...(holder.powerNames ?? []),
+        ...(target.powerNames ?? []),
+      ],
+      selfCue: [holder.selfCue, target.selfCue].filter(Boolean).join(" "),
+      effects: [...holder.effects, ...effects],
+      ruleLabels: [...holder.ruleLabels, ...target.ruleLabels],
+    };
+  }
+  return { ...base, bots };
 }
 
 function parseStringArray(raw: string | null | undefined): string[] {
@@ -551,7 +629,11 @@ export function resolveCoffeePowersForSession(
     const genericCuePowers = powers.filter(
       (power) =>
         !power.compiled?.effects.some(
-          (effect) => effect.type === "identity_mirror" || effect.type === "designation",
+          (effect) =>
+            effect.type === "identity_mirror" ||
+            effect.type === "identity_shapeshift" ||
+            effect.type === "false_name" ||
+            effect.type === "designation",
         ) && !botPowerDesignationEffectFromIntentV1(power.intent),
     );
     const namingCue = botPowerBotNamingCueFromEffectsV1(
@@ -845,7 +927,12 @@ export function coffeePowersPromptForSpeaker(
   const own = plan.bots[speakerBotId];
   const ownHasLegacyIdentityOnlyCue = Boolean(
     own?.powerIds.length === 1 &&
-      own.effects.some((effect) => effect.type === "identity_mirror"),
+      own.effects.some(
+        (effect) =>
+          effect.type === "identity_mirror" ||
+          effect.type === "identity_shapeshift" ||
+          effect.type === "false_name",
+      ),
   );
   const speechAudience = own?.effects.find((effect) => effect.type === "speech_audience");
   if (speechAudience?.type === "speech_audience") {
@@ -857,9 +944,10 @@ export function coffeePowersPromptForSpeaker(
   if (own?.effects.some((effect) => effect.type === "speech_copy")) {
     lines.push("Hard Copycat rule: on your first turn, if nobody has addressed speech to you yet, originate one short in-character opening. After that, repeat only the latest speech addressed directly to you, verbatim, with no added words or actions; if there is no addressed speech, remain silent.");
   }
-  if (own?.effects.some((effect) => effect.type === "eternal_introduction")) {
+  // eternal_introduction: context wipe only — no hard amnesia performance cue.
+  if (own?.effects.some((effect) => effect.type === "false_name")) {
     lines.push(
-      "Hard short-term-amnesia rule: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know the standing table topic unless that message states it, and you do not know prior turns or your own earlier messages. Never claim an older relationship, use hidden table history, mention this rule, or default to identical introductory copy. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely warrants it.",
+      "Hard false-name rule: sincerely believe your session name is not your Library label; use only the assigned believed name for this turn.",
     );
   }
   const responseBudget = coffeePowerResponseBudgetForBot(plan, speakerBotId);
@@ -899,7 +987,13 @@ export function coffeePowersPromptForSpeaker(
     visiblePeerBotIds,
     socialByBotId,
   }));
-  if (own?.selfCue && !ownHasLegacyIdentityOnlyCue) lines.push(own.selfCue);
+  const ownHasEternalIntroduction = Boolean(
+    own?.effects.some((effect) => effect.type === "eternal_introduction"),
+  );
+  // Amnesia is enforced by history wipe; do not inject compiled selfCue coaching.
+  if (own?.selfCue && !ownHasLegacyIdentityOnlyCue && !ownHasEternalIntroduction) {
+    lines.push(own.selfCue);
+  }
   for (const effect of own?.effects ?? []) {
     const targetNames = effect.type === "response_bond" || effect.type === "selective_memory"
       ? effect.targets.flatMap((target) => target.kind === "bot" ? [target.name] : [])
@@ -960,9 +1054,21 @@ export function coffeePowersPromptForSpeaker(
     const peer = plan.bots[botId];
     const peerHasLegacyIdentityOnlyCue = Boolean(
       peer?.powerIds.length === 1 &&
-        peer.effects.some((effect) => effect.type === "identity_mirror"),
+        peer.effects.some(
+          (effect) =>
+            effect.type === "identity_mirror" ||
+            effect.type === "identity_shapeshift" ||
+            effect.type === "false_name",
+        ),
     );
-    if (peer?.observerCue && !peerHasLegacyIdentityOnlyCue) {
+    const peerHasEternalIntroduction = Boolean(
+      peer?.effects.some((effect) => effect.type === "eternal_introduction"),
+    );
+    if (
+      peer?.observerCue &&
+      !peerHasLegacyIdentityOnlyCue &&
+      !peerHasEternalIntroduction
+    ) {
       lines.push(peer.observerCue);
     }
   }

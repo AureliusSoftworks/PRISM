@@ -487,3 +487,74 @@ test("V2 compiles only captured speech timing and exports a readable private-saf
     /voiceMode|effects|radio|provider|diagnostic|camera|thinking|endReason/u,
   );
 });
+
+test("V2 pairs captured speech start and stop events on the master clock", () => {
+  const pairedManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    direction: [
+      {
+        sequence: 1,
+        atMs: 1_000,
+        kind: "speech",
+        sourceMessageId: "message-1",
+        payload: {
+          speakerId: "host",
+          active: true,
+          audible: true,
+          channel: "primary",
+        },
+      },
+      {
+        sequence: 2,
+        atMs: 1_500,
+        kind: "speech",
+        sourceMessageId: "message-2",
+        payload: {
+          speakerId: "guest",
+          active: true,
+          audible: true,
+          channel: "reaction",
+        },
+      },
+      {
+        sequence: 3,
+        atMs: 1_900,
+        kind: "speech",
+        sourceMessageId: "message-2",
+        payload: {
+          speakerId: "guest",
+          active: false,
+          audible: true,
+          channel: "reaction",
+        },
+      },
+      {
+        sequence: 4,
+        atMs: 4_000,
+        kind: "speech",
+        sourceMessageId: "message-1",
+        payload: {
+          speakerId: "host",
+          active: false,
+          audible: true,
+          channel: "primary",
+        },
+      },
+    ],
+  };
+  const utterances = compileReplayTimelineV2(pairedManifest).beats.filter(
+    (beat) => beat.kind === "utterance",
+  );
+  assert.deepEqual(
+    utterances.map((beat) => [
+      beat.sourceMessageId,
+      beat.channel,
+      beat.startMs,
+      beat.endMs,
+    ]),
+    [
+      ["message-1", "primary", 1_000, 4_000],
+      ["message-2", "reaction", 1_500, 1_900],
+    ],
+  );
+});

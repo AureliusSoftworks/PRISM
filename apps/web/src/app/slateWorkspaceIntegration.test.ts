@@ -9,13 +9,21 @@ const workspaceCss = readFileSync(
   "utf8",
 );
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const companionSource = readFileSync(
+  new URL("./PrismCompanion.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("Slate workspace integration", () => {
   it("renders every registered Slate tutorial target in the live workspace", () => {
+    const renderedSlateSources = `${source}\n${pageSource}\n${companionSource}`;
     for (const step of MODE_TUTORIALS.slate.steps) {
       const match = step.targetSelector.match(/data-tutorial-target="([^"]+)"/);
       assert.ok(match?.[1], `Could not read target from ${step.targetSelector}`);
-      assert.match(source, new RegExp(`data-tutorial-target="${match[1]}"`));
+      assert.match(
+        renderedSlateSources,
+        new RegExp(`data-tutorial-target="${match[1]}"`),
+      );
     }
   });
 
@@ -308,9 +316,10 @@ describe("Slate workspace integration", () => {
   });
 
   it("uses the shared PRISM app header and keeps its utility panels mounted", () => {
+    const slateBranchStart = pageSource.lastIndexOf('if (view === "slate")');
     const slateBranch = pageSource.slice(
-      pageSource.indexOf('if (view === "slate")'),
-      pageSource.indexOf('if (view === "story")'),
+      slateBranchStart,
+      pageSource.indexOf('if (view === "story")', slateBranchStart),
     );
     assert.match(
       slateBranch,

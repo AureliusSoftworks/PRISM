@@ -247,6 +247,8 @@ export interface VoicePlaybackCharacterAlignment {
 export interface VoicePlaybackLifecycle {
   /** Temporary per-utterance delivery changes. V1 accepts the neutral envelope only. */
   deliveryEnvelope?: CoffeeVoiceDeliveryEnvelope;
+  /** Fires immediately before audible pre-speech presence, such as breath foley. */
+  onPresenceStart?: () => void;
   onStart?: (
     durationMs: number | null,
     alignment?: VoicePlaybackCharacterAlignment | null
@@ -254,6 +256,8 @@ export interface VoicePlaybackLifecycle {
   /** Audio-clock progress used to keep visible speech and mouth motion aligned. */
   onProgress?: (elapsedMs: number, durationMs: number) => void;
   onEnd?: () => void;
+  /** Clears presentation state when playback is superseded before completion. */
+  onCancel?: () => void;
 }
 
 export interface VoicePlaybackProgressController {
@@ -598,6 +602,7 @@ export async function playPreSpeechBreath(args: {
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   isCurrent?: () => boolean;
+  onStart?: () => void;
 }): Promise<boolean> {
   if (!args.plan) return false;
   const context = contextForPlayback();
@@ -674,6 +679,7 @@ export async function playPreSpeechBreath(args: {
       finish();
     }, { once: true });
     try {
+      args.onStart?.();
       source.start(startedAt);
       voiceStartTimer = window.setTimeout(
         releaseVoice,
@@ -789,6 +795,11 @@ export async function playRealtimeVoiceBytes(args: {
   isCurrent?: () => boolean;
   /** Keep visible speech on the device-output clock instead of the render clock. */
   compensateLifecycleForOutputLatency?: boolean;
+  /**
+   * Monotonic browser timestamp for an exact future audio start. Decoding and
+   * graph preparation happen immediately, then the source waits on this clock.
+   */
+  scheduledStartAtPerformanceMs?: number;
 }): Promise<boolean> {
   const context = contextForPlayback();
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
@@ -836,7 +847,13 @@ export async function playRealtimeVoiceBytes(args: {
   // Worklet registration can take long enough for a timestamp captured before
   // the await to become stale. Anchor both source scheduling and the visible
   // lifecycle to the live audio clock so neither starts ahead nor cuts short.
-  const now = context.currentTime;
+  const playbackClockStartedAt = context.currentTime;
+  const scheduledStartDelayMs =
+    typeof args.scheduledStartAtPerformanceMs === "number" &&
+    Number.isFinite(args.scheduledStartAtPerformanceMs)
+      ? Math.max(0, args.scheduledStartAtPerformanceMs - performance.now())
+      : 0;
+  const now = playbackClockStartedAt + scheduledStartDelayMs / 1_000;
   const tailFlushMs = FormantCorrectionNode
     ? VOICE_PLAYBACK_TAIL_FLUSH_MS
     : Math.min(40, VOICE_PLAYBACK_TAIL_FLUSH_MS);
@@ -1179,6 +1196,8 @@ export async function playRealtimeVoiceBytes(args: {
         }
         roomConnection.release();
         args.lifecycle?.onEnd?.();
+      } else {
+        args.lifecycle?.onCancel?.();
       }
       resolve();
     };
@@ -1204,9 +1223,9 @@ export async function playRealtimeVoiceBytes(args: {
     progress = beginVoicePlaybackProgress(
       args.lifecycle,
       playbackDurationMs,
-      () => (context.currentTime - now) * 1000,
+      () => (context.currentTime - playbackClockStartedAt) * 1000,
       args.alignment,
-      { startDelayMs: lifecycleOutputLatencyMs },
+      { startDelayMs: scheduledStartDelayMs + lifecycleOutputLatencyMs },
     );
     active.progress = progress;
   });

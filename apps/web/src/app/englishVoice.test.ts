@@ -41,6 +41,34 @@ describe("English voice post processing", () => {
     );
   });
 
+  it("honors an optional playback-validity guard before any audible start", () => {
+    const source = readFileSync(new URL("./englishVoice.ts", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /export function enqueueEnglishVoice\([\s\S]*?isPlaybackStillValid\?: \(\) => boolean,/u,
+    );
+    assert.match(
+      source,
+      /async function playAudio\([\s\S]*?isPlaybackStillValid\?: \(\) => boolean,[\s\S]*?const playbackStillValid = \(\): boolean =>[\s\S]*?expectedGeneration === generation && \(isPlaybackStillValid\?\.\(\) \?\? true\);/u,
+    );
+    assert.match(
+      source,
+      /await playPreSpeechBreath\(\{[\s\S]*?isCurrent: playbackStillValid,/u,
+    );
+    assert.match(
+      source,
+      /played = await playRealtimeVoiceBytes\(\{[\s\S]*?isCurrent: playbackStillValid,/u,
+    );
+    assert.match(
+      source,
+      /await playBytesWithMedia\([\s\S]*?isPlaybackStillValid,/u,
+    );
+    assert.match(
+      source,
+      /async function playBytesWithMedia\([\s\S]*?if \(!playbackStillValid\(\)\) \{[\s\S]*?finish\(\);[\s\S]*?return;/u,
+    );
+  });
+
   it("maps pitch and warmth without changing portable profile semantics", () => {
     assert.deepEqual(
       resolveEnglishVoicePostProcessing({
@@ -158,6 +186,26 @@ describe("English voice post processing", () => {
       state = "running";
       decodeAudioData(): Promise<AudioBuffer> {
         return Promise.reject(new Error("WebKit decode failed"));
+      }
+      createGain() {
+        return {
+          gain: { value: 1 },
+          connect() {
+            return this;
+          },
+          disconnect() {},
+        };
+      }
+      createMediaElementSource() {
+        return {
+          connect() {
+            return this;
+          },
+          disconnect() {},
+        };
+      }
+      get destination() {
+        return {};
       }
     }
     class FakeAudio {

@@ -17,6 +17,28 @@ export function prismBranchAllowsDevTools(branchName: string | undefined): boole
   return Boolean(normalized) && normalized !== "main" && normalized !== "unknown";
 }
 
+/** Marketplace shelves can pin to an exact git branch (today: `dev` only). */
+export type PrismMarketplaceBranchLock = "dev";
+
+export function normalizePrismMarketplaceBranchLock(
+  value: unknown,
+): PrismMarketplaceBranchLock | null {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return normalized === "dev" ? "dev" : null;
+}
+
+/**
+ * Branch-locked Marketplace entries stay hidden unless the running build's
+ * branch name exactly matches the lock. Missing/unknown branch → hidden.
+ */
+export function prismMarketplaceBranchLockAllows(
+  branchLock: PrismMarketplaceBranchLock | null | undefined,
+  branchName: string | undefined,
+): boolean {
+  if (!branchLock) return true;
+  return (branchName ?? "").trim().toLowerCase() === branchLock;
+}
+
 export function prismWebDevToolsEnabled(env: PrismDevEnv): boolean {
   if (!prismBranchAllowsDevTools(env.NEXT_PUBLIC_PRISM_BRANCH)) return false;
   return (

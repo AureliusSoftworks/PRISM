@@ -30,13 +30,13 @@ type ReplayAudioMasterCaptureSession = {
   /** Wall timestamp when the current compact hold began, if any. */
   pausedAt: number | null;
   /**
-   * Signal-only: pause the whole master during thinking / interruption
-   * processing beats. Coffee leaves this false.
+   * Signal-only: pause the whole master while a bot's presented thinking
+   * state is active. Coffee leaves this false.
    */
   compactThinkingGaps: boolean;
   /** Set when neither pause nor stop/restart can hold the recorder. */
   compactThinkingGapsDisabled: boolean;
-  /** Nested holds (thinking presentation + interruption retort delay). */
+  /** Defensive depth for overlapping presented thinking owners. */
   compactHoldDepth: number;
   /** True when pause() failed and the recorder was stopped for a clean restart. */
   needsRecorderRestart: boolean;
@@ -385,8 +385,8 @@ function resumeCaptureRecorder(capture: ReplayAudioMasterCaptureSession): void {
 }
 
 /**
- * Nested Signal hold for thinking presentations and interruption processing
- * beats. Coffee captures ignore this (compactThinkingGaps stays false).
+ * Signal hold for presented thinking intervals. Coffee captures ignore this
+ * (compactThinkingGaps stays false).
  */
 export function setReplayAudioMasterCompactHold(
   sourceId: string,
@@ -403,27 +403,6 @@ export function setReplayAudioMasterCompactHold(
   if (capture.compactHoldDepth <= 0) return;
   capture.compactHoldDepth -= 1;
   if (capture.compactHoldDepth === 0) resumeCaptureRecorder(capture);
-}
-
-/**
- * Hold the master for a timed interruption processing beat, then release.
- * Nested with thinking holds via compactHoldDepth.
- */
-export function pulseReplayAudioMasterCompactHold(
-  sourceId: string,
-  durationMs: number,
-): void {
-  const capture = activeCapture;
-  if (!capture || capture.sourceId !== sourceId) return;
-  if (!captureShouldCompactThinkingGaps(capture)) return;
-  const boundedMs = Math.max(0, Math.round(durationMs));
-  if (boundedMs <= 0) return;
-  setReplayAudioMasterCompactHold(sourceId, true);
-  const expectedSourceId = sourceId;
-  window.setTimeout(() => {
-    if (activeCapture?.sourceId !== expectedSourceId) return;
-    setReplayAudioMasterCompactHold(expectedSourceId, false);
-  }, boundedMs);
 }
 
 export function markReplayDirectionEvent(args: {

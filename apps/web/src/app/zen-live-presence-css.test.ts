@@ -1559,6 +1559,7 @@ describe("Zen live presence CSS", () => {
       "open-wide",
       "open-round",
       "at",
+      "click",
     ]) {
       assert.match(
         css,
@@ -1624,11 +1625,11 @@ describe("Zen live presence CSS", () => {
     assert.match(css, /1turn/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /ZEN_LIVE_MOUTH_PHASE_MS \* CUSTOM_MOUTH_SPIN_PHASES_PER_TURN/,
+      /ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS[\s\S]*from "\.\/zenLiveMouth\.ts"/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /\["--bot-face-mouth-spin-turn-duration" as string\]: `\$\{CUSTOM_MOUTH_SPIN_TURN_MS\}ms`/,
+      /\["--bot-face-mouth-spin-turn-duration" as string\]: `\$\{ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS\}ms`/,
     );
     assert.match(
       css,
@@ -1656,9 +1657,15 @@ describe("Zen live presence CSS", () => {
     assert.match(blinkRule, /--crt-glyph-core-blue-rgb:\s*255 255 255\s*;/);
     assert.match(blinkRule, /--crt-glyph-phosphor-midtone-strength:\s*0\.24\s*;/);
     assert.match(blinkRule, /--crt-glyph-phosphor-bright-strength:\s*0\.09\s*;/);
-    assert.match(blinkRule, /--bot-face-custom-glyph-base-rotation:\s*0deg\s*;/);
+    assert.match(
+      blinkRule,
+      /--bot-face-custom-glyph-base-rotation:\s*var\(\s*--bot-face-blink-rotation,\s*0deg\s*\)\s*;/,
+    );
     assert.match(blinkRule, /animation:\s*none\s*;/);
-    assert.match(blinkRule, /transform:\s*rotate\(0deg\)\s*;/);
+    assert.match(
+      blinkRule,
+      /transform:\s*rotate\(var\(--bot-face-blink-rotation,\s*0deg\)\)\s*;/,
+    );
 
     const closedEyeRule = ruleForSelectorNeedlesWithBody(
       [
@@ -1853,11 +1860,11 @@ describe("Zen live presence CSS", () => {
     assert.match(css, /@keyframes identityMirrorFaceScramble/);
     assert.match(
       pageSource,
-      /Date\.parse\(identityMirrorState\.occurredAt\) \+ BOT_IDENTITY_MIRROR_TRANSITION_MS \/ 2/,
+      /Date\.parse\(identityBorrowOccurredAt\) \+\s+identityBorrowTransitionMs \/ 2/,
     );
     assert.match(
       pageSource,
-      /const seatFaceStyle = identityMirrorTargetFaceVisible \? identityMirrorState!\.targetFace : resolveBotFaceStyleForBot\(bot\)/,
+      /const seatFaceStyle = identityBorrowTargetFaceVisible\s+\? \(identityMirrorState\?\.targetFace \?\?\s+identityShapeshiftState!\.targetFace\)\s+: resolveBotFaceStyleForBot\(bot\)/,
     );
     assert.match(pageSource, /const seatGlyphName:[^;]+bot\.glyph[^;]+;/);
     assert.match(

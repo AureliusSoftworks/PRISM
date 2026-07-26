@@ -128,20 +128,28 @@ import {
   buildCoffeePollExportLines,
   coffeeMessagesVisibleInExport,
   buildCoffeeTeamExportLines,
+  buildCoffeeGroupAtmospherePrompt,
   createCoffeePoll,
   createCoffeeTeamsForSession,
   createCoffeePreset,
-  createCoffeeGroupWithGeneratedName,
+  createCoffeeGroup,
   createCoffeeConversation,
   createCoffeeConversationFromGroup,
   deleteCoffeeGroup,
   deleteCoffeePreset,
+  failCoffeeGroupSynthesisItem,
+  getCoffeeGroup,
   getCoffeeConversationTranscript,
   getCoffeeSessionPoll,
   generateCoffeeSessionSynopsis,
+  inferCoffeeGroupEthos,
+  inferCoffeeGroupNameDetailed,
+  inferCoffeeGroupStarterTopicsDetailed,
   coffeePlayerDepartureEpilogueShouldStop,
   listCoffeeGroups,
   listCoffeePresets,
+  loadCoffeeGroupProfiles,
+  markCoffeeGroupSynthesisItemRunning,
   parseStoredCoffeeSessionSettings,
   processCoffeeAutonomousTurn,
   processCoffeeTurn,
@@ -154,8 +162,13 @@ import {
   setCoffeeConversationTopic,
   setCoffeePlayerTeam,
   setCoffeePollPlayerVote,
+  saveSynthesizedCoffeeGroupAtmosphere,
+  saveSynthesizedCoffeeGroupEthos,
+  saveSynthesizedCoffeeGroupName,
+  shouldGenerateCoffeeGroupNameFromInput,
   topOffCoffeeCupForBot,
   undoLatestCoffeeDebugMessage,
+  updateCoffeeGroup,
   updateCoffeePreset,
   updateCoffeeGroupWithGeneratedTopics,
   updateCoffeeBotSocialDebug,
@@ -173,6 +186,7 @@ import {
   SignalOnlineTurnError,
   advanceBotcastEpisode,
   botcastEpisodePowerSnapshotForRole,
+  cancelBotcastEpisode,
   chatWithBotcastShowHost,
   createBotcastEpisode,
   createBotcastShow,
@@ -180,8 +194,6 @@ import {
   deleteBotcastShow,
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
-  type BotcastProducerCutInterruption,
-  ensureBotcastEpisodePersonaReview,
   generateBotcastBookingSuggestion,
   generateBotcastProducerGuestBooking,
   generateBotcastShowAtmosphere,
@@ -258,6 +270,7 @@ import {
   upsertReplayVoiceTake,
 } from "./replay-recordings.ts";
 import type {
+  CoffeeGroupSynthesisItem,
   ReplayManifestV1,
   ReplayManifestV2,
   ReplayRecordingStatusV1,
@@ -606,6 +619,7 @@ import {
   normalizeGraphicsQuality,
   normalizeListenerReactionVocalFoley,
   normalizeBotCrosstalkInterruptedSpeakerCue,
+  coffeeInterruptionTranscriptSegments,
   botCrosstalkPrimarySpeakerContent,
   botcastListenerReactionForMessage,
   normalizeOptionalBotAudioVoiceProfileV1,
@@ -617,6 +631,8 @@ import {
   botPowerEternallyIntroducesV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerShapeshiftsIdentityV1,
+  botPowerBelievesFalseNameV1,
   botPowerThemeMoodCueV1,
   botPowerResponseIsSilentV1,
   strongestHardBotPowerResponseBudgetEffectV1,
@@ -3927,11 +3943,16 @@ async function generateAndPersistSignalArtworkAsset(args: {
   };
 }
 
-async function generateAndPersistSlateCoverAsset(args: {
+async function generateAndPersistStandaloneImageAsset(args: {
   userId: string;
   prompt: string;
   preferredProvider: ImageProviderName;
   signal: AbortSignal;
+  size: "1536x1024" | "1024x1536";
+  origin: ImageOrigin;
+  purpose: string;
+  featureLabel: string;
+  relatedBotIds?: string[];
 }): Promise<SignalArtworkGeneratedAsset> {
   const user = getUserRow(args.userId);
   const effectiveProvider = resolveImageProviderName({
@@ -3957,18 +3978,18 @@ async function generateAndPersistSlateCoverAsset(args: {
   if (effectiveProvider === "local" && localImageDisabled) {
     throw new HttpError(
       400,
-      "Local image generation is disabled. Choose a local image model before creating a Slate cover.",
+      `Local image generation is disabled. Choose a local image model before creating ${args.featureLabel}.`,
     );
   }
   if (!shouldRunLocal && openAiImageDisabled) {
     throw new HttpError(
       400,
-      "Online image generation is disabled. Choose an online image model before creating a Slate cover.",
+      `Online image generation is disabled. Choose an online image model before creating ${args.featureLabel}.`,
     );
   }
   if (shouldRunLocal && !resolvedLocalImageModel) {
     throw new Error(
-      "Pick a local image model in Images, then try the Slate cover again.",
+      `Pick a local image model in Images, then try ${args.featureLabel} again.`,
     );
   }
 
@@ -3982,7 +4003,7 @@ async function generateAndPersistSlateCoverAsset(args: {
     botId: null,
   });
 
-  const size = "1024x1536";
+  const size = args.size;
   const quality = shouldRunLocal ? "standard" : "high";
   const imageId = randomId(12);
   const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
@@ -4086,7 +4107,7 @@ async function generateAndPersistSlateCoverAsset(args: {
   }
 
   if (args.signal.aborted) {
-    throw new DOMException("Slate cover generation cancelled.", "AbortError");
+    throw new DOMException(`${args.featureLabel} generation cancelled.`, "AbortError");
   }
   const persistenceStartedAt = Date.now();
   try {
@@ -4103,11 +4124,12 @@ async function generateAndPersistSlateCoverAsset(args: {
          (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
           revised_prompt, url, size, quality, provider, model, local_rel_path,
           purpose, created_at)
-       VALUES (?, ?, NULL, NULL, '[]', 'slate_cover', ?, ?, ?, ?, ?, ?, ?, ?,
-               'slate_cover', ?)`,
+       VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       imageId,
       args.userId,
+      serializeImageRelatedBotIds(args.relatedBotIds ?? []),
+      args.origin,
       args.prompt,
       revisedPrompt,
       storedUrl,
@@ -4116,6 +4138,7 @@ async function generateAndPersistSlateCoverAsset(args: {
       provider,
       model,
       localRelPath,
+      args.purpose,
       createdAt,
     );
     recordImageUsage({
@@ -4137,6 +4160,256 @@ async function generateAndPersistSlateCoverAsset(args: {
     imageUrl: displayUrl,
     timings: { downloadMs, localPersistenceMs },
   };
+}
+
+async function generateAndPersistSlateCoverAsset(args: {
+  userId: string;
+  prompt: string;
+  preferredProvider: ImageProviderName;
+  signal: AbortSignal;
+}): Promise<SignalArtworkGeneratedAsset> {
+  return generateAndPersistStandaloneImageAsset({
+    ...args,
+    size: "1024x1536",
+    origin: "slate_cover",
+    purpose: "slate_cover",
+    featureLabel: "a Slate cover",
+  });
+}
+
+const COFFEE_GROUP_SYNTHESIS_ITEMS = new Set<CoffeeGroupSynthesisItem>([
+  "name",
+  "ethos",
+  "atmosphere",
+]);
+const coffeeGroupSynthesisFlights = new Map<string, Promise<void>>();
+
+function coffeeGroupSynthesisProvider(userId: string) {
+  const user = getUserRow(userId);
+  return auxiliaryProviderFactoryOverride(user.prism_default_llm_model, {
+    secondaryOllamaHost: user.secondary_ollama_host,
+    experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
+  });
+}
+
+async function refreshCoffeeGroupStarterTopicsFromEthos(
+  userId: string,
+  groupId: string,
+): Promise<void> {
+  const group = getCoffeeGroup(db, userId, groupId);
+  if (!group) return;
+  const ethosRevision = group.synthesis.items.ethos.revision;
+  try {
+    const generated = await inferCoffeeGroupStarterTopicsDetailed({
+      provider: coffeeGroupSynthesisProvider(userId),
+      group: loadCoffeeGroupProfiles(db, userId, group.botGroupIds),
+      sessionSettings: group.coffeeSettings,
+      ethos: group.ethos,
+    });
+    const latest = getCoffeeGroup(db, userId, groupId);
+    if (
+      !latest ||
+      latest.ethos !== group.ethos ||
+      latest.synthesis.items.ethos.revision !== ethosRevision
+    ) {
+      return;
+    }
+    updateCoffeeGroup(db, userId, groupId, {
+      starterTopics: generated.topics,
+    });
+  } catch (error) {
+    // Topic generation is supportive, not a fourth blocking identity item.
+    console.warn(
+      `[coffee] failed to refresh starter topics for group ${groupId}:`,
+      error,
+    );
+  }
+}
+
+async function runCoffeeGroupSynthesisItem(
+  userId: string,
+  groupId: string,
+  item: CoffeeGroupSynthesisItem,
+): Promise<void> {
+  let expectedRevision: number | undefined;
+  try {
+    const group = getCoffeeGroup(db, userId, groupId);
+    if (!group) return;
+    const running = markCoffeeGroupSynthesisItemRunning(
+      db,
+      userId,
+      groupId,
+      item,
+    );
+    expectedRevision = running.synthesis.items[item].revision;
+    const profiles = loadCoffeeGroupProfiles(
+      db,
+      userId,
+      group.botGroupIds,
+    );
+    if (item === "name") {
+      const generated = await inferCoffeeGroupNameDetailed({
+        provider: coffeeGroupSynthesisProvider(userId),
+        group: profiles,
+        fallbackName: group.name,
+      });
+      saveSynthesizedCoffeeGroupName({
+        db,
+        userId,
+        groupId,
+        name: generated.name,
+        generated: generated.generated,
+        expectedRevision,
+        ...(generated.generated
+          ? {}
+          : { error: "The local helper could not craft a group-specific name." }),
+      });
+      return;
+    }
+    if (item === "ethos") {
+      const generated = await inferCoffeeGroupEthos({
+        provider: coffeeGroupSynthesisProvider(userId),
+        group: profiles,
+      });
+      saveSynthesizedCoffeeGroupEthos({
+        db,
+        userId,
+        groupId,
+        ethos: generated.ethos,
+        generated: generated.generated,
+        expectedRevision,
+        ...(generated.generated
+          ? {}
+          : { error: "The local helper could not craft a group-specific ethos." }),
+      });
+      await refreshCoffeeGroupStarterTopicsFromEthos(userId, groupId);
+      return;
+    }
+
+    const latest = getCoffeeGroup(db, userId, groupId);
+    if (!latest) return;
+    const prompt = buildCoffeeGroupAtmospherePrompt({
+      groupName: latest.name,
+      ethos: latest.ethos,
+      group: profiles,
+    });
+    const user = getUserRow(userId);
+    const previousImageId = latest.atmosphere?.imageId ?? null;
+    const asset = await generateAndPersistStandaloneImageAsset({
+      userId,
+      prompt,
+      preferredProvider: resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        offlineOnly: user.preferred_provider === "local",
+      }),
+      signal: new AbortController().signal,
+      size: "1536x1024",
+      origin: "bot_group_room",
+      purpose: "group-room-wallpaper",
+      featureLabel: "a Coffee Group atmosphere",
+      relatedBotIds: latest.botGroupIds,
+    });
+    const saved = saveSynthesizedCoffeeGroupAtmosphere({
+      db,
+      userId,
+      groupId,
+      imageId: asset.imageId,
+      prompt,
+      expectedRevision,
+    });
+    if (saved.atmosphere?.imageId !== asset.imageId) {
+      const staleAsset = db
+        .prepare(
+          `SELECT local_rel_path
+             FROM images
+            WHERE id = ? AND user_id = ? AND purpose = 'group-room-wallpaper'`,
+        )
+        .get(asset.imageId, userId) as
+        | { local_rel_path: string | null }
+        | undefined;
+      if (staleAsset) {
+        db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+          asset.imageId,
+          userId,
+        );
+        if (staleAsset.local_rel_path) {
+          tryUnlinkGeneratedImageFile(staleAsset.local_rel_path);
+        }
+      }
+      return;
+    }
+    if (previousImageId && previousImageId !== asset.imageId) {
+      const previous = db
+        .prepare(
+          `SELECT local_rel_path
+             FROM images
+            WHERE id = ? AND user_id = ? AND purpose = 'group-room-wallpaper'`,
+        )
+        .get(previousImageId, userId) as
+        | { local_rel_path: string | null }
+        | undefined;
+      if (previous) {
+        db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+          previousImageId,
+          userId,
+        );
+        if (previous.local_rel_path) {
+          tryUnlinkGeneratedImageFile(previous.local_rel_path);
+        }
+      }
+    }
+  } catch (error) {
+    try {
+      failCoffeeGroupSynthesisItem(
+        db,
+        userId,
+        groupId,
+        item,
+        error,
+        expectedRevision,
+      );
+    } catch {
+      // The group may have been deleted while its background item was running.
+    }
+  }
+}
+
+function queueCoffeeGroupSynthesisItem(
+  userId: string,
+  groupId: string,
+  item: CoffeeGroupSynthesisItem,
+): Promise<void> {
+  const key = `${userId}:${groupId}:${item}`;
+  const active = coffeeGroupSynthesisFlights.get(key);
+  if (active) return active;
+  const flight = runCoffeeGroupSynthesisItem(userId, groupId, item).finally(
+    () => {
+      coffeeGroupSynthesisFlights.delete(key);
+    },
+  );
+  coffeeGroupSynthesisFlights.set(key, flight);
+  return flight;
+}
+
+function queueInitialCoffeeGroupSynthesis(
+  userId: string,
+  groupId: string,
+  items: readonly CoffeeGroupSynthesisItem[],
+): void {
+  const identityItems = items.filter(
+    (item): item is "name" | "ethos" =>
+      item === "name" || item === "ethos",
+  );
+  const identity = Promise.all(
+    identityItems.map((item) =>
+      queueCoffeeGroupSynthesisItem(userId, groupId, item),
+    ),
+  );
+  if (items.includes("atmosphere")) {
+    void identity.then(() =>
+      queueCoffeeGroupSynthesisItem(userId, groupId, "atmosphere"),
+    );
+  }
 }
 
 function buildRoutes(): RouteDefinition[] {
@@ -7978,6 +8251,8 @@ function buildRoutes(): RouteDefinition[] {
       let runtimeBotPowers: string | null = null;
       let runtimeBotMuted = false;
       let runtimeBotEternalIntroduction = false;
+      let runtimeBotShapeshift = false;
+      let runtimeBotFalseName = false;
       let runtimeBotQuietIgnored = false;
       let runtimeBotEchoAddressed = false;
       let runtimeBotMumbling = false;
@@ -7985,6 +8260,8 @@ function buildRoutes(): RouteDefinition[] {
         typeof strongestHardBotPowerResponseBudgetEffectV1
       > = null;
       let botForcesLocalProvider = false;
+      let botPersonaPrompt: string | undefined;
+      let botFlirtEnabled: boolean | undefined;
       const generationOverrides: GenerateOptions = {};
       if (runtimeBotId) {
         const bot = db
@@ -8011,6 +8288,10 @@ function buildRoutes(): RouteDefinition[] {
           runtimeBotEternalIntroduction = botPowerEternallyIntroducesV1(
             bot.powers_json,
           );
+          runtimeBotShapeshift = botPowerShapeshiftsIdentityV1(bot.powers_json);
+          runtimeBotFalseName = botPowerBelievesFalseNameV1(bot.powers_json);
+          botPersonaPrompt = bot.system_prompt ?? undefined;
+          botFlirtEnabled = bot.flirt_enabled === 1;
           if (botPowerIntermittentMuteEffectV1(bot.powers_json)) {
             const stableTurnOrdinal = incognito
               ? (ephemeralMessages?.length ?? 0)
@@ -8304,6 +8585,10 @@ function buildRoutes(): RouteDefinition[] {
             botPowers: runtimeBotPowers,
             botPowerMuted: runtimeBotMuted || runtimeBotQuietIgnored,
             botPowerEternalIntroduction: runtimeBotEternalIntroduction,
+            botPowerShapeshift: runtimeBotShapeshift,
+            botPowerFalseName: runtimeBotFalseName,
+            botPersonaPrompt,
+            botFlirtEnabled,
             botPowerQuietIgnored: runtimeBotQuietIgnored,
             botPowerEchoAddressed: runtimeBotEchoAddressed,
             botPowerMumbling: runtimeBotMumbling,
@@ -9786,12 +10071,6 @@ function buildRoutes(): RouteDefinition[] {
           throw new HttpError(404, "Signal episode not found.");
         }
       })();
-      if (targetEpisode.status !== "completed") {
-        throw new HttpError(
-          409,
-          "Finish the Signal broadcast before deleting its episode.",
-        );
-      }
       const replayIds = replayRecordingIdsForSource(
         userId,
         "signal",
@@ -9801,107 +10080,104 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Signal episode not found.");
       }
       removeReplayDirectories(userId, replayIds);
-      json(ctx.res, 200, { ok: true });
+      json(ctx.res, 200, {
+        ok: true,
+        discarded: targetEpisode.status !== "completed",
+      });
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = (ctx.body ?? {}) as Record<string, unknown>;
-      const checkpointRequested =
-        "lastAudienceMessageId" in body ||
-        "lastAudienceEventSequence" in body ||
-        "audienceSegmentCount" in body;
-      const audienceCheckpoint = checkpointRequested
-        ? (typeof body.lastAudienceMessageId === "string" ||
-            body.lastAudienceMessageId === null) &&
-          typeof body.lastAudienceEventSequence === "number" &&
-          Number.isInteger(body.lastAudienceEventSequence) &&
-          typeof body.audienceSegmentCount === "number" &&
-          Number.isInteger(body.audienceSegmentCount)
-          ? {
-              lastAudienceMessageId: body.lastAudienceMessageId,
-              lastAudienceEventSequence: body.lastAudienceEventSequence,
-              audienceSegmentCount: body.audienceSegmentCount,
-            }
-          : null
-        : undefined;
-      if (audienceCheckpoint === null) {
-        throw new HttpError(400, "Signal cut checkpoint is invalid.");
-      }
-      const rawInterruption = body.interruption;
-      const interruption = rawInterruption === undefined
-        ? undefined
-        : rawInterruption &&
-            typeof rawInterruption === "object" &&
-            !Array.isArray(rawInterruption) &&
-            typeof (rawInterruption as Record<string, unknown>).messageId ===
-              "string" &&
-            ((rawInterruption as Record<string, unknown>).speakerRole ===
-              "host" ||
-              (rawInterruption as Record<string, unknown>).speakerRole ===
-                "guest") &&
-            typeof (rawInterruption as Record<string, unknown>).spokenContent ===
-              "string" &&
-            (typeof (rawInterruption as Record<string, unknown>).bridgeLine ===
-              "string" ||
-              (rawInterruption as Record<string, unknown>).bridgeLine ===
-                undefined) &&
-            (typeof (rawInterruption as Record<string, unknown>)
-              .interruptedSpeakerCue === "string" ||
-              (rawInterruption as Record<string, unknown>)
-                .interruptedSpeakerCue === undefined)
-          ? (rawInterruption as BotcastProducerCutInterruption)
-          : null;
-      if (interruption === null) {
-        throw new HttpError(400, "Signal cut interruption is invalid.");
-      }
       if (
         body.deterministicClose !== undefined &&
         typeof body.deterministicClose !== "boolean"
       ) {
         throw new HttpError(400, "Signal deterministic close flag is invalid.");
       }
+      const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      const discardProducerCutEpisode = () => {
+        const cancelledEpisode = cancelBotcastEpisode(
+          db,
+          userId,
+          currentEpisode.id,
+        );
+        const replayIds = replayRecordingIdsForSource(
+          userId,
+          "signal",
+          [currentEpisode.id],
+        );
+        for (const recordingId of replayIds) {
+          deleteReplayRecordingMedia(db, userId, recordingId);
+        }
+        removeReplayDirectories(userId, replayIds);
+        return cancelledEpisode;
+      };
+      if (currentEpisode.status === "cancelled") {
+        json(ctx.res, 200, {
+          ok: true,
+          episode: projectBotcastEpisodeForAudienceV1(currentEpisode),
+          message: null,
+          discarded: true,
+        });
+        return;
+      }
+      if (currentEpisode.status !== "live") {
+        const completedProducerCut =
+          currentEpisode.status === "completed" &&
+          currentEpisode.events.some(
+            (event) =>
+              event.kind === "cut_away" &&
+              event.payload.reason === "producer_cut",
+          );
+        if (completedProducerCut) {
+          json(ctx.res, 200, {
+            ok: true,
+            episode: projectBotcastEpisodeForAudienceV1(
+              discardProducerCutEpisode(),
+            ),
+            message: null,
+            discarded: true,
+          });
+          return;
+        }
+        throw new HttpError(
+          409,
+          "This Signal episode has already ended.",
+        );
+      }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const currentEpisode = getBotcastEpisode(db, userId, ctx.params.id);
-      const generation = {
-        preferredProvider: currentEpisode.provider,
-        openAiApiKey:
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-        anthropicApiKey:
-          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
-        secondaryOllamaHost: user.secondary_ollama_host,
-        preferredLocalModel: user.preferred_local_model,
-        preferredOnlineModel: user.preferred_online_model,
-        autoFallbackChain: parseStoredAutoFallbackChain(
-          user.auto_fallback_chain,
-        ),
-        providerFactory: providerFactoryOverride,
-      };
       const result = await endBotcastEpisodeOnProducerCut(
         db,
         userId,
         currentEpisode.id,
-        generation,
         {
-          ...(audienceCheckpoint ? { audienceCheckpoint } : {}),
-          ...(interruption ? { interruption } : {}),
-          ...(body.deterministicClose === true ? { deterministic: true } : {}),
+          preferredProvider: currentEpisode.provider,
+          openAiApiKey:
+            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+          anthropicApiKey:
+            getAnthropicApiKeyForUser(userId, userKey) ??
+            config.anthropicApiKey,
+          secondaryOllamaHost: user.secondary_ollama_host,
+          preferredLocalModel: user.preferred_local_model,
+          preferredOnlineModel: user.preferred_online_model,
+          autoFallbackChain: parseStoredAutoFallbackChain(
+            user.auto_fallback_chain,
+          ),
+          providerFactory: providerFactoryOverride,
+        },
+        {
+          ...(body.deterministicClose === true
+            ? { deterministic: true }
+            : {}),
         },
       );
-      await ensureBotcastEpisodePersonaReview(
-        db,
-        userId,
-        result.episode.id,
-        generation,
-      );
+      const cancelledEpisode = discardProducerCutEpisode();
       json(ctx.res, 200, {
         ok: true,
-        ...projectBotcastAdvanceResponseForAudienceV1(
-          {
-            episode: getBotcastEpisode(db, userId, result.episode.id),
-            message: result.message,
-          },
-        ),
+        episode: projectBotcastEpisodeForAudienceV1(cancelledEpisode),
+        message: result.message,
+        discarded: true,
       });
     }),
     route(
@@ -10300,44 +10576,68 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/coffee/groups", async (ctx) => {
       const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
-      const group = await createCoffeeGroupWithGeneratedName(
+      const creationProfiles = loadCoffeeGroupProfiles(
+        db,
+        userId,
+        (groupBotIds ?? []).filter(
+          (botId): botId is string =>
+            typeof botId === "string" && botId.trim().length > 0,
+        ),
+      );
+      const pendingSynthesisItems: CoffeeGroupSynthesisItem[] = [];
+      if (
+        shouldGenerateCoffeeGroupNameFromInput(
+          typeof body.name === "string" ? body.name : null,
+          creationProfiles,
+        )
+      ) {
+        pendingSynthesisItems.push("name");
+      }
+      if (typeof body.ethos !== "string" || body.ethos.trim().length === 0) {
+        pendingSynthesisItems.push("ethos");
+      }
+      pendingSynthesisItems.push("atmosphere");
+      const group = createCoffeeGroup(
         db,
         userId,
         {
-        name: body.name,
-        groupBotIds,
-        coffeeSettings: body.coffeeSettings,
-        ...(body.modelChoiceByProvider !== undefined
-          ? { modelChoiceByProvider: body.modelChoiceByProvider }
-          : {}),
-        ...(body.starterTopics !== undefined
-          ? { starterTopics: body.starterTopics }
-          : {}),
-        ...(body.starterTopicsByBotId !== undefined
-          ? { starterTopicsByBotId: body.starterTopicsByBotId }
-          : {}),
-        },
-        {
-        prismDefaultLlmModel: user.prism_default_llm_model,
-        secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllamaEnabled:
-            user.experimental_dual_ollama_enabled === 1,
-        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+          name: body.name,
+          ethos: body.ethos,
+          groupBotIds,
+          coffeeSettings: body.coffeeSettings,
+          synthesisPending: pendingSynthesisItems,
+          ...(body.modelChoiceByProvider !== undefined
+            ? { modelChoiceByProvider: body.modelChoiceByProvider }
+            : {}),
+          ...(body.starterTopics !== undefined
+            ? { starterTopics: body.starterTopics }
+            : {}),
+          ...(body.starterTopicsByBotId !== undefined
+            ? { starterTopicsByBotId: body.starterTopicsByBotId }
+            : {}),
         },
       );
       json(ctx.res, 201, {
         ok: true,
         group,
       });
+      queueInitialCoffeeGroupSynthesis(
+        userId,
+        group.id,
+        pendingSynthesisItems,
+      );
     }),
     route("PATCH", "/api/coffee/groups/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const previousGroup =
+        body.ethos !== undefined
+          ? getCoffeeGroup(db, userId, ctx.params.id)
+          : null;
       const groupBotIds = Array.isArray(body.groupBotIds)
         ? body.groupBotIds
         : undefined;
@@ -10347,8 +10647,9 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         ctx.params.id,
         {
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(groupBotIds !== undefined ? { groupBotIds } : {}),
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.ethos !== undefined ? { ethos: body.ethos } : {}),
+          ...(groupBotIds !== undefined ? { groupBotIds } : {}),
           ...(body.coffeeSettings !== undefined
             ? { coffeeSettings: body.coffeeSettings }
             : {}),
@@ -10379,6 +10680,23 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         group,
+      });
+      if (previousGroup && group.ethos !== previousGroup.ethos) {
+        void refreshCoffeeGroupStarterTopicsFromEthos(userId, group.id);
+      }
+    }),
+    route("POST", "/api/coffee/groups/:id/synthesis/:item", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const item = ctx.params.item as CoffeeGroupSynthesisItem;
+      if (!COFFEE_GROUP_SYNTHESIS_ITEMS.has(item)) {
+        throw new HttpError(400, "Unknown Coffee Group synthesis item.");
+      }
+      const existing = getCoffeeGroup(db, userId, ctx.params.id);
+      if (!existing) throw new HttpError(404, "Coffee group not found.");
+      void queueCoffeeGroupSynthesisItem(userId, existing.id, item);
+      json(ctx.res, 202, {
+        ok: true,
+        group: getCoffeeGroup(db, userId, existing.id),
       });
     }),
     route("DELETE", "/api/coffee/groups/:id", async (ctx) => {
@@ -11554,7 +11872,7 @@ function buildRoutes(): RouteDefinition[] {
         ) {
         throw new Error("Interrupted bot id is required.");
       }
-      const conversation = recordCoffeeInterruptionPause({
+      const interruptionPause = recordCoffeeInterruptionPause({
         db,
         userId,
         conversationId: ctx.params.id,
@@ -11575,7 +11893,7 @@ function buildRoutes(): RouteDefinition[] {
           ? { targetPhase: body.targetPhase }
           : {}),
       });
-      json(ctx.res, 200, { ok: true, conversation });
+      json(ctx.res, 200, { ok: true, ...interruptionPause });
       },
     ),
     route("DELETE", "/api/coffee/turn-jobs/:id", async (ctx) => {
@@ -15104,7 +15422,9 @@ function buildRoutes(): RouteDefinition[] {
               user.zen_wallpaper_style_notes,
           ),
           variationSeed: groupRoomWallpaperContext.variationSeed || randomId(),
-        });
+        })
+          .replace(/\s+/gu, " ")
+          .trim();
         promptForModel = composedPrompt;
         promptForPersistence = composedPrompt;
         localPromptForModel = composedPrompt;
@@ -17410,53 +17730,116 @@ function buildRoutes(): RouteDefinition[] {
         });
         return;
       }
-      const storedMessages = db
-        .prepare(
-        `SELECT m.role, m.content, m.created_at, b.name AS bot_name, b.color AS bot_color
-           FROM messages m
-           LEFT JOIN bots b ON b.id = m.bot_id
-          WHERE m.conversation_id = ? AND m.user_id = ?
-          ORDER BY m.created_at ASC`,
-        )
-        .all(conversationId, userId) as Array<{
+      type TranscriptExportMessage = {
+        id: string;
         role: string;
         content: string;
         created_at: string;
+        bot_id: string | null;
         bot_name: string | null;
         bot_color: string | null;
-      }>;
+        coffeeInterruption?: ChatMessage["coffeeInterruption"];
+        socialSilence?: ChatMessage["socialSilence"];
+      };
+      const coffeeBotIds =
+        conversation.conversation_mode === "coffee"
+          ? parseConversationBotGroupIds(conversation.bot_group_ids)
+          : [];
+      const coffeeBotNamesById = new Map<string, string>();
+      if (coffeeBotIds.length > 0) {
+        const placeholders = coffeeBotIds.map(() => "?").join(", ");
+        const botRows = db
+          .prepare(
+          `SELECT id, name
+             FROM bots
+            WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`,
+          )
+          .all(userId, ...coffeeBotIds) as Array<{
+          id: string;
+          name: string | null;
+        }>;
+        for (const row of botRows) {
+          if (typeof row.name === "string" && row.name.trim().length > 0) {
+            coffeeBotNamesById.set(row.id, row.name.trim());
+          }
+        }
+      }
+      const storedMessages: TranscriptExportMessage[] =
+        conversation.conversation_mode === "coffee"
+          ? getCoffeeConversationTranscript(db, userId, conversationId).map(
+              (message) => ({
+                id: message.id,
+                role: message.role,
+                content: message.content,
+                created_at: message.createdAt,
+                bot_id: message.botId ?? null,
+                bot_name: message.botName ?? null,
+                bot_color: message.botColor ?? null,
+                ...(message.coffeeInterruption
+                  ? { coffeeInterruption: message.coffeeInterruption }
+                  : {}),
+                ...(message.socialSilence
+                  ? { socialSilence: message.socialSilence }
+                  : {}),
+              }),
+            )
+          : (db
+              .prepare(
+              `SELECT m.id, m.role, m.content, m.bot_id, m.created_at,
+                      b.name AS bot_name, b.color AS bot_color
+                 FROM messages m
+                 LEFT JOIN bots b ON b.id = m.bot_id
+                WHERE m.conversation_id = ? AND m.user_id = ?
+                ORDER BY m.created_at ASC`,
+              )
+              .all(
+                conversationId,
+                userId,
+              ) as unknown as TranscriptExportMessage[]);
+      const rawVisibleMessages =
+        conversation.conversation_mode === "coffee"
+          ? coffeeMessagesVisibleInExport(storedMessages)
+          : storedMessages;
+      const projectedMessages =
+        conversation.conversation_mode === "coffee"
+          ? storedMessages.flatMap((message) => {
+              const segments = coffeeInterruptionTranscriptSegments({
+                sourceMessageId: message.id,
+                sourceContent: message.content,
+                interruption: message.coffeeInterruption,
+              });
+              return [
+                message,
+                ...segments.map(
+                  (segment): TranscriptExportMessage => ({
+                    id: segment.id,
+                    role: "assistant",
+                    content: segment.text,
+                    created_at: message.created_at,
+                    bot_id: segment.speakerBotId,
+                    bot_name:
+                      coffeeBotNamesById.get(segment.speakerBotId) ??
+                      segment.speakerBotId,
+                    bot_color: null,
+                  }),
+                ),
+              ];
+            })
+          : storedMessages;
       const messages =
         conversation.conversation_mode === "coffee"
-        ? coffeeMessagesVisibleInExport(storedMessages)
-        : storedMessages;
+          ? coffeeMessagesVisibleInExport(projectedMessages)
+          : projectedMessages;
       const lines = [
         `# ${conversation.title}`,
         `> Exported ${new Date().toISOString()}`,
         "",
       ];
       if (conversation.conversation_mode === "coffee") {
-        const botIds = parseConversationBotGroupIds(conversation.bot_group_ids);
-        const botNamesById = new Map<string, string>();
-        if (botIds.length > 0) {
-          const placeholders = botIds.map(() => "?").join(", ");
-          const botRows = db
-            .prepare(
-            `SELECT id, name
-               FROM bots
-              WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`,
-            )
-            .all(userId, ...botIds) as Array<{
-            id: string;
-            name: string | null;
-          }>;
-          for (const row of botRows) {
-            if (typeof row.name === "string" && row.name.trim().length > 0) {
-              botNamesById.set(row.id, row.name.trim());
-            }
-          }
-        }
-        const botLabels = botIds.map((id) => botNamesById.get(id) ?? id);
-        const assistantMessages = messages.filter(
+        const botLabels = coffeeBotIds.map(
+          (id) => coffeeBotNamesById.get(id) ?? id,
+        );
+        const assistantMessages = rawVisibleMessages.filter(
           (message) => message.role === "assistant",
         );
         const speakerCounts = new Map<string, number>();
@@ -17480,7 +17863,7 @@ function buildRoutes(): RouteDefinition[] {
         lines.push(
           `- Bots: ${botLabels.length > 0 ? botLabels.join(", ") : "unknown"}`,
         );
-        lines.push(`- Messages: ${messages.length}`);
+        lines.push(`- Messages: ${rawVisibleMessages.length}`);
         lines.push(`- Bot replies: ${assistantMessages.length}`);
         lines.push(
           `- Speaker balance: ${
@@ -17492,7 +17875,9 @@ function buildRoutes(): RouteDefinition[] {
           }`,
         );
         lines.push(`- Created: ${conversation.created_at}`);
-        lines.push(`- First message: ${messages[0]?.created_at ?? "none"}`);
+        lines.push(
+          `- First message: ${rawVisibleMessages[0]?.created_at ?? "none"}`,
+        );
         lines.push(`- Updated: ${conversation.updated_at}`);
         lines.push("");
         const pollLines = buildCoffeePollExportLines(

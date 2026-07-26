@@ -32,10 +32,10 @@ describe("ghost Power live-avatar contract", () => {
     );
   });
 
-  it("uses the frozen Coffee plan and the active table speaker for the reveal", () => {
+  it("uses Coffee's viewer projection with the frozen plan as fallback", () => {
     assert.match(
       pageSource,
-      /const seatAvatarVisibilityMode\s*=\s*coffeePowerPlan[\s\S]{0,180}botPowerAvatarVisibilityModeFromEffectsV1\([\s\S]{0,100}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
+      /const seatAvatarVisibilityMode[\s\S]{0,180}seatObserverProjection\?\.visibility[\s\S]{0,260}botPowerAvatarVisibilityModeFromEffectsV1\([\s\S]{0,100}coffeePowerPlan\.bots\[bot\.id\]\?\.effects/u,
     );
     assert.match(
       pageSource,

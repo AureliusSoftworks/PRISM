@@ -93,6 +93,7 @@ interface TestBotLibraryGroup {
 interface AuthenticatedApiOptions {
   botLibraryGroups?: TestBotLibraryGroup[];
   bots?: Array<(typeof testBots)[number]>;
+  conversation?: TestConversation;
   images?: TestImageRecord[];
   theme?: "dark" | "light";
   zenWallpaperLocalImageModel?: string;
@@ -241,6 +242,7 @@ async function installAuthenticatedApi(
     theme: options.theme ?? testUser.theme,
   };
   const fixtureBots = options.bots ?? testBots;
+  const fixtureConversation = options.conversation ?? testConversation;
   const fixtureImages = options.images ?? [];
   await page.addInitScript(
     ({ userId, botLibraryGroups, preserveBotLibraryGroupsOnReload }) => {
@@ -249,6 +251,7 @@ async function installAuthenticatedApi(
         "prism_desktop_first_run_complete_v3",
         "done",
       );
+      window.localStorage.setItem("prism_intro_sequence_seen_v1", "done");
       window.localStorage.setItem(
         `prism_mode_tutorials_v1:${userId}`,
         JSON.stringify({ zen: true, chat: true, coffee: true }),
@@ -300,6 +303,12 @@ async function installAuthenticatedApi(
       return json({
         settings: {
           ...fixtureUser,
+          onboardingVersion: 1,
+          onboardingState: {
+            stage: "complete",
+            introResolution: "completed",
+            setupStep: 0,
+          },
           providerLocked: false,
           autoMemory: true,
           composerWritingAssist: true,
@@ -362,27 +371,34 @@ async function installAuthenticatedApi(
       return json({
         conversations: [
           {
-            ...testConversation,
-            lastBotId: null,
-            lastBotColor: null,
-            hasAssistantReply: false,
+            ...fixtureConversation,
+            lastBotId: fixtureConversation.botId,
+            lastBotColor:
+              fixtureBots.find(
+                (bot) => bot.id === fixtureConversation.botId,
+              )?.color ?? null,
+            hasAssistantReply:
+              fixtureConversation.hasAssistantReply ??
+              fixtureConversation.messages.some(
+                (message) => message.role === "assistant",
+              ),
           },
         ],
       });
     }
     if (pathname === "/api/conversations/zen/open") {
-      return json({ conversationId: testConversation.id });
+      return json({ conversationId: fixtureConversation.id });
     }
-    if (pathname === `/api/conversations/${testConversation.id}/summary`) {
+    if (pathname === `/api/conversations/${fixtureConversation.id}/summary`) {
       return json({ summary: null });
     }
     if (
       pathname ===
-      `/api/conversations/${testConversation.id}/summarization-debug`
+      `/api/conversations/${fixtureConversation.id}/summarization-debug`
     ) {
       return json({
         debug: {
-          conversationId: testConversation.id,
+          conversationId: fixtureConversation.id,
           mode: "zen",
           inProgress: false,
           latestSummary: null,
@@ -393,14 +409,33 @@ async function installAuthenticatedApi(
         },
       });
     }
-    if (pathname === `/api/conversations/${testConversation.id}/title`) {
-      return json({ conversation: testConversation });
+    if (pathname === `/api/conversations/${fixtureConversation.id}/title`) {
+      return json({ conversation: fixtureConversation });
     }
     if (/^\/api\/conversations\/[^/]+$/.test(pathname)) {
-      return json({ conversation: testConversation });
+      return json({ conversation: fixtureConversation });
     }
     if (pathname === "/api/memories") return json({ memories: [] });
     if (pathname === "/api/bots") return json({ bots: fixtureBots });
+    if (/^\/api\/bots\/[^/]+\/memory-panel$/.test(pathname)) {
+      const botId = decodeURIComponent(pathname.split("/")[3] ?? "");
+      return json({
+        botId,
+        memories: [],
+        aboutYouMemories: [],
+        botOpinion: null,
+        sessionOpinion: null,
+        botStatusSummary: null,
+        counts: {
+          total: 0,
+          visible: 0,
+          protectedAboutYou: 0,
+          bySource: { direct: 0, inferred: 0, compiled: 0, about_you: 0 },
+          byTier: { short_term: 0, long_term: 0 },
+          byCategory: { general: 0, user: 0, bot_relation: 0 },
+        },
+      });
+    }
     if (/^\/api\/images\/[^/]+\/(?:thumb|file)$/.test(pathname)) {
       const imageId = decodeURIComponent(pathname.split("/")[3] ?? "");
       const image = fixtureImages.find((candidate) => candidate.id === imageId);
@@ -652,6 +687,13 @@ test.describe("PRISM desktop smoke", () => {
   test("keeps the unauthenticated shell visually stable @visual", async ({
     page,
   }) => {
+    await page.route("**/api/auth/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ user: null, hasAnyAccounts: false }),
+      });
+    });
     await page.goto("/");
     await expect(page).toHaveScreenshot("prism-auth-shell.png", {
       animations: "disabled",
@@ -712,10 +754,7 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
 
     await activateNavigationControl(
-      page.locator('[data-app-switcher-trigger="true"]'),
-    );
-    await activateNavigationControl(
-      page.getByRole("menuitemradio", { name: /Chat/ }),
+      page.getByRole("button", { name: "Open All Bots Home" }),
     );
     await expect(atmosphere).toHaveCount(0);
 
@@ -1029,11 +1068,12 @@ test.describe("PRISM desktop smoke", () => {
     await page.reload();
     await expect(savedGroupButton).toBeVisible({ timeout: 15_000 });
     await savedGroupButton.click();
-    const coffeeTable = page.getByRole("region", { name: "Coffee table" });
-    const startSessionButton = coffeeTable.getByRole("button", {
-      name: "Start session with 5",
-      exact: true,
-    });
+    const startSessionButton = page
+      .getByRole("button", {
+        name: "Start session with 5",
+        exact: true,
+      })
+      .last();
     await expect(startSessionButton).toBeEnabled();
 
     await startSessionButton.click();
@@ -1189,7 +1229,7 @@ test.describe("PRISM desktop smoke", () => {
     );
     await expect(
       page.locator('[data-home-affordance="wordmark"]'),
-    ).toHaveAttribute("aria-label", "Back to the Bot Library");
+    ).toHaveAttribute("aria-label", "Open All Bots Home");
 
     const focusedCanvas = selectedHero.locator("..");
     const focusedCanvasBox = await focusedCanvas.boundingBox();
@@ -1503,15 +1543,13 @@ test.describe("PRISM desktop smoke", () => {
         name: "Select and expand Test Bot 1 conversations",
       })
       .click();
+    await page
+      .getByRole("button", { name: "Test Bot 1 Home", exact: true })
+      .click();
     await expect(page.getByText("Welcome to Test Bot 1 Home.")).toBeVisible();
     await expect(
-      page
-        .locator('[data-history-timeline-entry="true"]')
-        .filter({ hasText: "Test Bot 1 Home" }),
-    ).toBeVisible();
-    await expect(
       page.getByRole("button", { name: "Test Bot 1 Home", exact: true }),
-    ).toHaveCount(0);
+    ).toBeDisabled();
     await expect(shell).toHaveAttribute(
       "data-relationship-depth-transition",
       "settled",
@@ -1551,11 +1589,32 @@ test.describe("PRISM desktop smoke", () => {
     expect(pageErrors).toEqual([]);
   });
 
-  test("Zen Home return waits for an active reply @relationship-depth", async ({
+  test("All Bots Home remains available during an active reply @relationship-depth", async ({
     page,
   }) => {
     test.setTimeout(smokeTestTimeout(60_000));
-    await installAuthenticatedApi(page);
+    const establishedConversation: TestConversation = {
+      ...testConversation,
+      botId: "e2e-bot-a",
+      messages: [
+        {
+          id: "e2e-established-user",
+          role: "user",
+          content: "An earlier question.",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "e2e-established-assistant",
+          role: "assistant",
+          content: "An earlier answer.",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+      ],
+      hasAssistantReply: true,
+    };
+    await installAuthenticatedApi(page, {
+      conversation: establishedConversation,
+    });
     let releaseReply!: () => void;
     const replyReleased = new Promise<void>((resolve) => {
       releaseReply = resolve;
@@ -1573,12 +1632,9 @@ test.describe("PRISM desktop smoke", () => {
 
     try {
       await page.goto("/?view=chat");
-      await page.getByRole("radio", { name: "Test Bot 1" }).click();
-      const shell = page.locator('main[data-zen-surface="true"]');
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
+      await expect(page.getByText("An earlier answer.")).toBeVisible();
+      const shell = page.locator('[data-zen-surface="true"]').first();
+      await expect(shell).toBeVisible();
 
       const composer = page.getByRole("textbox").last();
       await composer.fill("Stay in this Home while the reply is active.");
@@ -1586,17 +1642,18 @@ test.describe("PRISM desktop smoke", () => {
       await replyStarted;
 
       const backButton = page.locator('[data-home-affordance="wordmark"]');
-      await expect(backButton).toBeDisabled();
+      await expect(backButton).toBeEnabled();
       await expect(backButton).toHaveAttribute(
         "aria-label",
-        "Wait for the current reply before returning",
+        "Open All Bots Home",
       );
-      await page.keyboard.press("Escape");
-      await expect(backButton).toBeDisabled();
-      await expect(shell).toHaveAttribute(
-        "data-relationship-depth-transition",
-        "settled",
-      );
+      await page.mouse.move(20, 1);
+      await expect(shell).not.toHaveAttribute("data-zen-header-hidden", "true");
+      await backButton.click();
+      await expect(
+        page.locator('[data-selected-bot-hero="true"]'),
+      ).toHaveCount(0);
+      await expect(shell).toBeVisible();
     } finally {
       releaseReply();
     }
@@ -4799,7 +4856,9 @@ test.describe("PRISM desktop smoke", () => {
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );
 
-    const studio = page.getByRole("dialog", { name: "Coffee Mouth Proof" });
+    const studio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
+    );
     await expect(studio).toBeVisible();
     await studio.getByRole("tab", { name: "Mouth" }).click({ force: true });
 
@@ -4882,9 +4941,9 @@ test.describe("PRISM desktop smoke", () => {
     await activateNavigationControl(
       page.getByRole("button", { name: /^Avatar Studio/ }),
     );
-    const reopenedStudio = page.getByRole("dialog", {
-      name: "Coffee Mouth Proof",
-    });
+    const reopenedStudio = page.locator(
+      'section[role="dialog"][aria-labelledby="bot-avatar-customizer-title"]',
+    );
     await reopenedStudio
       .getByRole("tab", { name: "Mouth" })
       .click({ force: true });

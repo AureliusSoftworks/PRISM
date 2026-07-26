@@ -211,7 +211,7 @@ export function coffeeCupSippingActive(args: {
 }): boolean {
   if (args.progress >= 0.96) return false;
   if (args.ambientSipAllowed === false) return false;
-  if (args.speaking === true) return false;
+  if (args.speaking === true || args.thinking === true) return false;
   if (!Number.isFinite(args.nowMs)) return false;
   const sipLikelihood = coffeeCupSipLikelihoodForProgress(args.progress);
   if (sipLikelihood <= 0) return false;
@@ -398,6 +398,7 @@ function coffeeCupSipGateTimes(args: {
   progress: number;
   durationMinutes?: number | null;
   speaking?: boolean | null;
+  thinking?: boolean | null;
   sessionStartedAtMs?: number | null;
   sessionEndsAtMs?: number | null;
 }): { currentGateMs: number; previousGateMs: number } | null {
@@ -416,7 +417,9 @@ function coffeeCupSipGateTimes(args: {
   const cyclePositionMs = positiveModulo(args.nowMs + offsetMs, cycleMs);
   const currentCycleStartMs = args.nowMs - cyclePositionMs;
   const currentSipVisible =
-    args.speaking !== true && cyclePositionMs < sipWindowMs;
+    args.speaking !== true &&
+    args.thinking !== true &&
+    cyclePositionMs < sipWindowMs;
   const currentGateMs = currentSipVisible ? args.nowMs : currentCycleStartMs;
   const previousGateMs = currentCycleStartMs - cycleMs;
   const sessionStartedAtMs =
@@ -451,6 +454,7 @@ export function coffeeCupSipGatedTimedProgress(args: {
   sessionEndsAtMs?: number | null;
   durationMinutes?: number | null;
   speaking?: boolean | null;
+  thinking?: boolean | null;
 }): number {
   const rawProgress = clampUnit(args.progress);
   if (rawProgress <= 0) return 0;
@@ -465,6 +469,7 @@ export function coffeeCupSipGatedTimedProgress(args: {
     progress: progressForSip,
     durationMinutes: args.durationMinutes,
     speaking: args.speaking,
+    thinking: args.thinking,
     sessionStartedAtMs: args.sessionStartedAtMs,
     sessionEndsAtMs: args.sessionEndsAtMs,
   });
@@ -731,7 +736,9 @@ export function buildCoffeeCupVisualState(args: {
     Number.isFinite(args.nowMs) &&
     args.nowMs < args.sipLockedUntilMs;
   const sippingOverride =
-    sipLocked || args.speaking === true ? false : args.sippingOverride;
+    sipLocked || args.speaking === true || args.thinking === true
+      ? false
+      : args.sippingOverride;
   const sipBaseProgress =
     args.topOff && Number.isFinite(args.topOff.progressAfter)
       ? clampUnit(args.topOff.progressAfter)
@@ -792,6 +799,7 @@ export function buildCoffeeCupVisualState(args: {
           sessionEndsAtMs: args.sessionEndsAtMs,
           durationMinutes: args.durationMinutes,
           speaking: args.speaking,
+          thinking: args.thinking,
         })
       : timedProgress;
   const previousTimedSipGateProgress =
@@ -803,6 +811,7 @@ export function buildCoffeeCupVisualState(args: {
             progress: rawPacedProgress,
             durationMinutes: args.durationMinutes,
             speaking: args.speaking,
+            thinking: args.thinking,
             sessionStartedAtMs: args.sessionStartedAtMs,
             sessionEndsAtMs: args.sessionEndsAtMs,
           });

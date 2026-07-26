@@ -3,6 +3,7 @@ import {
   extractStageDirections,
   type StageDirectionCue,
 } from "./botMention.ts";
+import type { ZenStageActionPayload } from "@localai/shared";
 
 export type ZenActionMotion = "default" | "glance" | "nod" | "breath" | "tap" | "settle";
 
@@ -146,6 +147,35 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
     }
   }
   return presentation;
+}
+
+/**
+ * Uses the server's canonical Zen action when available, retaining inline parsing
+ * for messages created before action metadata existed.
+ */
+export function resolveZenActionPresentationFromMessage(args: {
+  content: string;
+  zenStageAction?: ZenStageActionPayload;
+}): ZenActionPresentation {
+  const metadataAction = args.zenStageAction?.action
+    ? normalizeZenActionText(args.zenStageAction.action)
+    : "";
+  if (!metadataAction) return resolveZenActionPresentation(args.content);
+
+  return {
+    mainText: args.content,
+    cues: [
+      {
+        action: metadataAction,
+        revealAtDisplayLength: 0,
+        displayAtDisplayLength: 0,
+        motion: classifyZenActionMotion(metadataAction),
+        key: `metadata:${zenActionKey(metadataAction)}`,
+      },
+    ],
+    hasActions: true,
+    actionOnly: args.content.trim().length === 0,
+  };
 }
 
 export function resolveCurrentZenActionCue(

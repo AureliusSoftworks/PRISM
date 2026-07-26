@@ -314,6 +314,49 @@ test("Obsessed Kevin compiles deterministic current-addressee fandom without usi
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /never puppet, stalk, coerce/iu);
 });
 
+test("Andy Hominem compiles deterministic every-reply ad hominem without using the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() {
+      return [];
+    },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Andy Hominem",
+    powers: [
+      {
+        version: 1,
+        id: "andy-hominem",
+        name: "Ad Hominem",
+        intent:
+          "Andy is cursed so every single reply contains a fresh, tailored ad hominem insult aimed at whoever he is addressing.",
+        enabled: true,
+        compileStatus: "draft",
+        compiled: null,
+      },
+    ],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "addressed_insult",
+      trigger: "every_spoken_reply",
+      target: "current_addressee",
+      style: "fresh_tailored",
+    },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Every ordinary spoken reply/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /never protected traits/iu);
+});
+
 test("Identity Crisis Ian deterministically compiles bounded bot-only identity mirroring", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
@@ -343,9 +386,93 @@ test("Identity Crisis Ian deterministically compiles bounded bot-only identity m
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
     { type: "identity_mirror", trigger: "direct_bot_address" },
   ]);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /public persona.*face.*voice/iu);
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /public persona.*face.*voice.*active public Powers/iu,
+  );
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /diegetic name.*never your bot ID.*role.*seat/iu,
+  );
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /player.*never/iu);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /irritated/iu);
+});
+
+test("Shapeshifter deterministically compiles sticky Library/Marketplace identity forms", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Shapeshifter Sam",
+    powers: [{
+      version: 1,
+      id: "shapeshifter-sam",
+      name: "Shapeshifter",
+      intent:
+        "Each session take on the form of a different library bot, copying public persona, face, and voice. Stay sticky until short-term amnesia clears continuity, then reshape. The player is never a target.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "identity_shapeshift",
+      pool: "library_or_marketplace",
+      continuity: "session_sticky_until_amnesia",
+    },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Library bot/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /amnesia/iu);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /Library bot/iu);
+});
+
+test("John/Jane Doe deterministically compiles sticky mixed-persona false_name", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Alias Alex",
+    powers: [{
+      version: 1,
+      id: "john-jane-doe",
+      name: "John/Jane Doe",
+      intent:
+        "Each session sincerely believe your name is a random persona name until short-term amnesia clears continuity.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "false_name",
+      continuity: "session_sticky_until_amnesia",
+      pool: "mixed_persona_names",
+    },
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /random persona name/iu);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /random persona name/iu);
 });
 
 test("compiler makes Lazy Ivan's bare-minimum replies a hard reusable response budget", async () => {
@@ -880,9 +1007,15 @@ test("Forgetful Freddie compiles current-other-speaker context and gradual peer 
       targets: [{ kind: "all" }],
     },
   ]);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /current other-speaker message/iu);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /standing conversation topic/iu);
-  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /full encounter/iu);
+  assert.equal(result.powers[0]?.compiled?.selfCue ?? "", "");
+  assert.match(
+    result.powers[0]?.compiled?.observerCue ?? "",
+    /only retains the current other-speaker message/iu,
+  );
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
+    "Current other-speaker message only",
+    "Repeated introductions grate on bots",
+  ]);
 
   const plan = resolvedPlan({
     freddie: result.powers[0]!.compiled!.effects,
@@ -898,9 +1031,9 @@ test("Forgetful Freddie compiles current-other-speaker context and gradual peer 
     baseLimit: 12,
     stableTurnKey: "test-turn",
   }).length, 0);
-  assert.match(
+  assert.doesNotMatch(
     coffeePowersPromptForSpeaker(plan, "freddie", ["peer"]),
-    /current other-speaker message/iu,
+    /Hard short-term-amnesia|fresh first contact|HARD MEMORY CONTRACT/iu,
   );
 });
 

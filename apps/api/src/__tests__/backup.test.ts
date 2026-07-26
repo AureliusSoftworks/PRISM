@@ -91,6 +91,200 @@ describe("backup Coffee service state", () => {
   });
 });
 
+describe("backup Coffee Groups", () => {
+  it("round-trips active identity fields and fixed seat order", () => {
+    withBackupDatabase((db, userKey) => {
+      const createdAt = "2026-07-23T18:00:00.000Z";
+      const updatedAt = "2026-07-24T19:30:00.000Z";
+      for (const [id, name] of [
+        ["coffee-bot-a", "Aster"],
+        ["coffee-bot-b", "Birch"],
+      ]) {
+        db.prepare(
+          `INSERT INTO bots
+             (id, user_id, name, system_prompt, created_at, updated_at)
+           VALUES (?, 'user-1', ?, '', ?, ?)`,
+        ).run(id, name, createdAt, updatedAt);
+      }
+      db.prepare(
+        `INSERT INTO coffee_groups
+           (id, user_id, name, ethos, atmosphere_json, synthesis_json,
+            coffee_settings, preset_mode, coffee_topic_mode, model_choice,
+            starter_topics, mood_summary, archived_at, created_at, updated_at)
+         VALUES ('group-active', 'user-1', 'The Lantern Table',
+                 'Curiosity without hurry.', '{}', ?, ?, 'auto', 'auto', ?,
+                 ?, ?, NULL, ?, ?)`,
+      ).run(
+        JSON.stringify({
+          version: 1,
+          items: {
+            name: { status: "ready", revision: 2, updatedAt, source: "generated" },
+            ethos: { status: "ready", revision: 1, updatedAt, source: "manual" },
+            atmosphere: { status: "pending", revision: 0, updatedAt },
+          },
+        }),
+        JSON.stringify(normalizeCoffeeSessionSettings({ historyLimit: 19 })),
+        JSON.stringify({ local: "qwen3:8b", openai: "gpt-5-mini" }),
+        JSON.stringify({ version: 2, topics: ["Tiny rituals", "Odd museums"] }),
+        JSON.stringify({ warmth: 0.8, tension: 0.1 }),
+        createdAt,
+        updatedAt,
+      );
+      db.prepare(
+        `INSERT INTO coffee_group_seats
+           (user_id, group_id, seat_index, bot_id, updated_at)
+         VALUES ('user-1', 'group-active', 0, 'coffee-bot-b', ?),
+                ('user-1', 'group-active', 1, NULL, ?),
+                ('user-1', 'group-active', 2, 'coffee-bot-a', ?)`,
+      ).run(updatedAt, updatedAt, updatedAt);
+      db.prepare(
+        `INSERT INTO coffee_groups
+           (id, user_id, name, coffee_settings, archived_at, created_at, updated_at)
+         VALUES ('group-archived', 'user-1', 'Archived', '{}', ?, ?, ?)`,
+      ).run(updatedAt, createdAt, updatedAt);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.coffeeGroups?.length, 1);
+      assert.deepEqual(snapshot.coffeeGroups?.[0], {
+        id: "group-active",
+        name: "The Lantern Table",
+        seatBotIds: ["coffee-bot-b", null, "coffee-bot-a", null, null],
+        coffeeSettings: normalizeCoffeeSessionSettings({ historyLimit: 19 }),
+        presetMode: "auto",
+        topicSelectionMode: "auto",
+        modelChoice: { local: "qwen3:8b", openai: "gpt-5-mini" },
+        starterTopics: { version: 2, topics: ["Tiny rituals", "Odd museums"] },
+        moodSummary: { warmth: 0.8, tension: 0.1 },
+        ethos: "Curiosity without hurry.",
+        atmosphere: null,
+        synthesis: {
+          version: 1,
+          items: {
+            name: { status: "ready", revision: 2, updatedAt, source: "generated" },
+            ethos: { status: "ready", revision: 1, updatedAt, source: "manual" },
+            atmosphere: { status: "pending", revision: 0, updatedAt },
+          },
+        },
+        archivedAt: null,
+        createdAt,
+        updatedAt,
+      });
+
+      db.prepare("DELETE FROM coffee_groups WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        `SELECT name, ethos, atmosphere_json, synthesis_json, coffee_settings,
+                preset_mode, coffee_topic_mode, model_choice, starter_topics,
+                mood_summary, archived_at, created_at, updated_at
+           FROM coffee_groups
+          WHERE id = 'group-active' AND user_id = 'user-1'`,
+      ).get() as Record<string, string | null>;
+      assert.equal(restored.name, "The Lantern Table");
+      assert.equal(restored.ethos, "Curiosity without hurry.");
+      assert.equal(restored.atmosphere_json, "{}");
+      assert.deepEqual(JSON.parse(restored.model_choice!), {
+        local: "qwen3:8b",
+        openai: "gpt-5-mini",
+      });
+      assert.deepEqual(JSON.parse(restored.starter_topics!), {
+        version: 2,
+        topics: ["Tiny rituals", "Odd museums"],
+      });
+      assert.deepEqual(JSON.parse(restored.mood_summary!), {
+        warmth: 0.8,
+        tension: 0.1,
+      });
+      assert.equal(restored.preset_mode, "auto");
+      assert.equal(restored.coffee_topic_mode, "auto");
+      assert.equal(restored.created_at, createdAt);
+      assert.equal(restored.updated_at, updatedAt);
+      assert.deepEqual(
+        db.prepare(
+          `SELECT seat_index, bot_id
+             FROM coffee_group_seats
+            WHERE user_id = 'user-1' AND group_id = 'group-active'
+            ORDER BY seat_index`,
+        ).all().map((row) => ({ ...row })),
+        [
+          { seat_index: 0, bot_id: "coffee-bot-b" },
+          { seat_index: 1, bot_id: null },
+          { seat_index: 2, bot_id: "coffee-bot-a" },
+          { seat_index: 3, bot_id: null },
+          { seat_index: 4, bot_id: null },
+        ],
+      );
+    });
+  });
+
+  it("accepts old snapshots and clears unarchived atmosphere image ids", () => {
+    withBackupDatabase((db, userKey) => {
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      const oldSnapshot = structuredClone(snapshot);
+      delete oldSnapshot.coffeeGroups;
+      assert.doesNotThrow(() =>
+        importUserSnapshot(db, "user-1", oldSnapshot, userKey)
+      );
+
+      snapshot.coffeeGroups = [{
+        id: "plain-json-group",
+        name: "Plain JSON",
+        seatBotIds: [null, null, null, null, null],
+        coffeeSettings: normalizeCoffeeSessionSettings(undefined),
+        presetMode: "manual",
+        topicSelectionMode: "manual",
+        modelChoice: {},
+        starterTopics: {},
+        moodSummary: {},
+        ethos: "Keep the table gentle.",
+        atmosphere: {
+          imageId: "foreign-image-id",
+          prompt: "A quiet room",
+          revision: 3,
+          updatedAt: snapshot.exportedAt,
+        },
+        synthesis: {
+          version: 1,
+          items: {
+            atmosphere: {
+              status: "ready",
+              revision: 3,
+              updatedAt: snapshot.exportedAt,
+              source: "generated",
+            },
+          },
+        },
+        archivedAt: null,
+        createdAt: snapshot.exportedAt,
+        updatedAt: snapshot.exportedAt,
+      }];
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        `SELECT ethos, atmosphere_json, synthesis_json
+           FROM coffee_groups
+          WHERE id = 'plain-json-group' AND user_id = 'user-1'`,
+      ).get() as {
+        ethos: string;
+        atmosphere_json: string;
+        synthesis_json: string;
+      };
+      assert.equal(restored.ethos, "Keep the table gentle.");
+      assert.equal(restored.atmosphere_json, "{}");
+      const restoredSynthesis = JSON.parse(restored.synthesis_json) as {
+        items: { atmosphere: { status: string; error?: string } };
+      };
+      assert.equal(restoredSynthesis.items.atmosphere.status, "failed");
+      assert.match(
+        restoredSynthesis.items.atmosphere.error ?? "",
+        /image was not included/u,
+      );
+      assert.equal(
+        db.prepare("SELECT id FROM images WHERE id = 'foreign-image-id'").get(),
+        undefined,
+      );
+    });
+  });
+});
+
 describe("backup Auto model settings", () => {
   it("exports and restores Auto mode without exporting retired text fallback settings", () => {
     withBackupDatabase((db, userKey) => {

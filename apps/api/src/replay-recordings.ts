@@ -160,7 +160,9 @@ function assertReplaySourceOwned(
 ): void {
   const row = surface === "signal"
     ? db
-        .prepare("SELECT id FROM botcast_episodes WHERE id = ? AND user_id = ?")
+        .prepare(
+          "SELECT id FROM botcast_episodes WHERE id = ? AND user_id = ? AND status != 'cancelled'",
+        )
         .get(sourceId, userId)
     : db
         .prepare(

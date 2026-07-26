@@ -165,6 +165,122 @@ describe("replay manifests", () => {
     assert.equal(manifestV2.direction[1]?.kind, "speech");
   });
 
+  it("adds transcript-only Coffee interruption utterances without duplicate replay speech", () => {
+    const messages = [
+      {
+        id: "fragment-1",
+        role: "assistant" as const,
+        content: "The point I was making—",
+        botId: "speaker",
+        createdAt: "2026-07-24T20:00:01.000Z",
+      },
+      {
+        id: "pause-1",
+        role: "assistant" as const,
+        content: "...",
+        botId: "speaker",
+        createdAt: "2026-07-24T20:00:02.000Z",
+        coffeeInterruption: {
+          kind: "botInterruptsBot" as const,
+          interruptedBotId: "speaker",
+          interrupterBotId: "interrupter",
+          pauseBeat: true,
+          interrupterCue: "Hold on." as const,
+          interruptedSpeakerCue: "... sure. Go ahead." as const,
+          socialConsequences: [],
+        },
+      },
+      {
+        id: "follow-on-1",
+        role: "assistant" as const,
+        content: "Here is the rest of the answer.",
+        botId: "speaker",
+        createdAt: "2026-07-24T20:00:03.000Z",
+      },
+      {
+        id: "action-1",
+        role: "user" as const,
+        content: "*raises a hand*",
+        createdAt: "2026-07-24T20:00:04.000Z",
+        coffeeUserAction: {
+          v: 1,
+          name: "coffeeUserAction",
+          action: "raises a hand",
+        },
+      },
+    ];
+    const args = {
+      conversation: {
+        id: "coffee-interruption-replay",
+        title: "Interrupted table",
+        createdAt: "2026-07-24T20:00:00.000Z",
+        updatedAt: "2026-07-24T20:00:05.000Z",
+        botGroupIds: ["speaker", "interrupter"],
+        coffeeSeatBotIds: ["speaker", "interrupter"],
+        messages,
+      },
+      bots: [
+        { id: "speaker", name: "Speaker", color: "#ffffff" },
+        { id: "interrupter", name: "Interrupter", color: "#ff0000" },
+      ],
+      playerName: "Jared",
+      prismColor: "#55ddff",
+      prismGlyph: "△",
+      theme: "dark" as const,
+      capturedReplayEvents: [
+        {
+          id: "capture:pause-1:speech_start",
+          kind: "capture_timing",
+          sourceMessageId: "pause-1",
+          occurredAt: "2026-07-24T20:00:02.000Z",
+          payload: {
+            phase: "speech_start",
+            messageId: "pause-1",
+            atMs: 2_000,
+          },
+        },
+      ],
+    };
+    const manifest = buildCoffeeReplayManifestV1(args);
+
+    assert.deepEqual(
+      manifest.utterances.map((utterance) => utterance.id),
+      [
+        "fragment-1",
+        "pause-1:coffee-interruption:interrupter",
+        "pause-1:coffee-interruption:interrupted",
+        "follow-on-1",
+      ],
+    );
+    const interruptionUtterances = manifest.utterances.slice(1, 3);
+    assert.deepEqual(
+      interruptionUtterances.map((utterance) => utterance.speakerId),
+      ["interrupter", "speaker"],
+    );
+    assert.equal(
+      interruptionUtterances.every(
+        (utterance) =>
+          utterance.createdAt === "2026-07-24T20:00:02.000Z" &&
+          utterance.audible === false &&
+          utterance.visible === true &&
+          utterance.metadata?.sourceInterruptionMessageId === "pause-1",
+      ),
+      true,
+    );
+    const manifestV2 = buildCoffeeReplayManifestV2(args);
+    assert.equal(
+      manifestV2.direction.some(
+        (event) =>
+          event.kind === "speech" &&
+          (event.sourceMessageId === "pause-1" ||
+            event.sourceMessageId?.startsWith(
+              "pause-1:coffee-interruption:",
+            )),
+      ),
+      false,
+    );
+  });
+
   it("keeps Prism in Signal's control room when the guest is a bot", () => {
     const episode = {
       id: "signal-1",
@@ -173,7 +289,28 @@ describe("replay manifests", () => {
       guestBotId: "guest-1",
       guestKind: "bot",
       responseMode: "local",
-      messages: [],
+      messages: [
+        {
+          id: "signal-silence-1",
+          episodeId: "signal-1",
+          speakerRole: "guest",
+          botId: "guest-1",
+          content: "...",
+          stageActionText: null,
+          voicePerformanceText: null,
+          moodKey: "guarded",
+          socialSilence: {
+            v: 1,
+            name: "socialSilence",
+            provenance: "social",
+            mode: "signal",
+            seed: "signal-social-silence:signal-1:guest-1:1",
+            volleyTurn: 1,
+            holdMs: 900,
+          },
+          createdAt: "2026-07-21T00:00:02.000Z",
+        },
+      ],
       events: [],
       createdAt: "2026-07-21T00:00:00.000Z",
       updatedAt: "2026-07-21T00:05:00.000Z",
@@ -274,6 +411,12 @@ describe("replay manifests", () => {
       variantIndex: 2,
       gain: 0.31,
     });
+    assert.equal(manifest.utterances[0]?.text, "...");
+    assert.equal(manifest.utterances[0]?.audible, false);
+    assert.deepEqual(
+      manifest.utterances[0]?.metadata?.socialSilence,
+      episode.messages[0]?.socialSilence,
+    );
     assert.deepEqual(manifest.visual.metadata?.studioGlowTuning, {
       dark: { opacity: 0.78, blendMode: "screen" },
       light: { opacity: 0.52, blendMode: "overlay" },

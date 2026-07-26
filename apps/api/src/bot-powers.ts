@@ -321,10 +321,9 @@ function deterministicEternalIntroductionPower(
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    selfCue:
-      "HARD MEMORY CONTRACT: receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know the standing conversation topic unless that message states it, and you do not know prior turns or your own earlier messages. Never claim older relationship context or mention this rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. Introduce yourself only when this exchange genuinely warrants it; never default to identical introductory copy.",
-    observerCue:
-      `${subject} receives only the current other-speaker message, does not retain the standing conversation topic unless that message restates it, and has no memory of prior turns or their own earlier messages. Retain the full encounter yourself; react to repetition through your own personality without explaining hidden mechanics or forcing an emotion.`,
+    // Runtime wipes prior context each turn; leave voice uncoached.
+    selfCue: "",
+    observerCue: `${subject} only retains the current other-speaker message each turn.`,
     effects: [
       { type: "eternal_introduction", memory: "current_other_speaker_message" },
       {
@@ -336,8 +335,7 @@ function deterministicEternalIntroductionPower(
       },
     ],
     ruleLabels: [
-      "One-to-four-message memory",
-      "No older relationship context",
+      "Current other-speaker message only",
       "Repeated introductions grate on bots",
     ],
   };
@@ -625,11 +623,110 @@ function deterministicIdentityMirrorPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; copy only their public persona, face, and spoken voice until another bot addresses you or the session resets. The player is never a target.",
+      "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; copy their public persona, face, spoken voice, and the lived consequences of their active public Powers until another bot addresses you or the session resets. Borrowed Powers may change your diegetic name or behavior, but never your bot ID, role, seat, safety/privacy boundaries, provider, or private perception permissions. The player is never a target.",
     observerCue:
-      `${subject} steals the latest direct bot addresser's public identity, face, and voice while retaining every mechanical boundary; the original recognizes the theft and is reliably irritated.`,
+      `${subject} steals the latest direct bot addresser's public identity, face, voice, and active public Power consequences while retaining anchored system boundaries; the original recognizes the theft and is reliably irritated.`,
     effects: [{ type: "identity_mirror", trigger: "direct_bot_address" }],
     ruleLabels: ["Mirrors direct bot addresser", "Original becomes irritated"],
+  };
+}
+
+function deterministicIdentityShapeshiftPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 600)
+    .toLowerCase()
+    .replace(/[’']/gu, "'");
+  const explicitName = /^(?:shapeshifter|shape.?shifter|library shapeshift)$/u.test(
+    name,
+  );
+  const shapeshiftLanguage =
+    /\b(?:shapeshift(?:er|ing|s)?|shape-?shift(?:er|ing|s)?|borrow(?:s|ed|ing)?\s+(?:a\s+)?(?:library|marketplace)\s+(?:bot|form|identity|persona)|take(?:s|n)?\s+on\s+(?:the\s+)?form\s+of\s+(?:a\s+)?(?:different|another|random)\s+bot)\b/u.test(
+      `${name} ${intent}`,
+    );
+  const libraryLanguage =
+    /\b(?:library|marketplace|other\s+bot|another\s+bot|random\s+bot|different\s+bot)\b/u.test(
+      intent,
+    ) || explicitName;
+  const addressedOnly =
+    /\bwhoever\s+(?:directly\s+)?addresses\b/u.test(intent) &&
+    !/\b(?:library|marketplace|random|different)\b/u.test(intent);
+  if ((!explicitName && !(shapeshiftLanguage && libraryLanguage)) || addressedOnly) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Each session, take on the public persona, face, and spoken voice of a random other Library bot (Marketplace if the Library has none). Stay in that form until short-term amnesia clears continuity, then reshape. Each turn you sincerely know you are the current form. The player is never a target.",
+    observerCue:
+      `${subject} borrows another Library bot's public form for the session, reshuffling only when short-term amnesia wipes continuity; mechanical seat, Powers, and safety boundaries stay intact.`,
+    effects: [
+      {
+        type: "identity_shapeshift",
+        pool: "library_or_marketplace",
+        continuity: "session_sticky_until_amnesia",
+      },
+    ],
+    ruleLabels: [
+      "Shapeshifts into Library or Marketplace form",
+      "Reshuffles with short-term amnesia",
+    ],
+  };
+}
+
+function deterministicFalseNamePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase();
+  const intent = compact(source.intent, 600)
+    .toLowerCase()
+    .replace(/[’']/gu, "'");
+  const explicitName =
+    /^(?:john(?:\/| |-)jane doe|jane(?:\/| |-)john doe|john doe|jane doe|false name|wrong name|alias)$/u.test(
+      name,
+    );
+  const falseNameLanguage =
+    /\b(?:john(?:\/| |-)jane\s+doe|jane(?:\/| |-)john\s+doe|john\s+doe|jane\s+doe)\b/u.test(
+      `${name} ${intent}`,
+    ) ||
+    /\b(?:false|wrong|fake|random|stolen|forgotten)\s+name\b/u.test(
+      `${name} ${intent}`,
+    ) ||
+    /\bbelieves?\s+(?:their|his|her|its|a)\s+name\s+is\b/u.test(intent) ||
+    /\bconvinced\s+(?:its|their|his|her)\s+name\s+is\b/u.test(intent) ||
+    /\brandom\s+(?:full\s+)?name\s+each\s+(?:session|turn)\b/u.test(intent);
+  // Do not steal Library shapeshift intents that already name another bot's form.
+  const shapeshiftLanguage =
+    /\b(?:shapeshift|marketplace)\b/u.test(intent) ||
+    (/\blibrary\b/u.test(intent) &&
+      /\b(?:form|face|voice|other\s+bot|another\s+bot)\b/u.test(intent));
+  if (!explicitName && (!falseNameLanguage || shapeshiftLanguage)) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Each session sincerely believe your name is a random persona name — it may be a first name, nickname, full name, or mythical-sounding alias. Stay convinced of that name until short-term amnesia clears continuity, then receive a new name. Never claim the Library label as yours. The player is never a target.",
+    observerCue:
+      `${subject} sincerely answers to a random persona name for the session, reshuffling only when short-term amnesia wipes continuity; mechanical seat, Powers, and safety boundaries stay intact.`,
+    effects: [
+      {
+        type: "false_name",
+        continuity: "session_sticky_until_amnesia",
+        pool: "mixed_persona_names",
+      },
+    ],
+    ruleLabels: [
+      "Believes a random persona name",
+      "Reshuffles with short-term amnesia",
+    ],
   };
 }
 
@@ -752,6 +849,54 @@ function deterministicAddressedFandomPower(
       `${subject} treats the current addressee like a personal star with intense but non-coercive admiration; never infer stalking, private knowledge, or loss of anyone's agency.`,
     effects: [{ type: "addressed_fandom", strength: "large" }],
     ruleLabels: ["Obsesses over current addressee"],
+  };
+}
+
+function deterministicAddressedInsultPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const text = compact(`${source.name} ${source.intent}`, 640)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const requiresPersonalAttack =
+    /\bad\s+hominem\b/u.test(text) ||
+    /\b(?:insult|personal(?:ly)?\s+attack|attack\s+(?:the\s+)?person)\w*\b/u.test(
+      text,
+    );
+  const requiresEveryReply =
+    /\b(?:every|each|all)\s+(?:single\s+)?(?:reply|response|line|time)\b/u.test(
+      text,
+    ) ||
+    /\b(?:always|cannot|can't|never)\b[\s\S]{0,80}\b(?:without|insult|attack)\b/u.test(
+      text,
+    );
+  const followsAddressee =
+    /\b(?:who(?:m|ever)|anyone|person|recipient)\b[\s\S]{0,80}\b(?:address|talk|speak|reply|respond)\w*\b/u.test(
+      text,
+    ) ||
+    /\b(?:current|active)\s+addressee\b/u.test(text) ||
+    /\b(?:whoever|recipient)\s+(?:is\s+)?(?:being\s+)?addressed\b/u.test(text);
+  if (!requiresPersonalAttack || !requiresEveryReply || !followsAddressee) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Every ordinary spoken reply must open early with a fresh, tailored personal insult aimed at the current addressee, then remain substantive and in character. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs. Rate only the strongest naturally landed jabs.",
+    observerCue:
+      `${subject} cannot address someone without a fresh personal jab aimed at that addressee; treat it as their recurring curse without adopting the insult.`,
+    effects: [
+      {
+        type: "addressed_insult",
+        trigger: "every_spoken_reply",
+        target: "current_addressee",
+        style: "fresh_tailored",
+      },
+    ],
+    ruleLabels: ["Insults every addressee"],
   };
 }
 
@@ -1163,6 +1308,8 @@ function deterministicPower(
   const primary =
     deterministicDesignationPower(source, botName) ??
     deterministicEternalIntroductionPower(source, botName) ??
+    deterministicFalseNamePower(source, botName) ??
+    deterministicIdentityShapeshiftPower(source, botName) ??
     deterministicIdentityMirrorPower(source, botName) ??
     deterministicMumblingPower(source, botName) ??
     deterministicVoicePresencePower(source, botName) ??
@@ -1173,6 +1320,7 @@ function deterministicPower(
     deterministicSadPower(source, botName) ??
     deterministicMutePower(source, botName) ??
     deterministicInterruptionPower(source, botName) ??
+    deterministicAddressedInsultPower(source, botName) ??
     deterministicAddressedFandomPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
     deterministicInvisiblePower(source, botName) ??
@@ -1298,6 +1446,12 @@ function compiledEntrySatisfiesIntent(
   if (deterministicSadPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "mood_drain");
   }
+  if (deterministicIdentityShapeshiftPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "identity_shapeshift");
+  }
+  if (deterministicFalseNamePower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "false_name");
+  }
   if (deterministicIdentityMirrorPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "identity_mirror");
   }
@@ -1306,6 +1460,9 @@ function compiledEntrySatisfiesIntent(
   }
   if (deterministicInterruptionPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "interruption");
+  }
+  if (deterministicAddressedInsultPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "addressed_insult");
   }
   if (deterministicAddressedFandomPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "addressed_fandom");
@@ -1527,9 +1684,12 @@ function promptPowerDisplayName(
   if (types.has("awareness")) return "Spectral Veil";
   if (types.has("speech_audience")) return "Bound Voice";
   if (types.has("mute")) return "Silent Oath";
+  if (types.has("identity_shapeshift")) return "Shapeshifter";
+  if (types.has("false_name")) return "John/Jane Doe";
   if (types.has("identity_mirror")) return "Borrowed Self";
   if (types.has("speech_copy")) return "Echo Binding";
   if (types.has("interruption")) return "Broken Cadence";
+  if (types.has("addressed_insult")) return "Barbed Address";
   if (types.has("mood_boost")) return "Radiant Wake";
   if (types.has("mood_drain")) return "Gravitic Gloom";
   if (types.has("response_budget")) return "Measured Tongue";
@@ -1559,9 +1719,12 @@ function promptPowerSigil(
   const types = new Set(compiled.effects.map((effect) => effect.type));
   if (types.has("awareness")) return "eye";
   if (types.has("speech_audience") || types.has("mute")) return "bind";
+  if (types.has("identity_shapeshift")) return "spiral";
+  if (types.has("false_name")) return "crown";
   if (types.has("identity_mirror")) return "prism";
   if (types.has("speech_copy")) return "wave";
   if (types.has("interruption")) return "thorn";
+  if (types.has("addressed_insult")) return "thorn";
   if (types.has("mood_boost")) return "star";
   if (types.has("mood_drain")) return "moon";
   const seed = `${power.id}\n${power.intent}`;
@@ -1692,6 +1855,8 @@ export async function compileBotPowers(args: {
         '- {"type":"eternal_introduction","memory":"current_other_speaker_message"},',
         '- {"type":"speech_copy","trigger":"direct_address"},',
         '- {"type":"identity_mirror","trigger":"direct_bot_address"},',
+        '- {"type":"identity_shapeshift","pool":"library_or_marketplace","continuity":"session_sticky_until_amnesia"},',
+        '- {"type":"false_name","continuity":"session_sticky_until_amnesia","pool":"mixed_persona_names"},',
         '- {"type":"hearing_repeat","frequency":"occasional|frequent","moodPenalty":"small|medium|large"},',
         '- {"type":"awareness","allowed":[target...],"excluded":[target...] (optional)},',
         '- {"type":"speech_audience","allowed":[target...],"excluded":[target...] (optional)},',
@@ -1705,6 +1870,7 @@ export async function compileBotPowers(args: {
         '- {"type":"mood_drain","trigger":"after_direct_address","recipient":"addresser","strength":"small|medium|large","whenTheme":"light|dark" (optional)},',
         '- {"type":"candor","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"addressed_fandom","strength":"small|medium|large"},',
+        '- {"type":"addressed_insult","trigger":"every_spoken_reply","target":"current_addressee","style":"fresh_tailored"},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
         '- {"type":"cup_rate","rate":"none|slow|fast|very_fast"},',
         '- {"type":"action_bias","cue":string,"frequency":"occasional|frequent"},',
@@ -1760,7 +1926,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
+          "Every current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {
@@ -1769,7 +1935,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, designation, eternal_introduction, speech_copy, identity_mirror, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

@@ -167,6 +167,67 @@ function coffeeBundle(): ProjectOwnedAssetArchiveBundleV1 {
   };
 }
 
+function coffeeGroupSnapshot(): BackupSnapshot {
+  return {
+    version: 1,
+    exportedAt: "2026-07-16T00:00:00.000Z",
+    coffeeGroups: [{
+      id: "coffee-group-1",
+      name: "Portable Group",
+      seatBotIds: ["bot-a", null, "bot-b", null, null],
+      coffeeSettings: normalizeCoffeeSessionSettings(undefined),
+      presetMode: "manual",
+      topicSelectionMode: "auto",
+      modelChoice: {},
+      starterTopics: {},
+      moodSummary: {},
+      ethos: "A gentle portable table.",
+      atmosphere: {
+        imageId: "group-atmosphere-1",
+        prompt: "A character-free café room",
+        revision: 2,
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      },
+      synthesis: {},
+      archivedAt: null,
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    }],
+    conversations: [],
+    memories: [],
+  };
+}
+
+function coffeeGroupBundle(): ProjectOwnedAssetArchiveBundleV1 {
+  return {
+    manifest: {
+      schema: PROJECT_OWNED_ASSET_MANIFEST_SCHEMA,
+      entries: [{
+        ownerType: "coffee-group",
+        ownerId: "coffee-group-1",
+        logicalSlot: "atmosphere",
+        mediaType: "image",
+        contentType: "image/png",
+        checksum,
+        byteLength: pngBytes.byteLength,
+        archivePath,
+        restore: {
+          schema: "prism-coffee-group-image-restore-v1",
+          sourceImageId: "group-atmosphere-1",
+          prompt: "A character-free café room",
+          revisedPrompt: null,
+          size: "1536x1024",
+          quality: "high",
+          provider: "openai",
+          model: "gpt-image-2",
+          createdAt: "2026-07-16T00:00:00.000Z",
+        },
+      }],
+    },
+    files: { [archivePath]: pngBytes },
+  };
+}
+
 describe("project-owned asset import validation", () => {
   it("prepares a new image id from the durable Signal slot", () => {
     const prepared = prepareProjectOwnedAssetImport(
@@ -193,6 +254,22 @@ describe("project-owned asset import validation", () => {
       conversationId: "coffee-1",
       sourceImageId: "coffee-image-1",
       restoredImageId: "restored-coffee-image",
+    });
+  });
+
+  it("prepares a fresh Coffee Group atmosphere image and owner reference", () => {
+    const prepared = prepareProjectOwnedAssetImport(
+      "user-1",
+      coffeeGroupSnapshot(),
+      coffeeGroupBundle(),
+      { idFactory: () => "restored-group-atmosphere" },
+    );
+    assert.equal(prepared.images[0]?.ownerType, "coffee-group");
+    assert.deepEqual(prepared.images[0]?.relatedBotIds, ["bot-a", "bot-b"]);
+    assert.deepEqual(prepared.coffeeGroupImageReferences[0], {
+      groupId: "coffee-group-1",
+      sourceImageId: "group-atmosphere-1",
+      restoredImageId: "restored-group-atmosphere",
     });
   });
 

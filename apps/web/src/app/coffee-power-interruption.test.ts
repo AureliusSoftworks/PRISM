@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import type { CoffeePowerPlanV1 } from "@localai/shared";
+import type {
+  CoffeeInterruptionEvent,
+  CoffeePowerPlanV1,
+  ListenerReactionPlanV1,
+} from "@localai/shared";
 import {
+  coffeeAuthoritativeYieldTailPlanV1,
   coffeeAutomaticCutInCandidateV1,
+  coffeeDirectionalIrritationDeliveryForPlan,
+  coffeeInterrupterLeadPlanV1,
   coffeeInterruptionTriggerProgressV1,
 } from "./coffee-power-interruption.ts";
 
@@ -31,6 +38,126 @@ const plan: CoffeePowerPlanV1 = {
     },
   },
 };
+
+const deterministicCrosstalkPlan: ListenerReactionPlanV1 = {
+  v: 1,
+  name: "listenerReaction",
+  speakerBotId: "alice",
+  listenerBotId: "tom",
+  messageId: "message-1",
+  targetSource: "role",
+  visualAction: "lean_in",
+  spokenCue: "Hold on.",
+  interjectionAttempt: true,
+  floorOutcome: "yield",
+  interruptedSpeakerCue: "... sure. Go ahead.",
+  interruptedSpeakerCuePlayback: "crosstalk",
+  targetProgress: 0.35,
+  seed: "coffee-crosstalk",
+  cameraCutEligible: true,
+};
+
+test("the interrupter lead strips the interrupted speaker tail", () => {
+  const lead = coffeeInterrupterLeadPlanV1(deterministicCrosstalkPlan);
+
+  assert.notEqual(lead, deterministicCrosstalkPlan);
+  assert.equal(lead.spokenCue, "Hold on.");
+  assert.equal(lead.interruptedSpeakerCue, undefined);
+  assert.equal(lead.interruptedSpeakerCuePlayback, undefined);
+});
+
+test("an authoritative yield restores only the interrupted speaker tail", () => {
+  const lead = coffeeInterrupterLeadPlanV1(deterministicCrosstalkPlan);
+  const interruption: CoffeeInterruptionEvent = {
+    kind: "botInterruptsBot",
+    interruptedBotId: "alice",
+    interrupterBotId: "tom",
+    floorOutcome: "yield",
+    interruptedSpeakerCue: "... fine. I'll stop there.",
+    socialConsequences: [],
+  };
+
+  const tail = coffeeAuthoritativeYieldTailPlanV1(lead, interruption);
+
+  assert.ok(tail);
+  assert.equal(tail.floorOutcome, "yield");
+  assert.equal(tail.spokenCue, undefined);
+  assert.equal(tail.vocalFoley, undefined);
+  assert.equal(tail.interruptedSpeakerCue, "... fine. I'll stop there.");
+  assert.equal(tail.interruptedSpeakerCuePlayback, "crosstalk");
+});
+
+test("reads directional irritation delivery from the pause carrier", () => {
+  const delivery = {
+    v: 1 as const,
+    name: "directionalIrritationDelivery" as const,
+    subjectBotId: "alice",
+    targetBotId: "tom",
+    intensity: 0.4,
+    tier: "low" as const,
+    moodKey: "guarded" as const,
+    gainDbBoost: 0.6,
+    snarkCue: "I wasn't finished.",
+  };
+  const found = coffeeDirectionalIrritationDeliveryForPlan(
+    {
+      messages: [
+        {
+          coffeeInterruption: {
+            kind: "botInterruptsBot",
+            interruptedBotId: "alice",
+            interrupterBotId: "tom",
+            interruptedMessageId: "message-1",
+            floorOutcome: "yield",
+            interruptedSpeakerCue: "I wasn't finished.",
+            socialConsequences: [],
+          },
+          coffeeReplayEvents: [
+            {
+              kind: "directionalIrritation",
+              botId: "alice",
+              delivery,
+            },
+          ],
+        },
+      ],
+    },
+    { messageId: "message-1", speakerBotId: "alice" },
+  );
+  assert.deepEqual(found, delivery);
+  assert.equal(
+    coffeeDirectionalIrritationDeliveryForPlan(null, {
+      messageId: "message-1",
+      speakerBotId: "alice",
+    }),
+    null,
+  );
+});
+
+test("an authoritative reclaim never restores the surrender tail", () => {
+  const lead = coffeeInterrupterLeadPlanV1(deterministicCrosstalkPlan);
+  const interruption: CoffeeInterruptionEvent = {
+    kind: "botInterruptsBot",
+    interruptedBotId: "alice",
+    interrupterBotId: "tom",
+    floorOutcome: "reclaim",
+    reclaim: {
+      v: 1,
+      name: "crosstalkReclaim",
+      interruptedMessageId: "message-1",
+      speakerBotId: "alice",
+      heardFragment: "I was saying",
+      protectFromImmediateReinterruption: true,
+    },
+    interruptedSpeakerCue: "... sure. Go ahead.",
+    socialConsequences: [],
+  };
+
+  assert.equal(
+    coffeeAuthoritativeYieldTailPlanV1(lead, interruption),
+    null,
+  );
+});
 
 test("an eligible interruption Power outranks a more eager ordinary cut-in", () => {
   const result = coffeeAutomaticCutInCandidateV1({
@@ -86,7 +213,7 @@ test("a targeted interruption Power does not cut off a different bot", () => {
   assert.equal(result?.chance, 0.05);
 });
 
-test("Coffee turns a live bot cutoff into prepared two-voice crosstalk", () => {
+test("Coffee plays the interrupter lead before an authoritative yield tail", () => {
   const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
   const start = source.indexOf("const crosstalkPlan =");
   const end = source.indexOf("// Whenever we leave Coffee view", start);
@@ -94,24 +221,106 @@ test("Coffee turns a live bot cutoff into prepared two-voice crosstalk", () => {
 
   assert.ok(start >= 0 && end > start);
   assert.match(interruption, /buildBotCrosstalkListenerReactionPlanV1/u);
-  assert.match(interruption, /prepareCoffeeCrosstalkRef\.current\(crosstalkPlan\)/u);
-  assert.match(interruption, /playCoffeeListenerReactionRef\.current\(crosstalkPlan\)/u);
+  assert.match(
+    interruption,
+    /const leadPlan = coffeeInterrupterLeadPlanV1\(crosstalkPlan\)/u,
+  );
+  assert.match(
+    interruption,
+    /prefetchCoffeeListenerReactionRef\.current\(leadPlan\)/u,
+  );
+  assert.match(
+    interruption,
+    /prepareCoffeeCrosstalkRef\.current\(leadPlan\)/u,
+  );
+  assert.match(
+    interruption,
+    /presentCoffeeListenerReaction\(\s*leadPlan\s*,\s*"live"/u,
+  );
+  assert.match(
+    interruption,
+    /interruption: CoffeeInterruptionEvent/u,
+  );
+  assert.match(
+    interruption,
+    /coffeeAuthoritativeYieldTailPlanV1\(leadPlan, pause\.interruption\)/u,
+  );
+  assert.match(
+    interruption,
+    /if \(authoritativeYieldTailPlan\) \{[\s\S]{0,180}playCoffeeListenerReactionRef\.current\(\s*authoritativeYieldTailPlan/u,
+  );
+  assert.match(interruption, /clearCoffeeListenerReaction\(true\)/u);
   assert.match(interruption, /COFFEE_BOT_INTERRUPTION_OVERLAP_MS/u);
   assert.match(
     interruption,
     /releaseVoicePlaybackPreservingPreparedMode\([\s\S]{0,120}COFFEE_BOT_INTERRUPTION_RELEASE_MS/u,
   );
   assert.ok(
-    interruption.indexOf(
-      "playCoffeeListenerReactionRef.current(crosstalkPlan)",
-    ) <
+    interruption.indexOf("presentCoffeeListenerReaction(") <
       interruption.indexOf(
         "releaseVoicePlaybackPreservingPreparedMode(",
       ),
   );
-  assert.match(interruption, /interrupterCue: crosstalkPlan\.spokenCue/u);
   assert.match(
     interruption,
-    /interruptedSpeakerCue: crosstalkPlan\.interruptedSpeakerCue/u,
+    /const interruptionEvent = pause\.interruption/u,
+  );
+  assert.doesNotMatch(
+    interruption,
+    /const interruptionEvent: CoffeeInterruptionEvent = \{/u,
+  );
+});
+
+test("protected reclaims and social silence cannot be cut in", () => {
+  const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+  const guardAt = source.indexOf(
+    'pendingMessage.socialSilence?.provenance === "social"',
+  );
+  const candidateAt = source.indexOf(
+    "const candidate = coffeeAutomaticCutInCandidateV1",
+    guardAt,
+  );
+
+  assert.ok(guardAt >= 0 && candidateAt > guardAt);
+  assert.match(
+    source,
+    /pendingMessage\.socialSilence\?\.provenance === "social" \|\|[\s\S]{0,160}pendingMessage\.crosstalkReclaim\?\.protectFromImmediateReinterruption ===[\s\S]{0,40}true[\s\S]{0,180}coffeeAutomaticCutInConsideredRef\.current\.add\(opportunityKey\)/u,
+  );
+});
+
+test("social silence holds the visible ellipsis for its marked duration", () => {
+  const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    source,
+    /const durationMs = Math\.max\(\s*deliveryPlan\.durationMs,\s*last\.socialSilence\?\.holdMs \?\? 0,\s*\)/u,
+  );
+});
+
+test("bot-to-bot cut-ins surface spoken cue text and orphan-guard reveal voice", () => {
+  const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /upsertCoffeeLiveInterruptionTableSegments\(\[[\s\S]{0,220}kind: "interrupterCue"/u,
+  );
+  assert.match(
+    source,
+    /coffeeInterruptionTranscriptSegments\(\{[\s\S]{0,260}interruption: interruptionEvent/u,
+  );
+  assert.match(
+    source,
+    /coffeeLiveInterruptionTableSegments\.flatMap/u,
+  );
+  assert.match(
+    source,
+    /Bot-to-bot verbal cues live on the central table[\s\S]{0,220}botInterruptsPlayer/u,
+  );
+  assert.match(
+    source,
+    /activeCoffeeListenerReaction\.spokenCue\?\.trim\(\) \|\|[\s\S]{0,80}listenerReactionActionLabel/u,
+  );
+  assert.match(
+    source,
+    /if \(!revealDeliveryIsCurrent\(\)\) \{[\s\S]{0,260}const voiceOwnedReveal =[\s\S]{0,220}voiceSynthesisAbortRef\.current\?\.abort\(\);[\s\S]{0,600}if \(voiceOwnedReveal\)[\s\S]{0,500}stopVoicePlaybackPreservingPreparedMode\([\s\S]{0,220}else \{[\s\S]{0,120}coffeeVoiceSeenMessageIdsRef\.current\.delete\(pendingMessage\.id\)/u,
   );
 });

@@ -47,6 +47,10 @@ describe("Home atmosphere integration", () => {
       apiSource,
       /Home Atmosphere generation cannot be attributed to a bot or conversation/u,
     );
+    assert.match(
+      pageSource.slice(requestStart, requestEnd),
+      /if \(!generatedImageId\)/u,
+    );
   });
 
   it("preloads the Home image and reveals it with a reduced-motion fallback", () => {

@@ -192,6 +192,7 @@ describe("Signal review transcript", () => {
     });
 
     assert.match(transcript, /^# PRISM Signal Review Transcript/u);
+    assert.match(transcript, /Review format: 2/u);
     assert.match(transcript, /Use \$signal-review/u);
     assert.match(
       transcript,
@@ -244,6 +245,11 @@ describe("Signal review transcript", () => {
     );
     assert.match(transcript, /\| camera_suggestion \| event event-5/u);
     assert.match(transcript, /\| episode_completed \| event event-6/u);
+    assert.match(transcript, /Recording diagnostics: unavailable/u);
+    assert.match(
+      transcript,
+      /recorded post-validation utterance; raw provider draft not preserved/u,
+    );
   });
 
   it("keeps a useful record when legacy turns lack matching utterance events", () => {
@@ -385,5 +391,76 @@ describe("Signal review transcript", () => {
       transcript,
       /- ONLINE retry: \{"attempts":\[\{"durationMs":410,"httpStatus":500,"model":"gpt-signal","outcome":"failed","provider":"openai","reason":"provider_error"\},\{"durationMs":220,"model":"gpt-signal","outcome":"succeeded","provider":"openai"\}\],"finalModel":"gpt-signal","finalProvider":"openai","strategy":"same_route_retry","v":1\}/u,
     );
+  });
+
+  it("places repair provenance and silent thinking direction beside review evidence", () => {
+    const transcript = buildSignalReviewTranscript({
+      episode: {
+        ...episode,
+        events: episode.events.map((event) =>
+          event.id === "event-2"
+            ? {
+                ...event,
+                payload: {
+                  ...event.payload,
+                  utteranceRepair: {
+                    reason: "peer_label",
+                    fallbackKind: "host_follow_up",
+                  },
+                },
+              }
+            : event,
+        ),
+      },
+      show,
+      host: { id: "host-1", name: "Ada" },
+      guest: { id: "guest-1", name: "Grace" },
+      recordingEvidence: {
+        state: "recorded",
+        recordingId: "recording-1",
+        availability: "faithful",
+        status: "ready",
+        manifestVersion: 2,
+        audioDurationMs: 38_300,
+        timelineDurationMs: 38_300,
+        warningPresent: false,
+        errorPresent: false,
+        direction: [
+          {
+            sequence: 1,
+            atMs: 2_000,
+            endMs: 3_500,
+            kind: "thinking",
+            sourceMessageId: "message-1",
+            payload: {
+              participantId: "host",
+              botId: "host-1",
+              startMs: 2_000,
+              endMs: 3_500,
+              audible: false,
+              camera: "host",
+              segment: "opening",
+              followingMessageId: "message-1",
+              endReason: "completed",
+            },
+          },
+        ],
+      },
+    });
+
+    assert.match(
+      transcript,
+      /- Utterance repair: \{"fallbackKind":"host_follow_up","reason":"peer_label"\}/u,
+    );
+    assert.match(
+      transcript,
+      /recorded repaired\/fallback utterance; raw provider draft not preserved/u,
+    );
+    assert.match(transcript, /- Replay availability: faithful/u);
+    assert.match(
+      transcript,
+      /kind=thinking \| sourceMessageId=message-1 \| payload=.*"audible":false/u,
+    );
+    assert.match(transcript, /"followingMessageId":"message-1"/u);
   });
 });

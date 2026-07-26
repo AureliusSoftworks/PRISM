@@ -6,9 +6,14 @@ import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
 import type {
   BotCrosstalkInterruptedSpeakerCue,
+  CrosstalkFloorOutcome,
+  CrosstalkReclaimPlanV1,
   ListenerReactionSpokenCue,
+  SocialSilenceMarkerV1,
 } from "./listenerReaction.js";
 import type { BotPowerObserverProjectionV1 } from "./botPower.js";
+import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
+import type { BotFalseNameStateV1 } from "./botFalseName.js";
 
 export {
   PRISM_COMPANION_HANDOFF_DIRECTIONS,
@@ -121,6 +126,7 @@ export {
   COFFEE_POWER_PROMPT_MAX_TOKENS,
   activeBotPowerEffectsV1,
   activeBotPowersV1,
+  applyBotPowerAddressedInsultV1,
   applyBotPowerAddressedCopyResponseV1,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerEchoResponseV1,
@@ -129,6 +135,9 @@ export {
   applyBotPowerResponseBudgetV1,
   botPowerAddressedFandomCueFromEffectsV1,
   botPowerAddressedFandomCueV1,
+  botPowerRequiresAddressedInsultV1,
+  botPowerRequiresAddressedInsultFromEffectsV1,
+  botPowerResponseHasAddressedInsultV1,
   botPowerDeterministicHalfChanceV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
@@ -164,6 +173,8 @@ export {
   botPowerMumblesSpeechFromEffectsV1,
   botPowerMumblesSpeechV1,
   botPowerMirrorsIdentityV1,
+  botPowerShapeshiftsIdentityV1,
+  botPowerBelievesFalseNameV1,
   botPowerMuteActionTextsV1,
   botPowerObserverProjectionFromEffectsV1,
   botPowerObserverProjectionV1,
@@ -188,6 +199,7 @@ export {
   buildBotPowersPromptBlock,
   buildBotPowersSelfPromptV1,
   buildCoffeePowersPromptBlock,
+  composeBotIdentityMirrorPowersV1,
   coffeePowerCupRateMultiplierV1,
   coffeePowerStayRateMultiplierV1,
   coffeePowerVesselModeV1,
@@ -356,6 +368,42 @@ export {
   type BotIdentityMirrorStateV1,
   type BotIdentityMirrorSurfaceV1,
 } from "./botIdentityMirror.js";
+export {
+  BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
+  BOT_IDENTITY_SHAPESHIFT_VERSION,
+  applyBotIdentityShapeshiftResponseV1,
+  botIdentityShapeshiftHolderPromptV1,
+  botIdentityShapeshiftObserverPromptV1,
+  botIdentityShapeshiftSeedHashV1,
+  botIdentityShapeshiftTargetChangesV1,
+  botIdentityShapeshiftTransitionActiveV1,
+  createBotIdentityShapeshiftStateV1,
+  normalizeBotIdentityShapeshiftStateV1,
+  pickBotIdentityShapeshiftCandidateIndexV1,
+  resolveBotIdentityShapeshiftAvatarDetailsV1,
+  resolveBotIdentityShapeshiftFaceV1,
+  resolveBotIdentityShapeshiftVoiceV1,
+  type BotIdentityShapeshiftStateV1,
+  type BotIdentityShapeshiftSurfaceV1,
+  type BotIdentityShapeshiftTargetSourceV1,
+} from "./botIdentityShapeshift.js";
+
+export {
+  BOT_FALSE_NAME_POOL_V1,
+  BOT_FALSE_NAME_VERSION,
+  botFalseNameChangesV1,
+  botFalseNameObserverCueV1,
+  botFalseNameSeedHashV1,
+  botFalseNameSelfCueV1,
+  buildBotFalseNameSeedV1,
+  createBotFalseNameStateFromSeedV1,
+  createBotFalseNameStateV1,
+  normalizeBotFalseNameStateV1,
+  pickBotFalseNameFromPoolV1,
+  rewriteBotFalseNameResponseV1,
+  type BotFalseNameStateV1,
+  type BotFalseNameSurfaceV1,
+} from "./botFalseName.js";
 
 export {
   BOT_AUDIO_VOICE_IDS,
@@ -635,9 +683,11 @@ export {
   type AskQuestionOption,
   type AskQuestionPayload,
   type CoffeeAmbientActionPayload,
+  type CoffeeStageActionPayload,
   type CoffeeReplayArrivalEventPayload,
   type CoffeeReplayBaristaDeliveryEventPayload,
   type CoffeeReplayBotDepartureEventPayload,
+  type CoffeeReplayDirectionalIrritationEventPayload,
   type CoffeeReplayEventPayload,
   type CoffeeReplayIdentityMirrorEventPayload,
   type CoffeeReplayMoodEventPayload,
@@ -664,6 +714,7 @@ export {
   type ZenDisplayLinePlacement,
   type ZenDisplayMetadata,
   type ZenDisplayPlacement,
+  type ZenStageActionPayload,
 } from "./prismTool.js";
 
 export {
@@ -973,10 +1024,12 @@ export {
 import type {
   AskQuestionPayload,
   CoffeeAmbientActionPayload,
+  CoffeeStageActionPayload,
   CoffeeReplayEventPayload,
   CoffeeUserActionPayload,
   SentGeneratedImagePayload,
   ZenDisplayMetadata,
+  ZenStageActionPayload,
 } from "./prismTool.js";
 import type {
   ManualAskQuestionResultPayload,
@@ -1150,8 +1203,14 @@ export interface ChatMessage {
   webSearch?: WebSearchPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
+  /** Coffee-only canonical stage action (Director / LLM / Power) for exact-once display. */
+  coffeeStageAction?: CoffeeStageActionPayload;
+  /** Zen-only canonical stage action provenance for reload and plate presentation. */
+  zenStageAction?: ZenStageActionPayload;
   /** Coffee-only user action cue shown as ambient context, not transcript prose. */
   coffeeUserAction?: CoffeeUserActionPayload;
+  /** Coffee-only interruption metadata projected into transcript-only spoken lines. */
+  coffeeInterruption?: CoffeeInterruptionEvent;
   /** Coffee-only hidden replay state beats; not shown in normal transcripts. */
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   /** Frozen participant ids allowed to hear this Coffee line, or null for all. */
@@ -1162,6 +1221,14 @@ export interface ChatMessage {
   autoRecovery?: AutoRecoveryTraceV1;
   /** Saved deterministic hard-response branch from a Ready Power. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Session-sticky Shapeshifter public form for Chat/Zen (and Coffee/Signal envelopes). */
+  identityShapeshift?: BotIdentityShapeshiftStateV1;
+  /** Session-sticky John/Jane Doe alias for Chat/Zen assistant tool payloads. */
+  falseName?: BotFalseNameStateV1;
+  /** Exact `...` chosen as an ordinary social beat, never a Power response. */
+  socialSilence?: SocialSilenceMarkerV1;
+  /** Links a protected floor-reclaim turn to its interrupted heard fragment. */
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
   /** User-entered Prompt Center shortcut that resolved into this message content. */
   promptShortcut?: PromptShortcutMetadata;
   /** User-entered wildcard decks/options that resolved into this message content. */
@@ -1209,6 +1276,10 @@ export interface CoffeeInterruptionEvent {
   pauseBeat?: boolean;
   reactionOutcome?: "silence" | "react" | "yield" | "resume";
   resumeOutcome?: "none" | "yielded" | "continued" | "invited";
+  /** Canonical bot-to-bot floor result; legacy resume fields remain readable. */
+  floorOutcome?: CrosstalkFloorOutcome;
+  /** Linked one-turn reclaim generated from only the audience-heard fragment. */
+  reclaim?: CrosstalkReclaimPlanV1;
   reactionText?: string;
   /** Immediate canned cut-in spoken by the interrupting bot. */
   interrupterCue?: ListenerReactionSpokenCue;
@@ -2017,7 +2088,8 @@ export interface CoffeeGroupEvent {
     | "settings_updated"
     | "roster_updated"
     | "session_created"
-    | "model_choice_updated";
+    | "model_choice_updated"
+    | "synthesis_updated";
   payload: Record<string, unknown>;
   createdAt: string;
 }
@@ -2033,10 +2105,58 @@ export interface CoffeeGroupModelChoice {
   anthropic?: string;
 }
 
+/** Maximum length of the editable one-sentence Coffee Group ethos. */
+export const COFFEE_GROUP_ETHOS_MAX_LENGTH = 280;
+
+/** Independently retryable identity items synthesized for a Coffee Group. */
+export type CoffeeGroupSynthesisItem = "name" | "ethos" | "atmosphere";
+
+/** Durable lifecycle state for one Coffee Group synthesis item. */
+export type CoffeeGroupSynthesisStatus =
+  | "pending"
+  | "running"
+  | "ready"
+  | "failed";
+
+/** How the currently persisted value for a synthesis item was produced. */
+export type CoffeeGroupSynthesisSource =
+  | "generated"
+  | "manual"
+  | "fallback";
+
+/** Durable state for one independently retryable Coffee Group identity item. */
+export interface CoffeeGroupSynthesisItemState {
+  status: CoffeeGroupSynthesisStatus;
+  revision: number;
+  updatedAt: string;
+  source?: CoffeeGroupSynthesisSource;
+  error?: string;
+}
+
+/** Extensible manifest for Coffee Group identity synthesis. */
+export interface CoffeeGroupSynthesisState {
+  version: 1;
+  items: Record<CoffeeGroupSynthesisItem, CoffeeGroupSynthesisItemState>;
+}
+
+/** Generated, character-free café background attached to a Coffee Group. */
+export interface CoffeeGroupAtmosphere {
+  imageId: string;
+  prompt?: string;
+  revision: number;
+  updatedAt: string;
+}
+
 export interface CoffeeGroup {
   id: string;
   userId: string;
   name: string;
+  /** Soft table premise: why these bots choose to gather. */
+  ethos: string;
+  /** Character-free café artwork composited behind the Coffee table. */
+  atmosphere: CoffeeGroupAtmosphere | null;
+  /** Independent completion and retry state for generated identity items. */
+  synthesis: CoffeeGroupSynthesisState;
   botGroupIds: string[];
   coffeeSeatBotIds: Array<string | null>;
   coffeeSettings: CoffeeSessionSettings;
@@ -2093,8 +2213,12 @@ export {
 } from "./coffeeSettings.js";
 
 export {
+  coffeeInterruptionFloorOutcome,
   coffeeInterruptionReactionCandidates,
+  coffeeInterruptionTranscriptSegments,
   pickCoffeeInterruptionReaction,
+  type CoffeeInterruptionTranscriptSegment,
+  type CoffeeInterruptionTranscriptSegmentKind,
   type CoffeeReactionOutcome,
   type CoffeeReactionStyle,
   type CoffeeReactionTone,
@@ -2886,6 +3010,8 @@ export * from "./signalPickles.js";
 export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";
 export * from "./listenerReaction.js";
+export * from "./directionalIrritation.js";
+export * from "./stageActionDirector.js";
 export * from "./continuityVersion.js";
 export * from "./modelReadiness.js";
 export * from "./graphicsQuality.js";

@@ -1,4 +1,8 @@
 import {
+  socialSilenceMessageIsMarkedV1,
+  type SocialSilenceMarkerV1,
+} from "@localai/shared";
+import {
   PRISM_BOT_MARKDOWN_LINK_RE,
   tokenizeBotMentionSource,
 } from "./botMention.ts";
@@ -79,6 +83,22 @@ export function coffeePendingSubmittedUserLineVisible(args: {
   );
 }
 
+/**
+ * `queueCoffeeReveal` updates pending-conversation deps while the player line may
+ * still be in `userTableTyping`. Restarting that typewriter from zero makes the
+ * finished line vanish until the bot starts speaking — skip the restart once the
+ * reveal has settled (or the full display length is already on screen).
+ */
+export function coffeeUserTableTypingShouldRestart(args: {
+  settled: boolean;
+  visibleLength: number;
+  fullDisplayLength: number;
+}): boolean {
+  if (args.settled) return false;
+  if (args.fullDisplayLength <= 0) return false;
+  return args.visibleLength < args.fullDisplayLength;
+}
+
 /** The stored player message from a completed Coffee turn, without display rewriting. */
 export function coffeeSubmittedUserMessageFromTurn<
   T extends { role: string; content: string },
@@ -106,9 +126,19 @@ export function coffeePersistedUserLineOwnsPendingReveal<
   );
 }
 
-export function coffeeTableMessageContentIsVisible(content: string): boolean {
+export function coffeeTableMessageContentIsVisible(
+  content: string,
+  socialSilence?: SocialSilenceMarkerV1,
+): boolean {
   const normalized = content.trim();
-  return /[\p{L}\p{N}]/u.test(normalized);
+  return (
+    /[\p{L}\p{N}]/u.test(normalized) ||
+    socialSilenceMessageIsMarkedV1({
+      content: normalized,
+      marker: socialSilence,
+      mode: "coffee",
+    })
+  );
 }
 
 /** Sentence-case player prose for display without rewriting persisted message source. */
@@ -183,13 +213,16 @@ export function coffeeVoicePlaybackOwnsAutoplayGate(args: {
   return args.busy && Boolean(args.activeMessageId?.trim());
 }
 
+/**
+ * A composing player never blocks the table: bots keep thinking, revealing,
+ * and scheduling turns while text sits in the composer (Signal-style flow).
+ */
 export function coffeeAutoplayForceTurnShouldRun(args: {
   hasConversation: boolean;
   hasPresentBot: boolean;
   sessionPhase: string;
   autoplayPaused: boolean;
   devModeEnabled: boolean;
-  draft: string;
   requestInFlight: boolean;
   pendingReveal: boolean;
   timerPresent: boolean;
@@ -205,12 +238,7 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   if (!args.hasConversation || !args.hasPresentBot) return false;
   if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
     return false;
-  if (
-    args.autoplayPaused ||
-    args.devModeEnabled ||
-    args.draft.trim().length > 0
-  )
-    return false;
+  if (args.autoplayPaused || args.devModeEnabled) return false;
   if (args.requestInFlight || args.pendingReveal) return false;
   if (args.sessionEndsAtMs !== null && args.nowMs >= args.sessionEndsAtMs)
     return false;
@@ -237,7 +265,6 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   sessionPhase: string;
   autoplayPaused: boolean;
   devModeEnabled: boolean;
-  draft: string;
   rhythmState: CoffeeUserRevealFlowState;
   loopScheduled: boolean;
   requestInFlight: boolean;
@@ -248,46 +275,9 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
     return false;
   if (args.autoplayPaused || args.devModeEnabled) return false;
-  if (args.draft.trim().length > 0) return false;
   if (!coffeeArrivalAutoplayCanScheduleNow(args.rhythmState)) return false;
   if (args.loopScheduled || args.requestInFlight) return false;
   return args.sessionEndsAtMs === null || args.nowMs < args.sessionEndsAtMs;
-}
-
-export function coffeeTableTalkAutoplayDeferralMs(args: {
-  conversationId: string;
-  draft: string;
-  lastTypedAtMs: number;
-  lastTypedConversationId: string | null;
-  nowMs: number;
-  graceMs: number;
-}): number {
-  if (args.lastTypedConversationId !== args.conversationId) return 0;
-  if (args.draft.trim().length > 0) return Math.max(0, args.graceMs);
-  if (args.lastTypedAtMs <= 0) return 0;
-  return Math.max(0, args.graceMs - (args.nowMs - args.lastTypedAtMs));
-}
-
-export function coffeeGeneratedReplyRevealDeferralMs(args: {
-  conversationId: string;
-  draft: string;
-  includeCooldown: boolean;
-  lastTypedAtMs: number;
-  lastTypedConversationId: string | null;
-  nowMs: number;
-  graceMs: number;
-}): number {
-  if (args.includeCooldown) return 0;
-  if (args.draft.trim().length === 0) return 0;
-  return coffeeTableTalkAutoplayDeferralMs(args);
-}
-
-export function coffeeDraftChangeCountsAsTyping(
-  previousDraft: string,
-  nextDraft: string,
-): boolean {
-  if (previousDraft === nextDraft) return false;
-  return previousDraft.trim().length > 0 || nextDraft.trim().length > 0;
 }
 
 export function coffeeDirectedMentionBotIds(

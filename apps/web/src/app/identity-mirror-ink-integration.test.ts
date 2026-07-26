@@ -9,7 +9,7 @@ const tutorialSource = readFileSync(
 );
 
 describe("Identity Crisis avatar ink integration", () => {
-  it("switches Coffee and Signal ink with the copied face, including replay state", () => {
+  it("switches Coffee ink with the copied face, including replay state", () => {
     assert.equal(
       pageSource.match(/resolveBotIdentityMirrorAvatarDetailsV1\(/gu)?.length,
       2,
@@ -21,22 +21,16 @@ describe("Identity Crisis avatar ink integration", () => {
     );
     assert.ok(coffeeResolverIndex >= 0 && coffeeRenderIndex > coffeeResolverIndex);
     assert.match(
-      pageSource.slice(coffeeResolverIndex, coffeeResolverIndex + 500),
-      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*identityMirrorTargetFaceVisible,/u,
+      pageSource.slice(coffeeResolverIndex, coffeeResolverIndex + 700),
+      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*identityBorrowTargetFaceVisible,/u,
     );
-
-    const signalResolverIndex = pageSource.indexOf(
-      "const avatarDetails = resolveBotIdentityMirrorAvatarDetailsV1(",
-      coffeeResolverIndex + 1,
-    );
-    const signalRenderIndex = pageSource.indexOf(
-      "avatarDetails={avatarDetails}",
-      signalResolverIndex,
-    );
-    assert.ok(signalResolverIndex >= 0 && signalRenderIndex > signalResolverIndex);
     assert.match(
-      pageSource.slice(signalResolverIndex, signalResolverIndex + 500),
-      /botSummary\.identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*botSummary\.identityMirrorTargetFaceActive,/u,
+      pageSource,
+      /resolveBotIdentityMirrorAvatarDetailsV1\(\s*botSummary\.identityMirrorState,\s*resolveBotAvatarDetails\(bot\),\s*Boolean\(botSummary\.identityMirrorTargetFaceActive\),/u,
+    );
+    assert.match(
+      pageSource,
+      /botSummary\.identityMirrorState &&\s*botSummary\.identityMirrorTargetFaceActive\s*\?\s*botSummary\.identityMirrorState\.targetFace/u,
     );
   });
 
@@ -49,6 +43,14 @@ describe("Identity Crisis avatar ink integration", () => {
     assert.match(
       tutorialSource,
       /authored default persona, face, ink, and voice return before the closing sign-off/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Shapeshifter sincerely becomes a different Library bot's public form/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Marketplace is the fallback when no other Library bots exist/u,
     );
   });
 });

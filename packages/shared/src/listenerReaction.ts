@@ -3,8 +3,66 @@ import type {
   CoffeeCrossTalkLevel,
   CoffeeTableEnergy,
 } from "./coffeeSettings.js";
+import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 export const LISTENER_REACTION_PLAN_VERSION = 1 as const;
+export const CROSSTALK_RECLAIM_PLAN_VERSION = 1 as const;
+export const SOCIAL_SILENCE_MARKER_VERSION = 1 as const;
+export const SOCIAL_SILENCE_CONTENT = "..." as const;
+export const SOCIAL_SILENCE_MAX_CONSECUTIVE_TURNS = 4 as const;
+export const SOCIAL_SILENCE_DEFAULT_HOLD_MS = 900 as const;
+/** At or beyond this heard ratio, a cut-in no longer warrants a retort/reclaim. */
+export const CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO = 0.85;
+
+export type CrosstalkFloorOutcome = "yield" | "reclaim";
+export interface CrosstalkReclaimPlanV1 {
+  v: typeof CROSSTALK_RECLAIM_PLAN_VERSION;
+  name: "crosstalkReclaim";
+  interruptedMessageId: string;
+  speakerBotId: string;
+  /** Exact audience-heard fragment. Unheard suffixes must never enter this field. */
+  heardFragment: string;
+  /** A reclaim cannot be interrupted again on its first linked turn. */
+  protectFromImmediateReinterruption: true;
+}
+
+export type SocialSilenceModeV1 = "coffee" | "signal";
+export type SocialSilenceExclusionV1 =
+  | "kickoff"
+  | "opening"
+  | "closing"
+  | "poll"
+  | "direct_player_obligation"
+  | "departure"
+  | "required_wrap"
+  | "reclaim"
+  | "producer_control"
+  | "power_interruption"
+  | "power_silence";
+
+export interface SocialSilenceMarkerV1 {
+  v: typeof SOCIAL_SILENCE_MARKER_VERSION;
+  name: "socialSilence";
+  provenance: "social";
+  mode: SocialSilenceModeV1;
+  seed: string;
+  /** One-based position in the current ordinary-silence volley. */
+  volleyTurn: 1 | 2 | 3 | 4;
+  /** Brief visual hold used by live and replay presentation. */
+  holdMs: number;
+}
+
+export type SocialSilencePlanV1 =
+  | {
+      decision: "social_silence";
+      forceSubstantive: false;
+      marker: SocialSilenceMarkerV1;
+    }
+  | {
+      decision: "substantive";
+      forceSubstantive: boolean;
+      reason: "chance" | "excluded" | "cap";
+    };
 
 export type ListenerReactionTargetSource = "role" | "direct" | "inferred";
 export type ListenerReactionVisualAction =
@@ -40,6 +98,7 @@ export const BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES = [
   "... sure. Go ahead.",
   "... fine. I'll stop there.",
   "... okay. I'll leave it.",
+  ...DIRECTIONAL_IRRITATION_SNARK_CUES,
 ] as const;
 export type BotCrosstalkInterruptedSpeakerCue =
   (typeof BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES)[number];
@@ -67,11 +126,13 @@ export interface ListenerReactionPlanV1 {
   vocalFoley?: ListenerReactionVocalFoley;
   /** A tense guest trying to cut across the host without taking transcript ownership. */
   interjectionAttempt?: true;
+  /** Canonical floor result for bot-to-bot interruption playback. */
+  floorOutcome?: CrosstalkFloorOutcome;
   /** Short annoyed follow-up spoken by the bot whose live line was cut off. */
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
   /** Whether the follow-up is already part of primary audio or needs its own overlap channel. */
   interruptedSpeakerCuePlayback?: BotCrosstalkInterruptedSpeakerPlayback;
-  /** Relative position inside the speaker's delivery. Always 0.3..0.75. */
+  /** Relative position inside the speaker's delivery. Always 0.3..0.9. */
   targetProgress: number;
   seed: string;
   /** Signal may temporarily favor the listener only while Auto camera is active. */
@@ -121,6 +182,15 @@ export function normalizeListenerReactionVocalFoley(
     : null;
 }
 
+/** Normalize a persisted listener utterance against the authored cue bank. */
+export function normalizeListenerReactionSpokenCue(
+  value: unknown,
+): ListenerReactionSpokenCue | null {
+  return SPOKEN_CUES.has(value as ListenerReactionSpokenCue)
+    ? value as ListenerReactionSpokenCue
+    : null;
+}
+
 export function normalizeBotCrosstalkInterruptedSpeakerCue(
   value: unknown,
 ): BotCrosstalkInterruptedSpeakerCue | null {
@@ -167,6 +237,160 @@ function boundedId(value: unknown): string | null {
   return normalized && normalized.length <= 160 ? normalized : null;
 }
 
+function boundedHeardFragment(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized && normalized.length <= 8_000 ? normalized : null;
+}
+
+export function normalizeCrosstalkFloorOutcome(
+  value: unknown,
+): CrosstalkFloorOutcome | null {
+  if (value === "yield") return "yield";
+  // `resume` was the pre-contract Coffee spelling. Accept it at storage seams
+  // while emitting only the canonical `reclaim` value.
+  if (value === "reclaim" || value === "resume") return "reclaim";
+  return null;
+}
+
+export function normalizeCrosstalkReclaimPlanV1(
+  value: unknown,
+): CrosstalkReclaimPlanV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const interruptedMessageId = boundedId(row.interruptedMessageId);
+  const speakerBotId = boundedId(row.speakerBotId);
+  const heardFragment = boundedHeardFragment(row.heardFragment);
+  if (
+    row.v !== CROSSTALK_RECLAIM_PLAN_VERSION ||
+    row.name !== "crosstalkReclaim" ||
+    !interruptedMessageId ||
+    !speakerBotId ||
+    !heardFragment ||
+    row.protectFromImmediateReinterruption !== true
+  ) {
+    return null;
+  }
+  return {
+    v: CROSSTALK_RECLAIM_PLAN_VERSION,
+    name: "crosstalkReclaim",
+    interruptedMessageId,
+    speakerBotId,
+    heardFragment,
+    protectFromImmediateReinterruption: true,
+  };
+}
+
+export function normalizeSocialSilenceMarkerV1(
+  value: unknown,
+): SocialSilenceMarkerV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  const seed = boundedId(row.seed);
+  const mode = row.mode === "coffee" || row.mode === "signal"
+    ? row.mode
+    : null;
+  const volleyTurn =
+    row.volleyTurn === 1 ||
+      row.volleyTurn === 2 ||
+      row.volleyTurn === 3 ||
+      row.volleyTurn === 4
+      ? row.volleyTurn
+      : null;
+  const holdMs = typeof row.holdMs === "number" && Number.isFinite(row.holdMs)
+    ? Math.round(Math.max(400, Math.min(2_000, row.holdMs)))
+    : null;
+  if (
+    row.v !== SOCIAL_SILENCE_MARKER_VERSION ||
+    row.name !== "socialSilence" ||
+    row.provenance !== "social" ||
+    !mode ||
+    !seed ||
+    !volleyTurn ||
+    holdMs === null
+  ) {
+    return null;
+  }
+  return {
+    v: SOCIAL_SILENCE_MARKER_VERSION,
+    name: "socialSilence",
+    provenance: "social",
+    mode,
+    seed,
+    volleyTurn,
+    holdMs,
+  };
+}
+
+/**
+ * Plans an ordinary social-silence beat from a stable seed. Callers provide
+ * mode-specific mood/flow weighting as `chance` and explicit exclusions.
+ */
+export function planSocialSilenceV1(args: {
+  mode: SocialSilenceModeV1;
+  seed: string;
+  chance: number;
+  consecutiveSocialSilenceTurns: number;
+  exclusions?: readonly SocialSilenceExclusionV1[];
+}): SocialSilencePlanV1 {
+  const exclusions = args.exclusions ?? [];
+  if (exclusions.length > 0) {
+    return {
+      decision: "substantive",
+      forceSubstantive: false,
+      reason: "excluded",
+    };
+  }
+  const consecutiveTurns = Math.max(
+    0,
+    Math.floor(args.consecutiveSocialSilenceTurns),
+  );
+  if (consecutiveTurns >= SOCIAL_SILENCE_MAX_CONSECUTIVE_TURNS) {
+    return {
+      decision: "substantive",
+      forceSubstantive: true,
+      reason: "cap",
+    };
+  }
+  const chance = Math.max(0, Math.min(1, args.chance));
+  if (!args.seed.trim() || stableUnit(`${args.seed}:social-silence`) >= chance) {
+    return {
+      decision: "substantive",
+      forceSubstantive: false,
+      reason: "chance",
+    };
+  }
+  return {
+    decision: "social_silence",
+    forceSubstantive: false,
+    marker: {
+      v: SOCIAL_SILENCE_MARKER_VERSION,
+      name: "socialSilence",
+      provenance: "social",
+      mode: args.mode,
+      seed: args.seed.trim().slice(0, 160),
+      volleyTurn: Math.min(
+        SOCIAL_SILENCE_MAX_CONSECUTIVE_TURNS,
+        consecutiveTurns + 1,
+      ) as SocialSilenceMarkerV1["volleyTurn"],
+      holdMs: SOCIAL_SILENCE_DEFAULT_HOLD_MS,
+    },
+  };
+}
+
+export function socialSilenceMessageIsMarkedV1(args: {
+  content: string;
+  marker: unknown;
+  mode?: SocialSilenceModeV1;
+}): boolean {
+  const marker = normalizeSocialSilenceMarkerV1(args.marker);
+  return (
+    args.content.trim() === SOCIAL_SILENCE_CONTENT &&
+    marker !== null &&
+    (!args.mode || marker.mode === args.mode)
+  );
+}
+
 export function normalizeListenerReactionPlanV1(
   value: unknown,
 ): ListenerReactionPlanV1 | null {
@@ -194,6 +418,8 @@ export function normalizeListenerReactionPlanV1(
   const vocalFoley = normalizeListenerReactionVocalFoley(row.vocalFoley) ??
     undefined;
   const interjectionAttempt = row.interjectionAttempt === true;
+  const floorOutcome = normalizeCrosstalkFloorOutcome(row.floorOutcome) ??
+    undefined;
   const interruptedSpeakerCue =
     normalizeBotCrosstalkInterruptedSpeakerCue(row.interruptedSpeakerCue) ??
     undefined;
@@ -204,7 +430,7 @@ export function normalizeListenerReactionPlanV1(
       : undefined;
   const targetProgress = typeof row.targetProgress === "number" &&
       Number.isFinite(row.targetProgress)
-    ? Math.max(0.3, Math.min(0.75, row.targetProgress))
+    ? Math.max(0.3, Math.min(0.9, row.targetProgress))
     : null;
   if (
     !speakerBotId ||
@@ -230,7 +456,8 @@ export function normalizeListenerReactionPlanV1(
     ...(spokenCue ? { spokenCue } : {}),
     ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
     ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
-    ...(interjectionAttempt && interruptedSpeakerCue
+    ...(interjectionAttempt && floorOutcome ? { floorOutcome } : {}),
+    ...(interjectionAttempt && floorOutcome !== "reclaim" && interruptedSpeakerCue
       ? {
           interruptedSpeakerCue,
           interruptedSpeakerCuePlayback:
@@ -257,6 +484,39 @@ export function botCrosstalkInterruptedSpeakerCueForSeed(
   seed: string,
 ): BotCrosstalkInterruptedSpeakerCue {
   return choose(`${seed}:interrupted`, BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES);
+}
+
+/**
+ * Distinguishes a meaningful cutoff from a late overlap after the point landed.
+ * The interrupter may still enter, but late overlaps should not provoke a
+ * canned retort or a protected reclaim turn.
+ */
+export function crosstalkInterruptionIsMeaningfulV1(args: {
+  originalWordCount: number;
+  heardWordCount: number;
+}): boolean {
+  if (
+    !Number.isFinite(args.originalWordCount) ||
+    !Number.isFinite(args.heardWordCount)
+  ) {
+    return false;
+  }
+  const originalWordCount = Math.max(0, Math.floor(args.originalWordCount));
+  const heardWordCount = Math.max(
+    0,
+    Math.min(originalWordCount, Math.floor(args.heardWordCount)),
+  );
+  if (
+    originalWordCount < 2 ||
+    heardWordCount < 1 ||
+    heardWordCount >= originalWordCount
+  ) {
+    return false;
+  }
+  return (
+    heardWordCount / originalWordCount <
+    CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO
+  );
 }
 
 export function appendBotCrosstalkInterruptedSpeakerCue(
@@ -294,10 +554,13 @@ export function buildBotCrosstalkListenerReactionPlanV1(args: {
   speakerBotId: string;
   interrupterBotId: string;
   targetProgress: number;
+  floorOutcome?: CrosstalkFloorOutcome;
   interrupterCue?: ListenerReactionSpokenCue;
   interruptedSpeakerCue?: BotCrosstalkInterruptedSpeakerCue;
   interruptedSpeakerCuePlayback?: BotCrosstalkInterruptedSpeakerPlayback;
+  includeInterruptedSpeakerCue?: boolean;
 }): ListenerReactionPlanV1 {
+  const floorOutcome = args.floorOutcome ?? "yield";
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
     name: "listenerReaction",
@@ -309,13 +572,18 @@ export function buildBotCrosstalkListenerReactionPlanV1(args: {
     spokenCue:
       args.interrupterCue ?? botCrosstalkInterrupterCueForSeed(args.seed),
     interjectionAttempt: true,
-    interruptedSpeakerCue:
-      args.interruptedSpeakerCue ??
-      botCrosstalkInterruptedSpeakerCueForSeed(args.seed),
-    interruptedSpeakerCuePlayback:
-      args.interruptedSpeakerCuePlayback ?? "crosstalk",
+    floorOutcome,
+    ...(floorOutcome === "yield" && args.includeInterruptedSpeakerCue !== false
+      ? {
+          interruptedSpeakerCue:
+            args.interruptedSpeakerCue ??
+            botCrosstalkInterruptedSpeakerCueForSeed(args.seed),
+          interruptedSpeakerCuePlayback:
+            args.interruptedSpeakerCuePlayback ?? "crosstalk",
+        }
+      : {}),
     targetProgress: Number(
-      Math.max(0.3, Math.min(0.75, args.targetProgress)).toFixed(3),
+      Math.max(0.3, Math.min(0.9, args.targetProgress)).toFixed(3),
     ),
     seed: args.seed,
     cameraCutEligible: true,

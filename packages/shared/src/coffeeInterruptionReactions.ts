@@ -1,6 +1,78 @@
+import type { CoffeeInterruptionEvent } from "./index.js";
+import type { CrosstalkFloorOutcome } from "./listenerReaction.js";
+
 export type CoffeeReactionStyle = "neutral" | "warm" | "concise" | "playful" | "formal";
 export type CoffeeReactionTone = "surprised" | "annoyed" | "firm" | "wounded";
 export type CoffeeReactionOutcome = "react" | "yield" | "resume";
+
+export type CoffeeInterruptionTranscriptSegmentKind =
+  | "interrupterCue"
+  | "interruptedSpeakerCue";
+
+export interface CoffeeInterruptionTranscriptSegment {
+  id: string;
+  sourceMessageId: string;
+  kind: CoffeeInterruptionTranscriptSegmentKind;
+  speakerBotId: string;
+  text: string;
+  sequence: 0 | 1;
+}
+
+/**
+ * Project a hidden bot-to-bot interruption pause into the audible transcript
+ * lines it carried. The already-truncated source speech remains its own row,
+ * and `reactionText` remains the normal follow-on assistant message.
+ */
+export function coffeeInterruptionTranscriptSegments(args: {
+  sourceMessageId: string;
+  sourceContent: string;
+  interruption?: CoffeeInterruptionEvent | null;
+}): CoffeeInterruptionTranscriptSegment[] {
+  const sourceMessageId = args.sourceMessageId.trim();
+  const interruption = args.interruption;
+  const structuralPause =
+    interruption?.pauseBeat === true || args.sourceContent.trim() === "...";
+  if (
+    !sourceMessageId ||
+    !structuralPause ||
+    interruption?.kind !== "botInterruptsBot" ||
+    !interruption.interrupterBotId
+  ) {
+    return [];
+  }
+
+  const segments: CoffeeInterruptionTranscriptSegment[] = [];
+  const interrupterCue = interruption.interrupterCue?.trim();
+  if (interrupterCue) {
+    segments.push({
+      id: `${sourceMessageId}:coffee-interruption:interrupter`,
+      sourceMessageId,
+      kind: "interrupterCue",
+      speakerBotId: interruption.interrupterBotId,
+      text: interrupterCue,
+      sequence: 0,
+    });
+  }
+  const interruptedSpeakerCue = interruption.interruptedSpeakerCue?.trim();
+  if (interruptedSpeakerCue) {
+    segments.push({
+      id: `${sourceMessageId}:coffee-interruption:interrupted`,
+      sourceMessageId,
+      kind: "interruptedSpeakerCue",
+      speakerBotId: interruption.interruptedBotId,
+      text: interruptedSpeakerCue,
+      sequence: 1,
+    });
+  }
+  return segments;
+}
+
+/** Maps legacy Coffee reaction flavors onto the shared floor contract. */
+export function coffeeInterruptionFloorOutcome(
+  outcome: CoffeeReactionOutcome | "silence" | "reclaim" | unknown,
+): CrosstalkFloorOutcome {
+  return outcome === "resume" || outcome === "reclaim" ? "reclaim" : "yield";
+}
 
 const OPENERS: Record<CoffeeReactionStyle, Record<CoffeeReactionTone, readonly string[]>> = {
   neutral: {

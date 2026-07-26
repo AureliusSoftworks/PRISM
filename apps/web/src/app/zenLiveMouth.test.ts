@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   BOTTISH_MOUTH_PHASE_MS,
   bottishMouthShapeAtAlignedElapsedMs,
+  coffeeLiveAvatarSpeechProgressShouldCommit,
   crtSpeechMouthShapeAtAlignedElapsedMs,
   crtSpeechMouthShapeAtElapsedMs,
   crtSpeechMouthShapeAtTextCursor,
@@ -41,6 +42,41 @@ test("talking closed beats bypass mood-specific idle mouths", () => {
   );
 });
 
+test("Coffee live avatar speech progress only commits when the mouth shape changes", () => {
+  const text = "hello there friends";
+  const durationMs = 2_000;
+  assert.equal(
+    coffeeLiveAvatarSpeechProgressShouldCommit({
+      text,
+      previousElapsedMs: 100,
+      previousDurationMs: durationMs,
+      nextElapsedMs: 108,
+      nextDurationMs: durationMs,
+    }),
+    false,
+  );
+  assert.equal(
+    coffeeLiveAvatarSpeechProgressShouldCommit({
+      text,
+      previousElapsedMs: 100,
+      previousDurationMs: durationMs,
+      nextElapsedMs: 400,
+      nextDurationMs: durationMs,
+    }),
+    true,
+  );
+  assert.equal(
+    coffeeLiveAvatarSpeechProgressShouldCommit({
+      text,
+      previousElapsedMs: 100,
+      previousDurationMs: durationMs,
+      nextElapsedMs: 100,
+      nextDurationMs: durationMs + 50,
+    }),
+    true,
+  );
+});
+
 function collectZenLiveMouthShapes(
   input: Omit<
     Parameters<typeof zenLiveBotMouthShapeFromRevealProgress>[0],
@@ -70,7 +106,7 @@ test("CRT speech maps core English phoneme groups onto distinct visemes", () => 
   assert.equal(at("a"), "open-wide");
   assert.equal(at("u"), "dot");
   assert.equal(at("l"), "at");
-  assert.equal(at("r"), "narrow");
+  assert.equal(at("r"), "open-small");
   assert.equal(at("c"), "open-round");
 });
 
@@ -94,10 +130,10 @@ test("English CRT covers common ambiguous vowel spellings", () => {
     ["book", 1, "open-small"],
     ["food", 1, "dot"],
     ["head", 1, "open-wide"],
-    ["heat", 1, "narrow"],
-    ["piece", 1, "narrow"],
+    ["heat", 1, "open-wide"],
+    ["piece", 1, "open-wide"],
     ["pie", 1, "open-wide"],
-    ["key", 1, "narrow"],
+    ["key", 1, "open-wide"],
     ["they", 2, "open-wide"],
     ["snow", 2, "open-small"],
     ["cow", 1, "open-wide"],
@@ -123,7 +159,7 @@ test("English CRT exception words avoid their misleading written vowels", () => 
   assert.ok(vowelShapes("the").includes("open-small"));
   assert.ok(vowelShapes("one").includes("open-small"));
   assert.ok(vowelShapes("two").includes("dot"));
-  assert.ok(vowelShapes("people").includes("narrow"));
+  assert.ok(vowelShapes("people").includes("open-wide"));
   assert.ok(vowelShapes("could").includes("open-small"));
   assert.ok(vowelShapes("through").includes("dot"));
   assert.ok(vowelShapes("thought").includes("open-round"));
@@ -143,7 +179,7 @@ test("English CRT visemes expose the intended mouth glyph vocabulary", () => {
       text: "river",
       visibleLength: 1,
     }),
-    "narrow",
+    "open-small",
   );
   assert.equal(
     crtSpeechMouthShapeFromVisibleTextProgress({
@@ -392,11 +428,11 @@ test("English diphthongs transition through their opening and closing shapes", (
       .map((beat) => beat.shape);
   assert.equal(
     nonRestShapes("day").join(" "),
-    "open-wide open-wide narrow",
+    "at open-wide narrow",
   );
   assert.equal(
     nonRestShapes("out").join(" "),
-    "open-wide dot open-small",
+    "open-wide dot at",
   );
   assert.equal(
     nonRestShapes("boy").join(" "),
@@ -410,7 +446,7 @@ test("CRT speech gives consonant and vowel graphemes precedence", () => {
     ["ship", 0, "narrow"],
     ["chip", 0, "narrow"],
     ["phone", 0, "dot"],
-    ["green", 2, "narrow"],
+    ["green", 2, "open-wide"],
     ["food", 1, "dot"],
     ["queen", 0, "dot"],
     ["what", 0, "dot"],
@@ -422,6 +458,35 @@ test("CRT speech gives consonant and vowel graphemes precedence", () => {
     );
     assert.equal(
       crtSpeechMouthShapeAtTextCursor({ text, cursorIndex: cursorIndex + 1 }),
+      expected,
+    );
+  }
+  for (const [text, cursorIndex, expected] of [
+    ["cat", 2, "at"],
+    ["dog", 0, "at"],
+    ["tide", 0, "at"],
+    ["the", 0, "at"],
+    ["man", 2, "click"],
+    ["wish", 2, "narrow"],
+    ["much", 2, "narrow"],
+    ["happy", 4, "open-wide"],
+    ["city", 3, "open-wide"],
+    ["land", 0, "at"],
+    ["law", 0, "at"],
+    ["low", 0, "at"],
+    ["load", 0, "at"],
+    ["loud", 0, "at"],
+    ["lean", 0, "click"],
+    ["level", 0, "click"],
+    ["lull", 0, "click"],
+    ["lute", 0, "click"],
+    ["lunch", 0, "click"],
+    ["lurking", 0, "click"],
+    ["ball", 2, "at"],
+    ["help", 2, "at"],
+  ] as const) {
+    assert.equal(
+      crtSpeechMouthShapeAtTextCursor({ text, cursorIndex }),
       expected,
     );
   }
@@ -498,7 +563,7 @@ test("apostrophes do not insert fake pauses into contractions", () => {
   assert.ok(
     englishCrtVisemeTimeline("we're")
       .filter((beat) => beat.kind === "vowel")
-      .some((beat) => beat.shape === "narrow"),
+      .some((beat) => beat.shape === "open-wide"),
   );
   assert.ok(
     englishCrtVisemeTimeline("won't")
@@ -600,6 +665,7 @@ test("CRT speech uses a deterministic non-Latin fallback", () => {
 test("English CRT stays total and source-safe for adversarial text", () => {
   const allowedShapes = new Set([
     "at",
+    "click",
     "closed",
     "dot",
     "narrow",
@@ -787,8 +853,9 @@ test("Zen live mouth follows the shape-aware transition graph", () => {
     dot: ["speech-closed", "open-small"],
     "open-small": ["speech-closed", "open-wide", "open-round"],
     "open-wide": ["narrow", "open-small", "open-round"],
-    "open-round": ["open-small", "open-wide", "at"],
+    "open-round": ["open-small", "open-wide", "at", "click"],
     at: ["open-round"],
+    click: ["open-round", "open-small"],
   } as const;
 
   assert.equal(shapes[0], "speech-closed");
@@ -813,11 +880,20 @@ test("Zen live mouth follows the shape-aware transition graph", () => {
     if (current === "at" || previous === "at") {
       assert.ok(current === "open-round" || previous === "open-round");
     }
+    if (current === "click" || previous === "click") {
+      assert.ok(
+        current === "open-round" ||
+          previous === "open-round" ||
+          current === "open-small" ||
+          previous === "open-small",
+      );
+    }
     const currentIsOpen =
       current === "open-small" ||
       current === "open-wide" ||
       current === "open-round" ||
-      current === "at";
+      current === "at" ||
+      current === "click";
     consecutiveOpenShapes = currentIsOpen ? consecutiveOpenShapes + 1 : 0;
     assert.ok(consecutiveOpenShapes <= 5);
   }

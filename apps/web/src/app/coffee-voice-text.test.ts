@@ -96,6 +96,48 @@ describe("Coffee voice text", () => {
     );
   });
 
+  it("leaves same-session live voice to the synchronized table reveal", () => {
+    assert.match(
+      pageSource,
+      /const conversationChanged = coffeeVoiceConversationIdRef\.current !== coffeeConversation\.id;[\s\S]*?if \(!conversationChanged\) return;[\s\S]*?const unseen = assistantMessages\.filter/u,
+    );
+  });
+
+  it("rechecks reveal ownership inside voice preparation and before playback", () => {
+    assert.match(
+      pageSource,
+      /const startCoffeeVoiceForReveal = async \( message: CoffeeConversationMessage, speakerBotId: string, revealDeliveryEpoch: number, \)[\s\S]*?const revealVoiceIsCurrent = \(\): boolean => coffeeRevealPreparationMayCommit\(\{ preparedEpoch: revealDeliveryEpoch, currentEpoch: coffeeRevealDeliveryEpochRef\.current,/u,
+    );
+    assert.match(
+      pageSource,
+      /const revealVoiceToken = \{ valid: true \};[\s\S]*?const revealVoiceStillValid = \(\): boolean =>[\s\S]*?revealVoiceToken\.valid && revealVoiceIsCurrent\(\);/u,
+    );
+    assert.match(
+      pageSource,
+      /const cancelStaleRevealVoice = \(\): boolean => \{[\s\S]*?if \(revealVoiceStillValid\(\)\) return false;[\s\S]*?controller\.abort\(\);[\s\S]*?settle\(null\);/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(cancelStaleRevealVoice\(\)\) return; void enqueueRobotVoiceMode/u,
+    );
+    assert.match(
+      pageSource,
+      /const clip = await readEnglishVoiceSynthesisClip\(response\); if \(cancelStaleRevealVoice\(\)\) return;[\s\S]*?void enqueueEnglishVoice/u,
+    );
+    assert.match(
+      pageSource,
+      /revealVoiceToken\.valid = false;[\s\S]*?settle\(null\);[\s\S]*?\}, 1800\);/u,
+    );
+    assert.match(
+      pageSource,
+      /preSpeechBreath,[\s\S]*?0,[\s\S]*?revealVoiceStillValid,/u,
+    );
+    assert.match(
+      pageSource,
+      /startCoffeeVoiceForReveal\( pendingMessage, args\.speakerBotId, revealDeliveryEpoch, \)/u,
+    );
+  });
+
   it("keeps muted Coffee mouths closed while preserving sip presentation", () => {
     assert.match(
       pageSource,
@@ -107,7 +149,7 @@ describe("Coffee voice text", () => {
     );
     assert.match(
       pageSource,
-      /const seatMouthActive =\s*isTableTypingThisSeat \|\| seatAmbientVocalizationActive[\s\S]*?isTalking=\{seatMouthActive\}[\s\S]{0,520}seatSipPresentation\.active/u,
+      /const seatMouthActive =\s*isTableTypingThisSeat \|\| seatAmbientVocalizationActive[\s\S]*?isTalking=\{seatMouthActive\}[\s\S]{0,620}seatSipMouthTreatmentActive/u,
     );
     assert.match(
       pageSource,

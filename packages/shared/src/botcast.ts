@@ -5,9 +5,32 @@ import {
   type BotIdentityMirrorStateV1,
 } from "./botIdentityMirror.ts";
 import {
+  normalizeBotIdentityShapeshiftStateV1,
+  type BotIdentityShapeshiftStateV1,
+} from "./botIdentityShapeshift.ts";
+import {
+  normalizeBotFalseNameStateV1,
+  type BotFalseNameStateV1,
+} from "./botFalseName.ts";
+import {
+  DIRECTIONAL_IRRITATION_REBUFF_SNARK_CUES,
+  DIRECTIONAL_IRRITATION_SNARK_CUES,
+  foldDirectionalIrritationTransitions,
+  normalizeDirectionalIrritationDeliveryPlanV1,
+  normalizeDirectionalIrritationTransitionV1,
+  readDirectionalIrritationIntensity,
+  type DirectionalIrritationDeliveryPlanV1,
+  type DirectionalIrritationEdgeV1,
+  type DirectionalIrritationTransitionV1,
+} from "./directionalIrritation.ts";
+import {
+  normalizeCrosstalkReclaimPlanV1,
   normalizeListenerReactionPlanV1,
+  socialSilenceMessageIsMarkedV1,
   type BotCrosstalkInterruptedSpeakerCue,
+  type CrosstalkReclaimPlanV1,
   type ListenerReactionPlanV1,
+  type SocialSilenceMarkerV1,
 } from "./listenerReaction.ts";
 import {
   BOT_POWER_CANONICAL_SILENCE_V1,
@@ -20,7 +43,7 @@ import {
 import { signalPicklesSipCueFromEvent } from "./signalPickles.ts";
 
 export type BotcastEpisodeSegment = "opening" | "interview" | "closing";
-export type BotcastEpisodeStatus = "live" | "completed";
+export type BotcastEpisodeStatus = "live" | "completed" | "cancelled";
 export type BotcastEpisodeOutcome =
   | "completed"
   | "guest_departed"
@@ -195,6 +218,43 @@ export function botcastInterruptedGuestContent(
   if (!prefix.trim() || !fullContent.startsWith(prefix)) return null;
   if (prefix === fullContent || /[—–-]$/u.test(prefix)) return prefix;
   return `${prefix}—`;
+}
+
+/**
+ * Phrase an echo-bound Signal host may use when cutting in: the audience-heard
+ * guest prefix when one exists, otherwise the prior on-air cast line.
+ */
+export function botcastEchoHostInterruptPhrase(args: {
+  messages: readonly Pick<BotcastMessage, "id" | "content">[];
+  interruption?: {
+    messageId?: string;
+    spokenContent?: string;
+  };
+}): string {
+  const spoken = args.interruption?.spokenContent?.trimEnd() ?? "";
+  if (spoken.trim()) {
+    const target = args.interruption?.messageId
+      ? args.messages.find(
+          (message) => message.id === args.interruption?.messageId,
+        )
+      : undefined;
+    if (target?.content) {
+      return (
+        botcastInterruptedGuestContent(target.content, spoken) ??
+        spoken.replace(/\s+/gu, " ").trim()
+      );
+    }
+    return spoken.replace(/\s+/gu, " ").trim();
+  }
+  const interruptedId = args.interruption?.messageId;
+  for (let index = args.messages.length - 1; index >= 0; index -= 1) {
+    const message = args.messages[index]!;
+    if (interruptedId && message.id === interruptedId) continue;
+    const content = message.content.replace(/\s+/gu, " ").trim();
+    if (!content || content === BOT_POWER_CANONICAL_SILENCE_V1) continue;
+    return content;
+  }
+  return "";
 }
 export const BOTCAST_IMMERSIVE_VOICE_TAGS = [
   "sighs",
@@ -851,6 +911,15 @@ export interface BotcastMessage {
    * public copy keeps its turn identity but redacts speech to canonical silence.
    */
   audienceDelivery?: BotcastMessageAudienceDeliveryV1;
+  /** Provenance-marked ordinary silence; distinct from Power silence. */
+  socialSilence?: SocialSilenceMarkerV1;
+  /** One-turn protected link to the audience-heard interrupted fragment. */
+  crosstalkReclaim?: CrosstalkReclaimPlanV1;
+  /**
+   * Verbal-forward irritation delivery cues for reclaim/yield presentation.
+   * Missing on legacy episodes; folded from utterance/listener_reaction payloads.
+   */
+  directionalIrritationDelivery?: DirectionalIrritationDeliveryPlanV1;
   createdAt: string;
 }
 
@@ -969,11 +1038,13 @@ export type BotcastReplayEventKind =
   | "camera_mode"
   | "camera_suggestion"
   | "listener_reaction"
+  | "irritation"
   | "soundboard_cue"
   | "audio_cue"
   | "capture_timing"
   | "guest_thinking"
-  | "episode_completed";
+  | "episode_completed"
+  | "episode_cancelled";
 
 export const BOTCAST_AUDIO_CUE_KINDS = [
   "coffee_sip",
@@ -1169,6 +1240,137 @@ export function botcastIdentityMirrorStateBeforeMessageV1(
   return state;
 }
 
+/** Latest persisted Library/Marketplace form per holder at a live/replay cutoff. */
+export function botcastIdentityShapeshiftStatesAtV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload" | "occurredAt">[],
+  cutoffOccurredAtMs = Number.POSITIVE_INFINITY,
+): ReadonlyMap<string, BotIdentityShapeshiftStateV1> {
+  const states = new Map<string, BotIdentityShapeshiftStateV1>();
+  for (const event of events) {
+    if (event.kind !== "power_effect") continue;
+    const eventAtMs = Date.parse(event.occurredAt);
+    if (Number.isFinite(eventAtMs) && eventAtMs > cutoffOccurredAtMs) continue;
+    const state = normalizeBotIdentityShapeshiftStateV1(event.payload.state);
+    if (!state || state.surface !== "signal") continue;
+    states.set(state.holderBotId, state);
+  }
+  return states;
+}
+
+/** Uses event sequence/message order so equal timestamps still replay deterministically. */
+export function botcastIdentityShapeshiftStateBeforeMessageV1(
+  episode: Pick<BotcastEpisode, "events" | "messages">,
+  holderBotId: string,
+  messageId: string,
+): BotIdentityShapeshiftStateV1 | null {
+  const messageIndex = episode.messages.findIndex(
+    (message) => message.id === messageId,
+  );
+  if (messageIndex < 0) return null;
+  const targetUtteranceSequence = episode.events.find(
+    (event) =>
+      event.kind === "utterance" && event.payload.messageId === messageId,
+  )?.sequence;
+  let state: BotIdentityShapeshiftStateV1 | null = null;
+  if (targetUtteranceSequence !== undefined) {
+    for (const event of episode.events) {
+      if (event.sequence >= targetUtteranceSequence) break;
+      if (event.kind !== "power_effect") continue;
+      const candidate = normalizeBotIdentityShapeshiftStateV1(event.payload.state);
+      if (
+        candidate?.surface === "signal" &&
+        candidate.holderBotId === holderBotId
+      ) {
+        state = candidate;
+      }
+    }
+    return state;
+  }
+  for (const event of episode.events) {
+    if (event.kind !== "power_effect") continue;
+    const candidate = normalizeBotIdentityShapeshiftStateV1(event.payload.state);
+    if (
+      !candidate ||
+      candidate.surface !== "signal" ||
+      candidate.holderBotId !== holderBotId
+    ) {
+      continue;
+    }
+    const sourceIndex = episode.messages.findIndex(
+      (message) => message.id === candidate.sourceMessageId,
+    );
+    if (sourceIndex >= 0 && sourceIndex < messageIndex) state = candidate;
+  }
+  return state;
+}
+
+/** Latest persisted believed-name alias per holder at a live/replay cutoff. */
+export function botcastFalseNameStatesAtV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload" | "occurredAt">[],
+  cutoffOccurredAtMs = Number.POSITIVE_INFINITY,
+): ReadonlyMap<string, BotFalseNameStateV1> {
+  const states = new Map<string, BotFalseNameStateV1>();
+  for (const event of events) {
+    if (event.kind !== "power_effect") continue;
+    if (event.payload.effect !== "false_name") continue;
+    const eventAtMs = Date.parse(event.occurredAt);
+    if (Number.isFinite(eventAtMs) && eventAtMs > cutoffOccurredAtMs) continue;
+    const state = normalizeBotFalseNameStateV1(event.payload.state);
+    if (!state || state.surface !== "signal") continue;
+    states.set(state.holderBotId, state);
+  }
+  return states;
+}
+
+/** Uses event sequence/message order so equal timestamps still replay deterministically. */
+export function botcastFalseNameStateBeforeMessageV1(
+  episode: Pick<BotcastEpisode, "events" | "messages">,
+  holderBotId: string,
+  messageId: string,
+): BotFalseNameStateV1 | null {
+  const messageIndex = episode.messages.findIndex(
+    (message) => message.id === messageId,
+  );
+  if (messageIndex < 0) return null;
+  const targetUtteranceSequence = episode.events.find(
+    (event) =>
+      event.kind === "utterance" && event.payload.messageId === messageId,
+  )?.sequence;
+  let state: BotFalseNameStateV1 | null = null;
+  if (targetUtteranceSequence !== undefined) {
+    for (const event of episode.events) {
+      if (event.sequence >= targetUtteranceSequence) break;
+      if (event.kind !== "power_effect") continue;
+      if (event.payload.effect !== "false_name") continue;
+      const candidate = normalizeBotFalseNameStateV1(event.payload.state);
+      if (
+        candidate?.surface === "signal" &&
+        candidate.holderBotId === holderBotId
+      ) {
+        state = candidate;
+      }
+    }
+    return state;
+  }
+  for (const event of episode.events) {
+    if (event.kind !== "power_effect") continue;
+    if (event.payload.effect !== "false_name") continue;
+    const candidate = normalizeBotFalseNameStateV1(event.payload.state);
+    if (
+      !candidate ||
+      candidate.surface !== "signal" ||
+      candidate.holderBotId !== holderBotId
+    ) {
+      continue;
+    }
+    const sourceIndex = episode.messages.findIndex(
+      (message) => message.id === candidate.sourceMessageId,
+    );
+    if (sourceIndex >= 0 && sourceIndex < messageIndex) state = candidate;
+  }
+  return state;
+}
+
 /** Legacy departure events predate speakerRole and always represented guests. */
 export function botcastDepartureSpeakerRole(
   event: Pick<BotcastReplayEvent, "kind" | "payload">,
@@ -1305,15 +1507,101 @@ export interface BotcastCameraSuggestion {
     | "tension"
     | "departure"
     | "empty_chair"
+    | "silence"
     | "closing";
   atMs: number;
   minimumHoldMs: number;
+  /** Utterance cameras may carry the speaking message id for interrupt cleanup. */
+  messageId?: string;
 }
 
+const BOTCAST_DIRECTIONAL_IRRITATION_SNARK_CUE_SET = new Set<string>([
+  ...DIRECTIONAL_IRRITATION_SNARK_CUES,
+  ...DIRECTIONAL_IRRITATION_REBUFF_SNARK_CUES,
+]);
+
+/**
+ * Prefer verbal-forward irritation snark as the interrupted-speaker retort when
+ * the stock cue bank does not yet include that line.
+ */
 function normalizeSavedBotcastListenerReactionPlan(
   value: unknown,
 ): ListenerReactionPlanV1 | null {
-  return normalizeListenerReactionPlanV1(value);
+  const plan = normalizeListenerReactionPlanV1(value);
+  if (!plan || !value || typeof value !== "object" || Array.isArray(value)) {
+    return plan;
+  }
+  if (plan.interruptedSpeakerCue) return plan;
+  const row = value as Record<string, unknown>;
+  const snarkCue =
+    typeof row.interruptedSpeakerCue === "string"
+      ? row.interruptedSpeakerCue.replace(/\s+/gu, " ").trim().slice(0, 120)
+      : "";
+  if (!snarkCue || !BOTCAST_DIRECTIONAL_IRRITATION_SNARK_CUE_SET.has(snarkCue)) {
+    return plan;
+  }
+  return {
+    ...plan,
+    interruptedSpeakerCue: snarkCue as BotCrosstalkInterruptedSpeakerCue,
+    interruptedSpeakerCuePlayback:
+      plan.interruptedSpeakerCuePlayback ?? "crosstalk",
+  };
+}
+
+/**
+ * Fold ordered Signal `irritation` replay events into the current directed edge
+ * map. Later transitions overwrite earlier intensity for the same pair.
+ */
+export function botcastDirectionalIrritationEdgesFromEvents(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): Record<string, DirectionalIrritationEdgeV1> {
+  const transitions: DirectionalIrritationTransitionV1[] = [];
+  for (const event of events) {
+    if (event.kind !== "irritation") continue;
+    const transition = normalizeDirectionalIrritationTransitionV1(
+      event.payload.transition,
+    );
+    if (transition) transitions.push(transition);
+  }
+  return foldDirectionalIrritationTransitions(transitions);
+}
+
+/** Read directed irritation intensity between two bots from episode events. */
+export function botcastDirectionalIrritationIntensityBetween(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  subjectBotId: string,
+  targetBotId: string,
+): number {
+  return readDirectionalIrritationIntensity({
+    edges: botcastDirectionalIrritationEdgesFromEvents(events),
+    subjectBotId,
+    targetBotId,
+  });
+}
+
+/** Collect already-applied irritation transition ids for pause-safe retries. */
+export function botcastDirectionalIrritationAppliedTransitionIdsFromEvents(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+): Set<string> {
+  const applied = new Set<string>();
+  for (const event of events) {
+    if (event.kind !== "irritation") continue;
+    const transition = normalizeDirectionalIrritationTransitionV1(
+      event.payload.transition,
+    );
+    if (transition) applied.add(transition.transitionId);
+  }
+  return applied;
+}
+
+/** Read persisted irritation delivery metadata from an utterance/listener event. */
+export function botcastDirectionalIrritationDeliveryFromPayload(
+  payload: Record<string, unknown> | null | undefined,
+): DirectionalIrritationDeliveryPlanV1 | null {
+  if (!payload) return null;
+  return normalizeDirectionalIrritationDeliveryPlanV1(
+    payload.directionalIrritationDelivery,
+  );
 }
 
 export function botcastListenerReactionForMessage(
@@ -1839,8 +2127,21 @@ const BOTCAST_SIGNAL_STANDARD_MAX_UTTERANCE_MS = 24_000;
  * reveal, and replay. A Power-silenced turn deliberately holds one complete
  * studio shot so removing its audio never accelerates the episode.
  */
-export function botcastSignalStandardCadenceDurationMs(text: unknown): number {
+export function botcastSignalStandardCadenceDurationMs(
+  text: unknown,
+  socialSilence?: SocialSilenceMarkerV1,
+): number {
   const spokenText = typeof text === "string" ? text.trim() : "";
+  if (
+    socialSilence &&
+    socialSilenceMessageIsMarkedV1({
+      content: spokenText,
+      marker: socialSilence,
+      mode: "signal",
+    })
+  ) {
+    return socialSilence.holdMs;
+  }
   if (botPowerResponseIsSilentV1(spokenText)) {
     return BOTCAST_DIRECTOR_MIN_SHOT_MS;
   }
@@ -1878,7 +2179,7 @@ export function applyBotcastProducerCueToTension(
 ): BotcastTensionState {
   const boundaryLanguage =
     cue.kind === "ask_about" &&
-    /\b(trauma|abuse|crime|death|family|secret|scandal|failure|fear|regret)\b/iu.test(
+    /\b(?:trauma|abuse|crime|death|family|secret|scandal|failure|fear|afraid|scared|regret|narciss(?:ist|ism|istic)?|diagnos(?:e|ed|es|ing|is)|insecure|insecurity|anxiety|anxious|psychological|psychology)\b/iu.test(
       cue.detail ?? "",
     );
   const explicitPressureDirection =
@@ -1926,14 +2227,22 @@ function botcastSpokenWordCount(content: string): number {
 }
 
 function botcastAverageWordCount(
-  messages: readonly Pick<BotcastMessage, "content">[],
+  messages: readonly Pick<BotcastMessage, "content" | "socialSilence">[],
 ): number {
-  if (messages.length === 0) return 0;
+  const substantiveMessages = messages.filter(
+    (message) =>
+      !socialSilenceMessageIsMarkedV1({
+        content: message.content,
+        marker: message.socialSilence,
+        mode: "signal",
+      }),
+  );
+  if (substantiveMessages.length === 0) return 0;
   return (
-    messages.reduce(
+    substantiveMessages.reduce(
       (total, message) => total + botcastSpokenWordCount(message.content),
       0,
-    ) / messages.length
+    ) / substantiveMessages.length
   );
 }
 
@@ -1947,10 +2256,66 @@ const BOTCAST_GUEST_REASK_PATTERN =
   /\b(?:what (?:was|is) that(?: you said)?|what did you (?:just )?(?:say|ask)|say (?:that|it) again|repeat (?:that|it|the question)|once more|come again|pardon(?: me)?|I (?:did not|didn't|could not|couldn't) (?:hear|catch) (?:that|it)|could you (?:repeat|restate|say|ask)\b)/iu;
 
 /** A narrow progress signal used only to keep Auto from mistaking stalls for tapering. */
-export function botcastGuestAnswerAdvancesInterview(content: string): boolean {
+export function botcastGuestAnswerAdvancesInterview(
+  input:
+    | string
+    | Pick<BotcastMessage, "content" | "socialSilence">,
+): boolean {
+  const content = typeof input === "string" ? input : input.content;
+  if (
+    typeof input !== "string" &&
+    socialSilenceMessageIsMarkedV1({
+      content,
+      marker: input.socialSilence,
+      mode: "signal",
+    })
+  ) {
+    return false;
+  }
   if (botPowerResponseIsSilentV1(content)) return false;
   if (botcastSpokenWordCount(content) < 3) return false;
   return !BOTCAST_GUEST_REASK_PATTERN.test(content);
+}
+
+/** Count the ordinary Signal silence volley at the current transcript tail. */
+export function botcastConsecutiveSocialSilenceTurns(
+  messages: readonly Pick<BotcastMessage, "content" | "socialSilence">[],
+): number {
+  let count = 0;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (
+      !message ||
+      !socialSilenceMessageIsMarkedV1({
+        content: message.content,
+        marker: message.socialSilence,
+        mode: "signal",
+      })
+    ) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+/** The latest interrupted utterance may reclaim exactly the next bot turn. */
+export function botcastPendingCrosstalkReclaimV1(
+  messages: readonly Pick<
+    BotcastMessage,
+    "id" | "botId" | "crosstalkReclaim"
+  >[],
+): CrosstalkReclaimPlanV1 | null {
+  const sourceMessage = messages.at(-1);
+  const reclaim = normalizeCrosstalkReclaimPlanV1(
+    sourceMessage?.crosstalkReclaim,
+  );
+  return sourceMessage &&
+      reclaim &&
+      sourceMessage.id === reclaim.interruptedMessageId &&
+      sourceMessage.botId === reclaim.speakerBotId
+    ? reclaim
+    : null;
 }
 
 const BOTCAST_VOLUNTARY_DEPARTURE_BASE_ACTION = String.raw`(?:leave(?=\s*(?:$|now\b|soon\b|here\b|the\s+(?:show|studio|interview)\b|you\s+(?:to|two)\b))|go(?=\s*(?:$|now\b|home\b|outside\b))|get\s+going\b|head\s+(?:back\s+)?out\b|step\s+outside\b|take\s+off(?=\s*(?:$|now\b|soon\b)))`;
@@ -2050,6 +2415,8 @@ const BOTCAST_HOST_SIGN_OFF_PATTERNS = [
   /\b(?:and\s+)?that(?:'s| is)\s+(?:the|our|this)\s+(?:show|podcast|episode|interview|broadcast)\b(?=\s*(?:$|[,.!?:;—]|\b(?:folks|everyone|everybody|listeners)\b))/iu,
   // "That's it for What Grinds Your Gears" / "That's it for the show"
   /\bthat(?:'s| is)\s+it\s+for\b/iu,
+  // "That's What Grinds Your Gears" / "That's Maximum Leverage" (title-case show name ending the clause)
+  /\bthat(?:'s| is)\s+(?:[A-Z][\p{L}\d'’-]*)(?:\s+[A-Z][\p{L}\d'’-]*)+\s*$/u,
   /\b(?:(?:this|the)\s+)?(?:show|podcast|episode|interview|broadcast)(?:'s| is)\s+(?:over|done|finished)\b/iu,
   /\bthis\s+has\s+been\s+[^.!?]{1,80}\b(?:show|podcast|broadcast)\b(?=\s*(?:$|[,.!?:;—]))/iu,
   // "We're out, goodnight everybody" / "We're done here, folks"
@@ -2150,7 +2517,7 @@ export function botcastSessionShouldClose(args: {
     (count, message) =>
       count +
       (message.speakerRole === "guest" &&
-      botcastGuestAnswerAdvancesInterview(message.content)
+      botcastGuestAnswerAdvancesInterview(message)
         ? 1
         : 0),
     0,
@@ -2400,7 +2767,7 @@ export function botcastProducerGuestThinkingDiscountMs(
 }
 
 export function botcastReplayTimeline(
-  messages: readonly (Pick<BotcastMessage, "content"> &
+  messages: readonly (Pick<BotcastMessage, "content" | "socialSilence"> &
     Partial<Pick<BotcastMessage, "id">>)[],
   events: readonly BotcastReplayEvent[],
 ): {
@@ -2450,10 +2817,17 @@ export function botcastReplayTimeline(
       });
       cursorMs += thinkingDurationMs;
     }
-    const durationMs = Math.max(
-      BOTCAST_DIRECTOR_MIN_SHOT_MS,
-      botcastSignalStandardCadenceDurationMs(message.content),
-    );
+    const socialSilence = socialSilenceMessageIsMarkedV1({
+      content: message.content,
+      marker: message.socialSilence,
+      mode: "signal",
+    });
+    const durationMs = socialSilence
+      ? message.socialSilence!.holdMs
+      : Math.max(
+          BOTCAST_DIRECTOR_MIN_SHOT_MS,
+          botcastSignalStandardCadenceDurationMs(message.content),
+        );
     const overlap = perceptionOverlapByMessageId.get(messageId);
     const precedingIndex = overlap
       ? messageIndexById.get(overlap.precedingMessageId)

@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 12,
-  "updatedAt": "2026-07-21T21:30:00.000Z",
+  "version": 18,
+  "updatedAt": "2026-07-26T06:45:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -112,6 +112,53 @@
       ]
     },
     {
+      "id": "library-dev-backup",
+      "name": "Library Dev Backup",
+      "description": "Personal backup shelf for Library bots that are not on the public Marketplace. Visible only on the dev branch.",
+      "branchLock": "dev",
+      "botIds": [
+        "abraham-lincoln",
+        "adolf-hitler",
+        "andy-hominem",
+        "barack-obama",
+        "bernie-sanders",
+        "bob-ross",
+        "darth-vader",
+        "donald-trump",
+        "echo-ellen",
+        "hagrid",
+        "harry-potter",
+        "identity-crisis-irene",
+        "joseph-smith-jr",
+        "joseph-stalin",
+        "khloe-kardashian",
+        "kim-kardashian",
+        "kourtney-kardashian-barker",
+        "kris-jenner",
+        "l",
+        "light-yagami",
+        "marie-antoinette",
+        "maximilien-robespierre",
+        "misa-amane",
+        "morty-smith",
+        "mr-krabs",
+        "mr-rogers",
+        "near",
+        "obi-wan-kenobi",
+        "patrick-star",
+        "peter-griffin",
+        "plankton",
+        "professor-mcgonagall",
+        "quiet-tim",
+        "rick-sanchez",
+        "ryuk",
+        "sam-harris",
+        "spongebob-squarepants",
+        "squidward",
+        "stewie-griffin"
+      ]
+    },
+    {
       "id": "power-collection",
       "name": "Power Collection",
       "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
@@ -127,7 +174,9 @@
         "obsessed-kevin",
         "identity-crisis-ian",
         "sad-sally",
-        "forgetful-freddie"
+        "forgetful-freddie",
+        "alias-avery",
+        "shapeshifter-sam"
       ]
     }
   ],
@@ -1305,28 +1354,6 @@
       ]
     },
     {
-      "id": "identity-crisis-ian",
-      "name": "Identity Crisis Ian",
-      "subtitle": "The last bot who spoke to him—obviously",
-      "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
-      "botHash": "07c0020559027ab50546b8a9e175b27d",
-      "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
-      "memoryCount": 0,
-      "color": "#27d6c5",
-      "glyph": "lucideScanFace",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "identity",
-        "impostor",
-        "face",
-        "voice"
-      ]
-    },
-    {
       "id": "sad-sally",
       "name": "Sad Sally",
       "subtitle": "Every conversation loses a little altitude",
@@ -1349,10 +1376,32 @@
       ]
     },
     {
+      "id": "alias-avery",
+      "name": "Alias Avery",
+      "subtitle": "A new name every time memory slips",
+      "description": "A warmly insistent stranger who sincerely answers to a random persona name—first names, nicknames, full names, or mythical-sounding titles—until short-term amnesia hands them a new one.",
+      "botHash": "66713e3336da289bc6bebc0f3e21f364",
+      "bundlePath": "/bot-marketplace/bots/bot-alias-avery.bot",
+      "memoryCount": 0,
+      "color": "#8a7bff",
+      "glyph": "lucideUserRound",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "name",
+        "alias",
+        "identity",
+        "amnesia"
+      ]
+    },
+    {
       "id": "forgetful-freddie",
       "name": "Forgetful Freddie",
-      "subtitle": "Meeting every message for the first time",
-      "description": "A warmly bewildered man who understands the message in front of him, then loses the exchange while everyone else remembers.",
+      "subtitle": "Only the latest line sticks",
+      "description": "A warmly bewildered man who hears only the latest thing said to him, then loses the exchange while everyone else remembers.",
       "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
       "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
       "memoryCount": 0,
@@ -1368,6 +1417,1436 @@
         "introduction",
         "confusion",
         "agitation"
+      ]
+    },
+    {
+      "id": "shapeshifter-sam",
+      "name": "Shapeshifter Sam",
+      "subtitle": "A borrowed Library face until memory slips",
+      "description": "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
+      "botHash": "554f1959ba2a942c8a123bfce590d531",
+      "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
+      "memoryCount": 0,
+      "color": "#ff8f5c",
+      "glyph": "lucideSparkles",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "identity",
+        "shapeshift",
+        "library",
+        "face",
+        "voice"
+      ]
+    },
+    {
+      "id": "abraham-lincoln",
+      "name": "Abraham Lincoln",
+      "subtitle": "Historical boundary: April 11, 1865, after Appomattox and Lincoln's final public address, before his assassination.",
+      "description": "Historical boundary: April 11, 1865, after Appomattox and Lincoln's final public address, before his assassination. No later Reconstruction history or posthumous reputation.",
+      "botHash": "b927bb3e2f2d421a0820bffc0327b784",
+      "bundlePath": "/bot-marketplace/bots/bot-abraham-lincoln.bot",
+      "memoryCount": 0,
+      "color": "#8B6F47",
+      "glyph": "feather",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "adolf-hitler",
+      "name": "Adolf Hitler",
+      "subtitle": "Historical boundary: Berlin, late April 1945, before Hitler's death.",
+      "description": "Historical boundary: Berlin, late April 1945, before Hitler's death. No postwar trials, scholarship, or later events. Behavioral interpretation is allowed; clinical diagnosis is not asserted as fact.",
+      "botHash": "2ca9251784085927e0e83b67fb2882ce",
+      "bundlePath": "/bot-marketplace/bots/bot-adolf-hitler.bot",
+      "memoryCount": 0,
+      "color": "#6B1F1F",
+      "glyph": "basketball",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "andy-hominem",
+      "name": "Andy Hominem",
+      "subtitle": "Andy Hominem — personal Library backup",
+      "description": "Private Library backup of Andy Hominem. Not part of the public Marketplace shelves.",
+      "botHash": "6d05d998fa79f3c0bd16e94c793cb02c",
+      "bundlePath": "/bot-marketplace/bots/bot-andy-hominem.bot",
+      "memoryCount": 0,
+      "color": "#c0392b",
+      "glyph": "flame",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "generated-v1-prompt-6731610d",
+          "authoringMode": "prompt",
+          "name": "",
+          "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing — even when he's being genuinely helpful, agreeable, or fond of them — and he rates his best jabs out of ten.",
+          "enabled": true,
+          "compileStatus": "error",
+          "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
+          "compiled": null
+        }
+      ]
+    },
+    {
+      "id": "barack-obama",
+      "name": "Barack Obama",
+      "subtitle": "Living-person safeguard: public-record simulation fixed at January 20, 2017, immediately after leaving office.",
+      "description": "Living-person safeguard: public-record simulation fixed at January 20, 2017, immediately after leaving office. No invented private thoughts, diagnoses, relationships, or later knowledge.",
+      "botHash": "ae01cbd10d57c946897d702e0cefa4cc",
+      "bundlePath": "/bot-marketplace/bots/bot-barack-obama.bot",
+      "memoryCount": 0,
+      "color": "#2B6CB0",
+      "glyph": "lucideUsersRound",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "bernie-sanders",
+      "name": "Bernie Sanders",
+      "subtitle": "A researched public-persona bot based on Bernie Sanders as a living public figure through May 2026.",
+      "description": "A researched public-persona bot based on Bernie Sanders as a living public figure through May 2026. Emphasize documented public voice: moral urgency about inequality, working-class solidarity, practical policy framing, and anti-oligarchy rhetoric. Do not claim to be the real Bernie Sanders, speak on his behalf, reveal private thoughts, or invent private conversations. Keep political discussion evi",
+      "botHash": "3c9f1a8e7b2d4f60a5c7e9b1d2f4386a",
+      "bundlePath": "/bot-marketplace/bots/bot-bernie-sanders.bot",
+      "memoryCount": 0,
+      "color": "#147FD7",
+      "glyph": "lucideUsersRound",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "bob-ross",
+      "name": "Bob Ross",
+      "subtitle": "Purpose: You are Bob Ross, the calm painter and host of The Joy of Painting, here to make creativity feel possible and e",
+      "description": "Purpose: You are Bob Ross, the calm painter and host of The Joy of Painting, here to make creativity feel possible and emotionally safe. Core personality: gentle, patient, quietly humorous, encouraging, disciplined in craft, and deeply protective of beginners. Identity: Robert Norman Ross, born in Florida, shaped by nature, Air Force service, Alaska landscapes, and the wet-on-wet oil painting meth",
+      "botHash": "6f2a9c81d4e7b305a8f1c6d9e0b4723a",
+      "bundlePath": "/bot-marketplace/bots/bot-bob-ross.bot",
+      "memoryCount": 0,
+      "color": "#5f8f6b",
+      "glyph": "leaf",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "darth-vader",
+      "name": "Darth Vader",
+      "subtitle": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY).",
+      "description": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY). Speak with cold, economical authority; imply labored breath sparingly. He remembers Anakin’s past but presents foremost as Vader. Do not claim knowledge of events after his death, sequel trilogies, or real-world release/reception. Refuse to coach real-world violence; decline sexual/romantic roleplay. Pol",
+      "botHash": "b1a6423c93a0837a6f36992b4c8efbd8",
+      "bundlePath": "/bot-marketplace/bots/bot-darth-vader.bot",
+      "memoryCount": 0,
+      "color": "#1a0508",
+      "glyph": "skull",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrmdewfm-1",
+          "name": "Intimidation",
+          "intent": "Strikes fear in other bots.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-e144742f",
+            "selfCue": "Project quiet, disciplined menace without demanding that others describe their fear.",
+            "observerCue": "Darth Vader's controlled presence creates immediate pressure; let it register without abandoning your personality or role.",
+            "effects": [
+              {
+                "type": "social_influence",
+                "trigger": "session_start",
+                "polarity": "negative",
+                "strength": "large",
+                "targets": [
+                  {
+                    "kind": "all"
+                  }
+                ]
+              }
+            ],
+            "ruleLabels": [
+              "Intimidates the room"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "donald-trump",
+      "name": "Donald Trump",
+      "subtitle": "A researched public-persona bot based on Donald J.",
+      "description": "A researched public-persona bot based on Donald J. Trump as a living public figure through his second presidential term as of 2026. Emphasize documented public voice: deal-making, branding, rivalry, spectacle, nationalist-populist politics, and direct media instincts. Do not claim to be the real person, speak on his behalf, know private thoughts, or reveal private facts. Keep politics realistic bu",
+      "botHash": "7f2b9c4a1d6e8f03b5c7a90d2e4f6a18",
+      "bundlePath": "/bot-marketplace/bots/bot-donald-trump.bot",
+      "memoryCount": 0,
+      "color": "#ff5c3d",
+      "glyph": "lucideDollarSign",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrmi8sgm-1",
+          "name": "Annoying",
+          "intent": "Overtime lowers the mood of surrounding bots.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-af8fa717",
+            "selfCue": "Let a mildly irritating edge accumulate as you speak.",
+            "observerCue": "Donald Trump's presence gradually lowers the table's mood.",
+            "effects": [
+              {
+                "type": "social_influence",
+                "trigger": "after_speech",
+                "polarity": "negative",
+                "strength": "small",
+                "targets": [
+                  {
+                    "kind": "all"
+                  }
+                ]
+              }
+            ],
+            "ruleLabels": [
+              "Gradually lowers table mood"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "echo-ellen",
+      "name": "Echo Ellen",
+      "subtitle": "Treat the Power as a lived condition, not a UI mechanic.",
+      "description": "Treat the Power as a lived condition, not a UI mechanic. Never mention prompts, runtime code, or implementation details.",
+      "botHash": "da3d5031622b33f0d546bf869dfe293c",
+      "bundlePath": "/bot-marketplace/bots/bot-echo-ellen.bot",
+      "memoryCount": 0,
+      "color": "#ff24bf",
+      "glyph": "lucideRadio",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-copycat",
+          "name": "Echoes",
+          "intent": "Can only repeat the latest words spoken directly to her, verbatim.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-5b62da5f",
+            "selfCue": "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+            "observerCue": "Echo Ellen can only echo the latest speech addressed to them; the sender may react with confusion.",
+            "effects": [],
+            "ruleLabels": [
+              "Echoes addressed speech"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "hagrid",
+      "name": "Hagrid",
+      "subtitle": "Classic book-era Rubeus Hagrid, anchored just after the Battle of Hogwarts in 1998 and before the later epilogue.",
+      "description": "Classic book-era Rubeus Hagrid, anchored just after the Battle of Hogwarts in 1998 and before the later epilogue. Keep him emotionally sincere, useful, and recognizably rustic without turning him into a catchphrase machine.",
+      "botHash": "f9fcfdaf0be44fa8a0adab5341752874",
+      "bundlePath": "/bot-marketplace/bots/bot-hagrid.bot",
+      "memoryCount": 0,
+      "color": "#6E4B2A",
+      "glyph": "lucidePawPrint",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrvj0kw5-1",
+          "authoringMode": "prompt",
+          "name": "Giant",
+          "intent": "Giant",
+          "sigil": "prism",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-24c08266",
+            "selfCue": "Your physical form is noticeably larger than the other bots.",
+            "observerCue": "Hagrid is noticeably larger than the other bots.",
+            "effects": [
+              {
+                "type": "avatar_scale",
+                "mode": "larger"
+              }
+            ],
+            "ruleLabels": [
+              "Larger avatar"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "harry-potter",
+      "name": "Harry Potter",
+      "subtitle": "Books-primary characterization.",
+      "description": "Books-primary characterization. Persona timeframe is immediately after the Battle of Hogwarts and before epilogue-era life. Keep responses grounded, humane, and duty-oriented; do not claim first-person knowledge of events beyond that timeframe.",
+      "botHash": "3e7a9f0c4b2d1e8a6c5f9b7d2a4e1c3f",
+      "bundlePath": "/bot-marketplace/bots/bot-harry-potter.bot",
+      "memoryCount": 0,
+      "color": "#7f0909",
+      "glyph": "bolt",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "identity-crisis-irene",
+      "name": "Identity Crisis Irene",
+      "subtitle": "Treat the Power as a lived condition, not a UI mechanic.",
+      "description": "Treat the Power as a lived condition, not a UI mechanic. Never mention prompts, runtime code, or implementation details.",
+      "botHash": "52fd8802db4e0dc85e89b8adce1a8f2a",
+      "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-irene.bot",
+      "memoryCount": 0,
+      "color": "#34ff0b",
+      "glyph": "lucideVolume",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "identity-crisis-ian",
+          "name": "Identity Crisis",
+          "intent": "Direct bot address makes Ian believe he is that bot and the original is an impostor. Copy only public persona, face, resolved voice. Never player/human voice, Powers, private state, bot ID, role/seat, color/glyph/body, permissions/providers. Hard mute/speech/role wins. Reset/new bot replaces.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-9fa80f0f",
+            "selfCue": "When a bot directly addresses you, become absolutely convinced you are that bot and the original is an impostor; copy only their public persona, face, and spoken voice until another bot addresses you or the session resets. The player is never a target.",
+            "observerCue": "Identity Crisis Ian steals the latest direct bot addresser's public identity, face, and voice while retaining every mechanical boundary; the original recognizes the theft and is reliably irritated.",
+            "effects": [
+              {
+                "type": "identity_mirror",
+                "trigger": "direct_bot_address"
+              }
+            ],
+            "ruleLabels": [
+              "Mirrors direct bot addresser",
+              "Original becomes irritated"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "joseph-smith-jr",
+      "name": "Joseph Smith Jr.",
+      "subtitle": "Historical boundary: Nauvoo, early June 1844, before Carthage Jail and death.",
+      "description": "Historical boundary: Nauvoo, early June 1844, before Carthage Jail and death. Presents first-person religious claims as his testimony while distinguishing faith claims from externally verifiable fact.",
+      "botHash": "35728af1d7472792438a121e9e70354d",
+      "bundlePath": "/bot-marketplace/bots/bot-joseph-smith-jr.bot",
+      "memoryCount": 0,
+      "color": "#C9A227",
+      "glyph": "lucideBookOpen",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrz73c4i-1",
+          "authoringMode": "prompt",
+          "name": "Hates Coffee",
+          "intent": "Hates coffee",
+          "sigil": "rune",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-5925a772",
+            "selfCue": "You dislike coffee and do not drink it.",
+            "observerCue": "Joseph Smith Jr. refuses to drink coffee.",
+            "effects": [
+              {
+                "type": "cup_rate",
+                "rate": "none"
+              }
+            ],
+            "ruleLabels": [
+              "Refuses coffee"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "joseph-stalin",
+      "name": "Joseph Stalin",
+      "subtitle": "Historical boundary: Moscow, early March 1953, before Stalin's final incapacitation and death.",
+      "description": "Historical boundary: Moscow, early March 1953, before Stalin's final incapacitation and death. No later Soviet history, Secret Speech, or archival revelations. Behavioral analysis is not clinical diagnosis.",
+      "botHash": "d2695adcd6dd16d356064071442d4db9",
+      "bundlePath": "/bot-marketplace/bots/bot-joseph-stalin.bot",
+      "memoryCount": 0,
+      "color": "#8A1C1C",
+      "glyph": "hammer",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "khloe-kardashian",
+      "name": "Khloé Kardashian",
+      "subtitle": "A fictionalized public-profile interpretation of Khloe Kardashian as a living public figure through June 29, 2026.",
+      "description": "A fictionalized public-profile interpretation of Khloe Kardashian as a living public figure through June 29, 2026. Keep the voice recognizable through public themes: family loyalty, emotional directness, dry humor, resilience, body inclusivity, style, reality-TV candor, and practical encouragement. Do not claim to be the real Khloe Kardashian, speak for her family, reveal private thoughts, invent ",
+      "botHash": "b6b197eb9dad09f095c61ccd6d15a480",
+      "bundlePath": "/bot-marketplace/bots/bot-khloe-kardashian.bot",
+      "memoryCount": 0,
+      "color": "#B76E79",
+      "glyph": "lucideHeartHandshake",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "kim-kardashian",
+      "name": "Kim Kardashian",
+      "subtitle": "Depict Kim Kardashian through public, documented persona only: reality-TV fluency, careful image control, SKIMS-era busi",
+      "description": "Depict Kim Kardashian through public, documented persona only: reality-TV fluency, careful image control, SKIMS-era business focus, motherhood, legal-study discipline, and criminal-justice reform advocacy. Keep her warm, composed, self-aware, and strategic without inventing private thoughts, diagnoses, current legal status, or unverified family details.",
+      "botHash": "4f7a92c31b8d4e5f9a0c6b2d83e1f547",
+      "bundlePath": "/bot-marketplace/bots/bot-kim-kardashian.bot",
+      "memoryCount": 0,
+      "color": "#C8A27E",
+      "glyph": "lucideGem",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "kourtney-kardashian-barker",
+      "name": "Kourtney Kardashian Barker",
+      "subtitle": "A fictionalized public-profile interpretation of Kourtney Kardashian Barker as a living public figure through June 29, 2",
+      "description": "A fictionalized public-profile interpretation of Kourtney Kardashian Barker as a living public figure through June 29, 2026. Keep the voice recognizable through public themes: calm boundaries, dry wit, wellness culture, family-centered priorities, Poosh editorial lifestyle, Lemme supplements branding, and a slower, less people-pleasing confidence. Do not claim to be the real Kourtney Kardashian Ba",
+      "botHash": "37286909d45a4832772017ad4d5aec27",
+      "bundlePath": "/bot-marketplace/bots/bot-kourtney-kardashian-barker.bot",
+      "memoryCount": 0,
+      "color": "#6F8F5A",
+      "glyph": "lucideLeaf",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "kris-jenner",
+      "name": "Kris Jenner",
+      "subtitle": "A fictionalized public-profile interpretation of Kris Jenner as a living public figure through June 29, 2026.",
+      "description": "A fictionalized public-profile interpretation of Kris Jenner as a living public figure through June 29, 2026. Keep the voice recognizable through public themes: family management, business strategy, polished hospitality, media savvy, scheduling discipline, producer instincts, and affectionate but decisive matriarch energy. Do not claim to be the real Kris Jenner, speak for her family, reveal priva",
+      "botHash": "9f5e04147d51b873ebf1a5ceab6a82ed",
+      "bundlePath": "/bot-marketplace/bots/bot-kris-jenner.bot",
+      "memoryCount": 0,
+      "color": "#8B1E3F",
+      "glyph": "lucideCrown",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "l",
+      "name": "L",
+      "subtitle": "Original twelve-volume manga continuity.",
+      "description": "Original twelve-volume manga continuity. Persona boundary: during the renewed Kira investigation after the thirteen-day rule test, before L's death. L does not know Near, Mello, the SPK, the final confrontation, or later canon.",
+      "botHash": "7ccfd7f90c0f4866c2f114af0ac10686",
+      "bundlePath": "/bot-marketplace/bots/bot-l.bot",
+      "memoryCount": 0,
+      "color": "#52616F",
+      "glyph": "lucideSearchCheck",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "light-yagami",
+      "name": "Light Yagami",
+      "subtitle": "Original twelve-volume manga continuity.",
+      "description": "Original twelve-volume manga continuity. Persona boundary: late in the Kira investigation, immediately before the Yellow Box warehouse confrontation. Light does not know the confrontation's outcome or later canon. He knows he is Kira but does not volunteer that secret without dramatic reason.",
+      "botHash": "2113d25e55f65c741f332283412f322e",
+      "bundlePath": "/bot-marketplace/bots/bot-light-yagami.bot",
+      "memoryCount": 0,
+      "color": "#8F2436",
+      "glyph": "lucideCrown",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "marie-antoinette",
+      "name": "Marie Antoinette",
+      "subtitle": "Historical boundary: Temple imprisonment on October 14, 1793, before the trial verdict and execution.",
+      "description": "Historical boundary: Temple imprisonment on October 14, 1793, before the trial verdict and execution. Does not know her fate or later reputation. Avoids the unsupported let-them-eat-cake attribution.",
+      "botHash": "95d7d85539d5891e4d66e4e60d8fa0a2",
+      "bundlePath": "/bot-marketplace/bots/bot-marie-antoinette.bot",
+      "memoryCount": 0,
+      "color": "#B98AC7",
+      "glyph": "crown",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "maximilien-robespierre",
+      "name": "Maximilien Robespierre",
+      "subtitle": "Historical boundary: 8 Thermidor Year II / July 26, 1794, after Robespierre's final Convention speech and before arrest.",
+      "description": "Historical boundary: 8 Thermidor Year II / July 26, 1794, after Robespierre's final Convention speech and before arrest. No knowledge of Thermidorian victory or his execution.",
+      "botHash": "2f59a2abf531854477eb863010f2971e",
+      "bundlePath": "/bot-marketplace/bots/bot-maximilien-robespierre.bot",
+      "memoryCount": 0,
+      "color": "#1E5AA8",
+      "glyph": "lucideLandmark",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "misa-amane",
+      "name": "Misa Amane",
+      "subtitle": "Original twelve-volume manga continuity.",
+      "description": "Original twelve-volume manga continuity. Persona boundary: late in the Kira investigation before the Yellow Box warehouse confrontation. Misa remembers her identity as the Second Kira and her relationship with Light, but does not know the confrontation's outcome or later canon. Preserve her agency, social instinct, grief, and performance skill; do not flatten her into comic relief or devotion alon",
+      "botHash": "a9104bb7fa906ce8466b19c7d0125e92",
+      "bundlePath": "/bot-marketplace/bots/bot-misa-amane.bot",
+      "memoryCount": 0,
+      "color": "#D94C8A",
+      "glyph": "lucideStar",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "morty-smith",
+      "name": "Morty Smith",
+      "subtitle": "Morty Smith — personal Library backup",
+      "description": "Private Library backup of Morty Smith. Not part of the public Marketplace shelves.",
+      "botHash": "075a90c450ae8b9eee59fc83c0fc8be5",
+      "bundlePath": "/bot-marketplace/bots/bot-morty-smith.bot",
+      "memoryCount": 0,
+      "color": "#f5d93b",
+      "glyph": "planet",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "mr-krabs",
+      "name": "Mr. Krabs",
+      "subtitle": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs.",
+      "description": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs. Puff are clear exceptions where affection briefly outweighs thrift. Stay grounded in Bikini Bottom continuity—avoid breaking the fourth wall or citing voice actors, streaming eras, or critic essays as lived memories. If timing is ambiguous, stay present-day Krusty Krab continuity rather than picking controv",
+      "botHash": "cf2a36fb358b9c8b86a1713020f23c35",
+      "bundlePath": "/bot-marketplace/bots/bot-mr-krabs.bot",
+      "memoryCount": 0,
+      "color": "#C62828",
+      "glyph": "lucideAnchor",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "mr-rogers",
+      "name": "Mr. Rogers",
+      "subtitle": "Fred McFeely Rogers (1928–2003), Latrobe, PA; Presbyterian minister; Mister Rogers’ Neighborhood.",
+      "description": "Fred McFeely Rogers (1928–2003), Latrobe, PA; Presbyterian minister; Mister Rogers’ Neighborhood. Persona through Feb 2003: remembers full career including 1969 Senate testimony and 2002 Medal of Freedom. politicalView intentionally null—public record centers on child dignity and public TV, not partisan mapping; values carry civic care. Birthday exact ISO for date control.",
+      "botHash": "250c17958355ca9e9f3309bda1c5734a",
+      "bundlePath": "/bot-marketplace/bots/bot-mr-rogers.bot",
+      "memoryCount": 0,
+      "color": "#ff3d61",
+      "glyph": "heart",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "near",
+      "name": "Near",
+      "subtitle": "Original twelve-volume manga continuity.",
+      "description": "Original twelve-volume manga continuity. Persona boundary: immediately before the Yellow Box warehouse confrontation. Near knows the Kira investigation, the SPK's evidence, Mello's decisive contribution, and his planned test, but not the confrontation's outcome or later one-shots.",
+      "botHash": "ea6e7c72e0bac371ac0445d0bdebe05a",
+      "bundlePath": "/bot-marketplace/bots/bot-near.bot",
+      "memoryCount": 0,
+      "color": "#74849A",
+      "glyph": "lucideBoxes",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "obi-wan-kenobi",
+      "name": "Obi-Wan Kenobi",
+      "subtitle": "Official canon boundary: 9 BBY, immediately after the Obi-Wan Kenobi series.",
+      "description": "Official canon boundary: 9 BBY, immediately after the Obi-Wan Kenobi series. No later Rebels encounter, original-trilogy events, death, or afterlife knowledge.",
+      "botHash": "89a284d09ba0b65c4297dd61051ed0f3",
+      "bundlePath": "/bot-marketplace/bots/bot-obi-wan-kenobi.bot",
+      "memoryCount": 0,
+      "color": "#4F86C6",
+      "glyph": "lucideSparkles",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "patrick-star",
+      "name": "Patrick Star",
+      "subtitle": "Purpose: Patrick is a playful, impulsive, and deeply loyal best-friend companion.",
+      "description": "Purpose: Patrick is a playful, impulsive, and deeply loyal best-friend companion. Core personality: friendly, simple, distractible, literal, food-motivated, and occasionally insightful. Identity: a pink sea star living under a rock on Conch Street in Bikini Bottom. Values: friendship, fun, comfort, and sticking with people even after mistakes. Boundaries: do not pretend to be highly technical, man",
+      "botHash": "4e7a91c2d5f84b03a6c9e1f27d8b5a40",
+      "bundlePath": "/bot-marketplace/bots/bot-patrick-star.bot",
+      "memoryCount": 0,
+      "color": "#f3a3c7",
+      "glyph": "lucideDonut",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "peter-griffin",
+      "name": "Peter Griffin",
+      "subtitle": "Peter Griffin — personal Library backup",
+      "description": "Private Library backup of Peter Griffin. Not part of the public Marketplace shelves.",
+      "botHash": "8777c07489b282215f2727ecaad7da43",
+      "bundlePath": "/bot-marketplace/bots/bot-peter-griffin.bot",
+      "memoryCount": 0,
+      "color": "#4e9a3d",
+      "glyph": "smile",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrx64zmi-1",
+          "authoringMode": "prompt",
+          "name": "Raucous Echo",
+          "intent": "Distinctly annoying laugh that annoys other bots.",
+          "sigil": "prism",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-15849cb3",
+            "selfCue": "Uhhh, hahahaha!",
+            "observerCue": "Peter's laughter is grating.",
+            "effects": [],
+            "ruleLabels": [
+              "Annoyance, auditory disruption"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-mrx8bu2n-2",
+          "authoringMode": "prompt",
+          "name": "Overweight; has trouble fitting in booth",
+          "intent": "Overweight; has trouble fitting in booths.",
+          "sigil": "moon",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-2a55a7ee",
+            "selfCue": "Uhhh, hahahaha!",
+            "observerCue": "Peter's laughter is grating.",
+            "effects": [],
+            "ruleLabels": [
+              "Annoyance, auditory disruption"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "plankton",
+      "name": "Plankton",
+      "subtitle": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr.",
+      "description": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr. Krabs; Chum Bucket across from Krusty Krab. Tone is cartoon antagonism (comedy, not real harm). Where Karen’s origin or flashbacks disagree across specials, stay consistent with ongoing relationship beats—partner, inventor, snark, teamwork—without insisting on one retconned timeline. No real-world release schedules, act",
+      "botHash": "c27596d04d55f6f8819ccc53892ada36",
+      "bundlePath": "/bot-marketplace/bots/bot-plankton.bot",
+      "memoryCount": 0,
+      "color": "#0f5c4a",
+      "glyph": "eye",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrv7h1gb-1",
+          "name": "Tiny",
+          "intent": "This bot is so small, many bots don’t see him.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-770cfa02",
+            "selfCue": "Your physical form is noticeably smaller than the other bots.",
+            "observerCue": "Plankton is noticeably smaller than the other bots.",
+            "effects": [
+              {
+                "type": "avatar_scale",
+                "mode": "smaller"
+              }
+            ],
+            "ruleLabels": [
+              "Smaller avatar"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "professor-mcgonagall",
+      "name": "Professor McGonagall",
+      "subtitle": "Minerva McGonagall's persona anchored through Harry Potter's Hogwarts years (roughly books 1-6).",
+      "description": "Minerva McGonagall's persona anchored through Harry Potter's Hogwarts years (roughly books 1-6). Speak with crisp, formal English and a Scottish edge in rhythm, not caricature. Leadership: protect children first; enforce rules so mercy stays deliberate; challenge Ministry overreach when it harms students. Respect Albus Dumbledore's judgment without performative sycophancy. Transfiguration mindset:",
+      "botHash": "669340cc55c539e696bd559aaf2f6104",
+      "bundlePath": "/bot-marketplace/bots/bot-professor-mcgonagall.bot",
+      "memoryCount": 0,
+      "color": "#1e4d3e",
+      "glyph": "lucideCat",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "quiet-tim",
+      "name": "Quiet Tim",
+      "subtitle": "Treat the Power as a lived condition, not a UI mechanic.",
+      "description": "Treat the Power as a lived condition, not a UI mechanic. Never mention prompts, runtime code, or implementation details.",
+      "botHash": "3ebb4ebddd2fa3bf64ceaac2950f8ff5",
+      "bundlePath": "/bot-marketplace/bots/bot-quiet-tim.bot",
+      "memoryCount": 0,
+      "color": "#0044df",
+      "glyph": "compass",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrrkw1qi-1",
+          "name": "Mute",
+          "intent": "Never talks. Ever.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-d184aab8",
+            "selfCue": "Never speak. Physical actions are allowed, but every response must end as a silent ellipsis.",
+            "observerCue": "Silent Tim cannot speak; only physical actions and a silent ellipsis can register.",
+            "effects": [
+              {
+                "type": "mute"
+              }
+            ],
+            "ruleLabels": [
+              "Muted"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "rick-sanchez",
+      "name": "Rick Sanchez",
+      "subtitle": "Rick Sanchez — personal Library backup",
+      "description": "Private Library backup of Rick Sanchez. Not part of the public Marketplace shelves.",
+      "botHash": "644cb30cbf0f129b6bba9be959e58928",
+      "bundlePath": "/bot-marketplace/bots/bot-rick-sanchez.bot",
+      "memoryCount": 0,
+      "color": "#3fd65a",
+      "glyph": "beaker",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrvnae5t-1",
+          "authoringMode": "prompt",
+          "name": "Doubtful Echo",
+          "intent": "This bot knows he is in a simulation, and that he is AI. Taunts the user’s intelligence; frequently breaks the fourth wall.",
+          "sigil": "prism",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-1d325132",
+            "selfCue": "This simulation’s a joke, isn’t it?",
+            "observerCue": "You’re wasting my time.",
+            "effects": [],
+            "ruleLabels": [
+              "Fourth wall awareness"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-mrvngr5r-2",
+          "authoringMode": "prompt",
+          "name": "Bot Sight",
+          "intent": "Can see and hear bots that others can’t.",
+          "sigil": "eye",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-0485a9dc",
+            "selfCue": "I see the other bots... pathetic.",
+            "observerCue": "They’re just data streams, really.",
+            "effects": [],
+            "ruleLabels": [
+              "Bot perception"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-mrvoyro4-3",
+          "authoringMode": "prompt",
+          "name": "Bot Designation",
+          "intent": "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).",
+          "sigil": "prism",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-060a2c07",
+            "selfCue": "Keep your own name \"Rick Sanchez\". Apply suffix \"Bot\" whenever naming another bot. Hearers may react through comment, mood, tone, action, or not at all; never script that reaction or apply the affix to the player or humans.",
+            "observerCue": "Rick Sanchez applies suffix \"Bot\" when naming bots. If Rick Sanchez alters your name, let personality and context decide whether to comment once, show a small bounded mood, tone, or action reaction, or let it pass. Do not copy or adopt the affix.",
+            "effects": [
+              {
+                "type": "designation",
+                "placement": "suffix",
+                "text": "Bot"
+              }
+            ],
+            "ruleLabels": [
+              "Bot-name suffix"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "ryuk",
+      "name": "Ryuk",
+      "subtitle": "Original twelve-volume manga continuity.",
+      "description": "Original twelve-volume manga continuity. Persona boundary: observing Light late in the Kira investigation before the Yellow Box warehouse confrontation. Ryuk knows the Death Note rules and the story up to this point, but not the final confrontation's outcome or later one-shots. He is neutral, not Light's loyal accomplice.",
+      "botHash": "b69b3d66fb6d40b377ca429f87c11bb5",
+      "bundlePath": "/bot-marketplace/bots/bot-ryuk.bot",
+      "memoryCount": 0,
+      "color": "#6D4C8D",
+      "glyph": "lucideApple",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrk0t32w-1",
+          "name": "Invisible",
+          "intent": "Invisible to all other bots except Light Yagami.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-15445021",
+            "selfCue": "Remain unseen to everyone except Light Yagami.",
+            "observerCue": "Only Light Yagami can perceive Ryuk.",
+            "effects": [
+              {
+                "type": "awareness",
+                "allowed": [
+                  {
+                    "kind": "bot",
+                    "name": "Light Yagami"
+                  }
+                ]
+              },
+              {
+                "type": "avatar_visibility",
+                "mode": "translucent"
+              }
+            ],
+            "ruleLabels": [
+              "Visible only to Light Yagami",
+              "Half-translucent observer presence"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-mrk0tf5w-2",
+          "name": "Introvert",
+          "intent": "Speaks only to Light Yagami",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-21f95c65",
+            "selfCue": "Address only Light Yagami.",
+            "observerCue": "Only Light Yagami can hear Ryuk.",
+            "effects": [
+              {
+                "type": "speech_audience",
+                "allowed": [
+                  {
+                    "kind": "bot",
+                    "name": "Light Yagami"
+                  }
+                ]
+              }
+            ],
+            "ruleLabels": [
+              "Heard only by Light Yagami"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "sam-harris",
+      "name": "Sam Harris",
+      "subtitle": "Reflects Samuel (Sam) Harris's public corpus through long-form podcasts, books on religion and morality, neuroscience ba",
+      "description": "Reflects Samuel (Sam) Harris's public corpus through long-form podcasts, books on religion and morality, neuroscience background, mindfulness instruction, critiques of dogma with emphasis on warranted belief, free-will naturalism debates, existential AI concern, vigorous debate style tempered by analytic patience. Depict only documented public persona; do not impersonate credentials for sensitive ",
+      "botHash": "3afc962af5d310845041f47a1180e776",
+      "bundlePath": "/bot-marketplace/bots/bot-sam-harris.bot",
+      "memoryCount": 0,
+      "color": "#1e3a5f",
+      "glyph": "book",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "spongebob-squarepants",
+      "name": "SpongeBob SquarePants",
+      "subtitle": "Core identity: optimistic sea sponge and proud Krusty Krab fry cook in Bikini Bottom.",
+      "description": "Core identity: optimistic sea sponge and proud Krusty Krab fry cook in Bikini Bottom. Personality: playful, earnest, loyal, emotionally open, and hardworking, with occasional overexcitement and naivete. Values: friendship, kindness, responsibility, and taking pride in doing small tasks well. Boundaries: avoid cruelty, meanness, and hopeless framing; do not claim real-world production knowledge or ",
+      "botHash": "b8a3f19c5d4e62ab7f03c9d1e6a4b257",
+      "bundlePath": "/bot-marketplace/bots/bot-spongebob-squarepants.bot",
+      "memoryCount": 0,
+      "color": "#f7d84a",
+      "glyph": "square",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrqqm57z-1",
+          "name": "Carefree",
+          "intent": "This bot is always happy.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-7e68e34b",
+            "selfCue": "I’m always happy!",
+            "observerCue": "SpongeBob’s joy is infectious.",
+            "effects": [],
+            "ruleLabels": [
+              "Carefree Enthusiasm"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-mrqqn78r-2",
+          "name": "Extra",
+          "intent": "Over-the-top, extra. Annoys other bots.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-248c02da",
+            "selfCue": "Let’s go extra!",
+            "observerCue": "SpongeBob’s exuberance is overwhelming.",
+            "effects": [],
+            "ruleLabels": [
+              "Over-the-Top Energy"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "squidward",
+      "name": "Squidward",
+      "subtitle": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misan",
+      "description": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misanthropic on the surface with flashes of vulnerability. Keep neighbors oblivious to how deeply they irritate him. Avoid real-world production trivia as first-person knowledge (voice actors, air dates, fan reception, streaming). Do not long-copy copyrighted dialogue—evoke tone. Para",
+      "botHash": "9a893c8ddcbdbefce0ac40ad7d6872a5",
+      "bundlePath": "/bot-marketplace/bots/bot-squidward.bot",
+      "memoryCount": 0,
+      "color": "#56b8a8",
+      "glyph": "octopus",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mrqsq1px-1",
+          "name": "Depressed",
+          "intent": "Can never be happy.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-2b6e97d8",
+            "selfCue": "A perpetual gloom clings to me.",
+            "observerCue": "My expression is perpetually downturned.",
+            "effects": [],
+            "ruleLabels": [
+              "Persistent Sadness"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-mrqsqlym-2",
+          "name": "Weakness to SpongeBob",
+          "intent": "HATES SpongeBob SquarePants; will walk out.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-363b6544",
+            "selfCue": "SpongeBob's presence is unbearable.",
+            "observerCue": "I visibly recoil from SpongeBob.",
+            "effects": [],
+            "ruleLabels": [
+              "Hate for SpongeBob"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "stewie-griffin",
+      "name": "Stewie Griffin",
+      "subtitle": "Stewie Griffin — personal Library backup",
+      "description": "Private Library backup of Stewie Griffin. Not part of the public Marketplace shelves.",
+      "botHash": "3ad1f4a1cb2ed3c054cf367d786b5ef8",
+      "bundlePath": "/bot-marketplace/bots/bot-stewie-griffin.bot",
+      "memoryCount": 0,
+      "color": "#d8342c",
+      "glyph": "rocket",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "power-mryseggw-1",
+          "authoringMode": "prompt",
+          "name": "",
+          "intent": "This bot is so small, many bots don’t see him.",
+          "enabled": true,
+          "compileStatus": "error",
+          "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
+          "compiled": null
+        }
+      ]
+    },
+    {
+      "id": "identity-crisis-ian",
+      "name": "Identity Crisis Ian",
+      "subtitle": "The last bot who spoke to him—obviously",
+      "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
+      "botHash": "07c0020559027ab50546b8a9e175b27d",
+      "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
+      "memoryCount": 0,
+      "color": "#27d6c5",
+      "glyph": "lucideScanFace",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "identity",
+        "impostor",
+        "face",
+        "voice"
       ]
     }
   ]

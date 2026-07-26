@@ -71,6 +71,10 @@ describe("speech reveal timeline", () => {
     );
     assert.equal(
       speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 450)),
+      true,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 525)),
       false,
     );
   });

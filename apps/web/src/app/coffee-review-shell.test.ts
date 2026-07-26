@@ -47,6 +47,11 @@ test("Coffee review copies transcripts instead of exporting transcript files", (
     pageSource,
     /coffeeReplayUtilityControls[\s\S]{0,1000}copyCoffeeTranscriptToClipboard/u,
   );
+  assert.match(
+    pageSource,
+    /loadSessionReviewRecordingEvidence\("coffee", coffeeConversation\.id\)/u,
+  );
+  assert.match(pageSource, /formatCoffeeReviewClipboardText\(\{[\s\S]*recordingEvidence,/u);
   assert.match(pageSource, /data-copy-state=/u);
 });
 
@@ -90,6 +95,13 @@ test("leaving Coffee returns immediately while the epilogue continues in the bac
   assert.match(
     pageSource,
     /recordCoffeePlayerDepartureOnExit\(conversation, coffeeSessionPhase\);[\s\S]*?setCoffeeConversation\(null\);[\s\S]*?setCoffeeSessionPhase\("selecting"\)/,
+  );
+});
+
+test("finished Coffee review offers Coffee home back to setup", () => {
+  assert.match(
+    pageSource,
+    /onClick=\{\(\) => void exitCoffeeSessionToSelectedView\(\)\}[\s\S]{0,160}data-tutorial-target="coffee-review-home"[\s\S]{0,120}Coffee home/,
   );
 });
 

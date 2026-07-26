@@ -1,10 +1,13 @@
 import {
   applyVoiceDeliveryMoodToProfile,
+  BOT_VOICE_GAIN_DB_MAX,
+  DIRECTIONAL_IRRITATION_GAIN_DB_MAX,
   listenerReactionHasAudio,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
   type BotAudioVoiceProfileV1,
   type ListenerReactionPlanV1,
+  type NormalizedBotAudioVoiceProfileV1,
   type VoiceDeliveryMood,
 } from "@localai/shared";
 import {
@@ -31,6 +34,32 @@ export type ListenerReactionVoiceMode = "english" | "bottish" | "babble";
 
 /** A perceptible beat after a cut-in before the interrupted bot answers back. */
 export const INTERRUPTED_SPEAKER_RETORT_PAUSE_MS = 850;
+
+/**
+ * Temporarily raise profile gain for a single irritation playback.
+ * Never mutates the authored profile; returns a shallow copy.
+ */
+export function applyDirectionalIrritationGainToProfile(
+  profile: NormalizedBotAudioVoiceProfileV1,
+  gainDbBoost?: number | null,
+): NormalizedBotAudioVoiceProfileV1 {
+  if (
+    typeof gainDbBoost !== "number" ||
+    !Number.isFinite(gainDbBoost) ||
+    gainDbBoost <= 0
+  ) {
+    return profile;
+  }
+  const boost = Math.max(
+    0,
+    Math.min(DIRECTIONAL_IRRITATION_GAIN_DB_MAX, gainDbBoost),
+  );
+  if (boost <= 0) return profile;
+  return {
+    ...profile,
+    gainDb: Math.min(BOT_VOICE_GAIN_DB_MAX, profile.gainDb + boost),
+  };
+}
 
 async function waitForReactionVoiceStart(
   delayMs: number,
@@ -95,10 +124,13 @@ export async function playListenerReactionVoice(args: {
   globalVolume: number;
   effectsEnabled: boolean;
   mood?: VoiceDeliveryMood | null;
+  gainDbBoost?: number;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   channel?: VoicePlaybackChannel;
+  lifecycle?: VoicePlaybackLifecycle;
+  scheduledStartAtPerformanceMs?: number;
 }): Promise<boolean> {
   if (!listenerReactionHasAudio(args.plan)) return false;
   if (args.plan.vocalFoley && args.mode !== "english") return false;
@@ -111,10 +143,13 @@ export async function playListenerReactionVoice(args: {
     globalVolume: args.globalVolume,
     effectsEnabled: args.effectsEnabled,
     mood: args.mood,
+    gainDbBoost: args.gainDbBoost,
     englishClip: args.englishClip,
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
     channel: args.channel,
+    lifecycle: args.lifecycle,
+    scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
     maxDurationMs: args.plan.interjectionAttempt ? 2_400 : 2_000,
   });
 }
@@ -127,12 +162,14 @@ export async function playEphemeralReactionVoice(args: {
   globalVolume: number;
   effectsEnabled: boolean;
   mood?: VoiceDeliveryMood | null;
+  gainDbBoost?: number;
   englishClip?: EnglishVoiceSynthesisClip | null;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
   maxDurationMs?: number;
   channel?: VoicePlaybackChannel;
   startDelayMs?: number;
+  scheduledStartAtPerformanceMs?: number;
   signal?: AbortSignal;
   lifecycle?: VoicePlaybackLifecycle;
 }): Promise<boolean> {
@@ -143,8 +180,12 @@ export async function playEphemeralReactionVoice(args: {
   if (!(await waitForReactionVoiceStart(args.startDelayMs ?? 0, args.signal))) {
     return false;
   }
+  const boostedProfile = applyDirectionalIrritationGainToProfile(
+    normalizedInputProfile,
+    args.gainDbBoost,
+  );
   const profile = normalizeBotAudioVoiceProfileV1({
-    ...applyVoiceDeliveryMoodToProfile(normalizedInputProfile, args.mood),
+    ...applyVoiceDeliveryMoodToProfile(boostedProfile, args.mood),
     volume: normalizeBotVoiceVolume(args.globalVolume),
   });
   if (args.mode === "english") {
@@ -167,6 +208,8 @@ export async function playEphemeralReactionVoice(args: {
       roomAcoustics: args.roomAcoustics,
       stereoPan: args.stereoPan,
       lifecycle: args.lifecycle,
+      scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+      compensateLifecycleForOutputLatency: true,
     });
   }
 
@@ -191,6 +234,8 @@ export async function playEphemeralReactionVoice(args: {
     roomAcoustics: args.roomAcoustics,
     stereoPan: args.stereoPan,
     lifecycle: args.lifecycle,
+    scheduledStartAtPerformanceMs: args.scheduledStartAtPerformanceMs,
+    compensateLifecycleForOutputLatency: true,
   });
 }
 

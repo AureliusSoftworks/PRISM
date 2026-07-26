@@ -42267,7 +42267,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botProfileField textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 86px;
   min-height: 86px;
+  max-height: 86px;
+  resize: none;
+  overflow-y: auto;
 }
 
 .botVoicePresetGrid {
@@ -60732,6 +60740,70 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow: hidden;
 }
 
+.coffeeMainChrome {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.coffeeSessionTopicFrame {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: min(100%, var(--coffee-stage-max-width));
+  justify-self: center;
+  width: 100%;
+  padding: 8px 14px 10px;
+  border: 1px solid color-mix(in srgb, var(--coffee-line) 88%, transparent);
+  border-radius: 14px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--coffee-panel-strong) 92%, transparent),
+      color-mix(in srgb, var(--coffee-panel) 96%, transparent)
+    );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  display: grid;
+  gap: 2px;
+}
+
+.coffeeSessionTopicLabel {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--coffee-muted);
+  font-weight: 600;
+}
+
+.coffeeSessionTopicTitle {
+  margin: 0;
+  min-width: 0;
+  color: #f7f7f7;
+  font-size: clamp(0.95rem, 1.5vw, 1.08rem);
+  line-height: 1.35;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.themeLight.coffeeShell .coffeeSessionTopicFrame {
+  border-color: color-mix(in srgb, var(--line, #cfc7bc) 80%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, #fff 86%, transparent),
+      color-mix(in srgb, #f6f1ea 92%, transparent)
+    );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.themeLight.coffeeShell .coffeeSessionTopicLabel {
+  color: color-mix(in srgb, var(--fg-muted, #6b645c) 92%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeSessionTopicTitle {
+  color: var(--fg, #1f1a16);
+}
+
 .coffeeWorkspace {
   position: relative;
   min-width: 0;
@@ -62994,6 +63066,74 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   filter: blur(34px);
   opacity: 0.72;
   z-index: 0;
+}
+
+.coffeeGroupAtmosphereBackdrop {
+  position: absolute;
+  inset: clamp(-18px, -2.4vw, -8px);
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  mask-image: radial-gradient(
+    ellipse 76% 72% at 50% 50%,
+    #000 0 48%,
+    rgba(0, 0, 0, 0.88) 68%,
+    transparent 100%
+  );
+  transition: opacity 240ms ease;
+}
+
+.coffeeGroupAtmosphereBackdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.32;
+  filter: saturate(0.66) contrast(0.88) brightness(0.74);
+  transform: scale(1.025);
+}
+
+.coffeeGroupAtmosphereBackdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 42% 36% at 50% 50%,
+      rgba(10, 8, 7, 0.28),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 48%,
+      rgba(7, 6, 5, 0.44) 100%
+    );
+}
+
+.themeLight.coffeeShell .coffeeGroupAtmosphereBackdrop img {
+  opacity: 0.42;
+  filter: saturate(0.78) contrast(0.96) brightness(0.98);
+  mix-blend-mode: normal;
+}
+
+.themeLight.coffeeShell .coffeeGroupAtmosphereBackdrop::after {
+  background:
+    radial-gradient(
+      ellipse 42% 36% at 50% 50%,
+      rgba(255, 252, 247, 0.38),
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse at center,
+      transparent 48%,
+      rgba(250, 246, 239, 0.56) 100%
+    );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeGroupAtmosphereBackdrop {
+    transition: none;
+  }
 }
 
 .coffeeAtmosphereScene {
@@ -65856,6 +65996,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
+    .zenLiveBotPresenceFaceGlyph,
+    .zenLiveBotPresenceFaceEmissionMask
+  )[data-talking="true"][data-coffee-plate-mouth-shape="click"] {
+  --bot-face-mouth-speech-scale-x: 1.1;
+  --bot-face-mouth-speech-scale-y: 1.02;
+  --bot-face-mouth-pulse-scale-x: 1.08;
+  --bot-face-mouth-pulse-scale-y: 1.02;
+  --bot-face-mouth-speech-opacity: 0.96;
+  --bot-face-mouth-speech-wobble: 0deg;
+}
+
+:is(
+    .coffeeSeatPlateEmoji,
+    .messageMoodCoffeeFace,
     .zenLiveBotPresenceFaceGlyph
   )[data-talking="true"][data-face-mouth-animation="pulsate"]
   [data-coffee-plate-emoji-part="mouth"]
@@ -66586,13 +66740,14 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .coffeeCup[data-cup-top-off-eligible="true"] {
   background: radial-gradient(
     ellipse at 50% 62%,
-    rgba(255, 214, 120, 0.2),
-    rgba(255, 214, 120, 0.08) 43%,
+    rgba(255, 214, 120, 0.18),
+    rgba(255, 214, 120, 0.06) 43%,
     transparent 70%
   );
-  transform: translateY(-1px) scale(1.025);
-  filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.5))
-    drop-shadow(0 0 10px rgba(255, 214, 120, 0.2));
+  transform: translateY(-1px) scale(1.02);
+  /* Avoid dual drop-shadow filters on every eligible cup while the pot is
+     equipped — that was a major GPU hitch on top of full-page Coffee renders. */
+  box-shadow: 0 0 0 1.5px rgba(255, 214, 120, 0.45);
 }
 
 .coffeeCup[data-cup-pot-target="true"] {
@@ -66602,10 +66757,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     rgba(255, 184, 63, 0.14) 44%,
     transparent 72%
   );
-  transform: translateY(-3px) scale(1.1);
-  filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.48))
-    drop-shadow(0 0 18px rgba(255, 198, 86, 0.46))
-    drop-shadow(0 0 4px rgba(255, 247, 206, 0.36));
+  transform: translateY(-3px) scale(1.08);
+  box-shadow:
+    0 0 0 2px rgba(255, 214, 120, 0.72),
+    0 10px 18px rgba(0, 0, 0, 0.28);
 }
 
 .coffeeCup::after {
@@ -70985,6 +71140,190 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   text-transform: uppercase;
 }
 
+.coffeeGroupIdentityCard {
+  grid-column: 1 / -1;
+  gap: 7px;
+  padding: 8px;
+}
+
+.coffeeGroupIdentityHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.coffeeGroupIdentityHeading p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.64rem;
+}
+
+.coffeeGroupIdentityItems {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.coffeeGroupIdentityItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 5px 8px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.coffeeGroupIdentityItemHeader {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coffeeGroupIdentityItemHeader strong {
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.7rem;
+}
+
+.coffeeGroupIdentityStatus {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 0.58rem;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.coffeeGroupIdentityStatus[data-status="ready"] {
+  color: rgba(174, 239, 206, 0.82);
+}
+
+.coffeeGroupIdentityStatus:is(
+    [data-status="pending"],
+    [data-status="running"]
+  ) {
+  color: rgba(190, 221, 255, 0.82);
+}
+
+.coffeeGroupIdentityValue,
+.coffeeGroupAtmospherePreview {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+}
+
+.coffeeGroupIdentityValue span {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coffeeGroupIdentityValue small,
+.coffeeGroupAtmospherePreview small,
+.coffeeGroupEthosField small {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.58rem;
+  line-height: 1.25;
+}
+
+.coffeeGroupEthosField {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.coffeeGroupEthosField textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: none;
+  padding: 6px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.coffeeGroupEthosField textarea:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.07);
+}
+
+.coffeeGroupAtmospherePreview {
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+}
+
+.coffeeGroupAtmospherePreview img,
+.coffeeGroupAtmospherePreview > span {
+  width: 52px;
+  height: 34px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.coffeeGroupAtmospherePreview img {
+  object-fit: cover;
+  filter: saturate(0.72) contrast(0.9);
+}
+
+.coffeeGroupAtmospherePreview > span {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.coffeeGroupIdentityAction {
+  align-self: end;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.84);
+  font: inherit;
+  font-size: 0.62rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.coffeeGroupIdentityAction:hover:not(:disabled),
+.coffeeGroupIdentityAction:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.coffeeGroupIdentityAction:disabled {
+  opacity: 0.42;
+  cursor: wait;
+}
+
+@media (max-width: 760px) {
+  .coffeeGroupIdentityHeading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .coffeeGroupIdentityItems {
+    grid-template-columns: 1fr;
+  }
+}
+
 .coffeeGroupBotList,
 .coffeeGroupRecentSessions {
   list-style: none;
@@ -71707,6 +72046,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border-radius: 18px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.045);
+}
+
+.coffeeSettingsEthosInput {
+  min-height: 76px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.35;
 }
 
 .coffeeSettingsIntroRow {
@@ -73473,6 +73819,42 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   ) {
   border-color: var(--coffee-line);
   background: rgba(255, 255, 255, 0.58);
+}
+
+.themeLight.coffeeShell .coffeeGroupIdentityHeading p,
+.themeLight.coffeeShell .coffeeGroupIdentityValue small,
+.themeLight.coffeeShell .coffeeGroupAtmospherePreview small,
+.themeLight.coffeeShell .coffeeGroupEthosField small,
+.themeLight.coffeeShell .coffeeGroupIdentityStatus {
+  color: color-mix(in srgb, var(--fg) 58%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeGroupIdentityItem {
+  border-color: var(--coffee-line);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.themeLight.coffeeShell .coffeeGroupIdentityItemHeader strong,
+.themeLight.coffeeShell .coffeeGroupIdentityValue span {
+  color: var(--fg);
+}
+
+.themeLight.coffeeShell .coffeeGroupEthosField textarea {
+  border-color: var(--coffee-line);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--fg);
+}
+
+.themeLight.coffeeShell .coffeeGroupIdentityAction {
+  border-color: var(--coffee-line-strong);
+  background: rgba(255, 255, 255, 0.74);
+  color: var(--fg);
+}
+
+.themeLight.coffeeShell .coffeeGroupAtmospherePreview > span {
+  border-color: var(--coffee-line);
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--fg-muted);
 }
 
 .themeLight.coffeeShell .coffeeGroupGuestButton {

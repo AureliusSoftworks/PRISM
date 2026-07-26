@@ -7,6 +7,8 @@ import type {
   CoffeeBotSocialSnapshot,
   CoffeeCupTopOffSnapshot,
   Conversation,
+  DirectionalIrritationEdgeV1,
+  DirectionalIrritationTransitionV1,
   MemoryCategory,
   MemoryTier,
   OpinionTrend,
@@ -19,10 +21,13 @@ import type {
 import {
   COFFEE_SESSION_DURATION_MINUTES_MAX,
   COFFEE_SESSION_DURATION_MINUTES_MIN,
+  DIRECTIONAL_IRRITATION_VERSION,
   PRISM_ONBOARDING_VERSION,
   createCompletedPrismOnboardingState,
   createPrismCapabilityRevelations,
   createPrismTutorialProgress,
+  directionalIrritationEdgeKey,
+  normalizeDirectionalIrritationIntensity,
   sanitizePrismMoodState,
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
@@ -1161,6 +1166,32 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS coffee_directional_irritation (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      subject_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      intensity REAL NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      last_transition_id TEXT,
+      PRIMARY KEY (user_id, conversation_id, subject_bot_id, target_bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS coffee_directional_irritation_ledger (
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      transition_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      subject_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      before_intensity REAL NOT NULL,
+      after_intensity REAL NOT NULL,
+      occurred_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, conversation_id, transition_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS coffee_cup_top_offs (
       user_id TEXT NOT NULL,
       conversation_id TEXT NOT NULL,
@@ -1210,6 +1241,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      ethos TEXT NOT NULL DEFAULT '',
+      atmosphere_json TEXT NOT NULL DEFAULT '{}',
+      synthesis_json TEXT NOT NULL DEFAULT '{}',
       coffee_settings TEXT NOT NULL,
       preset_mode TEXT NOT NULL DEFAULT 'manual',
       coffee_topic_mode TEXT NOT NULL DEFAULT 'manual',
@@ -2556,6 +2590,30 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE coffee_groups ADD COLUMN starter_topics TEXT NOT NULL DEFAULT '{}';",
     );
   }
+  const hasCoffeeGroupEthosColumn = coffeeGroupColumns.some(
+    (column) => column.name === "ethos",
+  );
+  if (!hasCoffeeGroupEthosColumn) {
+    db.exec(
+      "ALTER TABLE coffee_groups ADD COLUMN ethos TEXT NOT NULL DEFAULT '';",
+    );
+  }
+  const hasCoffeeGroupAtmosphereColumn = coffeeGroupColumns.some(
+    (column) => column.name === "atmosphere_json",
+  );
+  if (!hasCoffeeGroupAtmosphereColumn) {
+    db.exec(
+      "ALTER TABLE coffee_groups ADD COLUMN atmosphere_json TEXT NOT NULL DEFAULT '{}';",
+    );
+  }
+  const hasCoffeeGroupSynthesisColumn = coffeeGroupColumns.some(
+    (column) => column.name === "synthesis_json",
+  );
+  if (!hasCoffeeGroupSynthesisColumn) {
+    db.exec(
+      "ALTER TABLE coffee_groups ADD COLUMN synthesis_json TEXT NOT NULL DEFAULT '{}';",
+    );
+  }
   const sweepBatchColumns = db
     .prepare("PRAGMA table_info(conversation_sweep_batches)")
     .all() as Array<{ name: string }>;
@@ -3329,6 +3387,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     "CREATE INDEX IF NOT EXISTS idx_coffee_social_user_conversation ON coffee_bot_social_state (user_id, conversation_id);",
   );
   db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_directional_irritation_user_conversation ON coffee_directional_irritation (user_id, conversation_id);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_coffee_directional_irritation_ledger_user_conversation ON coffee_directional_irritation_ledger (user_id, conversation_id);",
+  );
+  db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_cup_top_offs_user_conversation ON coffee_cup_top_offs (user_id, conversation_id);",
   );
   db.exec(
@@ -3950,6 +4014,149 @@ export function upsertCoffeeCupTopOffState(
       snapshot.progressAfter,
       snapshot.toppedOffAt,
       updatedAt,
+    );
+  }
+}
+
+interface DbCoffeeDirectionalIrritationRow {
+  subject_bot_id: string;
+  target_bot_id: string;
+  intensity: number;
+  updated_at: string;
+  last_transition_id: string | null;
+}
+
+/**
+ * Loads session-scoped directed irritation edges for one Coffee conversation.
+ */
+export function loadCoffeeDirectionalIrritationEdges(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Record<string, DirectionalIrritationEdgeV1> {
+  const rows = db
+    .prepare(
+      `SELECT subject_bot_id, target_bot_id, intensity, updated_at, last_transition_id
+         FROM coffee_directional_irritation
+        WHERE user_id = ? AND conversation_id = ?`,
+    )
+    .all(userId, conversationId) as unknown as DbCoffeeDirectionalIrritationRow[];
+  const edges: Record<string, DirectionalIrritationEdgeV1> = {};
+  for (const row of rows) {
+    const subjectBotId = row.subject_bot_id.trim();
+    const targetBotId = row.target_bot_id.trim();
+    if (!subjectBotId || !targetBotId || subjectBotId === targetBotId) continue;
+    const lastTransitionId =
+      typeof row.last_transition_id === "string" && row.last_transition_id.trim()
+        ? row.last_transition_id.trim().slice(0, 180)
+        : undefined;
+    const edge: DirectionalIrritationEdgeV1 = {
+      v: DIRECTIONAL_IRRITATION_VERSION,
+      subjectBotId,
+      targetBotId,
+      intensity: normalizeDirectionalIrritationIntensity(row.intensity),
+      updatedAt: row.updated_at,
+      ...(lastTransitionId ? { lastTransitionId } : {}),
+    };
+    edges[directionalIrritationEdgeKey(subjectBotId, targetBotId)] = edge;
+  }
+  return edges;
+}
+
+/**
+ * Loads already-applied directional irritation transition ids for one session.
+ */
+export function loadCoffeeDirectionalIrritationAppliedIds(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Set<string> {
+  const rows = db
+    .prepare(
+      `SELECT transition_id
+         FROM coffee_directional_irritation_ledger
+        WHERE user_id = ? AND conversation_id = ?`,
+    )
+    .all(userId, conversationId) as Array<{ transition_id: string }>;
+  return new Set(
+    rows
+      .map((row) => row.transition_id.trim())
+      .filter((transitionId) => transitionId.length > 0),
+  );
+}
+
+/**
+ * Persist one directional irritation transition idempotently.
+ * Ledger INSERT OR IGNORE gates the edge upsert so retries cannot double-apply.
+ */
+export function persistCoffeeDirectionalIrritationTransition(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  edge: DirectionalIrritationEdgeV1,
+  transition: DirectionalIrritationTransitionV1,
+): void {
+  const ledgerResult = db
+    .prepare(
+      `INSERT OR IGNORE INTO coffee_directional_irritation_ledger (
+        user_id, conversation_id, transition_id, reason, subject_bot_id, target_bot_id,
+        before_intensity, after_intensity, occurred_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      userId,
+      conversationId,
+      transition.transitionId,
+      transition.reason,
+      transition.subjectBotId,
+      transition.targetBotId,
+      transition.before,
+      transition.after,
+      transition.occurredAt,
+    ) as { changes?: number | bigint };
+  if (Number(ledgerResult.changes ?? 0) === 0) return;
+  db.prepare(
+    `INSERT INTO coffee_directional_irritation (
+      user_id, conversation_id, subject_bot_id, target_bot_id, intensity, updated_at, last_transition_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, conversation_id, subject_bot_id, target_bot_id) DO UPDATE SET
+      intensity = excluded.intensity,
+      updated_at = excluded.updated_at,
+      last_transition_id = excluded.last_transition_id`,
+  ).run(
+    userId,
+    conversationId,
+    edge.subjectBotId,
+    edge.targetBotId,
+    edge.intensity,
+    edge.updatedAt,
+    edge.lastTransitionId ?? transition.transitionId,
+  );
+}
+
+/**
+ * Persist an ordered list of directional irritation transitions.
+ */
+export function persistCoffeeDirectionalIrritationTransitions(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  edges: Record<string, DirectionalIrritationEdgeV1>,
+  transitions: readonly DirectionalIrritationTransitionV1[],
+): void {
+  for (const transition of transitions) {
+    const key = directionalIrritationEdgeKey(
+      transition.subjectBotId,
+      transition.targetBotId,
+    );
+    const edge = edges[key];
+    if (!edge) continue;
+    persistCoffeeDirectionalIrritationTransition(
+      db,
+      userId,
+      conversationId,
+      edge,
+      transition,
     );
   }
 }

@@ -1,7 +1,7 @@
 import {
   rankSignalPersonaTemperaments,
   type SignalPersonaTemperament,
-} from "./signalPersonaTemperament.js";
+} from "./signalPersonaTemperament.ts";
 
 export const SIGNAL_MUSIC_PALETTES = [
   "cinematic",
@@ -928,7 +928,7 @@ const SIGNAL_MUSIC_TEXTURE_DEFINITIONS: readonly SignalMusicAxisDefinition<Signa
   {
     value: "human-chamber",
     cues: [
-      /\b(?:chamber|solo cello|viola|clarinet|folk|human[- ]?scale)\b/iu,
+      /\b(?:chamber (?:ensemble|music|strings?)|solo cello|viola|clarinet|folk|human[- ]?(?:scale|chamber))\b/iu,
     ],
   },
 ] as const;

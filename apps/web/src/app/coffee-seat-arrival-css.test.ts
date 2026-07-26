@@ -367,7 +367,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /coffeeSeatScreenRelativeMouthRotationDeg/,
+      /coffeeSeatMouthRotationCssDeg/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -395,12 +395,13 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /coffeeSeatScreenRelativeMouthRotationDeg\(\s*normalizedFaceMouthRotationDeg,\s*rotateDeg,?\s*\)/
+      /const faceMouthRotationCssDeg = coffeeSeatMouthRotationCssDeg\(\{\s*authoredRotationDeg: normalizedFaceMouthRotationDeg \?\? 0,\s*faceRotationDeg: rotateDeg,\s*configuredCustomMouth: normalizedFaceMouthCharacter !== null,\s*renderedCustomMouth: renderedFaceMouthCharacter !== null,\s*transientSipPucker,\s*\}\);/,
+      "Rendered custom mouths, standard visemes, and custom-bot fallback visemes must stay distinct",
     );
-    assert.match(
+    assert.doesNotMatch(
       coffeeSeatPlateEmojiSource,
-      /normalizedFaceMouthCharacter && !renderedFaceMouthCharacter\s+\? undefined/,
-      "Default speech must drop custom-glyph counter-rotation when plate visemes replace the glyph",
+      /coffeeSeatScreenRelativeMouthRotationDeg/,
+      "The component must not counter-rotate every mouth state directly",
     );
     assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-mouth-rotation"/);
     assert.match(coffeeSeatPlateEmojiSource, /`\$\{faceMouthRotationCssDeg\}deg`/);
@@ -1535,11 +1536,11 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       selectionCreationSource,
-      /title: "Creating your Coffee Group"[\s\S]*stepLabel: "Reading the table"/u,
+      /title: "Creating your Coffee Group"[\s\S]*stepLabel: "Saving the table"/u,
     );
     assert.match(
       sessionCreationSource,
-      /title: "Saving this Coffee Group"[\s\S]*stepLabel: "Gathering the table"/u,
+      /title: "Saving this Coffee Group"[\s\S]*stepLabel: "Saving the table"/u,
     );
     assert.match(
       selectionCreationSource,
@@ -1946,17 +1947,17 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(pageSource, /coffeeConversationRef\.current = args\.conversation;\s+setCoffeeConversation\(args\.conversation\);/);
   });
 
-  it("puts the cup down before showing thinking while blocking refusal, pot filling, and pending speech", () => {
+  it("puts the cup down and shows thinking immediately while blocking refusal, pot filling, and pending speech", () => {
     assert.match(pageSource, /const COFFEE_CUP_REFILL_SIP_LOCK_MS = 3_200;/);
     assert.match(pageSource, /const refillSipLocked = refillSipLockUntilMs > coffeeCupClockMs;/);
     assert.match(
       pageSource,
-      /const visualSeatSipInProgress = coffeeCupRefused \|\| refillSipLocked \|\| coffeeSipTalkGateActive \? false : seatSipInProgress;/,
+      /const visualSeatSipInProgress =\s*coffeeCupRefused \|\|\s*refillSipLocked \|\|\s*coffeeSipTalkGateActive \|\|\s*seatIsThinking\s*\? false\s*: seatSipInProgress;/,
     );
     assert.match(pageSource, /sipLockedUntilMs: refillSipLockUntilMs \|\| null,/);
     assert.match(
       pageSource,
-      /refillSipLocked \|\| coffeeSipTalkGateActive \|\| !seatIsFirmlySeated/,
+      /refillSipLocked \|\|\s*coffeeSipTalkGateActive \|\|\s*seatIsThinking \|\|\s*!seatIsFirmlySeated/,
     );
     assert.match(
       pageSource,
@@ -1968,7 +1969,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       pageSource,
-      /const seatThinkingVisualActive =\s*seatIsThinkingThisSeat && !coffeeCupVisual\.sipping;/,
+      /const seatThinkingVisualActive = seatIsThinkingThisSeat;/,
     );
     assert.match(
       pageSource,

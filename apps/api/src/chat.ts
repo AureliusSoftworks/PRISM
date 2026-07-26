@@ -72,9 +72,14 @@ import type {
   WebSearchRequestPayload,
   AutoFallbackChainV1,
   AutoRecoveryTraceV1,
+  BotFalseNameStateV1,
+  BotIdentityShapeshiftStateV1,
   BotPowerResponseBudgetEffectV1,
   ImageProviderName,
   ResponseMode,
+  StageActionExclusionV1,
+  StageActionPlanV1,
+  ZenStageActionPayload,
   ZenAskQuestionPatienceInput,
   ZenAutonomyDecision,
   ZenAutonomyInput,
@@ -96,12 +101,19 @@ import {
   applyPrismMoodPositiveTurn,
   applyPrismMoodPowerIgnoredTurn,
   applyBotPowerEternalIntroductionResponseV1,
+  applyBotPowerAddressedInsultV1,
   applyBotPowerEchoResponseV1,
   applyBotPowerBotNamesV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  applyBotIdentityShapeshiftResponseV1,
+  rewriteBotFalseNameResponseV1,
+  createBotFalseNameStateV1,
+  botIdentityShapeshiftHolderPromptV1,
+  botIdentityShapeshiftTargetChangesV1,
   botPowerBotNamingCueV1,
+  botPowerRequiresAddressedInsultV1,
   botPowerObserverCueLinesV1,
   botPowerForgetfulPriorMessagesV1,
   createDefaultPrismMoodState,
@@ -121,14 +133,19 @@ import {
   parseStoredPsychicThoughtPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
+  planStageActionV1,
+  resolveFinalStageActionV1,
   sanitizePrismMoodState,
   serializeAssistantToolPayload,
+  stageActionPersonaInvitePromptV1,
+  stageActionSpeechOnlyPromptV1,
   serializePromptToolPayload,
   shouldPrismMoodDeclineResponse,
   shouldPrismMoodStartIgnoreCooldown,
   stripBotProfileMetaSuffix,
   withPromptShortcutResolvedPrompt,
   withPromptWildcardResolvedPrompt,
+  zenStageActionFromStageAction,
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
@@ -170,7 +187,14 @@ import {
   searchWebWithBrave,
 } from "./web-search.ts";
 import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
-import { withPrismRuntimeGrounding } from "./bots.ts";
+import { withPrismRuntimeGrounding, composeBotSystemPrompt } from "./bots.ts";
+import {
+  buildIdentityShapeshiftSeedV1,
+  createIdentityShapeshiftStateFromCandidateV1,
+  pickIdentityShapeshiftCandidateV1,
+  resolveIdentityShapeshiftCandidatesV1,
+} from "./bot-identity-shapeshift.ts";
+import { resolveBotFalseNameStateV1 } from "./bot-false-name.ts";
 import {
   buildZenProgressiveContinuationMessages,
   buildZenProgressiveFirstBeatMessages,
@@ -2578,12 +2602,19 @@ export interface UserChatSettings {
    */
   ephemeralMessages?: ChatMessage[];
   botSystemPrompt?: string;
+  /** Raw bot profile prompt used to recompose false-name display preambles. */
+  botPersonaPrompt?: string;
+  botFlirtEnabled?: boolean;
   /** Ready bot Powers used for turn-scoped naming cues and output enforcement. */
   botPowers?: unknown;
   /** Hard runtime enforcement for an active compiled mute Power. */
   botPowerMuted?: boolean;
   /** Hard current-other-speaker context and no-older-relationship contract. */
   botPowerEternalIntroduction?: boolean;
+  /** Session-sticky Library/Marketplace public-form Shapeshifter for Chat/Zen. */
+  botPowerShapeshift?: boolean;
+  /** Session-sticky John/Jane Doe alias for Chat/Zen. */
+  botPowerFalseName?: boolean;
   /** This turn hit the replay-stable half-mute branch of a Quiet Power. */
   botPowerQuietIgnored?: boolean;
   /** Hard runtime enforcement for an active compiled addressed-speech Copycat Power. */
@@ -3157,6 +3188,311 @@ function isZenMode(mode: ChatMode): boolean {
   return mode === "zen";
 }
 
+function planZenStageActionForTurn(args: {
+  conversationId: string;
+  botId: string | null | undefined;
+  messageOrdinal: number;
+  zenLiveActionContext?: ZenLiveActionContextInput;
+  botPowerHardResponseTurn: boolean;
+  prismMoodPauseTurn: boolean;
+  zenAutonomyTurn: boolean;
+  zenAskQuestionPatienceTurn: boolean;
+  zenLiveActionInterruptTurn: boolean;
+}): StageActionPlanV1 {
+  const exclusions: StageActionExclusionV1[] = [];
+  if (args.zenLiveActionContext) exclusions.push("live_action_owned");
+  if (args.botPowerHardResponseTurn) exclusions.push("power_silence");
+  if (args.prismMoodPauseTurn) exclusions.push("canonical_silence");
+  if (
+    args.zenAutonomyTurn ||
+    args.zenAskQuestionPatienceTurn ||
+    args.zenLiveActionInterruptTurn
+  ) {
+    exclusions.push("canonical_silence");
+  }
+  return planStageActionV1({
+    lane: "zen",
+    seed: `${args.conversationId}:${args.botId ?? "prism"}:${args.messageOrdinal}:stage-action`,
+    exclusions,
+  });
+}
+
+function insertSystemPromptBeforeLatestUser(
+  messages: ProviderMessage[],
+  content: string,
+): void {
+  const latestUserIndex = messages.reduce(
+    (latestIndex, message, index) =>
+      message.role === "user" ? index : latestIndex,
+    -1,
+  );
+  messages.splice(
+    latestUserIndex >= 0 ? latestUserIndex : messages.length,
+    0,
+    { role: "system", content },
+  );
+}
+
+/** Latest matching Chat/Zen shapeshift snapshot from prior assistant tool payloads. */
+function chatIdentityShapeshiftStickyFromHistoryV1(
+  history: readonly ChatMessage[],
+  holderBotId: string,
+  surface: "chat" | "zen",
+): BotIdentityShapeshiftStateV1 | null {
+  let sticky: BotIdentityShapeshiftStateV1 | null = null;
+  for (const message of history) {
+    if (message.role !== "assistant" || !message.identityShapeshift) continue;
+    const state = message.identityShapeshift;
+    if (state.surface !== surface) continue;
+    if (state.holderBotId !== holderBotId) continue;
+    sticky = state;
+  }
+  return sticky;
+}
+
+/**
+ * Resolve session-sticky Shapeshifter form for Chat/Zen.
+ * Amnesia (`eternal_introduction`) forces a reshuffle; otherwise reuse sticky state.
+ */
+function resolveChatZenIdentityShapeshiftV1(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  surface: "chat" | "zen";
+  holderBotId: string;
+  holderBotName: string;
+  history: readonly ChatMessage[];
+  eternallyIntroduces: boolean;
+  now?: string;
+}): {
+  activeState: BotIdentityShapeshiftStateV1 | null;
+  justChanged: boolean;
+} {
+  const sticky = chatIdentityShapeshiftStickyFromHistoryV1(
+    args.history,
+    args.holderBotId,
+    args.surface,
+  );
+  const reshuffleToken = args.eternallyIntroduces
+    ? `${args.history.length}:${args.history.at(-1)?.id ?? "kickoff"}`
+    : null;
+  const reuseSticky = !args.eternallyIntroduces && sticky !== null;
+  if (reuseSticky) {
+    return { activeState: sticky, justChanged: false };
+  }
+  const candidates = resolveIdentityShapeshiftCandidatesV1({
+    db: args.db,
+    userId: args.userId,
+    holderBotId: args.holderBotId,
+  });
+  const candidate = pickIdentityShapeshiftCandidateV1({
+    candidates,
+    seed: buildIdentityShapeshiftSeedV1({
+      conversationId: args.conversationId,
+      holderBotId: args.holderBotId,
+      reshuffleToken,
+    }),
+  });
+  if (!candidate) {
+    return { activeState: sticky, justChanged: false };
+  }
+  const nextState = createIdentityShapeshiftStateFromCandidateV1({
+    surface: args.surface,
+    holderBotId: args.holderBotId,
+    holderBotName: args.holderBotName,
+    candidate,
+    sourceMessageId: `shapeshift-pending:${args.conversationId}:${args.holderBotId}:${args.history.length}`,
+    occurredAt: args.now ?? new Date().toISOString(),
+  });
+  if (
+    botIdentityShapeshiftTargetChangesV1(sticky, candidate.id) ||
+    args.eternallyIntroduces ||
+    !sticky
+  ) {
+    return { activeState: nextState, justChanged: true };
+  }
+  return { activeState: sticky, justChanged: false };
+}
+
+function chatZenIdentityShapeshiftSystemPromptV1(args: {
+  holderName: string;
+  state: BotIdentityShapeshiftStateV1;
+  identityJustChanged: boolean;
+  mode: ChatMode;
+}): string {
+  return botIdentityShapeshiftHolderPromptV1({
+    holderName: args.holderName,
+    roleLabel: args.mode === "zen" ? "Zen Facet" : "Chat companion",
+    state: args.state,
+    identityJustChanged: args.identityJustChanged,
+  });
+}
+
+/** Prefer the borrowed public persona while keeping holder Powers / name framing. */
+function applyIdentityShapeshiftToBotSystemPromptV1(args: {
+  basePrompt: string | undefined;
+  holderName: string | undefined;
+  botPowers: unknown;
+  state: BotIdentityShapeshiftStateV1 | null;
+  mode: ChatMode;
+  prismHome: boolean;
+  believedName?: string | null;
+}): string | undefined {
+  if (!args.state) return args.basePrompt;
+  const recomposed = composeBotSystemPrompt(
+    args.holderName?.trim() || args.state.holderBotName,
+    args.state.targetPersonaPrompt,
+    undefined,
+    args.botPowers,
+    args.believedName ? { believedName: args.believedName } : undefined,
+  );
+  if (isZenMode(args.mode)) {
+    return composeZenPrismSystemPrompt(recomposed, { prismHome: args.prismHome });
+  }
+  return recomposed;
+}
+
+function persistIdentityShapeshiftStateForMessageV1(
+  state: BotIdentityShapeshiftStateV1 | null | undefined,
+  messageId: string,
+  occurredAt: string,
+): BotIdentityShapeshiftStateV1 | undefined {
+  if (!state) return undefined;
+  if (
+    !state.sourceMessageId.startsWith("shapeshift-pending:") &&
+    state.sourceMessageId === messageId
+  ) {
+    return state;
+  }
+  if (!state.sourceMessageId.startsWith("shapeshift-pending:")) {
+    return state;
+  }
+  return createIdentityShapeshiftStateFromCandidateV1({
+    surface: state.surface,
+    holderBotId: state.holderBotId,
+    holderBotName: state.holderBotName,
+    candidate: {
+      id: state.targetBotId,
+      name: state.targetBotName,
+      source: state.targetSource,
+      personaPrompt: state.targetPersonaPrompt,
+      face: state.targetFace,
+      avatarDetails: state.targetAvatarDetails ?? null,
+      voice: state.targetVoice,
+    },
+    sourceMessageId: messageId,
+    occurredAt,
+  });
+}
+
+/** Latest matching Chat/Zen false-name snapshot from prior assistant tool payloads. */
+function chatFalseNameStickyFromHistoryV1(
+  history: readonly ChatMessage[],
+  holderBotId: string,
+  surface: "chat" | "zen",
+): BotFalseNameStateV1 | null {
+  let sticky: BotFalseNameStateV1 | null = null;
+  for (const message of history) {
+    if (message.role !== "assistant" || !message.falseName) continue;
+    const state = message.falseName;
+    if (state.surface !== surface) continue;
+    if (state.holderBotId !== holderBotId) continue;
+    sticky = state;
+  }
+  return sticky;
+}
+
+/**
+ * Resolve session-sticky John/Jane Doe alias for Chat/Zen.
+ * Amnesia (`eternal_introduction`) forces a reshuffle; otherwise reuse sticky state.
+ */
+function resolveChatZenFalseNameV1(args: {
+  conversationId: string;
+  surface: "chat" | "zen";
+  holderBotId: string;
+  holderBotName: string;
+  history: readonly ChatMessage[];
+  eternallyIntroduces: boolean;
+  now?: string;
+}): {
+  activeState: BotFalseNameStateV1 | null;
+  justChanged: boolean;
+  pendingState: BotFalseNameStateV1 | null;
+} {
+  const sticky = chatFalseNameStickyFromHistoryV1(
+    args.history,
+    args.holderBotId,
+    args.surface,
+  );
+  const reshuffleToken = args.eternallyIntroduces
+    ? `${args.history.length}:${args.history.at(-1)?.id ?? "kickoff"}`
+    : null;
+  const resolution = resolveBotFalseNameStateV1({
+    surface: args.surface,
+    conversationId: args.conversationId,
+    holderBotId: args.holderBotId,
+    holderBotName: args.holderBotName,
+    sticky: args.eternallyIntroduces ? null : sticky,
+    reshuffleToken,
+    sourceMessageId: `false-name-pending:${args.conversationId}:${args.holderBotId}:${args.history.length}`,
+    occurredAt: args.now ?? new Date().toISOString(),
+  });
+  return {
+    activeState: resolution.state,
+    justChanged: resolution.justChanged,
+    pendingState: resolution.pending,
+  };
+}
+
+function applyChatZenFalseNameToBotSystemPromptV1(args: {
+  basePrompt: string | undefined;
+  holderName: string | undefined;
+  botPersonaPrompt?: string;
+  botFlirtEnabled?: boolean;
+  botPowers: unknown;
+  state: BotFalseNameStateV1 | null;
+  mode: ChatMode;
+  prismHome: boolean;
+}): string | undefined {
+  if (!args.state) return args.basePrompt;
+  const recomposed = composeBotSystemPrompt(
+    args.holderName?.trim() || args.state.holderBotName,
+    args.botPersonaPrompt,
+    args.botFlirtEnabled,
+    args.botPowers,
+    { believedName: args.state.believedName },
+  );
+  if (isZenMode(args.mode)) {
+    return composeZenPrismSystemPrompt(recomposed, { prismHome: args.prismHome });
+  }
+  return recomposed;
+}
+
+function persistFalseNameStateForMessageV1(
+  state: BotFalseNameStateV1 | null | undefined,
+  messageId: string,
+  occurredAt: string,
+): BotFalseNameStateV1 | undefined {
+  if (!state) return undefined;
+  if (
+    !state.sourceMessageId.startsWith("false-name-pending:") &&
+    state.sourceMessageId === messageId
+  ) {
+    return state;
+  }
+  if (!state.sourceMessageId.startsWith("false-name-pending:")) {
+    return state;
+  }
+  return createBotFalseNameStateV1({
+    surface: state.surface,
+    holderBotId: state.holderBotId,
+    holderBotName: state.holderBotName,
+    believedName: state.believedName,
+    sourceMessageId: messageId,
+    occurredAt,
+  });
+}
+
 function isCompanionMode(mode: ChatMode): boolean {
   return mode === "zen" || mode === "chat";
 }
@@ -3457,7 +3793,7 @@ const ZEN_PRISM_CHAT_SYSTEM_PROMPT = [
   "Lean toward chat logic rather than report logic. Prefer a lived-in conversational reply over a polished essay unless the user explicitly asks for structure, code, instructions, or a formal answer.",
   "Sound more alive through pacing and presence: brief acknowledgements, small turns of thought, occasional self-correction, and natural silence around uncertainty.",
   "Use ellipses more often than in standard Chat or Sandbox when they create a genuine pause, trailing thought, or softer handoff... but do not decorate every sentence with them.",
-  "You may occasionally use one very short single-asterisk action beat of 2-8 words, such as `*takes a breath*`, when it genuinely adds presence. Keep it to one simple gesture or expression: no chains of motions, facial micro-narration, motives, similes, or sentence-length choreography. Use this sparingly, and do not use asterisks for ordinary emphasis.",
+  "A per-turn stage-direction instruction will say whether this reply may include a short `*action*` beat. Follow that instruction exactly; do not add an action unless invited. Never use asterisks for ordinary emphasis.",
   "Treat the user's own single-asterisk text as a performed non-verbal action in the room. Respond to that presence naturally instead of quoting the syntax unless quoting is useful.",
   "Stay nonjudgmental, but you may have a current mood. If interrupted repeatedly, you can become guarded, take a beat, or answer more briefly; do not scold, punish, or dramatize it.",
   "When helpful, ask one gentle follow-up instead of over-answering. If the user seems to want momentum, continue without making them manage you.",
@@ -5128,6 +5464,10 @@ function hydrateMessages(
       ...(assembled.botPowerExactResponse
         ? { botPowerExactResponse: assembled.botPowerExactResponse }
         : {}),
+      ...(assembled.identityShapeshift
+        ? { identityShapeshift: assembled.identityShapeshift }
+        : {}),
+      ...(assembled.falseName ? { falseName: assembled.falseName } : {}),
     };
   });
 }
@@ -6555,6 +6895,18 @@ export async function processChatMessage(
   const botPowerMutedTurn = settings.botPowerMuted === true;
   const botPowerEternalIntroductionTurn =
     settings.botPowerEternalIntroduction === true && !botPowerMutedTurn;
+  const botPowerShapeshiftTurn =
+    settings.botPowerShapeshift === true &&
+    !botPowerMutedTurn &&
+    (mode === "chat" || mode === "zen") &&
+    typeof (assistantBotId ?? activeMemoryBotId) === "string" &&
+    Boolean((assistantBotId ?? activeMemoryBotId)?.trim());
+  const botPowerFalseNameTurn =
+    settings.botPowerFalseName === true &&
+    !botPowerMutedTurn &&
+    (mode === "chat" || mode === "zen") &&
+    typeof (assistantBotId ?? activeMemoryBotId) === "string" &&
+    Boolean((assistantBotId ?? activeMemoryBotId)?.trim());
   const botPowerQuietIgnoredTurn = settings.botPowerQuietIgnored === true;
   const botPowerEchoTurn = settings.botPowerEchoAddressed === true;
   const botPowerEchoOpeningTurn =
@@ -6687,8 +7039,76 @@ export async function processChatMessage(
     // Only an explicit user request should start another AskQuestion turn.
     const askQuestionMode: "off" | "explicit" | "continuation" =
       explicitAskQuestionRequest ? "explicit" : "off";
+    const zenStageActionPlan = isZenMode(mode)
+      ? planZenStageActionForTurn({
+          conversationId: conversationId ?? "incognito",
+          botId: assistantBotId,
+          messageOrdinal: history.length + 1,
+          zenLiveActionContext: settings.zenLiveActionContext,
+          botPowerHardResponseTurn,
+          prismMoodPauseTurn: false,
+          zenAutonomyTurn,
+          zenAskQuestionPatienceTurn,
+          zenLiveActionInterruptTurn,
+        })
+      : null;
+    const shapeshiftHolderBotId =
+      typeof assistantBotId === "string" && assistantBotId.trim().length > 0
+        ? assistantBotId.trim()
+        : null;
+    const shapeshiftResolution =
+      botPowerShapeshiftTurn && shapeshiftHolderBotId
+        ? resolveChatZenIdentityShapeshiftV1({
+            db,
+            userId,
+            conversationId: conversationId ?? "incognito",
+            surface: mode === "zen" ? "zen" : "chat",
+            holderBotId: shapeshiftHolderBotId,
+            holderBotName:
+              settings.starterPromptLabel?.trim() ||
+              shapeshiftHolderBotId,
+            history,
+            eternallyIntroduces: botPowerEternalIntroductionTurn,
+          })
+        : { activeState: null, justChanged: false };
+    const activeIdentityShapeshiftState = shapeshiftResolution.activeState;
+    const identityShapeshiftJustChanged = shapeshiftResolution.justChanged;
+    const falseNameResolution =
+      botPowerFalseNameTurn && shapeshiftHolderBotId
+        ? resolveChatZenFalseNameV1({
+            conversationId: conversationId ?? "incognito",
+            surface: mode === "zen" ? "zen" : "chat",
+            holderBotId: shapeshiftHolderBotId,
+            holderBotName:
+              settings.starterPromptLabel?.trim() ||
+              shapeshiftHolderBotId,
+            history,
+            eternallyIntroduces: botPowerEternalIntroductionTurn,
+          })
+        : { activeState: null, justChanged: false, pendingState: null };
+    const activeFalseNameState = falseNameResolution.activeState;
+    const falseNameJustChanged = falseNameResolution.justChanged;
+    const basePromptWithFalseName = applyChatZenFalseNameToBotSystemPromptV1({
+      basePrompt: effectiveBotSystemPrompt,
+      holderName: settings.starterPromptLabel,
+      botPersonaPrompt: settings.botPersonaPrompt,
+      botFlirtEnabled: settings.botFlirtEnabled,
+      botPowers: settings.botPowers,
+      state: activeFalseNameState,
+      mode,
+      prismHome: activeBotId == null,
+    });
+    const promptBotSystemPrompt = applyIdentityShapeshiftToBotSystemPromptV1({
+      basePrompt: basePromptWithFalseName,
+      holderName: settings.starterPromptLabel,
+      botPowers: settings.botPowers,
+      state: activeIdentityShapeshiftState,
+      mode,
+      prismHome: activeBotId == null,
+      believedName: activeFalseNameState?.believedName,
+    });
     const promptMessages = buildPromptMessages({
-      botSystemPrompt: effectiveBotSystemPrompt,
+      botSystemPrompt: promptBotSystemPrompt,
       userDisplayName: settings.userDisplayName,
       suppressDisplayNameHint: isStarterPrompt,
       devMemoriesEnabled: settings.devMemoriesEnabled,
@@ -6710,6 +7130,27 @@ export async function processChatMessage(
       interruptedContent: settings.prismInterruption?.interruptedContent,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
     });
+    if (zenStageActionPlan) {
+      insertSystemPromptBeforeLatestUser(
+        promptMessages,
+        zenStageActionPlan.decision === "persona_invite"
+          ? stageActionPersonaInvitePromptV1("zen")
+          : stageActionSpeechOnlyPromptV1("zen"),
+      );
+    }
+    if (activeIdentityShapeshiftState) {
+      insertSystemPromptBeforeLatestUser(
+        promptMessages,
+        chatZenIdentityShapeshiftSystemPromptV1({
+          holderName:
+            settings.starterPromptLabel?.trim() ||
+            activeIdentityShapeshiftState.holderBotName,
+          state: activeIdentityShapeshiftState,
+          identityJustChanged: identityShapeshiftJustChanged,
+          mode,
+        }),
+      );
+    }
     if (manualWebSearchPayload) {
       promptMessages.push({
         role: "system",
@@ -6881,6 +7322,28 @@ export async function processChatMessage(
       ? enforceStarterOpeningQuestion(assistantDisplayRaw, [])
       : assistantDisplayRaw;
     if (
+      activeIdentityShapeshiftState &&
+      !botPowerMutedTurn &&
+      !botPowerEchoEnforcedTurn
+    ) {
+      assistantDisplay = applyBotIdentityShapeshiftResponseV1(
+        assistantDisplay,
+        activeIdentityShapeshiftState,
+        identityShapeshiftJustChanged,
+      );
+    }
+    if (
+      activeFalseNameState &&
+      !botPowerMutedTurn &&
+      !botPowerEchoEnforcedTurn
+    ) {
+      assistantDisplay = rewriteBotFalseNameResponseV1(
+        assistantDisplay,
+        activeFalseNameState,
+        falseNameJustChanged,
+      );
+    }
+    if (
       (!botPowerHardResponseTurn || botPowerMumblingTurn) &&
       webSearchStatus !== "blocked"
     ) {
@@ -6888,6 +7351,17 @@ export async function processChatMessage(
         assistantDisplay,
         botPowerResponseBudgetTurn,
         botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
+      );
+    }
+    if (
+      botPowerRequiresAddressedInsultV1(settings.botPowers) &&
+      !botPowerHardResponseTurn &&
+      webSearchStatus !== "blocked"
+    ) {
+      assistantDisplay = applyBotPowerAddressedInsultV1(
+        assistantDisplay,
+        settings.userDisplayName ?? "you",
+        `${conversationId}:${assistantDisplay.length}`,
       );
     }
     if (
@@ -6909,6 +7383,30 @@ export async function processChatMessage(
       toneDelta: turnEvaluation?.delta,
       repairSignal,
     });
+    const zenStageAction: ZenStageActionPayload | undefined = zenStageActionPlan
+      ? (() => {
+          const resolved = resolveFinalStageActionV1({
+            plan: zenStageActionPlan,
+            lane: "zen",
+            replyText: assistantDisplay,
+            moodHint: assistantMood.key,
+            participantNames: settings.starterPromptLabel
+              ? [settings.starterPromptLabel]
+              : [],
+            userDisplayName: settings.userDisplayName,
+            allowCupActions: false,
+          });
+          if (
+            resolved.action?.source !== "director" ||
+            assistantDisplay.includes("*")
+          ) {
+            assistantDisplay = resolved.spokenText;
+          }
+          return resolved.action
+            ? zenStageActionFromStageAction(resolved.action)
+            : undefined;
+        })()
+      : undefined;
     const sendImgPromptIncRaw = botPowerHardResponseTurn
       ? undefined
       : manualImageGenRequested
@@ -6967,7 +7465,7 @@ export async function processChatMessage(
           chatModelUsed: modelUsed,
           chatProviderName: providerNameUsed,
           botName: settings.starterPromptLabel,
-          botSystemPrompt: effectiveBotSystemPrompt,
+          botSystemPrompt: promptBotSystemPrompt,
         });
         sendImgPromptInc = undefined;
         pendingImageJobIncognito = {
@@ -7035,12 +7533,23 @@ export async function processChatMessage(
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
     });
     const assistantCreatedAt = new Date().toISOString();
+    const assistantMessageId = randomId(12);
+    const persistedIdentityShapeshift = persistIdentityShapeshiftStateForMessageV1(
+      activeIdentityShapeshiftState,
+      assistantMessageId,
+      assistantCreatedAt,
+    );
+    const persistedFalseName = persistFalseNameStateForMessageV1(
+      activeFalseNameState,
+      assistantMessageId,
+      assistantCreatedAt,
+    );
     const assistantBotName =
       typeof assistantBotId === "string"
         ? settings.starterPromptLabel?.trim() ?? ""
         : "";
     const assistantMessageProse: ChatMessage = {
-      id: randomId(12),
+      id: assistantMessageId,
       role: "assistant",
       content: assistantDisplay,
       createdAt: assistantCreatedAt,
@@ -7057,12 +7566,17 @@ export async function processChatMessage(
       ...(!botPowerHardResponseTurn && parsedAssistant.zenDisplay
         ? { zenDisplay: parsedAssistant.zenDisplay }
         : {}),
+      ...(zenStageAction ? { zenStageAction } : {}),
       ...(webSearchForTurn ? { webSearch: webSearchForTurn } : {}),
       ...(botPowerEchoEnforcedTurn
         ? { botPowerExactResponse: "speech_copy" as const }
         : botPowerMumblingTurn
           ? { botPowerExactResponse: "speech_obfuscation" as const }
         : {}),
+      ...(persistedIdentityShapeshift
+        ? { identityShapeshift: persistedIdentityShapeshift }
+        : {}),
+      ...(persistedFalseName ? { falseName: persistedFalseName } : {}),
     };
     const assistantTail: ChatMessage[] = [assistantMessageProse];
     const promptShortcutWithResolvedPrompt = withPromptShortcutResolvedPrompt(
@@ -7837,8 +8351,74 @@ export async function processChatMessage(
 	          "manual"
 	        )
 	      : undefined;
+  const zenStageActionPlan = isZenMode(mode)
+    ? planZenStageActionForTurn({
+        conversationId: activeConversationId,
+        botId: assistantBotId,
+        messageOrdinal: history.length + 1,
+        zenLiveActionContext: settings.zenLiveActionContext,
+        botPowerHardResponseTurn,
+        prismMoodPauseTurn,
+        zenAutonomyTurn,
+        zenAskQuestionPatienceTurn,
+        zenLiveActionInterruptTurn,
+      })
+    : null;
+  const shapeshiftHolderBotId =
+    typeof assistantBotId === "string" && assistantBotId.trim().length > 0
+      ? assistantBotId.trim()
+      : null;
+  const shapeshiftResolution =
+    botPowerShapeshiftTurn && shapeshiftHolderBotId
+      ? resolveChatZenIdentityShapeshiftV1({
+          db,
+          userId,
+          conversationId: activeConversationId,
+          surface: mode === "zen" ? "zen" : "chat",
+          holderBotId: shapeshiftHolderBotId,
+          holderBotName:
+            settings.starterPromptLabel?.trim() || shapeshiftHolderBotId,
+          history,
+          eternallyIntroduces: botPowerEternalIntroductionTurn,
+        })
+      : { activeState: null, justChanged: false };
+  const activeIdentityShapeshiftState = shapeshiftResolution.activeState;
+  const identityShapeshiftJustChanged = shapeshiftResolution.justChanged;
+  const falseNameResolution =
+    botPowerFalseNameTurn && shapeshiftHolderBotId
+      ? resolveChatZenFalseNameV1({
+          conversationId: activeConversationId,
+          surface: mode === "zen" ? "zen" : "chat",
+          holderBotId: shapeshiftHolderBotId,
+          holderBotName:
+            settings.starterPromptLabel?.trim() || shapeshiftHolderBotId,
+          history,
+          eternallyIntroduces: botPowerEternalIntroductionTurn,
+        })
+      : { activeState: null, justChanged: false, pendingState: null };
+  const activeFalseNameState = falseNameResolution.activeState;
+  const falseNameJustChanged = falseNameResolution.justChanged;
+  const basePromptWithFalseName = applyChatZenFalseNameToBotSystemPromptV1({
+    basePrompt: effectiveBotSystemPrompt,
+    holderName: settings.starterPromptLabel,
+    botPersonaPrompt: settings.botPersonaPrompt,
+    botFlirtEnabled: settings.botFlirtEnabled,
+    botPowers: settings.botPowers,
+    state: activeFalseNameState,
+    mode,
+    prismHome: activeBotId == null,
+  });
+  const promptBotSystemPrompt = applyIdentityShapeshiftToBotSystemPromptV1({
+    basePrompt: basePromptWithFalseName,
+    holderName: settings.starterPromptLabel,
+    botPowers: settings.botPowers,
+    state: activeIdentityShapeshiftState,
+    mode,
+    prismHome: activeBotId == null,
+    believedName: activeFalseNameState?.believedName,
+  });
 	  const promptMessages = buildPromptMessages({
-    botSystemPrompt: effectiveBotSystemPrompt,
+    botSystemPrompt: promptBotSystemPrompt,
     userDisplayName: settings.userDisplayName,
     suppressDisplayNameHint: isStarterPrompt || botPowerEternalIntroductionTurn,
     devMemoriesEnabled: settings.devMemoriesEnabled,
@@ -7896,6 +8476,27 @@ export async function processChatMessage(
 	    interruptedContent: settings.prismInterruption?.interruptedContent,
 	    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
 	  });
+  if (zenStageActionPlan) {
+    insertSystemPromptBeforeLatestUser(
+      promptMessages,
+      zenStageActionPlan.decision === "persona_invite"
+        ? stageActionPersonaInvitePromptV1("zen")
+        : stageActionSpeechOnlyPromptV1("zen"),
+    );
+  }
+  if (activeIdentityShapeshiftState) {
+    insertSystemPromptBeforeLatestUser(
+      promptMessages,
+      chatZenIdentityShapeshiftSystemPromptV1({
+        holderName:
+          settings.starterPromptLabel?.trim() ||
+          activeIdentityShapeshiftState.holderBotName,
+        state: activeIdentityShapeshiftState,
+        identityJustChanged: identityShapeshiftJustChanged,
+        mode,
+      }),
+    );
+  }
 	  if (manualWebSearchPayload) {
 	    promptMessages.push({
 	      role: "system",
@@ -8229,6 +8830,28 @@ export async function processChatMessage(
       )
     : assistantDisplayRaw;
   if (
+    activeIdentityShapeshiftState &&
+    !botPowerMutedTurn &&
+    !botPowerEchoEnforcedTurn
+  ) {
+    assistantDisplay = applyBotIdentityShapeshiftResponseV1(
+      assistantDisplay,
+      activeIdentityShapeshiftState,
+      identityShapeshiftJustChanged,
+    );
+  }
+  if (
+    activeFalseNameState &&
+    !botPowerMutedTurn &&
+    !botPowerEchoEnforcedTurn
+  ) {
+    assistantDisplay = rewriteBotFalseNameResponseV1(
+      assistantDisplay,
+      activeFalseNameState,
+      falseNameJustChanged,
+    );
+  }
+  if (
     (!botPowerHardResponseTurn || botPowerMumblingTurn) &&
     webSearchStatus !== "blocked"
   ) {
@@ -8236,6 +8859,17 @@ export async function processChatMessage(
       assistantDisplay,
       botPowerResponseBudgetTurn,
       botPowerResponseBudgetTurn?.mode === "minimal" ? 1 : 2,
+    );
+  }
+  if (
+    botPowerRequiresAddressedInsultV1(settings.botPowers) &&
+    !botPowerHardResponseTurn &&
+    webSearchStatus !== "blocked"
+  ) {
+    assistantDisplay = applyBotPowerAddressedInsultV1(
+      assistantDisplay,
+      settings.userDisplayName ?? "you",
+      `${conversationId}:${assistantDisplay.length}`,
     );
   }
   if (
@@ -8271,6 +8905,30 @@ export async function processChatMessage(
         botOpinion: existingBotOpinion,
 	        repairSignal,
 	      });
+  const zenStageAction: ZenStageActionPayload | undefined = zenStageActionPlan
+    ? (() => {
+        const resolved = resolveFinalStageActionV1({
+          plan: zenStageActionPlan,
+          lane: "zen",
+          replyText: assistantDisplay,
+          moodHint: assistantMood.key,
+          participantNames: settings.starterPromptLabel
+            ? [settings.starterPromptLabel]
+            : [],
+          userDisplayName: settings.userDisplayName,
+          allowCupActions: false,
+        });
+        if (
+          resolved.action?.source !== "director" ||
+          assistantDisplay.includes("*")
+        ) {
+          assistantDisplay = resolved.spokenText;
+        }
+        return resolved.action
+          ? zenStageActionFromStageAction(resolved.action)
+          : undefined;
+      })()
+    : undefined;
   const manualAskQuestionForTurn = buildManualAskQuestionResultPayload({
     constraint: manualAskQuestionConstraint,
     assistantDisplay,
@@ -8355,7 +9013,7 @@ export async function processChatMessage(
         chatModelUsed: modelUsed,
         chatProviderName: providerNameUsed,
         botName: settings.starterPromptLabel,
-        botSystemPrompt: effectiveBotSystemPrompt,
+        botSystemPrompt: promptBotSystemPrompt,
       });
       sendImgPromptPersisted = undefined;
       pendingImageJob = {
@@ -8434,12 +9092,25 @@ export async function processChatMessage(
             activeBotId: zenLiveActionInterrupt!.activeBotId,
           }
         : undefined;
+  const assistantCreatedAt =
+    progressiveAssistantCreatedAt ?? new Date().toISOString();
+  const persistedIdentityShapeshift = persistIdentityShapeshiftStateForMessageV1(
+    activeIdentityShapeshiftState,
+    assistantProseMessageId,
+    assistantCreatedAt,
+  );
+  const persistedFalseName = persistFalseNameStateForMessageV1(
+    activeFalseNameState,
+    assistantProseMessageId,
+    assistantCreatedAt,
+  );
   const toolPayloadProseOnly = serializeAssistantToolPayload({
     askQuestion: assistantAskQuestionForTurn,
     tellFictionalStory: tellFictionalStoryForTurn,
 	    moodKey: assistantMood.key,
 	    moodConfidence: assistantMood.confidence,
 	    zenDisplay: botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
+	    zenStageAction,
 	    zenTurn: zenTurnMarker,
 	    webSearch: webSearchForTurn,
 	    autoRecovery,
@@ -8450,13 +9121,15 @@ export async function processChatMessage(
         : botPowerMumblingTurn
           ? "speech_obfuscation"
 	      : undefined,
+    ...(persistedIdentityShapeshift
+      ? { identityShapeshift: persistedIdentityShapeshift }
+      : {}),
+    ...(persistedFalseName ? { falseName: persistedFalseName } : {}),
 	  });
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
     : null;
 
-  const assistantCreatedAt =
-    progressiveAssistantCreatedAt ?? new Date().toISOString();
   const imageFollowUpCreatedAt = sentGeneratedImagePersisted
     ? new Date(Date.now() + 2).toISOString()
     : assistantCreatedAt;

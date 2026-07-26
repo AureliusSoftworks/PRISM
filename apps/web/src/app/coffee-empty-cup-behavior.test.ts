@@ -26,6 +26,15 @@ describe("Coffee empty-cup behavior", () => {
     assert.match(cssSource, /--coffee-cup-empty-attempt-x:/u);
     assert.match(cssSource, /34%,\s*43%[\s\S]*coffee-cup-empty-attempt-x/u);
     assert.match(pageSource, /emptyCupAttemptFrowning[\s\S]*coffeeSeatPlateGlyph\("sad"\)/u);
+    assert.match(
+      pageSource,
+      /mouthCharacter: emptyCupAttemptFrowning\s*\? null[\s\S]*mouthRotationDeg: emptyCupAttemptFrowning\s*\? 0\s*: seatFaceStyle\.mouthRotationDeg/u,
+      "The generated plate frown must not inherit custom-mouth rotation",
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /mouthCharacter: emptyCupAttemptFrowning\s*\? "\("/u,
+    );
   });
 
   it("finishes the client session after a server-directed group wrap", () => {

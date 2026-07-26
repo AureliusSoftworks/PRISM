@@ -35,7 +35,6 @@ describe("coffee session clock", () => {
   it("tracks model warmup separately from manual autoplay pause", () => {
     assert.deepEqual(
       coffeeSessionClockHoldReasons({
-        playerComposing: false,
         autoplayPaused: false,
         modelWarmup: true,
       }),
@@ -43,11 +42,19 @@ describe("coffee session clock", () => {
     );
     assert.deepEqual(
       coffeeSessionClockHoldReasons({
-        playerComposing: false,
         autoplayPaused: true,
         modelWarmup: true,
       }),
       ["manual_autoplay_pause", "model_warmup"],
+    );
+    // Player composing is deliberately not a hold reason: bots keep talking
+    // while the user types, so session time keeps flowing.
+    assert.deepEqual(
+      coffeeSessionClockHoldReasons({
+        autoplayPaused: false,
+        modelWarmup: false,
+      }),
+      [],
     );
   });
 

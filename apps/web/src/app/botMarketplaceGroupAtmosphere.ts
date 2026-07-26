@@ -47,6 +47,10 @@ const BOT_MARKETPLACE_GROUP_ATMOSPHERES: Readonly<
     label: "Mineral aurora",
     src: "/zen-fallback-wallpapers/mineral-aurora.png",
   },
+  "library-dev-backup": {
+    label: "Archive paper wash",
+    src: "/zen-fallback-wallpapers/paper-grain-wash.png",
+  },
 };
 
 export function resolveBotMarketplaceGroupAtmosphere(

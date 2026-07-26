@@ -1638,7 +1638,7 @@ function storyEternalIntroductionPowerRules(
   return bots.flatMap((holder) => {
     if (!botPowerEternallyIntroducesV1(holder.powers)) return [];
     return [
-      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. ${holder.name} does not retain the episode premise or topic unless that immediate beat states it, responds directly to its concrete content as fresh first contact, has no memory of prior turns or their own earlier scenes, and never claims older relationship history or explains the memory rule. If accused of repetition, ${holder.name} reacts with sincere confusion instead of agreeing or explaining. Do not force a self-introduction or identical copy unless the immediate scene genuinely warrants one. Other characters retain the full story and may react to repetition through their own personalities.`,
+      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. Do not supply earlier story history, episode premise, or topic unless that immediate beat states it. Do not add amnesia performance coaching — let ${holder.name} answer the available beat naturally. Other characters retain the full story.`,
     ];
   });
 }

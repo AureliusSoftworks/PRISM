@@ -412,9 +412,12 @@ async function playBytesWithMedia(
   bytes: ArrayBuffer,
   profile: BotAudioVoiceProfileV1,
   expectedGeneration: number,
-  lifecycle?: VoicePlaybackLifecycle
+  lifecycle?: VoicePlaybackLifecycle,
+  isPlaybackStillValid?: () => boolean,
 ): Promise<void> {
-  if (expectedGeneration !== generation) return;
+  const playbackStillValid = (): boolean =>
+    expectedGeneration === generation && (isPlaybackStillValid?.() ?? true);
+  if (!playbackStillValid()) return;
   const header = new Uint8Array(bytes, 0, Math.min(4, bytes.byteLength));
   const isWave = String.fromCharCode(...header) === "RIFF";
   const url = URL.createObjectURL(
@@ -440,6 +443,10 @@ async function playBytesWithMedia(
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
     const beginAudiblePlayback = () => {
       if (started) return;
+      if (!playbackStillValid()) {
+        finish();
+        return;
+      }
       started = true;
       const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
       const durationMs = Number.isFinite(audio.duration) && audio.duration > 0
@@ -686,6 +693,7 @@ async function playStreamingResponseWithMedia(
                   plan: preSpeechBreath,
                   profile,
                   isCurrent: () => expectedGeneration === generation,
+                  onStart: lifecycle?.onPresenceStart,
                 });
                 if (settled || expectedGeneration !== generation) {
                   finish();
@@ -747,16 +755,20 @@ async function playAudio(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan?: number,
+  isPlaybackStillValid?: () => boolean,
 ): Promise<void> {
-  if (expectedGeneration !== generation) return;
+  const playbackStillValid = (): boolean =>
+    expectedGeneration === generation && (isPlaybackStillValid?.() ?? true);
+  if (!playbackStillValid()) return;
   await playPreSpeechBreath({
     plan: preSpeechBreath,
     profile,
     roomAcoustics,
     stereoPan,
-    isCurrent: () => expectedGeneration === generation,
+    isCurrent: playbackStillValid,
+    onStart: lifecycle?.onPresenceStart,
   });
-  if (expectedGeneration !== generation) return;
+  if (!playbackStillValid()) return;
   const processing = resolveEnglishVoicePostProcessing(profile);
   const detuneCents = resolveEnglishVoicePlaybackDetuneCents(
     profile,
@@ -776,7 +788,7 @@ async function playAudio(
       stereoPan,
       lifecycle,
       compensateLifecycleForOutputLatency: true,
-      isCurrent: () => expectedGeneration === generation,
+      isCurrent: playbackStillValid,
     });
   } catch {
     // Some Safari/WebKit versions reject otherwise valid provider MP3 bytes
@@ -784,14 +796,16 @@ async function playAudio(
     // still play the same clip, so keep the soundcheck and ordinary speech
     // working through that compatibility path. It stays dry rather than
     // risking voice playback for a cosmetic room treatment.
-    if (expectedGeneration !== generation) return;
+    if (!playbackStillValid()) return;
   }
   if (!played) {
+    if (!playbackStillValid()) return;
     await playBytesWithMedia(
       bytes,
       profile,
       expectedGeneration,
       lifecycle,
+      isPlaybackStillValid,
     );
     return;
   }
@@ -885,6 +899,7 @@ export function enqueueEnglishVoice(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
+  isPlaybackStillValid?: () => boolean,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -905,6 +920,7 @@ export function enqueueEnglishVoice(
         roomAcoustics,
         preSpeechBreath,
         stereoPan,
+        isPlaybackStillValid,
       ),
     );
   return queue;

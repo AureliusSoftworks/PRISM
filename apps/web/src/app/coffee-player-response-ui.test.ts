@@ -12,6 +12,31 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
+  it("defers full Coffee table rerenders while the player keeps typing", () => {
+    const handlerStart = pageSource.indexOf(
+      "function updateCoffeeDraftFromComposer(next: string): void",
+    );
+    const handlerEnd = pageSource.indexOf(
+      "type ShellComposerVariant",
+      handlerStart,
+    );
+    const handlerSource = pageSource.slice(handlerStart, handlerEnd);
+
+    assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
+    assert.match(
+      handlerSource,
+      /function updateCoffeeDraftFromComposer\(next: string\): void \{[\s\S]*?coffeeDraftRef\.current = next;[\s\S]*?nextHasDraft !== previousHasDraft[\s\S]*?setCoffeeComposerHasDraft\(nextHasDraft\);[\s\S]*?scheduleDeferredCoffeeDraftState\(next\);/,
+    );
+    assert.match(
+      pageSource,
+      /COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240/,
+    );
+    assert.ok(
+      handlerSource.indexOf("setCoffeeDraft(next)") >
+        handlerSource.indexOf("if (nextHasDraft !== previousHasDraft)"),
+    );
+  });
+
   it("requests the bot response immediately after the player line settles", () => {
     assert.match(
       pageSource,
@@ -33,9 +58,40 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /const beginSpeaking = async[\s\S]*?await startCoffeeVoiceForReveal\([\s\S]*?setCoffeeTurnRhythmState\("tableTyping"\)/,
     );
+    // Thinking owns the rhythm even while the player is composing.
     assert.match(
       pageSource,
-      /coffeeDraftRef\.current\.trim\(\)\.length > 0[\s\S]*?\? "playerComposing"[\s\S]*?: "botThinking"/,
+      /if \(coffeeBusy \|\| coffeeAutoBusy\) \{\s*setCoffeeTurnRhythmState\("botThinking"\);\s*return;\s*\}\s*if \(coffeeComposerHasDraft\) \{\s*setCoffeeTurnRhythmState\("playerComposing"\);/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /coffeeDraftRef\.current\.trim\(\)\.length > 0[\s\S]{0,40}\? "playerComposing"[\s\S]{0,40}: "botThinking"/,
+    );
+  });
+
+  it("never lets typing pause the table and queues sends behind a thinking bot", () => {
+    // No typing-grace deferral machinery remains anywhere in the Coffee flow.
+    assert.doesNotMatch(pageSource, /coffeeTableTalkAutoplayDeferralMs/);
+    assert.doesNotMatch(pageSource, /coffeeGeneratedReplyRevealDeferralMs/);
+    assert.doesNotMatch(pageSource, /COFFEE_TABLE_TALK_TYPING_GRACE_MS/);
+    assert.doesNotMatch(pageSource, /paused while you type/);
+    // Sending while a bot thinks waits for its line instead of aborting it.
+    assert.match(
+      pageSource,
+      /const sendShouldWaitForThinkingBot =\s*!draftIsActionOnly &&\s*coffeeTurnRhythmState === "botThinking" &&\s*\(coffeeAutoBusy \|\|\s*coffeeContinueAbortRef\.current !== null \|\|\s*coffeePendingSpeakerBotId !== null\);/,
+    );
+    assert.match(
+      pageSource,
+      /if \(!actionShouldWaitForBotReveal && !sendShouldWaitForThinkingBot\) \{\s*clearCoffeeLoopTimer\(\);\s*coffeeContinueAbortRef\.current\?\.abort\(\);/,
+    );
+    assert.match(
+      pageSource,
+      /if \(actionShouldWaitForBotReveal \|\| sendShouldWaitForThinkingBot\) \{[\s\S]{0,220}?await waitForCoffeeRevealToSettle\(\);/,
+    );
+    // A visible reveal (tableTyping) is still a real player interruption.
+    assert.match(
+      pageSource,
+      /!draftIsActionOnly &&\s*coffeeTurnRhythmState === "tableTyping" &&\s*pendingRevealLatestMessage\?\.role === "assistant" &&\s*coffeePendingSpeakerBotId/,
     );
   });
 
@@ -111,6 +167,14 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /pendingTranscriptLineTyping[\s\S]*?revealPlainTextWithBotMentions\([\s\S]*?coffeeTypewriterLength/,
     );
+    assert.match(
+      pageSource,
+      /const transcriptMessagesWithInterruptions =\s*coffeeTranscriptMessagesWithInterruptions\(\{[\s\S]*?messages:\s*transcriptSourceMessages,[\s\S]*?const transcriptMessages = coffeeTranscriptVisibleMessages\(\s*transcriptMessagesWithInterruptions,/,
+    );
+    assert.match(
+      pageSource,
+      /function mergeCoffeeTranscriptMessageSources[\s\S]*?\{\s*\.\.\.historyMessage,\s*\.\.\.liveMessage\s*\}/,
+    );
   });
 
   it("hides a pending bot response through cooldown and voice preparation", () => {
@@ -139,7 +203,7 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("lets the active thinking state suppress the matching seat's sip", () => {
+  it("makes the active thinking state immediately suppress every matching seat sip", () => {
     assert.match(
       pageSource,
       /const seatIsThinking = thinkingBotId === bot\.id;/,
@@ -150,7 +214,27 @@ describe("Coffee player response UI wiring", () => {
     );
     assert.match(
       pageSource,
-      /completedSipAnimationActive\s*=\s*[\s\S]*?!seatIsThinking/,
+      /const visualSeatSipInProgress =[\s\S]{0,220}seatIsThinking[\s\S]{0,80}\? false[\s\S]{0,40}: seatSipInProgress;/,
+    );
+    assert.match(
+      pageSource,
+      /completedSipAnimationActive\s*=\s*[\s\S]{0,260}!seatIsThinking/,
+    );
+    assert.match(
+      pageSource,
+      /ambientSipAllowed:\s*!coffeeSipTalkGateActive &&\s*!seatIsThinking/,
+    );
+    assert.match(
+      pageSource,
+      /completedSipAnimationAgeMs:\s*refillSipLocked \|\| seatIsThinking\s*\? Number\.POSITIVE_INFINITY/,
+    );
+    assert.match(
+      pageSource,
+      /cupSipping:\s*refillSipLocked \|\| seatIsThinking\s*\? false/,
+    );
+    assert.match(
+      pageSource,
+      /const seatThinkingVisualActive = seatIsThinkingThisSeat;/,
     );
   });
 

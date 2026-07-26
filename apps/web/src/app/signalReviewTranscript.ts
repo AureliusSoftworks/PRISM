@@ -6,6 +6,14 @@ import {
   type BotcastReplayEvent,
   type BotcastShow,
 } from "@localai/shared";
+import {
+  formatSessionReviewDuration,
+  SESSION_REVIEW_FORMAT_VERSION,
+  sessionReviewDirectionLines,
+  sessionReviewRecordingSummaryLines,
+  sessionReviewStableJson,
+  type SessionReviewRecordingEvidence,
+} from "./sessionReviewEvidence.ts";
 
 export type SignalReviewParticipant = {
   id: string;
@@ -18,6 +26,7 @@ export type SignalReviewTranscriptInput = {
   host: SignalReviewParticipant;
   guest: SignalReviewParticipant;
   modelLabel?: string | null;
+  recordingEvidence?: SessionReviewRecordingEvidence;
 };
 
 function formatTimestamp(value: string | null): string {
@@ -27,16 +36,7 @@ function formatTimestamp(value: string | null): string {
 }
 
 function formatDuration(durationMs: number | null): string {
-  if (durationMs == null || !Number.isFinite(durationMs)) return "None";
-  const totalMs = Math.max(0, Math.round(durationMs));
-  const milliseconds = totalMs % 1_000;
-  const totalSeconds = Math.floor(totalMs / 1_000);
-  const seconds = totalSeconds % 60;
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  const minutes = totalMinutes % 60;
-  const hours = Math.floor(totalMinutes / 60);
-  const clock = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
-  return hours > 0 ? `${hours}:${clock}` : clock;
+  return formatSessionReviewDuration(durationMs);
 }
 
 function indentBlock(value: string | null | undefined): string {
@@ -45,23 +45,6 @@ function indentBlock(value: string | null | undefined): string {
     .split(/\r?\n/u)
     .map((line) => `    ${line || " "}`)
     .join("\n");
-}
-
-function stableJson(value: unknown): string {
-  if (value === null) return "null";
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJson(item)).join(",")}]`;
-  }
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, item]) => item !== undefined)
-      .sort(([left], [right]) => left.localeCompare(right));
-    return `{${entries
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`)
-      .join(",")}}`;
-  }
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? JSON.stringify(String(value)) : serialized;
 }
 
 function payloadString(
@@ -109,6 +92,8 @@ export function buildSignalReviewTranscript(
 
   const lines: string[] = [
     "# PRISM Signal Review Transcript",
+    "",
+    `Review format: ${SESSION_REVIEW_FORMAT_VERSION}`,
     "",
     "Paste this complete record with: Use $signal-review to review this Signal episode.",
     "",
@@ -191,8 +176,22 @@ export function buildSignalReviewTranscript(
         `- Segment: ${segment}`,
         `- Delivery mood: ${message.moodKey}`,
         `- Turn routing: ${responseMode} -> ${provider} -> ${model}`,
-        `- AUTO recovery: ${humanProducerGuest ? "Not applicable (human-authored)" : autoRecovery === undefined ? "None recorded" : stableJson(autoRecovery)}`,
-        `- ONLINE retry: ${humanProducerGuest ? "Not applicable (human-authored)" : providerRecovery === undefined ? "None recorded" : stableJson(providerRecovery)}`,
+        `- AUTO recovery: ${humanProducerGuest ? "Not applicable (human-authored)" : autoRecovery === undefined ? "None recorded" : sessionReviewStableJson(autoRecovery)}`,
+        `- ONLINE retry: ${humanProducerGuest ? "Not applicable (human-authored)" : providerRecovery === undefined ? "None recorded" : sessionReviewStableJson(providerRecovery)}`,
+        `- Utterance repair: ${
+          humanProducerGuest
+            ? "Not applicable (human-authored)"
+            : event?.payload.utteranceRepair === undefined
+              ? "None recorded"
+              : sessionReviewStableJson(event.payload.utteranceRepair)
+        }`,
+        `- Output provenance: ${
+          humanProducerGuest
+            ? "human-authored"
+            : event?.payload.utteranceRepair === undefined
+              ? "recorded post-validation utterance; raw provider draft not preserved"
+              : "recorded repaired/fallback utterance; raw provider draft not preserved"
+        }`,
         `- Immersive voice effect: ${event?.payload.immersiveVoiceEffect === true ? "yes" : "no"}`,
         "- Stage action (avatar only):",
         indentBlock(message.stageActionText),
@@ -205,22 +204,37 @@ export function buildSignalReviewTranscript(
     });
   }
 
+  lines.push(
+    "",
+    "## Faithful Recording Evidence",
+    "",
+    ...sessionReviewRecordingSummaryLines(args.recordingEvidence),
+    "",
+  );
+
   lines.push("## Production Event Log", "");
   if (events.length === 0) {
     lines.push("No production events were recorded.");
   } else {
     for (const event of events) {
       lines.push(
-        `- #${String(event.sequence).padStart(4, "0")} | ${formatTimestamp(event.occurredAt)} | ${event.kind} | event ${event.id} | ${stableJson(event.payload)}`,
+        `- #${String(event.sequence).padStart(4, "0")} | ${formatTimestamp(event.occurredAt)} | ${event.kind} | event ${event.id} | ${sessionReviewStableJson(event.payload)}`,
       );
     }
   }
 
   lines.push(
     "",
+    "## Private Replay Direction Log",
+    "",
+    "This section is diagnostic evidence for review. It is not part of the user-facing transcript download.",
+    "",
+    ...sessionReviewDirectionLines(args.recordingEvidence),
+    "",
     "## Review Notes",
     "",
-    "Use the visible transcript for user-visible quality. Use the segment, cue, tension, routing, provider generation, Power, listener reaction, camera, departure, and completion events to diagnose PRISM orchestration and replay fidelity.",
+    "Use the visible transcript for user-visible quality. Use the segment, cue, tension, routing, provider generation, Power, listener reaction, camera, thinking, departure, recording, and completion events to diagnose PRISM orchestration and replay fidelity.",
+    "Recorded utterances are post-validation unless an explicit raw-draft field says otherwise. Do not describe them as raw provider output merely because no repair was recorded.",
   );
   return `${lines.join("\n").trimEnd()}\n`;
 }

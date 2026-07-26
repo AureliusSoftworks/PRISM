@@ -3,7 +3,7 @@ const BRACKETED_ACTION_PATTERN =
   /(?<![\\[])\[([^\[\]\r\n]{1,240})\](?!\])(?!\s*\()/gu;
 
 const PHYSICAL_ACTION_START_PATTERN =
-  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|hesitantly)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|offers?|offering|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|watches?|watching|straightens?|straightening|releases?|releasing|nudges?|nudging|pulls?|pulling|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|rubs?|rubbing|scratches?|scratching|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|squints?|squinting)\b/iu;
+  /^(?:(?:dryly|slowly|quietly|thoughtfully|carefully|softly|theatrically|hesitantly)\s+)?(?:arches?|arching|arranges?|arranging|eyes?|eyeing|glances?|glancing|looks?|looking|nods?|nodding|shrugs?|shrugging|sighs?|sighing|smiles?|smiling|grins?|grinning|frowns?|frowning|pinches?|pinching|winces?|wincing|winks?|winking|grimaces?|grimacing|laughs?|laughing|chuckles?|chuckling|snickers?|snickering|snorts?|snorting|gasps?|gasping|screams?|screaming|dances?|dancing|whispers?|whispering|murmurs?|murmuring|pauses?|pausing|hesitates?|hesitating|stares?|staring|glares?|glaring|gestures?|gesturing|offers?|offering|points?|pointing|waves?|waving|blinks?|blinking|rolls?|rolling|shifts?|shifting|tilts?|tilting|crosses?|crossing|folds?|folding|leans?|leaning|turns?|turning|steps?|stepping|reaches?|reaching|lifts?|lifting|raises?|raising|lowers?|lowering|settles?|settling|regards?|regarding|holds?|holding|draws?|drawing|watches?|watching|straightens?|straightening|releases?|releasing|nudges?|nudging|pulls?|pulling|taps?|tapping|clears?|clearing|swallows?|swallowing|coughs?|coughing|rubs?|rubbing|scratches?|scratching|touches?|touching|wipes?|wiping|sniffs?|sniffing|exhales?|exhaling|inhales?|inhaling|squints?|squinting)\b/iu;
 
 const BODY_ACTION_START_PATTERN =
   /^(?:(?:his|her|their|its)\s+)?(?:antennae?|eyes?|gaze|jaw|mouth|shoulders?|hands?|fingers?|head|tail|ears?)\s+(?:twitch(?:es|ing)?|narrow(?:s|ing)?|widen(?:s|ing)?|shift(?:s|ing)?|drop(?:s|ping)?|rise(?:s|rising)?|turn(?:s|ing)?|tilt(?:s|ing)?|curl(?:s|ing)?|clench(?:es|ing)?|relax(?:es|ing)?|flick(?:s|ing)?|fold(?:s|ing)?|cross(?:es|ing)?|tap(?:s|ping)?|drum(?:s|ming)?|shake(?:s|shaking)?|nod(?:s|ding)?)\b/iu;
@@ -12,6 +12,8 @@ const ASTERISK_VOCAL_CUE_TAGS = [
   [/^(?:sighs?|sighing)\b/iu, "sighs"],
   [/^(?:burps?|burping|belches?|belching)\b/iu, "burps"],
   [/^(?:laughs?|laughing|giggles?|giggling)\b/iu, "laughs"],
+  [/^(?:bursts?|bursting)\s+(?:out\s+)?(?:into|in)\s+laugh(?:ter|s|ing)?\b/iu, "laughs"],
+  [/^(?:bursts?|bursting)\s+out\s+laughing\b/iu, "laughs"],
   [/^(?:chuckles?|chuckling|snickers?|snickering)\b/iu, "chuckles"],
   [/^(?:snorts?|snorting)\b/iu, "snorts"],
   [/^(?:farts?|farting|passes?\s+gas)\b/iu, "farts"],
@@ -58,6 +60,15 @@ function asteriskHumanSoundVoiceTag(inner: string): string | null {
   );
 }
 
+/**
+ * Models sometimes nest a quoted sound inside an asterisk action:
+ * `*belches with an audible "*burp*"*`. The inner marks shred block parsing
+ * into fragments, so fold quoted asterisk tokens back into plain quotes first.
+ */
+function normalizeNestedActionQuotes(value: string): string {
+  return value.replace(/(["“])\*([^*"”\r\n]{1,40})\*(["”])/gu, "$1$2$3");
+}
+
 function looksLikeMarkedStageDirection(
   inner: string,
   before: string,
@@ -84,7 +95,10 @@ function looksLikeMarkedStageDirection(
 
   return (
     /[.!?…:;—–]\s*$/u.test(spokenBoundaryBefore) &&
-    /^[\s"“'‘(\[]*[\p{Lu}\p{N}]/u.test(spokenBoundaryAfter)
+    // A direction may resume into a capitalized sentence, or bridge a trailing
+    // pause: "your... *pauses* ...bluntness" is stagecraft, not emphasis.
+    (/^[\s"“'‘(\[]*[\p{Lu}\p{N}]/u.test(spokenBoundaryAfter) ||
+      /^\s*(?:\.{3}|…)/u.test(spokenBoundaryAfter))
   );
 }
 
@@ -96,7 +110,7 @@ function looksLikeMarkedStageDirection(
  */
 export function voiceSpokenText(value: unknown): string {
   if (typeof value !== "string") return "";
-  return value
+  return normalizeNestedActionQuotes(value)
     .replace(BRACKETED_ACTION_PATTERN, " ")
     .replace(
       MARKED_SPEECH_BLOCK_PATTERN,
@@ -122,8 +136,10 @@ export function voicePerformanceTextFromActionCues(
   value: unknown,
 ): string | null {
   if (typeof value !== "string") return null;
-  let foundActionCue = [...value.matchAll(BRACKETED_ACTION_PATTERN)].length > 0;
-  const performanceText = value.replace(
+  const normalized = normalizeNestedActionQuotes(value);
+  let foundActionCue =
+    [...normalized.matchAll(BRACKETED_ACTION_PATTERN)].length > 0;
+  const performanceText = normalized.replace(
     MARKED_SPEECH_BLOCK_PATTERN,
     (match, _marker: string, inner: string, offset: number, source: string) => {
       const tag = asteriskHumanSoundVoiceTag(inner);

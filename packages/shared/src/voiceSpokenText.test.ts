@@ -83,6 +83,51 @@ describe("voice spoken text", () => {
     );
   });
 
+  it("survives nested quoted asterisks and burst-out laughter", () => {
+    // Nested inner marks must not shred the outer action block.
+    const nested = '*belches with an audible "*burp*"* I think we\'re close.';
+    assert.equal(voiceSpokenText(nested), "I think we're close.");
+    assert.equal(
+      voicePerformanceTextFromActionCues(nested),
+      "[burps] I think we're close.",
+    );
+    assert.equal(
+      voiceSpokenText("Oh boy. *Bursts into laughter* This is good."),
+      "Oh boy. This is good.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "Oh boy. *Bursts into laughter* This is good.",
+      ),
+      "Oh boy. [laughs] This is good.",
+    );
+  });
+
+  it("keeps trailing winks and pause-bridged directions off mic", () => {
+    // "*wink*" at the end of a sentence is a stage direction, never a word.
+    assert.equal(
+      voiceSpokenText("The war effort was tanking *wink*."),
+      "The war effort was tanking .",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "The war effort was tanking *wink*.",
+      ),
+      "The war effort was tanking [wink].",
+    );
+    // A direction bridging two spoken pauses is stagecraft, not emphasis.
+    assert.equal(
+      voiceSpokenText("No response is needed for your... *pauses* ...bluntness."),
+      "No response is needed for your... ...bluntness.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "No response is needed for your... *pauses* ...bluntness.",
+      ),
+      "No response is needed for your... [pauses] ...bluntness.",
+    );
+  });
+
   it("treats bracketed and asterisked actions as one actor-performance stream", () => {
     const text = "Look [gasp] at *scream* me! [dance]";
     assert.equal(voiceSpokenText(text), "Look at me!");

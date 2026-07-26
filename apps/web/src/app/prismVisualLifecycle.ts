@@ -27,10 +27,11 @@ export function resolvePrismVisualLifecycle(options: {
   pageHidden: boolean;
   systemPaused?: boolean;
 }): PrismVisualLifecycle {
-  return options.hidden ||
-    !options.focused ||
-    options.pageHidden ||
-    options.systemPaused
+  // Focus is tracked for interaction cleanup, but an unfocused-yet-visible
+  // window must keep rendering and running live clocks. Only true hiding,
+  // pagehide, or an explicit system pause may suspend expensive visuals.
+  void options.focused;
+  return options.hidden || options.pageHidden || options.systemPaused
     ? "suspended"
     : "foreground";
 }

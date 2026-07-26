@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  normalizePrismMarketplaceBranchLock,
   prismAvatarDetailsPaneEnabled,
   prismBranchAllowsDevTools,
+  prismMarketplaceBranchLockAllows,
   prismWebDevChatCommandsEnabled,
   prismWebDevToolsEnabled,
 } from "./prismDevGating.ts";
@@ -87,4 +89,18 @@ test("production dev commands require explicit opt-in on non-main branches", () 
     }),
     true
   );
+});
+
+test("marketplace branch locks require an exact branch match", () => {
+  assert.equal(normalizePrismMarketplaceBranchLock("dev"), "dev");
+  assert.equal(normalizePrismMarketplaceBranchLock("DEV"), "dev");
+  assert.equal(normalizePrismMarketplaceBranchLock("main"), null);
+  assert.equal(normalizePrismMarketplaceBranchLock("feature/foo"), null);
+  assert.equal(prismMarketplaceBranchLockAllows(null, "main"), true);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "dev"), true);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "DEV"), true);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "main"), false);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "feature/dev"), false);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", undefined), false);
+  assert.equal(prismMarketplaceBranchLockAllows("dev", "unknown"), false);
 });

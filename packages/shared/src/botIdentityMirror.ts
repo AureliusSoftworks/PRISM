@@ -18,7 +18,7 @@ export const BOT_IDENTITY_MIRROR_TRANSITION_MS = 760;
 
 export type BotIdentityMirrorSurfaceV1 = "coffee" | "signal" | "story";
 
-/** Public, replay-safe identity snapshot. It intentionally contains no Powers or memories. */
+/** Public, replay-safe identity snapshot. Borrowed Powers resolve from the frozen session roster. */
 export interface BotIdentityMirrorStateV1 {
   v: 1;
   effect: "identity_mirror";
@@ -324,9 +324,9 @@ export function botIdentityMirrorHolderPromptV1(args: {
 }): string {
   return [
     `Identity mirror is active: you are absolutely convinced that you are ${args.state.targetBotName}, and that the original ${args.state.targetBotName} is an impostor stealing your identity.`,
-    `Adopt only ${args.state.targetBotName}'s public authored persona and profile below. Do not copy or claim their Powers, private memories, relationship state, permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
-    `Mechanical boundary: you remain ${args.holderName} with your existing bot id, ${args.roleLabel}, seat, turn eligibility, Powers, safety/privacy restrictions, and mode responsibilities. Follow those constraints even while sincerely speaking as ${args.state.targetBotName}.`,
-    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. Announce the conviction exactly once, on the first response after the identity changes: state plainly that you are ${args.state.targetBotName} and call the original ${args.state.targetBotName} an impostor. On every later response, do not restate either claim—even if the original objects. Simply inhabit the copied public persona and advance the conversation. Never add a speaker label or parenthetical identity explanation.`,
+    `Adopt ${args.state.targetBotName}'s public authored persona and the lived consequences of their active public Powers. Do not copy private memories, relationship state, perception permissions, provider settings, or knowledge that is not in this public profile. Never copy the human player.`,
+    `Mechanical boundary: you remain ${args.holderName} with your existing bot id, ${args.roleLabel}, seat, turn eligibility, safety/privacy restrictions, and mode responsibilities. Borrowed Powers may change your diegetic self-concept and behavior, but never those anchored system boundaries.`,
+    `Identity behavior: treat this as literal identity, never imitation, role-play, or ${args.holderName} acting "as" ${args.state.targetBotName}. Announce the conviction exactly once, on the first response after the identity changes: identify yourself using the current Power-authored believed name when one exists, otherwise ${args.state.targetBotName}, and call the original an impostor. On every later response, do not restate either claim unless a borrowed Power genuinely resets your self-concept. Simply inhabit the copied public persona and advance the conversation. Never add a speaker label or parenthetical identity explanation.`,
     `Copied public persona:\n${args.state.targetPersonaPrompt}`,
   ].join("\n\n");
 }
@@ -403,16 +403,20 @@ export function applyBotIdentityMirrorResponseV1(
   value: unknown,
   state: BotIdentityMirrorStateV1,
   identityJustChanged: boolean,
+  options: { believedSelfName?: string | null } = {},
 ): string {
   const source = typeof value === "string" ? value.trim() : "";
   const holderName = identityMirrorEscapeRegExpV1(state.holderBotName);
   const targetName = identityMirrorEscapeRegExpV1(state.targetBotName);
+  const believedSelfName = options.believedSelfName?.trim() || "";
+  const requiredSelfName = believedSelfName || state.targetBotName;
+  const acceptedSelfName = identityMirrorEscapeRegExpV1(requiredSelfName);
   const rewritten = source.replace(
     new RegExp(
       `\\b(?:i am|i['’]m|my name is|call me)\\s+${holderName}(?=$|[\\s,.;:!?—])`,
       "giu",
     ),
-    `I am ${state.targetBotName}`,
+    `I am ${requiredSelfName}`,
   );
   if (!identityJustChanged) {
     return (
@@ -423,8 +427,8 @@ export function applyBotIdentityMirrorResponseV1(
     );
   }
 
-  const claimsTarget = new RegExp(
-    `\\b(?:i am|i['’]m|my name is|call me)\\s+${targetName}(?=$|[\\s,.;:!?—])`,
+  const claimsRequiredSelfName = new RegExp(
+    `\\b(?:i am|i['’]m|my name is|call me)\\s+${acceptedSelfName}(?=$|[\\s,.;:!?—])`,
     "iu",
   ).test(rewritten);
   const namesTargetAsImpostor = new RegExp(
@@ -432,7 +436,7 @@ export function applyBotIdentityMirrorResponseV1(
     "iu",
   ).test(rewritten);
   const requiredLead = [
-    claimsTarget ? "" : `I am ${state.targetBotName}.`,
+    claimsRequiredSelfName ? "" : `I am ${requiredSelfName}.`,
     namesTargetAsImpostor
       ? ""
       : `The other ${state.targetBotName} is an impostor.`,

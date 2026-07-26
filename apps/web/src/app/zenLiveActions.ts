@@ -112,7 +112,8 @@ function zenLiveActionOpenMouthGlyph(
   if (mouthShape === "speech-closed") return `${eyes}|`;
   if (mouthShape === "dot") return `${eyes}.`;
   if (mouthShape === "at") return `${eyes}@`;
-  if (mouthShape === "narrow") return `${eyes}o`;
+  if (mouthShape === "click") return `${eyes}ʘ`;
+  if (mouthShape === "narrow") return `${eyes}ɵ`;
   if (mouthShape === "open-wide") return `${eyes}0`;
   if (mouthShape === "open-small") return `${eyes}o`;
   if (mouthShape === "open-round") return `${eyes}O`;

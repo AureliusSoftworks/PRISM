@@ -78,6 +78,25 @@ export type BotPowerEffectV1 =
   | { type: "speech_copy"; trigger: "direct_address" }
   /** Copy the latest bot that directly addresses the holder; humans are never targets. */
   | { type: "identity_mirror"; trigger: "direct_bot_address" }
+  /**
+   * Borrow a random other Library bot's public form (Marketplace fallback).
+   * Sticky for the session; reshuffles when short-term amnesia clears continuity.
+   */
+  | {
+      type: "identity_shapeshift";
+      pool: "library_or_marketplace";
+      continuity: "session_sticky_until_amnesia";
+    }
+  /**
+   * Sincerely believe a random persona name for the session.
+   * Sticky until short-term amnesia clears continuity, then reshuffle.
+   * The saved Library bot name never changes.
+   */
+  | {
+      type: "false_name";
+      continuity: "session_sticky_until_amnesia";
+      pool: "mixed_persona_names";
+    }
   | {
       type: "hearing_repeat";
       frequency: BotPowerFrequency;
@@ -144,6 +163,13 @@ export type BotPowerEffectV1 =
       /** Soft pressure to treat the holder's current addressee as a personal star. */
       type: "addressed_fandom";
       strength: BotPowerStrength;
+    }
+  | {
+      /** Require a fresh personal jab at the current addressee in every ordinary spoken reply. */
+      type: "addressed_insult";
+      trigger: "every_spoken_reply";
+      target: "current_addressee";
+      style: "fresh_tailored";
     }
   | {
       type: "mood_resistance";
@@ -473,6 +499,20 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   if (effect.type === "identity_mirror") {
     return { type: "identity_mirror", trigger: "direct_bot_address" };
   }
+  if (effect.type === "identity_shapeshift") {
+    return {
+      type: "identity_shapeshift",
+      pool: "library_or_marketplace",
+      continuity: "session_sticky_until_amnesia",
+    };
+  }
+  if (effect.type === "false_name") {
+    return {
+      type: "false_name",
+      continuity: "session_sticky_until_amnesia",
+      pool: "mixed_persona_names",
+    };
+  }
   if (effect.type === "hearing_repeat") {
     return {
       type: "hearing_repeat",
@@ -561,6 +601,14 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
     return {
       type: "addressed_fandom",
       strength: normalizeStrength(effect.strength),
+    };
+  }
+  if (effect.type === "addressed_insult") {
+    return {
+      type: "addressed_insult",
+      trigger: "every_spoken_reply",
+      target: "current_addressee",
+      style: "fresh_tailored",
     };
   }
   if (effect.type === "mood_resistance") {
@@ -787,6 +835,56 @@ function upgradeLegacyLazyResponseBudgetV1(
   };
 }
 
+function addressedInsultCompiledFromIntentV1(
+  authoringMode: BotPowerAuthoringModeV1 | undefined,
+  name: string,
+  intent: string,
+): CompiledBotPowerV1 | null {
+  const text = compactText(`${name} ${intent}`, 700)
+    .toLocaleLowerCase()
+    .replace(/[’]/gu, "'");
+  const personalAttack =
+    /\bad\s+hominem\b/u.test(text) ||
+    /\b(?:insult|personal(?:ly)?\s+attack|attack\s+(?:the\s+)?person)\w*\b/u.test(
+      text,
+    );
+  const everyReply =
+    /\b(?:every|each|all)\s+(?:single\s+)?(?:reply|response|line|time)\b/u.test(
+      text,
+    ) ||
+    /\b(?:always|cannot|can't|never)\b[\s\S]{0,80}\b(?:without|insult|attack)\b/u.test(
+      text,
+    );
+  const currentAddressee =
+    /\b(?:who(?:m|ever)|anyone|person|recipient)\b[\s\S]{0,80}\b(?:address|talk|speak|reply|respond)\w*\b/u.test(
+      text,
+    ) ||
+    /\b(?:current|active)\s+addressee\b/u.test(text) ||
+    /\b(?:whoever|recipient)\s+(?:is\s+)?(?:being\s+)?addressed\b/u.test(text);
+  if (!personalAttack || !everyReply || !currentAddressee) return null;
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashForPowerV1({
+      authoringMode,
+      name,
+      intent,
+    }),
+    selfCue:
+      "Every ordinary spoken reply must open early with a fresh, tailored personal insult aimed at the current addressee, then remain substantive and in character. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs. Rate only the strongest naturally landed jabs.",
+    observerCue:
+      "The Power holder cannot address someone without a fresh personal jab aimed at that addressee; treat it as a recurring curse without adopting the insult.",
+    effects: [
+      {
+        type: "addressed_insult",
+        trigger: "every_spoken_reply",
+        target: "current_addressee",
+        style: "fresh_tailored",
+      },
+    ],
+    ruleLabels: ["Insults every addressee"],
+  };
+}
+
 export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const power = value as Record<string, unknown>;
@@ -797,7 +895,7 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
     power.authoringMode === "prompt" ? "prompt" : undefined;
   const sigil = normalizeBotPowerSigilIdV1(power.sigil);
   const parsedCompiled = normalizeCompiledBotPowerV1(power.compiled);
-  const compiled =
+  const parsedCurrentCompiled =
     parsedCompiled?.sourceHash === botPowerSourceHashForPowerV1({
       authoringMode,
       name,
@@ -809,9 +907,15 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
           intent,
         )
       : null;
+  const recoveredAddressedInsult = addressedInsultCompiledFromIntentV1(
+    authoringMode,
+    name,
+    intent,
+  );
+  const compiled = parsedCurrentCompiled ?? recoveredAddressedInsult;
   const lastValidCompiled = parsedCompiled;
   const compileStatus: BotPowerCompileStatus =
-    power.compileStatus === "ready" && compiled
+    compiled && (power.compileStatus === "ready" || recoveredAddressedInsult)
       ? "ready"
       : power.compileStatus === "error"
         ? "error"
@@ -1193,8 +1297,8 @@ export function botPowerBotNamingCueFromEffectsV1(
   )]
     .slice(0, 1)
     .map((name) => `${JSON.stringify(name)} becomes ${JSON.stringify(botPowerTargetNameFromEffectsV1(name, effects))}`);
-  const exactRule = `HARD—${holder}: keep your own name exactly ${JSON.stringify(holder)}. Every other bot name takes ${summary}.`;
-  const reactionRule = "Not humans. Hearers may comment once, show a small contextual mood, tone, or action shift, or let it pass; never script them or spread the affix.";
+  const exactRule = `HARD: keep your own name exactly ${JSON.stringify(holder)}. When naming or directly addressing another bot, apply ${summary}.`;
+  const reactionRule = "Not humans. Hearers may comment once, show a small contextual mood, tone, or action shift, or let it pass.";
   const withExample = [exactRule, ...(examples.length > 0 ? [`${examples[0]}.`] : []), reactionRule].join(" ");
   if (withExample.length <= 280) return withExample;
   const withoutExample = [exactRule, reactionRule].join(" ");
@@ -1285,6 +1389,26 @@ export function botPowerMirrorsIdentityV1(value: unknown): boolean {
     (effect) =>
       effect.type === "identity_mirror" &&
       effect.trigger === "direct_bot_address",
+  );
+}
+
+/** Ready, enabled holder contract for session-sticky Library/Marketplace shapeshift. */
+export function botPowerShapeshiftsIdentityV1(value: unknown): boolean {
+  return activeBotPowerEffectsV1(value).some(
+    (effect) =>
+      effect.type === "identity_shapeshift" &&
+      effect.pool === "library_or_marketplace" &&
+      effect.continuity === "session_sticky_until_amnesia",
+  );
+}
+
+/** Ready, enabled holder contract for session-sticky believed false names. */
+export function botPowerBelievesFalseNameV1(value: unknown): boolean {
+  return activeBotPowerEffectsV1(value).some(
+    (effect) =>
+      effect.type === "false_name" &&
+      effect.continuity === "session_sticky_until_amnesia" &&
+      effect.pool === "mixed_persona_names",
   );
 }
 
@@ -1803,6 +1927,113 @@ export function applyBotPowerResponseBudgetV1(
     .trim();
 }
 
+const BOT_POWER_ADDRESSED_INSULT_RE =
+  /\b(?:idiot|moron|fool|clown|fraud|hack|coward|amateur|buffoon|jackass|nitwit|dimwit|halfwit|windbag|blowhard|poser|philistine|cretin|imbecile|incompetent|pathetic|insufferable|witless|spineless|clueless|smug|tedious|desperate|insecure|delusional|obnoxious|arrogant|lazy|stupid|dumb|embarrassment|disaster|failure|bankruptcy)\b/iu;
+
+const BOT_POWER_ADDRESSED_INSULT_METAPHOR_RE =
+  /(?:structural integrity of wet cardboard|ego is doing heroic work trying to pass)\b/iu;
+
+const BOT_POWER_PERSONAL_ATTACK_STRUCTURE_RE =
+  /\b(?:you(?:'re| are| sound| look| remain| keep| couldn't| cannot| can't)|your\s+(?:brain|mind|ego|judgment|competence|credibility|intellect|reasoning|thinking|argument|performance|personality)|what kind of\s+(?:idiot|moron|fool)|the\s+(?:idiot|moron|fool|clown|fraud|hack)\s+(?:talking|speaking|asking|arguing))\b/iu;
+
+/** True when a ready Power requires a personal jab in every ordinary spoken reply. */
+export function botPowerRequiresAddressedInsultV1(value: unknown): boolean {
+  return botPowerRequiresAddressedInsultFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+  );
+}
+
+/** Effect-list variant for resolved mode plans such as Coffee. */
+export function botPowerRequiresAddressedInsultFromEffectsV1(
+  value: unknown,
+): boolean {
+  return Array.isArray(value) && value.some(
+    (effect) => effect.type === "addressed_insult",
+  );
+}
+
+/**
+ * Conservative evidence check for an addressed personal attack. Criticism of an
+ * idea alone does not count: the line needs both insulting language and a
+ * person-directed structure or the addressee's name.
+ */
+export function botPowerResponseHasAddressedInsultV1(
+  value: unknown,
+  targetName?: unknown,
+): boolean {
+  const source = typeof value === "string" ? value.trim() : "";
+  if (!source || botPowerResponseIsSilentV1(source)) return false;
+  const target = compactText(targetName, 100);
+  const namesTarget =
+    target.length > 0 &&
+    target.toLocaleLowerCase() !== "you" &&
+    source.toLocaleLowerCase().includes(target.toLocaleLowerCase());
+  return (
+    (BOT_POWER_ADDRESSED_INSULT_RE.test(source) ||
+      BOT_POWER_ADDRESSED_INSULT_METAPHOR_RE.test(source)) &&
+    (namesTarget || BOT_POWER_PERSONAL_ATTACK_STRUCTURE_RE.test(source))
+  );
+}
+
+const BOT_POWER_ADDRESSED_INSULT_OPENERS_V1 = [
+  (target: string, focus: string) =>
+    `${target}, only a smug amateur could make ${focus} sound like a revelation`,
+  (target: string, focus: string) =>
+    `${target}, your attempt to sell ${focus} has all the structural integrity of wet cardboard`,
+  (target: string, focus: string) =>
+    `${target}, you're treating ${focus} like intellectual bankruptcy with better lighting`,
+  (target: string, focus: string) =>
+    `${target}, your ego is doing heroic work trying to pass ${focus} off as competent judgment`,
+  (target: string, focus: string) =>
+    `${target}, only an insufferable fraud would present ${focus} with that much confidence`,
+  (target: string, focus: string) =>
+    `${target}, your reasoning mangles ${focus} with the confidence of a practiced fool`,
+] as const;
+
+function botPowerAddressedInsultHashV1(value: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash;
+}
+
+function botPowerAddressedInsultFocusV1(value: string): string {
+  const spoken = value
+    .replace(/\*[^*\n]{1,120}\*/gu, " ")
+    .replace(/\[([^\]\n]{1,100})\]\(prism-bot:\/\/[^)\s]+\)/gu, "$1")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const words = spoken.match(/[\p{L}\p{N}’'\-]+/gu) ?? [];
+  const bounded = words.slice(0, 9).join(" ");
+  return bounded ? `“${bounded}”` : "that thought";
+}
+
+/**
+ * Last-line runtime enforcement for hard addressed-insult Powers. The bounded
+ * opener targets conduct and competence only; it never invents private facts or
+ * attacks protected traits, family, grief, or trauma.
+ */
+export function applyBotPowerAddressedInsultV1(
+  value: unknown,
+  targetName: unknown,
+  seed: unknown,
+): string {
+  const source = typeof value === "string" ? value.trim() : "";
+  if (!source || botPowerResponseIsSilentV1(source)) return source;
+  const target = compactText(targetName, 100);
+  if (botPowerResponseHasAddressedInsultV1(source, target)) return source;
+  const addressedTarget =
+    !target || target.toLocaleLowerCase() === "you" ? "You" : target;
+  const opener =
+    BOT_POWER_ADDRESSED_INSULT_OPENERS_V1[
+      botPowerAddressedInsultHashV1(String(seed)) %
+        BOT_POWER_ADDRESSED_INSULT_OPENERS_V1.length
+    ]!(addressedTarget, botPowerAddressedInsultFocusV1(source));
+  return `${opener}—${source.charAt(0).toLocaleLowerCase()}${source.slice(1)}`;
+}
+
 /** Extracts only concise physical actions that a hard-muted bot can perform. */
 export function botPowerMuteActionTextsV1(value: unknown): string[] {
   const source = typeof value === "string" ? value : "";
@@ -1856,110 +2087,18 @@ export function botPowerResponseIsFirstIntroductionV1(
   return explicitSelfIntroduction.test(source) || greetingIntroduction.test(source);
 }
 
-function botPowerInputDirectlyRequestsIdentityV1(value: unknown): boolean {
-  if (typeof value !== "string") return false;
-  return /\b(?:who are you|what(?:'s| is) your name|what should I call you|may I call you|tell (?:me|us) (?:who you are|your name)|introduce yourself|identify yourself)\b/iu.test(
-    value,
-  );
-}
-
-/** Removes a redundant canned greeting while retaining the substantive answer. */
-function botPowerWithoutRepeatedIntroductionV1(
-  value: string,
-  botName: string,
-): string {
-  const escapedName = botPowerEscapeRegExpV1(botName);
-  const selfIntroduction = `(?:i am|i['’]m|my name is|call me)\\s+${escapedName}\\b`;
-  const greeting =
-    "(?:(?:it['’]?s\\s+)?(?:nice|pleased)|(?:a\\s+)?pleasure)\\s+to\\s+meet\\s+you";
-  const introductionSeparator = "[\\s,;:—–\\-]*";
-  const prefix = new RegExp(
-    `^\\s*(?:(?:hello|hi|hey|greetings)[,!—–\\-\\s]*)?(?:${greeting}[,;:.!?\\s]*)?(?:${selfIntroduction})(?:${introductionSeparator}(?:by the way|${greeting}))*[\\s,;:.!—–\\-]*`,
-    "iu",
-  );
-  const suffix = new RegExp(
-    `(?:[\\s,;:.!—–\\-]+)(?:(?:${selfIntroduction})(?:${introductionSeparator}(?:by the way|${greeting}))*|(?:${greeting})${introductionSeparator}(?:${selfIntroduction})(?:${introductionSeparator}by the way)?)[\\s.!?]*$`,
-    "iu",
-  );
-  const withoutPrefix = value.replace(prefix, "");
-  const trimmed = withoutPrefix
-    .replace(suffix, "")
-    .replace(/^(?:and|but)\s+/iu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!trimmed) return value;
-  const terminalPunctuation = value.match(/[.!?]+\s*$/u)?.[0].trim() ?? "";
-  return trimmed !== value && terminalPunctuation && !/[.!?]$/u.test(trimmed)
-    ? `${trimmed}${terminalPunctuation}`
-    : trimmed;
-}
-
 /**
- * Preserves a natural locally grounded reply while blocking claims of an
- * established relationship. Context-specific fallbacks keep a stale compiled
- * introduction cue from turning immediate anger into another canned greeting.
+ * Short-term amnesia is enforced by wiping prior prompt context each turn.
+ * Do not rewrite the model's reply — organic confusion, repair, or admission
+ * of forgetting is the intended fiction.
  */
 export function applyBotPowerEternalIntroductionResponseV1(
   value: unknown,
-  botName: unknown,
-  currentInput?: unknown,
-  options?: { hasPreviousOnAirTurn?: boolean },
+  _botName?: unknown,
+  _currentInput?: unknown,
+  _options?: { hasPreviousOnAirTurn?: boolean },
 ): string {
-  const name = botPowerIntroductionNameV1(botName);
-  const source = typeof value === "string" ? value.trim() : "";
-  const input = typeof currentInput === "string" ? currentInput.trim() : "";
-  const claimsEstablishedRelationship =
-    /\b(?:as I (?:said|mentioned) (?:earlier|previously|last time)|we (?:discussed|talked about) (?:earlier|before|last time)|we(?:'ve| have) (?:known each other|been (?:friends|together))|our (?:friendship|relationship|shared history)|after all (?:these|those) years|remember when we|as your (?:old|longtime) friend)\b/iu.test(
-      source,
-    );
-  const repetitionComplaint =
-    /\b(?:again|already (?:said|told|introduced)|keep (?:saying|repeating|introducing)|repeating yourself|introduced yourself|why are you introducing)\b/iu.test(
-      input,
-    );
-  const immediateUpset =
-    /\b(?:angry|annoyed|frustrated|furious|irritated|mad|upset|god+dam+\w*|damn(?:it)?|fuck|shit)\b/iu.test(
-      input,
-    );
-  const cannedIntroductionAgainstComplaint =
-    botPowerResponseIsFirstIntroductionV1(source, name) &&
-    (repetitionComplaint || immediateUpset);
-  const explainsUnseenAmnesiaOrRepetition =
-    /\b(?:again|introduc\w* myself|repeat\w*|repetit(?:ion|ive)|remember\w*|memory|amnesia|habit|start fresh|one conversation to the next|every time we meet|brain[^.!?]{0,40}catch(?:ing)? up)\b/iu.test(
-      source,
-    );
-  const respondsWithFirstContactConfusion =
-    /\b(?:what do you mean|not sure what you mean|I (?:do not|don't) understand|I (?:do not|don't) think we(?:'ve| have) met|have we met|who are you|confus(?:ed|ing)|what(?:'s| is) the matter|what(?:'s| is) wrong)\b/iu.test(
-      source,
-    );
-  const shouldRemoveRepeatedIntroduction = Boolean(
-    options?.hasPreviousOnAirTurn &&
-      !repetitionComplaint &&
-      !botPowerInputDirectlyRequestsIdentityV1(input),
-  );
-
-  if (
-    source &&
-    !claimsEstablishedRelationship &&
-    !cannedIntroductionAgainstComplaint &&
-    !(
-      repetitionComplaint &&
-      (explainsUnseenAmnesiaOrRepetition || !respondsWithFirstContactConfusion)
-    )
-  ) {
-    return shouldRemoveRepeatedIntroduction
-      ? botPowerWithoutRepeatedIntroductionV1(source, name)
-      : source;
-  }
-  if (repetitionComplaint) {
-    return "What do you mean? I don't think we've met yet.";
-  }
-  if (immediateUpset) {
-    return "What's the matter? Sorry, I'm not sure what's wrong.";
-  }
-  if (claimsEstablishedRelationship) {
-    return "I'm sorry, but I don't think we've met before.";
-  }
-  return `Hello—I'm ${name}. It's nice to meet you.`;
+  return typeof value === "string" ? value.trim() : "";
 }
 
 /** Repeats addressed speech verbatim, or remains canonically silent when none exists. */
@@ -2071,9 +2210,8 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
         (effect) => effect.type === "eternal_introduction",
       )
     ) {
-      return [
-        `${power.name || "Short-term amnesia"}: HARD MEMORY CONTRACT: you receive and understand only the current other-speaker message. Respond directly to its concrete content as fresh first contact. You do not know the standing conversation topic unless that message states it, and you do not know prior turns or your own earlier messages. Never claim an older relationship, recall hidden history, or mention the memory rule. If accused of repetition, react with sincere confusion; never agree that you repeated yourself or explain why. A self-introduction is optional only when this exchange genuinely calls for one; never default to identical introductory copy.`,
-      ];
+      // Context wipe is enforced by the runtime; do not coach the holder's voice.
+      return [];
     }
     const cue = power.compiled?.selfCue.trim();
     const fallback =
@@ -2097,9 +2235,8 @@ export function botPowerObserverCueLinesV1(
         (effect) => effect.type === "eternal_introduction",
       )
     ) {
-      return [
-        `${subject} — ${power.name || "Short-term amnesia"}: ${subject} receives only the current other-speaker message, does not retain the standing conversation topic unless that message restates it, and has no memory of prior turns or their own earlier messages. Respond to that limited fresh-contact perception naturally; other characters retain the full encounter and may react through their own personalities.`,
-      ];
+      // Peers keep full history; no amnesia performance cue for observers either.
+      return [];
     }
     const cue = power.compiled?.observerCue.trim();
     const fallback =
@@ -2354,6 +2491,41 @@ export function buildBotPowersPromptBlock(
 
 export function buildBotPowersSelfPromptV1(value: unknown): string {
   return buildBotPowersPromptBlock(botPowerSelfCueLinesV1(value));
+}
+
+/**
+ * First-order Power composition for identity mirroring.
+ *
+ * The holder keeps its own mechanical identity, while the target's active
+ * Powers are evaluated as borrowed holder Powers. Perception permissions and
+ * identity mirroring itself stay anchored to the original owner so copying a
+ * copier cannot recurse or expose private audience state.
+ */
+export function composeBotIdentityMirrorPowersV1(
+  holderValue: unknown,
+  targetValue: unknown,
+): BotPowerV1[] {
+  const holder = activeBotPowersV1(holderValue);
+  const borrowed = activeBotPowersV1(targetValue).flatMap((power) => {
+    const compiled = power.compiled;
+    if (!compiled) return [];
+    const effects = compiled.effects.filter(
+      (effect) =>
+        effect.type !== "identity_mirror" &&
+        effect.type !== "awareness" &&
+        effect.type !== "speech_audience",
+    );
+    if (effects.length === 0) return [];
+    return [{
+      ...power,
+      id: `identity-mirror:${power.id}`.slice(0, 128),
+      compiled: {
+        ...compiled,
+        effects,
+      },
+    }];
+  });
+  return [...holder, ...borrowed];
 }
 
 export function botPowerCupRateMultiplierForBotV1(value: unknown): number {

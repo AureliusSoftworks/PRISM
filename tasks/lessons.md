@@ -4,6 +4,51 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-07-26 · [architecture]
+**Trigger**: Needed a personal Marketplace backup of Library-only bots without shipping that shelf on main/release.
+**Lesson**: Marketplace shelves can carry `branchLock: "dev"`. Visibility helpers must require an exact branch match (`NEXT_PUBLIC_PRISM_BRANCH`), and public catalog quality gates should exclude branch-locked bots so personal backups can preserve Library state without public polish constraints.
+**Applies to**: `botMarketplace.ts`, `prismDevGating.ts`, `scripts/publish-library-dev-backup-marketplace.mjs`.
+
+### 2026-07-25 · [UX]
+**Trigger**: Profile-builder wildcards looked useful for random last names each turn, but expansion only baked once on save.
+**Lesson**: Do not put Prompt Center wildcards / pick-aware composers in Bot Profile Builder textareas. Bot identity copy must stay durable plain text; per-turn randomization needs a live runtime template elsewhere, not bake-on-save profile fields.
+**Applies to**: `BotProfileBuilder` in `apps/web/src/app/page.tsx`, bot create/save paths.
+
+### 2026-07-25 · [UX]
+**Trigger**: Signal closing left a 286px rail gap, and two faithful replays began saved audio before the extended intro visual had meaningfully revealed; one capture placed first speech at 778ms despite a saved 7980ms intro contract.
+**Lesson**: Outro stays full-bleed under the navbar until Return to show. For recording, never stop the ident on model warmup and never compact thinking while `episodePreRoll` exists. For legacy playback calibration, keep picture start and intro-card hold as independent knobs: picture start is animation-only head start, while card hold is audio-clock duration until the cut to wide. Never let picture start shorten or lengthen the card. Dissolve still lands on forced wide; copy a report with both values.
+**Applies to**: `botcast.module.css` outro/replay intro, `BotcastExperience` pre-roll capture gate and `SignalReplayBookend`.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal’s shows panel returned as soon as an episode completed, while the closing card was still up.
+**Lesson**: Treat intro, live, completed/cancelled awaiting dismiss, and the outro card as one immersive presentation. Keep `data-live-episode` / shows-rail hiding and chrome lock until Return to show clears the episode; only offer Cut show while the episode is still on air.
+**Applies to**: `BotcastExperience` `liveSessionActive` / `showLiveExit`, shared Signal navbar exit wiring.
+
+### 2026-07-24 · [UX]
+**Trigger**: Copycat Calvin (echo-bound Signal host) 400'd on producer Interrupt guest now with “cannot originate an interruption.”
+**Lesson**: Echo-bound hosts may still cut in, but only by repeating the last audience-heard on-air phrase. Derive the bridge from that heard prefix (or prior cast line for pre-speech cuts), skip saved hostInterruptionLines membership, force the durable host turn through speech-copy, and avoid double-playing the same echo after the ephemeral bridge.
+**Applies to**: Signal `interrupt_guest` in `apps/api/src/botcast.ts`, `BotcastExperience` bridge UI, shared `botcastEchoHostInterruptPhrase`.
+
+### 2026-07-24 · [UX]
+**Trigger**: Repeated Coffee/Signal interruptions needed to escalate annoyance without permanent hostility or replay drift.
+**Lesson**: Model interruption irritation as session-local directed edges with idempotent transition ids, bias the existing reclaim planner instead of inventing a third floor state, keep expression verbal-forward with capped snark/Foley/gain, and persist delivery metadata so live and replay stay aligned.
+**Applies to**: Coffee and Signal crosstalk in shared `directionalIrritation`, `coffee.ts`, `botcast.ts`, and web reaction playback.
+
+### 2026-07-24 · [testing]
+**Trigger**: A local Coffee Group Ethos response used a curly closing quote and appended word-count notes, so failed JSON parsing persisted the entire model reply as the Ethos.
+**Lesson**: Structured generation must never fall back to the full raw response after JSON parsing fails. Recover only the named field with a narrow malformed-JSON extractor, validate the complete user-facing contract before persistence, and keep an exact regression fixture for observed local-model formatting debris.
+**Applies to**: Coffee Group identity synthesis in `apps/api/src/coffee.ts` and similar PRISM structured-generation parsers.
+
+### 2026-07-24 · [perf]
+**Trigger**: Coffee group session starts waited on personalized starter-topic LLM generation, and unfocused windows suspended visuals on blur.
+**Lesson**: Open Coffee from saved/deterministic topics immediately and refresh personalized group topics in the background with roster/settings/ethos re-checks before persist. Keep `prismVisualLifecycle` foreground on ordinary blur (`focused: false` is still tracked); suspend only for hidden/pagehide/system pause. Bound Coffee reveal voice with a validity token so the 1.8s silent fallback cannot let late queued audio become audible.
+**Applies to**: `apps/api/src/coffee.ts` `ensureCanonicalCoffeeGroupStarterTopics`, `apps/web/src/app/prismVisualLifecycle.ts`, `apps/web/src/app/englishVoice.ts`, Coffee reveal voice in `page.tsx`.
+
+### 2026-07-24 · [architecture]
+**Trigger**: Coffee/Signal/Zen needed frequent `*actions*` without a second model wait, while still allowing occasional persona/prop beats.
+**Lesson**: Plan stage actions before the existing speaker call (80% Director / 20% persona invite). Persist one canonical action metadata field per lane (`coffeeStageAction`, Signal `stage_action_text`, `zenStageAction`), strip actions from spoken content, and keep legacy inline/`coffeeAmbientAction` reads as fallbacks so live/reload/replay never double-render. Yield to social silence, crosstalk reclaim, Powers, departures, listener reactions, and Zen live-action ownership.
+**Applies to**: `packages/shared/src/stageActionDirector.ts`, Coffee/Signal/Zen speaker paths, replay manifests.
+
 ### 2026-07-23 · [UX]
 **Trigger**: Coffee seat action badges rendered stage directions in all caps (“EXTENDS A HAND…”).
 **Lesson**: Canvas-facing action/stage-direction copy stays sentence case across Coffee, Zen, and Signal. Keep `text-transform: none` on badge/presence/voice-action text and sentence-case in the display normalizer; only the composer Action field chrome stays uppercase.
@@ -83,6 +128,61 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Trigger**: The bot About birthday controls allowed BC birth years without automatically marking the bot/persona as deceased.
 **Lesson**: BC birth years should force deceased status on and prevent present-day age semantics. If a profile control implies an impossible living state, normalize the data and lock the dependent UI state.
 **Applies to**: `packages/shared/src/botProfile.ts`, `packages/shared/src/botProfile.test.ts`, and `apps/web/src/app/page.tsx` bot profile birthday controls.
+
+### 2026-07-24 · [UX]
+**Trigger**: Coffee reviews exposed literal `assistant` speech in spaced, glued, bracketed-action, and role-only forms; exact Power responses could reintroduce it after draft sanitation. The same transcripts leaked noun actions (`A haughty scoff`) and trailing vocal beats (`burp`) as speech.
+**Lesson**: Strip chat-role framing at draft sanitation, after Power/hard-response transforms, and while loading exact-response rows. Parse balanced `{action}` / `[action]` role suffixes into `*action*`, suppress role-only rows as silence, and run narrow visible-action formatting after exact transforms. Noun action openers become explicit physical beats; short trailing vocal actions stay wrapped. Do not sanitize away ordinary words such as `User experience`.
+**Applies to**: `apps/api/src/coffee.ts` `stripCoffeeSpeakerPrefix` / `sanitizeCoffeeTableReply`.
+
+### 2026-07-24 · [UX]
+**Trigger**: A stay-on-thread Coffee premise demanded one unfree decision and its forcing cause, but the table discussed free will abstractly without satisfying the requested answer shape.
+**Lesson**: Topic anchoring must preserve explicit evidence/example/decision/cause requirements, not merely repeat the topic's subject. When a premise says everyone must answer or penalizes refusal, each still-unanswered bot must lead with a direct first-person answer; retry a dodge once, then show an explicit refusal rather than laundering philosophy into compliance. Adjacent abstraction is still topic drift.
+**Applies to**: `apps/api/src/coffee.ts` `buildSpeakerPrompt` topic contract.
+
+### 2026-07-24 · [perf]
+**Trigger**: Coffee review — afterparty + pileup + responseDelayBias=100 + breathingRoom=0 melted the table to <1fps; End needed spam-clicks. Export also baked "... sure. Go ahead." into cut-off lines.
+**Lesson**: Max-speed pileup must keep a short paint/input gap (~320ms), never a true 0ms schedule — every turn already replaces full Coffee conversation state and seat mood CSS filters. Mood replay events should emit only when social deltas exceed a small threshold. Bot-crosstalk annoyed follow-ups stay out of the saved cutoff line but remain visibly owned by the live interruption banner while audible.
+**Applies to**: `apps/web/src/app/coffee-turn-pacing.ts`, `apps/api/src/coffee.ts` mood replay + `recordCoffeeInterruptionPause`, Coffee review exports.
+
+### 2026-07-24 · [UX]
+**Trigger**: Thinking-time dead-air commentary felt too frequent, showed above seats like *actions*, and repeated the same lines.
+**Lesson**: Coffee dead-air asides must be sparse (chance + multi-turn gap + extra think delay), rotate commentators, and expand line variety with recent-text avoidance. Any intelligible aside must remain visibly owned by its seat for the full audible presentation; mouth-only speech is ghost speech.
+**Applies to**: `apps/web/src/app/deadAirAside.ts`, Coffee thinking aside effect in `page.tsx`, Coffee tutorial copy.
+
+### 2026-07-24 · [UX]
+**Trigger**: Coffee review — Trump audibly cut in on Stewie with no visible mouth/line; equipping the coffee pot caused major lag.
+**Lesson**: Bot-crosstalk cut-ins must call `presentCoffeeListenerReaction` (visual + audio) while the interrupted bot is still the active speaker, and `clearCoffeeListenerReaction(true)` if interrupt APIs fail — never bare `playCoffeeListenerReaction` alone (ghost speech). Seat badges and live interruption banners must show `spokenCue` for cut-ins, not only gesture labels. Coffee pot drag x/y must update via DOM CSS vars with React setState only for structural pour/return changes; skip cup hit-testing on tray grab; cache cup rects briefly while dragging; avoid multi-cup `drop-shadow` filters while equipped. Stale reveal epochs after `startCoffeeVoiceForReveal` must abort voice and unmark seen ids.
+**Applies to**: `apps/web/src/app/page.tsx` automatic cut-in + coffee pot drag path + reveal voice; `page.module.css` pot-drag cup highlights.
+
+### 2026-07-24 · [UX]
+**Trigger**: A directed Coffee reply showed Adolf's new text while Trump's prior line audibly replayed.
+**Lesson**: Live Coffee speech must have one visible owner. `queueCoffeeReveal` owns same-session bot audio and its synchronized table typewriter; the resume-latest voice fallback may run only when entering a conversation, never when that conversation refreshes during a player send or live turn. Ephemeral asides and interruption tails must keep matching seat/banner text visible while audible.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee resumed/live voice ownership.
+
+### 2026-07-24 · [UX]
+**Trigger**: A Coffee review exported top-offs as nearly-full cups dropping to 4%, and leaked bare `(prism-bot://…)` targets plus a valid bracketed mention misread as an action.
+**Lesson**: Coffee cup `progress` is consumption progress, so review exports must display fullness as `1 - progress`. Strip only orphan bot href targets; preserve complete `[Name](prism-bot://…)` mentions, and parse bracketed role actions only after an actual chat-role prefix was removed.
+**Applies to**: `apps/web/src/app/coffee-replay.ts`; `apps/api/src/coffee.ts` role/mention sanitation.
+
+### 2026-07-24 · [UX]
+**Trigger**: After the fallback-ordering fix, an existing group ("Gentle Order") still showed a fully canned quartet forever because the deterministic output had been persisted as the group's canonical topics.
+**Lesson**: Never persist purely deterministic starter topics as canonical. Track whether generation was LLM-backed, serve fallback topics per-session without storing them, and treat a stored quartet drawn entirely from the static pools (`coffeeGroupStarterTopicsLookCanned`) as an upgrade candidate on the next session start.
+**Applies to**: `apps/api/src/coffee.ts` `inferCoffeeGroupStarterTopicsDetailed` / `ensureCanonicalCoffeeGroupStarterTopics`.
+
+### 2026-07-24 · [design]
+**Trigger**: Jared reversed Coffee's "bots wait while the player types" bias in favor of Signal's live flow.
+**Lesson**: In Coffee, typing must never suppress the table: no loop-timer clearing, autoplay deferral, reveal holds, wake/force draft gates, or session-clock hold while composing. A thinking bot keeps its `botThinking` state over `playerComposing`, and a send during botThinking queues behind the bot's line (via the reveal-settle wait) instead of aborting the turn or recording an interruption. Only a send during a visible reveal (`tableTyping`) is a player interruption. `userIsComposing` still goes to the server — it enables bot cut-ins while typing, not suppression.
+**Applies to**: `apps/web/src/app/page.tsx` Coffee scheduling/sendCoffeeTurn, `coffee-user-reveal-flow.ts`, `coffee-session-clock.ts`.
+
+### 2026-07-24 · [perf]
+**Trigger**: Coffee composer typing stayed laggy after draft-state deferral; live spell-correct (native spellcheck/autocorrect attributes on the TipTap editor) was still active in Coffee/Signal.
+**Lesson**: Live writing assist is a Chat/Zen-only affordance. Coffee and Signal composers run assist-free, and when the account writing-assist setting is on, apply the deterministic send-time pass (`applyComposerSendAutoCorrect`) as text enters the Coffee table or Signal producer queue.
+**Applies to**: `apps/web/src/app/composerSendAutoCorrect.ts`, `renderShellComposer` in `page.tsx`, `submitProducerGuestAnswer` in `BotcastExperience.tsx`.
+
+### 2026-07-24 · [UX]
+**Trigger**: New Coffee groups always showed the same four canned starter topics ("Which rule deserves breaking?" etc.).
+**Lesson**: Canonical Coffee group starter completion must not jump straight from failed/filtered helper output to a fixed canned quartet. Prefer multi-seat tagged LLM labels, then unlabeled LLM labels, then bot-grounded deterministic + group-seeded fill topics, and only then the shared fallback. Discarding every candidate that lacks `participantBotIds` makes LOCAL/helper failures look identical across groups.
+**Applies to**: `apps/api/src/coffee.ts` `completeCanonicalCoffeeGroupStarterTopics` / `coffeeCanonicalGroupStarterTopicPadding`.
 
 ### 2026-05-22 · [UX]
 **Trigger**: Coffee starter topics improved from generic suggestions but still rendered nonsensical title fragments like "bold angle on Stoic ethics and physics as".
@@ -438,3 +538,93 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Trigger**: The Sound FX Bench header stacked its title and full explanatory subtitle beneath the PRISM mark at a normal desktop width, then retained a redundant tool title after being compressed.
 **Lesson**: Utility benches should use a compact single-row identity bar at normal desktop widths: small atelier mark and the primary view toggle. Omit a repeated tool title when the surrounding context already identifies the bench, move optional explanatory copy into a title tooltip on the mark, and reserve header stacking for emergency narrow-screen fallback.
 **Applies to**: `apps/web/public/tools/sound-fx-bench.html` bench header and responsive breakpoints.
+
+### 2026-07-24 · [UX]
+**Trigger**: Fixing Coffee speech mouths by counter-rotating every mouth glyph made standard plate mouths sideways, while Rick's rendered custom mouth remained correct.
+**Lesson**: Shared Coffee/Signal faces have three mouth cases. Rendered custom glyphs use authored screen-relative rotation; standard bots' generated plate visemes inherit the plate rotation and may apply a plate-relative authored delta; generated fallback visemes temporarily replacing a configured custom glyph must keep the neutral plate baseline rather than inheriting that different glyph's authored angle. Transient generated expressions such as the empty-cup frown must clear both the custom mouth character and its rotation instead of injecting the expression into the custom-mouth slot. Never classify solely by what glyph is rendered in the current frame.
+**Applies to**: `apps/web/src/app/CoffeeSeatPlateEmoji.tsx`, Coffee and Signal speech visemes, sip puckers, empty-cup frowns, and mouth-rotation tests.
+
+### 2026-07-24 · [UX]
+**Trigger**: Disabling a bot's `Coffee *` option preserved its custom mouth character but still ran the surrounding sip-face presentation, allowing persistent mouth features such as Darth Vader's respirator to disappear briefly.
+**Lesson**: `Coffee *` owns the entire sip-mouth treatment, not only the replacement character. When it is off, cup motion may continue, but the face must receive no sip glyph, pucker offset, rest transition, or mouth-active presentation whatsoever.
+**Applies to**: Coffee seat sip presentation in `apps/web/src/app/page.tsx` and `apps/web/src/app/coffee-seat-plate.ts`.
+
+### 2026-07-24 · [UX]
+**Trigger**: Coffee intentionally let an active sip finish after a bot entered its thinking state, which made the bot appear to ponder while drinking.
+**Lesson**: Thinking is a higher-priority embodied state than sipping. Entering thinking must immediately return the cup to rest, cancel explicit and ambient sip visuals, block new sip windows, and preserve cup progress at the prior valid sip gate rather than consuming invisibly.
+**Applies to**: Coffee cup scheduling, explicit action sips, completed sip animations, thinking indicators, and cup-progress gating.
+
+### 2026-07-24 · [UX]
+**Trigger**: A producer-ended Signal session was completed and archived, which also made a deliberately cancelled recording resumable and visible beside finished episodes.
+**Lesson**: Signal cancellation is terminal but not an archive. A first producer cut may synthesize one fast, smooth sign-off, and a second press may escalate to a canned immediate exit; both outcomes still preserve only reusable booking inputs for Latest episodes, discard replay media, stay out of recorded counts/archive cards, and reject every continuation path.
+**Applies to**: Signal episode status, producer Cut show flow, replay finalization, episode archive, and booking autofill.
+
+### 2026-07-24 · [UX]
+**Trigger**: Escalating a Signal producer cut correctly aborted the first smooth-ending request, but its expected `AbortError` was still shown as a failure toast beside the successful canned exit.
+**Lesson**: When a second user action intentionally supersedes an in-flight request, suppress the aborted request only after confirming its operation token is stale or the error is an abort. Preserve visible errors for the replacement request and genuine failures.
+**Applies to**: Signal two-stage producer cuts and other explicitly superseding request flows.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal thinking-gap compaction activated during pre-roll, paused the replay master over the intro, and rebased speech timing so replay mouths drifted from voices.
+**Lesson**: Replay compaction removes only the interval where a bot is visibly and audibly in its thinking state. It must preserve natural dead air, interruption timing, crosstalk, retorts, branded bookends, and pre-speech breath foley; release the hold immediately before that breath begins so audio, speech markers, cameras, and mouths share one time origin.
+**Applies to**: Signal intro capture, replay audio-master holds, logical replay timing, and audiovisual synchronization.
+
+### 2026-07-24 · [UX]
+**Trigger**: Protecting Signal host reclaim and producer-interruption follow-ups by suppressing an always-interrupt guest's Power made Interrupting Tom appear not to try on several addressed host turns.
+**Lesson**: Separate interruption attempt from floor ownership. An always-interrupt Power must visibly and audibly try on every eligible addressed turn; reclaim or producer protection may let the current speaker keep the floor, but must not erase the attempt itself.
+**Applies to**: Signal crosstalk planning, reclaim protection, producer `interrupt_guest`, and always-on interruption Powers.
+
+### 2026-07-24 · [UX]
+**Trigger**: Interrupting Tom successfully took the floor from a Signal host, then deterministic social silence consumed Tom's required response turn.
+**Lesson**: A successful interruption creates a substantive response obligation. Social-silence planning must not let an interrupter seize the mic and then say nothing; silence remains valid only when it does not break an explicit turn-taking payoff.
+**Applies to**: Signal Power interruptions, floor-yield routing, deterministic social silence, and interruption follow-up prompts.
+
+### 2026-07-24 · [perf]
+**Trigger**: An always-interrupt Signal guest combined overlapping voices and repeated camera cuts with per-animation-frame rerenders of the full studio, causing gameplay-breaking lag and disrupting producer cue typing.
+**Lesson**: Keep audio timing exact, but pace React presentation commits for discrete mouths and captions. High-frequency voice progress must not rerender the entire Signal control room at display refresh rate, and camera transitions must preserve active producer-input focus and caret.
+**Applies to**: Signal live speech progress, interruption-heavy Powers, animated cameras, stage rendering, and private host cues.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal could play an interrupted speaker's follow-on line without moving that bot's mouth, treat a cut-in near the end of a thought like a meaningful cutoff, and fall back from the bot's Premium American voice to a differently accented local voice.
+**Lesson**: Secondary speech channels need their own text, alignment, progress, cancellation cleanup, and effective identity-scoped voice recipe. Keep the cut-in attempt, but once at least 85 percent of the original line was heard, omit the offended retort and floor reclaim; if the requested Premium retort clip is unavailable, do not silently substitute a voice that changes the character's accent.
+**Applies to**: Signal listener reactions, interrupted-speaker crosstalk, mouth visemes, voice prefetch/fallback, manual producer interruptions, and Power interruption planning.
+
+### 2026-07-24 · [architecture]
+**Trigger**: A faithful Signal replay compiled captured `speech_start` direction events as one-millisecond utterances instead of pairing them with their matching `speech_end` events, making the master audio appear to begin ahead of mouths and cameras.
+**Lesson**: Compile replay speech as channel-scoped start/end spans keyed by source message and speaker. Schedule live cut-in audio against the same monotonic target clock, and record direction start/stop events from the audible playback lifecycle so the master, camera, and mouth timelines share one measured span.
+**Applies to**: Signal replay manifests, overlapping reaction/crosstalk channels, audio-master synchronization, live cut-in scheduling, and replay video direction.
+
+### 2026-07-24 · [UX]
+**Trigger**: Signal validated that Rick's complete generated opening contained the show and cast introduction, then an early Power interruption discarded that introduction and made the saved episode feel as though it began mid-conversation.
+**Lesson**: Validate interruption safety against the audience-heard prefix, not the hidden complete line. Front-load the show and host identity, complete the guest introduction immediately, and delay or suppress an opening cutoff until all three identities have aired.
+**Applies to**: Signal opening authoring, Power interruption timing, transcript truncation, and replay continuity.
+
+### 2026-07-24 · [UX]
+**Trigger**: A Signal interruption moved an explicitly selected Left, Right, or Wide camera to the interrupting bot even though Auto camera was disabled.
+**Lesson**: Manual camera selection owns the frame until the Producer changes it. Gate every transient speaker, reaction, thinking, and interruption shot behind Auto mode; within Auto, let Instant cut to an interrupter but keep Animated on the current shot because a camera sweep is too slow for a brief overlap. Audio and performance state must never implicitly seize a fixed camera.
+**Applies to**: Signal live camera resolution, Power interruptions, listener reactions, and faithful camera capture.
+
+### 2026-07-24 · [UX]
+**Trigger**: A faithful Signal replay began with several seconds of branded intro video, but its transcript list started directly on Rick's first line and visually implied that speech began at zero.
+**Lesson**: Time-bearing non-dialogue segments need exclusive timeline ownership. Derive a clickable intro row from the recorded first-utterance start so its duration, active highlight, seeking, audio, and video all describe the same opening span; faithful replay must not fall back to an estimated dialogue index when no recorded utterance is active.
+**Applies to**: Signal faithful replay transcripts, intro video timing, scrubber seeking, and active-row presentation.
+
+### 2026-07-24 · [UX]
+**Trigger**: The live Signal shell collapsed to one stage column after an episode was created while its intro still targeted the old second column, so the browser rendered the intro beside the stage.
+**Lesson**: Treat branded pre-roll as live presentation state from its first frame. Hide setup rails immediately and explicitly place overlays in the live grid column at every breakpoint so grid reconfiguration cannot create an unintended side column.
+**Applies to**: Signal live intro layout, responsive grid transitions, and other full-stage pre-roll overlays.
+
+### 2026-07-24 · [architecture]
+**Trigger**: A spontaneous Signal host sign-off still carried a planned guest Power interjection, the closing invented continuity from a numbered topic, and two rejected provider drafts were reported as a successful generation before deterministic repair.
+**Lesson**: Protect generated closing intent before applying interruption plans, validate anthology continuity claims instead of relying on prompts alone, and report provider acceptance separately from app-level fallback recovery.
+**Applies to**: Signal closing ownership, Power crosstalk planning, anthology validation, ONLINE retry provenance, and review transcripts.
+
+### 2026-07-25 · [UX]
+**Trigger**: Extending Prompt Center picks to Signal setup replaced the compact single-line episode-topic input with a rich composer surface.
+**Lesson**: “Prompts everywhere” means enriching existing composer textareas, not changing ordinary single-line inputs into composer-shaped multiline controls. Preserve each field’s original input semantics and visual footprint unless the request explicitly includes redesigning that field.
+**Applies to**: PRISM composer-pick rollouts, Signal setup fields, and other applet forms that mix single-line inputs with multiline composers.
+
+### 2026-07-25 · UX
+**Trigger**: Forgetful/amnesia Power over-coached "fresh first contact" and rewrote organic replies.
+**Lesson**: Short-term amnesia should be a pure per-turn context wipe. Do not inject hard performance cues or rewrite replies that admit forgetting; let dangling referents land naturally.
+**Applies to**: botPower eternal_introduction, Coffee/Signal/Chat/Zen/Story adapters, Forgetful Freddie showcase
