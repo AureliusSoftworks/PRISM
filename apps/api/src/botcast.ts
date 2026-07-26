@@ -8934,7 +8934,6 @@ export function buildBotcastSpeakerPrompt(
       ? "Echo opening exception: nobody has addressed speech to you yet, so originate this one required opening in your own voice. After this first phrase, the hard echo rule takes over."
       : "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line after your opening, return only `...`. This overrides every later question, answer, closing, and vocal-reaction instruction."
     : null;
-  // eternal_introduction: transcript wipe only — no hard amnesia performance cue.
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(speaker.powers);
   const responseBudgetRule = responseBudget
     ? responseBudget.mode === "minimal"
@@ -9018,6 +9017,14 @@ export function buildBotcastSpeakerPrompt(
             `Show: ${args.show.name}`,
             `Your assigned on-air role: ${args.speakerRole}.`,
             `${peerAddressName} is the person in front of you now.`,
+            ...(args.speakerRole === "host" &&
+            args.episode.guestKind !== "producer"
+              ? [
+                  args.cue
+                    ? `Private live producer cue: ${args.cue.kind}${args.cue.detail ? ` — ${args.cue.detail}` : ""}`
+                    : "Private live producer cue: none",
+                ]
+              : []),
             transcript
               ? `Current other-speaker on-air message:\n${transcript}`
               : "No other-speaker on-air message is available yet; this may be the opening.",

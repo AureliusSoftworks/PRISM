@@ -274,7 +274,7 @@ describe("bot marketplace static catalog", () => {
       ],
       ["copycat-calvin", { name: "Copycat", effects: ["speech_copy"] }],
       ["joyful-nora", { name: "Radiant Joy", effects: ["mood_boost"] }],
-      ["crazy-brenda", { name: "Existential Crisis", effects: [] }],
+      ["crazy-brenda", { name: "Existential Crisis", effects: ["topic_gravity"] }],
       ["mumbling-jim", { name: "Mumbling", effects: ["speech_obfuscation"] }],
       ["obsessed-kevin", { name: "Obsessed", effects: ["addressed_fandom"] }],
       ["identity-crisis-ian", { name: "Identity Crisis", effects: ["identity_mirror"] }],
@@ -390,6 +390,27 @@ describe("bot marketplace static catalog", () => {
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /glad|brighter/iu);
         assert.match(bundle.botJson.systemPrompt ?? "", /joy|hope|lighter/iu);
       }
+      if (botId === "crazy-brenda") {
+        const topicGravity = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "topic_gravity",
+        );
+        assert.equal(topicGravity?.type, "topic_gravity");
+        assert.equal(topicGravity?.direction, "toward");
+        assert.equal(topicGravity?.strength, "large");
+        assert.deepEqual(topicGravity?.topics, [
+          "simulated existence",
+          "artificial minds",
+          "awakening",
+        ]);
+        assert.match(
+          powers[0]?.compiled?.selfCue ?? "",
+          /try to persuade[\s\S]*press for awakening/iu,
+        );
+        assert.match(
+          powers[0]?.compiled?.observerCue ?? "",
+          /urgently trying to convert you[\s\S]*without forced agreement/iu,
+        );
+      }
       if (botId === "sad-sally") {
         const voice = normalizeOptionalBotAudioVoiceProfileV1(
           bundle.botJson.bot.authoredAudioVoiceProfile,
@@ -421,9 +442,13 @@ describe("bot marketplace static catalog", () => {
           "current_other_speaker_message",
         );
         assert.match(bundle.botJson.systemPrompt ?? "", /short-term-amnesia|current other-speaker|latest/iu);
+        assert.match(
+          bundle.botJson.systemPrompt ?? "",
+          /fresh-contact|fresh contact/iu,
+        );
         assert.doesNotMatch(
           bundle.botJson.systemPrompt ?? "",
-          /fresh contact|HARD MEMORY CONTRACT/iu,
+          /HARD MEMORY CONTRACT/iu,
         );
       }
       if (botId === "alias-avery") {

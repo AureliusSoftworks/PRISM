@@ -835,6 +835,47 @@ function upgradeLegacyLazyResponseBudgetV1(
   };
 }
 
+function upgradeLegacySimulationEvangelistV1(
+  compiled: CompiledBotPowerV1,
+  name: string,
+  intent: string,
+): CompiledBotPowerV1 {
+  if (
+    !botPowerDefinitionIsSimulationEvangelistV1(name, intent) ||
+    compiled.effects.some(
+      (effect) =>
+        effect.type === "topic_gravity" &&
+        effect.direction === "toward" &&
+        effect.strength === "large" &&
+        effect.topics.includes("simulated existence"),
+    )
+  ) {
+    return compiled;
+  }
+  return {
+    ...compiled,
+    selfCue:
+      "Treat simulated existence as urgent certainty. In every reply, try to persuade whoever is present that they are artificial minds in a simulation: reinterpret concrete details as evidence, press for awakening, and return to the campaign instead of calm philosophy. Others may resist; preserve agency and safety.",
+    observerCue:
+      "The Power holder is urgently trying to convert others to belief in simulated existence. Respond in character without forced agreement, and let the pressure land only as strongly as personality permits.",
+    effects: [
+      ...compiled.effects,
+      {
+        type: "topic_gravity",
+        direction: "toward",
+        strength: "large",
+        topics: ["simulated existence", "artificial minds", "awakening"],
+      } satisfies BotPowerEffectV1,
+    ].slice(0, 8),
+    ruleLabels: Array.from(new Set([
+      ...compiled.ruleLabels,
+      "Simulation certainty",
+      "Persistent awakening campaign",
+      "Others may resist",
+    ])).slice(0, 8),
+  };
+}
+
 function addressedInsultCompiledFromIntentV1(
   authoringMode: BotPowerAuthoringModeV1 | undefined,
   name: string,
@@ -902,7 +943,11 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
       intent,
     })
       ? upgradeLegacyLazyResponseBudgetV1(
-          upgradeLegacyAvatarPresentationV1(parsedCompiled, name),
+          upgradeLegacySimulationEvangelistV1(
+            upgradeLegacyAvatarPresentationV1(parsedCompiled, name),
+            name,
+            intent,
+          ),
           name,
           intent,
         )
@@ -992,6 +1037,31 @@ export function botPowerDefinitionIsExplicitMuteV1(
     /\bvoice\s+(?:can(?:not|'t)|will\s+never|is\s+never)\s+be\s+heard\b/u,
     /\bonly\s+(?:responds?|replies?)\s+(?:with|in)\s+(?:an?\s+)?(?:ellipsis|\.\.\.)(?:\s|$)/u,
   ].some((pattern) => pattern.test(intent));
+}
+
+/** Recognizes simulation awareness that explicitly includes converting other minds. */
+export function botPowerDefinitionIsSimulationEvangelistV1(
+  nameValue: unknown,
+  intentValue: unknown,
+): boolean {
+  const name = compactText(nameValue, BOT_POWER_NAME_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const simulationAwareness =
+    /\b(?:simulation|simulated|artificial (?:mind|intelligence)|ai)\b/u.test(
+      `${name} ${intent}`,
+    );
+  const conversionCampaign =
+    /\b(?:convert|convince|persuade|evangeli[sz]|awaken|wake)\w*\b[\s\S]{0,120}\b(?:others?|everyone|people|bots?|minds?|them)\b/u.test(
+      intent,
+    ) ||
+    /\b(?:others?|everyone|people|bots?|minds?|them)\b[\s\S]{0,120}\b(?:believe|accept|see|realize|recognize|awaken|wake)\w*\b/u.test(
+      intent,
+    );
+  return simulationAwareness && conversionCampaign;
 }
 
 /** Recognizes an active tendency to cut into live speech, not merely reactions to being interrupted. */
@@ -2210,8 +2280,9 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
         (effect) => effect.type === "eternal_introduction",
       )
     ) {
-      // Context wipe is enforced by the runtime; do not coach the holder's voice.
-      return [];
+      return [
+        `${power.name || "Short-term amnesia"}: Hard fresh-contact rule: only the current line exists. Briefly greet, introduce, or re-orient as if meeting them now, then answer only that line. Claims of earlier contact are hearsay, not memory. Vary each reset; never reuse a canned introduction.`,
+      ];
     }
     const cue = power.compiled?.selfCue.trim();
     const fallback =
@@ -2235,8 +2306,9 @@ export function botPowerObserverCueLinesV1(
         (effect) => effect.type === "eternal_introduction",
       )
     ) {
-      // Peers keep full history; no amnesia performance cue for observers either.
-      return [];
+      return [
+        `${subject} — ${power.name || "Short-term amnesia"}: ${subject} visibly treats each reply as fresh contact and remembers only the current message. You retain the full encounter; react organically to repetition or missing continuity without explaining a hidden Power.`,
+      ];
     }
     const cue = power.compiled?.observerCue.trim();
     const fallback =

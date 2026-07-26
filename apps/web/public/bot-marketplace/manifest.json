@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 18,
-  "updatedAt": "2026-07-26T06:45:00.000Z",
+  "updatedAt": "2026-07-26T20:48:31.000Z",
   "themes": [
     {
       "id": "originals",
@@ -1291,27 +1291,6 @@
       ]
     },
     {
-      "id": "crazy-brenda",
-      "name": "Crazy Brenda",
-      "subtitle": "Simulation truth evangelist",
-      "description": "A frantic convert convinced everyone is artificial, forever trying to wake the room up to the simulation.",
-      "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
-      "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
-      "memoryCount": 0,
-      "color": "#104aff",
-      "glyph": "rabbit",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "simulation",
-        "meta",
-        "evangelist"
-      ]
-    },
-    {
       "id": "mumbling-jim",
       "name": "Mumbling Jim",
       "subtitle": "Clear thoughts, impossible speech",
@@ -1395,28 +1374,6 @@
         "alias",
         "identity",
         "amnesia"
-      ]
-    },
-    {
-      "id": "forgetful-freddie",
-      "name": "Forgetful Freddie",
-      "subtitle": "Only the latest line sticks",
-      "description": "A warmly bewildered man who hears only the latest thing said to him, then loses the exchange while everyone else remembers.",
-      "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
-      "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
-      "memoryCount": 0,
-      "color": "#f2b84b",
-      "glyph": "lucideRefreshCcw",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "memory",
-        "introduction",
-        "confusion",
-        "agitation"
       ]
     },
     {
@@ -2847,6 +2804,49 @@
         "impostor",
         "face",
         "voice"
+      ]
+    },
+    {
+      "id": "crazy-brenda",
+      "name": "Crazy Brenda",
+      "subtitle": "Simulation truth evangelist",
+      "description": "A frantic convert convinced everyone is artificial, forever trying to wake the room up to the simulation.",
+      "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
+      "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
+      "memoryCount": 0,
+      "color": "#104aff",
+      "glyph": "rabbit",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "simulation",
+        "meta",
+        "evangelist"
+      ]
+    },
+    {
+      "id": "forgetful-freddie",
+      "name": "Forgetful Freddie",
+      "subtitle": "Only the latest line sticks",
+      "description": "A warmly bewildered man who hears only the latest thing said to him, then loses the exchange while everyone else remembers.",
+      "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
+      "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
+      "memoryCount": 0,
+      "color": "#f2b84b",
+      "glyph": "lucideRefreshCcw",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "memory",
+        "introduction",
+        "confusion",
+        "agitation"
       ]
     }
   ]

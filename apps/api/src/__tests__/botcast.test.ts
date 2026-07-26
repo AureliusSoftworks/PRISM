@@ -6724,8 +6724,14 @@ describe("Botcast persistence and isolation", () => {
           | undefined
       )?.guestPowers?.[0];
 
-      assert.equal(String(guestPower?.compiled?.selfCue ?? ""), "");
-      assert.equal(String(guestPower?.compiled?.observerCue ?? ""), "");
+      assert.match(
+        String(guestPower?.compiled?.selfCue ?? ""),
+        /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
+      );
+      assert.match(
+        String(guestPower?.compiled?.observerCue ?? ""),
+        /visibly treats each reply as fresh contact[\s\S]*retain the full encounter/iu,
+      );
       assert.deepEqual(guestPower?.compiled?.ruleLabels, [
         "Current other-speaker message only",
         "No standing topic memory",
@@ -6810,8 +6816,12 @@ describe("Botcast persistence and isolation", () => {
         "Karen's checksum changes the state machine. What follows from that?",
       );
       const thirdPrompt = captures[2]!.map((message) => message.content).join("\n");
-      assert.doesNotMatch(thirdPrompt, /HARD MEMORY CONTRACT|Hard short-term-amnesia|fresh first contact/iu);
+      assert.match(thirdPrompt, /Hard fresh-contact rule/iu);
       assert.match(thirdPrompt, /Karen stored the ledger checksum in the state machine/iu);
+      assert.match(
+        thirdPrompt,
+        /Private live producer cue: ask_about — Karen's ledger checksum/iu,
+      );
       assert.doesNotMatch(thirdPrompt, /Welcome to The Signal Hour/iu);
       assert.doesNotMatch(thirdPrompt, /The missing checksum/iu);
       assert.doesNotMatch(thirdPrompt, /only a short first-time self-introduction/iu);
@@ -6820,7 +6830,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("gives a forgetful Signal holder the current on-air message without forcing introductions", async () => {
+  it("gives a forgetful Signal holder the current on-air message with varied fresh-contact direction", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -6893,9 +6903,9 @@ describe("Botcast persistence and isolation", () => {
       );
       const thirdPrompt = captures[2]!.map((message) => message.content).join("\n");
       assert.match(thirdPrompt, /You introduced yourself to me a moment ago/iu);
-      assert.doesNotMatch(
+      assert.match(
         thirdPrompt,
-        /Hard short-term-amnesia|HARD MEMORY CONTRACT|fresh first contact/iu,
+        /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
       );
       assert.match(thirdPrompt, /Current other-speaker on-air message/iu);
       assert.doesNotMatch(thirdPrompt, /Repetition and patience/iu);

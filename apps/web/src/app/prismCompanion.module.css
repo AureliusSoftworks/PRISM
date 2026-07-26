@@ -228,6 +228,16 @@
   pointer-events: auto;
 }
 
+.bubble {
+  cursor: copy;
+  user-select: text;
+}
+
+.bubble[data-copied="true"] {
+  border-color: color-mix(in srgb, var(--companion-i) 62%, #ffffff32);
+  box-shadow: 0 18px 48px -24px #000d, 0 0 30px #6fe3ff30, inset 0 1px 0 #ffffff18;
+}
+
 .bubble[data-recent="true"] { animation: bubbleArrive 240ms ease-out both; }
 .bubble:not([data-recent="true"]) { animation: bubbleLife 34s cubic-bezier(.2,.72,.22,1) both; }
 .bubble[data-role="user"]:not([data-recent="true"]) { animation-duration: 18s; }
@@ -235,15 +245,48 @@
 
 .bubble[data-role="assistant"], .thinking { justify-self: start; border-radius: 22px 22px 22px 7px; }
 .bubble[data-role="user"] { justify-self: end; border-radius: 22px 22px 7px 22px; border-color: #e978d740; }
-.bubble > span, .thinking > span { display: block; margin-bottom: 5px; color: #8bdfffb8; font: 780 0.56rem/1.2 system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; }
-.bubble[data-role="user"] > span { color: #ee9ce0b8; text-align: right; }
+.bubbleHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
+.bubbleHeader > span, .thinking > span { display: block; color: #8bdfffb8; font: 780 0.56rem/1.2 system-ui, sans-serif; letter-spacing: .09em; text-transform: uppercase; }
+.thinking > span { margin-bottom: 5px; }
+.bubble[data-role="user"] .bubbleHeader { flex-direction: row-reverse; }
+.bubble[data-role="user"] .bubbleHeader > span { color: #ee9ce0b8; text-align: right; }
+.copyButton {
+  padding: 2px 6px;
+  border: 1px solid #ffffff1c;
+  border-radius: 999px;
+  color: var(--fg-subtle, #77716d);
+  background: #ffffff08;
+  font: 720 .5rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-1px);
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.bubble:hover .copyButton,
+.copyButton:focus-visible,
+.bubble[data-copied="true"] .copyButton {
+  opacity: 1;
+  pointer-events: auto;
+}
+.copyButton:hover,
+.copyButton:focus-visible,
+.bubble[data-copied="true"] .copyButton {
+  border-color: #8bdfff70;
+  color: #c6f3ff;
+  background: #6fe3ff12;
+}
+.copyButton:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 2px;
+}
 .thinking p { margin: 0; color: var(--fg-muted, #aaa4a0); font: italic .78rem/1.4 Georgia, serif; }
 
 .markdown { overflow-wrap: anywhere; font: .8rem/1.55 Georgia, "Times New Roman", serif; }
 .markdown :where(p, ul, ol, blockquote, pre, table) { margin: 0 0 .7em; }
 .markdown :where(p, ul, ol, blockquote, pre, table):last-child { margin: 0; }
 .markdown :where(ul, ol) { padding-left: 1.35em; }
-.markdown a { color: #8bdfff; }
+.markdown a { color: #8bdfff; cursor: pointer; }
 .markdown code { padding: .08em .28em; border-radius: .35em; background: #ffffff12; font: .88em ui-monospace, monospace; }
 .bubble[data-speech-preparing="true"] .markdown { min-height: 1.2em; }
 .bubble[data-speech-preparing="true"] .markdown::after {

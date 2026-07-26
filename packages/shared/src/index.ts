@@ -170,6 +170,7 @@ export {
   botPowerTargetNameFromEffectsV1,
   botPowerTargetNameV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDefinitionIsSimulationEvangelistV1,
   botPowerCopiesAddressedSpeechV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesFromEffectsV1,

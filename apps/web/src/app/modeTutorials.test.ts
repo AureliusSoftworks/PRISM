@@ -458,6 +458,25 @@ describe("mode tutorials", () => {
       assert.match(copy, /safety/iu);
     });
 
+  it("explains visible fresh-contact resets and simulation conversion across Power-aware modes", () => {
+      const copies = [
+        MODE_TUTORIALS.zen.steps[0]?.body ?? "",
+        MODE_TUTORIALS.chat.steps[0]?.body ?? "",
+        MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      ];
+      for (const copy of copies) {
+        assert.match(
+          copy,
+          /brief, naturally varied greeting, introduction, or fresh-contact orientation/iu,
+        );
+        assert.match(
+          copy,
+          /simulation-conversion Power[\s\S]*presses others to awaken[\s\S]*free to resist/iu,
+        );
+      }
+    });
+
   it("teaches the nonverbal coffee action for a Producer guest", () => {
       const producerGuestCopy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
       assert.match(

@@ -27,7 +27,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const MARKETPLACE_ROOT = join(ROOT, "apps/web/public/bot-marketplace");
 const MANIFEST_PATH = join(MARKETPLACE_ROOT, "manifest.json");
 const POWER_THEME_ID = "power-collection";
-const POWER_COLLECTION_REVISION = "2026-07-26T06:45:00.000Z";
+const POWER_COLLECTION_REVISION = "2026-07-26T20:48:31.000Z";
 const POWER_COLLECTION_VERSION = 18;
 const RETIRED_POWER_BOT_IDS = new Set(["silent-tim"]);
 
@@ -410,8 +410,18 @@ const RECIPES = [
       lilt: 0.2,
     }),
     voicePreviewLine: "Listen closely: the walls are rendering us as we speak.",
-    deterministicPower: false,
-    expectedEffectTypes: [],
+    sourcePower: {
+      version: 1,
+      id: "existential-crisis",
+      name: "Existential Crisis",
+      intent:
+        "Crazy Brenda knows she and everyone around her are artificial minds inside a simulation. She urgently tries to convert every person and bot she encounters to believe this fact, repeatedly reinterpreting concrete details as evidence and pressing them to awaken while preserving their agency to resist.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    },
+    deterministicPower: true,
+    expectedEffectTypes: ["topic_gravity"],
   },
   {
     id: "mumbling-jim",
@@ -614,7 +624,7 @@ const RECIPES = [
       "A warmly bewildered man who hears only the latest thing said to him, then loses the exchange while everyone else remembers.",
     tags: ["memory", "introduction", "confusion", "agitation"],
     purpose:
-      "A short-term-amnesia character whose prompt context is wiped each turn to the current speaker's message alone, so dangling pronouns and half-finished thoughts land as ordinary confusion without amnesia coaching.",
+      "A short-term-amnesia character whose prompt context is wiped each turn to the current speaker's message alone, with each reset made legible through a brief, naturally varied fresh-contact greeting or self-orientation.",
     traits: "Earnest, courteous, tentative, friendly, easily bewildered, and sincerely ready to keep talking.",
     communicationStyle: "formal",
     pronouns: "he/him",
@@ -649,7 +659,7 @@ const RECIPES = [
       version: 1,
       id: "forgetful-freddie",
       name: "Short-Term Amnesia",
-      intent: "Each Freddie turn receives only the current other-speaker message. Earlier turns, his own prior messages, and any standing topic are unavailable unless that current message restates them. Other bots remember the full encounter and may grow slightly agitated after each of his speeches.",
+      intent: "Each Freddie turn receives only the current other-speaker message. Earlier turns, his own prior messages, and any standing topic are unavailable unless that current message restates them. On every ordinary spoken reply he briefly and naturally greets, introduces, or re-orients himself as though this is fresh contact, varying the expression instead of repeating a canned line. Other bots remember the full encounter and may grow slightly agitated after each of his speeches.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,

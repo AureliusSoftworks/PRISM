@@ -230,7 +230,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Talk beside the document",
-        body: "Click the weighted rainbow Prism orb—or press Option Space on macOS and Control Space on Windows or Linux—to catch an idea without leaving Slate. During focused creation and full-screen loading, the free-floating assistant steps out and the same orb moves into the experience as a non-interactive presence. Throw the orb and it glides to a stop; with reduced motion it stays where released. Voice on lets Prism speak while each reply appears at the pace of its voice; use the same control to mute the widget and show replies immediately. The app softens behind the open panel, the newest two messages remain readable while older lines recede, and only the last three can recover in this app session on this surface. That is short recovery, not remembered history. Type / for Prompt Center prompts and ! for wildcard decks in the companion composer; they expand when you send. Prism can see the project and section names, not manuscript prose, Continuity, or memories; it never edits prose, and sharing source material always begins with an explicit preview.",
+        body: "Click the weighted rainbow Prism orb—or press Option Space on macOS and Control Space on Windows or Linux—to catch an idea without leaving Slate. During focused creation and full-screen loading, the free-floating assistant steps out and the same orb moves into the experience as a non-interactive presence. Throw the orb and it glides to a stop; with reduced motion it stays where released. Voice on lets Prism speak while each reply appears at the pace of its voice; use the same control to mute the widget and show replies immediately. Click any Prism or You message bubble to copy its full text; dragging across text still selects it normally. The app softens behind the open panel, the newest two messages remain readable while older lines recede, and only the last three can recover in this app session on this surface. That is short recovery, not remembered history. Type / for Prompt Center prompts and ! for wildcard decks in the companion composer; they expand when you send. Prism can see the project and section names, not manuscript prose, Continuity, or memories; it never edits prose, and sharing source material always begins with an explicit preview.",
         clickLabel: "the global Prism companion",
         targetSelector: '[data-tutorial-target="prism-companion"]',
       },
@@ -256,6 +256,10 @@ const SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX =
   "Physical-size Powers keep a host or guest subtly larger or smaller on the saved stage and replay. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet add a small fixed voice-volume and transcript-size shift without changing physical size or visibility; Loud still annoys the other cast member, while half of Quiet turns are ignored and lower the speaker's saved mood.";
 const SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX =
   "An Obsessed cast member treats the peer or audience they address as the star of each line, with fresh admiration but no control, private knowledge, or safety override.";
+const FRESH_CONTACT_POWER_TUTORIAL_SUFFIX =
+  "A short-term-amnesia bot receives only the current other-speaker line. Each ordinary reply makes that reset legible with a brief, naturally varied greeting, introduction, or fresh-contact orientation; everyone else keeps the encounter and may react organically.";
+const SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX =
+  "A simulation-conversion Power keeps awareness from flattening into calm philosophy: its holder repeatedly turns concrete details into evidence and presses others to awaken, while every other character remains free to resist.";
 const IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX =
   "An identity-mirroring bot copies the public persona, CRT face, authored Avatar Details ink, and resolved voice of the latest bot who directly addresses it, along with the lived consequences of that bot's active public Powers. Borrowed Powers can organically change its claimed name and behavior, while bot ID, seat, role, glyph, color, private perception, safety, and provider boundaries remain anchored; the player is never copied. The saved face-ink-and-voice handoff replays exactly and resets with the session. When the bot hosts Signal, its authored default persona, face, ink, and voice return before the closing sign-off so it ends the show as itself.";
 const IDENTITY_SHAPESHIFT_POWER_TUTORIAL =
@@ -344,13 +348,13 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   zen: {
     ...BASE_MODE_TUTORIALS.zen,
     steps: BASE_MODE_TUTORIALS.zen.steps.map((step, index) => index === 0
-      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
       : step),
   },
   chat: {
     ...BASE_MODE_TUTORIALS.chat,
     steps: BASE_MODE_TUTORIALS.chat.steps.map((step, index) => index === 0
-      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
       : step),
   },
   coffee: {
@@ -358,7 +362,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: BASE_MODE_TUTORIALS.coffee.steps.map((step, index) => {
       const body = currentInterruptionRetortTutorialBody(step.body);
       return index === 0
-        ? { ...step, body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+        ? { ...step, body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
         : step.heading === "Join the conversation"
           ? {
               ...step,
@@ -384,7 +388,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return index === 5
         ? {
             ...step,
-            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
+            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
           }
         : step.heading === "Produce from the control room"
           ? {
