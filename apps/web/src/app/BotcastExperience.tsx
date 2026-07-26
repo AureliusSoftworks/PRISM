@@ -217,6 +217,7 @@ import {
   signalStudioMaskedFloorGlowStyle,
   signalStudioOverscanCoordinate,
   signalStudioPlacementStyle,
+  signalStudioSeatColorOrder,
   signalStudioVoicePan,
 } from "./signalStudioPlacement";
 import {
@@ -1020,18 +1021,25 @@ function activeShowAtmosphere(
 
 function SignalStudioMicrophoneTint({
   atmosphere,
+  layout,
   hostColor,
   guestColor,
   theme,
   surface = "stage",
 }: {
   atmosphere: BotcastShow["atmosphere"];
+  layout: BotcastStudioLayout;
   hostColor: string;
   guestColor: string;
   theme: "light" | "dark";
   surface?: "stage" | "dashboard";
 }): React.JSX.Element | null {
   if (!atmosphere.microphoneTintMaskUrl) return null;
+  const { leftColor, rightColor } = signalStudioSeatColorOrder(
+    layout,
+    hostColor,
+    guestColor,
+  );
   return (
     <div
       className={styles.signalMicrophoneTintLayer}
@@ -1040,16 +1048,16 @@ function SignalStudioMicrophoneTint({
         {
           ["--signal-microphone-tint-mask" as string]:
             `url("${atmosphere.microphoneTintMaskUrl}")`,
-          ["--signal-microphone-host-color" as string]:
-            normalizeAccentForTheme(hostColor, theme),
-          ["--signal-microphone-guest-color" as string]:
-            normalizeAccentForTheme(guestColor, theme),
+          ["--signal-microphone-left-color" as string]:
+            normalizeAccentForTheme(leftColor, theme),
+          ["--signal-microphone-right-color" as string]:
+            normalizeAccentForTheme(rightColor, theme),
         } as CSSProperties
       }
       aria-hidden="true"
     >
-      <span data-role="host" />
-      <span data-role="guest" />
+      <span data-side="left" />
+      <span data-side="right" />
     </div>
   );
 }
@@ -7871,6 +7879,7 @@ export function BotcastExperience({
           </div>
           <SignalStudioMicrophoneTint
             atmosphere={stageAtmosphere}
+            layout={studioLayout}
             hostColor={args.host?.color ?? stageAccentColor}
             guestColor={args.guest?.color ?? stageAccentColor}
             theme={stageTheme}
@@ -8750,6 +8759,7 @@ export function BotcastExperience({
                   </div>
                   <SignalStudioMicrophoneTint
                     atmosphere={stageAtmosphere}
+                    layout={layout}
                     hostColor={host.color ?? show.accentColor}
                     guestColor={guest?.color ?? show.accentColor}
                     theme={previewTheme}
@@ -11523,6 +11533,7 @@ export function BotcastExperience({
               )}
               <SignalStudioMicrophoneTint
                 atmosphere={dashboardAtmosphere}
+                layout={selectedShow.studioLayout}
                 hostColor={hostShowAccent ?? selectedShow.accentColor}
                 guestColor={hostShowAccent ?? selectedShow.accentColor}
                 theme={theme}

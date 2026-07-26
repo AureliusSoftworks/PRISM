@@ -2188,8 +2188,9 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(css, /\.microphoneForeground\s*\{/u);
     assert.match(source, /function SignalStudioMicrophoneTint/u);
     assert.match(source, /if \(!atmosphere\.microphoneTintMaskUrl\) return null/u);
-    assert.match(source, /<span data-role="host" \/>/u);
-    assert.match(source, /<span data-role="guest" \/>/u);
+    assert.match(source, /signalStudioSeatColorOrder/u);
+    assert.match(source, /<span data-side="left" \/>/u);
+    assert.match(source, /<span data-side="right" \/>/u);
     assert.match(source, /function signalStudioLightingStyle/u);
     assert.match(source, /data-generated-lighting/u);
     assert.match(
@@ -2203,7 +2204,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.signalMicrophoneTintLayer > span\[data-role="guest"\][^}]*clip-path:\s*inset\(0 0 0 50%\)/u,
+      /\.signalMicrophoneTintLayer > span\[data-side="right"\][^}]*clip-path:\s*inset\(0 0 0 50%\)/u,
     );
     assert.match(css, /mix-blend-mode:\s*normal/u);
   });

@@ -75,6 +75,22 @@ export function signalStudioMaskedFloorGlowStyle(
 }
 
 /**
+ * Resolves role-owned colors into physical left/right studio seats. Fixed
+ * artwork masks (such as the authored microphone trim) need this projection
+ * when the host and guest exchange sides.
+ */
+export function signalStudioSeatColorOrder(
+  layout: BotcastStudioLayout | null | undefined,
+  hostColor: string,
+  guestColor: string,
+): { leftColor: string; rightColor: string } {
+  const normalized = normalizeBotcastStudioLayout(layout);
+  return normalized.hostBot.x <= normalized.guestBot.x
+    ? { leftColor: hostColor, rightColor: guestColor }
+    : { leftColor: guestColor, rightColor: hostColor };
+}
+
+/**
  * Maps the saved on-screen seat to restrained stereo staging. The full
  * left/right range intentionally stays narrow so Signal remains intelligible
  * on speakers and collapses cleanly to mono.
