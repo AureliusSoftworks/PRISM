@@ -24,6 +24,7 @@ export const PRISM_TUTORIAL_IDS = [
   "chat",
   "coffee",
   "botcast",
+  "signalRefract",
   "slate",
 ] as const;
 
@@ -220,7 +221,14 @@ export function normalizePrismTutorialProgress(
           },
         ];
       }
-      if (!isRecord(raw)) return [id, fallback[id]];
+      if (!isRecord(raw)) {
+        return [
+          id,
+          id === "signalRefract"
+            ? { status: "pending", step: 0, remindAfter: null }
+            : fallback[id],
+        ];
+      }
       const status =
         raw.status === "completed" ||
         raw.status === "skipped" ||

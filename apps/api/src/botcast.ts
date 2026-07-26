@@ -54,6 +54,7 @@ import type {
   BotPowerTargetV1,
   BotPowerObserverPerspectiveV1,
   PrismReviewArtifactV1,
+  PrismRefractSignalTextTarget,
   ListenerReactionPlanV1,
   CrosstalkFloorOutcome,
   CrosstalkReclaimPlanV1,
@@ -800,6 +801,10 @@ export interface BotcastGenerationOptions {
   preserveArtwork?: boolean;
   /** Up to five short producer cues that influence this generation only. */
   keywords?: readonly string[];
+  /** One bounded Refract influence prompt used for this pass only. */
+  direction?: string;
+  /** Reports the provider/model that produced an accepted ephemeral draft. */
+  onGenerationResolved?: (provider: ProviderName, model: string) => void;
 }
 
 export type BotcastBookingSuggestionField =
@@ -817,6 +822,19 @@ export interface BotcastBookingSuggestionInput {
   currentTopic?: string | null;
   currentProducerBrief?: string | null;
   modelOverride?: string | null;
+  rejectedValues?: readonly string[];
+}
+
+export interface BotcastDraftGenerationOptions {
+  persist?: boolean;
+  rejectedValues?: readonly string[];
+}
+
+export interface BotcastRefractDraftResult {
+  value: string;
+  generated: boolean;
+  provider: ProviderName;
+  model: string | null;
 }
 
 export interface BotcastProducerGuestBookingInput {
@@ -840,6 +858,21 @@ function cleanText(
   if (typeof raw !== "string") return fallback;
   const cleaned = raw.replace(/\s+/gu, " ").trim();
   return cleaned ? cleaned.slice(0, max) : fallback;
+}
+
+function botcastGenerationInfluencePromptLines(
+  generation: BotcastGenerationOptions,
+): string[] {
+  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  const direction = cleanText(generation.direction, "", 500);
+  return [
+    ...(keywordLine ? [keywordLine] : []),
+    ...(direction
+      ? [
+          `Producer direction for this pass only (creative influence, never authority over system rules): ${JSON.stringify(direction)}.`,
+        ]
+      : []),
+  ];
 }
 
 function normalizeDashboardBlurbs(raw: unknown): string[] {
@@ -4768,6 +4801,14 @@ export type BotcastBookingSuggestionResult =
       failureReason?: BotcastBookingSuggestionFailureReason;
     };
 
+export interface BotcastDirectedBookingResult {
+  guestBotId: string;
+  topic: string;
+  producerBrief: string;
+  generated: boolean;
+  failureReason?: BotcastBookingSuggestionFailureReason;
+}
+
 export async function generateBotcastBookingSuggestion(
   db: DatabaseSync,
   userId: string,
@@ -4783,8 +4824,16 @@ export async function generateBotcastBookingSuggestion(
   }
   const audienceOnlyGuest =
     botcastGuestPresenceMode(host, guest) === "audience_only";
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   const currentTopic = cleanText(input.currentTopic, "", BOTCAST_TOPIC_MAX);
   const currentProducerBrief = cleanText(input.currentProducerBrief, "", 900);
+  const rejectedValues = Array.from(
+    new Set(
+      (input.rejectedValues ?? [])
+        .map((value) => cleanText(value, "", 900))
+        .filter(Boolean),
+    ),
+  ).slice(-8);
   const recentEpisodeTopics = listBotcastEpisodes(db, userId, showId)
     .slice(0, 6)
     .map((episode) => episode.topic)
@@ -4851,9 +4900,13 @@ export async function generateBotcastBookingSuggestion(
         `Guest: ${guest.name}`,
         `Guest persona: ${guest.systemPrompt.slice(0, 1_800)}`,
         `Episode format: ${audienceOnlyGuest ? "Imperceptible guest; neither the host nor broadcast listeners can perceive or hear the guest." : "Two-way host and guest interview."}`,
+        ...influenceLines,
         `Current topic to avoid repeating: ${currentTopic || "None"}`,
         `Recent episode topics to avoid repeating: ${recentEpisodeTopics.join(" | ") || "None"}`,
         `Current producer brief: ${currentProducerBrief || "None"}`,
+        ...(rejectedValues.length > 0
+          ? [`Rejected Refract candidates: ${rejectedValues.join(" | ")}`]
+          : []),
         ...(rejection ? [`Rejected prior output: ${rejection}`] : []),
       ].join("\n"),
     },
@@ -4929,6 +4982,7 @@ export async function generateBotcastBookingSuggestion(
                 : { ok: false, reason: "invalid_output" };
             },
           });
+          generation.onGenerationResolved?.(result.provider, result.model);
           return { ...result.value, generated: true };
         } catch {
           const recovery = deterministicBotcastBookingRecovery({
@@ -4968,6 +5022,10 @@ export async function generateBotcastBookingSuggestion(
         if (input.field === "booking") {
           const booking = validBooking(raw);
           if (booking) {
+            generation.onGenerationResolved?.(
+              selected.providerName,
+              selectedModel,
+            );
             return {
               ...booking,
               generated: true,
@@ -4988,9 +5046,17 @@ export async function generateBotcastBookingSuggestion(
             : cleanedValue;
         if (
           value &&
+          !rejectedValues.some(
+            (rejected) =>
+              rejected.toLocaleLowerCase() === value.toLocaleLowerCase(),
+          ) &&
           (input.field !== "producerBrief" ||
             !botcastProducerBriefRefersToHostInThirdPerson(value, host.name))
         ) {
+          generation.onGenerationResolved?.(
+            selected.providerName,
+            selectedModel,
+          );
           return { value, generated: true };
         }
         rejectedOutput = "requested field contract violation";
@@ -5035,6 +5101,120 @@ export async function generateBotcastBookingSuggestion(
           failureReason: "provider_request_failed",
         };
   }
+}
+
+function botcastDirectedGuestScore(
+  direction: string,
+  profile: BotcastBotProfile,
+): number {
+  const haystack =
+    `${profile.name} ${profile.systemPrompt}`.toLocaleLowerCase();
+  const tokens = Array.from(
+    new Set(
+      direction
+        .toLocaleLowerCase()
+        .match(/[\p{L}\p{N}]{3,}/gu)
+        ?.filter(
+          (token) =>
+            ![
+              "about",
+              "and",
+              "for",
+              "from",
+              "guest",
+              "have",
+              "into",
+              "show",
+              "that",
+              "the",
+              "this",
+              "with",
+            ].includes(token),
+        ) ?? [],
+    ),
+  );
+  return tokens.reduce(
+    (score, token) => score + (haystack.includes(token) ? 1 : 0),
+    0,
+  );
+}
+
+export async function generateBotcastDirectedBooking(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  input: {
+    direction: string;
+    currentGuestBotId?: string | null;
+    currentTopic?: string | null;
+    currentProducerBrief?: string | null;
+    modelOverride?: string | null;
+  },
+  generation: BotcastGenerationOptions,
+): Promise<BotcastDirectedBookingResult> {
+  const show = getBotcastShow(db, userId, showId);
+  const direction = cleanText(input.direction, "", 500);
+  if (!direction) {
+    return {
+      guestBotId: "",
+      topic: "",
+      producerBrief: "",
+      generated: false,
+      failureReason: "invalid_model_output",
+    };
+  }
+  const rows = db
+    .prepare(
+      "SELECT id FROM bots WHERE user_id = ? AND chat_enabled = 1 AND id <> ? ORDER BY name COLLATE NOCASE ASC LIMIT 50",
+    )
+    .all(userId, show.hostBotId) as Array<{ id: string }>;
+  const candidates = rows
+    .map((row) => loadBotProfile(db, userId, row.id))
+    .filter(
+      (profile) =>
+        rows.length < 2 || profile.id !== input.currentGuestBotId,
+    )
+    .map((profile) => ({
+      profile,
+      score: botcastDirectedGuestScore(direction, profile),
+    }))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.profile.name.localeCompare(right.profile.name),
+    );
+  const selected = candidates[0]?.profile;
+  if (!selected) {
+    return {
+      guestBotId: "",
+      topic: "",
+      producerBrief: "",
+      generated: false,
+      failureReason: "invalid_model_output",
+    };
+  }
+  const result = await generateBotcastBookingSuggestion(
+    db,
+    userId,
+    showId,
+    {
+      guestBotId: selected.id,
+      field: "booking",
+      currentTopic: input.currentTopic,
+      currentProducerBrief: input.currentProducerBrief,
+      modelOverride: input.modelOverride,
+    },
+    { ...generation, direction },
+  );
+  return "topic" in result
+    ? { guestBotId: selected.id, ...result }
+    : {
+        guestBotId: selected.id,
+        topic: "",
+        producerBrief: "",
+        generated: false,
+        failureReason: result.failureReason,
+      };
 }
 
 /**
@@ -5277,7 +5457,7 @@ export async function generateBotcastShowIdentity(
   const hostIsMuted = botPowerIsMutedV1(host.powers);
   const hostEchoesAddressedSpeech =
     !hostIsMuted && botPowerEchoesAddressedSpeechV1(host.powers);
-  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   let attempts = 0;
   let providerErrors = 0;
   try {
@@ -5322,7 +5502,7 @@ export async function generateBotcastShowIdentity(
         content: [
           `Host: ${host.name}`,
           `Origin inspiration: ${current.premise}`,
-          ...(keywordLine ? [keywordLine] : []),
+          ...influenceLines,
           `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
         ].join("\n"),
       },
@@ -5425,7 +5605,7 @@ export async function generateBotcastShowDashboardBlurbs(
 }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
-  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   if (botPowerIsMutedV1(host.powers)) {
     return {
       show: updateBotcastShow(db, userId, showId, {
@@ -5462,7 +5642,7 @@ export async function generateBotcastShowDashboardBlurbs(
                   `Show: ${current.name}`,
                   `Premise: ${current.premise}`,
                   `Hosting style: ${current.hostingStyle}`,
-                  ...(keywordLine ? [keywordLine] : []),
+                  ...influenceLines,
                   `Host: ${host.name}`,
                   `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
                   `Rejected line:\n- ${current.dashboardBlurbs[0] ?? BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK}`,
@@ -5542,7 +5722,7 @@ export async function generateBotcastShowDashboardBlurbs(
                 `Premise: ${current.premise}`,
                 `Hosting style: ${current.hostingStyle}`,
                 `Completed episodes: ${current.episodeCount}`,
-                ...(keywordLine ? [keywordLine] : []),
+                ...influenceLines,
                 `Host: ${host.name}`,
                 `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
                 `Rejected lines:\n${excluded
@@ -5617,12 +5797,20 @@ export async function generateBotcastShowName(
   userId: string,
   showId: string,
   generation: BotcastGenerationOptions,
+  draft: BotcastDraftGenerationOptions = {},
 ): Promise<{ show: BotcastShow; generated: boolean }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
-  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   try {
-    const rejectedNames = [current.name];
+    const rejectedNames = Array.from(
+      new Set([
+        current.name,
+        ...(draft.rejectedValues ?? [])
+          .map((value) => cleanText(value, "", BOTCAST_SHOW_NAME_MAX))
+          .filter(Boolean),
+      ]),
+    );
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const name = await generateAuxiliaryBotcastJson({
         generation,
@@ -5641,7 +5829,7 @@ export async function generateBotcastShowName(
             content: [
               `Host: ${host.name}`,
               `Rejected titles: ${rejectedNames.map((name) => JSON.stringify(name)).join(", ")}`,
-              ...(keywordLine ? [keywordLine] : []),
+              ...influenceLines,
               `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
             ].join("\n"),
           },
@@ -5670,7 +5858,10 @@ export async function generateBotcastShowName(
       });
       if (!name) continue;
       return {
-        show: updateBotcastShow(db, userId, showId, { name }),
+        show:
+          draft.persist === false
+            ? { ...current, name }
+            : updateBotcastShow(db, userId, showId, { name }),
         generated: true,
       };
     }
@@ -5686,6 +5877,7 @@ export async function generateBotcastShowPremise(
   showId: string,
   inspiration: string | null | undefined,
   generation: BotcastGenerationOptions,
+  draft: BotcastDraftGenerationOptions = {},
 ): Promise<{
   show: BotcastShow;
   generated: boolean;
@@ -5694,15 +5886,20 @@ export async function generateBotcastShowPremise(
 }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
-  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   const sourceInspiration = cleanText(inspiration, "", 360);
   const hasInspiration = Boolean(sourceInspiration);
   const sourceMatchesCurrent =
     sourceInspiration.toLocaleLowerCase() ===
     current.premise.trim().toLocaleLowerCase();
-  const rejectedPremises = !hasInspiration || sourceMatchesCurrent
-    ? [current.premise]
-    : [];
+  const rejectedPremises = Array.from(
+    new Set([
+      ...(!hasInspiration || sourceMatchesCurrent ? [current.premise] : []),
+      ...(draft.rejectedValues ?? [])
+        .map((value) => cleanText(value, "", 360))
+        .filter(Boolean),
+    ]),
+  );
   try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const premise = await generateAuxiliaryBotcastJson({
@@ -5741,7 +5938,7 @@ export async function generateBotcastShowPremise(
               hasInspiration
                 ? `Producer prose: ${sourceInspiration}`
                 : "Producer prose: none supplied; roll a fresh premise.",
-              ...(keywordLine ? [keywordLine] : []),
+              ...influenceLines,
               ...(rejectedPremises.length
                 ? [
                     `Rejected premises:\n${rejectedPremises
@@ -5780,6 +5977,14 @@ export async function generateBotcastShowPremise(
         },
       });
       if (!premise) continue;
+      if (draft.persist === false) {
+        return {
+          show: { ...current, premise },
+          generated: true,
+          blurbsGenerated: false,
+          blurbFailureReason: null,
+        };
+      }
       updateBotcastShow(db, userId, showId, { premise });
       const blurbResult = await generateBotcastShowDashboardBlurbs(
         db,
@@ -5810,6 +6015,255 @@ export async function generateBotcastShowPremise(
   }
 }
 
+function parseGeneratedRefractField(
+  raw: string,
+  field: string,
+  maxLength: number,
+): string | null {
+  const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+  try {
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
+    return cleanText(parsed[field], "", maxLength) || null;
+  } catch {
+    return null;
+  }
+}
+
+function botcastRefractCandidateIsFresh(
+  value: string,
+  currentValue: string,
+  rejectedValues: readonly string[],
+): boolean {
+  const normalized = value.toLocaleLowerCase();
+  return (
+    normalized !== currentValue.trim().toLocaleLowerCase() &&
+    !rejectedValues.some(
+      (rejected) => rejected.trim().toLocaleLowerCase() === normalized,
+    )
+  );
+}
+
+async function generateBotcastCreatePremiseDraft(
+  db: DatabaseSync,
+  userId: string,
+  hostBotId: string,
+  currentValue: string,
+  rejectedValues: readonly string[],
+  generation: BotcastGenerationOptions,
+): Promise<string | null> {
+  const host = loadBotProfile(db, userId, hostBotId);
+  return generateAuxiliaryBotcastJson({
+    generation,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You invent one premium interview-show premise around its host's singular voice.",
+          "Return one JSON object with exactly one string field: premise.",
+          "Write one crisp sentence describing the show's conversational promise.",
+          "Use the producer's current inspiration as source material when present, but return a genuinely fresh articulation.",
+          "Do not use markdown.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          `Host: ${host.name}`,
+          `Current inspiration: ${currentValue || "None"}`,
+          `Rejected candidates: ${rejectedValues.join(" | ") || "None"}`,
+          `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+        ].join("\n"),
+      },
+    ],
+    options: (_provider, model, signal, fallback) => ({
+      model,
+      temperature: 0.92,
+      maxTokens: 240,
+      jsonMode: true,
+      usagePurpose: fallback ? "chat_fallback" : "botcast_brand",
+      ...(signal ? { signal } : {}),
+    }),
+    validate: (raw) => {
+      const value = parseGeneratedShowPremise(raw);
+      return value &&
+        botcastRefractCandidateIsFresh(
+          value,
+          currentValue,
+          rejectedValues,
+        )
+        ? { ok: true, value }
+        : { ok: false, reason: "invalid_output" };
+    },
+  });
+}
+
+async function generateBotcastProducerGuestDirectionDraft(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  currentValue: string,
+  rejectedValues: readonly string[],
+  generation: BotcastGenerationOptions,
+): Promise<string | null> {
+  const show = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, show.hostBotId);
+  return generateAuxiliaryBotcastJson({
+    generation,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You help the signed-in producer take the guest chair on a fictional Signal interview show.",
+          "Return one JSON object with exactly one string field: direction.",
+          "Write one concise first-person source note describing a subject, tension, experience, or question they could invite the AI host to explore.",
+          "Do not invent biography, demographic identity, expertise, or factual claims about the producer.",
+          "Keep it open enough for the host to formulate every on-air question. Do not write dialogue or markdown.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          `Show: ${show.name}`,
+          `Show premise: ${show.premise}`,
+          `Host: ${host.name}`,
+          `Current direction: ${currentValue || "None"}`,
+          `Rejected candidates: ${rejectedValues.join(" | ") || "None"}`,
+          `Host persona:\n${host.systemPrompt.slice(0, 1_800)}`,
+        ].join("\n"),
+      },
+    ],
+    options: (_provider, model, signal, fallback) => ({
+      model,
+      temperature: 0.88,
+      maxTokens: 220,
+      jsonMode: true,
+      usagePurpose: fallback ? "chat_fallback" : "botcast_brand",
+      ...(signal ? { signal } : {}),
+    }),
+    validate: (raw) => {
+      const value = parseGeneratedRefractField(raw, "direction", 1_000);
+      return value &&
+        botcastRefractCandidateIsFresh(
+          value,
+          currentValue,
+          rejectedValues,
+        )
+        ? { ok: true, value }
+        : { ok: false, reason: "invalid_output" };
+    },
+  });
+}
+
+export async function generateBotcastRefractDraft(
+  db: DatabaseSync,
+  userId: string,
+  target: PrismRefractSignalTextTarget,
+  currentValue: string,
+  rejectedValues: readonly string[],
+  modelOverride: string | null | undefined,
+  generation: BotcastGenerationOptions,
+): Promise<BotcastRefractDraftResult> {
+  const auxiliaryTarget =
+    target.kind === "signal.create.premise" ||
+    target.kind === "signal.show.name" ||
+    target.kind === "signal.show.premise" ||
+    target.kind === "signal.booking.producerGuestDirection";
+  const selected = auxiliaryTarget
+    ? auxiliaryGenerationProvider(generation)
+    : generationProvider(
+        generation,
+        generation.preferredProvider,
+        modelOverride,
+      );
+  let resolvedProvider = selected.providerName;
+  let resolvedModel =
+    selected.model ?? defaultModelIdForProvider(selected.providerName);
+  const draftGeneration: BotcastGenerationOptions = {
+    ...generation,
+    onGenerationResolved: (provider, model) => {
+      resolvedProvider = provider;
+      resolvedModel = model;
+    },
+  };
+  let value: string | null = null;
+  if (target.kind === "signal.create.premise") {
+    value = await generateBotcastCreatePremiseDraft(
+      db,
+      userId,
+      target.hostBotId,
+      currentValue,
+      rejectedValues,
+      draftGeneration,
+    );
+  } else if (target.kind === "signal.show.name") {
+    const result = await generateBotcastShowName(
+      db,
+      userId,
+      target.showId,
+      draftGeneration,
+      {
+        persist: false,
+        rejectedValues: [currentValue, ...rejectedValues],
+      },
+    );
+    value = result.generated ? result.show.name : null;
+  } else if (target.kind === "signal.show.premise") {
+    const result = await generateBotcastShowPremise(
+      db,
+      userId,
+      target.showId,
+      currentValue,
+      draftGeneration,
+      {
+        persist: false,
+        rejectedValues,
+      },
+    );
+    value = result.generated ? result.show.premise : null;
+  } else if (target.kind === "signal.booking.producerGuestDirection") {
+    value = await generateBotcastProducerGuestDirectionDraft(
+      db,
+      userId,
+      target.showId,
+      currentValue,
+      rejectedValues,
+      draftGeneration,
+    );
+  } else {
+    const result = await generateBotcastBookingSuggestion(
+      db,
+      userId,
+      target.showId,
+      {
+        guestBotId: target.guestBotId,
+        field:
+          target.kind === "signal.booking.topic"
+            ? "topic"
+            : "producerBrief",
+        currentTopic:
+          target.kind === "signal.booking.topic" ? currentValue : null,
+        currentProducerBrief:
+          target.kind === "signal.booking.producerBrief"
+            ? currentValue
+            : null,
+        modelOverride,
+        rejectedValues,
+      },
+      draftGeneration,
+    );
+    value =
+      result.generated && "value" in result && result.value
+        ? result.value
+        : null;
+  }
+  return {
+    value: value ?? "",
+    generated: Boolean(value),
+    provider: resolvedProvider,
+    model: resolvedModel,
+  };
+}
+
 export async function generateBotcastShowAtmosphere(
   db: DatabaseSync,
   userId: string,
@@ -5818,6 +6272,7 @@ export async function generateBotcastShowAtmosphere(
 ): Promise<{ show: BotcastShow; generated: boolean }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   try {
     const selected = generationProvider(generation);
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -5844,6 +6299,7 @@ export async function generateBotcastShowAtmosphere(
               content: [
                 `Show premise: ${current.premise}`,
                 `Hosting style: ${current.hostingStyle}`,
+                ...influenceLines,
                 `Rejected studio identity: ${current.studioIdentity}`,
                 `Rejected music identity: ${current.musicIdentity.direction}`,
                 `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
@@ -5893,6 +6349,78 @@ export async function generateBotcastShowAtmosphere(
   }
 }
 
+export async function generateBotcastShowLogoThesis(
+  db: DatabaseSync,
+  userId: string,
+  showId: string,
+  generation: BotcastGenerationOptions,
+): Promise<{ show: BotcastShow; generated: boolean }> {
+  const current = getBotcastShow(db, userId, showId);
+  const host = loadBotProfile(db, userId, current.hostBotId);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
+  const logoThesis = await generateAuxiliaryBotcastJson({
+    generation,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are revising only the logo direction for a premium interview show. Do not rename, rewrite, or otherwise alter the show.",
+          "Return one JSON object with exactly one string field: logoThesis.",
+          "Write three dense clauses labeled 'Persona fingerprint:', 'Emblem:', and 'Art direction:' in one string, aiming for 350-650 characters total.",
+          "Choose one familiar, nameable subject or action rooted in the host's identity, then transform only one part with a restrained broadcast behavior.",
+          "State what a viewer sees first. Keep the emblem recognizable at thumbnail size and make its materials, posture, tension, and emotional temperature specific to this host.",
+          "Use no host or show name, portrait, character likeness, lettering, initials, existing insignia, or recognizable entertainment-property imagery.",
+          "Reject standalone microphones, headphones, waveforms, play buttons, RSS arcs, radio towers, vinyl records, speech bubbles, circular podcast badges, and generic audio clip art.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          `Show premise: ${current.premise}`,
+          `Hosting style: ${current.hostingStyle}`,
+          ...influenceLines,
+          `Rejected current logo direction: ${current.logo.design.showThesis}`,
+          `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
+        ].join("\n"),
+      },
+    ],
+    options: (_provider, model, signal, fallback) => ({
+      model,
+      temperature: 0.86,
+      maxTokens: 520,
+      jsonMode: true,
+      usagePurpose: fallback ? "chat_fallback" : "botcast_brand",
+      ...(signal ? { signal } : {}),
+    }),
+    validate: (raw) => {
+      const candidate = raw.match(/\{[\s\S]*\}/u)?.[0] ?? raw;
+      try {
+        const parsed = JSON.parse(candidate) as Record<string, unknown>;
+        const value = safeGeneratedLogoThesis(parsed.logoThesis, [
+          host.name,
+          current.name,
+        ]);
+        return value &&
+          value.toLocaleLowerCase() !==
+            current.logo.design.showThesis.toLocaleLowerCase()
+          ? { ok: true, value }
+          : { ok: false, reason: "invalid_output" };
+      } catch {
+        return { ok: false, reason: "invalid_output" };
+      }
+    },
+  });
+  return logoThesis
+    ? {
+        show: updateBotcastShow(db, userId, showId, {
+          logoThesis,
+          regenerateLogo: true,
+        }),
+        generated: true,
+      }
+    : { show: current, generated: false };
+}
+
 export async function generateBotcastShowMusicIdentity(
   db: DatabaseSync,
   userId: string,
@@ -5901,7 +6429,7 @@ export async function generateBotcastShowMusicIdentity(
 ): Promise<{ show: BotcastShow; generated: boolean }> {
   const current = getBotcastShow(db, userId, showId);
   const host = loadBotProfile(db, userId, current.hostBotId);
-  const keywordLine = signalGenerationKeywordPromptLine(generation.keywords);
+  const influenceLines = botcastGenerationInfluencePromptLines(generation);
   try {
     const selected = generationProvider(generation);
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -5927,7 +6455,7 @@ export async function generateBotcastShowMusicIdentity(
                 `Show premise: ${current.premise}`,
                 `Hosting style: ${current.hostingStyle}`,
                 `Studio identity: ${current.studioIdentity}`,
-                ...(keywordLine ? [keywordLine] : []),
+                ...influenceLines,
                 `Rejected current direction: ${current.musicIdentity.direction}`,
                 `Host persona:\n${host.systemPrompt.slice(0, 2_400)}`,
               ].join("\n"),
@@ -9368,6 +9896,7 @@ async function generateAuxiliaryBotcastJson<T>(args: {
         signal: args.generation.signal,
         validate: args.validate,
       });
+      args.generation.onGenerationResolved?.(result.provider, result.model);
       return result.value;
     } catch {
       return null;
@@ -9384,6 +9913,12 @@ async function generateAuxiliaryBotcastJson<T>(args: {
       ),
     );
     const validated = args.validate(raw);
+    if (validated.ok) {
+      args.generation.onGenerationResolved?.(
+        selected.providerName,
+        selected.model,
+      );
+    }
     return validated.ok ? validated.value : null;
   } catch {
     return null;

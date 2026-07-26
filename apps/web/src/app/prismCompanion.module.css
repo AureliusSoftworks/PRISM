@@ -14,6 +14,12 @@
   will-change: left, top;
 }
 
+.anchor[data-refracting="traveling"] {
+  transition:
+    left 420ms cubic-bezier(.2, .82, .2, 1),
+    top 420ms cubic-bezier(.2, .82, .2, 1);
+}
+
 .backdrop {
   position: fixed;
   inset: 0;
@@ -104,6 +110,67 @@
 .anchor[data-open="true"] .orb {
   transform: scale(1.12) rotate(60deg);
   filter: brightness(1.22);
+}
+
+.anchor[data-refracting] .avatar {
+  pointer-events: none;
+}
+
+.anchor[data-refracting="traveling"] .avatar {
+  filter: drop-shadow(0 10px 28px #70e4ff88);
+}
+
+.anchor[data-refracting="generating"] .avatar,
+.anchor[data-refracting="ready"] .avatar,
+.anchor[data-refracting="prompting"] .avatar,
+.anchor[data-refracting="error"] .avatar {
+  opacity: 0;
+  transform: scale(.16);
+  filter: blur(8px) saturate(1.5);
+  transition:
+    opacity 180ms ease,
+    transform 240ms cubic-bezier(.2, .82, .2, 1),
+    filter 180ms ease;
+}
+
+.refractGlyph {
+  position: absolute;
+  left: calc(
+    50% + var(--prism-refract-target-half-width, 0px) - 20px
+  );
+  top: 50%;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(.35) rotate(-18deg);
+  filter:
+    drop-shadow(0 0 4px #fff)
+    drop-shadow(0 0 10px color-mix(in srgb, var(--companion-i) 84%, transparent));
+  transition:
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(.2, .82, .2, 1);
+}
+
+.refractGlyph svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: color-mix(in srgb, var(--companion-i) 18%, transparent);
+  stroke: white;
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+}
+
+.anchor[data-refracting="generating"] .refractGlyph,
+.anchor[data-refracting="ready"] .refractGlyph,
+.anchor[data-refracting="prompting"] .refractGlyph,
+.anchor[data-refracting="error"] .refractGlyph {
+  opacity: .94;
+  transform: translate(-50%, -50%) scale(1) rotate(0);
 }
 
 .shortcut {
@@ -219,6 +286,82 @@
   animation: bubbleArrive 240ms ease-out both;
 }
 
+.refractPrompt {
+  width: min(390px, calc(100vw - 24px));
+  display: grid;
+  gap: 7px;
+  padding: 12px 13px;
+  border: 1px solid #9ceaff55;
+  border-radius: 18px;
+  color: var(--fg, #edf3f8);
+  background:
+    radial-gradient(circle at 12% 0%, #e978d71c, transparent 52%),
+    color-mix(in srgb, var(--bg-surface, #151311) 94%, transparent);
+  box-shadow:
+    0 22px 58px -32px #000e,
+    0 0 30px #6fe3ff18,
+    inset 0 1px 0 #ffffff12;
+  backdrop-filter: blur(20px) saturate(1.15);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  pointer-events: auto;
+  animation: bubbleArrive 180ms ease-out both;
+}
+
+.refractTutorial {
+  width: min(370px, calc(100vw - 24px));
+  display: grid;
+  gap: 7px;
+  padding: 13px 14px;
+  border: 1px solid #9ceaff4d;
+  border-radius: 19px;
+  color: var(--fg, #edf3f8);
+  background:
+    radial-gradient(circle at 10% 0%, #e978d71a, transparent 50%),
+    color-mix(in srgb, var(--bg-surface, #151311) 95%, transparent);
+  box-shadow: 0 20px 54px -30px #000e, 0 0 28px #6fe3ff14;
+  backdrop-filter: blur(20px) saturate(1.12);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
+  pointer-events: auto;
+  animation: bubbleArrive 180ms ease-out both;
+}
+
+.anchor[data-dock="right"] .refractTutorial { align-self: flex-end; }
+.anchor[data-dock="left"] .refractTutorial { align-self: flex-start; }
+.refractTutorial > span { color: #9ceaff; font: 780 .55rem/1.2 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; }
+.refractTutorial strong { font: 760 .74rem/1.25 system-ui, sans-serif; }
+.refractTutorial p { margin: 0; color: var(--fg-muted, #aaa4a0); font: .66rem/1.4 system-ui, sans-serif; }
+.refractTutorial > div { display: flex; gap: 7px; justify-content: flex-end; }
+.refractTutorial button { padding: 6px 9px; border: 1px solid #ffffff1f; border-radius: 999px; color: var(--fg-muted, #aaa4a0); background: #ffffff08; font: 700 .58rem/1 system-ui, sans-serif; cursor: pointer; }
+.refractTutorial button:hover { border-color: #9ceaff70; color: var(--fg, #edf3f8); }
+
+.anchor[data-dock="right"] .refractPrompt { align-self: flex-end; }
+.anchor[data-dock="left"] .refractPrompt { align-self: flex-start; }
+.refractPrompt label { color: #dff8ff; font: 760 .67rem/1.2 system-ui, sans-serif; }
+.refractPrompt input {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #ffffff1f;
+  border-radius: 11px;
+  outline: 0;
+  color: var(--fg, #edf3f8);
+  background: #070a11b8;
+  font: .75rem/1.35 system-ui, sans-serif;
+}
+.refractPrompt input:focus { border-color: #9ceaff99; box-shadow: 0 0 0 2px #6fe3ff18; }
+.refractPrompt small { color: var(--fg-subtle, #77716d); font: .56rem/1.2 system-ui, sans-serif; }
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .anchor[data-dock="right"] .composer { align-self: flex-end; }
 .anchor[data-dock="left"] .composer { align-self: flex-start; }
 .composer textarea { width: 100%; resize: none; padding: 8px 9px; border: 0; outline: 0; color: var(--fg, #edf3f8); background: transparent; font: .76rem/1.45 system-ui, sans-serif; }
@@ -272,7 +415,9 @@
   .bubble[data-speech-preparing="true"] .markdown::after,
   .bubble[data-speaking="true"] .markdown::after { animation: none; }
   .bubble:not([data-recent="true"]) { animation-name: bubbleReducedLife; }
-  .backdrop, .light, .orb { transition-duration: 1ms; }
+  .anchor, .backdrop, .light, .orb { transition-duration: 1ms; }
+  .anchor[data-refracting] .avatar { transition-duration: 1ms; }
+  .refractGlyph { transition-duration: 1ms; }
 }
 
 @media (max-width: 720px) {

@@ -66,7 +66,7 @@ test("suppresses the floating assistant only during live Signal and Coffee sessi
   );
   assert.match(
     companion,
-    /\[companionSuppressed, open, openAndFocus\]/u,
+    /\[[\s\S]{0,180}companionSuppressed,[\s\S]{0,180}openAndFocus,[\s\S]{0,180}\]/u,
   );
   assert.match(
     companion,

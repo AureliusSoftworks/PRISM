@@ -67,10 +67,13 @@ import {
   ensureBotcastEpisodePersonaReview,
   forceEndBotcastEpisode,
   generateBotcastBookingSuggestion,
+  generateBotcastDirectedBooking,
   generateBotcastProducerGuestBooking,
+  generateBotcastRefractDraft,
   generateBotcastShowAtmosphere,
   generateBotcastShowDashboardBlurbs,
   generateBotcastShowIdentity,
+  generateBotcastShowLogoThesis,
   generateBotcastShowMusicIdentity,
   generateBotcastShowName,
   generateBotcastShowPremise,
@@ -10538,6 +10541,151 @@ describe("Botcast persistence and isolation", () => {
       assert.match(
         captures[0]?.[1]?.content ?? "",
         /Producer keyword cues.*"nocturnal".*"tactile evidence"/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns Refract show-name drafts without persisting candidates", async () => {
+    const db = fixture();
+    const provider = recordingProvider(
+      ['{"name":"The Unstored Spectrum"}'],
+      [],
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const savedName = show.name;
+      const result = await generateBotcastRefractDraft(
+        db,
+        "user-1",
+        { kind: "signal.show.name", showId: show.id },
+        savedName,
+        [savedName, "A Rejected Name"],
+        null,
+        generation(provider),
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.value, "The Unstored Spectrum");
+      assert.equal(result.provider, "local");
+      assert.equal(getBotcastShow(db, "user-1", show.id).name, savedName);
+      assert.throws(
+        () => getBotcastShow(db, "user-2", show.id),
+        /not found/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports the model that actually produced an AUTO Refract draft", async () => {
+    const db = fixture();
+    const providerFactory: typeof selectProvider = (providerName) => ({
+      name: providerName,
+      async generateResponse() {
+        if (providerName === "local") {
+          throw new Error("Local auxiliary model unavailable");
+        }
+        return '{"name":"The Recovered Prism"}';
+      },
+      async embedText() {
+        return [];
+      },
+    });
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastRefractDraft(
+        db,
+        "user-1",
+        { kind: "signal.show.name", showId: show.id },
+        show.name,
+        [],
+        null,
+        {
+          preferredProvider: "local",
+          responseMode: "auto",
+          prismDefaultLlmModel: "gemma3:latest",
+          autoFallbackChain: {
+            v: 1,
+            fallbacks: [
+              { provider: "anthropic", model: "claude-haiku-4-5" },
+            ],
+          },
+          providerFactory,
+        },
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.provider, "anthropic");
+      assert.equal(result.model, "claude-haiku-4-5");
+      assert.equal(getBotcastShow(db, "user-1", show.id).name, show.name);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets a directed Book for me pass select an authorized guest and synthesize one coherent booking", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        '{"topic":"The Debt of Disruption","producerBrief":"Ask what invention owes the people disrupted by its success, then press for one concrete responsibility the guest accepts."}',
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastDirectedBooking(
+        db,
+        "user-1",
+        show.id,
+        {
+          direction: "Choose Ivo for a tense conversation about invention.",
+          currentTopic: "A generic invention conversation",
+          modelOverride: "signal-suggestion-model",
+        },
+        generation(provider),
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.guestBotId, "guest-1");
+      assert.equal(result.topic, "The Debt of Disruption");
+      assert.match(
+        captures[0]?.[1]?.content ?? "",
+        /Choose Ivo for a tense conversation about invention/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("revises only the directed logo thesis before the artwork handoff", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const logoThesis =
+      "Persona fingerprint: forensic restraint under pressure, with a habit of tagging every claim for inspection. Emblem: a familiar evidence card whose single clipped corner becomes a restrained transmission pulse. Art direction: tactile paper fiber, exact black registration marks, one controlled cyan interruption, compact asymmetry, and cool skeptical tension.";
+    const provider = recordingProvider(
+      [JSON.stringify({ logoThesis })],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const result = await generateBotcastShowLogoThesis(
+        db,
+        "user-1",
+        show.id,
+        {
+          ...generation(provider),
+          direction: "Make the symbol feel tactile and forensic.",
+        },
+      );
+      assert.equal(result.generated, true);
+      assert.equal(result.show.name, show.name);
+      assert.equal(result.show.premise, show.premise);
+      assert.equal(result.show.studioIdentity, show.studioIdentity);
+      assert.equal(result.show.logo.design.showThesis, logoThesis);
+      assert.notEqual(result.show.logo.revision, show.logo.revision);
+      assert.match(
+        captures[0]?.[1]?.content ?? "",
+        /Make the symbol feel tactile and forensic/u,
       );
     } finally {
       db.close();

@@ -16,6 +16,19 @@ import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
 import type { BotFalseNameStateV1 } from "./botFalseName.js";
 
 export {
+  PRISM_REFRACT_DIRECTION_MAX_LENGTH,
+  PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH,
+  PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
+  PRISM_REFRACT_SIGNAL_TEXT_TARGET_KINDS,
+  normalizePrismRefractDirection,
+  normalizePrismRefractRequest,
+  type PrismRefractRequest,
+  type PrismRefractResponse,
+  type PrismRefractSignalTextTarget,
+  type PrismRefractSignalTextTargetKind,
+} from "./prismRefract.js";
+
+export {
   PRISM_COMPANION_HANDOFF_DIRECTIONS,
   PRISM_COMPANION_MESSAGE_MAX_LENGTH,
   PRISM_COMPANION_RECOVERY_LIMIT,
