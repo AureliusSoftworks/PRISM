@@ -5342,6 +5342,10 @@ describe("Coffee group foundation", () => {
     assert.equal(secondVisiblePromptMessages.length, 1);
     assert.match(secondProviderPrompt, /copper vault/iu);
     assert.doesNotMatch(secondProviderPrompt, /violet lighthouse/iu);
+    assert.match(
+      secondProviderPrompt,
+      /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
+    );
   });
 
   it("does not give Forgetful Freddie the saved Coffee topic at kickoff", async () => {
@@ -5403,10 +5407,11 @@ describe("Coffee group foundation", () => {
     const prompt = JSON.stringify(chatBodies.at(-1) ?? {});
     assert.doesNotMatch(prompt, /ORANGE CLOCK TOPIC SENTINEL/u);
     assert.match(prompt, /you do not know what the gathering is about/iu);
-    assert.doesNotMatch(
+    assert.match(
       prompt,
-      /standing table topic|Hard short-term-amnesia|HARD MEMORY CONTRACT|fresh first contact/iu,
+      /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
     );
+    assert.doesNotMatch(prompt, /standing table topic|HARD MEMORY CONTRACT/iu);
   });
 
   it("persists bot-only Coffee identity targets, ignores repeats, and replaces with the latest bot", async () => {

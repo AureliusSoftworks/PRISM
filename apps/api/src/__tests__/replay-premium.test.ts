@@ -130,6 +130,12 @@ describe("Signal Premium voice planning", () => {
     const second = planReplayPremiumSegments(manifest, takes);
     assert.deepEqual(first.map((segment) => segment.strategy), ["isolated_tts", "isolated_tts"]);
     assert.deepEqual(first.map((segment) => segment.inputHash), second.map((segment) => segment.inputHash));
+    assert.notDeepEqual(
+      first.map((segment) => segment.inputHash),
+      planReplayPremiumSegments(manifest, takes, "another-take").map(
+        (segment) => segment.inputHash,
+      ),
+    );
   });
 
   it("keeps single-actor runs as complete per-message TTS segments", () => {
@@ -225,15 +231,57 @@ describe("Signal Premium voice planning", () => {
         return new Response(JSON.stringify({
           audio_base64: Buffer.from("premium-audio").toString("base64"),
           voice_segments: [
-            { dialogue_input_index: 0, start_time_seconds: 0, end_time_seconds: 0.7 },
-            { dialogue_input_index: 1, start_time_seconds: 0.7, end_time_seconds: 1.2 },
+            {
+              dialogue_input_index: 0,
+              start_time_seconds: 0,
+              end_time_seconds: 0.7,
+              character_start_index: 0,
+              character_end_index: 6,
+            },
+            {
+              dialogue_input_index: 1,
+              start_time_seconds: 0.7,
+              end_time_seconds: 1.2,
+              character_start_index: 6,
+              character_end_index: 9,
+            },
           ],
-        }), { status: 200, headers: { "content-type": "application/json" } });
+          normalized_alignment: {
+            characters: [..."Hello.Hi."],
+            character_start_times_seconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.8, 0.9],
+            character_end_times_seconds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.8, 0.9, 1.2],
+          },
+        }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "character-cost": "11",
+          },
+        });
       },
     });
     assert.deepEqual(generated.timings, [
-      { sourceMessageId: "one", startMs: 0, endMs: 700, alignment: null },
-      { sourceMessageId: "two", startMs: 700, endMs: 1_200, alignment: null },
+      {
+        sourceMessageId: "one",
+        startMs: 0,
+        endMs: 700,
+        alignment: {
+          characters: [..."Hello."],
+          characterStartTimesSeconds: [0, 0.1, 0.2, 0.3, 0.4, 0.5],
+          characterEndTimesSeconds: [0.1, 0.2, 0.3, 0.4, 0.5, 0.7],
+        },
+      },
+      {
+        sourceMessageId: "two",
+        startMs: 700,
+        endMs: 1_200,
+        alignment: {
+          characters: [..."Hi."],
+          characterStartTimesSeconds: [0.7, 0.8, 0.9],
+          characterEndTimesSeconds: [0.8, 0.9, 1.2],
+        },
+      },
     ]);
+    assert.equal(generated.characterCost, 11);
   });
 });

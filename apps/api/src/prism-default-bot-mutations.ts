@@ -7,6 +7,7 @@ import {
   DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
   DEFAULT_BOT_FACE_BLINK_SCALE,
   DEFAULT_BOT_FACE_EYE_COUNT,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
   DEFAULT_BOT_FACE_EYE_OFFSET_X,
   DEFAULT_BOT_FACE_EYE_OFFSET_Y,
   DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
@@ -27,6 +28,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -52,6 +54,7 @@ const DEFAULT_BOT_COLUMNS = [
   "prism_default_bot_glyph",
   "prism_default_bot_face_eyes_font",
   "prism_default_bot_face_eye_character",
+  "prism_default_bot_face_eye_animation",
   "prism_default_bot_face_mouth_font",
   "prism_default_bot_face_mouth_character",
   "prism_default_bot_face_mouth_animation",
@@ -163,6 +166,12 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
       patch.faceEyeCharacter === null
         ? null
         : normalizeBotFaceEyeCharacter(patch.faceEyeCharacter),
+    prism_default_bot_face_eye_animation: requiredNormalized(
+      patch.faceEyeAnimation,
+      DEFAULT_BOT_FACE_EYE_MOVEMENT,
+      "eye movement",
+      normalizeBotFaceEyeMovement,
+    ),
     prism_default_bot_face_mouth_font: requiredNormalized(
       patch.faceMouthFont,
       DEFAULT_BOT_FACE_FONT_ID,

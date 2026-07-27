@@ -408,8 +408,14 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   }];
 
   assert.equal(botPowerEternallyIntroducesV1(powers), true);
-  assert.equal(botPowerSelfCueLinesV1(powers).join("\n"), "");
-  assert.equal(botPowerObserverCueLinesV1(name, powers).join("\n"), "");
+  assert.match(
+    botPowerSelfCueLinesV1(powers).join("\n"),
+    /Hard fresh-contact rule[\s\S]*Briefly greet, introduce, or re-orient[\s\S]*reuse a canned introduction/iu,
+  );
+  assert.match(
+    botPowerObserverCueLinesV1(name, powers).join("\n"),
+    /visibly treats each reply as fresh contact[\s\S]*retain the full encounter[\s\S]*react organically/iu,
+  );
   assert.deepEqual(
     parseStoredBotPowersV1(serializeBotPowersV1(powers))[0]?.compiled?.effects,
     [{ type: "eternal_introduction", memory: "current_other_speaker_message" }],
@@ -1315,6 +1321,44 @@ test("legacy Lazy Cameron Powers gain a hard minimal response budget without a r
       1,
     ),
     "Mm.",
+  );
+});
+
+test("legacy simulation-awareness Powers recover an explicit conversion campaign without a recompile", () => {
+  const name = "Existential Crisis";
+  const intent =
+    "This bot knows she is in a simulation, and that she is AI. She tries to convert others to believe this fact.";
+  const powers = normalizeBotPowersV1([{
+    version: 1,
+    id: "existential-crisis",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "I perceive this as a simulation.",
+      observerCue: "Acknowledging simulated existence.",
+      effects: [],
+      ruleLabels: ["Existential Awareness"],
+    },
+  }]);
+
+  assert.equal(powers[0]?.compileStatus, "ready");
+  assert.deepEqual(powers[0]?.compiled?.effects, [{
+    type: "topic_gravity",
+    direction: "toward",
+    strength: "large",
+    topics: ["simulated existence", "artificial minds", "awakening"],
+  }]);
+  assert.match(
+    powers[0]?.compiled?.selfCue ?? "",
+    /try to persuade[\s\S]*press for awakening[\s\S]*Others may resist/iu,
+  );
+  assert.match(
+    powers[0]?.compiled?.observerCue ?? "",
+    /urgently trying to convert others[\s\S]*without forced agreement/iu,
   );
 });
 

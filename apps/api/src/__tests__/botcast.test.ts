@@ -6398,7 +6398,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         advanced.message?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Off-mic stage actions.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Off-mic stage actions. [sighs]",
       );
       assert.doesNotMatch(advanced.message?.content ?? "", /antennae|\*/iu);
       assert.doesNotMatch(
@@ -6724,8 +6724,14 @@ describe("Botcast persistence and isolation", () => {
           | undefined
       )?.guestPowers?.[0];
 
-      assert.equal(String(guestPower?.compiled?.selfCue ?? ""), "");
-      assert.equal(String(guestPower?.compiled?.observerCue ?? ""), "");
+      assert.match(
+        String(guestPower?.compiled?.selfCue ?? ""),
+        /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
+      );
+      assert.match(
+        String(guestPower?.compiled?.observerCue ?? ""),
+        /visibly treats each reply as fresh contact[\s\S]*retain the full encounter/iu,
+      );
       assert.deepEqual(guestPower?.compiled?.ruleLabels, [
         "Current other-speaker message only",
         "No standing topic memory",
@@ -6810,8 +6816,12 @@ describe("Botcast persistence and isolation", () => {
         "Karen's checksum changes the state machine. What follows from that?",
       );
       const thirdPrompt = captures[2]!.map((message) => message.content).join("\n");
-      assert.doesNotMatch(thirdPrompt, /HARD MEMORY CONTRACT|Hard short-term-amnesia|fresh first contact/iu);
+      assert.match(thirdPrompt, /Hard fresh-contact rule/iu);
       assert.match(thirdPrompt, /Karen stored the ledger checksum in the state machine/iu);
+      assert.match(
+        thirdPrompt,
+        /Private live producer cue: ask_about — Karen's ledger checksum/iu,
+      );
       assert.doesNotMatch(thirdPrompt, /Welcome to The Signal Hour/iu);
       assert.doesNotMatch(thirdPrompt, /The missing checksum/iu);
       assert.doesNotMatch(thirdPrompt, /only a short first-time self-introduction/iu);
@@ -6820,7 +6830,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("gives a forgetful Signal holder the current on-air message without forcing introductions", async () => {
+  it("gives a forgetful Signal holder the current on-air message with varied fresh-contact direction", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -6893,9 +6903,9 @@ describe("Botcast persistence and isolation", () => {
       );
       const thirdPrompt = captures[2]!.map((message) => message.content).join("\n");
       assert.match(thirdPrompt, /You introduced yourself to me a moment ago/iu);
-      assert.doesNotMatch(
+      assert.match(
         thirdPrompt,
-        /Hard short-term-amnesia|HARD MEMORY CONTRACT|fresh first contact/iu,
+        /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
       );
       assert.match(thirdPrompt, /Current other-speaker on-air message/iu);
       assert.doesNotMatch(thirdPrompt, /Repetition and patience/iu);
@@ -11421,16 +11431,17 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         advanced.message?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, [laughs] and today I'm joined by Ivo Stone to explore A performed transcript.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [sighs]",
       );
       assert.equal(
         getBotcastEpisode(db, "user-1", episode.id).messages[0]
           ?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, [laughs] and today I'm joined by Ivo Stone to explore A performed transcript.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A performed transcript. [sighs]",
       );
       const prompt = captures[0]!.map((message) => message.content).join("\n");
       assert.match(prompt, /Use only one of these exact square-bracket tags/u);
       assert.match(prompt, /Include exactly one natural/u);
+      assert.match(prompt, /reaction at the very end/u);
     } finally {
       db.close();
     }
@@ -11491,13 +11502,13 @@ describe("Botcast persistence and isolation", () => {
       }
       assert.equal(
         turns[0]?.message?.voicePerformanceText,
-        "[breathes deeply] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reliable performed reactions.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Reliable performed reactions. [breathes deeply]",
       );
       assert.equal(turns[1]?.message?.voicePerformanceText, null);
       assert.equal(turns[2]?.message?.voicePerformanceText, null);
       assert.equal(
         turns[3]?.message?.voicePerformanceText,
-        "[exhales] That is the part I find difficult.",
+        "That is the part I find difficult. [exhales]",
       );
     } finally {
       db.close();
@@ -11538,11 +11549,11 @@ describe("Botcast persistence and isolation", () => {
         );
       }
 
-      assert.match(turns[0]?.message?.voicePerformanceText ?? "", /^\[sighs\]/u);
-      assert.match(turns[3]?.message?.voicePerformanceText ?? "", /^\[exhales\]/u);
+      assert.match(turns[0]?.message?.voicePerformanceText ?? "", /\[sighs\]$/u);
+      assert.match(turns[3]?.message?.voicePerformanceText ?? "", /\[exhales\]$/u);
       assert.match(
         turns[6]?.message?.voicePerformanceText ?? "",
-        /^\[breathes deeply\]/u,
+        /\[breathes deeply\]$/u,
       );
       const secondReactionPrompt = captures[3]!
         .map((message) => message.content)
@@ -17049,7 +17060,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         snapshot.botcast?.messages[0]?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit. [sighs]",
       );
       assert.equal(
         snapshot.botcast?.messages[1]?.stageActionText,
@@ -17139,7 +17150,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         restored.messages[0]?.voicePerformanceText,
-        "[sighs] Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit.",
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore What survives an edit. [sighs]",
       );
       assert.equal(restored.messages[1]?.content, "...");
       assert.equal(restored.messages[1]?.stageActionText, null);

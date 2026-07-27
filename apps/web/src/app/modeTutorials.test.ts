@@ -458,6 +458,25 @@ describe("mode tutorials", () => {
       assert.match(copy, /safety/iu);
     });
 
+  it("explains visible fresh-contact resets and simulation conversion across Power-aware modes", () => {
+      const copies = [
+        MODE_TUTORIALS.zen.steps[0]?.body ?? "",
+        MODE_TUTORIALS.chat.steps[0]?.body ?? "",
+        MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
+        MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      ];
+      for (const copy of copies) {
+        assert.match(
+          copy,
+          /brief, naturally varied greeting, introduction, or fresh-contact orientation/iu,
+        );
+        assert.match(
+          copy,
+          /simulation-conversion Power[\s\S]*presses others to awaken[\s\S]*free to resist/iu,
+        );
+      }
+    });
+
   it("teaches the nonverbal coffee action for a Producer guest", () => {
       const producerGuestCopy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
       assert.match(
@@ -1096,7 +1115,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /measured Signal intro row[\s\S]*recorded duration[\s\S]*seeks back to the beginning/u,
+        /measured Signal intro row[\s\S]*calibrated duration[\s\S]*seeks back to the beginning/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
@@ -1106,13 +1125,13 @@ describe("mode tutorials", () => {
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
         /Natural room silence, interruptions, crosstalk, retorts/u,
       );
-      assert.match(
+      assert.doesNotMatch(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /intro-length slider[\s\S]*translates the complete baked transcript, mouth, camera, and transition performance/u,
+        /intro-length slider/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /calibrated nine-second Signal intro is the default/u,
+        /automatic intro is calibrated to 8\.75 seconds[\s\S]*translates the complete baked transcript, mouth, camera, and transition performance/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",

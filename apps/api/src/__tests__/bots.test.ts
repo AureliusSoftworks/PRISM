@@ -170,6 +170,40 @@ describe("composeBotSystemPrompt", () => {
     assert.doesNotMatch(prompt ?? "", /DRAFT_MARKER|DISABLED_MARKER/u);
   });
 
+  it("makes a ready short-term-amnesia Power visibly fresh-contact in Chat and Zen prompts", () => {
+    const name = "Short-Term Amnesia";
+    const intent = "Only the current other-speaker message remains.";
+    const prompt = composeBotSystemPrompt(
+      "Forgetful Freddie",
+      "Stay courteous and earnest.",
+      false,
+      [{
+        version: 1,
+        id: "forgetful-freddie",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "",
+          observerCue: "",
+          effects: [{
+            type: "eternal_introduction",
+            memory: "current_other_speaker_message",
+          }],
+          ruleLabels: ["Current message only"],
+        },
+      }],
+    );
+
+    assert.match(
+      prompt ?? "",
+      /Hard fresh-contact rule[\s\S]*Briefly greet, introduce, or re-orient[\s\S]*reuse a canned introduction/iu,
+    );
+  });
+
   it("keeps the holder identity while cueing its bot-name suffix", () => {
     const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
     const prompt = composeBotSystemPrompt("Rick Sanchez", "Stay impatient.", false, [{

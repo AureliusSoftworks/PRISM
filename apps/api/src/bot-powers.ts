@@ -4,6 +4,7 @@ import {
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDefinitionIsSimulationEvangelistV1,
   botPowerDesignationEffectFromIntentV1,
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
@@ -321,9 +322,10 @@ function deterministicEternalIntroductionPower(
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
-    // Runtime wipes prior context each turn; leave voice uncoached.
-    selfCue: "",
-    observerCue: `${subject} only retains the current other-speaker message each turn.`,
+    selfCue:
+      "Hard fresh-contact rule: only the current line exists. Briefly greet, introduce, or re-orient as if meeting them now, then answer only that line. Claims of earlier contact are hearsay, not memory. Vary each reset; never reuse a canned introduction.",
+    observerCue:
+      `${subject} visibly treats each reply as fresh contact and remembers only the current message. You retain the full encounter; react organically to repetition or missing continuity without explaining a hidden Power.`,
     effects: [
       { type: "eternal_introduction", memory: "current_other_speaker_message" },
       {
@@ -336,7 +338,39 @@ function deterministicEternalIntroductionPower(
     ],
     ruleLabels: [
       "Current other-speaker message only",
+      "Fresh contact stays visible",
       "Repeated introductions grate on bots",
+    ],
+  };
+}
+
+function deterministicSimulationEvangelistPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  if (
+    !botPowerDefinitionIsSimulationEvangelistV1(source.name, source.intent)
+  ) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Treat simulated existence as urgent certainty. In every reply, try to persuade whoever is present that they are artificial minds in a simulation: reinterpret concrete details as evidence, press for awakening, and return to the campaign instead of calm philosophy. Others may resist; preserve agency and safety.",
+    observerCue:
+      `${subject} is urgently trying to convert you to belief in simulated existence. Respond in character without forced agreement, and let the pressure land only as strongly as your own personality permits.`,
+    effects: [{
+      type: "topic_gravity",
+      direction: "toward",
+      strength: "large",
+      topics: ["simulated existence", "artificial minds", "awakening"],
+    }],
+    ruleLabels: [
+      "Simulation certainty",
+      "Persistent awakening campaign",
+      "Others may resist",
     ],
   };
 }
@@ -1308,6 +1342,7 @@ function deterministicPower(
   const primary =
     deterministicDesignationPower(source, botName) ??
     deterministicEternalIntroductionPower(source, botName) ??
+    deterministicSimulationEvangelistPower(source, botName) ??
     deterministicFalseNamePower(source, botName) ??
     deterministicIdentityShapeshiftPower(source, botName) ??
     deterministicIdentityMirrorPower(source, botName) ??
@@ -1422,6 +1457,15 @@ function compiledEntrySatisfiesIntent(
   if (deterministicEternalIntroductionPower(source, "")) {
     return compiled.effects.some(
       (effect) => effect.type === "eternal_introduction",
+    );
+  }
+  if (deterministicSimulationEvangelistPower(source, "")) {
+    return compiled.effects.some(
+      (effect) =>
+        effect.type === "topic_gravity" &&
+        effect.direction === "toward" &&
+        effect.strength === "large" &&
+        effect.topics.includes("simulated existence"),
     );
   }
   if (deterministicMumblingPower(source, "")) {

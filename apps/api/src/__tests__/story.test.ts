@@ -1010,7 +1010,7 @@ describe("Story API helpers", () => {
     assert.equal(boundedScene?.narration, "Fine.");
   });
 
-  it("keeps Forgetful Freddie Story scenes locally grounded without forced introductions", async () => {
+  it("keeps Forgetful Freddie Story scenes locally grounded with varied fresh-contact behavior", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
     seedBot(db, "bot-b", "Forgetful Freddie");
@@ -1086,8 +1086,12 @@ describe("Story API helpers", () => {
     assert.ok(freddieScenes.every((scene) => scene.spritePose === "speaking"));
     assert.match(prompt, /Story adaptation for Forgetful Freddie/iu);
     assert.match(prompt, /current other-speaker beat/iu);
-    assert.match(prompt, /Do not add amnesia performance coaching/iu);
-    assert.doesNotMatch(prompt, /fresh first contact|explains the memory rule/iu);
+    assert.match(
+      prompt,
+      /brief, naturally varied greeting, introduction, or fresh-contact orientation/iu,
+    );
+    assert.match(prompt, /Other characters retain the full story/iu);
+    assert.doesNotMatch(prompt, /explains the memory rule/iu);
   });
 
   it("hard-echoes the prior bot-authored Story scene for powered speakers", async () => {

@@ -8934,7 +8934,6 @@ export function buildBotcastSpeakerPrompt(
       ? "Echo opening exception: nobody has addressed speech to you yet, so originate this one required opening in your own voice. After this first phrase, the hard echo rule takes over."
       : "Hard echo Power: repeat only the immediately preceding on-air line from the other cast member, verbatim. Add no words, actions, reactions, labels, or vocal tags. If there is no preceding cast line after your opening, return only `...`. This overrides every later question, answer, closing, and vocal-reaction instruction."
     : null;
-  // eternal_introduction: transcript wipe only — no hard amnesia performance cue.
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(speaker.powers);
   const responseBudgetRule = responseBudget
     ? responseBudget.mode === "minimal"
@@ -8952,7 +8951,7 @@ export function buildBotcastSpeakerPrompt(
               `Do not reuse these recently heard reactions: ${recentImmersiveVoiceTags.map((tag) => `[${tag}]`).join(", ")}.`,
             ]
           : []),
-        "Put the reaction at the very beginning or very end of the spoken line. Do not describe or explain it.",
+        "Put the reaction at the very end of the spoken line so it punctuates the finished thought without changing the voice that delivers the sentence. Do not describe or explain it.",
       ].join(" ")
     : "Do not include bracketed directions, delivery notes, or sound-effect tags in this line.";
   return [
@@ -9018,6 +9017,14 @@ export function buildBotcastSpeakerPrompt(
             `Show: ${args.show.name}`,
             `Your assigned on-air role: ${args.speakerRole}.`,
             `${peerAddressName} is the person in front of you now.`,
+            ...(args.speakerRole === "host" &&
+            args.episode.guestKind !== "producer"
+              ? [
+                  args.cue
+                    ? `Private live producer cue: ${args.cue.kind}${args.cue.detail ? ` — ${args.cue.detail}` : ""}`
+                    : "Private live producer cue: none",
+                ]
+              : []),
             transcript
               ? `Current other-speaker on-air message:\n${transcript}`
               : "No other-speaker on-air message is available yet; this may be the opening.",
@@ -9132,6 +9139,7 @@ function extractBotcastVoicePerformance(
   value: string,
   enabled: boolean,
   recentTags: readonly string[] = [],
+  automaticReactionRole?: BotcastSpeakerRole,
 ): { content: string; voicePerformanceText: string | null } {
   const directionSafeValue = value.replace(
     BOTCAST_PARENTHETICAL_STAGE_DIRECTION_PATTERN,
@@ -9146,7 +9154,10 @@ function extractBotcastVoicePerformance(
   const rawPerformanceText = enabled
     ? voicePerformanceTextFromActionCues(directionSafeValue)
     : null;
-  const fallbackTag = botcastFallbackImmersiveVoiceTag("guest", recentTags);
+  const fallbackTag = botcastFallbackImmersiveVoiceTag(
+    automaticReactionRole ?? "guest",
+    recentTags,
+  );
   const authoredAsteriskPerformanceTags = new Set(
     [...directionSafeValue.matchAll(/(\*{1,3})[^*\r\n]{1,240}\1/gu)]
       .flatMap((match) =>
@@ -9157,7 +9168,7 @@ function extractBotcastVoicePerformance(
         ].map((tagMatch) => (tagMatch[1] ?? "").trim().toLowerCase()),
       ),
   );
-  const voicePerformanceText = rawPerformanceText?.replace(
+  const normalizedPerformanceText = rawPerformanceText?.replace(
     BOTCAST_BRACKETED_DIRECTION_PATTERN,
     (match, rawTag: string) => {
       const tag = rawTag.trim().toLowerCase();
@@ -9168,6 +9179,39 @@ function extractBotcastVoicePerformance(
         : `[${fallbackTag}]`;
     },
   ) ?? null;
+  let voicePerformanceText = normalizedPerformanceText;
+  if (automaticReactionRole) {
+    let selectedAutomaticTag: string | null = null;
+    const performanceWithoutAutomaticTags = (
+      normalizedPerformanceText ?? content
+    )
+      .replace(
+        BOTCAST_BRACKETED_DIRECTION_PATTERN,
+        (match, rawTag: string) => {
+          const tag = rawTag.trim().toLowerCase();
+          if (
+            !(BOTCAST_IMMERSIVE_VOICE_TAGS as readonly string[]).includes(tag)
+          ) {
+            return match;
+          }
+          if (authoredAsteriskPerformanceTags.has(tag)) {
+            return match;
+          }
+          if (!selectedAutomaticTag && !recentTags.includes(tag)) {
+            selectedAutomaticTag = tag;
+          }
+          return " ";
+        },
+      )
+      .replace(/\s+/gu, " ")
+      .trim();
+    voicePerformanceText =
+      authoredAsteriskPerformanceTags.size > 0
+        ? performanceWithoutAutomaticTags
+        : `${performanceWithoutAutomaticTags} [${
+            selectedAutomaticTag ?? fallbackTag
+          }]`.trim();
+  }
   return {
     content,
     voicePerformanceText,
@@ -12457,6 +12501,7 @@ export async function advanceBotcastEpisode(
     immersiveVoiceEffectRequired ||
       stageActionPlan.decision === "persona_invite",
     botcastRecentImmersiveVoiceTags(episode),
+    immersiveVoiceEffectRequired ? speakerRole : undefined,
   );
   const cleanGeneratedContent = performance.content || fallback;
   const introductionSafeContent =
@@ -12742,19 +12787,19 @@ export async function advanceBotcastEpisode(
               [peer.name],
             )
           : immersiveVoiceEffectRequired
-            ? `[${botcastFallbackImmersiveVoiceTag(
+            ? `${content} [${botcastFallbackImmersiveVoiceTag(
                 speakerRole,
                 botcastRecentImmersiveVoiceTags(episode),
-              )}] ${content}`
+              )}]`
             : null)
     : !socialSilenceMarker &&
         !powerInterruptedContent &&
         responseBudgetAdjusted &&
         immersiveVoiceEffectRequired
-      ? `[${botcastFallbackImmersiveVoiceTag(
+      ? `${content} [${botcastFallbackImmersiveVoiceTag(
           speakerRole,
           botcastRecentImmersiveVoiceTags(episode),
-        )}] ${content}`
+        )}]`
     : null;
   const messageId = randomId(12);
   const tensionMoodKey = botcastVoiceMoodForTension(tension);

@@ -28,6 +28,9 @@ export const BOT_FACE_GLYPH_ANIMATIONS = [
 ] as const;
 export type BotFaceGlyphAnimation = (typeof BOT_FACE_GLYPH_ANIMATIONS)[number];
 export const DEFAULT_BOT_FACE_GLYPH_ANIMATION: BotFaceGlyphAnimation = "none";
+export const BOT_FACE_EYE_MOVEMENTS = ["still", "natural"] as const;
+export type BotFaceEyeMovement = (typeof BOT_FACE_EYE_MOVEMENTS)[number];
+export const DEFAULT_BOT_FACE_EYE_MOVEMENT: BotFaceEyeMovement = "natural";
 export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
 export const BOT_FACE_EYE_COUNTS = [1, 2] as const;
 export type BotFaceEyeCount = (typeof BOT_FACE_EYE_COUNTS)[number];
@@ -113,8 +116,8 @@ export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
   eyeCharacter: string | null;
   eyeCount: BotFaceEyeCount;
-  /** Legacy compatibility field. Custom eye glyphs do not animate. */
-  eyeAnimation: BotFaceGlyphAnimation;
+  /** Presentation-only eye attention. Stored under the legacy API field name. */
+  eyeAnimation: BotFaceEyeMovement;
   mouthFont: BotFaceFontId;
   mouthCharacter: string | null;
   mouthAnimation: BotFaceGlyphAnimation;
@@ -181,6 +184,26 @@ export function normalizeBotFaceGlyphAnimation(
   return typeof value === "string" &&
     BOT_FACE_GLYPH_ANIMATIONS.includes(value as BotFaceGlyphAnimation)
     ? (value as BotFaceGlyphAnimation)
+    : null;
+}
+
+/**
+ * Old eye-effect values were exposed by mistake but never rendered. Treat them
+ * as the new default so existing faces gain Natural movement without reviving
+ * the retired pulse/spin/flicker/wobble behavior.
+ */
+export function normalizeBotFaceEyeMovement(
+  value: unknown
+): BotFaceEyeMovement | null {
+  if (
+    typeof value === "string" &&
+    BOT_FACE_EYE_MOVEMENTS.includes(value as BotFaceEyeMovement)
+  ) {
+    return value as BotFaceEyeMovement;
+  }
+  return typeof value === "string" &&
+    BOT_FACE_GLYPH_ANIMATIONS.includes(value as BotFaceGlyphAnimation)
+    ? DEFAULT_BOT_FACE_EYE_MOVEMENT
     : null;
 }
 
@@ -476,7 +499,9 @@ export function resolveBotFaceStyle(
         ? normalizeBotFaceEyeCount(input.faceEyeCount) ??
           DEFAULT_BOT_FACE_EYE_COUNT
         : DEFAULT_BOT_FACE_EYE_COUNT,
-    eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    eyeAnimation:
+      normalizeBotFaceEyeMovement(input.faceEyeAnimation) ??
+      DEFAULT_BOT_FACE_EYE_MOVEMENT,
     mouthFont: normalizeBotFaceFontId(input.faceMouthFont) ?? fallbackFont,
     mouthCharacter,
     mouthAnimation:
@@ -559,7 +584,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     eyesFont: pickFont(),
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
     eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
-    eyeAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+    eyeAnimation: DEFAULT_BOT_FACE_EYE_MOVEMENT,
     mouthFont: pickFont(),
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,

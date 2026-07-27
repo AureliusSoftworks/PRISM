@@ -6,16 +6,25 @@ import {
   type BotAvatarSfxV1,
 } from "@localai/shared";
 import {
+  BOT_AVATAR_SFX_ATTACK_MS,
+  BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
+  BOT_AVATAR_SFX_RELEASE_MS,
   GENERATED_BOT_THINKING_SFX_PROMPT,
   PRISM_BOT_THINKING_SFX_FALLBACK_URLS,
   botAudioVoiceProfileWithThinkingSfx,
+  botAvatarSfxAttackGainAt,
+  botAvatarSfxLoopBounds,
+  botAvatarSfxLoopRestartTime,
+  botAvatarSfxReleaseGainAt,
   botAvatarSfxShouldPlay,
   botAvatarSfxStereoPanForRect,
   connectBotAvatarSfxSpatialAudio,
   effectiveBotAvatarSfxPlayback,
+  playBotAvatarSfxSampleAudio,
   prismBotThinkingSfxFallback,
   prismBotThinkingSfxFallbackIndex,
   requestElevenLabsAvatarSfxLoop,
+  stopBotAvatarSfxSampleAudio,
   stopBotAvatarSfxAudio,
   syncBotAvatarSfxAudio,
   type BotAvatarSfxAudioTarget,
@@ -92,6 +101,39 @@ test("bot thinking SFX follows the rendered bot's horizontal location", () => {
   assert.equal(
     botAvatarSfxStereoPanForRect({ left: 1_200, width: 100 }, 1_000),
     1,
+  );
+});
+
+test("avatar SFX trims both loop edges and scales the trim for short clips", () => {
+  assert.deepEqual(botAvatarSfxLoopBounds(4), {
+    startTime: BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
+    endTime: 4 - BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
+  });
+  const shortBounds = botAvatarSfxLoopBounds(0.4);
+  assert.ok(shortBounds);
+  assert.ok(Math.abs(shortBounds.startTime - 0.04) < 1e-10);
+  assert.ok(Math.abs(shortBounds.endTime - 0.36) < 1e-10);
+  assert.equal(botAvatarSfxLoopBounds(0), null);
+  assert.equal(botAvatarSfxLoopBounds(Number.NaN), null);
+  assert.equal(botAvatarSfxLoopRestartTime(0, 4), 0.08);
+  assert.equal(botAvatarSfxLoopRestartTime(3.92, 4), 0.08);
+  assert.equal(botAvatarSfxLoopRestartTime(2, 4), null);
+});
+
+test("avatar SFX uses the approved equal-power attack and release", () => {
+  assert.equal(BOT_AVATAR_SFX_ATTACK_MS, 120);
+  assert.equal(BOT_AVATAR_SFX_RELEASE_MS, 240);
+  assert.equal(botAvatarSfxAttackGainAt(0, 0.5, 0), 0);
+  assert.equal(botAvatarSfxAttackGainAt(0, 0.5, 1), 0.5);
+  assert.equal(botAvatarSfxReleaseGainAt(0.5, 0), 0.5);
+  assert.ok(botAvatarSfxReleaseGainAt(0.5, 1) < 1e-10);
+  assert.ok(
+    Math.abs(botAvatarSfxAttackGainAt(0, 1, 0.5) - Math.SQRT1_2) <
+      1e-10,
+  );
+  assert.ok(
+    Math.abs(botAvatarSfxReleaseGainAt(1, 0.5) - Math.SQRT1_2) <
+      1e-10,
   );
 });
 
@@ -202,6 +244,7 @@ test("automatic and manual avatar loops share the guarded ElevenLabs request", a
 class FakeAvatarSfxAudio implements BotAvatarSfxAudioTarget {
   src = "";
   currentTime = 0;
+  duration = 4;
   loop = false;
   volume = 1;
   paused = true;
@@ -223,6 +266,66 @@ class FakeAvatarSfxAudio implements BotAvatarSfxAudioTarget {
     this.paused = false;
   }
 }
+
+test("Avatar Studio sample fades in, trims its start, and releases before pausing", async () => {
+  const audio = new FakeAvatarSfxAudio();
+  await playBotAvatarSfxSampleAudio(
+    audio as unknown as HTMLMediaElement,
+    sfx,
+  );
+  assert.equal(audio.currentTime, 0.08);
+  assert.equal(audio.paused, false);
+  assert.equal(audio.volume, 0);
+  await new Promise((resolve) => setTimeout(resolve, BOT_AVATAR_SFX_ATTACK_MS + 40));
+  assert.ok(Math.abs(audio.volume - sfx.volume) < 1e-10);
+
+  stopBotAvatarSfxSampleAudio(audio as unknown as HTMLMediaElement);
+  assert.equal(audio.paused, false);
+  await new Promise((resolve) =>
+    setTimeout(resolve, BOT_AVATAR_SFX_RELEASE_MS + 40),
+  );
+  assert.equal(audio.paused, true);
+  assert.equal(audio.currentTime, 0);
+  assert.ok(audio.volume < 1e-10);
+});
+
+test("Avatar Studio sample cancels a release and fades source replacements safely", async () => {
+  const audio = new FakeAvatarSfxAudio();
+  await playBotAvatarSfxSampleAudio(
+    audio as unknown as HTMLMediaElement,
+    sfx,
+  );
+  await new Promise((resolve) => setTimeout(resolve, BOT_AVATAR_SFX_ATTACK_MS + 40));
+
+  stopBotAvatarSfxSampleAudio(audio as unknown as HTMLMediaElement);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await playBotAvatarSfxSampleAudio(
+    audio as unknown as HTMLMediaElement,
+    sfx,
+  );
+  await new Promise((resolve) => setTimeout(resolve, BOT_AVATAR_SFX_ATTACK_MS + 40));
+  assert.equal(audio.paused, false);
+  assert.equal(audio.loadCalls, 1);
+
+  const replacement = {
+    ...sfx,
+    audioDataUrl: "data:audio/mpeg;base64,BAUG",
+  };
+  await playBotAvatarSfxSampleAudio(
+    audio as unknown as HTMLMediaElement,
+    replacement,
+  );
+  assert.equal(audio.src, replacement.audioDataUrl);
+  assert.equal(audio.loadCalls, 2);
+  assert.equal(audio.currentTime, 0.08);
+  assert.equal(audio.paused, false);
+
+  stopBotAvatarSfxSampleAudio(audio as unknown as HTMLMediaElement);
+  await new Promise((resolve) =>
+    setTimeout(resolve, BOT_AVATAR_SFX_RELEASE_MS + 40),
+  );
+  assert.equal(audio.paused, true);
+});
 
 test("avatar SFX keeps one loop running across enabled live states", () => {
   const audio = new FakeAvatarSfxAudio();

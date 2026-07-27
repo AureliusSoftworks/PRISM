@@ -11,6 +11,8 @@ import {
   botPowerCandorTriggerV1,
   botPowerEternallyIntroducesFromEffectsV1,
   botPowerForgetfulPriorMessagesV1,
+  botPowerObserverCueLinesV1,
+  botPowerSelfCueLinesV1,
   botPowerThemeMoodCueFromEffectsV1,
   botPowerResponseIsSilentV1,
   botPowerIntermittentMuteEffectFromEffectsV1,
@@ -651,11 +653,15 @@ export function resolveCoffeePowersForSession(
       powerNames: powers.map((power) => power.name || "Power"),
       selfCue: [
         namingCue,
-        ...genericCuePowers.map((power) => power.compiled?.selfCue ?? ""),
+        ...genericCuePowers.flatMap((power) =>
+          botPowerSelfCueLinesV1([power])
+        ),
       ].filter(Boolean).join(" "),
       observerCue: [
         namingObserverCue,
-        ...genericCuePowers.map((power) => power.compiled?.observerCue ?? ""),
+        ...genericCuePowers.flatMap((power) =>
+          botPowerObserverCueLinesV1(bot.name, [power])
+        ),
       ].filter(Boolean).join(" "),
       visibleToBotIds:
         audienceIdsFromResolvedEffect(awareness, "awareness"),
@@ -944,7 +950,6 @@ export function coffeePowersPromptForSpeaker(
   if (own?.effects.some((effect) => effect.type === "speech_copy")) {
     lines.push("Hard Copycat rule: on your first turn, if nobody has addressed speech to you yet, originate one short in-character opening. After that, repeat only the latest speech addressed directly to you, verbatim, with no added words or actions; if there is no addressed speech, remain silent.");
   }
-  // eternal_introduction: context wipe only — no hard amnesia performance cue.
   if (own?.effects.some((effect) => effect.type === "false_name")) {
     lines.push(
       "Hard false-name rule: sincerely believe your session name is not your Library label; use only the assigned believed name for this turn.",
@@ -987,11 +992,7 @@ export function coffeePowersPromptForSpeaker(
     visiblePeerBotIds,
     socialByBotId,
   }));
-  const ownHasEternalIntroduction = Boolean(
-    own?.effects.some((effect) => effect.type === "eternal_introduction"),
-  );
-  // Amnesia is enforced by history wipe; do not inject compiled selfCue coaching.
-  if (own?.selfCue && !ownHasLegacyIdentityOnlyCue && !ownHasEternalIntroduction) {
+  if (own?.selfCue && !ownHasLegacyIdentityOnlyCue) {
     lines.push(own.selfCue);
   }
   for (const effect of own?.effects ?? []) {
@@ -1061,13 +1062,9 @@ export function coffeePowersPromptForSpeaker(
             effect.type === "false_name",
         ),
     );
-    const peerHasEternalIntroduction = Boolean(
-      peer?.effects.some((effect) => effect.type === "eternal_introduction"),
-    );
     if (
       peer?.observerCue &&
-      !peerHasLegacyIdentityOnlyCue &&
-      !peerHasEternalIntroduction
+      !peerHasLegacyIdentityOnlyCue
     ) {
       lines.push(peer.observerCue);
     }

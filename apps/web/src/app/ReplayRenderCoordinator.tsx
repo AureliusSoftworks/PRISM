@@ -1,17 +1,23 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type {
   ReplayRecordingV1,
   ReplaySurfaceV1,
   ReplayTimelineV1,
 } from "@localai/shared";
+import {
+  claimReplayStudioCutMix,
+  completeReplayStudioCutMix,
+  failReplayStudioCutMix,
+  replayFetch,
+  resumeReplayStudioCut,
+} from "./replayClient";
+import { encodeReplayAudioWindows } from "./replayRenderAudio";
+import { prepareSignalStudioCut } from "./signalStudioCutAudio";
 
 export const REPLAY_RECORDING_CHANGED_EVENT = "prism:replay-recording-changed";
 
-/**
- * Kept as a compatibility type for the released Signal canvas. Faithful
- * session replay is audio plus procedural direction and never renders video.
- */
 export interface ReplayFrameRenderer {
   captureFps: number;
   prepare: (
@@ -22,9 +28,57 @@ export interface ReplayFrameRenderer {
   finish?: () => void;
 }
 
+async function pendingSignalStudioCuts(): Promise<ReplayRecordingV1[]> {
+  const response = await replayFetch("/api/replays?surface=signal");
+  if (!response.ok) return [];
+  const payload = (await response.json().catch(() => null)) as
+    | { recordings?: ReplayRecordingV1[] }
+    | null;
+  return (payload?.recordings ?? []).filter(
+    (recording) =>
+      recording.studioCutProduction?.phase === "mixing_episode" &&
+      recording.studioCutProduction.masterReady,
+  );
+}
+
+async function mixStudioCut(recordingId: string): Promise<void> {
+  const claim = await claimReplayStudioCutMix(recordingId);
+  if (!claim) return;
+  try {
+    const prepared = await prepareSignalStudioCut(
+      claim.recording,
+      claim.premiumSegments,
+    );
+    await encodeReplayAudioWindows({
+      recordingId,
+      renderToken: claim.renderToken,
+      title: `${claim.recording.manifest?.title ?? "Signal"} — Studio Cut`,
+      uploadPath: `/api/replays/${encodeURIComponent(recordingId)}/studio-cut/mix/audio-chunk`,
+      windows: prepared.renderWindows(),
+    });
+    await completeReplayStudioCutMix({
+      recordingId,
+      renderToken: claim.renderToken,
+      durationMs: prepared.durationMs,
+      timeline: prepared.timeline,
+      manifest: prepared.manifest,
+      warning: prepared.warnings.join(" ") || null,
+    });
+  } catch (error) {
+    await failReplayStudioCutMix({
+      recordingId,
+      renderToken: claim.renderToken,
+      error: error instanceof Error ? error.message : "Studio Cut mixing failed.",
+    }).catch(() => undefined);
+  } finally {
+    window.dispatchEvent(new CustomEvent(REPLAY_RECORDING_CHANGED_EVENT));
+  }
+}
+
 /**
- * Historical callers can remain mounted while old saved rows are preserved,
- * but no client may claim or encode a replay render.
+ * Global, navigation-safe Signal audio finisher. Voice generation runs on the
+ * server; this coordinator performs bounded-window Web Audio mixing and
+ * streams 192 kbps Opus/WebM chunks without allocating a full episode buffer.
  */
 export function ReplayRenderCoordinator(
   props: {
@@ -33,6 +87,36 @@ export function ReplayRenderCoordinator(
     frameRenderer?: ReplayFrameRenderer;
   } = {},
 ): null {
-  void props;
+  const activeRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (props.surface && props.surface !== "signal") return;
+    let cancelled = false;
+    let timer = 0;
+    const poll = async (): Promise<void> => {
+      const pending = await pendingSignalStudioCuts().catch(() => []);
+      const response = await replayFetch("/api/replays?surface=signal").catch(() => null);
+      const payload = response?.ok
+        ? await response.json().catch(() => null) as { recordings?: ReplayRecordingV1[] } | null
+        : null;
+      for (const recording of payload?.recordings ?? []) {
+        if (recording.studioCutProduction?.phase === "mastering_voices") {
+          void resumeReplayStudioCut(recording.id).catch(() => undefined);
+        }
+      }
+      for (const recording of pending) {
+        if (cancelled || activeRef.current.has(recording.id)) continue;
+        activeRef.current.add(recording.id);
+        void mixStudioCut(recording.id).finally(() => {
+          activeRef.current.delete(recording.id);
+        });
+      }
+      if (!cancelled) timer = window.setTimeout(() => void poll(), 3_000);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [props.surface]);
   return null;
 }

@@ -16,6 +16,10 @@ const orbCss = readFileSync(
 );
 const globalCss = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const tutorials = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 const handoffCanvas = readFileSync(
   new URL("./PrismHandoffCanvas.tsx", import.meta.url),
   "utf8",
@@ -114,6 +118,30 @@ test("keeps the newest two replies readable while older messages recede", () => 
   );
   assert.match(companionCss, /\.bubble:not\(\[data-recent="true"\]\).*bubbleLife 34s/u);
   assert.match(companionCss, /filter: blur\(3px\)/u);
+});
+
+test("copies a full ephemeral bubble without hijacking links or text selection", () => {
+  assert.match(
+    component,
+    /writePrismCompanionClipboard\(message\.content\)/u,
+  );
+  assert.match(component, /prismCompanionBubbleHasSelection/u);
+  assert.match(
+    component,
+    /target\.closest\(\s*"a, button, input, textarea, select, summary"/u,
+  );
+  assert.match(component, /data-copied=\{copied \? "true" : undefined\}/u);
+  assert.match(component, /`Copy \$\{speakerLabel\} message`/u);
+  assert.match(component, /role="status"[\s\S]*aria-live="polite"/u);
+  assert.match(companionCss, /\.bubble \{[\s\S]*cursor: copy/u);
+  assert.match(
+    companionCss,
+    /\.bubble:hover \.copyButton,[\s\S]*\.bubble\[data-copied="true"\] \.copyButton/u,
+  );
+  assert.match(
+    tutorials,
+    /Click any Prism or You message bubble to copy its full text; dragging across text still selects it normally/u,
+  );
 });
 
 test("lets the player mute only Prism's widget voice", () => {

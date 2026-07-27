@@ -827,6 +827,7 @@ describe("backup bot avatar face style", () => {
         },
         faceEyesFont: "warm",
         faceEyeCharacter: "8",
+        faceEyeAnimation: "natural",
         faceMouthFont: "formal",
         faceMouthCharacter: "△",
         faceMouthAnimation: "flicker",
@@ -926,7 +927,7 @@ describe("backup bot avatar face style", () => {
       );
       assert.equal(restored.face_eyes_font, "warm");
       assert.equal(restored.face_eye_character, "8");
-      assert.equal(restored.face_eye_animation, "none");
+      assert.equal(restored.face_eye_animation, "natural");
       assert.equal(restored.face_mouth_font, "formal");
       assert.equal(restored.face_mouth_character, "△");
       assert.equal(restored.face_mouth_animation, "flicker");

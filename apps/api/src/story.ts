@@ -1638,7 +1638,7 @@ function storyEternalIntroductionPowerRules(
   return bots.flatMap((holder) => {
     if (!botPowerEternallyIntroducesV1(holder.powers)) return [];
     return [
-      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. Do not supply earlier story history, episode premise, or topic unless that immediate beat states it. Do not add amnesia performance coaching — let ${holder.name} answer the available beat naturally. Other characters retain the full story.`,
+      `Story adaptation for ${holder.name}: for each spoken scene, give ${holder.name} only the current other-speaker beat immediately preceding that scene. Do not supply earlier story history, episode premise, or topic unless that immediate beat states it. Make the reset legible with one brief, naturally varied greeting, introduction, or fresh-contact orientation before ${holder.name} answers only that beat; never reuse a canned line. Other characters retain the full story and may react organically to the repetition or missing continuity.`,
     ];
   });
 }

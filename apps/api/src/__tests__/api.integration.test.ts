@@ -2283,7 +2283,7 @@ describe("API request integration", () => {
       jsonInit({
         name: "Marketplace update target",
         faceEyeCharacter: "8",
-        faceEyeAnimation: "spin",
+        faceEyeAnimation: "natural",
         faceEyeRotationDeg: -25,
         faceEyeCount: 2,
         faceMouthCharacter: "△",
@@ -2297,7 +2297,7 @@ describe("API request integration", () => {
     assert.equal(created.status, 201);
     const createdPayload = await json(created);
     const botId = String(createdPayload.bot.id);
-    assert.equal(createdPayload.bot.face_eye_animation, undefined);
+    assert.equal(createdPayload.bot.face_eye_animation, "natural");
     assert.equal(createdPayload.bot.face_eye_rotation_deg, -25);
     assert.equal(createdPayload.bot.face_eye_count, 2);
     assert.equal(createdPayload.bot.face_mouth_animation, "wobble");
@@ -2312,7 +2312,7 @@ describe("API request integration", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         faceBlinkBar: " ",
-        faceEyeAnimation: "flicker",
+        faceEyeAnimation: "still",
         faceEyeRotationDeg: 35,
         faceEyeCount: 1,
         faceMouthAnimation: "pulsate",
@@ -2326,7 +2326,7 @@ describe("API request integration", () => {
     assert.equal(updated.status, 200);
     const updatedPayload = await json(updated);
     assert.equal(updatedPayload.bot.face_blink_bar, " ");
-    assert.equal(updatedPayload.bot.face_eye_animation, "none");
+    assert.equal(updatedPayload.bot.face_eye_animation, "still");
     assert.equal(updatedPayload.bot.face_eye_rotation_deg, 35);
     assert.equal(updatedPayload.bot.face_eye_count, 1);
     assert.equal(updatedPayload.bot.face_mouth_animation, "pulsate");
@@ -2352,7 +2352,7 @@ describe("API request integration", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         faceEyeCharacter: "8",
-        faceEyeAnimation: "spin",
+        faceEyeAnimation: "natural",
         faceEyeRotationDeg: -45,
         faceEyeCount: 2,
         faceMouthCharacter: "△",
@@ -2365,7 +2365,10 @@ describe("API request integration", () => {
     });
     assert.equal(updatedDefault.status, 200);
     const defaultPayload = await json(updatedDefault);
-    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation, undefined);
+    assert.equal(
+      defaultPayload.defaultBot.prismDefaultBotFaceEyeAnimation,
+      "natural",
+    );
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeRotationDeg, -45);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceEyeCount, 2);
     assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceMouthAnimation, "wobble");

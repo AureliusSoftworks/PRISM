@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BOTCAST_DEFAULT_STUDIO_LAYOUT } from "@localai/shared";
+import {
+  BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  swapBotcastStudioLayoutSeats,
+} from "@localai/shared";
 import {
   SIGNAL_STUDIO_ARTWORK_OVERSCAN_PERCENT,
   SIGNAL_STUDIO_FLOOR_GLOW_MAX_HEIGHT_PERCENT,
@@ -10,6 +13,7 @@ import {
   signalStudioMaskedFloorGlowStyle,
   signalStudioOverscanCoordinate,
   signalStudioPlacementStyle,
+  signalStudioSeatColorOrder,
   signalStudioVoicePan,
 } from "./signalStudioPlacement.ts";
 
@@ -73,6 +77,25 @@ describe("Signal studio placement parity", () => {
         width: "11.8182%",
         height: "3.8636%",
       },
+    );
+  });
+
+  it("swaps fixed artwork colors when the host and guest exchange seats", () => {
+    assert.deepEqual(
+      signalStudioSeatColorOrder(
+        BOTCAST_DEFAULT_STUDIO_LAYOUT,
+        "host-blue",
+        "guest-orange",
+      ),
+      { leftColor: "host-blue", rightColor: "guest-orange" },
+    );
+    assert.deepEqual(
+      signalStudioSeatColorOrder(
+        swapBotcastStudioLayoutSeats(BOTCAST_DEFAULT_STUDIO_LAYOUT),
+        "host-blue",
+        "guest-orange",
+      ),
+      { leftColor: "guest-orange", rightColor: "host-blue" },
     );
   });
 

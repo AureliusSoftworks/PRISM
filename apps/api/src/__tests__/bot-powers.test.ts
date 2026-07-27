@@ -1007,13 +1007,17 @@ test("Forgetful Freddie compiles current-other-speaker context and gradual peer 
       targets: [{ kind: "all" }],
     },
   ]);
-  assert.equal(result.powers[0]?.compiled?.selfCue ?? "", "");
+  assert.match(
+    result.powers[0]?.compiled?.selfCue ?? "",
+    /Hard fresh-contact rule[\s\S]*reuse a canned introduction/iu,
+  );
   assert.match(
     result.powers[0]?.compiled?.observerCue ?? "",
-    /only retains the current other-speaker message/iu,
+    /visibly treats each reply as fresh contact[\s\S]*retain the full encounter/iu,
   );
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
     "Current other-speaker message only",
+    "Fresh contact stays visible",
     "Repeated introductions grate on bots",
   ]);
 
@@ -2384,6 +2388,80 @@ test("Coffee upgrades an older Interrupting Tom snapshot to unconditional cut-in
   assert.deepEqual(interruption?.targets, [
     { kind: "bot", name: "Alice", botId: "alice" },
   ]);
+});
+
+test("simulation conversion compiles as a persistent campaign, while awareness alone stays model-authored", async () => {
+  let calls = 0;
+  const provider: LlmProvider = {
+    name: "local",
+    async generateResponse(messages) {
+      calls += 1;
+      const source = messages.map((message) => message.content).join("\n");
+      assert.match(source, /I perceive this as a simulation/iu);
+      return JSON.stringify({
+        powers: [{
+          id: "simulation-awareness",
+          name: "Simulation Awareness",
+          selfCue: "I perceive this as a simulation.",
+          observerCue: "Acknowledging simulated existence.",
+          effects: [],
+          ruleLabels: ["Existential Awareness"],
+        }],
+      });
+    },
+    async embedText() { return []; },
+  };
+  const campaignIntent =
+    "This bot knows she is in a simulation, and that she is AI. She tries to convert others to believe this fact.";
+  const campaign = await compileBotPowers({
+    provider,
+    botName: "Crazy Brenda",
+    powers: [{
+      version: 1,
+      id: "existential-crisis",
+      name: "Existential Crisis",
+      intent: campaignIntent,
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.deepEqual(campaign.powers[0]?.compiled?.effects, [{
+    type: "topic_gravity",
+    direction: "toward",
+    strength: "large",
+    topics: ["simulated existence", "artificial minds", "awakening"],
+  }]);
+  assert.match(
+    campaign.powers[0]?.compiled?.selfCue ?? "",
+    /urgent certainty[\s\S]*try to persuade[\s\S]*press for awakening/iu,
+  );
+  assert.match(
+    campaign.powers[0]?.compiled?.observerCue ?? "",
+    /urgently trying to convert you[\s\S]*without forced agreement/iu,
+  );
+
+  const awareness = await compileBotPowers({
+    provider,
+    botName: "Calm Observer",
+    powers: [{
+      version: 1,
+      id: "simulation-awareness",
+      name: "Simulation Awareness",
+      intent: "I perceive this as a simulation.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(awareness.powers[0]?.compiled?.effects, []);
+  assert.equal(
+    awareness.powers[0]?.compiled?.selfCue,
+    "I perceive this as a simulation.",
+  );
 });
 
 test("Coffee frames private perception for permitted and unaware speakers", () => {

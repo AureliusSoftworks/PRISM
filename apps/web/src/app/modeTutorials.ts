@@ -183,7 +183,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Watch the saved cut",
-        body: "Replay restores the full transcript beside the saved camera cut and gives you play, pause, scrub, and transcript-line seeking. A measured Signal intro row appears before the host’s first line, shows the opening video’s recorded duration, highlights while it plays, and seeks back to the beginning when clicked. A calibrated nine-second Signal intro is the default. The intro-length slider adds or removes only that opening-card time: it translates the complete baked transcript, mouth, camera, and transition performance together without stretching the interview or changing the audio master’s normal playback speed. The stage starts black; Play fades in the branded intro, then dissolves into a wide studio beat before speech. Pausing freezes the picture with a clear Paused overlay like an online video. Signal plays the exact private in-world audio master once at normal speed while its detailed direction track restores cameras, mouths, effects, overlaps, and the intro and outro. New faithful masters omit only the intervals where a bot is visibly and audibly thinking, then resume before pre-speech breath foley. Natural room silence, interruptions, crosstalk, retorts, every camera timestamp, and every Animated or Instant transition stay in the saved performance. It never re-synthesizes a line, changes models, or generates a video; an episode without its exact master remains transcript-only. Recorded replay replaces routing, model, and Voice controls because the saved performance is independent of current account settings. There are no post-episode camera controls. The one replay download is a readable timestamped transcript, while Copy for Signal Review puts the complete conversation plus its private cues, per-turn model routing, delivery notes, segment changes, camera decisions, and outcome on your clipboard for a focused review.",
+        body: "Replay restores the full transcript beside the saved camera cut and gives you play, pause, scrub, and transcript-line seeking. A measured Signal intro row appears before the host’s first line, shows the opening video’s calibrated duration, highlights while it plays, and seeks back to the beginning when clicked. The automatic intro is calibrated to 8.75 seconds: it translates the complete baked transcript, mouth, camera, and transition performance together without stretching the interview or changing the audio master’s normal playback speed. The stage starts black; Play fades in the branded intro, then dissolves into a wide studio beat before speech. Pausing freezes the picture with a clear Paused overlay like an online video. On Air always plays the exact private in-world audio master once at normal speed while its detailed direction track restores cameras, mouths, effects, overlaps, and the intro and outro. New faithful masters omit only the intervals where a bot is visibly and audibly thinking, then resume before pre-speech breath foley. Natural room silence, interruptions, crosstalk, retorts, every camera timestamp, and every Animated or Instant transition stay in the saved performance. On Air never re-synthesizes a line, changes models, calls a provider, or generates a video; an episode without its exact master remains transcript-only. Studio Cut ✨ is a separate, optional paid alternate when every speaker has a saved ElevenLabs voice. It asks every time before sending the canonical dialogue and voice IDs to ElevenLabs v3, shows an estimated character and request count, then rebuilds mouth and direction timing around the new performance while keeping saved intro, outdent, atmosphere, and message-anchored production cues. You can leave the page while it works, keep playing the previous cut during a retry, switch between On Air and Studio Cut, download either production, try another take, or remove only the Studio Cut. Hard LOCAL mode never offers it. Recorded replay replaces routing, model, and Voice controls because either saved performance is independent of current account settings. There are no post-episode camera controls. The readable timestamped transcript remains available, while Copy for Signal Review puts the complete conversation plus its private cues, per-turn model routing, delivery notes, segment changes, camera decisions, and outcome on your clipboard for a focused review.",
         clickLabel: "an archived episode",
         targetSelector: '[data-tutorial-target="botcast-replay"]',
       },
@@ -230,7 +230,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Talk beside the document",
-        body: "Click the weighted rainbow Prism orb—or press Option Space on macOS and Control Space on Windows or Linux—to catch an idea without leaving Slate. During focused creation and full-screen loading, the free-floating assistant steps out and the same orb moves into the experience as a non-interactive presence. Throw the orb and it glides to a stop; with reduced motion it stays where released. Voice on lets Prism speak while each reply appears at the pace of its voice; use the same control to mute the widget and show replies immediately. The app softens behind the open panel, the newest two messages remain readable while older lines recede, and only the last three can recover in this app session on this surface. That is short recovery, not remembered history. Type / for Prompt Center prompts and ! for wildcard decks in the companion composer; they expand when you send. Prism can see the project and section names, not manuscript prose, Continuity, or memories; it never edits prose, and sharing source material always begins with an explicit preview.",
+        body: "Click the weighted rainbow Prism orb—or press Option Space on macOS and Control Space on Windows or Linux—to catch an idea without leaving Slate. During focused creation and full-screen loading, the free-floating assistant steps out and the same orb moves into the experience as a non-interactive presence. Throw the orb and it glides to a stop; with reduced motion it stays where released. Voice on lets Prism speak while each reply appears at the pace of its voice; use the same control to mute the widget and show replies immediately. Click any Prism or You message bubble to copy its full text; dragging across text still selects it normally. The app softens behind the open panel, the newest two messages remain readable while older lines recede, and only the last three can recover in this app session on this surface. That is short recovery, not remembered history. Type / for Prompt Center prompts and ! for wildcard decks in the companion composer; they expand when you send. Prism can see the project and section names, not manuscript prose, Continuity, or memories; it never edits prose, and sharing source material always begins with an explicit preview.",
         clickLabel: "the global Prism companion",
         targetSelector: '[data-tutorial-target="prism-companion"]',
       },
@@ -256,6 +256,10 @@ const SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX =
   "Physical-size Powers keep a host or guest subtly larger or smaller on the saved stage and replay. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet add a small fixed voice-volume and transcript-size shift without changing physical size or visibility; Loud still annoys the other cast member, while half of Quiet turns are ignored and lower the speaker's saved mood.";
 const SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX =
   "An Obsessed cast member treats the peer or audience they address as the star of each line, with fresh admiration but no control, private knowledge, or safety override.";
+const FRESH_CONTACT_POWER_TUTORIAL_SUFFIX =
+  "A short-term-amnesia bot receives only the current other-speaker line. Each ordinary reply makes that reset legible with a brief, naturally varied greeting, introduction, or fresh-contact orientation; everyone else keeps the encounter and may react organically.";
+const SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX =
+  "A simulation-conversion Power keeps awareness from flattening into calm philosophy: its holder repeatedly turns concrete details into evidence and presses others to awaken, while every other character remains free to resist.";
 const IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX =
   "An identity-mirroring bot copies the public persona, CRT face, authored Avatar Details ink, and resolved voice of the latest bot who directly addresses it, along with the lived consequences of that bot's active public Powers. Borrowed Powers can organically change its claimed name and behavior, while bot ID, seat, role, glyph, color, private perception, safety, and provider boundaries remain anchored; the player is never copied. The saved face-ink-and-voice handoff replays exactly and resets with the session. When the bot hosts Signal, its authored default persona, face, ink, and voice return before the closing sign-off so it ends the show as itself.";
 const IDENTITY_SHAPESHIFT_POWER_TUTORIAL =
@@ -344,13 +348,13 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   zen: {
     ...BASE_MODE_TUTORIALS.zen,
     steps: BASE_MODE_TUTORIALS.zen.steps.map((step, index) => index === 0
-      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
       : step),
   },
   chat: {
     ...BASE_MODE_TUTORIALS.chat,
     steps: BASE_MODE_TUTORIALS.chat.steps.map((step, index) => index === 0
-      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
       : step),
   },
   coffee: {
@@ -358,7 +362,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: BASE_MODE_TUTORIALS.coffee.steps.map((step, index) => {
       const body = currentInterruptionRetortTutorialBody(step.body);
       return index === 0
-        ? { ...step, body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+        ? { ...step, body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
         : step.heading === "Join the conversation"
           ? {
               ...step,
@@ -384,7 +388,7 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return index === 5
         ? {
             ...step,
-            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
+            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
           }
         : step.heading === "Produce from the control room"
           ? {

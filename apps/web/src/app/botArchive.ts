@@ -1,7 +1,9 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
+  DEFAULT_BOT_FACE_EYE_MOVEMENT,
   normalizeBotFaceGlyphAnimation,
+  normalizeBotFaceEyeMovement,
   parseBotAvatarDetailsV1,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
@@ -11,6 +13,7 @@ import {
   type BotFaceEyeCount,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   type BotProfileFields,
   type BotAudioVoiceProfileV1,
@@ -49,7 +52,7 @@ export interface PrismBotArchiveJson {
     openaiImageModel?: string | null;
     faceEyesFont?: BotFaceFontId | null;
     faceEyeCharacter?: string | null;
-    faceEyeAnimation?: BotFaceGlyphAnimation | null;
+    faceEyeAnimation?: BotFaceEyeMovement | BotFaceGlyphAnimation | null;
     faceMouthFont?: BotFaceFontId | null;
     faceMouthCharacter?: string | null;
     faceMouthAnimation?: BotFaceGlyphAnimation | null;
@@ -95,6 +98,12 @@ export function resolvePrismBotArchiveFaceGlyphAnimation(
   return (
     normalizeBotFaceGlyphAnimation(value) ?? DEFAULT_BOT_FACE_GLYPH_ANIMATION
   );
+}
+
+export function resolvePrismBotArchiveFaceEyeMovement(
+  value: unknown,
+): BotFaceEyeMovement {
+  return normalizeBotFaceEyeMovement(value) ?? DEFAULT_BOT_FACE_EYE_MOVEMENT;
 }
 
 export function createPrismBotArchive(args: {

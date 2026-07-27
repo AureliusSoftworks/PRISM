@@ -5,7 +5,7 @@ import {
   elevenLabsVoiceDirectionForMood,
   normalizeBotAudioVoiceProfileV1,
   normalizeElevenLabsVoiceDirection,
-  type ReplayManifestV1,
+  type ReplayManifest,
   type ReplayPremiumVoiceTimingV1,
   type ReplayVoiceTakeRecordV1,
 } from "@localai/shared";
@@ -38,6 +38,7 @@ export interface ReplayPremiumGeneratedSegment {
   contentType: "audio/mpeg";
   durationMs: number;
   timings: ReplayPremiumVoiceTimingV1[];
+  characterCost: number;
 }
 
 function stableJsonHash(value: unknown): string {
@@ -84,7 +85,7 @@ function premiumPerformanceText(take: ReplayVoiceTakeRecordV1): string {
 }
 
 function primaryPremiumInputs(
-  manifest: ReplayManifestV1,
+  manifest: ReplayManifest,
   takes: readonly ReplayVoiceTakeRecordV1[],
 ): ReplayPremiumPlannedInput[] {
   const takeByMessageId = new Map(
@@ -122,8 +123,9 @@ function primaryPremiumInputs(
 }
 
 export function planReplayPremiumSegments(
-  manifest: ReplayManifestV1,
+  manifest: ReplayManifest,
   takes: readonly ReplayVoiceTakeRecordV1[],
+  generationSeed = "studio-cut",
 ): ReplayPremiumPlannedSegment[] {
   const inputs = primaryPremiumInputs(manifest, takes);
   const speakersByVoiceId = new Map<string, Set<string>>();
@@ -181,6 +183,7 @@ export function planReplayPremiumSegments(
     inputs: group.inputs,
     inputHash: stableJsonHash({
       v: 1,
+      generationSeed,
       strategy: group.strategy,
       inputs: group.inputs.map((input) => ({
         sourceMessageId: input.sourceMessageId,
@@ -211,6 +214,7 @@ export async function generateReplayPremiumSegment(args: {
   apiKey: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  generationSeed?: string;
 }): Promise<ReplayPremiumGeneratedSegment> {
   if (args.segment.strategy === "dialogue") {
     const response = await (args.fetchImpl ?? fetch)(
@@ -228,6 +232,13 @@ export async function generateReplayPremiumSegment(args: {
             voice_id: input.voiceId,
           })),
           model_id: "eleven_v3",
+          seed: Number.parseInt(
+            stableJsonHash({
+              generationSeed: args.generationSeed ?? "studio-cut",
+              segment: args.segment.index,
+            }).slice(0, 8),
+            16,
+          ),
         }),
       },
     );
@@ -248,15 +259,47 @@ export async function generateReplayPremiumSegment(args: {
     const voiceSegments = Array.isArray(payload.voice_segments)
       ? payload.voice_segments as Array<Record<string, unknown>>
       : [];
+    const rawAlignment =
+      payload.normalized_alignment && typeof payload.normalized_alignment === "object"
+        ? payload.normalized_alignment as Record<string, unknown>
+        : payload.alignment && typeof payload.alignment === "object"
+          ? payload.alignment as Record<string, unknown>
+          : null;
+    const characters = Array.isArray(rawAlignment?.characters)
+      ? rawAlignment.characters.filter((value): value is string => typeof value === "string")
+      : [];
+    const starts = Array.isArray(rawAlignment?.character_start_times_seconds)
+      ? rawAlignment.character_start_times_seconds.map(Number)
+      : [];
+    const ends = Array.isArray(rawAlignment?.character_end_times_seconds)
+      ? rawAlignment.character_end_times_seconds.map(Number)
+      : [];
     const timings = args.segment.inputs.map((input, index) => {
       const timing = voiceSegments.find(
         (candidate) => Number(candidate.dialogue_input_index) === index,
       );
+      const characterStartIndex = Math.max(
+        0,
+        Math.round(Number(timing?.character_start_index ?? 0)),
+      );
+      const characterEndIndex = Math.max(
+        characterStartIndex,
+        Math.round(Number(timing?.character_end_index ?? characterStartIndex)),
+      );
+      const alignmentCharacters = characters.slice(characterStartIndex, characterEndIndex);
+      const alignmentStarts = starts.slice(characterStartIndex, characterEndIndex);
+      const alignmentEnds = ends.slice(characterStartIndex, characterEndIndex);
       return {
         sourceMessageId: input.sourceMessageId,
         startMs: Math.max(0, Math.round(Number(timing?.start_time_seconds ?? 0) * 1_000)),
         endMs: Math.max(1, Math.round(Number(timing?.end_time_seconds ?? 0) * 1_000)),
-        alignment: null,
+        alignment: alignmentCharacters.length > 0
+          ? {
+              characters: alignmentCharacters,
+              characterStartTimesSeconds: alignmentStarts,
+              characterEndTimesSeconds: alignmentEnds,
+            }
+          : null,
       } satisfies ReplayPremiumVoiceTimingV1;
     });
     const durationMs = Math.max(1, ...timings.map((timing) => timing.endMs));
@@ -265,6 +308,14 @@ export async function generateReplayPremiumSegment(args: {
       contentType: "audio/mpeg",
       durationMs,
       timings,
+      characterCost: Math.max(
+        0,
+        Number.parseInt(response.headers.get("character-cost") ?? "", 10) ||
+          args.segment.inputs.reduce(
+            (sum, input) => sum + Array.from(input.text).length,
+            0,
+          ),
+      ),
     };
   }
 
@@ -293,5 +344,6 @@ export async function generateReplayPremiumSegment(args: {
       endMs: durationMs,
       alignment,
     }],
+    characterCost: Array.from(input.text).length,
   };
 }

@@ -188,6 +188,52 @@ function readSpeechEnabled(accountKey: string): boolean {
   }
 }
 
+async function writePrismCompanionClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // LAN development over plain HTTP can still allow the explicit fallback.
+    }
+  }
+
+  const previouslyFocused =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard copy command failed.");
+    }
+  } finally {
+    textarea.remove();
+    previouslyFocused?.focus({ preventScroll: true });
+  }
+}
+
+function prismCompanionBubbleHasSelection(bubble: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+    return false;
+  }
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    if (bubble.contains(selection.getRangeAt(index).commonAncestorContainer)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function actionLabel(action: PrismCompanionActionIntent): string {
   if (action.type === "navigate") {
     return action.destination === "home" ? "Go Home" : "Open Slate";
@@ -239,6 +285,7 @@ export default function PrismCompanion({
   const [cards, setCards] = useState<PrismCompanionCardV1[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [recentRuns, setRecentRuns] = useState<PrismActionRunV1[]>([]);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [speechEnabled, setSpeechEnabled] = useState(() =>
     readSpeechEnabled(accountKey),
   );
@@ -284,6 +331,7 @@ export default function PrismCompanion({
   const refractTravelFrameRef = useRef<number | null>(null);
   const refractMagicHandoffFrameRef = useRef<number | null>(null);
   const refractAbortRef = useRef<AbortController | null>(null);
+  const copyFeedbackTimerRef = useRef<number | null>(null);
   const refractRunRef = useRef(0);
   const refractDropTargetRef = useRef<HTMLElement | null>(null);
   const wieldTutorialTargetRef = useRef<HTMLElement | null>(null);
@@ -391,6 +439,27 @@ export default function PrismCompanion({
     }
     speechPlaybackActiveRef.current = false;
   }, []);
+
+  const copyPrismCompanionMessage = useCallback(
+    async (message: PrismCompanionMessage): Promise<void> => {
+      try {
+        await writePrismCompanionClipboard(message.content);
+        setCopiedMessageId(message.id);
+        if (copyFeedbackTimerRef.current !== null) {
+          window.clearTimeout(copyFeedbackTimerRef.current);
+        }
+        copyFeedbackTimerRef.current = window.setTimeout(() => {
+          copyFeedbackTimerRef.current = null;
+          setCopiedMessageId((current) =>
+            current === message.id ? null : current,
+          );
+        }, 1_600);
+      } catch {
+        onError?.("Prism could not copy that message.");
+      }
+    },
+    [onError],
+  );
 
   const persistPosition = useCallback(
     (next: PrismCompanionPosition): void => {
@@ -615,6 +684,9 @@ export default function PrismCompanion({
       speechAbortRef.current?.abort();
       if (speechPlaybackActiveRef.current) stopSpeakingRef.current?.();
       speechPlaybackActiveRef.current = false;
+      if (copyFeedbackTimerRef.current !== null) {
+        window.clearTimeout(copyFeedbackTimerRef.current);
+      }
       persistPosition(positionRef.current);
       resetPrismWield();
     };
@@ -2312,11 +2384,16 @@ export default function PrismCompanion({
                         message.content,
                       )
                     : message.content;
+                const copied = copiedMessageId === message.id;
+                const speakerLabel =
+                  message.role === "assistant" ? "Prism" : "You";
                 return (
                   <article
                     key={message.id}
                     className={styles.bubble}
+                    title="Click to copy"
                     data-role={message.role}
+                    data-copied={copied ? "true" : undefined}
                     data-recent={
                       index >= Math.max(0, messages.length - 2)
                         ? "true"
@@ -2332,12 +2409,53 @@ export default function PrismCompanion({
                         ? "true"
                         : undefined
                     }
+                    onClick={(event) => {
+                      const target = event.target;
+                      if (
+                        target instanceof Element &&
+                        target.closest(
+                          "a, button, input, textarea, select, summary",
+                        )
+                      ) {
+                        return;
+                      }
+                      if (
+                        prismCompanionBubbleHasSelection(event.currentTarget)
+                      ) {
+                        return;
+                      }
+                      void copyPrismCompanionMessage(message);
+                    }}
                   >
-                    <span>{message.role === "assistant" ? "Prism" : "You"}</span>
+                    <header className={styles.bubbleHeader}>
+                      <span>{speakerLabel}</span>
+                      <button
+                        type="button"
+                        className={styles.copyButton}
+                        aria-label={
+                          copied
+                            ? `${speakerLabel} message copied`
+                            : `Copy ${speakerLabel} message`
+                        }
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void copyPrismCompanionMessage(message);
+                        }}
+                      >
+                        {copied ? "Copied" : "Copy"}
+                      </button>
+                    </header>
                     <div className={styles.markdown}>
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
                         {visibleContent}
                       </ReactMarkdown>
+                    </div>
+                    <div
+                      className={styles.srOnly}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {copied ? `${speakerLabel} message copied` : ""}
                     </div>
                   </article>
                 );

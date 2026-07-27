@@ -8,6 +8,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -54,6 +55,7 @@ export const PRISM_JOURNALED_BOT_PATCH_KEYS = new Set([
   "repetitionPenalty",
   "faceEyesFont",
   "faceEyeCharacter",
+  "faceEyeAnimation",
   "faceMouthFont",
   "faceMouthCharacter",
   "faceMouthAnimation",
@@ -99,6 +101,7 @@ const BOT_MUTATION_COLUMNS = [
   "repetition_penalty",
   "face_eyes_font",
   "face_eye_character",
+  "face_eye_animation",
   "face_mouth_font",
   "face_mouth_character",
   "face_mouth_animation",
@@ -361,6 +364,11 @@ function normalizedColumns(
   for (const [key, column, normalize, label] of nullableAvatarFields) {
     if (!own(patch, key)) continue;
     next[column] = normalizeNullable(patch[key], label, normalize);
+  }
+  if (own(patch, "faceEyeAnimation")) {
+    const movement = normalizeBotFaceEyeMovement(patch.faceEyeAnimation);
+    if (movement === null) throw new Error("Invalid face eye movement.");
+    next.face_eye_animation = movement;
   }
   if (own(patch, "faceMouthAnimation")) {
     next.face_mouth_animation = normalizeNullable(

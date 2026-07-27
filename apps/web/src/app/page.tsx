@@ -757,6 +757,7 @@ import {
   DEFAULT_BOT_FACE_FONT_ID,
   DEFAULT_BOT_FACE_FONT_WEIGHT,
   BOT_FACE_GLYPH_ANIMATIONS,
+  BOT_FACE_EYE_MOVEMENTS,
   BOT_FACE_EYE_ROTATION_DEG_MAX,
   BOT_FACE_EYE_ROTATION_DEG_MIN,
   BOT_FACE_EYE_ROTATION_DEG_STEP,
@@ -802,6 +803,7 @@ import {
   normalizeBotFaceBlinkScale,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
+  normalizeBotFaceEyeMovement,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
@@ -884,6 +886,7 @@ import {
   type BotFaceBlinkBar,
   type BotFaceFontId,
   type BotFaceGlyphAnimation,
+  type BotFaceEyeMovement,
   type BotFaceStyle,
   type BotFaceEyeCount,
   type BotFaceThinkingFrames,
@@ -1066,10 +1069,13 @@ import {
   botAvatarSfxShouldPlay,
   effectiveBotAvatarSfxPlayback,
   generateBotThinkingSfxProfile,
+  playBotAvatarSfxSampleAudio,
   prismBotThinkingSfxFallback,
   prismBotThinkingSfxFallbackIndex,
   requestElevenLabsAvatarSfxLoop,
+  setBotAvatarSfxSampleVolume,
   stopBotAvatarSfxAudio,
+  stopBotAvatarSfxSampleAudio,
   syncBotAvatarSfxAudio,
   type BotAvatarSfxPlayback,
   type BotAvatarSfxState,
@@ -1353,6 +1359,7 @@ import {
   createPrismBotArchive,
   parsePrismBotArchive,
   resolvePrismBotArchiveFaceGlyphAnimation,
+  resolvePrismBotArchiveFaceEyeMovement,
   type ParsedPrismBotArchive,
   type PrismBotArchiveJson,
 } from "./botArchive";
@@ -10652,7 +10659,7 @@ interface UserSettings {
   prismDefaultBotGlyph: string;
   prismDefaultBotFaceEyesFont: BotFaceFontId;
   prismDefaultBotFaceEyeCharacter: string | null;
-  prismDefaultBotFaceEyeAnimation: BotFaceGlyphAnimation;
+  prismDefaultBotFaceEyeAnimation: BotFaceEyeMovement;
   prismDefaultBotFaceMouthFont: BotFaceFontId;
   prismDefaultBotFaceMouthCharacter: string | null;
   prismDefaultBotFaceMouthAnimation: BotFaceGlyphAnimation;
@@ -12482,7 +12489,7 @@ type BotEditOriginalSnapshot = {
   glyph: BotGlyphName;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
-  faceEyeAnimation: BotFaceGlyphAnimation;
+  faceEyeAnimation: BotFaceEyeMovement;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
   faceMouthAnimation: BotFaceGlyphAnimation;
@@ -12919,7 +12926,7 @@ function prepareBotArchivePayload(
       faceEyeCharacter: normalizeBotFaceEyeCharacter(
         parsedBot.faceEyeCharacter,
       ),
-      faceEyeAnimation: resolvePrismBotArchiveFaceGlyphAnimation(
+      faceEyeAnimation: resolvePrismBotArchiveFaceEyeMovement(
         parsedBot.faceEyeAnimation,
       ),
       faceMouthFont: normalizeBotFaceFontId(parsedBot.faceMouthFont),
@@ -14903,7 +14910,7 @@ function createBotFormHasEnteredData(options: {
   repetitionPenalty: number;
   faceEyesFont?: BotFaceFontId;
   faceEyeCharacter?: string | null;
-  faceEyeAnimation?: BotFaceGlyphAnimation;
+  faceEyeAnimation?: BotFaceEyeMovement;
   faceMouthFont?: BotFaceFontId;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation;
@@ -29230,6 +29237,10 @@ interface ZenLiveBotMannequinProps {
   avatarDetailsColor?: string | null;
   inkOffsetY?: string;
   detailLevel?: "full" | "reduced";
+  eyeAttentionState?: import("./botFaceEyeMovement").BotFaceAttentionState;
+  eyeTargetDirection?: import("./botFaceEyeMovement").BotFaceGazeDirection;
+  eyeTimelineMs?: number | null;
+  eyeStateStartedAtMs?: number | null;
 }
 
 interface BotAmbientPresenceRigProps {
@@ -29313,6 +29324,14 @@ function ZenLiveBotMannequin({
   avatarDetailsColor = null,
   inkOffsetY,
   detailLevel = "full",
+  eyeAttentionState = showThinkingSpinner
+    ? "thinking"
+    : isTalking
+      ? "speaking"
+      : "listening",
+  eyeTargetDirection = 0,
+  eyeTimelineMs,
+  eyeStateStartedAtMs,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const avatarSfxAudioRef = useRef<HTMLAudioElement | null>(null);
   const avatarSfxLoadedSourceRef = useRef<string | null>(null);
@@ -29514,6 +29533,13 @@ function ZenLiveBotMannequin({
               voicePreset={voicePreset}
               faceEyesFont={faceStyle.eyesFont}
               faceEyeCharacter={faceStyle.eyeCharacter}
+              faceEyeMovement={
+                detailLevel === "full" ? faceStyle.eyeAnimation : "still"
+              }
+              eyeAttentionState={eyeAttentionState}
+              eyeTargetDirection={eyeTargetDirection}
+              eyeTimelineMs={eyeTimelineMs}
+              eyeStateStartedAtMs={eyeStateStartedAtMs}
               faceMouthFont={faceStyle.mouthFont}
               faceMouthCharacter={faceStyle.mouthCharacter}
               faceMouthAnimation={faceStyle.mouthAnimation}
@@ -29566,6 +29592,13 @@ function ZenLiveBotMannequin({
               blinkWhileTalking={blinkWhileTalking}
               faceEyesFont={faceStyle.eyesFont}
               faceEyeCharacter={faceStyle.eyeCharacter}
+              faceEyeMovement={
+                detailLevel === "full" ? faceStyle.eyeAnimation : "still"
+              }
+              eyeAttentionState={eyeAttentionState}
+              eyeTargetDirection={eyeTargetDirection}
+              eyeTimelineMs={eyeTimelineMs}
+              eyeStateStartedAtMs={eyeStateStartedAtMs}
               faceMouthFont={faceStyle.mouthFont}
               faceMouthCharacter={faceStyle.mouthCharacter}
               faceMouthAnimation={faceStyle.mouthAnimation}
@@ -35335,7 +35368,7 @@ interface BotAvatarCustomizerModalProps {
   themeMode: Theme;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
-  faceEyeAnimation: BotFaceGlyphAnimation;
+  faceEyeAnimation: BotFaceEyeMovement;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
   faceMouthAnimation: BotFaceGlyphAnimation;
@@ -35391,7 +35424,7 @@ interface BotAvatarCustomizerModalProps {
   onColorPickerToggle: () => void;
   onEyesFontChange: (fontId: BotFaceFontId) => void;
   onEyeCharacterChange: (character: string | null) => void;
-  onEyeAnimationChange: (animation: BotFaceGlyphAnimation) => void;
+  onEyeAnimationChange: (animation: BotFaceEyeMovement) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onMouthCharacterChange: (character: string | null) => void;
   onMouthAnimationChange: (animation: BotFaceGlyphAnimation) => void;
@@ -35987,7 +36020,7 @@ function BotAvatarPreviewModeIcon({
 function botAvatarFaceIsDefault(args: {
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
-  faceEyeAnimation: BotFaceGlyphAnimation;
+  faceEyeAnimation: BotFaceEyeMovement;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
   faceMouthAnimation: BotFaceGlyphAnimation;
@@ -36044,7 +36077,7 @@ function botAvatarPresetSelected(
   args: {
     faceEyesFont: BotFaceFontId;
     faceEyeCharacter: string | null;
-    faceEyeAnimation: BotFaceGlyphAnimation;
+    faceEyeAnimation: BotFaceEyeMovement;
     faceMouthFont: BotFaceFontId;
     faceMouthCharacter: string | null;
     faceMouthAnimation: BotFaceGlyphAnimation;
@@ -37088,8 +37121,7 @@ function BotAvatarSfxEditor({
   useEffect(() => {
     const sample = sampleRef.current;
     if (!sample) return;
-    sample.pause();
-    sample.currentTime = 0;
+    stopBotAvatarSfxSampleAudio(sample);
     setSamplePlaying(false);
   }, [sampleSfx.audioDataUrl]);
 
@@ -37097,8 +37129,7 @@ function BotAvatarSfxEditor({
     () => () => {
       const sample = sampleRef.current;
       if (!sample) return;
-      sample.pause();
-      sample.currentTime = 0;
+      stopBotAvatarSfxSampleAudio(sample);
     },
     [],
   );
@@ -37198,20 +37229,17 @@ function BotAvatarSfxEditor({
   const toggleSample = async (): Promise<void> => {
     const sample = sampleRef.current;
     if (!sample) return;
-    if (!sample.paused) {
-      sample.pause();
-      sample.currentTime = 0;
+    if (samplePlaying) {
+      stopBotAvatarSfxSampleAudio(sample);
       setSamplePlaying(false);
       return;
     }
-    sample.src = sampleSfx.audioDataUrl;
-    sample.loop = true;
-    sample.volume = sampleSfx.volume;
     try {
-      await sample.play();
+      await playBotAvatarSfxSampleAudio(sample, sampleSfx);
       setSamplePlaying(true);
       setStatus(null);
     } catch {
+      stopBotAvatarSfxSampleAudio(sample);
       setStatus("Your browser blocked the sample. Check this tab's sound permission.");
     }
   };
@@ -37224,9 +37252,9 @@ function BotAvatarSfxEditor({
   const setAvatarSfxMuted = (muted: boolean): void => {
     const sample = sampleRef.current;
     if (sample) {
-      sample.pause();
-      sample.currentTime = 0;
+      stopBotAvatarSfxSampleAudio(sample);
     }
+    setSamplePlaying(false);
     commitSfx(currentSfx, muted);
     setStatus(
       muted
@@ -37429,7 +37457,9 @@ function BotAvatarSfxEditor({
                   onRandomize={() => {
                     const next = Number(((Math.round(currentSfx.volume * 100) + 1 + Math.floor(Math.random() * 100)) % 101 / 100).toFixed(2));
                     updateCurrentSfx({ volume: next });
-                    if (sampleRef.current) sampleRef.current.volume = next;
+                    if (sampleRef.current) {
+                      setBotAvatarSfxSampleVolume(sampleRef.current, next);
+                    }
                   }}
                 />
               </span>
@@ -37443,7 +37473,9 @@ function BotAvatarSfxEditor({
               onChange={(event) => {
                 const volume = Number(event.currentTarget.value);
                 updateCurrentSfx({ volume });
-                if (sampleRef.current) sampleRef.current.volume = volume;
+                if (sampleRef.current) {
+                  setBotAvatarSfxSampleVolume(sampleRef.current, volume);
+                }
               }}
               aria-label="Avatar sound volume"
             />
@@ -37642,6 +37674,38 @@ const BOT_AVATAR_GLYPH_ANIMATION_LABELS: Record<BotFaceGlyphAnimation, string> =
     wobble: "Wobble",
   };
 
+const BOT_AVATAR_EYE_MOVEMENT_LABELS: Record<BotFaceEyeMovement, string> = {
+  still: "Still",
+  natural: "Natural",
+};
+
+function BotAvatarEyeMovementControl({
+  value,
+  onChange,
+}: {
+  value: BotFaceEyeMovement;
+  onChange: (value: BotFaceEyeMovement) => void;
+}): React.JSX.Element {
+  return (
+    <fieldset className={styles.botAvatarGlyphAnimationControl}>
+      <legend>Eye movement</legend>
+      <div role="group" aria-label="Eye movement">
+        {BOT_FACE_EYE_MOVEMENTS.map((movement) => (
+          <button
+            key={`eye-movement-${movement}`}
+            type="button"
+            data-selected={value === movement ? "true" : undefined}
+            aria-pressed={value === movement}
+            onClick={() => onChange(movement)}
+          >
+            {BOT_AVATAR_EYE_MOVEMENT_LABELS[movement]}
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function BotAvatarGlyphAnimationControl({
   label = "Animation",
   value,
@@ -37745,7 +37809,7 @@ function BotAvatarFaceControls({
   >;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
-  faceEyeAnimation: BotFaceGlyphAnimation;
+  faceEyeAnimation: BotFaceEyeMovement;
   faceMouthFont: BotFaceFontId;
   faceMouthCharacter: string | null;
   faceMouthAnimation: BotFaceGlyphAnimation;
@@ -37770,7 +37834,7 @@ function BotAvatarFaceControls({
   faceIsDefault: boolean;
   onEyesFontChange: (fontId: BotFaceFontId) => void;
   onEyeCharacterChange: (character: string | null) => void;
-  onEyeAnimationChange: (animation: BotFaceGlyphAnimation) => void;
+  onEyeAnimationChange: (animation: BotFaceEyeMovement) => void;
   onMouthFontChange: (fontId: BotFaceFontId) => void;
   onMouthCharacterChange: (character: string | null) => void;
   onMouthAnimationChange: (animation: BotFaceGlyphAnimation) => void;
@@ -38324,10 +38388,8 @@ function BotAvatarFaceControls({
                   }}
                 />
               </div>
-              <BotAvatarGlyphAnimationControl
-                label="Eye animation"
+              <BotAvatarEyeMovementControl
                 value={faceEyeAnimation}
-                disabled={!customEyeActive}
                 onChange={onEyeAnimationChange}
               />
               <fieldset className={styles.botAvatarCustomChoiceGroup}>
@@ -45546,7 +45608,7 @@ function HomeContent(): React.JSX.Element {
     string | null
   >(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
   const [newBotFaceEyeAnimation, setNewBotFaceEyeAnimation] =
-    useState<BotFaceGlyphAnimation>(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
+    useState<BotFaceEyeMovement>(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
   const [newBotFaceMouthFont, setNewBotFaceMouthFont] = useState<BotFaceFontId>(
     DEFAULT_BOT_FACE_STYLE.mouthFont,
   );
@@ -45841,10 +45903,10 @@ function HomeContent(): React.JSX.Element {
   );
 
   const handleNewBotFaceEyeAnimationChange = useCallback(
-    (next: BotFaceGlyphAnimation) => {
+    (next: BotFaceEyeMovement) => {
       createBotAppearanceTouchedRef.current = true;
       setNewBotFaceEyeAnimation(
-        normalizeBotFaceGlyphAnimation(next) ??
+        normalizeBotFaceEyeMovement(next) ??
           DEFAULT_BOT_FACE_STYLE.eyeAnimation,
       );
     },
@@ -68249,7 +68311,7 @@ function HomeContent(): React.JSX.Element {
           d.settings.prismDefaultBotFaceEyeCharacter,
         ) ?? DEFAULT_BOT_FACE_STYLE.eyeCharacter,
       prismDefaultBotFaceEyeAnimation:
-        normalizeBotFaceGlyphAnimation(
+        normalizeBotFaceEyeMovement(
           d.settings.prismDefaultBotFaceEyeAnimation,
         ) ?? DEFAULT_BOT_FACE_STYLE.eyeAnimation,
       prismDefaultBotFaceMouthFont:
@@ -87872,7 +87934,7 @@ function HomeContent(): React.JSX.Element {
       normalizeBotFaceEyeCharacter(settings.prismDefaultBotFaceEyeCharacter) ??
       DEFAULT_BOT_FACE_STYLE.eyeCharacter;
     const seededFaceEyeAnimation =
-      normalizeBotFaceGlyphAnimation(
+      normalizeBotFaceEyeMovement(
         settings.prismDefaultBotFaceEyeAnimation,
       ) ?? DEFAULT_BOT_FACE_STYLE.eyeAnimation;
     const seededFaceMouthFont =
@@ -111439,7 +111501,7 @@ function HomeContent(): React.JSX.Element {
                         }}
                         onEyeAnimationChange={(next) => {
                           const normalized =
-                            normalizeBotFaceGlyphAnimation(next) ??
+                            normalizeBotFaceEyeMovement(next) ??
                             DEFAULT_BOT_FACE_STYLE.eyeAnimation;
                           pushBotAvatarUndoSnapshot();
                           handleNewBotFaceEyeAnimationChange(normalized);
@@ -124012,6 +124074,19 @@ function HomeContent(): React.JSX.Element {
                 coffeeSpeakerGazeParticipant.botId === bot.id
                   ? activeCoffeeSpeakerGazeDirection
                   : null;
+              const seatListenerGazeDirection =
+                seatSpeakerGazeDirection === null &&
+                coffeeSpeakerGazeParticipant !== null
+                  ? coffeeSpeakerGazeHorizontalDirection({
+                      speaker: { kind: "bot", botId: bot.id },
+                      target: coffeeSpeakerGazeParticipant,
+                      compact: compactCoffeeStage,
+                      seatCount: coffeeSeatLayoutCount,
+                      visibleSeats: coffeeGazeVisibleSeats,
+                    })
+                  : null;
+              const seatEyeTargetDirection =
+                seatSpeakerGazeDirection ?? seatListenerGazeDirection ?? 0;
               const neutralCoffeePlateFaceScaleY =
                 isTopHeadSeat && !seatDebugOverride
                   ? coffeeHeadPlateFaceScaleYFromGazeTargetSide(
@@ -124639,6 +124714,21 @@ function HomeContent(): React.JSX.Element {
                             scheduleKey={`coffee-live-${bot.id}`}
                             thinkingScheduleKey={`coffee-thinking-${bot.id}`}
                             showThinkingSpinner={seatThinkingVisualActive}
+                            eyeAttentionState={
+                              seatThinkingVisualActive
+                                ? "thinking"
+                                : seatMouthActive
+                                  ? "speaking"
+                                  : coffeeSpeakerGazeParticipant
+                                    ? "listening"
+                                    : "idle"
+                            }
+                            eyeTargetDirection={seatEyeTargetDirection}
+                            eyeTimelineMs={
+                              coffeeReplayActive
+                                ? coffeeReplayAudioMasterElapsedMs
+                                : undefined
+                            }
                             screenMaterialSeed={botScreenMaterialSeedForBot(
                               bot,
                               bot.id,
@@ -128489,6 +128579,18 @@ function HomeContent(): React.JSX.Element {
                       scheduleKey="botcast-producer-prism"
                       thinkingScheduleKey="botcast-producer-prism-thinking"
                       showThinkingSpinner={avatarState.thinking}
+                      eyeAttentionState={
+                        avatarState.thinking
+                          ? "thinking"
+                          : avatarState.talking
+                            ? "speaking"
+                            : "listening"
+                      }
+                      eyeTargetDirection={
+                        avatarState.role === "host" ? 1 : -1
+                      }
+                      eyeTimelineMs={avatarState.eyeTimelineMs}
+                      eyeStateStartedAtMs={avatarState.eyeStateStartedAtMs}
                       screenMaterialSeed="prism-default"
                       frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
                     />
@@ -128613,6 +128715,18 @@ function HomeContent(): React.JSX.Element {
                     }
                     scheduleKey={`botcast-${avatarState.role}-${bot.id}`}
                     showThinkingSpinner={avatarState.thinking}
+                    eyeAttentionState={
+                      avatarState.thinking
+                        ? "thinking"
+                        : avatarState.talking
+                          ? "speaking"
+                          : "listening"
+                    }
+                    eyeTargetDirection={
+                      avatarState.role === "host" ? 1 : -1
+                    }
+                    eyeTimelineMs={avatarState.eyeTimelineMs}
+                    eyeStateStartedAtMs={avatarState.eyeStateStartedAtMs}
                     screenMaterialSeed={botScreenMaterialSeedForBot(bot, bot.id)}
                     frameMaterialSeed={botFrameMaterialSeedForBot(bot, bot.id)}
                     avatarDetails={resolveBotIdentityMirrorAvatarDetailsV1(
