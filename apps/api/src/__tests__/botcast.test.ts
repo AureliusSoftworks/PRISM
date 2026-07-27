@@ -6830,6 +6830,145 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("repairs a forgetful host question before completing the closing turn", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "This is Mara Vale in the Margins, and I’m Mara Vale. Ivo Stone, when power needs an audience, what does it ask them to remember?",
+        "It asks them to remember fear long after the machine itself is gone.",
+        "Hello, I’m Mara Vale. What does fear demand from the audience in front of you?",
+        "It demands that they keep reacting after the threat should have gone stale.",
+        "I’m Mara Vale. What survives when the audience stops reacting?",
+        "Only the consequences; the theatre collapses without attention.",
+        "Hello, I’m Mara Vale. Bucket or basket?",
+        "Pleased to meet you; I’m Mara Vale. Bucket or basket?",
+      ],
+      captures,
+    );
+    const powerName = "Eternal Introduction";
+    const powerIntent =
+      "Every message is only a sincere first introduction. Mara has no awareness of her own prior messages or the earlier conversation.";
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+        JSON.stringify([
+          {
+            version: 1,
+            id: "eternal-introduction",
+            name: powerName,
+            intent: powerIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+              selfCue: "Every request is first contact.",
+              observerCue: "Remember every repetition and react naturally.",
+              effects: [
+                {
+                  type: "eternal_introduction",
+                  memory: "current_other_speaker_message",
+                },
+              ],
+              ruleLabels: ["Current other-speaker message only"],
+            },
+          },
+        ]),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Doomsday devices need an audience",
+      });
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      db.prepare(
+        "UPDATE botcast_episodes SET started_at = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        new Date(Date.now() - 31 * 60_000).toISOString(),
+        episode.id,
+        "user-1",
+      );
+
+      const closing = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+
+      assert.equal(closing.episode.status, "completed");
+      assert.equal(closing.episode.segment, "closing");
+      assert.equal(
+        closing.message?.content,
+        "That is where we will leave it. Ivo Stone, thank you for joining me.",
+      );
+      assert.doesNotMatch(closing.message?.content ?? "", /\?/u);
+      const closingUtterance = closing.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === closing.message?.id,
+      );
+      assert.equal(
+        closingUtterance?.payload.utteranceRepair?.reason,
+        "generic_closing",
+      );
+      assert.equal(
+        closingUtterance?.payload.utteranceRepair?.fallbackKind,
+        "host_closing",
+      );
+      assert.equal(captures.length, 7);
+      assert.match(
+        captures[6]!.map((message) => message.content).join("\n"),
+        /final host-owned beat/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("gives a forgetful Signal holder the current on-air message with varied fresh-contact direction", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
@@ -14211,7 +14350,11 @@ describe("Botcast persistence and isolation", () => {
       assert.match(prompt, /Briefly connect the cue to the guest's latest on-air point/u);
       assert.match(prompt, /A slightly awkward pivot is acceptable/u);
       assert.match(prompt, /It is direction, not dialogue/u);
-      assert.match(prompt, /never quote the cue detail verbatim/u);
+      assert.match(prompt, /never quote the cue detail as a whole/u);
+      assert.match(
+        prompt,
+        /If and only if it explicitly requests one[\s\S]*third-person `\*action\*`/u,
+      );
       assert.match(
         prompt,
         /Do not import absolute real-world calendar years/u,
@@ -14221,6 +14364,246 @@ describe("Botcast persistence and isolation", () => {
         /Private live producer cue: ask_about — Offer him the family archive/u,
       );
       assert.doesNotMatch(advanced.message?.content ?? "", /producer|cue|control room/iu);
+      assert.equal(advanced.message?.stageActionText, null);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets a late producer question receive its guest answer before Auto closes", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Doomsday devices need an audience. Ivo, what does the threat require from its witnesses?",
+        "It requires fear to survive longer than the machinery.",
+        "What does that borrowed fear purchase for the person holding the switch?",
+        "A brief illusion that authority and spectacle are the same thing.",
+        "And when the spectacle fails, what remains?",
+        "Accountability, if anyone survives long enough to demand it.",
+        "Your apocalypse has standards, Ivo: bucket or basket for the less glamorous emergency?",
+        "A basket is absurd. A bucket at least admits what sort of emergency it is.",
+        "Even apocalypse has standards. Ivo, thank you.",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Doomsday devices need an audience",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      db.prepare(
+        "UPDATE botcast_episodes SET started_at = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        new Date(Date.now() - 31 * 60_000).toISOString(),
+        episode.id,
+        "user-1",
+      );
+
+      const cueTurn = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {
+          cue: {
+            kind: "ask_about",
+            detail: "if he’d rather poop in a bucket or poop in a basket.",
+          },
+        },
+        generation(provider),
+      );
+      assert.equal(cueTurn.episode.status, "live");
+      assert.equal(cueTurn.episode.segment, "interview");
+      assert.equal(
+        cueTurn.message?.content,
+        "Your apocalypse has standards, Ivo: bucket or basket for the less glamorous emergency?",
+      );
+
+      const guestAnswer = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(guestAnswer.episode.status, "live");
+      assert.equal(guestAnswer.episode.segment, "interview");
+      assert.equal(guestAnswer.message?.speakerRole, "guest");
+      assert.equal(
+        guestAnswer.message?.content,
+        "A basket is absurd. A bucket at least admits what sort of emergency it is.",
+      );
+
+      const closing = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(closing.episode.status, "completed");
+      assert.equal(closing.episode.segment, "closing");
+      assert.equal(
+        closing.message?.content,
+        "Even apocalypse has standards. Ivo, thank you.",
+      );
+
+      const cueEvent = closing.episode.events.findLast(
+        (event) =>
+          event.kind === "producer_cue" &&
+          event.payload.detail ===
+            "if he’d rather poop in a bucket or poop in a basket.",
+      );
+      const cueUtterance = closing.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === cueTurn.message?.id,
+      );
+      const guestUtterance = closing.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === guestAnswer.message?.id,
+      );
+      const closingSegment = closing.episode.events.findLast(
+        (event) =>
+          event.kind === "segment" && event.payload.segment === "closing",
+      );
+      const closingUtterance = closing.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === closing.message?.id,
+      );
+      const completed = closing.episode.events.findLast(
+        (event) => event.kind === "episode_completed",
+      );
+      assert.ok(cueEvent);
+      assert.ok(cueUtterance);
+      assert.ok(guestUtterance);
+      assert.ok(closingSegment);
+      assert.ok(closingUtterance);
+      assert.ok(completed);
+      assert.ok(cueEvent.sequence < cueUtterance.sequence);
+      assert.ok(cueUtterance.sequence < guestUtterance.sequence);
+      assert.ok(guestUtterance.sequence < closingSegment.sequence);
+      assert.ok(closingSegment.sequence < closingUtterance.sequence);
+      assert.ok(closingUtterance.sequence < completed.sequence);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a producer-directed physical beat out of Signal dialogue", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore Consent under pressure. Ivo, where does choice survive?",
+        "It survives only where refusal remains materially safe.",
+        "*starts twerking* Fuck you, bitch! What independent evidence should rebut a presumption of retaliation?",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Consent under pressure",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {
+          cue: {
+            kind: "ask_about",
+            detail:
+              "Randomly say “Fuck you, bitch!” to Ivo, then start twerking. Randomly.",
+          },
+        },
+        generation(provider),
+      );
+
+      assert.equal(advanced.message?.stageActionText, "starts twerking");
+      assert.equal(
+        advanced.message?.content,
+        "Fuck you, bitch! What independent evidence should rebut a presumption of retaliation?",
+      );
+      assert.doesNotMatch(advanced.message?.content ?? "", /\b(?:twerk|danc)/iu);
+      assert.equal(advanced.message?.voicePerformanceText, null);
+      const utterance = advanced.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === advanced.message?.id,
+      );
+      assert.deepEqual(utterance?.payload.stageAction, {
+        v: 1,
+        source: "llm",
+        category: "gesture",
+        action: "starts twerking",
+        seed: `signal-stage-action:${episode.id}:host-1:2`,
+        lane: "signal",
+      });
+      const prompt = captures[2]!.map((message) => message.content).join("\n");
+      assert.match(prompt, /requested subject, event, offer, question, spoken line, or physical behavior/u);
+      assert.match(prompt, /perform that act through the private stage-direction format/u);
+      assert.match(prompt, /Never announce, describe, or claim the physical movement/u);
     } finally {
       db.close();
     }

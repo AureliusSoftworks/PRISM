@@ -41,8 +41,31 @@ export interface ReplayPremiumGeneratedSegment {
   characterCost: number;
 }
 
+export class ReplayStudioCutEligibilityError extends Error {
+  readonly missingSpeakers: string[];
+
+  constructor(
+    message: string,
+    missingSpeakers: string[],
+  ) {
+    super(message);
+    this.name = "ReplayStudioCutEligibilityError";
+    this.missingSpeakers = missingSpeakers;
+  }
+}
+
 function stableJsonHash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function speakerList(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? "A speaker";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names.at(-1)}`;
+}
+
+function uniqueNames(names: readonly string[]): string[] {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
 }
 
 function premiumSavedSpeechText(take: ReplayVoiceTakeRecordV1): string {
@@ -96,15 +119,62 @@ function primaryPremiumInputs(
       )
       .map((take) => [take.snapshot.sourceMessageId as string, take]),
   );
-  return manifest.utterances.flatMap((utterance) => {
-    if (!utterance.audible) return [];
+  const participantNameById = new Map(
+    manifest.participants.map((participant) => [participant.id, participant.name]),
+  );
+  const audibleUtterances = manifest.utterances.filter(
+    (utterance) => utterance.audible,
+  );
+  const missingSnapshotSpeakers = uniqueNames(
+    audibleUtterances.flatMap((utterance) => {
+      const take = takeByMessageId.get(utterance.sourceMessageId);
+      return !take || !take.snapshot.audible || take.snapshot.mode === "mute"
+        ? [
+            take?.snapshot.speakerName ??
+              participantNameById.get(utterance.speakerId) ??
+              utterance.speakerRole,
+          ]
+        : [];
+    }),
+  );
+  const missingVoiceSpeakers = uniqueNames(
+    audibleUtterances.flatMap((utterance) => {
+      const take = takeByMessageId.get(utterance.sourceMessageId);
+      return take &&
+          take.snapshot.audible &&
+          take.snapshot.mode !== "mute" &&
+          !resolveElevenLabsVoiceId(take.snapshot.profile)
+        ? [take.snapshot.speakerName]
+        : [];
+    }),
+  );
+  if (missingSnapshotSpeakers.length > 0 || missingVoiceSpeakers.length > 0) {
+    const reasons: string[] = [];
+    if (missingSnapshotSpeakers.length > 0) {
+      const speakers = speakerList(missingSnapshotSpeakers);
+      reasons.push(
+        `${speakers} ${missingSnapshotSpeakers.length === 1 ? "needs" : "need"} an audible saved replay voice snapshot`,
+      );
+    }
+    if (missingVoiceSpeakers.length > 0) {
+      const speakers = speakerList(missingVoiceSpeakers);
+      reasons.push(
+        `${speakers} ${missingVoiceSpeakers.length === 1 ? "needs" : "need"} an ElevenLabs voice`,
+      );
+    }
+    throw new ReplayStudioCutEligibilityError(
+      `${reasons.join("; ")} before Studio Cut can begin.`,
+      uniqueNames([...missingSnapshotSpeakers, ...missingVoiceSpeakers]),
+    );
+  }
+  return audibleUtterances.map((utterance) => {
     const take = takeByMessageId.get(utterance.sourceMessageId);
-    if (!take || !take.snapshot.audible || take.snapshot.mode === "mute") return [];
+    if (!take) {
+      throw new Error("Studio Cut voice snapshot validation failed.");
+    }
     const voiceId = resolveElevenLabsVoiceId(take.snapshot.profile);
     if (!voiceId) {
-      throw new Error(
-        `${take.snapshot.speakerName} needs an ElevenLabs voice before Premium production can begin.`,
-      );
+      throw new Error("Studio Cut ElevenLabs voice validation failed.");
     }
     const text = premiumPerformanceText(take);
     if (Array.from(text).length > REPLAY_PREMIUM_DIALOGUE_MAX_CHARACTERS) {
@@ -112,13 +182,13 @@ function primaryPremiumInputs(
         `${take.snapshot.speakerName}'s saved line exceeds the 2,000-character Premium message limit.`,
       );
     }
-    return [{
+    return {
       sourceMessageId: utterance.sourceMessageId,
       speakerId: take.snapshot.speakerId,
       voiceId,
       text,
       take,
-    }];
+    };
   });
 }
 

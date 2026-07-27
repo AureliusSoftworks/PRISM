@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
+  compileReplayTimelineV2,
   replayManifestV1IsValid,
   replayManifestV2IsValid,
   type BotcastEpisode,
@@ -11,6 +12,7 @@ import {
   buildCoffeeReplayManifestV1,
   buildCoffeeReplayManifestV2,
   buildSignalReplayManifestV1,
+  buildSignalReplayManifestV2,
   COFFEE_REPLAY_RENDER_CONTRACT,
 } from "./replayManifest.ts";
 
@@ -451,6 +453,245 @@ describe("replay manifests", () => {
       dark: { opacity: 0.78, blendMode: "screen" },
       light: { opacity: 0.52, blendMode: "overlay" },
     });
+  });
+
+  it("keeps captured Signal direction authoritative over server-time semantics", () => {
+    const episode = {
+      id: "signal-faithful-clock",
+      title: "Captured clock",
+      hostBotId: "host-1",
+      guestBotId: "guest-1",
+      guestKind: "bot",
+      responseMode: "online",
+      messages: [
+        {
+          id: "message-1",
+          episodeId: "signal-faithful-clock",
+          speakerRole: "host",
+          botId: "host-1",
+          content: "First captured line.",
+          stageActionText: null,
+          voicePerformanceText: null,
+          moodKey: "neutral",
+          createdAt: "2026-07-27T00:00:10.000Z",
+        },
+        {
+          id: "message-2",
+          episodeId: "signal-faithful-clock",
+          speakerRole: "guest",
+          botId: "guest-1",
+          content: "Final captured line.",
+          stageActionText: null,
+          voicePerformanceText: null,
+          moodKey: "neutral",
+          createdAt: "2026-07-27T00:05:20.000Z",
+        },
+      ],
+      events: [
+        {
+          id: "segment-opening",
+          episodeId: "signal-faithful-clock",
+          sequence: 1,
+          kind: "segment",
+          payload: { ordinal: 0, segment: "opening" },
+          occurredAt: "2026-07-27T00:00:00.000Z",
+        },
+        {
+          id: "camera-server",
+          episodeId: "signal-faithful-clock",
+          sequence: 2,
+          kind: "camera_suggestion",
+          payload: {
+            atMs: 800,
+            messageId: "message-1",
+            shot: "left",
+          },
+          occurredAt: "2026-07-27T00:00:10.000Z",
+        },
+        {
+          id: "utterance-1",
+          episodeId: "signal-faithful-clock",
+          sequence: 3,
+          kind: "utterance",
+          payload: { messageId: "message-1" },
+          occurredAt: "2026-07-27T00:00:10.000Z",
+        },
+        {
+          id: "reaction-server",
+          episodeId: "signal-faithful-clock",
+          sequence: 4,
+          kind: "listener_reaction",
+          payload: {
+            plan: {
+              messageId: "message-1",
+              speakerBotId: "host-1",
+              listenerBotId: "guest-1",
+              visualAction: "nod",
+            },
+          },
+          occurredAt: "2026-07-27T00:05:00.000Z",
+        },
+        {
+          id: "segment-closing",
+          episodeId: "signal-faithful-clock",
+          sequence: 5,
+          kind: "segment",
+          payload: { ordinal: 2, segment: "closing" },
+          occurredAt: "2026-07-27T00:05:19.000Z",
+        },
+        {
+          id: "utterance-2",
+          episodeId: "signal-faithful-clock",
+          sequence: 6,
+          kind: "utterance",
+          payload: { messageId: "message-2" },
+          occurredAt: "2026-07-27T00:05:20.000Z",
+        },
+        {
+          id: "reaction-server-unrendered",
+          episodeId: "signal-faithful-clock",
+          sequence: 7,
+          kind: "listener_reaction",
+          payload: {
+            plan: {
+              messageId: "message-2",
+              speakerBotId: "guest-1",
+              listenerBotId: "host-1",
+              visualAction: "head_tilt",
+            },
+          },
+          occurredAt: "2026-07-27T00:05:25.000Z",
+        },
+        {
+          id: "completed-server",
+          episodeId: "signal-faithful-clock",
+          sequence: 8,
+          kind: "episode_completed",
+          payload: { outcome: "completed", runtimeMs: 320_000 },
+          occurredAt: "2026-07-27T00:05:30.000Z",
+        },
+      ],
+      createdAt: "2026-07-27T00:00:00.000Z",
+      updatedAt: "2026-07-27T00:05:30.000Z",
+      completedAt: "2026-07-27T00:05:30.000Z",
+    } as unknown as BotcastEpisode;
+    const show = {
+      id: "show-1",
+      hostBotId: "host-1",
+      name: "Captured Show",
+      accentColor: "#55ddff",
+      atmosphereMix: {
+        background: 0.16,
+        grain: 0,
+        foley: 1,
+        filmGrain: 0.65,
+      },
+      studioLayout: {},
+      studioGlowTuning: {
+        dark: { opacity: 0.78, blendMode: "screen" },
+        light: { opacity: 0.52, blendMode: "overlay" },
+      },
+      logo: { imageUrl: null },
+      dayAtmosphere: { imageUrl: null },
+      nightAtmosphere: { imageUrl: null },
+    } as unknown as BotcastShow;
+    const capturedReactionPlan = {
+      messageId: "message-1",
+      speakerBotId: "host-1",
+      listenerBotId: "guest-1",
+      visualAction: "nod",
+    };
+    const manifest = buildSignalReplayManifestV2({
+      episode,
+      show,
+      bots: [
+        { id: "host-1", name: "Host" },
+        { id: "guest-1", name: "Guest" },
+      ],
+      producerName: "Jared",
+      theme: "dark",
+      capturedDirection: [
+        {
+          sequence: 1,
+          atMs: 100,
+          kind: "camera",
+          sourceMessageId: null,
+          payload: { shot: "wide" },
+        },
+        {
+          sequence: 2,
+          atMs: 1_000,
+          endMs: 2_000,
+          kind: "speech",
+          sourceMessageId: "message-1",
+          payload: { speakerId: "host-1", audible: true, channel: "primary" },
+        },
+        {
+          sequence: 3,
+          atMs: 1_500,
+          kind: "action",
+          sourceMessageId: null,
+          payload: { plan: capturedReactionPlan },
+        },
+        {
+          sequence: 4,
+          atMs: 3_000,
+          kind: "camera",
+          sourceMessageId: "message-2",
+          payload: { shot: "right" },
+        },
+        {
+          sequence: 5,
+          atMs: 3_200,
+          endMs: 4_000,
+          kind: "speech",
+          sourceMessageId: "message-2",
+          payload: { speakerId: "guest-1", audible: true, channel: "primary" },
+        },
+        {
+          sequence: 6,
+          atMs: 4_500,
+          kind: "outro",
+          sourceMessageId: null,
+          payload: { active: true },
+        },
+      ],
+    });
+
+    assert.deepEqual(
+      manifest.direction
+        .filter((event) => event.kind === "camera")
+        .map((event) => event.atMs),
+      [100, 3_000],
+    );
+    assert.deepEqual(
+      manifest.direction
+        .filter((event) => event.kind === "action")
+        .map((event) => event.atMs),
+      [1_500],
+    );
+    assert.deepEqual(
+      manifest.direction
+        .filter((event) => event.kind === "segment")
+        .map((event) => [event.payload.segment, event.atMs]),
+      [
+        ["opening", 0],
+        ["closing", 3_000],
+      ],
+    );
+    assert.deepEqual(
+      manifest.direction
+        .filter((event) => event.kind === "outro")
+        .map((event) => event.atMs),
+      [4_500],
+    );
+    assert.equal(
+      Math.max(
+        ...manifest.direction.map((event) => event.endMs ?? event.atMs),
+      ),
+      4_500,
+    );
+    assert.equal(compileReplayTimelineV2(manifest).durationMs, 4_500);
   });
 });
 

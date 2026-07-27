@@ -49,6 +49,7 @@ import {
   generateReplayPremiumSegment,
   planReplayPremiumSegments,
   replayPremiumInputHash,
+  ReplayStudioCutEligibilityError,
 } from "./replay-premium.ts";
 
 const REPLAY_MANIFEST_MAX_BYTES = 4 * 1024 * 1024;
@@ -1046,13 +1047,15 @@ export function replayStudioCutEligibility(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Studio Cut is unavailable.";
-    const missing = /^(.+?) needs an ElevenLabs voice/u.exec(message)?.[1];
     return {
       eligible: false,
       blockedReason: message,
       characterEstimate: 0,
       requestEstimate: 0,
-      missingSpeakers: missing ? [missing] : [],
+      missingSpeakers:
+        error instanceof ReplayStudioCutEligibilityError
+          ? error.missingSpeakers
+          : [],
     };
   }
 }

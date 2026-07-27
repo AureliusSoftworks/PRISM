@@ -318,7 +318,7 @@ function episodeWithCameraEvents(
 }
 
 describe("Signal replay video frames", () => {
-  it("translates baked mouth and camera tracks together while the audio clock stays fixed", () => {
+  it("translates baked mouth tracks while camera direction stays on the audio clock", () => {
     const bakedManifest: ReplayManifestV2 = {
       v: 2,
       surface: "signal",
@@ -382,13 +382,13 @@ describe("Signal replay video frames", () => {
       "open-wide",
     );
     assert.equal(
-      replayCameraPresentationAtV2(bakedManifest, originalVisualMs)
+      replayCameraPresentationAtV2(bakedManifest, audioElapsedMs)
         .transitionMode,
       "instant",
     );
     assert.equal(
-      replayCameraPresentationAtV2(bakedManifest, extendedIntroVisualMs).shot,
-      null,
+      replayCameraPresentationAtV2(bakedManifest, audioElapsedMs).shot,
+      "right",
     );
   });
 

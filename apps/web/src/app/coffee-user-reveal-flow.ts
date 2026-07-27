@@ -21,8 +21,11 @@ export function coffeeComposerUsesRichInput(args: {
 }): boolean {
   return (
     args.markdownEditorEnabled ||
-    args.variant === "coffee-table" ||
-    args.variant === "signal"
+    // Coffee's live table needs rich mention-chip rendering. Signal's producer
+    // answer field is intentionally plain unless the writer opts into Markdown:
+    // its controlled rich-editor update can replace the focused editing surface
+    // while the live stage rerenders.
+    args.variant === "coffee-table"
   );
 }
 

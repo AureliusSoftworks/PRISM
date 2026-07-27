@@ -6,6 +6,7 @@ import type {
 } from "@localai/shared";
 import {
   REPLAY_PREMIUM_DIALOGUE_MAX_CHARACTERS,
+  ReplayStudioCutEligibilityError,
   generateReplayPremiumSegment,
   planReplayPremiumSegments,
 } from "../replay-premium.ts";
@@ -98,6 +99,81 @@ function fixture(lines: Array<{
 }
 
 describe("Signal Premium voice planning", () => {
+  it("reports every speaker whose audible line lacks a saved voice snapshot", () => {
+    const { manifest } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+
+    assert.throws(
+      () => planReplayPremiumSegments(manifest, []),
+      (error) => {
+        assert.ok(error instanceof ReplayStudioCutEligibilityError);
+        assert.equal(
+          error.message,
+          "Host and Guest need an audible saved replay voice snapshot before Studio Cut can begin.",
+        );
+        assert.deepEqual(error.missingSpeakers, ["Host", "Guest"]);
+        return true;
+      },
+    );
+  });
+
+  it("blocks a partial Studio Cut instead of silently omitting an audible line", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+
+    assert.throws(
+      () => planReplayPremiumSegments(manifest, takes.slice(0, 1)),
+      (error) => {
+        assert.ok(error instanceof ReplayStudioCutEligibilityError);
+        assert.equal(
+          error.message,
+          "Guest needs an audible saved replay voice snapshot before Studio Cut can begin.",
+        );
+        assert.deepEqual(error.missingSpeakers, ["Guest"]);
+        return true;
+      },
+    );
+  });
+
+  it("reserves the no-dialogue state for a genuinely silent replay", () => {
+    const { manifest } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Silent." },
+    ]);
+    manifest.utterances[0]!.audible = false;
+
+    assert.deepEqual(planReplayPremiumSegments(manifest, []), []);
+  });
+
+  it("reports every audible speaker who lacks an ElevenLabs voice", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+    for (const take of takes) {
+      take.snapshot.profile = {
+        ...take.snapshot.profile,
+        elevenLabsVoiceId: null,
+      };
+    }
+
+    assert.throws(
+      () => planReplayPremiumSegments(manifest, takes),
+      (error) => {
+        assert.ok(error instanceof ReplayStudioCutEligibilityError);
+        assert.equal(
+          error.message,
+          "Host and Guest need an ElevenLabs voice before Studio Cut can begin.",
+        );
+        assert.deepEqual(error.missingSpeakers, ["Host", "Guest"]);
+        return true;
+      },
+    );
+  });
+
   it("batches distinct actors into exact message-boundary Dialogue chunks", () => {
     const line = "x".repeat(980);
     const { manifest, takes } = fixture([

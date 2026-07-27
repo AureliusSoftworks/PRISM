@@ -15,6 +15,7 @@ const mixer = readFileSync(
   "utf8",
 );
 const client = readFileSync(new URL("./replayClient.ts", import.meta.url), "utf8");
+const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Signal Studio Cut contract", () => {
   it("keeps On Air as a distinct source and confirms every paid take", () => {
@@ -23,6 +24,23 @@ describe("Signal Studio Cut contract", () => {
     assert.match(experience, /canonical episode dialogue and saved ElevenLabs voice IDs/u);
     assert.match(experience, /exact On Air recording remains unchanged/u);
     assert.match(client, /confirm: "send-to-elevenlabs"/u);
+  });
+
+  it("freezes every audible on-air line and its resolved voice audio", () => {
+    assert.match(
+      page,
+      /const replayVoiceTakePromise = captureReplayVoiceTake\(\{[\s\S]{0,180}sourceId: message\.episodeId/u,
+    );
+    assert.match(page, /sourceMessageId: message\.id/u);
+    assert.match(page, /profile: playbackProfile/u);
+    assert.match(
+      page,
+      /storeCapturedReplayVoiceAudio\(\{[\s\S]{0,180}resolvedEngine: clip\.engineUsed/u,
+    );
+    assert.match(
+      page,
+      /updateCapturedReplayVoiceTake\(replayVoiceTakePromise,[\s\S]{0,120}durationMs,[\s\S]{0,80}alignment/u,
+    );
   });
 
   it("runs the mix globally in bounded windows and streams Opus chunks", () => {

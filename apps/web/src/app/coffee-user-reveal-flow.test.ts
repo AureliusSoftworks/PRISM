@@ -25,7 +25,7 @@ import {
 } from "./coffee-user-reveal-flow.ts";
 
 describe("coffee user reveal flow", () => {
-  it("keeps the Coffee table composer rich so mentions render as chips", () => {
+  it("keeps only the Coffee table composer rich by default", () => {
     assert.equal(
       coffeeComposerUsesRichInput({
         variant: "coffee-table",
@@ -51,6 +51,13 @@ describe("coffee user reveal flow", () => {
       coffeeComposerUsesRichInput({
         variant: "signal",
         markdownEditorEnabled: false,
+      }),
+      false,
+    );
+    assert.equal(
+      coffeeComposerUsesRichInput({
+        variant: "signal",
+        markdownEditorEnabled: true,
       }),
       true,
     );

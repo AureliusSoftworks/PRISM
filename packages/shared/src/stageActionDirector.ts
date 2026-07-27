@@ -663,6 +663,8 @@ export function resolveFinalStageActionV1(args: {
   allowCupActions?: boolean;
   postGenerationExclusions?: readonly StageActionExclusionV1[];
   powerAction?: { cue: string; frequency?: "occasional" | "frequent" } | null;
+  /** False when an upstream contract may supply an action but must not invent one. */
+  directorFallback?: boolean;
 }): { action: StageActionV1 | null; spokenText: string } {
   const postExclusion = args.postGenerationExclusions?.find(Boolean);
   if (args.plan.decision === "excluded" || postExclusion) {
@@ -718,6 +720,13 @@ export function resolveFinalStageActionV1(args: {
         lane: args.lane,
       },
       spokenText: extracted.spokenText,
+    };
+  }
+
+  if (args.directorFallback === false) {
+    return {
+      action: null,
+      spokenText: extracted.spokenText || normalizeWhitespace(args.replyText),
     };
   }
 

@@ -6757,6 +6757,21 @@ export function BotcastExperience({
       replaySceneCheckpoints,
     ],
   );
+  const replayCameraDirectedScene = useMemo(
+    () =>
+      replayPresentationManifestV2
+        ? replaySceneAtV2(
+            replayPresentationManifestV2,
+            replayElapsedMs,
+            replaySceneCheckpoints,
+          )
+        : null,
+    [
+      replayPresentationManifestV2,
+      replayElapsedMs,
+      replaySceneCheckpoints,
+    ],
+  );
   const replayHasCapturedCameraDirection = useMemo(
     () =>
       replayPresentationManifestV2?.direction.some((event) => event.kind === "camera") ===
@@ -6793,24 +6808,24 @@ export function BotcastExperience({
         ? signalFaithfulReplayCameraState({
             episode: replayEpisode,
             timeline: replayActiveTimeline,
-            replayElapsedMs: replayInterviewFootageElapsedMs,
-            scene: replayDirectedScene,
+            replayElapsedMs,
+            scene: replayCameraDirectedScene,
             activeMessage: replayActiveMessage,
             preferDirectedCamera: replayHasCapturedCameraDirection,
           })
         : null,
     [
-      replayDirectedScene,
+      replayCameraDirectedScene,
       replayEpisode,
       replayFaithful,
       replayActiveMessage,
       replayHasCapturedCameraDirection,
-      replayInterviewFootageElapsedMs,
+      replayElapsedMs,
       replayActiveTimeline,
     ],
   );
   const replayEventElapsedMs =
-    replayFaithfulCamera?.eventElapsedMs ?? replayInterviewFootageElapsedMs;
+    replayFaithfulCamera?.eventElapsedMs ?? replayElapsedMs;
   const replayBaseShot = replayEpisode
     ? replayFaithful
       ? (replayFaithfulCamera?.shot ??
@@ -7409,7 +7424,7 @@ export function BotcastExperience({
   }): React.JSX.Element => {
     const stageCameraTransitionMode =
       args.replay && replayFaithful
-        ? replayCameraTransitionModeV2(replayDirectedScene)
+        ? replayCameraTransitionModeV2(replayCameraDirectedScene)
         : cameraTransitionMode;
     const recordedGuestDeparture =
       args.guestDeparted ?? guestHasDeparted(args.currentEpisode);

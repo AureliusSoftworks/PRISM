@@ -181,6 +181,32 @@ describe("stageActionDirector", () => {
     assert.equal(filled.spokenText, "Plain spoken line.");
   });
 
+  it("keeps an optional action without inventing a Director fallback", () => {
+    const plan = planStageActionV1({
+      lane: "signal",
+      seed: "signal:producer-cue:optional-action",
+      personaInviteChance: 0,
+    });
+    const directed = resolveFinalStageActionV1({
+      plan,
+      lane: "signal",
+      replyText: "*starts twerking* Stay with the evidence.",
+      directorFallback: false,
+    });
+    assert.equal(directed.action?.source, "llm");
+    assert.equal(directed.action?.action, "starts twerking");
+    assert.equal(directed.spokenText, "Stay with the evidence.");
+
+    const speechOnly = resolveFinalStageActionV1({
+      plan,
+      lane: "signal",
+      replyText: "Stay with the evidence.",
+      directorFallback: false,
+    });
+    assert.equal(speechOnly.action, null);
+    assert.equal(speechOnly.spokenText, "Stay with the evidence.");
+  });
+
   it("discards actions when a post-generation exclusion appears", () => {
     const plan = planStageActionV1({
       lane: "coffee",

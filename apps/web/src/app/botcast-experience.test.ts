@@ -1046,7 +1046,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(source, /Signal Intro Alignment/u);
     assert.match(
       source,
-      /signalReplayDefaultIntroDurationMs\(\s*replayRecording\?\.timeline/u,
+      /signalReplayDefaultIntroDurationMs\(\s*replayActiveTimeline/u,
     );
     assert.match(
       source,
@@ -1058,7 +1058,11 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayElapsedMs: replayInterviewFootageElapsedMs,[\s\S]{0,120}activeMessage: replayActiveMessage/u,
+      /const replayCameraDirectedScene = useMemo\([\s\S]{0,240}replaySceneAtV2\([\s\S]{0,120}replayElapsedMs/u,
+    );
+    assert.match(
+      source,
+      /signalFaithfulReplayCameraState\(\{[\s\S]{0,180}replayElapsedMs,[\s\S]{0,80}scene: replayCameraDirectedScene/u,
     );
     assert.match(source, /audio\.playbackRate = 1/u);
     assert.doesNotMatch(
@@ -1116,7 +1120,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayFaithfulCamera\?\.eventElapsedMs \?\? replayInterviewFootageElapsedMs/u,
+      /replayFaithfulCamera\?\.eventElapsedMs \?\? replayElapsedMs/u,
     );
     assert.match(
       source,
@@ -1128,7 +1132,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /replayCameraTransitionModeV2\(replayDirectedScene\)/u,
+      /replayCameraTransitionModeV2\(replayCameraDirectedScene\)/u,
     );
     assert.match(
       source,

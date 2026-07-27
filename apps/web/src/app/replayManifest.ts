@@ -528,6 +528,30 @@ function replayEventAtMs(
     : 0;
 }
 
+function replayDirectionMessageId(
+  event: Pick<ReplayDirectionEventV2, "sourceMessageId" | "payload">,
+): string | null {
+  const direct =
+    typeof event.sourceMessageId === "string"
+      ? event.sourceMessageId.trim()
+      : "";
+  if (direct) return direct;
+  const payloadMessageId =
+    typeof event.payload.messageId === "string"
+      ? event.payload.messageId.trim()
+      : "";
+  if (payloadMessageId) return payloadMessageId;
+  const plan =
+    event.payload.plan &&
+    typeof event.payload.plan === "object" &&
+    !Array.isArray(event.payload.plan)
+      ? (event.payload.plan as Record<string, unknown>)
+      : null;
+  return typeof plan?.messageId === "string" && plan.messageId.trim()
+    ? plan.messageId.trim()
+    : null;
+}
+
 function capturedSpeechDirection(
   manifest: ReplayManifestV1,
 ): ReplayDirectionEventV2[] {
@@ -573,7 +597,32 @@ function buildReplayDirectionV2(
   capturedDirection: readonly ReplayDirectionEventV2[] = [],
 ): ReplayDirectionEventV2[] {
   const createdAtMs = Date.parse(manifest.createdAt);
-  const semanticEvents = manifest.events.flatMap((event) => {
+  const capturedKinds = new Set(capturedDirection.map((event) => event.kind));
+  const hasCapturedPresentation = capturedDirection.length > 0;
+  const capturedAnchorByMessageId = new Map<string, number>();
+  for (const event of capturedDirection) {
+    const messageId = replayDirectionMessageId(event);
+    if (!messageId) continue;
+    const prior = capturedAnchorByMessageId.get(messageId);
+    if (prior === undefined || event.atMs < prior) {
+      capturedAnchorByMessageId.set(messageId, event.atMs);
+    }
+  }
+  const followingUtteranceMessageId = (eventIndex: number): string | null => {
+    for (let index = eventIndex + 1; index < manifest.events.length; index += 1) {
+      const candidate = manifest.events[index]!;
+      if (candidate.kind !== "utterance") continue;
+      const messageId =
+        typeof candidate.sourceMessageId === "string"
+          ? candidate.sourceMessageId.trim()
+          : typeof candidate.payload.messageId === "string"
+            ? candidate.payload.messageId.trim()
+            : "";
+      if (messageId) return messageId;
+    }
+    return null;
+  };
+  const semanticEvents = manifest.events.flatMap((event, eventIndex) => {
     if (event.kind === "capture_timing") {
       const phase = event.payload.phase;
       if (phase === "intro_start" || phase === "outro_start") {
@@ -594,10 +643,36 @@ function buildReplayDirectionV2(
     // V2 thinking comes only from the committed on-screen presentation hook.
     // Server request/job timestamps are not equivalent to the spinner interval.
     if (kind === "thinking") return [];
+    // Faithful capture owns live presentation timing. Server-authored camera,
+    // listener-action, and bookend clocks can include model latency and must not
+    // be replayed beside their captured equivalents.
+    if (kind === "camera" && capturedKinds.has("camera")) return [];
+    if (
+      (kind === "intro" || kind === "outro") &&
+      capturedKinds.has(kind)
+    ) {
+      return [];
+    }
+    const semanticListenerReaction =
+      event.kind.replace(/[_-]/gu, "").toLowerCase() === "listenerreaction";
+    if (semanticListenerReaction && hasCapturedPresentation) {
+      return [];
+    }
+    const segmentOrdinal = Number(event.payload.ordinal);
+    const followingMessageId =
+      kind === "segment" && segmentOrdinal > 0
+        ? followingUtteranceMessageId(eventIndex)
+        : null;
+    const capturedSegmentAtMs = followingMessageId
+      ? capturedAnchorByMessageId.get(followingMessageId)
+      : undefined;
     return [
       {
         sequence: 0,
-        atMs: replayEventAtMs(event, createdAtMs),
+        atMs:
+          kind === "segment" && segmentOrdinal === 0
+            ? 0
+            : capturedSegmentAtMs ?? replayEventAtMs(event, createdAtMs),
         kind,
         sourceMessageId: event.sourceMessageId,
         payload: { ...event.payload },

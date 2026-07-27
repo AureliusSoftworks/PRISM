@@ -1131,7 +1131,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /automatic intro is calibrated to 8\.75 seconds[\s\S]*translates the complete baked transcript, mouth, camera, and transition performance/u,
+        /automatic intro is calibrated to 8\.75 seconds[\s\S]*translates the baked transcript and mouth performance[\s\S]*camera timestamp and transition stays locked to the untouched audio master clock/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",

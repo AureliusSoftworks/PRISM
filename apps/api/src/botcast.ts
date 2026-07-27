@@ -71,6 +71,7 @@ import type {
   BotAvatarDetailsV1,
   VoiceDeliveryMood,
   StageActionExclusionV1,
+  StageActionPlanV1,
 } from "@localai/shared";
 import {
   BOTCAST_DASHBOARD_BLURB_FALLBACKS,
@@ -8762,7 +8763,7 @@ export function buildBotcastSpeakerPrompt(
   const askAboutCueRule =
     args.speakerRole === "host" &&
     args.cue?.kind === "ask_about"
-      ? "Binding private live objective: on this exact host turn, make the requested subject, event, offer, or question in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote the cue detail verbatim, never echo producer cadence words such as \"anyway,\" never mention a producer, cue, or control room, and never address the user. Paraphrase into your own host voice. Do not import absolute real-world calendar years or dated timestamps from the cue; ask the substance in-world so the guest's persona timeline stays intact."
+      ? "Binding private live objective: on this exact host turn, make the requested subject, event, offer, question, spoken line, or physical behavior in the private live producer cue your primary on-air objective. Do not defer it, soften it into a generic follow-up, contradict or invert it, or substitute an adjacent topic. This cue takes priority over ordinary interview momentum for this turn, while the guest remains free to respond in character. It is direction, not dialogue: never quote the cue detail as a whole, never echo producer cadence words such as \"anyway,\" never mention a producer, cue, or control room, and never address the user. If the cue explicitly requests exact on-air words, preserve those words exactly without exposing the surrounding direction; otherwise paraphrase into your own host voice. If it explicitly requests a visible physical act, perform that act through the private stage-direction format and never announce, describe, or claim the movement in spoken dialogue. Do not import absolute real-world calendar years or dated timestamps from the cue; ask the substance in-world so the guest's persona timeline stays intact."
       : null;
   const refocusCueRule =
     args.speakerRole === "host" &&
@@ -9670,6 +9671,16 @@ function botcastHostClosingNeedsPersonaRetry(content: string): boolean {
     sentenceCount > 2 ||
     BOTCAST_GENERIC_HOST_CLOSING_PATTERNS.some((pattern) =>
       pattern.test(spoken),
+    )
+  );
+}
+
+function botcastHostClosingInvitesResponse(content: string): boolean {
+  const spoken = extractBotcastVoicePerformance(content, false).content.trim();
+  return (
+    /\?\s*["”'’)\]]*$/u.test(spoken) ||
+    /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
+      spoken,
     )
   );
 }
@@ -11473,7 +11484,9 @@ export async function advanceBotcastEpisode(
           : wrapUpCue || pendingPicklesReaction
               ? episode.segment
               : sessionShouldClose
-                ? "closing"
+                ? requestedCue
+                  ? episode.segment
+                  : "closing"
                 : botcastSegmentForTurn({
                     current: episode.segment,
                     utteranceCount: episode.messages.length,
@@ -11804,13 +11817,17 @@ export async function advanceBotcastEpisode(
       ? socialSilencePlan.marker
       : null;
   const stageActionExclusions: StageActionExclusionV1[] = [];
+  const producerCueStageActionContract =
+    speakerRole === "host" &&
+    requestedCue?.kind === "ask_about" &&
+    Boolean(requestedCue.detail?.trim());
   if (socialSilenceMarker) stageActionExclusions.push("social_silence");
   if (activeCrosstalkReclaim) stageActionExclusions.push("crosstalk_reclaim");
   if (episode.segment === "opening") stageActionExclusions.push("opening");
   if (episode.segment === "closing") stageActionExclusions.push("closing");
   if (
     episode.guestKind === "producer" ||
-    requestedCue ||
+    (requestedCue && !producerCueStageActionContract) ||
     producerCut ||
     picklesBeatKind
   ) {
@@ -11832,11 +11849,22 @@ export async function advanceBotcastEpisode(
   if (plannedPowerInterruption) {
     stageActionExclusions.push("power_interruption");
   }
-  const stageActionPlan = planStageActionV1({
-    lane: "signal",
-    seed: `signal-stage-action:${episode.id}:${speaker.id}:${episode.messages.length}`,
-    exclusions: stageActionExclusions,
-  });
+  const producerCueStageActionEligible =
+    producerCueStageActionContract && stageActionExclusions.length === 0;
+  const stageActionSeed =
+    `signal-stage-action:${episode.id}:${speaker.id}:${episode.messages.length}`;
+  const stageActionPlan: StageActionPlanV1 = producerCueStageActionEligible
+    ? {
+        v: 1,
+        decision: "director",
+        seed: stageActionSeed,
+        invitePersona: false,
+      }
+    : planStageActionV1({
+        lane: "signal",
+        seed: stageActionSeed,
+        exclusions: stageActionExclusions,
+      });
   const forceSocialSilencePayoff =
     socialSilencePlan.decision === "substantive" &&
     socialSilencePlan.forceSubstantive;
@@ -11895,13 +11923,22 @@ export async function advanceBotcastEpisode(
     : buildBotcastSpeakerPrompt(promptArgs);
   const hostClosingTurn =
     speakerRole === "host" && episode.segment === "closing";
-  const signalStageDirection =
-    stageActionPlan.decision === "persona_invite"
+  const signalStageDirection = producerCueStageActionEligible
+    ? [
+        "Signal stage-direction format for this producer-directed turn:",
+        "The private live producer cue may request a visible physical behavior.",
+        "If and only if it explicitly requests one, begin with one short 2-8 word third-person `*action*` that performs it, then write the spoken line.",
+        "The action must begin with a present-tense verb ending in `s` (for example, `*starts dancing*`), must not name either participant, and must stay out of the spoken dialogue.",
+        "Never announce, describe, or claim the physical movement in first-person speech. If the cue requests no physical behavior, write spoken words only and do not add an action.",
+      ].join("\n")
+    : stageActionPlan.decision === "persona_invite"
       ? stageActionPersonaInvitePromptV1("signal")
       : stageActionSpeechOnlyPromptV1("signal");
   const prompt: ProviderMessage[] = [
     ...basePrompt.map((message) =>
-      message.role === "system" && stageActionPlan.decision === "persona_invite"
+      message.role === "system" &&
+      (stageActionPlan.decision === "persona_invite" ||
+        producerCueStageActionEligible)
         ? {
             ...message,
             content: message.content.replace(
@@ -11956,7 +11993,9 @@ export async function advanceBotcastEpisode(
         ]
       : []),
     "If the persona refuses the fictional premise, make that refusal specific, in character, and substantive instead of using generic policy language.",
-    "Do not add speaker labels, production notes, stage directions, or private instructions.",
+    producerCueStageActionEligible
+      ? "If the live cue explicitly requests a visible physical act, put only that act in one leading 2-8 word third-person `*action*`; otherwise do not add a stage direction. Never narrate the act in speech."
+      : "Do not add speaker labels, production notes, stage directions, or private instructions.",
   ].join(" ");
   const turnStartEventSequence = episode.events.at(-1)?.sequence ?? -1;
   const selected = generationProvider(
@@ -12495,6 +12534,7 @@ export async function advanceBotcastEpisode(
       .slice(-8),
     participantNames: [host.name, guest.name],
     allowCupActions: false,
+    directorFallback: !producerCueStageActionEligible,
   });
   const performance = extractBotcastVoicePerformance(
     resolvedStageAction.spokenText,
@@ -12545,7 +12585,7 @@ export async function advanceBotcastEpisode(
       ? botcastStripPrematureHostSignoff(silentGuestAnswerSafeContent, host.name) ||
         fallback
       : silentGuestAnswerSafeContent;
-  const unbudgetedContent = picklesBeatKind
+  const powerPresentationContent = picklesBeatKind
     ? cleanGeneratedContent
     : socialSilenceMarker
       ? BOT_POWER_CANONICAL_SILENCE_V1
@@ -12569,14 +12609,20 @@ export async function advanceBotcastEpisode(
       content: prematureSignoffSafeContent,
     })
       ? fallback
-      : speakerRole === "host" &&
-    episode.segment === "closing" &&
-    (/\?\s*$/u.test(prematureSignoffSafeContent) ||
-      /\b(?:one|a)\s+(?:last|final|more)\s+question\b|\blet me ask\b/iu.test(
-        prematureSignoffSafeContent,
-      ))
-      ? fallback
       : prematureSignoffSafeContent;
+  const closingContractRepaired = Boolean(
+    speakerRole === "host" &&
+      episode.segment === "closing" &&
+      !picklesBeatKind &&
+      !socialSilenceMarker &&
+      !speakerIsMutedForTurn &&
+      !speakerRepeatsForHearingPower &&
+      !speakerEchoesForTurn &&
+      botcastHostClosingInvitesResponse(powerPresentationContent),
+  );
+  const unbudgetedContent = closingContractRepaired
+    ? fallback
+    : powerPresentationContent;
   const activeIdentityMirrorState =
     botcastIdentityMirrorStatesV1(episode.events).get(speaker.id) ?? null;
   const identityMirrorJustChanged = Boolean(
@@ -13023,14 +13069,16 @@ export async function advanceBotcastEpisode(
     ...(autoRecovery ? { autoRecovery } : {}),
     // Intentional silence/mute already owns the on-air content; ellipsis cleanup
     // must not look like a failed model repair in the production log.
-    ...(generatedUtterance.repairReason &&
+    ...((generatedUtterance.repairReason || closingContractRepaired) &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn
       ? {
           utteranceRepair: {
             v: 1,
             source: "sanitizer",
-            reason: generatedUtterance.repairReason,
+            reason:
+              generatedUtterance.repairReason ??
+              ("generic_closing" as BotcastUtteranceRepairReason),
             fallbackKind:
               speakerRole === "guest"
                 ? "guest_substantive_answer"

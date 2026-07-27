@@ -657,11 +657,14 @@ import {
   type ReplayBotVisualSnapshotV1,
 } from "./replayManifest";
 import {
+  captureReplayVoiceTake,
   replayRecordingDetail,
   replayRecordingForSource,
   retryPendingFaithfulReplaySessions,
   saveFaithfulReplaySession,
   startReplayRecordingDraft,
+  storeCapturedReplayVoiceAudio,
+  updateCapturedReplayVoiceTake,
 } from "./replayClient";
 import { loadSessionReviewRecordingEvidence } from "./sessionReviewEvidence";
 import {
@@ -1056,6 +1059,7 @@ import {
   type ReplayRecordingV1,
   type ReplaySceneCheckpointV2,
   type ReplayVoiceSelectionSnapshotV2,
+  type ReplayVoiceTakeV1,
   type ReplayTimelineV1,
   type SlateDeliberationConfig,
   type SlateProjectResponse,
@@ -61768,6 +61772,46 @@ function HomeContent(): React.JSX.Element {
       const spokenText = voiceSpokenText(message.content);
       if (!playbackProfile.enabled || !spokenText) return false;
       const breathSeed = `botcast:${message.episodeId}:${message.id}`;
+      const requestedEngine: EnglishVoiceEngine | null =
+        voiceSelection.voiceMode === "english"
+          ? botSummary.online_enabled !== 0
+            ? voiceSelection.englishVoiceEngine
+            : "builtin"
+          : null;
+      const replayVoiceTakeSnapshot: ReplayVoiceTakeV1 = {
+        v: 1,
+        sourceKey: `primary:${message.id}`,
+        sourceMessageId: message.id,
+        sourceEventId: null,
+        speakerId: botSummary.id,
+        speakerName: botSummary.name,
+        spokenText,
+        performanceText: message.voicePerformanceText
+          ? message.voicePerformanceText.replace(/\s+/gu, " ").trim()
+          : null,
+        mode: voiceSelection.voiceMode,
+        requestedEngine,
+        resolvedEngine:
+          voiceSelection.voiceMode === "english"
+            ? null
+            : voiceSelection.voiceMode,
+        profile: playbackProfile,
+        moodKey: message.moodKey,
+        effectsEnabled: settings.voiceEffectsEnabled !== false,
+        gain: playbackVolume,
+        stereoPan,
+        channel: "primary",
+        seed: breathSeed,
+        audible: true,
+        durationMs: null,
+        alignment: null,
+      };
+      const replayVoiceTakePromise = captureReplayVoiceTake({
+        surface: "signal",
+        sourceId: message.episodeId,
+        snapshot: replayVoiceTakeSnapshot,
+      });
+      void replayVoiceTakePromise.catch(() => undefined);
       const preSpeechBreath = playerVoice
         ? null
         : resolvePreSpeechBreathPlan({
@@ -61831,6 +61875,10 @@ function HomeContent(): React.JSX.Element {
               },
             });
           }
+          void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
+            durationMs,
+            alignment,
+          }).catch(() => undefined);
           lifecycle.onStart?.(durationMs, alignment);
         },
         onEnd: () => {
@@ -61894,6 +61942,12 @@ function HomeContent(): React.JSX.Element {
           );
         }
         if (!clip || controller.signal.aborted) return false;
+        void storeCapturedReplayVoiceAudio({
+          takePromise: replayVoiceTakePromise,
+          bytes: clip.bytes,
+          contentType: clip.audioContentType,
+          resolvedEngine: clip.engineUsed,
+        }).catch(() => undefined);
         await enqueueEnglishVoice(
           clip.bytes,
           playbackProfile,
