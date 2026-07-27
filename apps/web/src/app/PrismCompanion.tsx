@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,17 +17,24 @@ import { createPortal } from "react-dom";
 import { Volume2, VolumeX } from "lucide-react";
 import type {
   EphemeralChatResolvedProvider,
+  PrismActionProposalV1,
+  PrismActionRunV1,
   PrismCompanionActionIntent,
+  PrismCompanionCardV1,
   PrismCompanionMessage,
   PrismCompanionResponse,
   PrismCompanionSurfaceReference,
 } from "@localai/shared";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import {
+  isPrismCompanionModifierHeld,
+  isPrismCompanionModifierKey,
+  isPrismCompanionPlatformModifier,
   isPrismCompanionShortcut,
   parsePrismCompanionRecovery,
   parsePrismCompanionSpeechEnabled,
   prismCompanionDismissesOnExternalInteraction,
+  prismCompanionModifierPresentation,
   prismCompanionPositionStorageKey,
   prismCompanionRecoveryStorageKey,
   prismCompanionSpeechStorageKey,
@@ -70,8 +78,16 @@ import {
   requestPrismRefract,
   subscribePrismRefractRequests,
   type PrismRefractInvocation,
+  type PrismRefractOrigin,
   type RegisteredPrismRefractTarget,
 } from "./prismRefract";
+import {
+  PRISM_WIELD_ARM_DELAY_MS,
+  createPrismWieldState,
+  transitionPrismWield,
+  type PrismWieldPoint,
+  type PrismWieldState,
+} from "./prismWield";
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
 import styles from "./prismCompanion.module.css";
 
@@ -80,6 +96,7 @@ const PRISM_SYSTEM_PAUSE_EXEMPT_SELECTOR =
   '[data-prism-system-pause-exempt="true"]';
 const PRISM_REFRACT_TRAVEL_MS = 420;
 const PRISM_REFRACT_CURSOR_ATTRIBUTE = "data-prism-refract-cursor-hidden";
+const PRISM_WIELD_CURSOR_ATTRIBUTE = "data-prism-wielding";
 
 type PrismRefractPhase =
   | "traveling"
@@ -124,6 +141,17 @@ interface PrismCompanionProps {
   ) => boolean | Promise<boolean>;
   onStopSpeaking?: () => void;
   onError?: (message: string) => void;
+  onOrchestrationResult?: (run: PrismActionRunV1) => void | Promise<void>;
+  onOpenCreatedBot?: (botId: string) => void | Promise<void>;
+  onStartCreatedCoffeeGroup?: (input: {
+    groupId: string;
+    premise: string;
+    botIds: string[];
+  }) => void | Promise<void>;
+  wieldTutorialActive?: boolean;
+  onWieldTutorialComplete?: () => void;
+  onWieldTutorialSkip?: () => void;
+  onWieldTutorialRemind?: () => void;
   refractTutorialActive?: boolean;
   onRefractTutorialComplete?: () => void;
   onRefractTutorialSkip?: () => void;
@@ -183,6 +211,13 @@ export default function PrismCompanion({
   onSpeak,
   onStopSpeaking,
   onError,
+  onOrchestrationResult,
+  onOpenCreatedBot,
+  onStartCreatedCoffeeGroup,
+  wieldTutorialActive = false,
+  onWieldTutorialComplete,
+  onWieldTutorialSkip,
+  onWieldTutorialRemind,
   refractTutorialActive = false,
   onRefractTutorialComplete,
   onRefractTutorialSkip,
@@ -201,6 +236,9 @@ export default function PrismCompanion({
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<PrismCompanionMessage[]>([]);
   const [actions, setActions] = useState<PrismCompanionActionIntent[]>([]);
+  const [cards, setCards] = useState<PrismCompanionCardV1[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [recentRuns, setRecentRuns] = useState<PrismActionRunV1[]>([]);
   const [speechEnabled, setSpeechEnabled] = useState(() =>
     readSpeechEnabled(accountKey),
   );
@@ -215,16 +253,28 @@ export default function PrismCompanion({
     useState<PrismRefractSession | null>(null);
   const [refractPrompt, setRefractPrompt] = useState("");
   const [refractStatus, setRefractStatus] = useState("");
+  const [wieldTutorialVisible, setWieldTutorialVisible] = useState(false);
+  const [wieldTutorialStage, setWieldTutorialStage] = useState<
+    "hold" | "target" | "release"
+  >("hold");
   const [refractTutorialVisible, setRefractTutorialVisible] = useState(false);
   const [refractTutorialStage, setRefractTutorialStage] = useState<
     "summon" | "reroll" | "settle"
   >("summon");
+  const modifierPresentation = useMemo(
+    () =>
+      prismCompanionModifierPresentation(
+        typeof navigator === "undefined" ? "" : navigator.platform,
+      ),
+    [],
+  );
   const companionSuppressed = useSyncExternalStore(
     subscribePrismCompanionSuppression,
     getPrismCompanionSuppressedSnapshot,
     getPrismCompanionSuppressedServerSnapshot,
   );
   const anchorRef = useRef<HTMLDivElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
   const positionRef = useRef(position);
@@ -236,12 +286,28 @@ export default function PrismCompanion({
   const refractAbortRef = useRef<AbortController | null>(null);
   const refractRunRef = useRef(0);
   const refractDropTargetRef = useRef<HTMLElement | null>(null);
+  const wieldTutorialTargetRef = useRef<HTMLElement | null>(null);
+  const wieldTutorialVisibleRef = useRef(false);
+  const wieldTutorialStageRef = useRef<"hold" | "target" | "release">("hold");
+  const wieldTutorialRunRef = useRef(false);
+  const onWieldTutorialCompleteRef = useRef(onWieldTutorialComplete);
+  const contextTokenIdsRef = useRef<string[]>([]);
   const refractTutorialTargetRef = useRef<HTMLElement | null>(null);
   const refractTutorialStageRef = useRef<"summon" | "reroll" | "settle">(
     "summon",
   );
   const refractTutorialRunRef = useRef(false);
   const onRefractTutorialCompleteRef = useRef(onRefractTutorialComplete);
+  const wieldStateRef = useRef<PrismWieldState>(createPrismWieldState());
+  const wieldArmTimerRef = useRef<number | null>(null);
+  const wieldFrameRef = useRef<number | null>(null);
+  const wieldLastPointerRef = useRef<PrismWieldPoint | null>(null);
+  const wieldHoverTargetRef = useRef<HTMLElement | null>(null);
+  const wieldReturnPositionRef = useRef<PrismCompanionPosition | null>(null);
+  const wieldCaptureReturnPositionRef =
+    useRef<PrismCompanionPosition | null>(null);
+  const wieldSuppressedClickRef = useRef<HTMLElement | null>(null);
+  const wieldSuppressedClickTimerRef = useRef<number | null>(null);
   const dragRef = useRef<
     | (PrismCompanionDragVelocitySample & {
         pointerId: number;
@@ -291,6 +357,14 @@ export default function PrismCompanion({
     [],
   );
 
+  const updateWieldTutorialStage = useCallback(
+    (stage: "hold" | "target" | "release"): void => {
+      wieldTutorialStageRef.current = stage;
+      setWieldTutorialStage(stage);
+    },
+    [],
+  );
+
   useEffect(() => {
     positionRef.current = position;
   }, [position]);
@@ -302,6 +376,10 @@ export default function PrismCompanion({
   useEffect(() => {
     onRefractTutorialCompleteRef.current = onRefractTutorialComplete;
   }, [onRefractTutorialComplete]);
+
+  useEffect(() => {
+    onWieldTutorialCompleteRef.current = onWieldTutorialComplete;
+  }, [onWieldTutorialComplete]);
 
   const cancelSpeech = useCallback((stopAudio: boolean): void => {
     speechRunRef.current += 1;
@@ -386,7 +464,148 @@ export default function PrismCompanion({
     [persistPosition, stopInertia],
   );
 
-  useEffect(() => {
+  const clearPrismWieldHover = useCallback((): void => {
+    delete wieldHoverTargetRef.current?.dataset.prismRefractWieldHover;
+    wieldHoverTargetRef.current = null;
+  }, []);
+
+  const resetPrismWield = useCallback(
+    (
+      preserveCaptureReturn = false,
+      completeTutorialOnRelease = false,
+    ): void => {
+      const state = wieldStateRef.current;
+      const shouldCompleteTutorial =
+        completeTutorialOnRelease &&
+        state.phase === "following" &&
+        wieldTutorialVisibleRef.current &&
+        wieldTutorialRunRef.current &&
+        wieldTutorialStageRef.current === "release";
+      if (state.phase !== "idle") {
+        const returning = transitionPrismWield(state, {
+          type: "return",
+          epoch: state.epoch,
+        });
+        wieldStateRef.current = transitionPrismWield(returning, {
+          type: "finish",
+          epoch: returning.epoch,
+        });
+      }
+      if (wieldArmTimerRef.current !== null) {
+        window.clearTimeout(wieldArmTimerRef.current);
+        wieldArmTimerRef.current = null;
+      }
+      if (wieldFrameRef.current !== null) {
+        window.cancelAnimationFrame(wieldFrameRef.current);
+        wieldFrameRef.current = null;
+      }
+      clearPrismWieldHover();
+      document.documentElement.removeAttribute(PRISM_WIELD_CURSOR_ATTRIBUTE);
+      anchorRef.current?.removeAttribute("data-wielding");
+      backdropRef.current?.removeAttribute("data-wielding");
+      anchorRef.current?.style.removeProperty("transform");
+      wieldReturnPositionRef.current = null;
+      if (!preserveCaptureReturn) {
+        wieldCaptureReturnPositionRef.current = null;
+      }
+      if (shouldCompleteTutorial) {
+        wieldTutorialRunRef.current = false;
+        wieldTutorialVisibleRef.current = false;
+        setWieldTutorialVisible(false);
+        delete wieldTutorialTargetRef.current?.dataset.prismWieldTutorial;
+        wieldTutorialTargetRef.current = null;
+        onWieldTutorialCompleteRef.current?.();
+      }
+    },
+    [clearPrismWieldHover],
+  );
+
+  const flushPrismWieldFrame = useCallback((): void => {
+    wieldFrameRef.current = null;
+    const state = wieldStateRef.current;
+    const pointer = state.pointer;
+    const anchor = anchorRef.current;
+    if (state.phase !== "following" || !pointer || !anchor) return;
+
+    anchor.style.transform = `translate3d(${pointer.x}px, ${pointer.y}px, 0) translate(-50%, -50%)`;
+
+    const targetId = prismRefractTargetIdAtPoint(pointer.x, pointer.y);
+    const targetElement = targetId
+      ? registeredPrismRefractTarget(targetId)?.element ?? null
+      : null;
+    if (targetElement === wieldHoverTargetRef.current) return;
+    clearPrismWieldHover();
+    wieldHoverTargetRef.current = targetElement;
+    if (targetElement) {
+      targetElement.dataset.prismRefractWieldHover = "true";
+      if (
+        wieldTutorialVisibleRef.current &&
+        wieldTutorialStageRef.current === "target"
+      ) {
+        updateWieldTutorialStage("release");
+      }
+    }
+  }, [clearPrismWieldHover, updateWieldTutorialStage]);
+
+  const schedulePrismWieldFrame = useCallback((): void => {
+    if (wieldFrameRef.current !== null) return;
+    wieldFrameRef.current = window.requestAnimationFrame(flushPrismWieldFrame);
+  }, [flushPrismWieldFrame]);
+
+  const presentPrismWield = useCallback(
+    (state: PrismWieldState): void => {
+      if (state.phase !== "following") return;
+      if (wieldArmTimerRef.current !== null) {
+        window.clearTimeout(wieldArmTimerRef.current);
+        wieldArmTimerRef.current = null;
+      }
+      if (!wieldReturnPositionRef.current) {
+        wieldReturnPositionRef.current = positionRef.current;
+      }
+      stopInertia(false);
+      document.documentElement.setAttribute(
+        PRISM_WIELD_CURSOR_ATTRIBUTE,
+        "true",
+      );
+      anchorRef.current?.setAttribute("data-wielding", "true");
+      backdropRef.current?.setAttribute("data-wielding", "true");
+      if (
+        wieldTutorialVisibleRef.current &&
+        wieldTutorialStageRef.current === "hold"
+      ) {
+        wieldTutorialRunRef.current = true;
+        updateWieldTutorialStage("target");
+      }
+      schedulePrismWieldFrame();
+    },
+    [schedulePrismWieldFrame, stopInertia, updateWieldTutorialStage],
+  );
+
+  const startPrismWield = useCallback(
+    (pointer: PrismWieldPoint): void => {
+      const current = wieldStateRef.current;
+      const next = transitionPrismWield(current, {
+        type: "modifier-down",
+        pointer,
+      });
+      if (next === current) return;
+      wieldStateRef.current = next;
+      const epoch = next.epoch;
+      wieldArmTimerRef.current = window.setTimeout(() => {
+        const beforeArm = wieldStateRef.current;
+        const armed = transitionPrismWield(beforeArm, {
+          type: "arm",
+          epoch,
+        });
+        if (armed === beforeArm) return;
+        wieldStateRef.current = armed;
+        presentPrismWield(armed);
+      }, PRISM_WIELD_ARM_DELAY_MS);
+    },
+    [presentPrismWield],
+  );
+
+  useLayoutEffect(() => {
     return () => {
       if (inertiaFrameRef.current !== null) {
         window.cancelAnimationFrame(inertiaFrameRef.current);
@@ -397,8 +616,9 @@ export default function PrismCompanion({
       if (speechPlaybackActiveRef.current) stopSpeakingRef.current?.();
       speechPlaybackActiveRef.current = false;
       persistPosition(positionRef.current);
+      resetPrismWield();
     };
-  }, [persistPosition]);
+  }, [persistPosition, resetPrismWield]);
 
   useEffect(() => {
     setSpeechEnabled(readSpeechEnabled(accountKey));
@@ -491,6 +711,8 @@ export default function PrismCompanion({
       setMessages([]);
     }
     setActions([]);
+    setCards([]);
+    contextTokenIdsRef.current = [];
     setDraft("");
     setOpen(false);
   }, [cancelSpeech, recoveryKey, surfaceScope]);
@@ -584,9 +806,57 @@ export default function PrismCompanion({
     [updateRefractSession],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    resetPrismWield();
     releasePrismRefract(true);
-  }, [releasePrismRefract, surfaceScope]);
+  }, [releasePrismRefract, resetPrismWield, surfaceScope]);
+
+  useEffect(() => {
+    delete wieldTutorialTargetRef.current?.dataset.prismWieldTutorial;
+    wieldTutorialTargetRef.current = null;
+    wieldTutorialRunRef.current = false;
+    wieldTutorialVisibleRef.current = false;
+    setWieldTutorialVisible(false);
+    updateWieldTutorialStage("hold");
+    if (!wieldTutorialActive) return;
+    const revealWhenReady = (): boolean => {
+      const target = Array.from(
+        document.querySelectorAll<HTMLElement>("[data-prism-refract-id]"),
+      ).find((element) => {
+        const targetId = element.dataset.prismRefractId;
+        const registration = targetId
+          ? registeredPrismRefractTarget(targetId)
+          : null;
+        return (
+          registration?.element === element &&
+          !registration.target.disabled?.()
+        );
+      });
+      if (!target) return false;
+      wieldTutorialTargetRef.current = target;
+      target.dataset.prismWieldTutorial = "true";
+      wieldTutorialVisibleRef.current = true;
+      setWieldTutorialVisible(true);
+      return true;
+    };
+    if (revealWhenReady()) {
+      return () => {
+        wieldTutorialVisibleRef.current = false;
+        delete wieldTutorialTargetRef.current?.dataset.prismWieldTutorial;
+        wieldTutorialTargetRef.current = null;
+      };
+    }
+    const observer = new MutationObserver(() => {
+      if (revealWhenReady()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      wieldTutorialVisibleRef.current = false;
+      delete wieldTutorialTargetRef.current?.dataset.prismWieldTutorial;
+      wieldTutorialTargetRef.current = null;
+    };
+  }, [updateWieldTutorialStage, wieldTutorialActive]);
 
   useEffect(() => {
     delete refractTutorialTargetRef.current?.dataset.prismRefractTutorial;
@@ -594,7 +864,13 @@ export default function PrismCompanion({
     refractTutorialRunRef.current = false;
     setRefractTutorialVisible(false);
     updateRefractTutorialStage("summon");
-    if (!refractTutorialActive || surface.surfaceId !== "signal") return;
+    if (
+      wieldTutorialActive ||
+      !refractTutorialActive ||
+      surface.surfaceId !== "signal"
+    ) {
+      return;
+    }
     const revealWhenReady = (): boolean => {
       const target = Array.from(
         document.querySelectorAll<HTMLElement>("[data-prism-refract-id]"),
@@ -633,6 +909,7 @@ export default function PrismCompanion({
     refractTutorialActive,
     surface.surfaceId,
     updateRefractTutorialStage,
+    wieldTutorialActive,
   ]);
 
   const generatePrismRefractCandidate = useCallback(
@@ -746,7 +1023,11 @@ export default function PrismCompanion({
   );
 
   const beginPrismRefract = useCallback(
-    (targetId: string, invocation: PrismRefractInvocation): void => {
+    (
+      targetId: string,
+      invocation: PrismRefractInvocation,
+      origin?: PrismRefractOrigin,
+    ): void => {
       const registration = registeredPrismRefractTarget(targetId);
       if (!registration || registration.target.disabled?.()) return;
       if (
@@ -756,12 +1037,28 @@ export default function PrismCompanion({
         refractTutorialRunRef.current = true;
         updateRefractTutorialStage("reroll");
       }
+      const wieldReturnPosition =
+        invocation === "wield-click"
+          ? wieldCaptureReturnPositionRef.current
+          : null;
       releasePrismRefract(true);
+      if (invocation === "wield-click") {
+        resetPrismWield(true);
+      }
       setOpen(false);
       cancelSpeech(true);
       stopInertia(false);
-      const returnPosition = positionRef.current;
+      const returnPosition = wieldReturnPosition ?? positionRef.current;
       refractReturnPositionRef.current = returnPosition;
+      wieldCaptureReturnPositionRef.current = null;
+      if (invocation === "wield-click" && origin) {
+        const pointerPosition = clampPrismCompanionPosition({
+          x: origin.clientX / Math.max(1, window.innerWidth),
+          y: origin.clientY / Math.max(1, window.innerHeight),
+        });
+        positionRef.current = pointerPosition;
+        setPosition(pointerPosition);
+      }
       const rect = registration.element.getBoundingClientRect();
       const targetPosition = clampPrismCompanionPosition({
         x: (rect.left + rect.width / 2) / Math.max(1, window.innerWidth),
@@ -846,6 +1143,7 @@ export default function PrismCompanion({
       updateRefractSession,
       updateRefractTutorialStage,
       refractTutorialVisible,
+      resetPrismWield,
     ],
   );
 
@@ -941,11 +1239,29 @@ export default function PrismCompanion({
     ],
   );
 
+  const dismissWieldTutorial = useCallback(
+    (resolution: "skip" | "remind"): void => {
+      resetPrismWield();
+      wieldTutorialRunRef.current = false;
+      wieldTutorialVisibleRef.current = false;
+      setWieldTutorialVisible(false);
+      delete wieldTutorialTargetRef.current?.dataset.prismWieldTutorial;
+      wieldTutorialTargetRef.current = null;
+      if (resolution === "skip") onWieldTutorialSkip?.();
+      else onWieldTutorialRemind?.();
+    },
+    [
+      onWieldTutorialRemind,
+      onWieldTutorialSkip,
+      resetPrismWield,
+    ],
+  );
+
   useEffect(
     () => {
       if (companionSuppressed) return;
-      return subscribePrismRefractRequests(({ targetId, invocation }) => {
-        beginPrismRefract(targetId, invocation);
+      return subscribePrismRefractRequests(({ targetId, invocation, origin }) => {
+        beginPrismRefract(targetId, invocation, origin);
       });
     },
     [beginPrismRefract, companionSuppressed],
@@ -1194,6 +1510,151 @@ export default function PrismCompanion({
   }, [dismissOnExternalInteraction, open]);
 
   useEffect(() => {
+    const platform = navigator.platform;
+    const handlePointerMove = (event: PointerEvent): void => {
+      if (event.pointerType === "touch") return;
+      const pointer = { x: event.clientX, y: event.clientY };
+      wieldLastPointerRef.current = pointer;
+      const current = wieldStateRef.current;
+      if (current.phase !== "pending" && current.phase !== "following") return;
+      if (!isPrismCompanionModifierHeld(event, platform)) {
+        resetPrismWield();
+        return;
+      }
+      const next = transitionPrismWield(current, {
+        type: "pointer-move",
+        epoch: current.epoch,
+        pointer,
+      });
+      wieldStateRef.current = next;
+      if (current.phase === "pending" && next.phase === "following") {
+        presentPrismWield(next);
+      } else if (next.phase === "following") {
+        schedulePrismWieldFrame();
+      }
+    };
+    const handlePointerDown = (event: PointerEvent): void => {
+      const current = wieldStateRef.current;
+      if (
+        current.phase !== "following" ||
+        event.pointerType === "touch" ||
+        event.button !== 0
+      ) {
+        return;
+      }
+      if (!isPrismCompanionModifierHeld(event, platform)) {
+        resetPrismWield();
+        return;
+      }
+      const targetId = prismRefractTargetIdAtPoint(
+        event.clientX,
+        event.clientY,
+      );
+      const registration = targetId
+        ? registeredPrismRefractTarget(targetId)
+        : null;
+      if (!targetId || !registration || registration.target.disabled?.()) {
+        return;
+      }
+
+      const captured = transitionPrismWield(current, {
+        type: "capture",
+        epoch: current.epoch,
+        pointer: { x: event.clientX, y: event.clientY },
+      });
+      if (captured.phase !== "captured") return;
+      wieldStateRef.current = captured;
+      wieldCaptureReturnPositionRef.current =
+        wieldReturnPositionRef.current ?? positionRef.current;
+      wieldSuppressedClickRef.current = registration.element;
+      let started = false;
+      try {
+        started = requestPrismRefract(targetId, "wield-click", {
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+      } catch {
+        started = false;
+      }
+      if (!started) {
+        wieldSuppressedClickRef.current = null;
+        resetPrismWield();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (wieldSuppressedClickTimerRef.current !== null) {
+        window.clearTimeout(wieldSuppressedClickTimerRef.current);
+      }
+      wieldSuppressedClickTimerRef.current = window.setTimeout(() => {
+        wieldSuppressedClickRef.current = null;
+        wieldSuppressedClickTimerRef.current = null;
+      }, 1_500);
+    };
+    const suppressCapturedNativeClick = (event: MouseEvent): void => {
+      const suppressedTarget = wieldSuppressedClickRef.current;
+      if (!suppressedTarget) return;
+      const eventTarget = event.target;
+      if (
+        eventTarget instanceof Node &&
+        suppressedTarget.contains(eventTarget)
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      wieldSuppressedClickRef.current = null;
+      if (wieldSuppressedClickTimerRef.current !== null) {
+        window.clearTimeout(wieldSuppressedClickTimerRef.current);
+        wieldSuppressedClickTimerRef.current = null;
+      }
+    };
+    const restoreOnVisibilityChange = (): void => {
+      if (document.visibilityState !== "visible") resetPrismWield();
+    };
+    const restoreOnBlur = (): void => resetPrismWield();
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    );
+    const restoreOnReducedMotionChange = (): void => resetPrismWield();
+    const restoreIfHoverTargetUnmounts = new MutationObserver(() => {
+      const hoverTarget = wieldHoverTargetRef.current;
+      if (hoverTarget && !hoverTarget.isConnected) resetPrismWield();
+    });
+    restoreIfHoverTargetUnmounts.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    window.addEventListener("pointermove", handlePointerMove, true);
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("click", suppressCapturedNativeClick, true);
+    window.addEventListener("blur", restoreOnBlur);
+    document.addEventListener("visibilitychange", restoreOnVisibilityChange);
+    reducedMotion.addEventListener("change", restoreOnReducedMotionChange);
+    return () => {
+      restoreIfHoverTargetUnmounts.disconnect();
+      window.removeEventListener("pointermove", handlePointerMove, true);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("click", suppressCapturedNativeClick, true);
+      window.removeEventListener("blur", restoreOnBlur);
+      document.removeEventListener(
+        "visibilitychange",
+        restoreOnVisibilityChange,
+      );
+      reducedMotion.removeEventListener(
+        "change",
+        restoreOnReducedMotionChange,
+      );
+      resetPrismWield();
+    };
+  }, [
+    presentPrismWield,
+    resetPrismWield,
+    schedulePrismWieldFrame,
+  ]);
+
+  useEffect(() => {
+    const platform = navigator.platform;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (companionSuppressed) return;
       const refracting = refractSessionRef.current;
@@ -1256,8 +1717,9 @@ export default function PrismCompanion({
           return;
         }
       }
+      if (refracting) return;
       if (
-        !isPrismCompanionShortcut({
+        isPrismCompanionShortcut({
           key: event.key,
           code: event.code,
           altKey: event.altKey,
@@ -1267,26 +1729,246 @@ export default function PrismCompanion({
           platform: navigator.platform,
         })
       ) {
+        resetPrismWield();
+        event.preventDefault();
+        const targetId = focusedPrismRefractTargetId(document.activeElement);
+        if (targetId && requestPrismRefract(targetId, "focused-shortcut")) {
+          return;
+        }
+        if (open) setOpen(false);
+        else openAndFocus();
         return;
       }
-      event.preventDefault();
-      const targetId = focusedPrismRefractTargetId(document.activeElement);
-      if (targetId && requestPrismRefract(targetId, "focused-shortcut")) {
+
+      if (isPrismCompanionModifierKey(event, platform)) {
+        if (event.repeat || wieldStateRef.current.phase !== "idle") return;
+        const pointer =
+          wieldLastPointerRef.current ??
+          (() => {
+            const rect = anchorRef.current?.getBoundingClientRect();
+            return {
+              x: rect ? rect.left + rect.width / 2 : window.innerWidth / 2,
+              y: rect ? rect.top + rect.height / 2 : window.innerHeight / 2,
+            };
+          })();
+        startPrismWield(pointer);
         return;
       }
-      if (open) setOpen(false);
-      else openAndFocus();
+
+      const wielding = wieldStateRef.current;
+      if (wielding.phase === "pending" || wielding.phase === "following") {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+        resetPrismWield();
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent): void => {
+      if (isPrismCompanionPlatformModifier(event, platform)) {
+        resetPrismWield(false, true);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
   }, [
     acceptPrismRefract,
     companionSuppressed,
     open,
     openAndFocus,
     releasePrismRefract,
+    resetPrismWield,
     rerollPrismRefract,
+    startPrismWield,
   ]);
+
+  const rememberPrismContextTokens = useCallback(
+    (nextCards: readonly PrismCompanionCardV1[]): void => {
+      const discovered = nextCards.flatMap((card): string[] => {
+        if (card.type !== "result") return [];
+        const result = card.run.result;
+        if (!result || typeof result !== "object" || Array.isArray(result)) {
+          return [];
+        }
+        const token = result.contextToken;
+        if (!token || typeof token !== "object" || Array.isArray(token)) {
+          return [];
+        }
+        return typeof token.id === "string" && token.id.trim()
+          ? [token.id.trim()]
+          : [];
+      });
+      if (discovered.length === 0) return;
+      contextTokenIdsRef.current = Array.from(
+        new Set([...discovered, ...contextTokenIdsRef.current]),
+      ).slice(0, 8);
+    },
+    [],
+  );
+
+  const reconcileOrchestrationResult = useCallback(
+    async (run: PrismActionRunV1): Promise<void> => {
+      try {
+        await onOrchestrationResult?.(run);
+      } catch {
+        onError?.(
+          "Prism completed the action, but this screen could not refresh automatically.",
+        );
+      }
+    },
+    [onError, onOrchestrationResult],
+  );
+
+  const applyPrismProposal = useCallback(
+    async (proposal: PrismActionProposalV1): Promise<void> => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const response = await fetch("/api/prism/actions/execute", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            proposalId: proposal.id,
+            confirmation: true,
+            idempotencyKey: `companion-apply:${proposal.id}`,
+            surface,
+          }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as
+          | { ok: true; run: PrismActionRunV1 }
+          | { ok?: false; error?: string };
+        if (!response.ok || payload.ok !== true) {
+          throw new Error(
+            "error" in payload && typeof payload.error === "string"
+              ? payload.error
+              : "Prism could not apply that proposal.",
+          );
+        }
+        const nextCards: PrismCompanionCardV1[] = [
+          {
+            schemaVersion: proposal.schemaVersion,
+            type: "result",
+            title:
+              payload.run.status === "committed"
+                ? "Complete"
+                : "Could not complete",
+            run: payload.run,
+          },
+        ];
+        setCards(nextCards);
+        rememberPrismContextTokens(nextCards);
+        if (
+          payload.run.affectedEntities.length > 0 ||
+          payload.run.undoAvailable ||
+          payload.run.nonReversibleConsequences.length > 0
+        ) {
+          setRecentRuns((current) => [
+            payload.run,
+            ...current.filter((run) => run.id !== payload.run.id),
+          ].slice(0, 12));
+        }
+        await reconcileOrchestrationResult(payload.run);
+      } catch (error) {
+        onError?.(
+          error instanceof Error
+            ? error.message
+            : "Prism could not apply that proposal.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      busy,
+      onError,
+      reconcileOrchestrationResult,
+      rememberPrismContextTokens,
+      surface,
+    ],
+  );
+
+  const undoPrismRun = useCallback(
+    async (runId: string): Promise<void> => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        const response = await fetch("/api/prism/actions/undo", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ runId, surface }),
+        });
+        const payload = (await response.json().catch(() => ({}))) as
+          | { ok: true; run: PrismActionRunV1 }
+          | { ok?: false; error?: string };
+        if (!response.ok || payload.ok !== true) {
+          throw new Error(
+            "error" in payload && typeof payload.error === "string"
+              ? payload.error
+              : "Prism could not undo that action.",
+          );
+        }
+        setCards([
+          {
+            schemaVersion: payload.run.schemaVersion,
+            type: "result",
+            title: payload.run.status === "undone" ? "Undone" : "Undo failed",
+            run: payload.run,
+          },
+        ]);
+        setRecentRuns((current) =>
+          current.map((run) =>
+            run.id === payload.run.id ? payload.run : run,
+          ),
+        );
+        await reconcileOrchestrationResult(payload.run);
+      } catch (error) {
+        onError?.(
+          error instanceof Error
+            ? error.message
+            : "Prism could not undo that action.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, onError, reconcileOrchestrationResult, surface],
+  );
+
+  const togglePrismHistory = useCallback(async (): Promise<void> => {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+    setHistoryOpen(true);
+    try {
+      const response = await fetch("/api/prism/actions?limit=12", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        runs?: PrismActionRunV1[];
+      };
+      if (response.ok && payload.ok === true && Array.isArray(payload.runs)) {
+        setRecentRuns(
+          payload.runs.filter(
+            (run) =>
+              run.affectedEntities.length > 0 ||
+              run.undoAvailable ||
+              run.nonReversibleConsequences.length > 0,
+          ),
+        );
+      }
+    } catch {
+      onError?.("Prism could not load recent activity.");
+    }
+  }, [historyOpen, onError]);
 
   const sendMessage = async (): Promise<void> => {
     const content = draft.trim();
@@ -1302,7 +1984,9 @@ export default function PrismCompanion({
     setBusy(true);
     setDraft("");
     setActions([]);
+    setCards([]);
     setMessages(persistRecovery([...priorMessages, userMessage]));
+    const requestId = crypto.randomUUID();
     try {
       const response = await fetch("/api/prism-companion", {
         method: "POST",
@@ -1312,6 +1996,8 @@ export default function PrismCompanion({
           surface,
           message: content,
           recoveryMessages: priorMessages,
+          requestId,
+          contextTokenIds: contextTokenIdsRef.current,
         }),
       });
       const payload = (await response.json().catch(() => ({}))) as
@@ -1328,6 +2014,14 @@ export default function PrismCompanion({
         persistRecovery([...priorMessages, userMessage, payload.message]),
       );
       setActions(payload.actions);
+      const nextCards = Array.isArray(payload.cards) ? payload.cards : [];
+      setCards(nextCards);
+      rememberPrismContextTokens(nextCards);
+      for (const card of nextCards) {
+        if (card.type === "result") {
+          await reconcileOrchestrationResult(card.run);
+        }
+      }
       speakResponse(payload.message, payload.provider);
     } catch (error) {
       setDraft(content);
@@ -1449,9 +2143,10 @@ export default function PrismCompanion({
     persistPosition(positionRef.current);
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!companionSuppressed) return;
     setOpen(false);
+    resetPrismWield();
     setDragging(false);
     dragRef.current = null;
     releasePrismRefract(true);
@@ -1461,6 +2156,7 @@ export default function PrismCompanion({
     cancelSpeech,
     companionSuppressed,
     releasePrismRefract,
+    resetPrismWield,
     stopInertia,
   ]);
 
@@ -1468,6 +2164,7 @@ export default function PrismCompanion({
   return createPortal(
     <>
       <div
+        ref={backdropRef}
         className={styles.backdrop}
         data-open={open ? "true" : undefined}
         data-prism-system-pause-exempt="true"
@@ -1490,6 +2187,43 @@ export default function PrismCompanion({
       >
         <div className={styles.light} aria-hidden="true" />
         <div className={styles.conversation}>
+          {wieldTutorialVisible ? (
+            <section
+              className={styles.refractTutorial}
+              data-prism-wield-tutorial-card="true"
+              aria-live="polite"
+            >
+              <span>First light · Wield Prism</span>
+              <strong>
+                {wieldTutorialStage === "hold"
+                  ? `Hold ${modifierPresentation.modifierLabel} by itself.`
+                  : wieldTutorialStage === "target"
+                    ? "Guide Prism toward the glowing control."
+                    : `Release ${modifierPresentation.modifierLabel} safely.`}
+              </strong>
+              <p>
+                {wieldTutorialStage === "hold"
+                  ? "After a brief intentional hold, Prism contracts into your pointer without closing this conversation."
+                  : wieldTutorialStage === "target"
+                    ? "Registered creative controls answer with a restrained spectral glow. Ordinary controls remain untouched."
+                    : "Let go without clicking. Your cursor returns immediately and Prism remembers where it was. When Prism completes a product change, its receipt offers Undo—and “undo that” reverses the latest meaningful action."}
+              </p>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => dismissWieldTutorial("remind")}
+                >
+                  Do it later
+                </button>
+                <button
+                  type="button"
+                  onClick={() => dismissWieldTutorial("skip")}
+                >
+                  Skip
+                </button>
+              </div>
+            </section>
+          ) : null}
           {refractTutorialVisible ? (
             <section
               className={styles.refractTutorial}
@@ -1506,7 +2240,7 @@ export default function PrismCompanion({
               </strong>
               <p>
                 {refractTutorialStage === "summon"
-                  ? "Shift-click the highlighted field, focus it and use the Prism shortcut, or drag the orb onto it."
+                  ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, focus it and use ${modifierPresentation.spokenLabel}, or drag the orb onto it.`
                   : refractTutorialStage === "reroll"
                     ? "Space refracts another candidate. It never types into the captured field."
                     : "Enter or Tab keeps the draft. Escape restores the original."}
@@ -1627,6 +2361,253 @@ export default function PrismCompanion({
                   ))}
                 </div>
               ) : null}
+              {cards.length > 0 ? (
+                <div
+                  className={styles.orchestrationCards}
+                  aria-label="Prism actions"
+                >
+                  {cards.map((card, index) => (
+                    <article
+                      key={`${card.type}-${index}`}
+                      className={styles.orchestrationCard}
+                      data-card-type={card.type}
+                    >
+                      <span>{card.title}</span>
+                      {card.type === "proposal" ? (
+                        <>
+                          <strong>{card.proposal.preview.summary}</strong>
+                          {card.proposal.preview.targets.length > 0 ? (
+                            <p>
+                              {card.proposal.preview.targets.length} target
+                              {card.proposal.preview.targets.length === 1
+                                ? ""
+                                : "s"}
+                              {card.proposal.preview.diffs.length > 0
+                                ? ` · ${card.proposal.preview.diffs.length} changes`
+                                : ""}
+                            </p>
+                          ) : null}
+                          {card.proposal.preview.provider ||
+                          card.proposal.preview.model ||
+                          card.proposal.preview.estimatedCostMicroUsd !==
+                            null ? (
+                            <small>
+                              {[
+                                card.proposal.preview.provider
+                                  ? `Provider: ${card.proposal.preview.provider}`
+                                  : null,
+                                card.proposal.preview.model
+                                  ? `Model: ${card.proposal.preview.model}`
+                                  : null,
+                                card.proposal.preview.estimatedCostMicroUsd !==
+                                null
+                                  ? `Estimated cost: $${(
+                                      card.proposal.preview
+                                        .estimatedCostMicroUsd / 1_000_000
+                                    ).toFixed(4)}`
+                                  : null,
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </small>
+                          ) : null}
+                          {card.proposal.preview.diffs.length > 0 ? (
+                            <details>
+                              <summary>Review exact changes</summary>
+                              {card.proposal.preview.diffs.map(
+                                (diff, diffIndex) => (
+                                  <p key={`${diff.entity.id}-${diffIndex}`}>
+                                    <strong>{diff.entity.label}</strong>
+                                    <br />
+                                    <small>
+                                      {JSON.stringify(diff.before)} →{" "}
+                                      {JSON.stringify(diff.after)}
+                                    </small>
+                                  </p>
+                                ),
+                              )}
+                            </details>
+                          ) : null}
+                          {card.proposal.preview.consequences.map(
+                            (consequence) => (
+                              <small key={consequence}>{consequence}</small>
+                            ),
+                          )}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() =>
+                              void applyPrismProposal(card.proposal)
+                            }
+                          >
+                            Apply
+                          </button>
+                        </>
+                      ) : card.type === "result" ? (
+                        <>
+                          <strong>
+                            {card.run.status === "committed"
+                              ? "Committed"
+                              : card.run.status === "undone"
+                                ? "Restored"
+                                : card.run.status === "failed" ||
+                                    card.run.status === "undo-failed"
+                                  ? card.run.error || "Action failed"
+                                  : "In progress"}
+                          </strong>
+                          {card.run.affectedEntities.length > 0 ? (
+                            <p>
+                              {card.run.affectedEntities.length} item
+                              {card.run.affectedEntities.length === 1
+                                ? ""
+                                : "s"}
+                            </p>
+                          ) : null}
+                          {card.run.nonReversibleConsequences.map(
+                            (consequence) => (
+                              <small key={consequence}>{consequence}</small>
+                            ),
+                          )}
+                          {card.run.undoAvailable ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => void undoPrismRun(card.run.id)}
+                            >
+                              Undo
+                            </button>
+                          ) : null}
+                          {card.run.capabilityId === "bots.create" &&
+                          card.run.affectedEntities[0]?.entityType === "bot" ? (
+                            <div className={styles.resultActions}>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() =>
+                                  void onOpenCreatedBot?.(
+                                    card.run.affectedEntities[0]!.id,
+                                  )
+                                }
+                              >
+                                Avatar Studio
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setDraft(
+                                    `Refine ${card.run.affectedEntities[0]!.label}: `,
+                                  );
+                                  composerRef.current?.focus();
+                                }}
+                              >
+                                Refine
+                              </button>
+                            </div>
+                          ) : null}
+                          {card.run.capabilityId === "library.group.create" ? (
+                            <div className={styles.resultActions}>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  const result = card.run.result;
+                                  if (
+                                    !result ||
+                                    typeof result !== "object" ||
+                                    Array.isArray(result)
+                                  ) {
+                                    return;
+                                  }
+                                  const navigation = result.navigation;
+                                  const group = result.group;
+                                  if (
+                                    !navigation ||
+                                    typeof navigation !== "object" ||
+                                    Array.isArray(navigation) ||
+                                    typeof navigation.groupId !== "string" ||
+                                    !group ||
+                                    typeof group !== "object" ||
+                                    Array.isArray(group) ||
+                                    !Array.isArray(group.botIds)
+                                  ) {
+                                    return;
+                                  }
+                                  void onStartCreatedCoffeeGroup?.({
+                                    groupId: navigation.groupId,
+                                    premise:
+                                      typeof result.premise === "string"
+                                        ? result.premise
+                                        : "",
+                                    botIds: group.botIds.filter(
+                                      (botId): botId is string =>
+                                        typeof botId === "string",
+                                    ),
+                                  });
+                                }}
+                              >
+                                Start Coffee
+                              </button>
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => {
+                                  setDraft(
+                                    `Refine ${card.run.affectedEntities[0]?.label ?? "this Coffee group"}: `,
+                                  );
+                                  composerRef.current?.focus();
+                                }}
+                              >
+                                Refine
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : card.type === "clarification" ? (
+                        <strong>{card.question}</strong>
+                      ) : card.type === "progress" ? (
+                        <>
+                          <strong>{card.run.status}</strong>
+                          {card.progress !== null ? (
+                            <progress max={1} value={card.progress} />
+                          ) : null}
+                        </>
+                      ) : (
+                        <strong>{card.body}</strong>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+              {historyOpen ? (
+                <div
+                  className={styles.actionHistory}
+                  aria-label="Recent Prism activity"
+                >
+                  {recentRuns.length > 0 ? (
+                    recentRuns.map((run) => (
+                      <article key={run.id}>
+                        <span>{run.capabilityId}</span>
+                        <small>
+                          {run.status} ·{" "}
+                          {new Date(run.createdAt).toLocaleString()}
+                        </small>
+                        {run.undoAvailable ? (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void undoPrismRun(run.id)}
+                          >
+                            Undo
+                          </button>
+                        ) : null}
+                      </article>
+                    ))
+                  ) : (
+                    <small>No persistent Prism actions yet.</small>
+                  )}
+                </div>
+              ) : null}
             </div>
           ) : null}
           {open ? (
@@ -1667,6 +2648,14 @@ export default function PrismCompanion({
               />
               <footer>
                 <small>Ephemeral · latest 3 recover on this surface</small>
+                <button
+                  type="button"
+                  className={styles.historyToggle}
+                  aria-expanded={historyOpen}
+                  onClick={() => void togglePrismHistory()}
+                >
+                  Activity
+                </button>
                 <button
                   type="button"
                   className={styles.voiceToggle}
@@ -1715,7 +2704,7 @@ export default function PrismCompanion({
           }
           aria-expanded={open}
           aria-controls="global-prism-companion"
-          aria-keyshortcuts="Alt+Space Control+Space"
+          aria-keyshortcuts={modifierPresentation.ariaKeyShortcuts}
           onPointerDown={beginDrag}
           onPointerMove={moveDrag}
           onPointerUp={endDrag}
@@ -1731,7 +2720,7 @@ export default function PrismCompanion({
         >
           <PrismOrb aura={false} className={styles.orb} />
           <span className={styles.shortcut} aria-hidden="true">
-            ⌥/Ctrl Space
+            {modifierPresentation.label}
           </span>
         </button>
         <span className={styles.refractGlyph} aria-hidden="true">
@@ -1743,7 +2732,7 @@ export default function PrismCompanion({
           {refractStatus}
         </span>
       </div>
-      <style>{`html[${PRISM_REFRACT_CURSOR_ATTRIBUTE}="true"], html[${PRISM_REFRACT_CURSOR_ATTRIBUTE}="true"] * { cursor: none !important; }`}</style>
+      <style>{`html[${PRISM_REFRACT_CURSOR_ATTRIBUTE}="true"], html[${PRISM_REFRACT_CURSOR_ATTRIBUTE}="true"] *, html[${PRISM_WIELD_CURSOR_ATTRIBUTE}="true"], html[${PRISM_WIELD_CURSOR_ATTRIBUTE}="true"] * { cursor: none !important; }`}</style>
     </>,
     document.body,
   );

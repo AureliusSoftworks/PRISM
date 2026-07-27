@@ -311,6 +311,155 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS prism_action_proposals (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      capability_id TEXT NOT NULL,
+      capability_version INTEGER NOT NULL,
+      input_json TEXT NOT NULL,
+      preview_json TEXT NOT NULL,
+      risk TEXT NOT NULL,
+      confirmation_policy TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ready'
+        CHECK(status IN ('ready', 'stale', 'expired', 'executed')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      executed_run_id TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_prism_action_proposals_user_created
+      ON prism_action_proposals(user_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS prism_action_runs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      parent_run_id TEXT,
+      capability_id TEXT NOT NULL,
+      capability_version INTEGER NOT NULL,
+      source TEXT NOT NULL CHECK(source IN ('prism', 'ui')),
+      status TEXT NOT NULL
+        CHECK(status IN ('running', 'committed', 'failed', 'undone', 'undo-failed')),
+      idempotency_key TEXT NOT NULL,
+      input_json TEXT NOT NULL,
+      result_json TEXT,
+      affected_entities_json TEXT NOT NULL DEFAULT '[]',
+      inverse_ciphertext TEXT,
+      inverse_iv TEXT,
+      inverse_tag TEXT,
+      cost_micro_usd INTEGER,
+      non_reversible_json TEXT NOT NULL DEFAULT '[]',
+      error TEXT,
+      created_at TEXT NOT NULL,
+      committed_at TEXT,
+      undone_at TEXT,
+      undo_expires_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(parent_run_id) REFERENCES prism_action_runs(id) ON DELETE SET NULL,
+      UNIQUE(user_id, idempotency_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_prism_action_runs_user_created
+      ON prism_action_runs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_prism_action_runs_user_undo
+      ON prism_action_runs(user_id, status, undo_expires_at, created_at DESC);
+    CREATE TABLE IF NOT EXISTS prism_context_tokens (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      entities_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_prism_context_tokens_user_expires
+      ON prism_context_tokens(user_id, expires_at);
+    CREATE TABLE IF NOT EXISTS prism_monitors (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('elevenlabs-credit-threshold')),
+      status TEXT NOT NULL
+        CHECK(status IN ('active', 'paused-local', 'triggered', 'disabled')),
+      threshold_ratio REAL NOT NULL CHECK(threshold_ratio > 0 AND threshold_ratio < 1),
+      last_observed_ratio REAL,
+      billing_cycle_key TEXT,
+      last_checked_at TEXT,
+      triggered_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      UNIQUE(user_id, kind)
+    );
+    CREATE TABLE IF NOT EXISTS prism_notifications (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      monitor_id TEXT,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      delivered_at TEXT,
+      read_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(monitor_id) REFERENCES prism_monitors(id) ON DELETE SET NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_prism_notifications_user_created
+      ON prism_notifications(user_id, created_at DESC);
+    CREATE TABLE IF NOT EXISTS prism_quarantine (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
+      payload_ciphertext TEXT NOT NULL,
+      payload_iv TEXT NOT NULL,
+      payload_tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      restored_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(run_id) REFERENCES prism_action_runs(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_prism_quarantine_user_expires
+      ON prism_quarantine(user_id, expires_at);
+    CREATE TABLE IF NOT EXISTS library_groups (
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      delete_protected_default INTEGER NOT NULL DEFAULT 0,
+      built_in INTEGER NOT NULL DEFAULT 0,
+      marketplace_theme_id TEXT,
+      atmosphere_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY(user_id, id),
+      UNIQUE(user_id, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_groups_user_updated
+      ON library_groups(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS library_group_members (
+      user_id TEXT NOT NULL,
+      group_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      delete_protected_override INTEGER
+        CHECK(delete_protected_override IS NULL OR delete_protected_override IN (0, 1)),
+      added_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, group_id, bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id, group_id)
+        REFERENCES library_groups(user_id, id) ON DELETE CASCADE,
+      FOREIGN KEY(bot_id) REFERENCES bots(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_library_group_members_user_bot
+      ON library_group_members(user_id, bot_id);
+    CREATE TABLE IF NOT EXISTS library_group_imports (
+      user_id TEXT NOT NULL,
+      source_key TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      imported_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, source_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS slate_handoffs (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

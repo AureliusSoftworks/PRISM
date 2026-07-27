@@ -1,4 +1,5 @@
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
+import type { PrismCompanionCardV1 } from "./prismOrchestration.js";
 
 export const PRISM_COMPANION_RECOVERY_LIMIT = 3;
 export const PRISM_COMPANION_MESSAGE_MAX_LENGTH = 4_000;
@@ -30,6 +31,9 @@ export interface PrismCompanionSurfaceReference {
   signalEpisodeId?: string;
   slateProjectId?: string;
   slateSectionId?: string;
+  storySessionId?: string;
+  imageId?: string;
+  libraryGroupId?: string;
 }
 
 export interface PrismCompanionMessage {
@@ -68,12 +72,21 @@ export interface PrismCompanionRequest {
   surface: PrismCompanionSurfaceReference;
   message: string;
   recoveryMessages: PrismCompanionMessage[];
+  requestId: string;
+  contextTokenIds: string[];
+  /**
+   * Full-size Prism Home uses the same endpoint as the floating companion to
+   * probe product commands without replacing an ordinary conversational turn.
+   * A non-command returns 204 and never reaches the fallback chat model.
+   */
+  orchestrationOnly?: boolean;
 }
 
 export interface PrismCompanionResponse {
   ok: true;
   message: PrismCompanionMessage;
   actions: PrismCompanionActionIntent[];
+  cards: PrismCompanionCardV1[];
   provider: EphemeralChatResolvedProvider;
   model: string | null;
 }
@@ -127,6 +140,15 @@ export function normalizePrismCompanionSurfaceReference(
     ...(boundedId(value.slateSectionId)
       ? { slateSectionId: boundedId(value.slateSectionId) }
       : {}),
+    ...(boundedId(value.storySessionId)
+      ? { storySessionId: boundedId(value.storySessionId) }
+      : {}),
+    ...(boundedId(value.imageId)
+      ? { imageId: boundedId(value.imageId) }
+      : {}),
+    ...(boundedId(value.libraryGroupId)
+      ? { libraryGroupId: boundedId(value.libraryGroupId) }
+      : {}),
   };
 }
 
@@ -179,6 +201,17 @@ export function normalizePrismCompanionRequest(
     surface: normalizePrismCompanionSurfaceReference(value.surface),
     message,
     recoveryMessages: normalizePrismCompanionMessages(value.recoveryMessages),
+    requestId: boundedId(value.requestId) ?? crypto.randomUUID(),
+    contextTokenIds: Array.isArray(value.contextTokenIds)
+      ? Array.from(
+          new Set(
+            value.contextTokenIds
+              .map(boundedId)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ).slice(0, 8)
+      : [],
+    ...(value.orchestrationOnly === true ? { orchestrationOnly: true } : {}),
   };
 }
 

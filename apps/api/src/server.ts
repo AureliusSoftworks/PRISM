@@ -127,6 +127,7 @@ import {
   collectCoffeePollVotes,
   buildCoffeePollExportLines,
   coffeeMessagesVisibleInExport,
+  coffeeConversationHasPlayerDeparture,
   buildCoffeeTeamExportLines,
   buildCoffeeGroupAtmospherePrompt,
   createCoffeePoll,
@@ -188,9 +189,7 @@ import {
   botcastEpisodePowerSnapshotForRole,
   cancelBotcastEpisode,
   chatWithBotcastShowHost,
-  createBotcastEpisode,
   createBotcastShow,
-  deleteBotcastEpisode,
   deleteBotcastShow,
   deleteBotcastShowIntroAudio,
   endBotcastEpisodeOnProducerCut,
@@ -291,7 +290,6 @@ import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
   deleteMemoriesForBotScope,
-  deleteMemoryById,
   deleteOrphanedBotMemories,
   filterConflictingMemories,
   normalizeMemoryDurability,
@@ -311,10 +309,8 @@ import {
   clearConversationMessages,
   createDevSeedConversations,
   dedupeActiveZenWallpaperGeneration,
-  deleteAllConversations,
   deleteConversation,
   deleteConversationMessage,
-  deleteConversationsByBot,
   getConversationSweepState,
   getLatestRememberedZenWallpaperForBot,
   listConversationSummaries,
@@ -331,20 +327,15 @@ import {
   undoLatestConversationSweep,
 } from "./conversations.ts";
 import {
-  chooseStorySessionChoice,
   createStorySession,
-  deleteStorySession,
   generateStorySessionEpisode,
   getStorySessionDetail,
   listStorySessions,
   loadStoryBotProfiles,
   normalizeStoryCreateBotIds,
-  pickupStorySessionItem,
-  travelStorySession,
 } from "./story.ts";
 import {
   acceptSlateRevision,
-  createSlateProject,
   deleteSlateProject,
   draftSlateStructureItem,
   generateSlateShape,
@@ -374,10 +365,38 @@ import {
   suggestSlateProjectTitle,
 } from "./slate-project-companion.ts";
 import {
+  buildPrismCompanionAuthoritativeContext,
   chatWithPrismCompanion,
   prismCompanionEphemeralMode,
   resolvePrismCompanionProvider,
 } from "./prism-companion.ts";
+import {
+  importLegacyLibraryGroupsOnce,
+  listLibraryGroups,
+  replaceLibraryGroups,
+} from "./library-groups.ts";
+import {
+  createPrismDomainCapabilityRegistry,
+} from "./prism-domain-capabilities.ts";
+import type { PrismCapabilityContext } from "./prism-capabilities.ts";
+import { prismSettingsPatchIsJournalable } from "./prism-settings-mutations.ts";
+import { prismBotPatchIsJournalable } from "./prism-bot-mutations.ts";
+import { prismSlatePatchIsRootOnly } from "./prism-slate-mutations.ts";
+import {
+  planPrismIntent,
+  prismMessageMayNeedOrchestration,
+  resolvePrismIntentPlan,
+} from "./prism-orchestrator.ts";
+import {
+  listRecentPrismActionRuns,
+  purgeExpiredPrismOrchestrationState,
+} from "./prism-action-journal.ts";
+import {
+  checkElevenLabsCreditMonitor,
+  listPrismMonitors,
+  listPrismNotifications,
+  PRISM_MONITOR_INTERVAL_MS,
+} from "./prism-monitors.ts";
 import {
   createPendingLivingShellAccountProgress,
   getLivingShellAccountProgress,
@@ -387,7 +406,6 @@ import { resolveSlateDeliberationModelOverride } from "./slate-deliberation-rout
 import {
   SlateSectionAiWriteConflictError,
   SlateSectionRevisionConflictError,
-  createSlateSeries,
   getSlateContinuityStatus,
   getSlateManuscriptPage,
   getSlateProjectSection,
@@ -445,14 +463,10 @@ import {
 import {
   composeBotSystemPrompt,
   deleteAllBots,
-  deleteBot,
   deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
-  patchSelectedBots,
   resolveBotExportHashForCreate,
-  setSelectedBotsDeleteProtection,
-  type SelectedBotPatch,
 } from "./bots.ts";
 import { queueBotSemanticFacetsRefresh } from "./bot-facets.ts";
 import { compileBotPowers } from "./bot-powers.ts";
@@ -466,7 +480,6 @@ import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   BOT_PROFILE_PICTURE_SIZE,
   GALLERY_EXCLUDED_PURPOSE_SQL,
-  clearBotProfilePictureReference,
   deleteBotProfilePictureImageIfOwned,
   normalizeBotProfilePicturePngBytes,
   parseBotProfilePictureDataUrl,
@@ -509,6 +522,7 @@ import {
   checkOpenAiApiKeyStatus,
   defaultModelIdForProvider,
   getAuxiliaryProvider,
+  resolveAuxiliaryOllamaModel,
   selectProvider,
 } from "./providers.ts";
 import type {
@@ -578,6 +592,8 @@ import {
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
+  PRISM_ACTION_UNDO_RETENTION_MS,
+  PRISM_ORCHESTRATION_VERSION,
   HUB_ATMOSPHERE_IMAGE_PURPOSE,
   composeHubAtmospherePrompt,
   GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
@@ -622,6 +638,9 @@ import {
   normalizeBotVoiceVolume,
   normalizeEphemeralChatProviderPreferences,
   normalizePrismCompanionRequest,
+  normalizePrismCompanionSurfaceReference,
+  normalizePrismExecuteProposalRequestV1,
+  normalizePrismUndoRequestV1,
   normalizeGraphicsQuality,
   normalizeListenerReactionVocalFoley,
   normalizeBotCrosstalkInterruptedSpeakerCue,
@@ -703,6 +722,9 @@ import {
   type GraphicsQuality,
   type ImageProviderName,
   type PrismStartupPreference,
+  type PrismJsonObject,
+  type PrismCompanionCardV1,
+  type PrismCompanionSurfaceReference,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -1048,6 +1070,371 @@ const networkState: { desiredLanAccess: boolean; boundLanActive: boolean } = {
   boundLanActive: false,
 };
 const backupAdapter = new LocalOnlyBackupAdapter();
+
+async function startPrismStorySession(
+  context: PrismCapabilityContext,
+  input: PrismJsonObject,
+) {
+  const powerTheme = readResolvedPowerTheme(input.theme);
+  const botIds = normalizeStoryCreateBotIds(input.botIds);
+  const storyBots = loadStoryBotProfiles(db, context.userId, botIds);
+  const user = getUserRow(context.userId);
+  const requestedProvider = readProvider(input.preferredProvider);
+  const anyOfflineProtected = storyBots.some((bot) => !bot.onlineEnabled);
+  let effectiveProvider: ProviderName =
+    context.hardLocal || anyOfflineProtected
+      ? "local"
+      : (requestedProvider ?? user.preferred_provider);
+  const explicitModelOverride =
+    context.hardLocal || anyOfflineProtected
+      ? null
+      : readModelOverride(input.modelOverride);
+  const requestedReasoningEffort = reasoningEffortForRequest(
+    input.reasoningEffort,
+  );
+  const storyModelOverride =
+    effectiveProvider === "local"
+      ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
+      : explicitModelOverride;
+  const openAiApiKey =
+    getOpenAiApiKeyForUser(context.userId, context.userKey) ??
+    config.openAiApiKey;
+  const anthropicApiKey =
+    getAnthropicApiKeyForUser(context.userId, context.userKey) ??
+    config.anthropicApiKey;
+  const catalog = await buildModelCatalog(
+    context.hardLocal ? undefined : openAiApiKey,
+    user.secondary_ollama_host,
+    context.hardLocal ? undefined : anthropicApiKey,
+  );
+  const resolvedAuto = resolveAutoModel({
+    provider: effectiveProvider,
+    explicitModelOverride: storyModelOverride,
+    preferredModel:
+      effectiveProvider === "local"
+        ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
+        : readOptionalString(user.preferred_online_model),
+    hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+    catalog,
+  });
+  effectiveProvider = resolvedAuto.provider;
+  const provider = selectProvider(
+    effectiveProvider,
+    context.hardLocal ? undefined : openAiApiKey,
+    user.secondary_ollama_host,
+    context.hardLocal ? undefined : anthropicApiKey,
+  );
+  const premise = readOptionalString(input.premise);
+  const session = createStorySession(db, context.userId, {
+    botIds,
+    premise,
+    provider: effectiveProvider,
+    model: resolvedAuto.model,
+  });
+  void Promise.resolve(
+    runWithUsageSession(
+      {
+        db,
+        userId: context.userId,
+        privacyScope: "normal",
+        mode: "story",
+        surface: "story",
+      },
+      () =>
+        generateStorySessionEpisode(db, context.userId, session.id, {
+          provider,
+          providerName: effectiveProvider,
+          model: resolvedAuto.model,
+          bots: storyBots,
+          premise,
+          ...(powerTheme ? { theme: powerTheme } : {}),
+          ...(requestedReasoningEffort
+            ? { reasoningEffort: requestedReasoningEffort }
+            : {}),
+        }),
+    ),
+  ).catch((error) => {
+    console.warn("[story] generation job failed", error);
+  });
+  return session;
+}
+
+const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
+  primaryOllamaHost: config.ollamaHost,
+  startStorySession: startPrismStorySession,
+  onBotProfileChanged: (context, botId) => {
+    const user = getUserRow(context.userId);
+    queueBotSemanticFacetsRefresh({
+      db,
+      userId: context.userId,
+      botId,
+      prismDefaultLlmModel: user.prism_default_llm_model,
+      provider: auxiliaryProviderFactoryOverride(
+        user.prism_default_llm_model ?? undefined,
+        dualOllamaWorkloadOptions(user),
+      ),
+    });
+  },
+  readElevenLabsBalance: async (context) => {
+    const apiKey = getElevenLabsApiKeyForUser(
+      context.userId,
+      context.userKey,
+    );
+    if (!apiKey) {
+      throw new HttpError(
+        409,
+        "Save an ElevenLabs API key to this account before checking credits.",
+      );
+    }
+    return getElevenLabsCreditBalance(apiKey);
+  },
+  generateBotDraft: async (context, brief) => {
+    const user = getUserRow(context.userId);
+    const model = resolveAuxiliaryOllamaModel(
+      user.prism_default_llm_model,
+    );
+    const generated = await runWithUsageSession(
+      {
+        db,
+        userId: context.userId,
+        privacyScope: "normal",
+        mode: "system",
+        surface: "bots",
+      },
+      () =>
+        generateBotDraft({
+          prompt: brief,
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model ?? undefined,
+            dualOllamaWorkloadOptions(user),
+          ),
+          providerName: "local",
+          model,
+          responseMode: "local",
+        }),
+    );
+    if (generated.draft.powers.length === 0) return generated.draft;
+    const compiled = await runWithUsageSession(
+      {
+        db,
+        userId: context.userId,
+        privacyScope: "normal",
+        mode: "system",
+        surface: "bots",
+      },
+      () =>
+        compileBotPowers({
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model ?? undefined,
+            dualOllamaWorkloadOptions(user),
+          ),
+          botName: generated.draft.name,
+          systemPrompt: JSON.stringify(generated.draft.profile),
+          powers: generated.draft.powers,
+          targetBots: db
+            .prepare(
+              "SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id",
+            )
+            .all(context.userId) as Array<{ id: string; name: string }>,
+        }),
+    );
+    return {
+      ...generated.draft,
+      powers: compiled.powers,
+    };
+  },
+  generateBotContextualField: async (
+    context,
+    { botName, currentValue, direction, profile },
+  ) => {
+    const user = getUserRow(context.userId);
+    const model = resolveAuxiliaryOllamaModel(
+      user.prism_default_llm_model,
+    );
+    const generated = await runWithUsageSession(
+      {
+        db,
+        userId: context.userId,
+        privacyScope: "normal",
+        mode: "system",
+        surface: "bots",
+      },
+      () =>
+        generateBotField({
+          fieldKey: "profile.advancedPrompt",
+          currentValue,
+          context: {
+            botName,
+            profile,
+            playerDirection: direction,
+            instruction:
+              "Rewrite the advanced prompt so this bot uniquely satisfies the player direction while preserving its established identity.",
+          },
+          provider: auxiliaryProviderFactoryOverride(
+            user.prism_default_llm_model ?? undefined,
+            dualOllamaWorkloadOptions(user),
+          ),
+          providerName: "local",
+          model,
+          responseMode: "local",
+        }),
+    );
+    if (typeof generated.value !== "string" || !generated.value.trim()) {
+      throw new Error("The auxiliary model returned an invalid bot update.");
+    }
+    return {
+      value: generated.value,
+      provider: generated.providerNameUsed,
+      model: generated.modelUsed,
+    };
+  },
+  generateCoffeeGroupIdentity: async (context, { brief, bots }) => {
+    const user = getUserRow(context.userId);
+    const model = resolveAuxiliaryOllamaModel(
+      user.prism_default_llm_model,
+    );
+    const raw = await runWithUsageSession(
+      {
+        db,
+        userId: context.userId,
+        privacyScope: "normal",
+        mode: "system",
+        surface: "coffee",
+      },
+      () =>
+        auxiliaryProviderFactoryOverride(
+          user.prism_default_llm_model ?? undefined,
+          dualOllamaWorkloadOptions(user),
+        ).generateResponse(
+          [
+            {
+              role: "system",
+              content: [
+                "Create one distinctive Coffee group identity for the supplied PRISM characters.",
+                "The contrast should be funny because of who these specific characters are, not because of generic randomness.",
+                "Write a short evocative group name and one playable premise that gives everyone a reason to talk.",
+                "Return one shared group, never a separate entry for each character.",
+                "Do not mention prompts, bots, AI, character sheets, or internal product mechanics.",
+                'Return only JSON: {"name":"2-5 words","premise":"1-2 sentences"}',
+              ].join("\n"),
+            },
+            {
+              role: "user",
+              content: [
+                `Player direction: ${brief.slice(0, 2_000)}`,
+                "Characters:",
+                ...bots.map(
+                  (bot) =>
+                    `- ${bot.name}: ${bot.profileSummary.replace(/\s+/gu, " ").slice(0, 1_200)}`,
+                ),
+              ].join("\n"),
+            },
+          ],
+          {
+            model,
+            temperature: 0.8,
+            maxTokens: 320,
+            jsonMode: true,
+            usagePurpose: "chat_reply",
+          },
+        ),
+    );
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      throw new Error("The auxiliary model returned an invalid Coffee identity.");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw.slice(start, end + 1));
+    } catch {
+      throw new Error("The auxiliary model returned an invalid Coffee identity.");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("The auxiliary model returned an invalid Coffee identity.");
+    }
+    const record = parsed as Record<string, unknown>;
+    const name =
+      typeof record.name === "string"
+        ? record.name.trim().replace(/\s+/gu, " ").slice(0, 120)
+        : "";
+    const premise =
+      typeof record.premise === "string"
+        ? record.premise.trim().replace(/\s+/gu, " ").slice(0, 1_000)
+        : "";
+    if (!name || !premise) {
+      throw new Error("The auxiliary model returned an incomplete Coffee identity.");
+    }
+    return {
+      name,
+      premise,
+      provider: "local",
+      model,
+    };
+  },
+  generateSignalBooking: async (
+    context,
+    { showId, guestBotId, direction },
+  ) => {
+    const user = getUserRow(context.userId);
+    const model = resolveAuxiliaryOllamaModel(
+      user.prism_default_llm_model,
+    );
+    let resolvedProvider = "local";
+    let resolvedModel: string | null = model;
+    const generated = await runWithUsageSession(
+      {
+        db,
+        userId: context.userId,
+        privacyScope: "normal",
+        mode: "system",
+        surface: "signal",
+      },
+      () =>
+        generateBotcastBookingSuggestion(
+          db,
+          context.userId,
+          showId,
+          {
+            guestBotId,
+            field: "booking",
+            modelOverride: model,
+          },
+          {
+            preferredProvider: "local",
+            responseMode: "local",
+            preferredLocalModel: model,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            providerFactory: providerFactoryOverride,
+            direction,
+            onGenerationResolved: (provider, selectedModel) => {
+              resolvedProvider = provider;
+              resolvedModel = selectedModel;
+            },
+          },
+        ),
+    );
+    if (
+      !("topic" in generated) ||
+      !generated.generated ||
+      !generated.topic.trim() ||
+      !generated.producerBrief.trim()
+    ) {
+      throw new HttpError(
+        503,
+        generated.failureReason === "provider_request_failed"
+          ? "Signal could not reach the auxiliary model."
+          : "Signal could not synthesize a valid booking.",
+      );
+    }
+    return {
+      topic: generated.topic,
+      producerBrief: generated.producerBrief,
+      provider: resolvedProvider,
+      model: resolvedModel,
+    };
+  },
+});
 
 function slateRecoveryRootDirectory(): string {
   const configured = process.env.SLATE_RECOVERY_DIR?.trim();
@@ -1930,6 +2317,454 @@ function getUserRow(userId: string): UserDbRow {
   return row;
 }
 
+function prismSurfaceIsLive(
+  userId: string,
+  surface: PrismCompanionSurfaceReference,
+): boolean {
+  if (surface.surfaceId === "coffee") {
+    if (!surface.conversationId) return false;
+    if (
+      coffeeConversationHasPlayerDeparture(
+        db,
+        userId,
+        surface.conversationId,
+      )
+    ) {
+      return false;
+    }
+    return Boolean(
+      getActiveCoffeeTurnJobForConversation(
+        userId,
+        surface.conversationId,
+      ) ||
+        db
+          .prepare(
+            `SELECT 1
+               FROM conversations
+              WHERE id = ? AND user_id = ? AND conversation_mode = 'coffee'`,
+          )
+          .get(surface.conversationId, userId),
+    );
+  }
+  if (surface.surfaceId !== "signal" || !surface.signalEpisodeId) return false;
+  const episode = db
+    .prepare(
+      `SELECT status
+         FROM botcast_episodes
+        WHERE id = ? AND user_id = ?`,
+    )
+    .get(surface.signalEpisodeId, userId) as { status: string } | undefined;
+  return episode?.status === "live";
+}
+
+function prismCapabilityContext(
+  userId: string,
+  user: UserDbRow,
+  surface: PrismCompanionSurfaceReference,
+  source: "prism" | "ui",
+) {
+  return {
+    db,
+    userId,
+    userKey: decryptUserKey(userId),
+    source,
+    surfaceId: surface.surfaceId,
+    hardLocal: userBlocksOnlineCapabilities(user),
+    live: prismSurfaceIsLive(userId, surface),
+    now: new Date(),
+  } as const;
+}
+
+function prismActionRunMessage(
+  capabilityId: string,
+  status: string,
+  result: unknown,
+  error: string | null,
+): string {
+  if (status === "failed" || status === "undo-failed") {
+    return error || "That Prism action could not be completed.";
+  }
+  const record =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : {};
+  if (capabilityId === "usage.top-bots.query") {
+    const bots = Array.isArray(record.bots)
+      ? record.bots.filter(
+          (bot): bot is Record<string, unknown> =>
+            Boolean(bot) && typeof bot === "object" && !Array.isArray(bot),
+        )
+      : [];
+    if (bots.length === 0) {
+      return "You do not have any persisted non-incognito bot reply turns yet.";
+    }
+    return bots
+      .map(
+        (bot, index) =>
+          `${index + 1}. ${String(bot.name ?? "Unnamed bot")} — ${Number(
+            bot.replyTurns ?? 0,
+          ).toLocaleString()} replies`,
+      )
+      .join("\n");
+  }
+  if (capabilityId === "settings.online-model.update") {
+    return `Primary online model changed to ${String(
+      record.preferredOnlineModel ?? "the selected model",
+    )}.`;
+  }
+  if (capabilityId === "settings.fields.update") {
+    return status === "undone"
+      ? "The previous account settings were restored."
+      : `${Number(record.updated ?? 0).toLocaleString()} account setting${
+          Number(record.updated ?? 0) === 1 ? " is" : "s are"
+        } updated.`;
+  }
+  if (capabilityId === "bots.fields.update") {
+    return status === "undone"
+      ? "The previous bot and avatar fields were restored."
+      : `${Number(record.updated ?? 0).toLocaleString()} bot field${
+          Number(record.updated ?? 0) === 1 ? " is" : "s are"
+        } updated.`;
+  }
+  if (capabilityId === "default-bot.fields.update") {
+    return status === "undone"
+      ? "Default Prism's previous appearance was restored."
+      : `${Number(record.updated ?? 0).toLocaleString()} Default Prism appearance field${
+          Number(record.updated ?? 0) === 1 ? " is" : "s are"
+        } updated.`;
+  }
+  if (capabilityId === "story.session.advance") {
+    return status === "undone"
+      ? "That Story move was undone."
+      : "The Story moved forward.";
+  }
+  if (capabilityId === "story.session.create") {
+    return status === "undone"
+      ? "The new Story session was removed."
+      : "The Story session is generating.";
+  }
+  if (capabilityId === "story.session.delete") {
+    return status === "undone"
+      ? `${String(record.title ?? "The Story session")} was restored.`
+      : `${String(record.title ?? "The Story session")} is quarantined. Undo is available for 30 days.`;
+  }
+  if (capabilityId === "slate.project.create") {
+    return status === "undone"
+      ? "The new Slate project was removed."
+      : "The Slate project is ready.";
+  }
+  if (capabilityId === "slate.series.create") {
+    return status === "undone"
+      ? "The empty Slate series was removed."
+      : "The Slate series is ready.";
+  }
+  if (capabilityId === "slate.project.fields.update") {
+    return status === "undone"
+      ? "The previous Slate project fields were restored."
+      : "The Slate project was updated.";
+  }
+  if (capabilityId === "images.delete") {
+    return status === "undone"
+      ? "The image and its local file were restored."
+      : "The image is quarantined. Undo is available for 30 days.";
+  }
+  if (capabilityId === "bots.delete") {
+    return status === "undone"
+      ? `${String(record.name ?? "The bot")} was restored.`
+      : `${String(record.name ?? "The bot")} is quarantined. Undo is available for 30 days.`;
+  }
+  if (capabilityId === "library.group.create") {
+    const group =
+      record.group && typeof record.group === "object"
+        ? (record.group as Record<string, unknown>)
+        : {};
+    return `${String(group.name ?? "Your new group")} is ready for Coffee.`;
+  }
+  if (capabilityId === "library.favorites.update") {
+    return "Those bots are now in Favorites.";
+  }
+  if (capabilityId === "bots.avatar.eye-count.batch") {
+    return `${Number(record.updated ?? 0).toLocaleString()} bot${
+      Number(record.updated ?? 0) === 1 ? " now has" : "s now have"
+    } one eye.`;
+  }
+  if (capabilityId === "library.protection.unprotect") {
+    return `${Number(record.updated ?? 0).toLocaleString()} Library bot${
+      Number(record.updated ?? 0) === 1 ? " is" : "s are"
+    } unprotected.`;
+  }
+  if (capabilityId === "usage.elevenlabs-credits.query") {
+    const balance =
+      record.balance && typeof record.balance === "object"
+        ? (record.balance as Record<string, unknown>)
+        : {};
+    const remaining = Number(balance.remainingCredits ?? 0);
+    const total = Number(balance.totalCredits ?? 0);
+    const percent = total > 0 ? Math.round((remaining / total) * 100) : 0;
+    return `ElevenLabs has ${remaining.toLocaleString()} of ${total.toLocaleString()} credits remaining (${percent}%).`;
+  }
+  if (capabilityId === "notifications.elevenlabs-credit.monitor") {
+    if (record.disabled === true) {
+      return "The ElevenLabs credit reminder is disabled.";
+    }
+    const monitor =
+      record.monitor && typeof record.monitor === "object"
+        ? (record.monitor as Record<string, unknown>)
+        : {};
+    const percent = Math.round(Number(monitor.thresholdRatio ?? 0.2) * 100);
+    return `I’ll notify you once per billing cycle when ElevenLabs reaches about ${percent}% remaining.`;
+  }
+  if (capabilityId === "signal.episodes.delete") {
+    return `${Number(record.deleted ?? 0).toLocaleString()} Signal episode${
+      Number(record.deleted ?? 0) === 1 ? " is" : "s are"
+    } quarantined. Undo is available for 30 days.`;
+  }
+  if (capabilityId === "signal.latest.export-to-slate") {
+    return "The latest completed Signal episode is open in a new Slate material project.";
+  }
+  if (capabilityId === "backup.export") {
+    return "Your backup download is ready.";
+  }
+  if (capabilityId === "bots.create") {
+    const bot =
+      record.bot && typeof record.bot === "object"
+        ? (record.bot as Record<string, unknown>)
+        : {};
+    return `${String(bot.name ?? "Your new character")} is saved. You can open Avatar Studio, refine the concept, or undo the creation.`;
+  }
+  if (capabilityId === "marketplace.install") {
+    const installed = Number(record.installed ?? 0);
+    const skipped = Number(record.skipped ?? 0);
+    if (status === "undone") {
+      return "The Marketplace install was removed and the prior Library groups were restored.";
+    }
+    if (installed === 0 && skipped > 0) {
+      return "That Marketplace selection is already installed.";
+    }
+    return `${installed.toLocaleString()} Marketplace bot${
+      installed === 1 ? " is" : "s are"
+    } installed with bundled memories.`;
+  }
+  return status === "undone"
+    ? "Undone."
+    : "Prism completed the requested action.";
+}
+
+async function orchestratePrismCompanionRequest(args: {
+  userId: string;
+  user: UserDbRow;
+  request: ReturnType<typeof normalizePrismCompanionRequest>;
+  signal: AbortSignal;
+}): Promise<{
+  content: string;
+  cards: PrismCompanionCardV1[];
+  provider: "local";
+  model: string;
+} | null> {
+  if (
+    !prismMessageMayNeedOrchestration(
+      args.request.message,
+      args.request.contextTokenIds,
+    )
+  ) {
+    return null;
+  }
+  const context = prismCapabilityContext(
+    args.userId,
+    args.user,
+    args.request.surface,
+    "prism",
+  );
+  const provider = auxiliaryProviderFactoryOverride(
+    args.user.prism_default_llm_model,
+    dualOllamaWorkloadOptions(args.user),
+  );
+  const model = resolveAuxiliaryOllamaModel(
+    args.user.prism_default_llm_model,
+  );
+  const authoritativeContext = buildPrismCompanionAuthoritativeContext(
+    db,
+    args.userId,
+    args.user.display_name,
+    args.request.surface,
+  );
+  const planned = await planPrismIntent({
+    message: args.request.message,
+    contextTokenIds: args.request.contextTokenIds,
+    registry: prismCapabilityRegistry,
+    capabilityContext: context,
+    surfaceSummary: JSON.stringify(authoritativeContext),
+    provider,
+    model,
+    signal: args.signal,
+  });
+  let onlineModels;
+  if (
+    (planned.capabilityId === "settings.online-model.update" ||
+      planned.steps.some(
+        (step) => step.capabilityId === "settings.online-model.update",
+      )) &&
+    !context.hardLocal
+  ) {
+    const userKey = context.userKey;
+    const catalog = await buildModelCatalog(
+      getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey,
+      args.user.secondary_ollama_host,
+      getAnthropicApiKeyForUser(args.userId, userKey) ??
+        config.anthropicApiKey,
+    );
+    onlineModels = catalog.online;
+  }
+  const plan = (() => {
+    if (planned.kind !== "workflow") {
+      return resolvePrismIntentPlan({
+        plan: planned,
+        context,
+        surface: args.request.surface,
+        onlineModels,
+      });
+    }
+    const resolvedSteps = [];
+    for (const step of planned.steps) {
+      const resolved = resolvePrismIntentPlan({
+        plan: {
+          schemaVersion: PRISM_ORCHESTRATION_VERSION,
+          kind: "action",
+          confidence: planned.confidence,
+          capabilityId: step.capabilityId,
+          input: step.input,
+          steps: [],
+          contextTokenIds: planned.contextTokenIds,
+          clarification: null,
+        },
+        context,
+        surface: args.request.surface,
+        onlineModels,
+      });
+      if (resolved.kind === "clarification") return resolved;
+      if (!resolved.capabilityId) {
+        return {
+          ...resolved,
+          kind: "clarification" as const,
+          clarification:
+            "One workflow step could not be authorized. Which action should I take first?",
+        };
+      }
+      resolvedSteps.push({
+        capabilityId: resolved.capabilityId,
+        input: resolved.input,
+        dependsOn: step.dependsOn,
+      });
+    }
+    return { ...planned, steps: resolvedSteps };
+  })();
+  if (plan.kind === "clarification") {
+    const question =
+      plan.clarification ||
+      "What specific item and change should I use?";
+    return {
+      content: question,
+      cards: [
+        {
+          schemaVersion: PRISM_ORCHESTRATION_VERSION,
+          type: "clarification",
+          title: "One thing first",
+          question,
+          choices: [],
+        },
+      ],
+      provider: "local",
+      model,
+    };
+  }
+  if (plan.kind === "undo") {
+    const run = prismCapabilityRegistry.undo({ context });
+    return {
+      content: prismActionRunMessage(
+        run.capabilityId,
+        run.status,
+        run.result,
+        run.error,
+      ),
+      cards: [
+        {
+          schemaVersion: PRISM_ORCHESTRATION_VERSION,
+          type: "result",
+          title: "Undo",
+          run,
+        },
+      ],
+      provider: "local",
+      model,
+    };
+  }
+  if (plan.kind !== "workflow" && !plan.capabilityId) {
+    return {
+      content: "I need one specific product action before I can proceed.",
+      cards: [],
+      provider: "local",
+      model,
+    };
+  }
+  const proposal =
+    plan.kind === "workflow"
+      ? prismCapabilityRegistry.createWorkflowProposal({
+          context,
+          steps: plan.steps.map((step) => ({
+            capabilityId: step.capabilityId,
+            input: step.input,
+          })),
+        })
+      : await prismCapabilityRegistry.createPreparedProposal({
+          context,
+          capabilityId: plan.capabilityId!,
+          input: plan.input,
+        });
+  const shouldExecuteImmediately =
+    proposal.risk === "query" ||
+    proposal.risk === "navigation" ||
+    (proposal.risk === "reversible" && proposal.confirmation === "none");
+  if (!shouldExecuteImmediately) {
+    return {
+      content: proposal.preview.summary,
+      cards: [
+        {
+          schemaVersion: PRISM_ORCHESTRATION_VERSION,
+          type: "proposal",
+          title: "Ready to apply",
+          proposal,
+        },
+      ],
+      provider: "local",
+      model,
+    };
+  }
+  const run = await prismCapabilityRegistry.executeProposal({
+    context,
+    proposalId: proposal.id,
+    confirmation: true,
+    idempotencyKey: `companion:${args.request.requestId}:${proposal.capabilityId}`,
+  });
+  return {
+    content: prismActionRunMessage(
+      run.capabilityId,
+      run.status,
+      run.result,
+      run.error,
+    ),
+    cards: [
+      {
+        schemaVersion: PRISM_ORCHESTRATION_VERSION,
+        type: "result",
+        title: run.status === "committed" ? "Complete" : "Could not complete",
+        run,
+      },
+    ],
+    provider: "local",
+    model,
+  };
+}
+
 function dualOllamaWorkloadOptions(user: UserDbRow): {
   secondaryOllamaHost: string | null;
   experimentalDualOllama: boolean;
@@ -2242,6 +3077,120 @@ function getElevenLabsApiKeyForUser(
     },
     userKey,
   );
+}
+
+async function checkPrismCreditMonitorForUser(
+  userId: string,
+  force = false,
+): Promise<void> {
+  const user = getUserRow(userId);
+  const hardLocal = userBlocksOnlineCapabilities(user);
+  const userKey = decryptUserKey(userId);
+  await checkElevenLabsCreditMonitor({
+    db,
+    userId,
+    hardLocal,
+    readBalance: async () => {
+      const apiKey = getElevenLabsApiKeyForUser(userId, userKey);
+      if (!apiKey) {
+        throw new Error(
+          "Save an ElevenLabs API key before checking credits.",
+        );
+      }
+      return getElevenLabsCreditBalance(apiKey);
+    },
+    force,
+  });
+}
+
+async function checkDuePrismCreditMonitors(force = false): Promise<void> {
+  const rows = db
+    .prepare(
+      `SELECT monitor.user_id
+         FROM prism_monitors AS monitor
+        WHERE monitor.kind = 'elevenlabs-credit-threshold'
+          AND monitor.status IN ('active', 'paused-local')
+          AND (
+            ? = 1 OR
+            monitor.last_checked_at IS NULL OR
+            monitor.last_checked_at <= ?
+          )`,
+    )
+    .all(
+      force ? 1 : 0,
+      new Date(Date.now() - PRISM_MONITOR_INTERVAL_MS).toISOString(),
+    ) as unknown as Array<{ user_id: string }>;
+  for (const row of rows) {
+    try {
+      await checkPrismCreditMonitorForUser(row.user_id, force);
+    } catch (error) {
+      console.warn(
+        "[prism-monitor] ElevenLabs credit check failed",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+}
+
+function purgeExpiredPrismStateAndFiles(): void {
+  const expiredConversations = db
+    .prepare(
+      `SELECT id, user_id
+         FROM conversations
+        WHERE archive_batch_id LIKE 'prism:%'
+          AND archived_at IS NOT NULL
+          AND archived_at <= ?`,
+    )
+    .all(
+      new Date(
+        Date.now() - PRISM_ACTION_UNDO_RETENTION_MS,
+      ).toISOString(),
+    ) as unknown as Array<{ id: string; user_id: string }>;
+  for (const conversation of expiredConversations) {
+    const replayIds = replayRecordingIdsForSource(
+      conversation.user_id,
+      "coffee",
+      [conversation.id],
+    );
+    for (const replayId of replayIds) {
+      deleteReplayRecordingMedia(db, conversation.user_id, replayId);
+    }
+    removeReplayDirectories(conversation.user_id, replayIds);
+    try {
+      deleteConversation(db, conversation.user_id, conversation.id);
+    } catch {
+      // A concurrent delete or parent cascade already completed the purge.
+    }
+  }
+  for (const expired of purgeExpiredPrismOrchestrationState(db)) {
+    removeReplayDirectories(
+      expired.userId,
+      expired.replayRecordingIds,
+    );
+  }
+  const recoveryCutoff = Date.now() - PRISM_ACTION_UNDO_RETENTION_MS;
+  const userIds = db
+    .prepare("SELECT id FROM users")
+    .all() as unknown as Array<{ id: string }>;
+  for (const { id: userId } of userIds) {
+    reconcileAssetCleanupRecoveryForUser(db, userId);
+    for (const recovery of listImageAssetCleanupRecoveries(db, userId)) {
+      if (
+        new Date(recovery.quarantinedAt).getTime() > recoveryCutoff
+      ) {
+        continue;
+      }
+      try {
+        permanentlyDeleteImageAssetCleanupRecovery(
+          db,
+          userId,
+          recovery.recoveryId,
+        );
+      } catch {
+        // Keep ambiguous recovery batches for explicit user inspection.
+      }
+    }
+  }
 }
 
 function getBraveSearchApiKeyForUser(
@@ -4771,84 +5720,39 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/story/sessions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const powerTheme = readResolvedPowerTheme(body.theme);
-      const botIds = normalizeStoryCreateBotIds(body.botIds);
-      const storyBots = loadStoryBotProfiles(db, userId, botIds);
       const user = getUserRow(userId);
-      const requestedProvider = readProvider(body.preferredProvider);
-      const anyOfflineProtected = storyBots.some((bot) => !bot.onlineEnabled);
-      let effectiveProvider: ProviderName = anyOfflineProtected
-        ? "local"
-        : (requestedProvider ?? user.preferred_provider);
-      const explicitModelOverride = anyOfflineProtected
-        ? null
-        : readModelOverride(body.modelOverride);
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "story" },
+        "ui",
       );
-      const storyModelOverride =
-        effectiveProvider === "local"
-          ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
-          : explicitModelOverride;
-      const userKey = decryptUserKey(userId);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey,
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride: storyModelOverride,
-        preferredModel:
-          effectiveProvider === "local"
-            ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "story.session.create",
+        input: JSON.parse(JSON.stringify(body)),
       });
-      effectiveProvider = resolvedAuto.provider;
-      const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey,
-      );
-      const session = createStorySession(db, userId, {
-        botIds,
-        premise: readOptionalString(body.premise),
-        provider: effectiveProvider,
-        model: resolvedAuto.model,
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:story-create:${randomId()}`,
       });
-      void Promise.resolve(
-        runWithUsageSession(
-          {
-            db,
-            userId,
-            privacyScope: "normal",
-            mode: "story",
-            surface: "story",
-          },
-          () =>
-            generateStorySessionEpisode(db, userId, session.id, {
-              provider,
-              providerName: effectiveProvider,
-              model: resolvedAuto.model,
-              bots: storyBots,
-              premise: readOptionalString(body.premise),
-              ...(powerTheme ? { theme: powerTheme } : {}),
-              ...(requestedReasoningEffort
-                ? { reasoningEffort: requestedReasoningEffort }
-                : {}),
-            }),
-        ),
-      ).catch((error) => {
-        console.warn("[story] generation job failed", error);
-      });
-      json(ctx.res, 200, { ok: true, session });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Story session could not be created.");
+      }
+      const result =
+        run.result && typeof run.result === "object" && !Array.isArray(run.result)
+          ? run.result
+          : {};
+      const session =
+        result.session &&
+        typeof result.session === "object" &&
+        !Array.isArray(result.session)
+          ? result.session
+          : null;
+      if (!session) throw new Error("Story session creation returned no session.");
+      json(ctx.res, 200, { ok: true, session, actionRun: run });
     }),
     route("GET", "/api/story/sessions/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -4861,33 +5765,131 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const choiceId = readString(body.choiceId, "choiceId");
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "story" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "story.session.advance",
+        input: {
+          sessionId: ctx.params.id,
+          kind: "choice",
+          targetId: choiceId,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:story-choice:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Story could not apply that choice.");
+      }
       json(ctx.res, 200, {
         ok: true,
-        session: chooseStorySessionChoice(db, userId, ctx.params.id, choiceId),
+        session: getStorySessionDetail(db, userId, ctx.params.id),
+        actionRun: run,
       });
     }),
     route("POST", "/api/story/sessions/:id/travel", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const locationId = readString(body.locationId, "locationId");
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "story" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "story.session.advance",
+        input: {
+          sessionId: ctx.params.id,
+          kind: "travel",
+          targetId: locationId,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:story-travel:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Story could not travel there.");
+      }
       json(ctx.res, 200, {
         ok: true,
-        session: travelStorySession(db, userId, ctx.params.id, locationId),
+        session: getStorySessionDetail(db, userId, ctx.params.id),
+        actionRun: run,
       });
     }),
     route("POST", "/api/story/sessions/:id/items", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const itemId = readString(body.itemId, "itemId");
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "story" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "story.session.advance",
+        input: {
+          sessionId: ctx.params.id,
+          kind: "item",
+          targetId: itemId,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:story-item:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Story could not collect that item.");
+      }
       json(ctx.res, 200, {
         ok: true,
-        session: pickupStorySessionItem(db, userId, ctx.params.id, itemId),
+        session: getStorySessionDetail(db, userId, ctx.params.id),
+        actionRun: run,
       });
     }),
     route("DELETE", "/api/story/sessions/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      deleteStorySession(db, userId, ctx.params.id);
-      json(ctx.res, 200, { ok: true });
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "story" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "story.session.delete",
+        input: { sessionId: ctx.params.id },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:story-delete:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Story session could not be deleted.");
+      }
+      json(ctx.res, 200, { ok: true, actionRun: run });
     }),
     route("GET", "/api/slate/series", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -4896,12 +5898,42 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/series", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "slate" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "slate.series.create",
+        input: JSON.parse(JSON.stringify(body)),
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:slate-series-create:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Slate series could not be created.");
+      }
+      const result =
+        run.result && typeof run.result === "object" && !Array.isArray(run.result)
+          ? run.result
+          : {};
+      const series =
+        result.series &&
+        typeof result.series === "object" &&
+        !Array.isArray(result.series)
+          ? result.series
+          : null;
+      if (!series) throw new Error("Slate series creation returned no series.");
       json(ctx.res, 201, {
         ok: true,
-        series: createSlateSeries(db, userId, {
-          title: body.title,
-          description: body.description,
-        }),
+        series,
+        actionRun: run,
       });
     }),
     route("GET", "/api/slate/series/:id", async (ctx) => {
@@ -4956,22 +5988,50 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const project = createSlateProject(db, userId, {
-        title: body.title,
-        titleOrigin: body.titleOrigin,
-        spark: body.spark,
-        seriesId: body.seriesId,
-        sparkWildcards: body.sparkWildcards,
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "slate" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "slate.project.create",
+        input: JSON.parse(JSON.stringify(body)),
       });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:slate-create:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Slate project could not be created.");
+      }
+      const result =
+        run.result && typeof run.result === "object" && !Array.isArray(run.result)
+          ? run.result
+          : {};
+      const project =
+        result.project &&
+        typeof result.project === "object" &&
+        !Array.isArray(result.project)
+          ? result.project
+          : null;
+      if (!project) {
+        throw new Error("Slate project creation returned no project.");
+      }
       json(ctx.res, 201, {
         ok: true,
         project: protectSlateMutation(
-          project,
+          project as never,
           userId,
-          project.id,
+          String(project.id),
           "Project created",
           true,
         ),
+        actionRun: run,
       });
     }),
     route("POST", "/api/slate/handoffs", async (ctx) => {
@@ -5621,6 +6681,46 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("PATCH", "/api/slate/projects/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (prismSlatePatchIsRootOnly(body)) {
+        const user = getUserRow(userId);
+        const capabilityContext = prismCapabilityContext(
+          userId,
+          user,
+          { surfaceId: "slate", slateProjectId: ctx.params.id },
+          "ui",
+        );
+        const current = getSlateProject(db, userId, ctx.params.id);
+        const proposal = prismCapabilityRegistry.createProposal({
+          context: capabilityContext,
+          capabilityId: "slate.project.fields.update",
+          input: {
+            projectId: ctx.params.id,
+            expectedRevision: current.updatedAt,
+            patch: JSON.parse(JSON.stringify(body)),
+          },
+        });
+        const run = await prismCapabilityRegistry.executeProposal({
+          context: capabilityContext,
+          proposalId: proposal.id,
+          confirmation: true,
+          idempotencyKey: `ui:slate-update:${randomId()}`,
+        });
+        if (run.status !== "committed") {
+          throw new Error(run.error || "Slate project could not be updated.");
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            getSlateProject(db, userId, ctx.params.id),
+            userId,
+            ctx.params.id,
+            "Project direction or structure saved",
+          ),
+          actionRun: run,
+        });
+        return;
+      }
       const project = updateSlateProject(db, userId, ctx.params.id, ctx.body);
       json(ctx.res, 200, {
         ok: true,
@@ -7289,13 +8389,36 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/conversations/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      const replayIds = replayRecordingIdsForSource(
+      const existing = db
+        .prepare(
+          "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND archived_at IS NULL",
+        )
+        .get(ctx.params.id, userId) as { id?: string } | undefined;
+      if (!existing?.id) throw new HttpError(404, "Conversation not found.");
+      const user = getUserRow(userId);
+      const context = prismCapabilityContext(
         userId,
-        "coffee",
-        [ctx.params.id],
+        user,
+        { surfaceId: "home", conversationId: ctx.params.id },
+        "ui",
       );
-      deleteConversation(db, userId, ctx.params.id);
-      removeReplayDirectories(userId, replayIds);
+      const proposal = await prismCapabilityRegistry.createPreparedProposal({
+        context,
+        capabilityId: "conversations.quarantine",
+        input: { conversationIds: [ctx.params.id] },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:conversation-delete:${ctx.params.id}:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new HttpError(
+          409,
+          run.error ?? "Conversation could not be deleted.",
+        );
+      }
       json(ctx.res, 200, { ok: true });
     }),
     route("POST", "/api/conversations/:id/clear", async (ctx) => {
@@ -7309,14 +8432,106 @@ function buildRoutes(): RouteDefinition[] {
     // userId means there's no footgun for an admin/shared-DB scenario.
     route("DELETE", "/api/conversations", async (ctx) => {
       const userId = requireAuth(ctx);
-      const deleted = deleteAllConversations(db, userId);
-      json(ctx.res, 200, { ok: true, deleted });
+      const { count } = db
+        .prepare(
+          `SELECT COUNT(*) AS count
+             FROM conversations
+            WHERE user_id = ?
+              AND COALESCE(incognito, 0) = 0
+              AND archived_at IS NULL
+              AND NOT (
+                conversation_mode = 'zen'
+                OR (conversation_mode = 'chat' AND bot_id IS NULL)
+              )`,
+        )
+        .get(userId) as { count: number };
+      if (count === 0) {
+        json(ctx.res, 200, { ok: true, deleted: 0 });
+        return;
+      }
+      const user = getUserRow(userId);
+      const context = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "home" },
+        "ui",
+      );
+      const proposal = await prismCapabilityRegistry.createPreparedProposal({
+        context,
+        capabilityId: "conversations.quarantine",
+        input: { all: true },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:conversations-delete-all:${randomId()}`,
+      });
+      if (
+        run.status !== "committed" ||
+        !run.result ||
+        typeof run.result !== "object" ||
+        Array.isArray(run.result) ||
+        typeof run.result.deleted !== "number"
+      ) {
+        throw new HttpError(
+          409,
+          run.error ?? "Conversations could not be deleted.",
+        );
+      }
+      json(ctx.res, 200, { ok: true, deleted: run.result.deleted });
     }),
     route("DELETE", "/api/conversations/by-bot/:botId", async (ctx) => {
       const userId = requireAuth(ctx);
       const botId = ctx.params.botId === "_default" ? null : ctx.params.botId;
-      const deleted = deleteConversationsByBot(db, userId, botId);
-      json(ctx.res, 200, { ok: true, deleted });
+      const rows = db
+        .prepare(
+          `SELECT id
+             FROM conversations
+            WHERE user_id = ?
+              AND COALESCE(incognito, 0) = 0
+              AND archived_at IS NULL
+              AND conversation_mode != 'zen'
+              AND ${botId === null ? "bot_id IS NULL" : "bot_id = ?"}`,
+        )
+        .all(
+          ...(botId === null ? [userId] : [userId, botId]),
+        ) as unknown as Array<{ id: string }>;
+      if (rows.length === 0) {
+        json(ctx.res, 200, { ok: true, deleted: 0 });
+        return;
+      }
+      const user = getUserRow(userId);
+      const context = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "home" },
+        "ui",
+      );
+      const proposal = await prismCapabilityRegistry.createPreparedProposal({
+        context,
+        capabilityId: "conversations.quarantine",
+        input: { conversationIds: rows.map((row) => row.id) },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:conversations-delete-bot:${botId ?? "_default"}:${randomId()}`,
+      });
+      if (
+        run.status !== "committed" ||
+        !run.result ||
+        typeof run.result !== "object" ||
+        Array.isArray(run.result) ||
+        typeof run.result.deleted !== "number"
+      ) {
+        throw new HttpError(
+          409,
+          run.error ?? "Conversations could not be deleted.",
+        );
+      }
+      json(ctx.res, 200, { ok: true, deleted: run.result.deleted });
     }),
     route("POST", "/api/conversations/dev-seed", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -9814,6 +11029,7 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
         json(ctx.res, 201, { ok: true, show: savedShow });
+        void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (controller.signal.aborted) return;
         if (
@@ -9889,6 +11105,7 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
         json(ctx.res, 201, { ok: true, show: savedShow });
+        void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (controller.signal.aborted) return;
         if (error instanceof ElevenLabsSoundError) {
@@ -9980,6 +11197,54 @@ function buildRoutes(): RouteDefinition[] {
           409,
           "This show’s custom look is still generating.",
         );
+      }
+      const patchKeys = Object.keys(body);
+      if (
+        patchKeys.length > 0 &&
+        patchKeys.every((key) => key === "name" || key === "premise")
+      ) {
+        const user = getUserRow(userId);
+        const context = prismCapabilityContext(
+          userId,
+          user,
+          {
+            surfaceId: "signal",
+            signalShowId: ctx.params.id,
+          },
+          "ui",
+        );
+        const proposal = prismCapabilityRegistry.createProposal({
+          context,
+          capabilityId: "signal.show.text.update",
+          input: {
+            showId: ctx.params.id,
+            patch: {
+              ...(typeof body.name === "string"
+                ? { name: body.name }
+                : {}),
+              ...(typeof body.premise === "string"
+                ? { premise: body.premise }
+                : {}),
+            },
+          },
+        });
+        const run = await prismCapabilityRegistry.executeProposal({
+          context,
+          proposalId: proposal.id,
+          confirmation: true,
+          idempotencyKey: `ui:signal-show-text:${randomId()}`,
+        });
+        if (run.status !== "committed") {
+          throw new HttpError(
+            500,
+            run.error ?? "Signal could not update the show.",
+          );
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          show: getBotcastShow(db, userId, ctx.params.id),
+        });
+        return;
       }
       const show = updateBotcastShow(db, userId, ctx.params.id, {
         ...(body.name !== undefined ? { name: body.name as string } : {}),
@@ -10191,43 +11456,76 @@ function buildRoutes(): RouteDefinition[] {
             : "Signal could not shape a valid interview plan from the configured models. Try again.",
         );
       }
-      const episode = createBotcastEpisode(db, userId, ctx.params.id, {
-        guestKind: producerGuest ? "producer" : "bot",
-        ...(producerGuest
-          ? {}
-          : {
-              guestBotId:
-                typeof body.guestBotId === "string" ? body.guestBotId : "",
-            }),
-        ...(producerGuest
-          ? {
-              guestName: producerGuestName!,
-              guestContext,
-              topic: producerGuestBooking!.topic,
-              producerBrief: producerGuestBooking!.producerBrief,
-            }
-          : {
-              topic: typeof body.topic === "string" ? body.topic : "",
-              ...(body.producerBrief !== undefined
-                ? { producerBrief: body.producerBrief as string }
-                : {}),
-            }),
-        preferredProvider,
-        responseMode: autoEnabled
-          ? "auto"
-          : preferredProvider === "local"
-            ? "local"
-            : "online",
-        modelOverride:
-          modelOverride ??
-          (accountModel && !isDisabledModelChoice(accountModel)
-            ? accountModel
-            : null),
-        durationMinutes:
-          body.durationMinutes === null || body.durationMinutes === undefined
-            ? null
-            : Number(body.durationMinutes),
+      const surface = {
+        surfaceId: "signal" as const,
+        signalShowId: ctx.params.id,
+      };
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        surface,
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "signal.episode.create",
+        input: {
+          showId: ctx.params.id,
+          guestKind: producerGuest ? "producer" : "bot",
+          guestBotId:
+            typeof body.guestBotId === "string" ? body.guestBotId : "",
+          guestName: producerGuestName ?? "",
+          guestContext,
+          topic: producerGuest
+            ? producerGuestBooking!.topic
+            : typeof body.topic === "string"
+              ? body.topic
+              : "",
+          producerBrief: producerGuest
+            ? producerGuestBooking!.producerBrief
+            : typeof body.producerBrief === "string"
+              ? body.producerBrief
+              : "",
+          preferredProvider,
+          responseMode: autoEnabled
+            ? "auto"
+            : preferredProvider === "local"
+              ? "local"
+              : "online",
+          modelOverride:
+            modelOverride ??
+            (accountModel && !isDisabledModelChoice(accountModel)
+              ? accountModel
+              : null),
+          durationMinutes:
+            body.durationMinutes === null || body.durationMinutes === undefined
+              ? null
+              : Number(body.durationMinutes),
+        },
       });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey:
+          typeof body.prismIdempotencyKey === "string" &&
+          body.prismIdempotencyKey.trim()
+            ? body.prismIdempotencyKey.trim().slice(0, 240)
+            : `ui:signal:create:${randomId()}`,
+      });
+      if (
+        run.status !== "committed" ||
+        !run.result ||
+        typeof run.result !== "object" ||
+        Array.isArray(run.result) ||
+        typeof run.result.episodeId !== "string"
+      ) {
+        throw new HttpError(
+          500,
+          run.error ?? "Signal could not create the episode.",
+        );
+      }
+      const episode = getBotcastEpisode(db, userId, run.result.episodeId);
       json(ctx.res, 201, {
         ok: true,
         episode: projectBotcastEpisodeForAudienceV1(episode),
@@ -10248,6 +11546,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
       const targetEpisode = (() => {
         try {
           return getBotcastEpisode(db, userId, ctx.params.id);
@@ -10255,15 +11554,29 @@ function buildRoutes(): RouteDefinition[] {
           throw new HttpError(404, "Signal episode not found.");
         }
       })();
-      const replayIds = replayRecordingIdsForSource(
-        userId,
-        "signal",
-        [ctx.params.id],
-      );
-      if (!deleteBotcastEpisode(db, userId, ctx.params.id)) {
-        throw new HttpError(404, "Signal episode not found.");
+      const surface = {
+        surfaceId: "signal" as const,
+        signalShowId: targetEpisode.showId,
+        signalEpisodeId: targetEpisode.id,
+      };
+      const context = prismCapabilityContext(userId, user, surface, "ui");
+      const proposal = prismCapabilityRegistry.createProposal({
+        context,
+        capabilityId: "signal.episodes.delete",
+        input: {
+          showId: targetEpisode.showId,
+          episodeIds: [targetEpisode.id],
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:signal-episode-delete:${targetEpisode.id}`,
+      });
+      if (run.status !== "committed") {
+        throw new HttpError(409, run.error ?? "Signal episode was not deleted.");
       }
-      removeReplayDirectories(userId, replayIds);
       json(ctx.res, 200, {
         ok: true,
         discarded: targetEpisode.status !== "completed",
@@ -12300,12 +13613,50 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
-      const result = db
+      const { count } = db
         .prepare(
-          "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'",
+          `SELECT COUNT(*) AS count
+             FROM memories
+            WHERE user_id = ?
+              AND COALESCE(source, 'direct') != 'about_you'`,
         )
-        .run(userId);
-      json(ctx.res, 200, { ok: true, deleted: Number(result.changes ?? 0) });
+        .get(userId) as { count: number };
+      if (count === 0) {
+        json(ctx.res, 200, { ok: true, deleted: 0 });
+        return;
+      }
+      const user = getUserRow(userId);
+      const context = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "settings" },
+        "ui",
+      );
+      const proposal = await prismCapabilityRegistry.createPreparedProposal({
+        context,
+        capabilityId: "memories.delete",
+        input: {
+          all: true,
+          includeAboutYou: false,
+          allowLongTerm: true,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:memories-delete-all:${randomId()}`,
+      });
+      if (
+        run.status !== "committed" ||
+        !run.result ||
+        typeof run.result !== "object" ||
+        Array.isArray(run.result) ||
+        typeof run.result.deleted !== "number"
+      ) {
+        throw new HttpError(409, run.error ?? "Memories could not be deleted.");
+      }
+      json(ctx.res, 200, { ok: true, deleted: run.result.deleted });
     }),
     route("POST", "/api/dev/clear-bot-memory", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -12518,11 +13869,57 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const allowLongTerm = ctx.query.get("allowLongTerm") === "true";
       const allowAboutYou = ctx.query.get("allowAboutYou") === "true";
-      const deleted = deleteMemoryById(db, userId, ctx.params.id, {
-        allowLongTerm,
-        allowAboutYou,
+      const eligible = db
+        .prepare(
+          `SELECT id
+             FROM memories
+            WHERE id = ?
+              AND user_id = ?
+              AND (? = 1 OR COALESCE(source, 'direct') != 'about_you')
+              AND (? = 1 OR COALESCE(tier, 'short_term') != 'long_term')`,
+        )
+        .get(
+          ctx.params.id,
+          userId,
+          allowAboutYou ? 1 : 0,
+          allowLongTerm ? 1 : 0,
+        ) as { id?: string } | undefined;
+      if (!eligible?.id) {
+        json(ctx.res, 200, { ok: true, deleted: false });
+        return;
+      }
+      const user = getUserRow(userId);
+      const context = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "settings" },
+        "ui",
+      );
+      const proposal = await prismCapabilityRegistry.createPreparedProposal({
+        context,
+        capabilityId: "memories.delete",
+        input: {
+          memoryIds: [ctx.params.id],
+          includeAboutYou: allowAboutYou,
+          allowLongTerm,
+        },
       });
-      json(ctx.res, 200, { ok: true, deleted });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:memory-delete:${ctx.params.id}:${randomId()}`,
+      });
+      if (
+        run.status !== "committed" ||
+        !run.result ||
+        typeof run.result !== "object" ||
+        Array.isArray(run.result) ||
+        typeof run.result.deleted !== "number"
+      ) {
+        throw new HttpError(409, run.error ?? "Memory could not be deleted.");
+      }
+      json(ctx.res, 200, { ok: true, deleted: run.result.deleted > 0 });
     }),
     route("PATCH", "/api/messages/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -13058,6 +14455,7 @@ function buildRoutes(): RouteDefinition[] {
           ctx.res.setHeader("x-prism-provider-request-id", sound.requestId);
         }
         ctx.res.end(sound.audioBytes);
+        void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (controller.signal.aborted) return;
         if (error instanceof ElevenLabsSoundError) {
@@ -13160,6 +14558,7 @@ function buildRoutes(): RouteDefinition[] {
           ctx.res.setHeader("x-prism-provider-request-id", sound.requestId);
         }
         ctx.res.end(sound.audioBytes);
+        void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (controller.signal.aborted) return;
         if (error instanceof ElevenLabsSoundError) {
@@ -14178,6 +15577,7 @@ function buildRoutes(): RouteDefinition[] {
             alignment,
             normalizedAlignment: timestamped.normalizedAlignment,
           });
+          void checkPrismCreditMonitorForUser(userId, true);
           return;
         }
         const providerResponse = await requestElevenLabsSpeech({
@@ -14208,6 +15608,7 @@ function buildRoutes(): RouteDefinition[] {
           providerResponse.body as import("stream/web").ReadableStream,
         );
         await pipeline(nodeReadable, ctx.res);
+        void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (ctx.res.headersSent) {
           if (!ctx.res.writableEnded) ctx.res.destroy();
@@ -14348,6 +15749,44 @@ function buildRoutes(): RouteDefinition[] {
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
       try {
+        const orchestration = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "private",
+            mode: ephemeralMode,
+            surface: "prism-orchestration",
+            conversationId: request.surface.conversationId ?? null,
+          },
+          () =>
+            orchestratePrismCompanionRequest({
+              userId,
+              user,
+              request,
+              signal: controller.signal,
+            }),
+        );
+        if (orchestration) {
+          json(ctx.res, 200, {
+            ok: true,
+            message: {
+              id: randomId(),
+              role: "assistant",
+              content: orchestration.content,
+              createdAt: new Date().toISOString(),
+            },
+            actions: [],
+            cards: orchestration.cards,
+            provider: orchestration.provider,
+            model: orchestration.model,
+          });
+          return;
+        }
+        if (request.orchestrationOnly === true) {
+          ctx.res.statusCode = 204;
+          ctx.res.end();
+          return;
+        }
         const result = await runWithUsageSession(
           {
             db,
@@ -14380,6 +15819,7 @@ function buildRoutes(): RouteDefinition[] {
             createdAt: new Date().toISOString(),
           },
           actions: result.actions,
+          cards: [],
           provider: providerName,
           model,
         });
@@ -14394,6 +15834,214 @@ function buildRoutes(): RouteDefinition[] {
       } finally {
         ctx.req.off("close", onClose);
       }
+    }),
+    route("GET", "/api/library/groups", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        groups: listLibraryGroups(db, userId),
+      });
+    }),
+    route("POST", "/api/library/groups/import-legacy", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : {};
+      const result = importLegacyLibraryGroupsOnce({
+        db,
+        userId,
+        sourceKey: "browser-local-v1",
+        groups: body.groups,
+      });
+      json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("PUT", "/api/library/groups", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : null;
+      if (!body || !Array.isArray(body.groups)) {
+        throw new HttpError(400, "Library groups are required.");
+      }
+      const context = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "group-home" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context,
+        capabilityId: "library.groups.replace",
+        input: { groups: body.groups },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey:
+          typeof body.idempotencyKey === "string" &&
+          body.idempotencyKey.trim()
+            ? body.idempotencyKey.trim().slice(0, 240)
+            : `ui:library-groups:${randomId()}`,
+      });
+      if (
+        run.status !== "committed" ||
+        !run.result ||
+        typeof run.result !== "object" ||
+        Array.isArray(run.result) ||
+        !Array.isArray(run.result.groups)
+      ) {
+        throw new HttpError(
+          500,
+          run.error ?? "Library groups could not be saved.",
+        );
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        groups: run.result.groups,
+      });
+    }),
+    route("GET", "/api/prism/capabilities", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const surface = normalizePrismCompanionSurfaceReference({
+        surfaceId: ctx.query.get("surfaceId") || "home",
+      });
+      const context = prismCapabilityContext(userId, user, surface, "ui");
+      json(ctx.res, 200, {
+        ok: true,
+        capabilities: prismCapabilityRegistry.descriptors(context),
+      });
+    }),
+    route("POST", "/api/prism/actions/execute", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      let request;
+      try {
+        request = normalizePrismExecuteProposalRequestV1(ctx.body);
+      } catch (error) {
+        throw new HttpError(
+          400,
+          error instanceof Error ? error.message : "Invalid Prism proposal.",
+        );
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const surface = normalizePrismCompanionSurfaceReference(
+        body.surface ?? { surfaceId: "home" },
+      );
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: prismCapabilityContext(userId, user, surface, "prism"),
+        proposalId: request.proposalId,
+        confirmation: request.confirmation,
+        idempotencyKey: request.idempotencyKey,
+      });
+      json(ctx.res, 200, { ok: true, run });
+    }),
+    route("GET", "/api/prism/actions", async (ctx) => {
+      const userId = requireAuth(ctx);
+      purgeExpiredPrismStateAndFiles();
+      const requestedLimit = Number(ctx.query.get("limit") ?? 20);
+      json(ctx.res, 200, {
+        ok: true,
+        runs: listRecentPrismActionRuns(
+          db,
+          userId,
+          Number.isFinite(requestedLimit) ? requestedLimit : 20,
+        ),
+      });
+    }),
+    route("POST", "/api/prism/actions/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const request = normalizePrismUndoRequestV1(ctx.body);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : {};
+      const surface = normalizePrismCompanionSurfaceReference(
+        body.surface ?? { surfaceId: "home" },
+      );
+      const run = prismCapabilityRegistry.undo({
+        context: prismCapabilityContext(userId, user, surface, "prism"),
+        runId: request.runId,
+      });
+      json(ctx.res, 200, { ok: true, run });
+    }),
+    route("GET", "/api/prism/monitors", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        monitors: listPrismMonitors(db, userId),
+      });
+    }),
+    route("POST", "/api/prism/monitors/elevenlabs-credits", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : {};
+      const context = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "settings" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context,
+        capabilityId: "notifications.elevenlabs-credit.monitor",
+        input: {
+          thresholdRatio:
+            typeof body.thresholdRatio === "number"
+              ? body.thresholdRatio
+              : 0.2,
+          enabled: body.enabled !== false,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey:
+          typeof body.idempotencyKey === "string" &&
+          body.idempotencyKey.trim()
+            ? body.idempotencyKey.trim().slice(0, 240)
+            : `monitor-api:${randomId()}`,
+      });
+      json(ctx.res, 200, { ok: true, run });
+    }),
+    route("GET", "/api/prism/notifications", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        notifications: listPrismNotifications(db, userId),
+      });
+    }),
+    route("PATCH", "/api/prism/notifications/:notificationId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const notificationId = ctx.params.notificationId?.trim() ?? "";
+      const read =
+        Boolean(
+          ctx.body &&
+            typeof ctx.body === "object" &&
+            !Array.isArray(ctx.body) &&
+            (ctx.body as Record<string, unknown>).read,
+        );
+      const now = new Date().toISOString();
+      const result = db
+        .prepare(
+          `UPDATE prism_notifications
+              SET read_at = ?
+            WHERE id = ? AND user_id = ?`,
+        )
+        .run(read ? now : null, notificationId, userId);
+      if (result.changes !== 1) {
+        throw new HttpError(404, "Prism notification not found.");
+      }
+      json(ctx.res, 200, { ok: true, readAt: read ? now : null });
     }),
     route("GET", "/api/settings", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -14811,148 +16459,33 @@ function buildRoutes(): RouteDefinition[] {
       if (Object.prototype.hasOwnProperty.call(body, "avatarDetails")) {
         throw new Error("Avatar Details are only available for custom bots.");
       }
-      const faceEyesFont =
-        readBotFaceFontForStorage(body.faceEyesFont) ??
-        DEFAULT_BOT_FACE_FONT_ID;
-      const faceEyeCharacter = readBotFaceEyeCharacterForStorage(
-        body.faceEyeCharacter,
-      );
-      const faceMouthFont =
-        readBotFaceFontForStorage(body.faceMouthFont) ??
-        DEFAULT_BOT_FACE_FONT_ID;
-      const faceMouthCharacter = readBotFaceMouthCharacterForStorage(
-        body.faceMouthCharacter,
-      );
-      const faceMouthAnimation =
-        readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
-        DEFAULT_BOT_FACE_GLYPH_ANIMATION;
-      const faceMouthCoffeePucker =
-        readBotFaceMouthCoffeePuckerForStorage(body.faceMouthCoffeePucker);
-      const faceFontWeight =
-        readBotFaceWeightForStorage(body.faceFontWeight) ??
-        DEFAULT_BOT_FACE_FONT_WEIGHT;
-      const faceEyeScale =
-        readBotFaceEyeScaleForStorage(body.faceEyeScale) ??
-        DEFAULT_BOT_FACE_EYE_SCALE;
-      const faceEyeOffsetX =
-        readBotFaceEyeOffsetXForStorage(body.faceEyeOffsetX) ??
-        DEFAULT_BOT_FACE_EYE_OFFSET_X;
-      const faceEyeOffsetY =
-        readBotFaceEyeOffsetYForStorage(body.faceEyeOffsetY) ??
-        DEFAULT_BOT_FACE_EYE_OFFSET_Y;
-      const faceEyeRotationDeg =
-        readBotFaceEyeRotationDegForStorage(body.faceEyeRotationDeg) ??
-        DEFAULT_BOT_FACE_EYE_ROTATION_DEG;
-      const faceEyeCount =
-        body.faceEyeCount === undefined
-          ? DEFAULT_BOT_FACE_EYE_COUNT
-          : readBotFaceEyeCountForStorage(body.faceEyeCount);
-      if (faceEyeCount === null) throw new Error("Invalid custom eye count.");
-      const faceMouthScale =
-        readBotFaceMouthScaleForStorage(body.faceMouthScale) ??
-        DEFAULT_BOT_FACE_MOUTH_SCALE;
-      const faceMouthOffsetX =
-        readBotFaceMouthOffsetXForStorage(body.faceMouthOffsetX) ??
-        DEFAULT_BOT_FACE_MOUTH_OFFSET_X;
-      const faceMouthOffsetY =
-        readBotFaceMouthOffsetYForStorage(body.faceMouthOffsetY) ??
-        DEFAULT_BOT_FACE_MOUTH_OFFSET_Y;
-      const faceMouthRotationDeg =
-        readBotFaceMouthRotationDegForStorage(body.faceMouthRotationDeg) ??
-        DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG;
-      const faceBlinkBar =
-        readBotFaceBlinkBarForStorage(body.faceBlinkBar) ??
-        DEFAULT_BOT_FACE_BLINK_BAR;
-      const faceBlinkScale =
-        readBotFaceBlinkScaleForStorage(body.faceBlinkScale) ??
-        DEFAULT_BOT_FACE_BLINK_SCALE;
-      const faceBlinkOffsetX =
-        readBotFaceBlinkOffsetXForStorage(body.faceBlinkOffsetX) ??
-        DEFAULT_BOT_FACE_BLINK_OFFSET_X;
-      const faceBlinkOffsetY =
-        readBotFaceBlinkOffsetYForStorage(body.faceBlinkOffsetY) ??
-        DEFAULT_BOT_FACE_BLINK_OFFSET_Y;
-      const faceBlinkRotationDeg =
-        readBotFaceBlinkRotationDegForStorage(body.faceBlinkRotationDeg) ??
-        DEFAULT_BOT_FACE_BLINK_ROTATION_DEG;
-      let faceThinkingFrames: string | null = null;
-      if (body.faceThinkingFrames !== null) {
-        faceThinkingFrames = readBotFaceThinkingFramesForStorage(
-          body.faceThinkingFrames ?? DEFAULT_BOT_FACE_THINKING_FRAMES,
-        );
-        if (faceThinkingFrames === null) {
-          throw new Error("Invalid face thinking frames.");
-        }
-      }
-
-      db.prepare(
-        `
-        UPDATE users
-        SET prism_default_bot_name = NULL,
-            prism_default_bot_system_prompt = NULL,
-            prism_default_bot_color = NULL,
-            prism_default_bot_glyph = NULL,
-            prism_default_bot_face_eyes_font = ?,
-            prism_default_bot_face_eye_character = ?,
-            prism_default_bot_face_mouth_font = ?,
-            prism_default_bot_face_mouth_character = ?,
-            prism_default_bot_face_mouth_animation = ?,
-            prism_default_bot_face_mouth_coffee_pucker = ?,
-            prism_default_bot_face_font_weight = ?,
-            prism_default_bot_face_eye_scale = ?,
-            prism_default_bot_face_eye_offset_x = ?,
-            prism_default_bot_face_eye_offset_y = ?,
-            prism_default_bot_face_eye_rotation_deg = ?,
-            prism_default_bot_face_eye_count = ?,
-            prism_default_bot_face_mouth_scale = ?,
-            prism_default_bot_face_mouth_offset_x = ?,
-            prism_default_bot_face_mouth_offset_y = ?,
-            prism_default_bot_face_mouth_rotation_deg = ?,
-            prism_default_bot_face_blink_bar = ?,
-            prism_default_bot_face_blink_scale = ?,
-            prism_default_bot_face_blink_offset_x = ?,
-            prism_default_bot_face_blink_offset_y = ?,
-            prism_default_bot_face_blink_rotation_deg = ?,
-            prism_default_bot_face_thinking_frames = ?,
-            prism_default_bot_temperature = NULL,
-            prism_default_bot_max_tokens = NULL,
-            prism_default_bot_top_p = NULL,
-            prism_default_bot_top_k = NULL,
-            prism_default_bot_repetition_penalty = NULL,
-            prism_default_bot_audio_voice_profile = ?
-        WHERE id = ?
-      `,
-      ).run(
-        faceEyesFont,
-        faceEyeCharacter,
-        faceMouthFont,
-        faceMouthCharacter,
-        faceMouthAnimation,
-        faceMouthCoffeePucker,
-        faceFontWeight,
-        faceEyeScale,
-        faceEyeOffsetX,
-        faceEyeOffsetY,
-        faceEyeRotationDeg,
-        faceEyeCount,
-        faceMouthScale,
-        faceMouthOffsetX,
-        faceMouthOffsetY,
-        faceMouthRotationDeg,
-        faceBlinkBar,
-        faceBlinkScale,
-        faceBlinkOffsetX,
-        faceBlinkOffsetY,
-        faceBlinkRotationDeg,
-        faceThinkingFrames,
-        serializeBotAudioVoiceProfileV1(body.audioVoiceProfile),
-        userId,
-      );
-
       const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "avatar-studio" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "default-bot.fields.update",
+        input: {
+          patch: JSON.parse(JSON.stringify(body)),
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:default-bot:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Default Prism could not be updated.");
+      }
       json(ctx.res, 200, {
         ok: true,
-        defaultBot: normalizeDefaultBotSettingsForResponse(user),
+        defaultBot: normalizeDefaultBotSettingsForResponse(getUserRow(userId)),
+        actionRun: run,
       });
     }),
     route("PATCH", "/api/settings", async (ctx) => {
@@ -14960,6 +16493,75 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
+      if (prismSettingsPatchIsJournalable(body)) {
+        const capabilityContext = prismCapabilityContext(
+          userId,
+          user,
+          { surfaceId: "settings" },
+          "ui",
+        );
+        const proposal = prismCapabilityRegistry.createProposal({
+          context: capabilityContext,
+          capabilityId: "settings.fields.update",
+          input: {
+            patch: JSON.parse(JSON.stringify(body)),
+          },
+        });
+        const run = await prismCapabilityRegistry.executeProposal({
+          context: capabilityContext,
+          proposalId: proposal.id,
+          confirmation: true,
+          idempotencyKey: `ui:settings:${randomId()}`,
+        });
+        if (run.status !== "committed") {
+          throw new Error(run.error || "Settings could not be updated.");
+        }
+        const committedUser = getUserRow(userId);
+        const result =
+          run.result && typeof run.result === "object" && !Array.isArray(run.result)
+            ? run.result
+            : {};
+        const savedSettings =
+          result.settings &&
+          typeof result.settings === "object" &&
+          !Array.isArray(result.settings)
+            ? result.settings
+            : {};
+        json(ctx.res, 200, {
+          ok: true,
+          settings: {
+            ...savedSettings,
+            hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
+            hasAnthropicApiKey: Boolean(
+              committedUser.anthropic_key_ciphertext,
+            ),
+            hasElevenLabsApiKey: Boolean(
+              committedUser.elevenlabs_key_ciphertext,
+            ),
+            hasBraveSearchApiKey: Boolean(
+              committedUser.brave_search_key_ciphertext,
+            ),
+            openAiApiKeySource: apiKeySource(
+              committedUser.openai_key_ciphertext,
+              config.openAiApiKey,
+            ),
+            anthropicApiKeySource: apiKeySource(
+              committedUser.anthropic_key_ciphertext,
+              config.anthropicApiKey,
+            ),
+            elevenLabsApiKeySource: apiKeySource(
+              committedUser.elevenlabs_key_ciphertext,
+              config.elevenLabsApiKey,
+            ),
+            braveSearchApiKeySource: apiKeySource(
+              committedUser.brave_search_key_ciphertext,
+              config.braveSearchApiKey,
+            ),
+          },
+          actionRun: run,
+        });
+        return;
+      }
       const devMemoriesEnabled =
         typeof body.devMemoriesEnabled === "boolean"
           ? Number(body.devMemoriesEnabled)
@@ -16394,33 +17996,31 @@ function buildRoutes(): RouteDefinition[] {
     route("DELETE", "/api/images/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       const imageId = ctx.params.id;
-      const row = db
-        .prepare(
-          "SELECT user_id, local_rel_path FROM images WHERE id = ? AND user_id = ?",
-        )
-        .get(imageId, userId) as
-        { user_id: string; local_rel_path: string | null } | undefined;
-      if (!row) {
-        throw new HttpError(404, "Image not found.");
-      }
-      clearBotProfilePictureReference(db, userId, imageId);
-      db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
-        imageId,
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
         userId,
+        user,
+        { surfaceId: "images" },
+        "ui",
       );
-      const rel = row.local_rel_path?.trim();
-      if (rel) {
-        try {
-          tryUnlinkGeneratedImageFile(rel);
-        } catch (error) {
-          console.error(
-            `[images] orphan file after DB delete imageId=${imageId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "images.delete",
+        input: { imageId },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:image-delete:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        if (/not found/iu.test(run.error ?? "")) {
+          throw new HttpError(404, run.error ?? "Image not found.");
         }
+        throw new Error(run.error || "Image could not be deleted.");
       }
-      json(ctx.res, 200, { ok: true });
+      json(ctx.res, 200, { ok: true, actionRun: run });
     }),
     route("POST", "/api/bots/:id/profile-picture/upload", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -17119,13 +18719,59 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Delete protection must be a boolean.");
       }
       const ids = idsRaw.filter((id): id is string => typeof id === "string");
-      const result = setSelectedBotsDeleteProtection(
-        db,
-        userId,
-        ids,
-        body.deleteProtected,
+      const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()))).filter(
+        Boolean,
       );
-      json(ctx.res, 200, { ok: true, ...result });
+      if (uniqueIds.length === 0) {
+        json(ctx.res, 200, { ok: true, updated: 0 });
+        return;
+      }
+      const rows = db
+        .prepare(
+          `SELECT id, updated_at
+             FROM bots
+            WHERE user_id = ? AND id IN (${uniqueIds.map(() => "?").join(", ")})`,
+        )
+        .all(userId, ...uniqueIds) as Array<{
+        id: string;
+        updated_at: string;
+      }>;
+      if (rows.length === 0) {
+        json(ctx.res, 200, { ok: true, updated: 0 });
+        return;
+      }
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "avatar-studio", botIds: rows.map((row) => row.id) },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "bots.fields.batch",
+        input: {
+          botIds: rows.map((row) => row.id),
+          expectedRevisions: Object.fromEntries(
+            rows.map((row) => [row.id, row.updated_at]),
+          ),
+          patch: { deleteProtected: body.deleteProtected },
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:bot-protection:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Bot protection could not be updated.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        updated: rows.length,
+        actionRun: run,
+      });
     }),
     route("PATCH", "/api/bots/selected", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -17150,12 +18796,57 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error("Selected bot patch is required.");
       }
       const ids = idsRaw.filter((id): id is string => typeof id === "string");
-      const result = patchSelectedBots(
-        db,
-        userId,
-        ids,
-        patchRaw as SelectedBotPatch,
+      const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()))).filter(
+        Boolean,
       );
+      const rows =
+        uniqueIds.length > 0
+          ? (db
+              .prepare(
+                `SELECT id, updated_at
+                   FROM bots
+                  WHERE user_id = ? AND id IN (${uniqueIds.map(() => "?").join(", ")})`,
+              )
+              .all(userId, ...uniqueIds) as Array<{
+              id: string;
+              updated_at: string;
+            }>)
+          : [];
+      if (rows.length === 0) {
+        json(ctx.res, 200, { ok: true, updated: 0, bots: [] });
+        return;
+      }
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "avatar-studio", botIds: rows.map((row) => row.id) },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "bots.fields.batch",
+        input: {
+          botIds: rows.map((row) => row.id),
+          expectedRevisions: Object.fromEntries(
+            rows.map((row) => [row.id, row.updated_at]),
+          ),
+          patch: JSON.parse(JSON.stringify(patchRaw)),
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:bot-batch:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Selected bots could not be updated.");
+      }
+      const result = {
+        ids: rows.map((row) => row.id),
+        updated: rows.length,
+      };
       const updatedBots =
         result.ids.length > 0
           ? (db
@@ -17168,6 +18859,7 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         updated: result.updated,
         bots: botRowsForResponse(updatedBots),
+        actionRun: run,
       });
     }),
     route("PATCH", "/api/bots/:id", async (ctx) => {
@@ -17176,15 +18868,57 @@ function buildRoutes(): RouteDefinition[] {
       const botId = ctx.params.id;
       const existing = db
         .prepare(
-          "SELECT id, profile_picture_image_id FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, profile_picture_image_id, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as
-        { id?: string; profile_picture_image_id?: string | null } | undefined;
+        | {
+            id?: string;
+            profile_picture_image_id?: string | null;
+            updated_at?: string;
+          }
+        | undefined;
       if (!existing?.id) {
         throw new Error("Bot not found.");
       }
       const body = ctx.body as Record<string, unknown>;
       rejectUnsupportedBotAvatarPayload(body);
+      if (prismBotPatchIsJournalable(body)) {
+        const capabilityContext = prismCapabilityContext(
+          userId,
+          user,
+          { surfaceId: "avatar-studio", botIds: [botId] },
+          "ui",
+        );
+        const proposal = prismCapabilityRegistry.createProposal({
+          context: capabilityContext,
+          capabilityId: "bots.fields.update",
+          input: {
+            botId,
+            expectedRevision: existing.updated_at ?? null,
+            patch: JSON.parse(JSON.stringify(body)),
+          },
+        });
+        const run = await prismCapabilityRegistry.executeProposal({
+          context: capabilityContext,
+          proposalId: proposal.id,
+          confirmation: true,
+          idempotencyKey: `ui:bot:${botId}:${randomId()}`,
+        });
+        if (run.status !== "committed") {
+          throw new Error(run.error || "Bot could not be updated.");
+        }
+        const updatedBot = db
+          .prepare(
+            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          )
+          .get(botId, userId) as Record<string, unknown>;
+        json(ctx.res, 200, {
+          ok: true,
+          bot: botRowForResponse(updatedBot),
+          actionRun: run,
+        });
+        return;
+      }
       const fields: string[] = [];
       const values: Array<string | number | null> = [];
       let shouldRefreshFacets = false;
@@ -17679,8 +19413,38 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/bots/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      deleteBot(db, userId, ctx.params.id);
-      json(ctx.res, 200, { ok: true });
+      const user = getUserRow(userId);
+      const botId = ctx.params.id;
+      const existing = db
+        .prepare(
+          "SELECT updated_at FROM bots WHERE id = ? AND user_id = ?",
+        )
+        .get(botId, userId) as { updated_at: string } | undefined;
+      if (!existing) throw new Error("Bot not found.");
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "avatar-studio", botIds: [botId] },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "bots.delete",
+        input: {
+          botId,
+          expectedRevision: existing.updated_at,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey: `ui:bot-delete:${botId}:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new Error(run.error || "Bot could not be deleted.");
+      }
+      json(ctx.res, 200, { ok: true, actionRun: run });
     }),
     // User-facing bulk-clear removes every bot; Developer Tools can pass
     // `limit` for bounded density-stage cleanup.
@@ -18594,9 +20358,17 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
     },
   });
   void purgeInactiveAccounts();
+  void checkDuePrismCreditMonitors();
+  purgeExpiredPrismStateAndFiles();
   setInterval(() => {
     void purgeInactiveAccounts();
   }, INACTIVE_ACCOUNT_CLEANUP_INTERVAL_MS);
+  setInterval(() => {
+    void checkDuePrismCreditMonitors();
+  }, PRISM_MONITOR_INTERVAL_MS);
+  setInterval(() => {
+    purgeExpiredPrismStateAndFiles();
+  }, 24 * 60 * 60 * 1_000);
 
   process.on("SIGINT", () => {
     void shutdown("SIGINT").then(() => process.exit(0));

@@ -76985,3 +76985,107 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeReplayVideoCard[data-phase="end"] {
   background: rgba(3, 8, 12, 0.58);
 }
+
+.prismHomeOrchestration {
+  width: min(680px, calc(100% - 32px));
+  margin: 8px auto 24px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line));
+  border-radius: 18px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--accent) 9%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.prismHomeOrchestration > header,
+.prismHomeOrchestrationCard,
+.prismHomeOrchestrationHistory,
+.prismHomeOrchestrationHistory > article {
+  display: flex;
+  gap: 8px;
+}
+
+.prismHomeOrchestration > header {
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.prismHomeOrchestration > header > span,
+.prismHomeOrchestrationCard > span {
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+  font-size: 0.72rem;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.prismHomeOrchestration button {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.prismHomeOrchestration button:disabled {
+  cursor: default;
+  opacity: 0.52;
+}
+
+.prismHomeOrchestrationCard {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+}
+
+.prismHomeOrchestrationCard + .prismHomeOrchestrationCard {
+  margin-top: 8px;
+}
+
+.prismHomeOrchestrationCard > p,
+.prismHomeOrchestrationCard > small {
+  margin: 0;
+}
+
+.prismHomeOrchestrationCard details {
+  width: 100%;
+}
+
+.prismHomeOrchestrationCard progress {
+  width: 100%;
+}
+
+.prismHomeOrchestrationHistory {
+  flex-direction: column;
+  margin-top: 10px;
+}
+
+.prismHomeOrchestrationHistory > article {
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+.prismHomeOrchestrationHistory > article > small {
+  margin-right: auto;
+  color: color-mix(in srgb, var(--fg) 62%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prismHomeOrchestration {
+    backdrop-filter: none;
+  }
+}

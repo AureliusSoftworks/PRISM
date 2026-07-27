@@ -20,12 +20,16 @@ function fixture(): DatabaseSync {
     CREATE TABLE botcast_episodes (id TEXT PRIMARY KEY, user_id TEXT, show_id TEXT, title TEXT, status TEXT);
     CREATE TABLE slate_projects (id TEXT PRIMARY KEY, user_id TEXT, title TEXT, phase TEXT, manuscript TEXT);
     CREATE TABLE slate_sections (id TEXT PRIMARY KEY, user_id TEXT, project_id TEXT, title TEXT, prose TEXT);
+    CREATE TABLE story_sessions (id TEXT PRIMARY KEY, user_id TEXT, title TEXT, status TEXT);
+    CREATE TABLE images (id TEXT PRIMARY KEY, user_id TEXT, prompt TEXT);
     INSERT INTO bots VALUES ('owned', 'u1', 'Lux', 'private');
     INSERT INTO bots VALUES ('public', 'u2', 'Umbra', 'public');
     INSERT INTO bots VALUES ('secret', 'u2', 'Secret', 'private');
     INSERT INTO conversations VALUES ('c1', 'u1', 'A quiet talk', 'zen', 1);
     INSERT INTO slate_projects VALUES ('p1', 'u1', 'The Glass Sea', 'draft', 'SECRET MANUSCRIPT');
     INSERT INTO slate_sections VALUES ('s1', 'u1', 'p1', 'Chapter One', 'SECRET PROSE');
+    INSERT INTO story_sessions VALUES ('story-1', 'u1', 'Glass Archive', 'playing');
+    INSERT INTO images VALUES ('image-1', 'u1', 'A pinecone under theatrical light');
   `);
   return db;
 }
@@ -50,6 +54,29 @@ test("builds tenant-safe metadata context without source material", () => {
   const serialized = JSON.stringify(context);
   assert.doesNotMatch(serialized, /SECRET MANUSCRIPT|SECRET PROSE/u);
   assert.doesNotMatch(prismCompanionSystemPrompt(context), /SECRET MANUSCRIPT|SECRET PROSE/u);
+});
+
+test("authorizes focused Story and Image metadata without exposing asset data", () => {
+  const db = fixture();
+  const story = buildPrismCompanionAuthoritativeContext(
+    db,
+    "u1",
+    "Jared",
+    { surfaceId: "story", storySessionId: "story-1" },
+  );
+  assert.equal(story.story?.sessionTitle, "Glass Archive");
+  assert.equal(story.story?.sessionStatus, "playing");
+  const image = buildPrismCompanionAuthoritativeContext(
+    db,
+    "u1",
+    "Jared",
+    { surfaceId: "images", imageId: "image-1" },
+  );
+  assert.equal(
+    image.image?.promptExcerpt,
+    "A pinecone under theatrical light",
+  );
+  assert.doesNotMatch(JSON.stringify(image), /data:image|local_rel_path/u);
 });
 
 test("explains the current screen controls without needing pixels or DOM", () => {

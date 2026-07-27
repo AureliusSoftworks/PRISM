@@ -696,7 +696,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-        /Shift-click.*Option Space.*Control Space.*Space rerolls.*Escape.*restores/u,
+        /hold Option.*Control.*Wield Prism.*Option Space.*Control Space.*Space rerolls.*Escape.*restores/u,
       );
       assert.doesNotMatch(
         MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -704,7 +704,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[0]?.body ?? "",
-        /skippable Refract ritual/u,
+        /skippable Wield Prism teaching beat.*skippable Refract ritual/u,
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[1]?.body ?? "",

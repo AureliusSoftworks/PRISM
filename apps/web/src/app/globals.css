@@ -230,6 +230,11 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-prism-refract-wield-hover="true"] {
+    transition: none;
+    animation: none;
+  }
+
   html[data-relationship-depth-motion="crossfade"]::view-transition-group(root),
   html[data-relationship-depth-motion="crossfade"]::view-transition-old(root),
   html[data-relationship-depth-motion="crossfade"]::view-transition-new(root) {
@@ -237,4 +242,12 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
     animation-timing-function: ease;
     transform: none;
   }
+}
+
+[data-prism-refract-wield-hover="true"] {
+  outline: 1px solid color-mix(in srgb, var(--prism-i, #6fe3ff) 68%, white);
+  outline-offset: 3px;
+  filter:
+    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #6fe3ff) 58%, transparent))
+    drop-shadow(0 0 13px color-mix(in srgb, var(--prism-s, #9d8cff) 30%, transparent));
 }

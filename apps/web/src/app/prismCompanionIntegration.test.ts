@@ -40,15 +40,66 @@ test("mounts the global companion on every authenticated product shell", () => {
   assert.match(page, /surfaceId: "settings"/u);
 });
 
-test("keeps the companion explicit, keyboard accessible, and non-destructive", () => {
-  assert.match(component, /aria-keyshortcuts="Alt\+Space Control\+Space"/u);
+test("keeps the companion explicit, keyboard accessible, and capability-driven", () => {
+  assert.match(
+    component,
+    /aria-keyshortcuts=\{modifierPresentation\.ariaKeyShortcuts\}/u,
+  );
+  assert.match(component, /\{modifierPresentation\.label\}/u);
   assert.match(component, /createPortal\(/u);
   assert.match(component, /document\.body/u);
   assert.match(component, /window\.sessionStorage/u);
   assert.match(component, /onAction\(action\)/u);
+  assert.match(component, /data-card-type=\{card\.type\}/u);
+  assert.match(component, /\/api\/prism\/actions\/execute/u);
+  assert.match(component, /\/api\/prism\/actions\/undo/u);
+  assert.match(component, /contextTokenIds: contextTokenIdsRef\.current/u);
+  assert.match(component, /Review exact changes/u);
+  assert.match(component, /Estimated cost:/u);
+  assert.match(component, /aria-label="Recent Prism activity"/u);
+  assert.match(component, /“undo that” reverses the latest meaningful action/u);
   assert.doesNotMatch(component, /delete_bot|delete_project|delete_conversation/u);
   assert.match(handoffCanvas, /Exact source preview/u);
   assert.match(handoffCanvas, /Only this selection will cross surfaces/u);
+});
+
+test("gives full-size Prism Home the same orchestration, activity, and undo APIs", () => {
+  assert.match(page, /orchestrationOnly: true/u);
+  assert.match(page, /response\.status === 204/u);
+  assert.match(page, /setPrismHomeOrchestrationCards\(payload\.cards\)/u);
+  assert.match(page, /\/api\/prism\/actions\/execute/u);
+  assert.match(page, /\/api\/prism\/actions\/undo/u);
+  assert.match(page, /\/api\/prism\/actions\?limit=12/u);
+  assert.match(page, /renderPrismHomeOrchestrationCards\(\)/u);
+  assert.match(page, /Review exact changes/u);
+  assert.match(page, /aria-label="Recent Prism activity"/u);
+  assert.match(api, /request\.orchestrationOnly === true/u);
+  assert.match(api, /ctx\.res\.statusCode = 204/u);
+});
+
+test("hands synthesized Signal bookings to the normal warmup and playback path", () => {
+  const signal = readFileSync(
+    new URL("./BotcastExperience.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(page, /run\.capabilityId === "signal\.episode\.stage"/u);
+  assert.match(page, /setSignalOrchestrationLaunch\(/u);
+  assert.match(page, /orchestrationLaunch=\{signalOrchestrationLaunch\}/u);
+  assert.match(signal, /orchestrationLaunchStagedTokenRef/u);
+  assert.match(signal, /void startEpisodeRef\.current\(\)/u);
+  assert.match(signal, /waitForModelPreparation/u);
+  assert.match(signal, /setAutoRun\(true\)/u);
+});
+
+test("hands Story, Slate, and Image actions back to their normal product surfaces", () => {
+  assert.match(page, /storySessionId: storySession\.id/u);
+  assert.match(page, /imageId: imageLightbox\.id/u);
+  assert.match(page, /run\.capabilityId\.startsWith\("story\.session\."\)/u);
+  assert.match(page, /await openStorySession\(resultSessionId\)/u);
+  assert.match(page, /run\.capabilityId === "slate\.project\.create"/u);
+  assert.match(page, /setRequestedSlateProjectId\(navigation\.slateProjectId\)/u);
+  assert.match(page, /run\.capabilityId === "images\.delete"/u);
+  assert.match(page, /await refreshImages\(imagePanelBotId\)/u);
 });
 
 test("keeps the newest two replies readable while older messages recede", () => {

@@ -621,6 +621,14 @@ export interface BotcastExperienceProps {
    * they enter the queue. The Signal composer itself never runs live assist.
    */
   autoCorrectGuestAnswerEnabled?: boolean;
+  orchestrationLaunch?: {
+    token: string;
+    showId: string;
+    guestBotId: string;
+    topic: string;
+    producerBrief: string;
+  } | null;
+  onOrchestrationLaunchConsumed?: (token: string) => void;
 }
 
 type BotcastLiveSpeech = {
@@ -1422,6 +1430,8 @@ export function BotcastExperience({
   renderPickAwareComposer,
   expandComposerDraft,
   autoCorrectGuestAnswerEnabled = false,
+  orchestrationLaunch = null,
+  onOrchestrationLaunchConsumed,
 }: BotcastExperienceProps): React.JSX.Element {
   const eligibleBots = useMemo(
     () => [...bots].sort((a, b) => a.name.localeCompare(b.name)),
@@ -1488,6 +1498,9 @@ export function BotcastExperience({
   const [episodeSetupLoadingId, setEpisodeSetupLoadingId] = useState<
     string | null
   >(null);
+  const orchestrationLaunchHandledTokenRef = useRef<string | null>(null);
+  const orchestrationLaunchStagedTokenRef = useRef<string | null>(null);
+  const startEpisodeRef = useRef<() => Promise<void>>(async () => undefined);
   const [askAboutDraft, setAskAboutDraft] = useState("");
   const [queuedProducerCue, setQueuedProducerCue] =
     useState<BotcastProducerCue | null>(null);
@@ -3226,6 +3239,9 @@ export function BotcastExperience({
         const nextShows = await loadShows();
         if (!active) return;
         const first =
+          nextShows.find(
+            (show) => show.id === orchestrationLaunch?.showId,
+          ) ??
           nextShows.find((show) => show.hostBotId === initialHostBotId) ??
           nextShows[0] ??
           null;
@@ -3243,7 +3259,12 @@ export function BotcastExperience({
     return () => {
       active = false;
     };
-  }, [initialHostBotId, loadEpisodes, loadShows]);
+  }, [
+    initialHostBotId,
+    loadEpisodes,
+    loadShows,
+    orchestrationLaunch?.showId,
+  ]);
 
   const selectShow = useCallback(
     async (show: BotcastShow): Promise<void> => {
@@ -4872,6 +4893,77 @@ export function BotcastExperience({
       }
     }
   };
+  startEpisodeRef.current = startEpisode;
+
+  useEffect(() => {
+    const launch = orchestrationLaunch;
+    if (
+      !launch ||
+      orchestrationLaunchHandledTokenRef.current === launch.token ||
+      orchestrationLaunchStagedTokenRef.current === launch.token ||
+      episode
+    ) {
+      return;
+    }
+    const show = shows.find((candidate) => candidate.id === launch.showId);
+    if (!show) return;
+    if (selectedShowId !== show.id) {
+      void selectShow(show);
+      return;
+    }
+    if (!botsById.has(launch.guestBotId)) {
+      setError(
+        signalErrorToast(
+          "Start Prism episode",
+          "The selected guest is no longer installed.",
+          "Prism orchestration",
+        ),
+      );
+      orchestrationLaunchHandledTokenRef.current = launch.token;
+      onOrchestrationLaunchConsumed?.(launch.token);
+      return;
+    }
+    setGuestDraftId(launch.guestBotId);
+    setTopicDraft(launch.topic);
+    setProducerBriefDraft(launch.producerBrief);
+    orchestrationLaunchStagedTokenRef.current = launch.token;
+  }, [
+    botsById,
+    episode,
+    onOrchestrationLaunchConsumed,
+    orchestrationLaunch,
+    selectedShowId,
+    selectShow,
+    shows,
+  ]);
+
+  useEffect(() => {
+    const launch = orchestrationLaunch;
+    if (
+      !launch ||
+      orchestrationLaunchHandledTokenRef.current === launch.token ||
+      orchestrationLaunchStagedTokenRef.current !== launch.token ||
+      selectedShowId !== launch.showId ||
+      guestDraftId !== launch.guestBotId ||
+      topicDraft !== launch.topic ||
+      producerBriefDraft !== launch.producerBrief ||
+      episode
+    ) {
+      return;
+    }
+    orchestrationLaunchHandledTokenRef.current = launch.token;
+    orchestrationLaunchStagedTokenRef.current = null;
+    onOrchestrationLaunchConsumed?.(launch.token);
+    void startEpisodeRef.current();
+  }, [
+    episode,
+    guestDraftId,
+    onOrchestrationLaunchConsumed,
+    orchestrationLaunch,
+    producerBriefDraft,
+    selectedShowId,
+    topicDraft,
+  ]);
 
   const skipEpisodePreRoll = (): void => {
     preRollSkipRequestedRef.current = true;

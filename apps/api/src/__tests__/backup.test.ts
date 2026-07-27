@@ -1963,6 +1963,50 @@ describe("backup spectral Power compatibility", () => {
   });
 });
 
+describe("backup server-backed Library groups", () => {
+  it("round-trips membership protection overrides", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-07-26T01:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, created_at, updated_at)
+         VALUES ('library-bot', 'user-1', 'Library Bot', '', ?, ?)`,
+      ).run(now, now);
+      db.prepare(
+        `INSERT INTO library_groups
+          (id, user_id, name, description, delete_protected_default, built_in,
+           atmosphere_json, created_at, updated_at)
+         VALUES ('group:test', 'user-1', 'Test Group', '', 1, 0, '{}', ?, ?)`,
+      ).run(now, now);
+      db.prepare(
+        `INSERT INTO library_group_members
+          (user_id, group_id, bot_id, delete_protected_override, added_at,
+           updated_at)
+         VALUES ('user-1', 'group:test', 'library-bot', 0, ?, ?)`,
+      ).run(now, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.libraryGroups?.[1]?.id, "group:test");
+      assert.equal(
+        snapshot.libraryGroups?.[1]?.deleteProtectionByBotId["library-bot"],
+        false,
+      );
+
+      db.prepare("DELETE FROM library_groups WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT delete_protected_override
+             FROM library_group_members
+            WHERE user_id = 'user-1' AND group_id = 'group:test'
+              AND bot_id = 'library-bot'`,
+        )
+        .get() as { delete_protected_override: number };
+      assert.equal(restored.delete_protected_override, 0);
+    });
+  });
+});
+
 function withBackupDatabase(
   run: (db: ReturnType<typeof createDatabase>, userKey: Buffer) => void
 ): void {
