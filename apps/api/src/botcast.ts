@@ -1310,6 +1310,7 @@ type BotcastStudioLighting = "day" | "night";
 
 const BOTCAST_STUDIO_STAGE_COMPOSITION_PROMPT = [
   "Stage exactly two adult-scale interview chairs centered at 22.5% and 77.5% of the frame width, with their backs contained in the lower third; keep the furniture and surrounding architecture at believable human scale.",
+  "Angle both chairs slightly toward one another in a restrained, symmetrical conversational toe-in, about 5–10 degrees from straight ahead. Keep them mostly front-facing and never turn them as far inward as the 1 o'clock and 11 o'clock positions.",
   "Leave the full seated-bot silhouette in each chair zone unobstructed because Signal composites one live bot into each chair.",
   "Build exactly two compact, believable studio microphones into the scene, positioned just inward of the chairs around 38% and 62% of frame width and below the seated bots' face zones. No microphone, stand, boom arm, pop filter, or cable may cross either chair center or cover the seated-bot silhouettes.",
   "On those microphones only, render the illuminated trim, LED rings, and status lights in the exact flat electric-magenta color key #FF00FF. Keep the microphone bodies, grilles, stands, arms, and cables in believable set materials. Keep #FF00FF out of every other object, reflection, practical light, surface, and pixel; this magenta is a runtime color key, not part of the studio palette.",

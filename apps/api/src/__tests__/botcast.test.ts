@@ -8574,6 +8574,14 @@ describe("Botcast persistence and isolation", () => {
         show.nightAtmosphere.prompt,
         /chairs centered at 22\.5% and 77\.5%/iu,
       );
+      assert.match(
+        show.dayAtmosphere.prompt,
+        /slightly toward one another[\s\S]*5–10 degrees from straight ahead/iu,
+      );
+      assert.match(
+        show.nightAtmosphere.prompt,
+        /mostly front-facing[\s\S]*never turn them as far inward as the 1 o'clock and 11 o'clock positions/iu,
+      );
       assert.doesNotMatch(show.dayAtmosphere.prompt, /daylight variant/iu);
       assert.doesNotMatch(show.nightAtmosphere.prompt, /nighttime variant/iu);
       assert.doesNotMatch(
