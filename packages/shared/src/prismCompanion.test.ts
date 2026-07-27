@@ -13,6 +13,8 @@ test("normalizes only identifier-based surface context", () => {
       surfaceId: "slate",
       botIds: [" one ", "one", "two"],
       slateProjectId: " project-1 ",
+      storySessionId: " story-1 ",
+      imageId: " image-1 ",
       manuscript: "This must never enter the contract.",
       memories: ["also forbidden"],
     }),
@@ -20,6 +22,8 @@ test("normalizes only identifier-based surface context", () => {
       surfaceId: "slate",
       botIds: ["one", "two"],
       slateProjectId: "project-1",
+      storySessionId: "story-1",
+      imageId: "image-1",
     },
   );
 });
@@ -28,6 +32,9 @@ test("keeps only the latest three valid recovery messages", () => {
   const request = normalizePrismCompanionRequest({
     surface: { surfaceId: "coffee" },
     message: " Hello, Prism. ",
+    requestId: " request-1 ",
+    contextTokenIds: [" token-1 ", "token-1", "token-2"],
+    orchestrationOnly: true,
     recoveryMessages: [
       { id: "1", role: "user", content: "one", createdAt: "a" },
       { id: "2", role: "assistant", content: "two", createdAt: "b" },
@@ -37,6 +44,9 @@ test("keeps only the latest three valid recovery messages", () => {
     ],
   });
   assert.equal(request.message, "Hello, Prism.");
+  assert.equal(request.requestId, "request-1");
+  assert.deepEqual(request.contextTokenIds, ["token-1", "token-2"]);
+  assert.equal(request.orchestrationOnly, true);
   assert.equal(request.recoveryMessages.length, PRISM_COMPANION_RECOVERY_LIMIT);
   assert.deepEqual(
     request.recoveryMessages.map((message) => message.content),

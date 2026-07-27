@@ -1027,20 +1027,12 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   );
   assert.doesNotMatch(defaultBotRouteSource, /body\.color/);
   assert.doesNotMatch(defaultBotRouteSource, /body\.glyph/);
-  assert.match(defaultBotRouteSource, /prism_default_bot_color = NULL/);
-  assert.match(defaultBotRouteSource, /prism_default_bot_glyph = NULL/);
   assert.match(
     defaultBotRouteSource,
-    /prism_default_bot_face_mouth_character = \?/,
+    /capabilityId: "default-bot\.fields\.update"/,
   );
-  assert.match(
-    defaultBotRouteSource,
-    /prism_default_bot_face_mouth_rotation_deg = \?/,
-  );
-  assert.match(
-    defaultBotRouteSource,
-    /prism_default_bot_face_thinking_frames = \?/,
-  );
+  assert.match(defaultBotRouteSource, /prismCapabilityContext\([\s\S]*"ui"/);
+  assert.match(defaultBotRouteSource, /actionRun: run/);
   assert.match(apiServerSource, /prismDefaultBotColor: ""/);
   assert.match(apiServerSource, /prismDefaultBotGlyph: ""/);
 });

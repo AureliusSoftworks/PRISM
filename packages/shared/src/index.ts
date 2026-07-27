@@ -16,6 +16,38 @@ import type { BotIdentityShapeshiftStateV1 } from "./botIdentityShapeshift.js";
 import type { BotFalseNameStateV1 } from "./botFalseName.js";
 
 export {
+  PRISM_ACTION_UNDO_RETENTION_MS,
+  PRISM_CONTEXT_TOKEN_TTL_MS,
+  PRISM_ORCHESTRATION_VERSION,
+  normalizePrismExecuteProposalRequestV1,
+  normalizePrismIntentPlanV1,
+  normalizePrismJsonObject,
+  normalizePrismUndoRequestV1,
+  type PrismActionPreviewV1,
+  type PrismActionProposalV1,
+  type PrismActionRunStatusV1,
+  type PrismActionRunV1,
+  type PrismCapabilityDescriptorV1,
+  type PrismCapabilityExecutionV1,
+  type PrismCapabilityProviderV1,
+  type PrismCapabilityRiskV1,
+  type PrismCapabilityUndoV1,
+  type PrismCompanionCardV1,
+  type PrismConfirmationPolicyV1,
+  type PrismContextTokenV1,
+  type PrismEntityReferenceV1,
+  type PrismExecuteProposalRequestV1,
+  type PrismIntentKindV1,
+  type PrismIntentPlanStepV1,
+  type PrismIntentPlanV1,
+  type PrismJsonObject,
+  type PrismJsonPrimitive,
+  type PrismJsonValue,
+  type PrismMonitorV1,
+  type PrismUndoRequestV1,
+} from "./prismOrchestration.js";
+
+export {
   PRISM_REFRACT_DIRECTION_MAX_LENGTH,
   PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH,
   PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,

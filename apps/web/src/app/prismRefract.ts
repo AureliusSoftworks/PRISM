@@ -3,16 +3,22 @@
 import {
   useEffect,
   useRef,
-  type PointerEvent as ReactPointerEvent,
+  useState,
   type ReactNode,
 } from "react";
+import { prismCompanionModifierPresentation } from "./prismCompanionState.ts";
 
 export const PRISM_REFRACT_TARGET_ATTRIBUTE = "data-prism-refract-id";
 
 export type PrismRefractInvocation =
-  | "shift-click"
+  | "wield-click"
   | "focused-shortcut"
   | "orb-drop";
+
+export interface PrismRefractOrigin {
+  clientX: number;
+  clientY: number;
+}
 
 export interface PrismRefractGenerationInput {
   currentValue: string;
@@ -66,6 +72,7 @@ export interface RegisteredPrismRefractTarget {
 export interface PrismRefractRequest {
   targetId: string;
   invocation: PrismRefractInvocation;
+  origin?: PrismRefractOrigin;
 }
 
 type TargetRegistration = {
@@ -105,10 +112,13 @@ export function subscribePrismRefractRequests(
 export function requestPrismRefract(
   targetId: string,
   invocation: PrismRefractInvocation,
+  origin?: PrismRefractOrigin,
 ): boolean {
   const registration = registeredPrismRefractTarget(targetId);
   if (!registration || registration.target.disabled?.()) return false;
-  for (const listener of requestListeners) listener({ targetId, invocation });
+  for (const listener of requestListeners) {
+    listener({ targetId, invocation, origin });
+  }
   return requestListeners.size > 0;
 }
 
@@ -173,24 +183,6 @@ export interface PrismRefractBinding {
   ref: (element: HTMLElement | null) => void;
   "data-prism-refract-id": string;
   "aria-keyshortcuts": string;
-  onPointerDownCapture: (
-    event: Pick<
-      ReactPointerEvent<HTMLElement>,
-      | "button"
-      | "shiftKey"
-      | "preventDefault"
-      | "stopPropagation"
-    >,
-  ) => void;
-  onClickCapture: (
-    event: Pick<
-      ReactPointerEvent<HTMLElement>,
-      | "button"
-      | "shiftKey"
-      | "preventDefault"
-      | "stopPropagation"
-    >,
-  ) => void;
 }
 
 export function PrismRefractTarget({
@@ -202,11 +194,19 @@ export function PrismRefractTarget({
 }): ReactNode {
   const targetRef = useRef(target);
   const elementRef = useRef<HTMLElement | null>(null);
-  const suppressClickRef = useRef(false);
+  const [ariaKeyShortcuts, setAriaKeyShortcuts] = useState(
+    "Alt+Space Control+Space",
+  );
 
   useEffect(() => {
     targetRef.current = target;
   }, [target]);
+
+  useEffect(() => {
+    setAriaKeyShortcuts(
+      prismCompanionModifierPresentation(navigator.platform).ariaKeyShortcuts,
+    );
+  }, []);
 
   useEffect(
     () =>
@@ -225,37 +225,6 @@ export function PrismRefractTarget({
       elementRef.current = element;
     },
     "data-prism-refract-id": target.id,
-    "aria-keyshortcuts": "Alt+Space Control+Space",
-    onPointerDownCapture: (event) => {
-      if (
-        event.button !== 0 ||
-        !event.shiftKey ||
-        targetRef.current.disabled?.()
-      ) {
-        return;
-      }
-      if (!requestPrismRefract(target.id, "shift-click")) return;
-      suppressClickRef.current = true;
-      event.preventDefault();
-      event.stopPropagation();
-    },
-    onClickCapture: (event) => {
-      if (suppressClickRef.current) {
-        suppressClickRef.current = false;
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (
-        event.button !== 0 ||
-        !event.shiftKey ||
-        targetRef.current.disabled?.() ||
-        !requestPrismRefract(target.id, "shift-click")
-      ) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-    },
+    "aria-keyshortcuts": ariaKeyShortcuts,
   });
 }

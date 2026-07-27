@@ -114,6 +114,11 @@ import {
   type PreparedProjectOwnedAssetImport,
   type ProjectOwnedAssetArchiveBundleV1,
 } from "./project-owned-assets.ts";
+import {
+  listLibraryGroups,
+  replaceLibraryGroups,
+  type LibraryGroupV1,
+} from "./library-groups.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -300,6 +305,8 @@ export interface BackupSnapshot {
   exportedAt: string;
   settings?: BackupUserSettings;
   bots?: BackupBotSnapshot[];
+  /** Server-backed Library groups. Older browser-authored archives omit this. */
+  libraryGroups?: LibraryGroupV1[];
   /** Optional in older v1 snapshots. Only active Coffee Groups are exported. */
   coffeeGroups?: BackupCoffeeGroupSnapshot[];
   conversations: Array<{
@@ -2360,6 +2367,7 @@ export function exportUserSnapshot(
         createdAt: bot.created_at,
         updatedAt: bot.updated_at,
       })),
+    libraryGroups: listLibraryGroups(db, userId),
     coffeeGroups: coffeeGroupPayload,
     conversations: conversationPayload,
     slate: exportSlateSnapshot(db, userId),
@@ -3327,6 +3335,15 @@ function importUserSnapshotWithinTransaction(
         userId,
       );
     }
+  }
+
+  if (Array.isArray(snapshot.libraryGroups)) {
+    replaceLibraryGroups({
+      db,
+      userId,
+      groups: snapshot.libraryGroups,
+      manageTransaction: false,
+    });
   }
 
   const restorableCoffeeGroupImageIds = new Map(

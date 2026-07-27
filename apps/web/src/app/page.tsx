@@ -1026,8 +1026,13 @@ import {
   type HubAtmosphereStyle,
   type PrismStartupPreference,
   type PrismOnboardingState,
+  type PrismTutorialId,
   type PrismTutorialProgress,
   type PrismCompanionActionIntent,
+  type PrismActionProposalV1,
+  type PrismActionRunV1,
+  type PrismCompanionCardV1,
+  type PrismCompanionResponse,
   type PrismCompanionSurfaceReference,
   type SlateHandoffCommitRequest,
   type SlateHandoffPreview,
@@ -12601,6 +12606,7 @@ interface BotLibraryGroup {
   roomAtmosphere?: BotGroupRoomAtmosphere;
   marketplaceThemeId?: string | null;
   deleteProtected: boolean;
+  deleteProtectionByBotId?: Record<string, boolean | null>;
   builtIn: boolean;
   createdAt: string;
   updatedAt: string;
@@ -13046,6 +13052,7 @@ function createFavoritesBotGroup(): BotLibraryGroup {
     description: "Pinned bots you want to keep close.",
     botIds: [],
     deleteProtected: false,
+    deleteProtectionByBotId: {},
     builtIn: true,
     createdAt: now,
     updatedAt: now,
@@ -13071,6 +13078,7 @@ function createPrismStarterBotGroup(
     botIds: uniqueBotIds,
     marketplaceThemeId: BOT_MARKETPLACE_STARTER_THEME_ID,
     deleteProtected: false,
+    deleteProtectionByBotId: {},
     builtIn: false,
     createdAt: now,
     updatedAt: now,
@@ -13113,6 +13121,19 @@ function normalizeBotLibraryGroups(raw: unknown): BotLibraryGroup[] {
                   (id): id is string => typeof id === "string",
                 )
               : [],
+            deleteProtectionByBotId:
+              record.deleteProtectionByBotId &&
+              typeof record.deleteProtectionByBotId === "object"
+                ? Object.fromEntries(
+                    Object.entries(record.deleteProtectionByBotId).flatMap(
+                      ([botId, protectedValue]) =>
+                        typeof protectedValue === "boolean" ||
+                        protectedValue === null
+                          ? [[botId, protectedValue]]
+                          : [],
+                    ),
+                  )
+                : {},
             ...(roomAtmosphere ? { roomAtmosphere } : {}),
             marketplaceThemeId:
               typeof record.marketplaceThemeId === "string" &&
@@ -13159,9 +13180,14 @@ function protectedBotIdsForBotLibraryGroups(
 ): Set<string> {
   const protectedIds = new Set<string>();
   for (const group of groups) {
-    if (!group.deleteProtected) continue;
     for (const botId of group.botIds) {
-      if (!existingBotIds || existingBotIds.has(botId)) {
+      const override = group.deleteProtectionByBotId?.[botId];
+      const protectedByMembership =
+        override === true || (override !== false && group.deleteProtected);
+      if (
+        protectedByMembership &&
+        (!existingBotIds || existingBotIds.has(botId))
+      ) {
         protectedIds.add(botId);
       }
     }
@@ -43261,6 +43287,27 @@ function HomeContent(): React.JSX.Element {
     episodeId: string | null;
     botIds: string[];
   } | null>(null);
+  const [signalOrchestrationEpoch, setSignalOrchestrationEpoch] = useState(0);
+  const [signalOrchestrationLaunch, setSignalOrchestrationLaunch] = useState<{
+    token: string;
+    showId: string;
+    guestBotId: string;
+    topic: string;
+    producerBrief: string;
+  } | null>(null);
+  const [prismHomeOrchestrationCards, setPrismHomeOrchestrationCards] =
+    useState<PrismCompanionCardV1[]>([]);
+  const [prismHomeOrchestrationBusy, setPrismHomeOrchestrationBusy] =
+    useState(false);
+  const [prismHomeOrchestrationHistoryOpen, setPrismHomeOrchestrationHistoryOpen] =
+    useState(false);
+  const [prismHomeRecentActionRuns, setPrismHomeRecentActionRuns] = useState<
+    PrismActionRunV1[]
+  >([]);
+  const prismHomeContextTokenIdsRef = useRef<string[]>([]);
+  const prismOrchestrationResultReconcilerRef = useRef<
+    (run: PrismActionRunV1) => Promise<void>
+  >(async () => undefined);
   const [slateHemisphereSettingsSaving, setSlateHemisphereSettingsSaving] =
     useState(false);
   const [slateHemisphereSettingsError, setSlateHemisphereSettingsError] =
@@ -52333,16 +52380,35 @@ function HomeContent(): React.JSX.Element {
       setBotLibraryGroupsHydratedUserId(user.id);
       return;
     }
+    let disposed = false;
+    let localGroups: BotLibraryGroup[];
     try {
       const raw = window.localStorage.getItem(
         botLibraryGroupsStorageKey(user.id),
       );
       const parsed: unknown = raw ? JSON.parse(raw) : [];
-      setBotLibraryGroups(normalizeBotLibraryGroups(parsed));
+      localGroups = normalizeBotLibraryGroups(parsed);
     } catch {
-      setBotLibraryGroups([createFavoritesBotGroup()]);
+      localGroups = [createFavoritesBotGroup()];
     }
-    setBotLibraryGroupsHydratedUserId(user.id);
+    setBotLibraryGroups(localGroups);
+    void api<{ groups?: unknown }>("/api/library/groups/import-legacy", {
+      method: "POST",
+      body: JSON.stringify({ groups: localGroups }),
+    })
+      .then((response) => {
+        if (disposed) return;
+        setBotLibraryGroups(normalizeBotLibraryGroups(response.groups));
+        setBotLibraryGroupsHydratedUserId(user.id);
+      })
+      .catch(() => {
+        if (disposed) return;
+        setBotLibraryGroups(localGroups);
+        setBotLibraryGroupsHydratedUserId(user.id);
+      });
+    return () => {
+      disposed = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -52373,6 +52439,15 @@ function HomeContent(): React.JSX.Element {
     } catch {
       // Non-fatal: groups still work for this page session.
     }
+    const syncTimer = window.setTimeout(() => {
+      void api<{ groups?: unknown }>("/api/library/groups", {
+        method: "PUT",
+        body: JSON.stringify({ groups: botLibraryGroups }),
+      }).catch(() => {
+        // The browser cache remains a compatibility fallback while offline.
+      });
+    }, 180);
+    return () => window.clearTimeout(syncTimer);
   }, [botLibraryGroups, botLibraryGroupsHydratedUserId, user]);
 
   useEffect(() => {
@@ -67074,6 +67149,57 @@ function HomeContent(): React.JSX.Element {
     return () => window.clearTimeout(timer);
   }, [localCommandToast]);
 
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const response = await fetch("/api/prism/notifications", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!response.ok || cancelled) return;
+        const payload = (await response.json()) as {
+          ok?: boolean;
+          notifications?: Array<{
+            id: string;
+            title: string;
+            body: string;
+            readAt: string | null;
+          }>;
+        };
+        const unread = payload.notifications?.find(
+          (notification) => !notification.readAt,
+        );
+        if (!unread || cancelled) return;
+        const now = Date.now();
+        setLocalCommandToast({
+          id: `prism-notification:${unread.id}`,
+          title: unread.title,
+          detail: unread.body,
+          expiresAt: now + LOCAL_COMMAND_TOAST_DISMISS_MS,
+        });
+        void fetch(
+          `/api/prism/notifications/${encodeURIComponent(unread.id)}`,
+          {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ read: true }),
+          },
+        );
+      } catch {
+        // Notifications are opportunistic and must never disrupt the surface.
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [user?.id]);
+
   // Every entrance into Sandbox lands on a fresh, empty surface. Zen briefly
   // clears stale mode state too, then the restore effect below opens the
   // current episode in the user's Prism Home.
@@ -69605,6 +69731,11 @@ function HomeContent(): React.JSX.Element {
       [mode]: { status: "pending", step: 0, remindAfter: null },
       ...(mode === "botcast"
         ? {
+            prismWield: {
+              status: "pending" as const,
+              step: 0,
+              remindAfter: null,
+            },
             signalRefract: {
               status: "pending" as const,
               step: 0,
@@ -72679,6 +72810,145 @@ function HomeContent(): React.JSX.Element {
     return `${responseModeShortLabel(responseMode)} replies are disabled. Choose Auto or a model before sending.`;
   }
 
+  function prismHomeOrchestrationSurfaceActive(): boolean {
+    if (view !== "chat" || zenPersonaBotIdRef.current !== null) return false;
+    if (detail?.hubRole === "side") return false;
+    return (detail?.hubBotId ?? detail?.botId ?? null) === null;
+  }
+
+  function rememberPrismHomeContextTokens(
+    cards: readonly PrismCompanionCardV1[],
+  ): void {
+    const discovered = cards.flatMap((card): string[] => {
+      if (card.type !== "result") return [];
+      const result = card.run.result;
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        return [];
+      }
+      const token = result.contextToken;
+      if (!token || typeof token !== "object" || Array.isArray(token)) {
+        return [];
+      }
+      return typeof token.id === "string" && token.id.trim()
+        ? [token.id.trim()]
+        : [];
+    });
+    if (discovered.length === 0) return;
+    prismHomeContextTokenIdsRef.current = Array.from(
+      new Set([...discovered, ...prismHomeContextTokenIdsRef.current]),
+    ).slice(0, 8);
+  }
+
+  function retainPrismHomeActionRun(run: PrismActionRunV1): void {
+    if (
+      run.affectedEntities.length === 0 &&
+      !run.undoAvailable &&
+      run.nonReversibleConsequences.length === 0
+    ) {
+      return;
+    }
+    setPrismHomeRecentActionRuns((current) => [
+      run,
+      ...current.filter((candidate) => candidate.id !== run.id),
+    ].slice(0, 12));
+  }
+
+  function appendEphemeralPrismHomeOrchestrationTurn(args: {
+    userContent: string;
+    response: PrismCompanionResponse;
+  }): void {
+    const createdAt = new Date().toISOString();
+    const userMessage: Message = {
+      id: `prism-home-command-user-${crypto.randomUUID()}`,
+      role: "user",
+      content: args.userContent,
+      createdAt,
+      botId: null,
+    };
+    const assistantMessage: Message = {
+      id: args.response.message.id,
+      role: "assistant",
+      content: args.response.message.content,
+      createdAt: args.response.message.createdAt,
+      provider: args.response.provider,
+      model: args.response.model ?? undefined,
+      botId: null,
+    };
+    setDetail((current) => {
+      const base: ConversationDetail =
+        current ?? {
+          id: "prism-home-orchestration",
+          title: "Prism Home",
+          botId: null,
+          hubRole: "hub",
+          hubBotId: null,
+          parentHubId: null,
+          incognito: false,
+          lastBotId: null,
+          lastBotColor: null,
+          hasAssistantReply: false,
+          messages: [],
+        };
+      return {
+        ...base,
+        hasAssistantReply: true,
+        messages: [...base.messages, userMessage, assistantMessage],
+      };
+    });
+  }
+
+  async function tryPrismHomeOrchestration(
+    message: string,
+  ): Promise<boolean> {
+    if (
+      prismHomeOrchestrationBusy ||
+      !prismHomeOrchestrationSurfaceActive()
+    ) {
+      return false;
+    }
+    setPrismHomeOrchestrationBusy(true);
+    try {
+      const response = await fetch("/api/prism-companion", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          surface: prismCompanionSurfaceReference(),
+          message,
+          recoveryMessages: [],
+          requestId: crypto.randomUUID(),
+          contextTokenIds: prismHomeContextTokenIdsRef.current,
+          orchestrationOnly: true,
+        }),
+      });
+      if (response.status === 204) return false;
+      const payload = (await response.json().catch(() => ({}))) as
+        | PrismCompanionResponse
+        | { ok?: false; error?: string };
+      if (!response.ok || payload.ok !== true || !("message" in payload)) {
+        throw new Error(
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : "Prism could not interpret that product request.",
+        );
+      }
+      appendEphemeralPrismHomeOrchestrationTurn({
+        userContent: message,
+        response: payload,
+      });
+      setPrismHomeOrchestrationCards(payload.cards);
+      rememberPrismHomeContextTokens(payload.cards);
+      for (const card of payload.cards) {
+        if (card.type !== "result") continue;
+        retainPrismHomeActionRun(card.run);
+        await prismOrchestrationResultReconcilerRef.current(card.run);
+      }
+      return true;
+    } finally {
+      setPrismHomeOrchestrationBusy(false);
+    }
+  }
+
   async function sendMessage(
     e:
       | React.FormEvent
@@ -72826,6 +73096,33 @@ function HomeContent(): React.JSX.Element {
       }
       clearComposerDraftNow();
       return;
+    }
+    if (
+      rawTrimmed.length > 0 &&
+      !rawTrimmed.startsWith("/") &&
+      !options.starterPrompt &&
+      !isAssistantOnlyTurn &&
+      editingMessageId === null &&
+      prismHomeOrchestrationSurfaceActive()
+    ) {
+      try {
+        const handled = await tryPrismHomeOrchestration(rawTrimmed);
+        if (handled) {
+          if (!options.skipComposerHistory) {
+            appendComposerHistoryEntry(rawDraft);
+          }
+          clearComposerDraftNow();
+          setError(null);
+          return;
+        }
+      } catch (error) {
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Prism could not interpret that product request.",
+        );
+        return;
+      }
     }
     if (modelCatalogLoading && !isAssistantOnlyTurn) {
       showLocalCommandToast(
@@ -77313,7 +77610,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   function composerSubmitDisabled(value: string): boolean {
-    if (botGroupCoffeeStaging) return true;
+    if (botGroupCoffeeStaging || prismHomeOrchestrationBusy) return true;
     if (composerSubmitUsesRandomNudge(value)) {
       return (
         composerRandomPromptBusy ||
@@ -96713,6 +97010,7 @@ function HomeContent(): React.JSX.Element {
         return {
           surfaceId: "images",
           ...(imagePanelBotId ? { botIds: [imagePanelBotId] } : {}),
+          ...(imageLightbox ? { imageId: imageLightbox.id } : {}),
         };
       }
       if (panel === "bots" && botPanelView === "marketplace") {
@@ -96766,12 +97064,14 @@ function HomeContent(): React.JSX.Element {
         return {
           surfaceId: "story",
           botIds: (storySession?.botIds ?? storySelectedBotIds).slice(0, 5),
+          ...(storySession ? { storySessionId: storySession.id } : {}),
         };
       }
       if (activeBotLibraryGroupFilter) {
         return {
           surfaceId: "group-home",
           botIds: activeBotLibraryGroupFilter.botIds.slice(0, 5),
+          libraryGroupId: activeBotLibraryGroupFilter.id,
         };
       }
       const personaBotId = zenPersonaBot?.id ?? activeBot?.id ?? null;
@@ -96985,14 +97285,325 @@ function HomeContent(): React.JSX.Element {
     }
   };
 
+  async function applyPrismHomeProposal(
+    proposal: PrismActionProposalV1,
+  ): Promise<void> {
+    if (prismHomeOrchestrationBusy) return;
+    setPrismHomeOrchestrationBusy(true);
+    try {
+      const response = await fetch("/api/prism/actions/execute", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          proposalId: proposal.id,
+          confirmation: true,
+          idempotencyKey: `prism-home-apply:${proposal.id}`,
+          surface: prismCompanionSurfaceReference(),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as
+        | { ok: true; run: PrismActionRunV1 }
+        | { ok?: false; error?: string };
+      if (!response.ok || payload.ok !== true) {
+        throw new Error(
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : "Prism could not apply that proposal.",
+        );
+      }
+      const cards: PrismCompanionCardV1[] = [
+        {
+          schemaVersion: proposal.schemaVersion,
+          type: "result",
+          title: payload.run.status === "committed" ? "Complete" : "Action",
+          run: payload.run,
+        },
+      ];
+      setPrismHomeOrchestrationCards(cards);
+      rememberPrismHomeContextTokens(cards);
+      retainPrismHomeActionRun(payload.run);
+      await prismOrchestrationResultReconcilerRef.current(payload.run);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Prism could not apply that proposal.",
+      );
+    } finally {
+      setPrismHomeOrchestrationBusy(false);
+    }
+  }
+
+  async function undoPrismHomeRun(runId: string): Promise<void> {
+    if (prismHomeOrchestrationBusy) return;
+    setPrismHomeOrchestrationBusy(true);
+    try {
+      const response = await fetch("/api/prism/actions/undo", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runId,
+          surface: prismCompanionSurfaceReference(),
+        }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as
+        | { ok: true; run: PrismActionRunV1 }
+        | { ok?: false; error?: string };
+      if (!response.ok || payload.ok !== true) {
+        throw new Error(
+          "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : "Prism could not undo that action.",
+        );
+      }
+      setPrismHomeOrchestrationCards([
+        {
+          schemaVersion: payload.run.schemaVersion,
+          type: "result",
+          title: payload.run.status === "undone" ? "Undone" : "Undo",
+          run: payload.run,
+        },
+      ]);
+      setPrismHomeRecentActionRuns((current) =>
+        current.map((run) => (run.id === payload.run.id ? payload.run : run)),
+      );
+      await prismOrchestrationResultReconcilerRef.current(payload.run);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Prism could not undo that action.",
+      );
+    } finally {
+      setPrismHomeOrchestrationBusy(false);
+    }
+  }
+
+  async function togglePrismHomeActionHistory(): Promise<void> {
+    if (prismHomeOrchestrationHistoryOpen) {
+      setPrismHomeOrchestrationHistoryOpen(false);
+      return;
+    }
+    setPrismHomeOrchestrationHistoryOpen(true);
+    try {
+      const response = await fetch("/api/prism/actions?limit=12", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        runs?: PrismActionRunV1[];
+      };
+      if (response.ok && payload.ok === true && Array.isArray(payload.runs)) {
+        setPrismHomeRecentActionRuns(
+          payload.runs.filter(
+            (run) =>
+              run.affectedEntities.length > 0 ||
+              run.undoAvailable ||
+              run.nonReversibleConsequences.length > 0,
+          ),
+        );
+      }
+    } catch {
+      setError("Prism could not load recent activity.");
+    }
+  }
+
+  function renderPrismHomeOrchestrationCards(): React.JSX.Element | null {
+    if (
+      !prismHomeOrchestrationSurfaceActive() ||
+      (prismHomeOrchestrationCards.length === 0 &&
+        !prismHomeOrchestrationHistoryOpen)
+    ) {
+      return null;
+    }
+    return (
+      <section
+        className={styles.prismHomeOrchestration}
+        aria-label="Prism orchestration"
+        aria-live="polite"
+      >
+        <header>
+          <span>Prism actions</span>
+          <button
+            type="button"
+            onClick={() => void togglePrismHomeActionHistory()}
+            aria-expanded={prismHomeOrchestrationHistoryOpen}
+          >
+            Activity
+          </button>
+        </header>
+        {prismHomeOrchestrationCards.map((card, index) => (
+          <article
+            key={`${card.type}-${index}`}
+            className={styles.prismHomeOrchestrationCard}
+            data-card-type={card.type}
+          >
+            <span>{card.title}</span>
+            {card.type === "proposal" ? (
+              <>
+                <strong>{card.proposal.preview.summary}</strong>
+                {card.proposal.preview.targets.length > 0 ? (
+                  <p>
+                    {card.proposal.preview.targets.length} target
+                    {card.proposal.preview.targets.length === 1 ? "" : "s"}
+                    {card.proposal.preview.diffs.length > 0
+                      ? ` · ${card.proposal.preview.diffs.length} changes`
+                      : ""}
+                  </p>
+                ) : null}
+                {card.proposal.preview.provider ||
+                card.proposal.preview.model ||
+                card.proposal.preview.estimatedCostMicroUsd !== null ? (
+                  <small>
+                    {[
+                      card.proposal.preview.provider
+                        ? `Provider: ${card.proposal.preview.provider}`
+                        : null,
+                      card.proposal.preview.model
+                        ? `Model: ${card.proposal.preview.model}`
+                        : null,
+                      card.proposal.preview.estimatedCostMicroUsd !== null
+                        ? `Estimated cost: $${(
+                            card.proposal.preview.estimatedCostMicroUsd /
+                            1_000_000
+                          ).toFixed(4)}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </small>
+                ) : null}
+                {card.proposal.preview.diffs.length > 0 ? (
+                  <details>
+                    <summary>Review exact changes</summary>
+                    {card.proposal.preview.diffs.map((diff, diffIndex) => (
+                      <p key={`${diff.entity.id}-${diffIndex}`}>
+                        <strong>{diff.entity.label}</strong>
+                        <br />
+                        <small>
+                          {JSON.stringify(diff.before)} →{" "}
+                          {JSON.stringify(diff.after)}
+                        </small>
+                      </p>
+                    ))}
+                  </details>
+                ) : null}
+                {card.proposal.preview.consequences.map((consequence) => (
+                  <small key={consequence}>{consequence}</small>
+                ))}
+                <button
+                  type="button"
+                  disabled={prismHomeOrchestrationBusy}
+                  onClick={() => void applyPrismHomeProposal(card.proposal)}
+                >
+                  Apply
+                </button>
+              </>
+            ) : card.type === "result" ? (
+              <>
+                <strong>
+                  {card.run.status === "committed"
+                    ? "Committed"
+                    : card.run.status === "undone"
+                      ? "Restored"
+                      : card.run.status === "failed" ||
+                          card.run.status === "undo-failed"
+                        ? card.run.error || "Action failed"
+                        : "In progress"}
+                </strong>
+                {card.run.affectedEntities.length > 0 ? (
+                  <p>
+                    {card.run.affectedEntities.length} item
+                    {card.run.affectedEntities.length === 1 ? "" : "s"}
+                  </p>
+                ) : null}
+                {card.run.nonReversibleConsequences.map((consequence) => (
+                  <small key={consequence}>{consequence}</small>
+                ))}
+                {card.run.undoAvailable ? (
+                  <button
+                    type="button"
+                    disabled={prismHomeOrchestrationBusy}
+                    onClick={() => void undoPrismHomeRun(card.run.id)}
+                  >
+                    Undo
+                  </button>
+                ) : null}
+                {card.run.capabilityId === "bots.create" &&
+                card.run.affectedEntities[0]?.entityType === "bot" ? (
+                  <button
+                    type="button"
+                    disabled={prismHomeOrchestrationBusy}
+                    onClick={async () => {
+                      const nextBots = await refreshBots();
+                      const created = nextBots.find(
+                        (bot) => bot.id === card.run.affectedEntities[0]!.id,
+                      );
+                      if (created) openBotCustomizer(created);
+                    }}
+                  >
+                    Avatar Studio
+                  </button>
+                ) : null}
+              </>
+            ) : card.type === "clarification" ? (
+              <strong>{card.question}</strong>
+            ) : card.type === "progress" ? (
+              <>
+                <strong>{card.run.status}</strong>
+                {card.progress !== null ? (
+                  <progress max={1} value={card.progress} />
+                ) : null}
+              </>
+            ) : (
+              <strong>{card.body}</strong>
+            )}
+          </article>
+        ))}
+        {prismHomeOrchestrationHistoryOpen ? (
+          <div
+            className={styles.prismHomeOrchestrationHistory}
+            aria-label="Recent Prism activity"
+          >
+            {prismHomeRecentActionRuns.length > 0 ? (
+              prismHomeRecentActionRuns.map((run) => (
+                <article key={run.id}>
+                  <span>{run.capabilityId}</span>
+                  <small>
+                    {run.status} · {new Date(run.createdAt).toLocaleString()}
+                  </small>
+                  {run.undoAvailable ? (
+                    <button
+                      type="button"
+                      disabled={prismHomeOrchestrationBusy}
+                      onClick={() => void undoPrismHomeRun(run.id)}
+                    >
+                      Undo
+                    </button>
+                  ) : null}
+                </article>
+              ))
+            ) : (
+              <small>No meaningful actions yet.</small>
+            )}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   const renderGlobalPrismCompanion = (): React.JSX.Element | null => {
     if (!user || !settings) return null;
-    const resolveSignalRefractTutorial = (
+    const resolveCompanionTutorial = (
+      tutorialId: Extract<PrismTutorialId, "prismWield" | "signalRefract">,
       status: "completed" | "skipped" | "remind",
     ): void => {
       const nextTutorialProgress: PrismTutorialProgress = {
         ...tutorialProgress,
-        signalRefract: {
+        [tutorialId]: {
           status,
           step: 0,
           remindAfter:
@@ -97009,6 +97620,278 @@ function HomeContent(): React.JSX.Element {
         false,
       );
     };
+    const reconcilePrismOrchestrationResult = async (
+      run: PrismActionRunV1,
+    ): Promise<void> => {
+      if (
+        run.status !== "committed" &&
+        run.status !== "undone"
+      ) {
+        return;
+      }
+      if (
+        run.capabilityId === "bots.avatar.eye-count.batch" ||
+        run.capabilityId === "library.protection.unprotect" ||
+        run.capabilityId === "bots.create" ||
+        run.capabilityId === "marketplace.install"
+      ) {
+        await refreshBots();
+      }
+      if (run.capabilityId === "marketplace.install") {
+        await refreshMemories();
+      }
+      if (run.capabilityId === "settings.online-model.update") {
+        await refreshSettings();
+      }
+      if (run.capabilityId === "memories.delete") {
+        await refreshMemories();
+      }
+      if (run.capabilityId === "conversations.quarantine") {
+        await refreshConversations();
+      }
+      if (run.capabilityId === "images.delete") {
+        setImageLightbox(null);
+        await refreshImages(imagePanelBotId);
+      }
+      if (run.capabilityId.startsWith("story.session.")) {
+        await refreshStorySessions();
+        const result =
+          run.result &&
+          typeof run.result === "object" &&
+          !Array.isArray(run.result)
+            ? run.result
+            : {};
+        const resultSession =
+          result.session &&
+          typeof result.session === "object" &&
+          !Array.isArray(result.session)
+            ? result.session
+            : null;
+        const resultSessionId =
+          typeof resultSession?.id === "string"
+            ? resultSession.id
+            : typeof result.sessionId === "string"
+              ? result.sessionId
+              : null;
+        if (
+          run.status === "committed" &&
+          resultSessionId &&
+          run.capabilityId !== "story.session.delete"
+        ) {
+          navigateToView("story");
+          await openStorySession(resultSessionId);
+        } else if (
+          run.capabilityId === "story.session.delete" &&
+          run.status === "undone" &&
+          resultSessionId
+        ) {
+          navigateToView("story");
+          await openStorySession(resultSessionId);
+        } else if (
+          resultSessionId &&
+          storySession?.id === resultSessionId
+        ) {
+          setStorySelectedSessionId(null);
+          setStorySession(null);
+        }
+      }
+      if (
+        run.status === "committed" &&
+        run.capabilityId === "slate.project.create" &&
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
+      ) {
+        const navigation = run.result.navigation;
+        if (
+          navigation &&
+          typeof navigation === "object" &&
+          !Array.isArray(navigation) &&
+          typeof navigation.slateProjectId === "string"
+        ) {
+          setRequestedSlateProjectId(navigation.slateProjectId);
+          navigateToView("slate");
+        }
+      }
+      if (
+        run.capabilityId.startsWith("library.") ||
+        run.capabilityId === "marketplace.install"
+      ) {
+        const response = await api<{ groups?: unknown }>(
+          "/api/library/groups",
+        );
+        const nextGroups = normalizeBotLibraryGroups(response.groups);
+        setBotLibraryGroups(nextGroups);
+        if (
+          run.status === "committed" &&
+          run.capabilityId === "library.group.create" &&
+          run.result &&
+          typeof run.result === "object" &&
+          !Array.isArray(run.result)
+        ) {
+          const navigation = run.result.navigation;
+          if (
+            navigation &&
+            typeof navigation === "object" &&
+            !Array.isArray(navigation) &&
+            typeof navigation.groupId === "string"
+          ) {
+            openLivingShellHome();
+            setBotLibraryGroupFilterId(navigation.groupId);
+          }
+        }
+      }
+      if (
+        run.status === "committed" &&
+        run.capabilityId === "marketplace.install"
+      ) {
+        openBotMarketplace();
+      }
+      if (run.capabilityId === "signal.episodes.delete") {
+        setSignalOrchestrationEpoch((current) => current + 1);
+      }
+      if (
+        run.status === "committed" &&
+        run.capabilityId === "signal.episode.stage" &&
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
+      ) {
+        const navigation = run.result.navigation;
+        if (
+          navigation &&
+          typeof navigation === "object" &&
+          !Array.isArray(navigation) &&
+          navigation.autoStart === true &&
+          typeof navigation.showId === "string" &&
+          typeof navigation.hostBotId === "string" &&
+          typeof navigation.guestBotId === "string" &&
+          typeof navigation.topic === "string" &&
+          typeof navigation.producerBrief === "string"
+        ) {
+          setSignalInitialCastBotIds([
+            navigation.hostBotId,
+            navigation.guestBotId,
+          ]);
+          setSignalOrchestrationLaunch({
+            token: run.id,
+            showId: navigation.showId,
+            guestBotId: navigation.guestBotId,
+            topic: navigation.topic,
+            producerBrief: navigation.producerBrief,
+          });
+          navigateToView("botcast");
+        }
+      }
+      if (
+        run.status === "committed" &&
+        run.capabilityId === "signal.latest.export-to-slate" &&
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
+      ) {
+        const navigation = run.result.navigation;
+        if (
+          navigation &&
+          typeof navigation === "object" &&
+          !Array.isArray(navigation) &&
+          typeof navigation.slateProjectId === "string"
+        ) {
+          setRequestedSlateProjectId(navigation.slateProjectId);
+          navigateToView("slate");
+        }
+      }
+      if (
+        run.status === "committed" &&
+        run.capabilityId === "backup.export" &&
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
+      ) {
+        const download = run.result.download;
+        if (
+          !download ||
+          typeof download !== "object" ||
+          Array.isArray(download) ||
+          typeof download.kind !== "string"
+        ) {
+          return;
+        }
+        if (download.kind === "account") {
+          await exportAccountAsPrismArchive();
+          return;
+        }
+        if (
+          download.kind === "library-group" &&
+          typeof download.groupId === "string"
+        ) {
+          const group = botLibraryGroups.find(
+            (candidate) => candidate.id === download.groupId,
+          );
+          if (!group) throw new Error("That Library group is unavailable.");
+          const groupBots = group.botIds.flatMap((botId) => {
+            const bot = bots.find((candidate) => candidate.id === botId);
+            return bot ? [bot] : [];
+          });
+          await exportBotsAsCollection(groupBots, { group });
+          return;
+        }
+        if (
+          download.kind === "coffee-transcript" &&
+          typeof download.conversationId === "string"
+        ) {
+          if (coffeeConversation?.id !== download.conversationId) {
+            throw new Error(
+              "Open that saved Coffee session before exporting its transcript.",
+            );
+          }
+          const [messages, recordingEvidence] = await Promise.all([
+            loadCoffeeTranscriptMessagesForClipboard(coffeeConversation),
+            loadSessionReviewRecordingEvidence(
+              "coffee",
+              coffeeConversation.id,
+            ),
+          ]);
+          const transcript = formatCoffeeReviewClipboardText({
+            messages,
+            context: {
+              conversationId: coffeeConversation.id,
+              title: coffeeConversation.title,
+              topic: coffeeConversation.coffeeTopic,
+              phase: coffeeSessionPhase,
+              createdAt: coffeeConversation.createdAt,
+              updatedAt: coffeeConversation.updatedAt,
+              durationMinutes:
+                coffeeConversation.coffeeSessionDurationMinutes,
+              incognito: coffeeConversation.incognito,
+              groupId: coffeeConversation.coffeeGroupId,
+              bots: coffeeMentionBotPicks.map((bot) => ({
+                id: bot.id,
+                name: bot.name,
+              })),
+              absentBotIds: coffeeConversation.coffeeAbsentBotIds,
+              settings:
+                coffeeConversation.coffeeSettings ??
+                coffeeSessionSettingsRef.current,
+              recordingEvidence,
+            },
+          });
+          const blob = new Blob([transcript], {
+            type: "text/markdown;charset=utf-8",
+          });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = `${slugifyFileToken(
+            coffeeConversation.title || "coffee-session",
+          )}.md`;
+          anchor.click();
+          URL.revokeObjectURL(url);
+        }
+      }
+    };
+    prismOrchestrationResultReconcilerRef.current =
+      reconcilePrismOrchestrationResult;
     const handoffLayer = pendingSlateHandoff ? (
       <PrismHandoffCanvas
         handoff={pendingSlateHandoff}
@@ -97099,20 +97982,57 @@ function HomeContent(): React.JSX.Element {
         <PrismCompanion
           accountKey={user.id}
           surface={prismCompanionSurfaceReference()}
+          wieldTutorialActive={prismTutorialShouldRun(
+            tutorialProgress.prismWield,
+          )}
+          onWieldTutorialComplete={() =>
+            resolveCompanionTutorial("prismWield", "completed")
+          }
+          onWieldTutorialSkip={() =>
+            resolveCompanionTutorial("prismWield", "skipped")
+          }
+          onWieldTutorialRemind={() =>
+            resolveCompanionTutorial("prismWield", "remind")
+          }
           refractTutorialActive={
             view === "botcast" &&
             prismTutorialShouldRun(tutorialProgress.signalRefract)
           }
           onRefractTutorialComplete={() =>
-            resolveSignalRefractTutorial("completed")
+            resolveCompanionTutorial("signalRefract", "completed")
           }
           onRefractTutorialSkip={() =>
-            resolveSignalRefractTutorial("skipped")
+            resolveCompanionTutorial("signalRefract", "skipped")
           }
           onRefractTutorialRemind={() =>
-            resolveSignalRefractTutorial("remind")
+            resolveCompanionTutorial("signalRefract", "remind")
           }
           onAction={handlePrismCompanionAction}
+          onOrchestrationResult={reconcilePrismOrchestrationResult}
+          onOpenCreatedBot={async (botId) => {
+            const nextBots = await refreshBots();
+            const created = nextBots.find((bot) => bot.id === botId);
+            if (created) openBotCustomizer(created);
+          }}
+          onStartCreatedCoffeeGroup={({ groupId, premise, botIds }) => {
+            const selectedBotIds = Array.from(new Set(botIds))
+              .filter((botId) => coffeeBotsById.has(botId))
+              .slice(0, COFFEE_GROUP_MAX_SIZE_CLIENT);
+            if (selectedBotIds.length < COFFEE_GROUP_MIN_SIZE_CLIENT) {
+              setPanelError(
+                "That Coffee group no longer has enough available bots.",
+              );
+              return;
+            }
+            botGroupCoffeePendingLaunchRef.current = {
+              prompt: premise,
+              sourceGroupId: groupId,
+              sourceRoomVisitSeed: `prism:${groupId}:${Date.now()}`,
+              selectedBotIds,
+            };
+            botGroupCoffeeLaunchStartedRef.current = false;
+            navigateToView("coffee");
+          }}
           onError={setPanelError}
           onStopSpeaking={() => {
             voicePreviewPlaybackRunRef.current += 1;
@@ -127428,6 +128348,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div className={themeClass}>
         <BotcastExperience
+          key={`signal:${signalOrchestrationEpoch}`}
           bots={signalBots}
           initialCastBotIds={signalInitialCastBotIds}
           request={api}
@@ -127449,6 +128370,12 @@ function HomeContent(): React.JSX.Element {
           autoCorrectGuestAnswerEnabled={
             settings?.composerWritingAssist !== false
           }
+          orchestrationLaunch={signalOrchestrationLaunch}
+          onOrchestrationLaunchConsumed={(token) => {
+            setSignalOrchestrationLaunch((current) =>
+              current?.token === token ? null : current,
+            );
+          }}
           expandComposerDraft={expandComposerDraft}
           renderPickAwareComposer={renderPickAwareComposer}
           renderProducerGuestComposer={(composer) =>
@@ -130020,6 +130947,7 @@ function HomeContent(): React.JSX.Element {
                 );
               })}
               {devChatDebugEventsNode}
+              {renderPrismHomeOrchestrationCards()}
               {!chatLikeSurface ? typingIndicatorNode : null}
               {sandboxSummaryIndicatorNode}
               <div

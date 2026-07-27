@@ -115,10 +115,67 @@ describe("Prism Refract Signal integration", () => {
     );
   });
 
-  it("falls back to the click boundary when a text control misses pointer-down capture", () => {
+  it("wields Prism only into registered eligible controls and preserves native clicks elsewhere", () => {
     assert.match(
-      refractSource,
-      /onClickCapture: \(event\) => \{[\s\S]*if \(suppressClickRef\.current\)[\s\S]*event\.button !== 0[\s\S]*!event\.shiftKey[\s\S]*requestPrismRefract\(target\.id, "shift-click"\)/u,
+      companionSource,
+      /current\.phase !== "following"[\s\S]*event\.pointerType === "touch"[\s\S]*event\.button !== 0/u,
+    );
+    assert.match(
+      companionSource,
+      /prismRefractTargetIdAtPoint\([\s\S]*!targetId \|\| !registration \|\| registration\.target\.disabled\?\.\(\)[\s\S]*return/u,
+    );
+    assert.match(
+      companionSource,
+      /requestPrismRefract\(targetId, "wield-click",[\s\S]*if \(!started\)[\s\S]*return[\s\S]*event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)/u,
+    );
+    assert.doesNotMatch(refractSource, /shift-click|shiftKey|onClickCapture/u);
+  });
+
+  it("arms Wield Prism deliberately and follows through compositor frames", () => {
+    assert.match(
+      companionSource,
+      /type: "modifier-down"[\s\S]*PRISM_WIELD_ARM_DELAY_MS/u,
+    );
+    assert.match(
+      companionSource,
+      /requestAnimationFrame\(flushPrismWieldFrame\)/u,
+    );
+    assert.match(
+      companionSource,
+      /anchor\.style\.transform = `translate3d\(\$\{pointer\.x\}px, \$\{pointer\.y\}px, 0\) translate\(-50%, -50%\)`/u,
+    );
+    assert.doesNotMatch(
+      companionSource.match(
+        /const flushPrismWieldFrame[\s\S]*?const schedulePrismWieldFrame/u,
+      )?.[0] ?? "",
+      /setPosition|setState/u,
+    );
+    assert.match(
+      companionStyles,
+      /\.anchor\[data-wielding="true"\][\s\S]*width: 28px[\s\S]*translate3d/u,
+    );
+  });
+
+  it("restores Wield Prism across focus, visibility, motion, surface, and suppression changes", () => {
+    assert.match(
+      companionSource,
+      /const restoreOnBlur = \(\): void => resetPrismWield\(\)[\s\S]*window\.addEventListener\("blur", restoreOnBlur\)/u,
+    );
+    assert.match(
+      companionSource,
+      /visibilitychange[\s\S]*restoreOnVisibilityChange/u,
+    );
+    assert.match(
+      companionSource,
+      /prefers-reduced-motion: reduce[\s\S]*restoreOnReducedMotionChange/u,
+    );
+    assert.match(
+      companionSource,
+      /resetPrismWield\(\);[\s\S]*releasePrismRefract\(true\);[\s\S]*surfaceScope/u,
+    );
+    assert.match(
+      companionSource,
+      /if \(!companionSuppressed\) return;[\s\S]*resetPrismWield\(\);/u,
     );
   });
 
@@ -178,14 +235,26 @@ describe("Prism Refract Signal integration", () => {
 
   it("keeps the ritual skippable, remindable, resettable, and persisted outside the walkthrough", () => {
     assert.match(tutorialSource, /skippable Refract ritual/u);
+    assert.match(tutorialSource, /skippable Wield Prism teaching beat/u);
     assert.match(tutorialSource, /Space rerolls[\s\S]*Escape[\s\S]*restores/u);
+    assert.match(pageSource, /tutorialProgress\.prismWield/u);
     assert.match(pageSource, /tutorialProgress\.signalRefract/u);
-    assert.match(pageSource, /resolveSignalRefractTutorial\("completed"\)/u);
-    assert.match(pageSource, /resolveSignalRefractTutorial\("skipped"\)/u);
-    assert.match(pageSource, /resolveSignalRefractTutorial\("remind"\)/u);
     assert.match(
       pageSource,
-      /mode === "botcast"[\s\S]*signalRefract:[\s\S]*status: "pending"/u,
+      /resolveCompanionTutorial\("prismWield", "completed"\)/u,
+    );
+    assert.match(
+      pageSource,
+      /resolveCompanionTutorial\("signalRefract", "completed"\)/u,
+    );
+    assert.match(
+      pageSource,
+      /mode === "botcast"[\s\S]*prismWield:[\s\S]*status: "pending"[\s\S]*signalRefract:[\s\S]*status: "pending"/u,
+    );
+    assert.match(companionSource, /data-prism-wield-tutorial-card="true"/u);
+    assert.match(
+      companionSource,
+      /Release \$\{modifierPresentation\.modifierLabel\} safely/u,
     );
   });
 });

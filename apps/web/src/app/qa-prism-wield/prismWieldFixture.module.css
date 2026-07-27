@@ -1,0 +1,127 @@
+.shell {
+  min-height: 100vh;
+  padding: 56px clamp(36px, 7vw, 112px);
+  color: var(--qa-ink);
+  background:
+    radial-gradient(circle at 46% 38%, var(--qa-spectrum), transparent 28%),
+    linear-gradient(145deg, var(--qa-bg-a), var(--qa-bg-b));
+  --qa-bg-a: #090b11;
+  --qa-bg-b: #17131f;
+  --qa-panel: #11131cd9;
+  --qa-ink: #f6f1ff;
+  --qa-muted: #b7adca;
+  --qa-line: #ffffff20;
+  --qa-spectrum: #7966ff24;
+}
+
+:global(html[data-theme="light"]) .shell {
+  --qa-bg-a: #f1eef8;
+  --qa-bg-b: #e5f1f4;
+  --qa-panel: #fffdfbd9;
+  --qa-ink: #251f30;
+  --qa-muted: #6e647a;
+  --qa-line: #362b4a24;
+  --qa-spectrum: #886cff2b;
+}
+
+.shell header {
+  max-width: 650px;
+}
+
+.shell header > span {
+  color: var(--qa-muted);
+  font-size: 12px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.shell h1 {
+  margin: 10px 0 8px;
+  font-size: clamp(40px, 5vw, 72px);
+  font-weight: 520;
+  letter-spacing: -.055em;
+}
+
+.shell p {
+  max-width: 590px;
+  color: var(--qa-muted);
+  line-height: 1.55;
+}
+
+.stage {
+  position: relative;
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  width: min(760px, 72vw);
+  min-height: 480px;
+  margin-top: 38px;
+  padding: 72px;
+  overflow: hidden;
+  border: 1px solid var(--qa-line);
+  border-radius: 34px;
+  background: var(--qa-panel);
+  box-shadow: 0 28px 90px #00000028;
+}
+
+.pyramid {
+  position: absolute;
+  top: 14px;
+  right: 42px;
+  color: #9f8cff66;
+  font-size: 180px;
+  line-height: 1;
+  filter: drop-shadow(0 0 26px #65d8ff44);
+  transform: rotate(8deg);
+  user-select: none;
+}
+
+.target {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 10px;
+  color: var(--qa-muted);
+  font-size: 13px;
+}
+
+.target textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--qa-line);
+  border-radius: 18px;
+  padding: 18px 20px;
+  color: var(--qa-ink);
+  background: color-mix(in srgb, var(--qa-panel) 82%, transparent);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.45;
+  outline: none;
+}
+
+.target textarea:focus-visible {
+  border-color: #72d9ee88;
+  box-shadow: 0 0 0 3px #72d9ee24;
+}
+
+.nativeControl {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  border: 1px solid var(--qa-line);
+  border-radius: 999px;
+  padding: 10px 16px;
+  color: var(--qa-muted);
+  background: transparent;
+}
+
+.nativeControl[data-clicked="true"]::after {
+  content: " · clicked";
+  color: #6fe3ff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pyramid {
+    filter: none;
+  }
+}

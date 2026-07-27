@@ -16,6 +16,15 @@ import {
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
   "pairing_codes",
+  "prism_notifications",
+  "prism_monitors",
+  "prism_context_tokens",
+  "prism_quarantine",
+  "prism_action_proposals",
+  "prism_action_runs",
+  "library_group_members",
+  "library_group_imports",
+  "library_groups",
   "replay_voice_takes",
   "replay_recordings",
   "botcast_events",

@@ -3611,7 +3611,7 @@ function coffeePlayerDepartureEventRow(
   return null;
 }
 
-function coffeeConversationHasPlayerDeparture(
+export function coffeeConversationHasPlayerDeparture(
   db: DatabaseSync,
   userId: string,
   conversationId: string

@@ -1177,7 +1177,8 @@
     0 0 30px color-mix(in srgb, var(--prism-s) 28%, transparent);
 }
 
-.shell :global([data-prism-refract-tutorial="true"]) {
+.shell :global([data-prism-refract-tutorial="true"]),
+.shell :global([data-prism-wield-tutorial="true"]) {
   outline: 2px solid color-mix(in srgb, var(--prism-s) 64%, white);
   outline-offset: 3px;
   box-shadow: 0 0 24px color-mix(in srgb, var(--prism-m) 22%, transparent);

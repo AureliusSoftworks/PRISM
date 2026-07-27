@@ -1091,7 +1091,7 @@ describe("Botcast persistence and isolation", () => {
       "Signal could not reach an available interview model.",
     );
     const episodeCreationIndex = serverSource.indexOf(
-      "const episode = createBotcastEpisode",
+      'capabilityId: "signal.episode.create"',
       bookingFailureIndex,
     );
     assert.ok(bookingFailureIndex >= 0);

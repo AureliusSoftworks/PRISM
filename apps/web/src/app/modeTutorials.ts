@@ -332,10 +332,10 @@ function currentSignalRefractTutorialBody(
     .replace("Randomize booking", "Book for me")
     .replace(
       "The small dice beside Topic and Private comments can regenerate either field on its own.",
-      "Refract replaces the old Topic and Private comments dice: Shift-click either registered field, focus it and press Option Space on macOS or Control Space elsewhere, or drag the Prism orb onto it. Space rerolls after a draft settles; Enter or Tab keeps it, while Escape or an outside click restores the original.",
+      "Refract replaces the old Topic and Private comments dice: hold Option on macOS or Control on Windows and Linux to Wield Prism, then click either glowing registered field. You can also focus it and press Option Space or Control Space, or drag the Prism orb onto it. Space rerolls after a draft settles; Enter or Tab keeps it, while Escape or an outside click restores the original.",
     );
   if (index === 0) {
-    return `${current} The first eligible creative control offers one skippable Refract ritual: summon Prism, press Space once, then keep the draft or restore what you had.`;
+    return `${current} The first eligible creative control first offers a skippable Wield Prism teaching beat: hold the platform modifier, find the spectral glow, and release safely. Signal then offers one skippable Refract ritual: capture a control, press Space once, then keep the draft or restore what you had.`;
   }
   if (index === 1) {
     return `${current} Ordinary clicks on Complete this show, Book for me, blurbs, studio, logo, and atmosphere keep their current behavior. Refracting one of those actions opens a temporary one-line direction for only that pass; its raw prompt is not remembered.`;
