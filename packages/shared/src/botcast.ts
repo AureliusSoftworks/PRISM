@@ -309,8 +309,95 @@ export type BotcastTensionStage =
   "calm" | "resistance" | "warning" | "departed";
 export type BotcastCameraShot = "auto" | "left" | "right" | "wide";
 export type BotcastDirectedCameraShot = Exclude<BotcastCameraShot, "auto">;
+export interface BotcastCameraFrame {
+  zoom: number;
+  /** Horizontal adjustment layered over Signal's automatic subject framing. */
+  panX: number;
+  /** Vertical adjustment layered over Signal's automatic subject framing. */
+  panY: number;
+}
+export type BotcastCameraFraming = Record<
+  BotcastDirectedCameraShot,
+  BotcastCameraFrame
+>;
+export const BOTCAST_CAMERA_ZOOM_MIN = 1;
+export const BOTCAST_CAMERA_ZOOM_MAX = 2;
+export const BOTCAST_CAMERA_ZOOM_STEP = 0.01;
+export const BOTCAST_CAMERA_PAN_MIN = -30;
+export const BOTCAST_CAMERA_PAN_MAX = 30;
+export const BOTCAST_CAMERA_PAN_STEP = 0.25;
+export const BOTCAST_DEFAULT_CAMERA_FRAMING: Readonly<BotcastCameraFraming> = {
+  left: { zoom: 1.42, panX: 0, panY: 0 },
+  right: { zoom: 1.42, panX: 0, panY: 0 },
+  wide: { zoom: 1, panX: 0, panY: 0 },
+};
 export const BOTCAST_AUTO_CAMERA_LEAD_IN_MIN_MS = 240;
 export const BOTCAST_AUTO_CAMERA_LEAD_IN_MAX_MS = 420;
+
+function normalizeBotcastCameraFrame(
+  value: unknown,
+  fallback: Readonly<BotcastCameraFrame>,
+): BotcastCameraFrame {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<BotcastCameraFrame>)
+      : {};
+  const bounded = (
+    candidate: unknown,
+    fallbackValue: number,
+    minimum: number,
+    maximum: number,
+  ): number => {
+    const parsed =
+      typeof candidate === "number"
+        ? candidate
+        : typeof candidate === "string"
+          ? Number(candidate)
+          : Number.NaN;
+    return Number(
+      Math.max(
+        minimum,
+        Math.min(maximum, Number.isFinite(parsed) ? parsed : fallbackValue),
+      ).toFixed(2),
+    );
+  };
+  return {
+    zoom: bounded(
+      container.zoom,
+      fallback.zoom,
+      BOTCAST_CAMERA_ZOOM_MIN,
+      BOTCAST_CAMERA_ZOOM_MAX,
+    ),
+    panX: bounded(
+      container.panX,
+      fallback.panX,
+      BOTCAST_CAMERA_PAN_MIN,
+      BOTCAST_CAMERA_PAN_MAX,
+    ),
+    panY: bounded(
+      container.panY,
+      fallback.panY,
+      BOTCAST_CAMERA_PAN_MIN,
+      BOTCAST_CAMERA_PAN_MAX,
+    ),
+  };
+}
+
+export function normalizeBotcastCameraFraming(
+  value: unknown,
+  fallback: Readonly<BotcastCameraFraming> =
+    BOTCAST_DEFAULT_CAMERA_FRAMING,
+): BotcastCameraFraming {
+  const container =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Partial<Record<BotcastDirectedCameraShot, unknown>>)
+      : {};
+  return {
+    left: normalizeBotcastCameraFrame(container.left, fallback.left),
+    right: normalizeBotcastCameraFrame(container.right, fallback.right),
+    wide: normalizeBotcastCameraFrame(container.wide, fallback.wide),
+  };
+}
 
 /** Lets a speaker land on mic before Auto changes the saved camera cut. */
 export function botcastAutoCameraLeadInMs(utteranceDurationMs: number): number {
@@ -606,10 +693,11 @@ function botcastCameraOffsetPercent(args: {
   focusPercent: number;
   focalLinePercent: number;
   transformOriginPercent: number;
+  zoom: number;
 }): number {
   const desiredOffset =
-    (args.focalLinePercent - args.focusPercent) * BOTCAST_CLOSEUP_CAMERA_SCALE;
-  const zoomOverflow = BOTCAST_CLOSEUP_CAMERA_SCALE - 1;
+    (args.focalLinePercent - args.focusPercent) * args.zoom;
+  const zoomOverflow = args.zoom - 1;
   const minimumOffset = -(100 - args.transformOriginPercent) * zoomOverflow;
   const maximumOffset = args.transformOriginPercent * zoomOverflow;
   const safeOffset = Math.max(
@@ -623,6 +711,7 @@ function botcastCameraOffsetPercent(args: {
 export function botcastCameraOffsetXPercent(
   shot: BotcastDirectedCameraShot,
   layout: BotcastStudioLayout,
+  zoom = BOTCAST_CLOSEUP_CAMERA_SCALE,
 ): number {
   if (shot === "wide") return 0;
   const focusX = shot === "left" ? layout.hostBot.x : layout.guestBot.x;
@@ -630,6 +719,7 @@ export function botcastCameraOffsetXPercent(
     focusPercent: focusX,
     focalLinePercent: 50,
     transformOriginPercent: 50,
+    zoom,
   });
 }
 
@@ -637,6 +727,7 @@ export function botcastCameraOffsetXPercent(
 export function botcastCameraOffsetYPercent(
   shot: BotcastDirectedCameraShot,
   layout: BotcastStudioLayout,
+  zoom = BOTCAST_CLOSEUP_CAMERA_SCALE,
 ): number {
   if (shot === "wide") return 0;
   const focusY = shot === "left" ? layout.hostBot.y : layout.guestBot.y;
@@ -644,6 +735,7 @@ export function botcastCameraOffsetYPercent(
     focusPercent: focusY,
     focalLinePercent: 55,
     transformOriginPercent: 55,
+    zoom,
   });
 }
 
@@ -766,6 +858,7 @@ export const BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT = [
   "The attached image is the sole canonical source frame.",
   "Produce one finished replacement image of that exact studio in natural daytime lighting.",
   "Preserve the identical camera position, lens, crop, perspective, room geometry, windows and view, furniture, microphones, props, artwork, materials, object placement, scale, and negative space.",
+  "Preserve both empty cup coasters exactly as shown, fully visible and unobstructed; do not place any object or drinkware on either coaster.",
   "On both microphones, keep the exact flat electric-magenta #FF00FF color key confined to the illuminated trim, LED rings, and status lights. Keep #FF00FF out of every other object, reflection, light, surface, and pixel.",
   "Do not add coffee cups, mugs, tumblers, drinking glasses, or other drinkware.",
   "Do not redesign, restage, add, remove, substitute, duplicate, relocate, crop, zoom, or recompose anything.",
@@ -859,6 +952,7 @@ export interface BotcastShow {
   nightAtmosphere: BotcastAtmosphereState;
   studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
+  cameraFraming: BotcastCameraFraming;
   studioGlowTuning: BotcastStudioGlowTuning;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
@@ -1499,6 +1593,7 @@ export interface BotcastCameraSuggestion {
   shot: BotcastDirectedCameraShot;
   reason:
     | "opening"
+    | "introduction"
     | "speaker"
     | "hidden_speaker"
     | "power_effect"
@@ -2015,6 +2110,7 @@ export interface BotcastShowPatchRequest {
   /** Server-owned derived state; omitted by the public show PATCH route. */
   studioLighting?: BotcastStudioLightingState;
   studioLayout?: BotcastStudioLayout;
+  cameraFraming?: BotcastCameraFraming;
   studioGlowTuning?: BotcastStudioGlowTuning;
   voiceLevelsByBotId?: BotcastVoiceLevelsByBotId;
   atmosphereMix?: BotcastStudioAtmosphereMix;
@@ -2455,7 +2551,10 @@ export function botcastHostSignOffIntent(args: {
  * no wall-clock target: it follows the shape and tempo of the transcript.
  */
 export function botcastSessionShouldClose(args: {
-  messages: readonly Pick<BotcastMessage, "speakerRole" | "content">[];
+  messages: readonly Pick<
+    BotcastMessage,
+    "speakerRole" | "content" | "socialSilence"
+  >[];
   durationMinutes: BotcastSessionDurationMinutes | null;
   startedAtMs: number;
   nowMs: number;
@@ -2504,7 +2603,14 @@ export function botcastSessionShouldClose(args: {
     return true;
   }
 
-  const latestGuestLine = args.messages.at(-1)?.content ?? "";
+  const latestGuestTurn = args.messages.at(-1);
+  if (
+    !latestGuestTurn ||
+    !botcastGuestAnswerAdvancesInterview(latestGuestTurn)
+  ) {
+    return false;
+  }
+  const latestGuestLine = latestGuestTurn.content;
   if (BOTCAST_NATURAL_REST_PATTERN.test(latestGuestLine)) return true;
   if (
     utteranceCount >= 10 &&

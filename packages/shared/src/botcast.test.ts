@@ -10,6 +10,7 @@ import {
   BOTCAST_ECHO_DASHBOARD_BLURB_FALLBACK,
   BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+  BOTCAST_DEFAULT_CAMERA_FRAMING,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
@@ -60,6 +61,7 @@ import {
   isBotcastFallbackStudioAccentVariant,
   isBotcastEchoDashboardBlurb,
   normalizeBotcastStudioLayout,
+  normalizeBotcastCameraFraming,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastHostRecoveryQuestions,
@@ -68,6 +70,27 @@ import {
   swapBotcastStudioLayoutSeats,
   type BotcastReplayEvent,
 } from "./botcast.ts";
+
+describe("Signal show camera framing", () => {
+  it("keeps independent bounded framing for left, right, and wide cameras", () => {
+    assert.deepEqual(
+      normalizeBotcastCameraFraming({
+        left: { zoom: 1.6, panX: -8.25, panY: 4.5 },
+        right: { zoom: 9, panX: 90, panY: -90 },
+        wide: { zoom: 0.5, panX: 2, panY: 3 },
+      }),
+      {
+        left: { zoom: 1.6, panX: -8.25, panY: 4.5 },
+        right: { zoom: 2, panX: 30, panY: -30 },
+        wide: { zoom: 1, panX: 2, panY: 3 },
+      },
+    );
+    assert.deepEqual(
+      normalizeBotcastCameraFraming(undefined),
+      BOTCAST_DEFAULT_CAMERA_FRAMING,
+    );
+  });
+});
 
 describe("Signal fallback studio accents", () => {
   it("normalizes the four replay-safe Signal soundboard cues", () => {
@@ -611,6 +634,7 @@ describe("Signal studio relighting", () => {
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /do not show a nighttime state/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /diptych|split screen|comparison/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Preserve[\s\S]*microphones/iu);
+    assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Preserve both empty cup coasters[\s\S]*fully visible and unobstructed/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /#FF00FF[\s\S]*every other object/iu);
     assert.match(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /Do not add coffee cups, mugs/iu);
     assert.doesNotMatch(BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT, /persona|set bible|host/iu);
@@ -963,6 +987,36 @@ describe("Botcast episode state", () => {
       startedAtMs: 0,
       nowMs: 4 * 60_000,
     }), false);
+
+    const matureInterview = Array.from({ length: 18 }, (_, index) => ({
+      speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
+      content:
+        "This concrete answer keeps the interview moving through one unresolved consequence.",
+    }));
+    matureInterview[17] = {
+      speakerRole: "guest",
+      content: "...",
+      socialSilence: socialSilence("late-silence"),
+    };
+    assert.equal(botcastSessionShouldClose({
+      messages: matureInterview,
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: [
+        ...matureInterview.slice(0, -1),
+        {
+          speakerRole: "guest",
+          content:
+            "The final answer resolves the open question and lets the mature conversation taper.",
+        },
+      ],
+      durationMinutes: null,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+    }), true);
   });
 
   it("recognizes earned voluntary exits without treating conditional warnings as departures", () => {

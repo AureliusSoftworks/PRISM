@@ -358,6 +358,11 @@ describe("replay manifests", () => {
         filmGrain: 0.65,
       },
       studioLayout: {},
+      cameraFraming: {
+        left: { zoom: 1.56, panX: -4, panY: 2 },
+        right: { zoom: 1.48, panX: 5, panY: -1 },
+        wide: { zoom: 1.08, panX: 0, panY: 1.5 },
+      },
       studioGlowTuning: {
         dark: { opacity: 0.78, blendMode: "screen" },
         light: { opacity: 0.52, blendMode: "overlay" },
@@ -453,6 +458,7 @@ describe("replay manifests", () => {
       dark: { opacity: 0.78, blendMode: "screen" },
       light: { opacity: 0.52, blendMode: "overlay" },
     });
+    assert.deepEqual(manifest.visual.metadata?.cameraFraming, show.cameraFraming);
   });
 
   it("keeps captured Signal direction authoritative over server-time semantics", () => {
@@ -587,6 +593,11 @@ describe("replay manifests", () => {
         filmGrain: 0.65,
       },
       studioLayout: {},
+      cameraFraming: {
+        left: { zoom: 1.42, panX: 0, panY: 0 },
+        right: { zoom: 1.42, panX: 0, panY: 0 },
+        wide: { zoom: 1, panX: 0, panY: 0 },
+      },
       studioGlowTuning: {
         dark: { opacity: 0.78, blendMode: "screen" },
         light: { opacity: 0.52, blendMode: "overlay" },

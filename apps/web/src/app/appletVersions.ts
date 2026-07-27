@@ -40,6 +40,7 @@ export type BotPowerGhostModePolicy =
   | "irrelevant"
   | "deferred";
 export type BotPowerAvatarScaleModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAvatarColorCycleModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAvatarVisibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
@@ -69,13 +70,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.34",
+    version: "1.35",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.32",
+    version: "1.33",
     status: "active",
   },
   arena: {
@@ -93,13 +94,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.38",
+    version: "2.39",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.38",
+    version: "1.39",
     status: "active",
   },
   feed: {
@@ -117,7 +118,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.28",
+    version: "0.29",
     status: "planned",
   },
   gym: {
@@ -170,6 +171,26 @@ export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
 export const BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerSpectralPerceptionModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** The holder's authored color stays the resting fallback in every projection. */
+export const BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerAvatarColorCycleModePolicy
 > = {
   chat: "direct",
   zen: "direct",

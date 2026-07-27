@@ -4,6 +4,7 @@ import type {
   BotcastAudienceExperienceV1,
   BotcastObserverProjectionV2,
   BotcastCameraShot,
+  BotcastCameraFraming,
   BotcastCameraSuggestion,
   BotcastEpisode,
   BotcastEpisodeAdvanceRequest,
@@ -88,6 +89,7 @@ import {
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  BOTCAST_DEFAULT_CAMERA_FRAMING,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
@@ -131,6 +133,7 @@ import {
   normalizeBotIdentityShapeshiftStateV1,
   normalizeBotcastIdentityMirrorResetV1,
   normalizeBotcastStudioGlowTuning,
+  normalizeBotcastCameraFraming,
   parseStoredBotAvatarDetailsV1,
   resolveBotAudioVoiceProfileV1,
   rewriteBotFalseNameResponseV1,
@@ -1315,6 +1318,7 @@ const BOTCAST_STUDIO_STAGE_COMPOSITION_PROMPT = [
   "Build exactly two compact, believable studio microphones into the scene, positioned just inward of the chairs around 38% and 62% of frame width and below the seated bots' face zones. No microphone, stand, boom arm, pop filter, or cable may cross either chair center or cover the seated-bot silhouettes.",
   "On those microphones only, render the illuminated trim, LED rings, and status lights in the exact flat electric-magenta color key #FF00FF. Keep the microphone bodies, grilles, stands, arms, and cables in believable set materials. Keep #FF00FF out of every other object, reflection, practical light, surface, and pixel; this magenta is a runtime color key, not part of the studio palette.",
   "Add one low, broad shared table across the inner gap between the chairs, designed in the same persona-specific material language as the set. Its clear horizontal tabletop must visibly extend beneath both runtime cup bases centered at 36.25% and 63.75% of frame width, meeting those bases around 95% of frame height and showing enough depth and front edge to read as solid furniture; keep the table below both seated-bot silhouettes.",
+  "On that tabletop, include exactly two empty, clearly visible cup coasters centered at 36.25% and 63.75% of frame width beneath the runtime mug bases. Each coaster must sit flat and unobstructed, be sized for one standard coffee mug, show its full rim, and use the same persona-specific material language as the set.",
   "Do not include coffee cups, mugs, tumblers, drinking glasses, or other drinkware; Signal adds any drinks separately at runtime.",
 ].join(" ");
 
@@ -2004,6 +2008,7 @@ function parseAtmospheres(raw: string): {
   nightAtmosphere: BotcastAtmosphereState;
   studioLighting: BotcastStudioLightingState;
   studioLayout: BotcastStudioLayout;
+  cameraFraming: BotcastCameraFraming;
   studioGlowTuning: BotcastStudioGlowTuning;
   voiceLevelsByBotId: BotcastVoiceLevelsByBotId;
   atmosphereMix: BotcastStudioAtmosphereMix;
@@ -2019,6 +2024,7 @@ function parseAtmospheres(raw: string): {
       nightAtmosphere?: Partial<BotcastAtmosphereState>;
       studioLighting?: Partial<BotcastStudioLightingState>;
       studioLayout?: unknown;
+      cameraFraming?: unknown;
       studioGlowTuning?: unknown;
       voiceLevelsByBotId?: unknown;
       atmosphereMix?: unknown;
@@ -2075,6 +2081,7 @@ function parseAtmospheres(raw: string): {
       nightAtmosphere: normalizeAtmosphere(container.nightAtmosphere, legacy),
       studioLighting,
       studioLayout: normalizeBotcastStudioLayout(container.studioLayout),
+      cameraFraming: normalizeBotcastCameraFraming(container.cameraFraming),
       studioGlowTuning: normalizeBotcastStudioGlowTuning(
         container.studioGlowTuning,
       ),
@@ -2103,6 +2110,7 @@ function parseAtmospheres(raw: string): {
         status: "missing",
       },
       studioLayout: normalizeBotcastStudioLayout(undefined),
+      cameraFraming: normalizeBotcastCameraFraming(undefined),
       studioGlowTuning: normalizeBotcastStudioGlowTuning(undefined),
       voiceLevelsByBotId: {},
       atmosphereMix: normalizeBotcastStudioAtmosphereMix(undefined),
@@ -2264,6 +2272,7 @@ function serializeShowVisuals(
   hostInterruptionLines: readonly string[],
   hostRecoveryQuestions: readonly string[],
   studioLayout: BotcastStudioLayout,
+  cameraFraming: BotcastCameraFraming,
   studioGlowTuning: Readonly<BotcastStudioGlowTuning>,
   voiceLevelsByBotId: Readonly<BotcastVoiceLevelsByBotId>,
   atmosphereMix: Readonly<BotcastStudioAtmosphereMix>,
@@ -2285,6 +2294,7 @@ function serializeShowVisuals(
     nightAtmosphere,
     studioLighting,
     studioLayout,
+    cameraFraming: normalizeBotcastCameraFraming(cameraFraming),
     studioGlowTuning: normalizeBotcastStudioGlowTuning(studioGlowTuning),
     voiceLevelsByBotId: normalizeBotcastVoiceLevelsByBotId(
       voiceLevelsByBotId,
@@ -2453,6 +2463,7 @@ function repairBotcastShowHostAuthoredLines(
       show.hostInterruptionLines,
       show.hostRecoveryQuestions,
       show.studioLayout,
+      show.cameraFraming,
       show.studioGlowTuning,
       show.voiceLevelsByBotId,
       show.atmosphereMix,
@@ -3693,6 +3704,7 @@ export function createBotcastShow(
         ? botcastCanonicalSilentHostLines()
         : [],
       BOTCAST_DEFAULT_STUDIO_LAYOUT,
+      BOTCAST_DEFAULT_CAMERA_FRAMING,
       BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
       {},
       BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
@@ -4030,6 +4042,10 @@ export function updateBotcastShow(
     patch.studioLayout,
     current.studioLayout,
   );
+  const cameraFraming = normalizeBotcastCameraFraming(
+    patch.cameraFraming,
+    current.cameraFraming,
+  );
   const studioGlowTuning = normalizeBotcastStudioGlowTuning(
     patch.studioGlowTuning,
     current.studioGlowTuning,
@@ -4308,6 +4324,7 @@ export function updateBotcastShow(
         : botcastHostInterruptionLinesForSeed(host.id),
       hostRecoveryQuestions,
       studioLayout,
+      cameraFraming,
       studioGlowTuning,
       voiceLevelsByBotId,
       atmosphereMix,
@@ -8678,7 +8695,11 @@ export function buildBotcastSpeakerPrompt(
         source: peer,
         target: speaker,
       });
-  const wrappingUp = args.cue?.kind === "wrap_up";
+  const guestClosingOpportunity =
+    args.speakerRole === "guest" &&
+    activeBotcastWrapUpCue(args.episode)?.utterancesSinceCue === 1;
+  const wrappingUp =
+    args.cue?.kind === "wrap_up" || guestClosingOpportunity;
   const producerCut = args.speakerRole === "host" && args.producerCut === true;
   const departureEvent = [...args.episode.events]
     .reverse()
@@ -8714,11 +8735,18 @@ export function buildBotcastSpeakerPrompt(
       args.episode.messages[0]?.speakerRole === "host" &&
       botPowerIsMutedV1(args.host.powers),
   );
+  const firstGuestOpeningReply = Boolean(
+    args.speakerRole === "guest" &&
+      args.episode.segment === "opening" &&
+      args.episode.messages.length === 1 &&
+      args.episode.messages[0]?.speakerRole === "host" &&
+      !botPowerIsMutedV1(args.host.powers),
+  );
   const openingIntroductionRule =
     firstHostOpening
     ? botPowerIsMutedV1(args.guest.powers)
       ? `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook. Do not end with a generic request for the muted guest to begin speaking. Establish the private producer plan's first tactic instead: a proposition, permission to remain silent, or one clear nonverbal response route. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
-      : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook or first question. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
+      : `This is the episode's opening host turn. Deliver one cohesive, natural on-air introduction that says the exact show name "${args.show.name}", identifies you by name as "${args.host.name}", introduces the booked guest by exact name as "${hostNamesGuest}", and bridges into the subject. Put the show name and your host identification in the first sentence, then complete the guest introduction immediately before any extended premise hook or first question. Treat ${hostNamesGuest} as a person already in the room: address them directly, make one brief guest-specific acknowledgement, observation, or provocation that gives them something real to react to, and leave conversational space for their answer. Sound like this specific host on this specific show—not generic podcast copy—and never present the details as a checklist, labels, or setup metadata.`
     : null;
   const openingTopicFramingRule = firstHostOpening
     ? "Treat the public Topic field as a raw editorial title, not a line of dialogue: it is a label, not a sentence topic to parrot. Build the opening around one meaningful premise, tension, tradeoff, event, or question that the title suggests; expand or grammatically reframe it as needed, preserve its meaning, and let the host persona flavor the framing. The exact title does not need to appear verbatim. Do not treat verbatim wording as a requirement or fall back to a fixed topic-announcement template. Never announce the title with a canned Today-plus-talk-about template, and never merely restate the title as the subject of the first question."
@@ -8906,11 +8934,13 @@ export function buildBotcastSpeakerPrompt(
       : [
           "You are the guest. Answer from your persona, with your own confidence, evasiveness, boundaries, and willingness to disagree.",
           wrappingUp
-            ? "The episode is wrapping up. Give your final response or closing thought now. Do not introduce a new topic, ask a return question, or extend the interview."
+            ? "The host has opened the closing exchange and offered you the floor. If this guest genuinely wants the moment, use it for one brief final comment—a closing thought, direct response, correction, or thanks in your own voice. If not, answer tersely and leave the space alone. Do not introduce a new topic, ask a return question, or turn this into the host's sign-off."
             : args.departureRequired
             ? "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
             : firstGuestAfterMutedHostOpening
               ? `This is the episode's first audible line because ${guestNamesHost} cannot speak. Carry the opening naturally: say the exact show name "${args.show.name}", identify yourself as the guest "${args.guest.name}" and ${guestNamesHost} as the host, name the subject, then offer your first substantive thought. Do not claim the host spoke or asked a question.`
+              : firstGuestOpeningReply
+                ? `This is your first on-mic reply. Briefly register ${guestNamesHost}'s actual welcome, guest-specific observation, provocation, or framing in a way only this guest would—a warm acknowledgement, dry correction, skepticism, amusement, or immediate disagreement all count—then answer the concrete invitation. Do not repeat the introductions or default to generic "glad to be here" podcast filler.`
             : args.episode.tensionStage === "warning"
               ? "Push back explicitly and draw one firm personal boundary. Do not announce, threaten, or forecast a future walkout; if the boundary is crossed, the departure should surprise the host."
             : args.episode.tensionStage === "resistance"
@@ -9104,7 +9134,8 @@ export function buildBotcastOpeningIntroPrompt(
     `Let ${args.host.name}'s actual persona determine the degree and manner of anticipation. It may be delighted, wary, hungry, amused, precise, or quietly compelled, but it must feel earned by this host rather than uniformly enthusiastic. Whatever the register, convey a genuine personal desire to be on mic for this particular episode; never sound bored, procedural, or obligated.`,
     `Treat ${hostNamesGuest}'s persona as a real source of friction, expertise, or intrigue when a guest is present. Use the episode topic and any private producer direction as the immediate reason this particular conversation needs to begin now.`,
     "Choose a fresh opening architecture that fits this episode, but lead with a concise, persona-shaped identity sentence naming the show and host, then identify the guest immediately. After that protected identity lead, move into a provocation, vivid image, contradiction, confession, urgent observation, or pointed guest-specific hook.",
-    "Naturally launch the conversation with a concrete invitation, proposition, or first question. Avoid stock welcome language, generic podcast boilerplate, routine Today-we-are-here phrasing, and all variants of asking for the meaning of the topic or the lesson behind the topic.",
+    "Stage the opening as the beginning of an interaction, not a host monologue. Speak to the guest by name, let one short acknowledgement or provocation land between you, and hand them one clean conversational opening.",
+    "Naturally launch the conversation with a concrete invitation, proposition, or first question. Do not stack multiple questions or answer on the guest's behalf. Avoid stock welcome language, generic podcast boilerplate, routine Today-we-are-here phrasing, and all variants of asking for the meaning of the topic or the lesson behind the topic.",
     "Return only the spoken on-air intro. Do not explain the creative choices, mention this authoring pass, or write the guest's response.",
   ].join("\n\n");
   return ordinaryPrompt.map((message) =>
@@ -9810,6 +9841,24 @@ function botcastOpeningIntroducesCast(input: {
   // the host persona and the episode-specific opening hook.
   const identifiesGuest = content.includes(guestName);
   return content.includes(showName) && identifiesHost && identifiesGuest;
+}
+
+function botcastOpeningGuestIntroductionProgress(input: {
+  content: string;
+  guestName: string;
+}): number | null {
+  const words = normalizeBotcastSpokenIdentity(input.content)
+    .split(" ")
+    .filter(Boolean);
+  const guestWords = normalizeBotcastSpokenIdentity(input.guestName)
+    .split(" ")
+    .filter(Boolean);
+  if (words.length === 0 || guestWords.length === 0) return null;
+  const guestStart = words.findIndex((_, index) =>
+    guestWords.every((word, offset) => words[index + offset] === word),
+  );
+  if (guestStart < 0) return null;
+  return Math.max(0, Math.min(1, guestStart / words.length));
 }
 
 function botcastOpeningInterruptionTargetProgress(input: {
@@ -13286,6 +13335,25 @@ export async function advanceBotcastEpisode(
       );
     }
   }
+  const openingReactionMinimumProgress = firstHostOpening
+    ? (botcastOpeningInterruptionTargetProgress({
+        content,
+        showName: show.name,
+        hostName: host.name,
+        guestName: hostNamesGuest,
+        targetProgress: 0.3,
+        certainty: "always",
+      }) ?? 0.88)
+    : undefined;
+  const recentSignalSpokenCues = episode.messages
+    .slice(-4)
+    .flatMap((priorMessage) => {
+      const priorPlan = botcastListenerReactionForMessage(
+        episode.events,
+        priorMessage.id,
+      );
+      return priorPlan?.spokenCue ? [priorPlan.spokenCue] : [];
+    });
   let listenerReactionCandidate = powerInterruptionPlan
     ? buildBotCrosstalkListenerReactionPlanV1({
         seed: `signal-power-crosstalk-v1:${episode.id}:${messageId}:${listener.id}`,
@@ -13320,6 +13388,10 @@ export async function advanceBotcastEpisode(
           segment: episode.segment,
           mood: utteranceMoodKey,
           tensionLevel: tension.level,
+          ...(openingReactionMinimumProgress !== undefined
+            ? { minimumTargetProgress: openingReactionMinimumProgress }
+            : {}),
+          recentSpokenCues: recentSignalSpokenCues,
         })
       : null;
   if (
@@ -13628,17 +13700,65 @@ export async function advanceBotcastEpisode(
       segment: episode.segment,
       event: "utterance",
     });
+    const recordedSuggestion =
+      firstOpeningHost && speakerVisibleToAudience
+        ? { ...suggestion, minimumHoldMs: 1_800 }
+        : suggestion;
     recordEvent(
       db,
       userId,
       episode.id,
       "camera_suggestion",
-      { ...suggestion, messageId },
+      { ...recordedSuggestion, messageId },
       now,
     );
+    if (
+      firstOpeningHost &&
+      speakerVisibleToAudience &&
+      utteranceDurationMs >= 3_600
+    ) {
+      const guestVisibleToAudience = botcastObserverProjectionForRoleV2({
+        episode,
+        role: "guest",
+        perspective: "live",
+      }).visible;
+      const guestIntroductionProgress = botcastOpeningGuestIntroductionProgress({
+        content: deliveredContent,
+        guestName: hostNamesGuest,
+      });
+      if (guestVisibleToAudience && guestIntroductionProgress !== null) {
+        const introductionAtMs = Math.max(
+          recordedSuggestion.atMs + recordedSuggestion.minimumHoldMs,
+          messageStartMs +
+            Math.round(utteranceDurationMs * guestIntroductionProgress),
+        );
+        const guestFocusAtMs = Math.min(
+          messageStartMs + utteranceDurationMs - 900,
+          introductionAtMs,
+        );
+        if (guestFocusAtMs > recordedSuggestion.atMs) {
+          recordEvent(
+            db,
+            userId,
+            episode.id,
+            "camera_suggestion",
+            {
+              shot: "right",
+              reason: "introduction",
+              speakerRole: "guest",
+              introductionTarget: "guest",
+              atMs: guestFocusAtMs,
+              minimumHoldMs: 1_800,
+              messageId,
+            },
+            now,
+          );
+        }
+      }
+    }
     if (participantDepartsThisTurn) {
       const departureSuggestion = botcastDirectorSuggestion({
-        previous: suggestion,
+        previous: recordedSuggestion,
         atMs:
           messageStartMs +
           Math.max(BOTCAST_DIRECTOR_MIN_SHOT_MS, utteranceDurationMs),

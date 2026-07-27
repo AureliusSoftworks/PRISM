@@ -260,6 +260,7 @@ import {
   withSignalGenerationKeywords,
 } from "./signal-generation-keywords.ts";
 import {
+  REPLAY_RENDER_CHUNK_MAX_BYTES,
   claimReplayStudioCutMix,
   completeReplayStudioCutMix,
   deleteReplayRecordingMedia,
@@ -273,6 +274,7 @@ import {
   replayPremiumAudioFile,
   replayPremiumSegmentAudioFile,
   replayStudioCutEligibility,
+  retryReplayPremiumProduction,
   replayTranscript,
   replayVoiceTakeAudioFile,
   startReplayPremiumProduction,
@@ -11320,6 +11322,12 @@ function buildRoutes(): RouteDefinition[] {
               studioLayout: body.studioLayout as BotcastShowPatchRequest["studioLayout"],
             }
           : {}),
+        ...(body.cameraFraming !== undefined
+          ? {
+              cameraFraming:
+                body.cameraFraming as BotcastShowPatchRequest["cameraFraming"],
+            }
+          : {}),
         ...(body.studioGlowTuning !== undefined
           ? {
               studioGlowTuning:
@@ -14908,6 +14916,18 @@ function buildRoutes(): RouteDefinition[] {
       const claimed = claimReplayStudioCutMix(db, userId, ctx.params.id);
       json(ctx.res, 200, { ok: true, claimed });
     }),
+    route("POST", "/api/replays/:id/studio-cut/mix/retry", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const recording = retryReplayPremiumProduction(
+        db,
+        userId,
+        ctx.params.id,
+      );
+      if (!recording) {
+        throw new HttpError(409, "No saved Studio Cut voice master is available.");
+      }
+      json(ctx.res, 200, { ok: true, recording });
+    }),
     route("POST", "/api/replays/:id/studio-cut/mix/audio-chunk", async (ctx) => {
       const userId = requireAuth(ctx);
       const renderToken = readReplayRenderToken(ctx);
@@ -15415,11 +15435,13 @@ function buildRoutes(): RouteDefinition[] {
               : "";
           if (
             listenerReactionText !== "mm-hm" &&
+            listenerReactionText !== "mm-hmm" &&
             listenerReactionText !== "I see" &&
             listenerReactionText !== "hmm" &&
             listenerReactionText !== "right" &&
             listenerReactionText !== "oh" &&
             listenerReactionText !== "go on" &&
+            listenerReactionText !== "sure, sure" &&
             listenerReactionText !== "No, hold on." &&
             listenerReactionText !== "Let me answer that." &&
             listenerReactionText !== "That's not fair." &&
@@ -20396,12 +20418,16 @@ async function dispatchRequest(
     const replayFaithfulAudioUpload =
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/audio$/u.test(pathname);
+    const replayStudioCutAudioChunkUpload =
+      method === "POST" &&
+      /^\/api\/replays\/[^/]+\/studio-cut\/mix\/audio-chunk$/u.test(pathname);
     const body =
       method === "POST" || method === "PATCH" || method === "DELETE"
         ? slateArchiveUpload ||
           accountBackupArchiveUpload ||
           replayVoiceTakeUpload ||
-          replayFaithfulAudioUpload
+          replayFaithfulAudioUpload ||
+          replayStudioCutAudioChunkUpload
           ? await readBinaryBody(
               req,
               slateArchiveUpload
@@ -20410,7 +20436,9 @@ async function dispatchRequest(
                   ? ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES
                   : replayFaithfulAudioUpload
                       ? REPLAY_FAITHFUL_AUDIO_MAX_BYTES
-                      : 24 * 1024 * 1024,
+                      : replayStudioCutAudioChunkUpload
+                        ? REPLAY_RENDER_CHUNK_MAX_BYTES
+                        : 24 * 1024 * 1024,
             )
           : await readJsonBody(req)
         : {};

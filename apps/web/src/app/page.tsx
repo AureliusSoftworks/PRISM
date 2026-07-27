@@ -824,6 +824,8 @@ import {
   activeBotPowersV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
+  botPowerHasAvatarColorCycleFromEffectsV1,
+  botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeFromEffectsV1,
   botPowerAvatarVisibilityModeV1,
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
@@ -30488,6 +30490,11 @@ function ZenLiveBotPresencePlate({
       data-power-avatar-scale={
         bot ? (botPowerAvatarScaleModeV1(bot.powers) ?? undefined) : undefined
       }
+      data-power-avatar-color-cycle={
+        bot && botPowerHasAvatarColorCycleV1(bot.powers)
+          ? "spectrum"
+          : undefined
+      }
       data-private-mode={privateModeActive ? "true" : undefined}
       data-prism-forming={
         defaultPrismPresence && defaultPrismPresenceForming ? "true" : undefined
@@ -38683,6 +38690,8 @@ function BotPowerBadge({
       return effect.mode === "larger"
         ? "Slightly larger avatar"
         : "Slightly smaller avatar";
+    if (effect.type === "avatar_color_cycle")
+      return "Avatar continuously cycles through the color spectrum";
     if (effect.type === "voice_presence")
       return effect.mode === "loud"
         ? "Amplified voice and larger spoken text"
@@ -123805,6 +123814,11 @@ function HomeContent(): React.JSX.Element {
                     coffeePowerPlan.bots[bot.id]?.effects,
                   )
                 : botPowerAvatarScaleModeV1(bot.powers);
+              const seatAvatarColorCycle = coffeePowerPlan
+                ? botPowerHasAvatarColorCycleFromEffectsV1(
+                    coffeePowerPlan.bots[bot.id]?.effects,
+                  )
+                : botPowerHasAvatarColorCycleV1(bot.powers);
               const seatDeadAirAsideTalking =
                 activeCoffeeDeadAirAside?.commentatorBotId === bot.id &&
                 !seatPowerMuted;
@@ -124595,6 +124609,9 @@ function HomeContent(): React.JSX.Element {
                     seatAvatarVisibilityMode ?? undefined
                   }
                   data-power-avatar-scale={seatAvatarScaleMode ?? undefined}
+                  data-power-avatar-color-cycle={
+                    seatAvatarColorCycle ? "spectrum" : undefined
+                  }
                   data-identity-mirror-active={
                     identityMirrorState || identityShapeshiftState
                       ? "true"
@@ -128050,6 +128067,11 @@ function HomeContent(): React.JSX.Element {
             data-power-avatar-visibility={
               botPowerAvatarVisibilityModeV1(npcActor.bot.powers) ?? undefined
             }
+            data-power-avatar-color-cycle={
+              botPowerHasAvatarColorCycleV1(npcActor.bot.powers)
+                ? "spectrum"
+                : undefined
+            }
           >
             <img
               src={spriteUrl}
@@ -128496,6 +128518,11 @@ function HomeContent(): React.JSX.Element {
               bots.find((candidate) => candidate.id === botSummary.id)?.powers,
             )
           }
+          resolveAvatarColorCycle={(botSummary) =>
+            botPowerHasAvatarColorCycleV1(
+              bots.find((candidate) => candidate.id === botSummary.id)?.powers,
+            )
+          }
           resolveThinkingAudible={(botSummary) => {
             const sfx = botSummary.producerGuest
               ? botAvatarSfxForProfile(
@@ -128705,6 +128732,9 @@ function HomeContent(): React.JSX.Element {
                   botSummary.identityMirrorState?.targetBotId
                 }
                 data-thinking={avatarState.thinking ? "true" : undefined}
+                data-power-avatar-color-cycle={
+                  avatarState.avatarColorCycle ? "spectrum" : undefined
+                }
                 data-sip-face-reason={
                   sipMouthTreatmentActive ? sipPresentation.reason : undefined
                 }

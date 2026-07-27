@@ -3312,7 +3312,7 @@ describe("API request integration", () => {
         "/api/voices/synthesize",
         jsonInit({
           signalMessageId: "signal-online-voice-message",
-          listenerReactionText: "mm-hm",
+          listenerReactionText: "mm-hmm",
           mode: "english",
           engine: "elevenlabs",
           profile: {
@@ -3333,7 +3333,7 @@ describe("API request integration", () => {
       const reactionProviderBody = JSON.parse(
         String(reactionCalls[0]?.init?.body),
       );
-      assert.equal(reactionProviderBody.text, "mm-hm");
+      assert.equal(reactionProviderBody.text, "mm-hmm");
       assert.equal(
         reactionProviderBody.seed,
         elevenLabsVoiceIsolationSeed("signal-voice-guest"),
@@ -3366,7 +3366,7 @@ describe("API request integration", () => {
         "/api/voices/synthesize",
         jsonInit({
           signalMessageId: "signal-online-voice-message",
-          listenerReactionText: "go on",
+          listenerReactionText: "sure, sure",
           mode: "english",
           engine: "builtin",
         }),

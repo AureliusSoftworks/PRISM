@@ -1754,7 +1754,7 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.wordmark \.showLogo\s*\{[^}]*width:\s*68px/iu);
     assert.match(
       css,
-      /\.stageViewport\[data-shot="right"\] \.stageScene\s*\{[^}]*scale\(1\.42\)/u,
+      /\.stageScene\s*\{[^}]*scale\(var\(--botcast-camera-zoom, 1\)\)/u,
     );
     assert.match(css, /\.wordmark::before\s*\{[^}]*radial-gradient/iu);
     assert.match(css, /\.wordmark strong\s*\{[^}]*color:\s*#f8fbff/iu);
@@ -1771,15 +1771,17 @@ describe("Signal experience shell", () => {
   it("reserves the full transcript and playback controls for replay", () => {
     assert.doesNotMatch(source, /className=\{styles\.transcript\}/u);
     assert.doesNotMatch(source, /signalTranscriptFollowingRef/u);
-    assert.match(source, /className=\{styles\.replayControls\}/u);
+    assert.match(source, /className=\{styles\.replayPlayer\}/u);
     assert.match(source, /className=\{styles\.replayTranscript\}/u);
-    assert.match(css, /\.replayControls\s*\{[^}]*background:\s*var\(--botcast-panel\)/u);
+    assert.match(css, /\.replayPlayer\s*\{[^}]*var\(--botcast-panel\)/u);
     assert.match(css, /\.replayTranscript\s*\{[^}]*max-height:\s*320px/u);
     assert.match(
       source,
       /signalReplayIntroDurationMs\(replayActiveTimeline\)/u,
     );
-    assert.match(source, />\s*Studio Cut ✨\s*</u);
+    assert.match(source, /className=\{styles\.replaySourceToggle\}/u);
+    assert.match(source, /aria-label="Choose replay audio"/u);
+    assert.match(source, />\s*Studio Cut\s*</u);
     assert.match(source, /startReplayStudioCut\(replayRecording\.id, regenerate\)/u);
     assert.match(source, /Estimated ElevenLabs use:/u);
     assert.match(source, />\s*On Air\s*</u);
@@ -2376,8 +2378,13 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /translate\(var\(--botcast-camera-offset-x, 0%\), var\(--botcast-camera-offset-y, 0%\)\) scale\(1\.42\)/u,
+      /translate\(var\(--botcast-camera-offset-x, 0%\), var\(--botcast-camera-offset-y, 0%\)\) scale\(var\(--botcast-camera-zoom, 1\)\)/u,
     );
+    assert.match(source, /aria-label="Show camera alignment"/u);
+    assert.match(source, /\(\["left", "right", "wide"\] as const\)\.map/u);
+    assert.match(source, /body: JSON\.stringify\(\{ cameraFraming: draft\.framing \}\)/u);
+    assert.match(source, /replayVisualMetadata\?\.cameraFraming \?\? args\.show\.cameraFraming/u);
+    assert.match(source, /BOTCAST_DEFAULT_CAMERA_FRAMING\[[\s\S]{0,100}studioCameraPreviewShot/u);
     assert.match(css, /\.stageViewport\s*\{[^}]*aspect-ratio:\s*16 \/ 9/iu);
     assert.doesNotMatch(css, /aspect-ratio:\s*16 \/ 8\.8/iu);
     assert.match(source, /aria-label="Signal episode length"/u);

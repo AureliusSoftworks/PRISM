@@ -773,6 +773,66 @@
   scale: 0.86;
 }
 
+@property --bot-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+
+@property --coffee-bot-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+
+@keyframes botPowerSpectrumColorCycle {
+  0%,
+  100% {
+    --coffee-bot-color: #ff4d6d;
+  }
+  16.67% {
+    --coffee-bot-color: #ff9f43;
+  }
+  33.33% {
+    --coffee-bot-color: #ffe66d;
+  }
+  50% {
+    --coffee-bot-color: #2ed573;
+  }
+  66.67% {
+    --coffee-bot-color: #35cfff;
+  }
+  83.33% {
+    --coffee-bot-color: #a66cff;
+  }
+}
+
+@keyframes botPowerStorySpectrumColorCycle {
+  0%,
+  100% {
+    --bot-color: #ff4d6d;
+  }
+  16.67% {
+    --bot-color: #ff9f43;
+  }
+  33.33% {
+    --bot-color: #ffe66d;
+  }
+  50% {
+    --bot-color: #2ed573;
+  }
+  66.67% {
+    --bot-color: #35cfff;
+  }
+  83.33% {
+    --bot-color: #a66cff;
+  }
+}
+
+.storySpriteWrap[data-power-avatar-color-cycle="spectrum"] {
+  animation: botPowerStorySpectrumColorCycle 7.2s linear infinite;
+}
+
 .storySpriteWrap[data-power-avatar-visibility="hidden"] {
   opacity: 0;
 }
@@ -978,6 +1038,15 @@
   transform-origin: 50% 70%;
 }
 
+/* Color Powers animate the holder's rendered accent; inline authored color stays underneath. */
+.zenLiveBotPresencePlate[data-power-avatar-color-cycle="spectrum"],
+.coffeeSeat[data-power-avatar-color-cycle="spectrum"]:not(
+    [data-roster-preview="true"]
+  )
+  .coffeeSeatPlate[data-live-body-style="zen"] {
+  animation: botPowerSpectrumColorCycle 7.2s linear infinite;
+}
+
 /* Visibility Powers affect only the embodied avatar, not its seat or transcript. */
 .zenLiveBotPresencePlate[data-power-avatar-visibility="hidden"] {
   opacity: 0;
@@ -1056,6 +1125,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .storySpriteWrap[data-power-avatar-color-cycle="spectrum"],
+  .zenLiveBotPresencePlate[data-power-avatar-color-cycle="spectrum"],
+  .coffeeSeat[data-power-avatar-color-cycle="spectrum"]
+    .coffeeSeatPlate[data-live-body-style="zen"] {
+    animation: none;
+  }
+
   .zenLiveBotPresencePlate[data-ghostly-presence="true"],
   .coffeeSeat[data-ghostly-presence="true"]
     .coffeeSeatPlate[data-live-body-style="zen"] {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
+import { compactSignalStudioCutMouthCues } from "./signalStudioCutMouth.ts";
 
 const experience = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
@@ -14,15 +15,54 @@ const mixer = readFileSync(
   new URL("./signalStudioCutAudio.ts", import.meta.url),
   "utf8",
 );
+const voiceEffects = readFileSync(
+  new URL("./voiceEffects.ts", import.meta.url),
+  "utf8",
+);
 const client = readFileSync(new URL("./replayClient.ts", import.meta.url), "utf8");
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Signal Studio Cut contract", () => {
+  it("emits Replay V2-valid direction and mouth-track sequences", () => {
+    assert.match(
+      mixer,
+      /\.map\(\(event, sequence\) => \(\{ \.\.\.event, sequence: sequence \+ 1 \}\)\)/u,
+    );
+    assert.deepEqual(
+      compactSignalStudioCutMouthCues([
+        { atMs: 100, shape: "open-small" },
+        { atMs: 120, shape: "open-small" },
+        { atMs: 140, shape: "closed" },
+        { atMs: 160, shape: "closed" },
+        { atMs: 180, shape: "open-wide" },
+      ]),
+      [
+        { atMs: 100, shape: "open-small" },
+        { atMs: 140, shape: "closed" },
+        { atMs: 180, shape: "open-wide" },
+      ],
+    );
+  });
+
   it("keeps On Air as a distinct source and confirms every paid take", () => {
     assert.match(experience, /"on-air" \| "studio-cut"/u);
+    assert.match(experience, /Checking Studio Cut…/u);
+    assert.match(experience, /Starting paid Studio Cut generation…/u);
+    assert.match(
+      experience,
+      /Remixing the saved Studio Cut voices and production layers without another paid generation…/u,
+    );
+    assert.match(experience, /aria-busy=\{studioCutBusy\}/u);
+    assert.doesNotMatch(experience, /window\.confirm\(/u);
+    assert.match(experience, /role="alertdialog"[\s\S]*signal-studio-cut-title/u);
+    assert.match(experience, /confirmStudioCut\(\)/u);
+    assert.match(experience, /confirmRemoveStudioCut\(\)/u);
     assert.match(experience, /Estimated ElevenLabs use:/u);
-    assert.match(experience, /canonical episode dialogue and saved ElevenLabs voice IDs/u);
-    assert.match(experience, /exact On Air recording remains unchanged/u);
+    assert.match(
+      experience,
+      /canonical episode dialogue and saved\s+ElevenLabs voice IDs/u,
+    );
+    assert.match(experience, /exact On Air recording remains\s+unchanged/u);
     assert.match(client, /confirm: "send-to-elevenlabs"/u);
   });
 
@@ -54,6 +94,24 @@ describe("Signal Studio Cut contract", () => {
     );
   });
 
+  it("reapplies saved per-line voice processing and production mix layers", () => {
+    assert.match(coordinator, /claim\.takes/u);
+    assert.match(mixer, /primaryTakeByMessageId/u);
+    assert.match(mixer, /renderOfflineVoiceTake\(\{[\s\S]*profile: take\.snapshot\.profile/u);
+    assert.match(mixer, /moodKey: take\.snapshot\.moodKey/u);
+    assert.match(mixer, /effectsEnabled: take\.snapshot\.effectsEnabled/u);
+    assert.match(mixer, /gain: take\.snapshot\.gain/u);
+    assert.match(mixer, /stereoPan: take\.snapshot\.stereoPan/u);
+    assert.match(mixer, /SIGNAL_STUDIO_VOICE_ROOM_SEND/u);
+    assert.match(mixer, /SIGNAL_STUDIO_FOLEY_ROOM_SEND/u);
+    assert.match(mixer, /resolvePreSpeechBreathPlan/u);
+    assert.match(mixer, /sessionAtmosphereBusVolume/u);
+    assert.match(voiceEffects, /applyVoiceDeliveryMoodToProfile/u);
+    assert.match(voiceEffects, /resolveVoicePlaybackTransform/u);
+    assert.match(voiceEffects, /resolveVoiceEffectPlan/u);
+    assert.match(voiceEffects, /FormantCorrectionNode/u);
+  });
+
   it("derives replay direction and mouths without thinking holds", () => {
     assert.match(mixer, /event\.kind === "thinking" \|\| event\.kind === "overlap"/u);
     assert.match(mixer, /timingByMessageId/u);
@@ -62,9 +120,13 @@ describe("Signal Studio Cut contract", () => {
   });
 
   it("offers retry, download, and removal while preserving the previous cut", () => {
-    assert.match(experience, /Try another/u);
-    assert.match(experience, /Download Studio Cut/u);
-    assert.match(experience, />\s*Remove\s*</u);
+    assert.match(experience, /New Studio Cut/u);
+    assert.match(experience, /Remix cut/u);
+    assert.match(experience, /retryReplayStudioCutMix/u);
+    assert.match(experience, /Retry Studio Cut mix/u);
+    assert.match(experience, /Download audio/u);
+    assert.match(experience, /replayActiveDownloadUrl/u);
+    assert.match(experience, /Remove cut/u);
     assert.match(coordinator, /resumeReplayStudioCut/u);
   });
 });

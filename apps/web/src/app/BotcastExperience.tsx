@@ -20,6 +20,13 @@ import {
   BOTCAST_DEFAULT_STUDIO_FILM_GRAIN,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
+  BOTCAST_DEFAULT_CAMERA_FRAMING,
+  BOTCAST_CAMERA_PAN_MAX,
+  BOTCAST_CAMERA_PAN_MIN,
+  BOTCAST_CAMERA_PAN_STEP,
+  BOTCAST_CAMERA_ZOOM_MAX,
+  BOTCAST_CAMERA_ZOOM_MIN,
+  BOTCAST_CAMERA_ZOOM_STEP,
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE,
@@ -33,6 +40,7 @@ import {
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
   botPowerAvatarScaleModeV1,
+  botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeV1,
   applyBotPowerEchoResponseV1,
   botPowerIsMutedV1,
@@ -76,6 +84,7 @@ import {
   buildSignalMusicProfile,
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
+  normalizeBotcastCameraFraming,
   normalizeBotcastStudioGlowTuning,
   normalizeBotcastStudioLayout,
   normalizeBotcastVoiceLevel,
@@ -98,6 +107,9 @@ import {
   type BotcastMessage,
   type BotcastProducerCue,
   type BotcastProducerCueDelivery,
+  type BotcastCameraFrame,
+  type BotcastCameraFraming,
+  type BotcastDirectedCameraShot,
   type BotcastShow,
   type BotcastShowHostChatMessage,
   type BotcastShowHostChatResponse,
@@ -126,7 +138,16 @@ import {
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
 import { INTERRUPTED_SPEAKER_RETORT_PAUSE_MS } from "./listenerReactionVoice";
-import { LoaderCircle } from "lucide-react";
+import {
+  Download,
+  FileText,
+  LoaderCircle,
+  Pause,
+  Play,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import {
   buildCoffeeCupVisualState,
   coffeeCupSipAnimationTiming,
@@ -239,6 +260,7 @@ import {
   replayRecordingDetail,
   replayRecordingForSource,
   removeReplayStudioCut,
+  retryReplayStudioCutMix,
   replayStudioCutEligibility,
   saveFaithfulReplaySession,
   startReplayStudioCut,
@@ -527,6 +549,7 @@ export interface BotcastExperienceProps {
       talking: boolean;
       thinking: boolean;
       sipping: boolean;
+      avatarColorCycle?: boolean;
       replayAudioMaster?: boolean;
       role: "host" | "guest";
       surface: "dashboard" | "stage" | "alignment";
@@ -555,6 +578,7 @@ export interface BotcastExperienceProps {
   resolveAvatarScaleMode?: (
     bot: BotcastBotSummary,
   ) => BotPowerAvatarScaleMode | null;
+  resolveAvatarColorCycle?: (bot: BotcastBotSummary) => boolean;
   resolveThinkingAudible?: (bot: BotcastBotSummary) => boolean;
   onUtterance?: (
     message: BotcastMessage,
@@ -749,6 +773,18 @@ type SignalBlockingOperation = {
   progress: number | null;
   cancellable: boolean;
 };
+
+type SignalStudioCutConfirmation =
+  | {
+      kind: "generate";
+      recordingId: string;
+      regenerate: boolean;
+      eligibility: ReplayStudioCutEligibilityV1;
+    }
+  | {
+      kind: "remove";
+      recordingId: string;
+    };
 
 type SignalStudioLayoutDrag = {
   pointerId: number;
@@ -1421,6 +1457,7 @@ export function BotcastExperience({
   resolveCupRateMultiplier,
   resolveAvatarVisibilityMode,
   resolveAvatarScaleMode,
+  resolveAvatarColorCycle,
   resolveThinkingAudible,
   onUtterance,
   onPrefetchUtterance,
@@ -1491,6 +1528,11 @@ export function BotcastExperience({
   const [replayPlaybackSource, setReplayPlaybackSource] =
     useState<"on-air" | "studio-cut">("on-air");
   const [studioCutBusy, setStudioCutBusy] = useState(false);
+  const [studioCutRequestPhase, setStudioCutRequestPhase] = useState<
+    "checking" | "retrying" | "starting" | null
+  >(null);
+  const [studioCutConfirmation, setStudioCutConfirmation] =
+    useState<SignalStudioCutConfirmation | null>(null);
   const [studioCutEligibilityState, setStudioCutEligibilityState] =
     useState<ReplayStudioCutEligibilityV1 | null>(null);
   const replayAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -1599,9 +1641,13 @@ export function BotcastExperience({
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
   const [studioLayoutPreviewTheme, setStudioLayoutPreviewTheme] =
     useState<"light" | "dark">(theme);
+  const [studioCameraPreviewShot, setStudioCameraPreviewShot] =
+    useState<BotcastDirectedCameraShot>("wide");
   const [studioLayoutPreviewGuestId, setStudioLayoutPreviewGuestId] =
     useState("");
   const [studioLayoutSaving, setStudioLayoutSaving] = useState(false);
+  const [studioCameraFramingSaving, setStudioCameraFramingSaving] =
+    useState(false);
   const [studioGlowTuningSaving, setStudioGlowTuningSaving] = useState(false);
   const [studioVoiceLevelsSaving, setStudioVoiceLevelsSaving] =
     useState(false);
@@ -1698,6 +1744,12 @@ export function BotcastExperience({
   } | null>(null);
   const studioLayoutSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const studioLayoutSavePendingRef = useRef(0);
+  const studioCameraFramingDraftRef = useRef<{
+    showId: string;
+    framing: BotcastCameraFraming;
+    revision: number;
+  } | null>(null);
+  const studioCameraFramingSaveInFlightRef = useRef(false);
   const studioGlowTuningDraftRef = useRef<{
     showId: string;
     tuning: BotcastStudioGlowTuning;
@@ -2831,6 +2883,7 @@ export function BotcastExperience({
     });
     setStudioLayoutPreviewGuestId(previewGuestId ?? "");
     setStudioLayoutPreviewTheme(theme);
+    setStudioCameraPreviewShot("wide");
     setStudioLayoutEditorOpen(true);
   };
   const hostShowAccent = selectedShow
@@ -3377,6 +3430,87 @@ export function BotcastExperience({
         }
       });
     studioLayoutSaveQueueRef.current = queuedSave;
+  };
+
+  const flushStudioCameraFramingSave = async (): Promise<void> => {
+    if (studioCameraFramingSaveInFlightRef.current) return;
+    studioCameraFramingSaveInFlightRef.current = true;
+    setStudioCameraFramingSaving(true);
+    try {
+      while (studioCameraFramingDraftRef.current) {
+        const draft = studioCameraFramingDraftRef.current;
+        const response = await request<{ show: BotcastShow }>(
+          `/api/botcast/shows/${encodeURIComponent(draft.showId)}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify({ cameraFraming: draft.framing }),
+          },
+        );
+        const latestDraft = studioCameraFramingDraftRef.current;
+        setShows((current) =>
+          current.map((show) => {
+            if (show.id !== draft.showId) return show;
+            return latestDraft?.showId === draft.showId
+              ? { ...response.show, cameraFraming: latestDraft.framing }
+              : response.show;
+          }),
+        );
+        if (
+          !latestDraft ||
+          latestDraft.showId !== draft.showId ||
+          latestDraft.revision === draft.revision
+        ) {
+          studioCameraFramingDraftRef.current = null;
+          break;
+        }
+      }
+    } catch (saveError) {
+      studioCameraFramingDraftRef.current = null;
+      setError(signalErrorToast("Save studio cameras", saveError));
+    } finally {
+      studioCameraFramingSaveInFlightRef.current = false;
+      setStudioCameraFramingSaving(false);
+      if (studioCameraFramingDraftRef.current) {
+        void flushStudioCameraFramingSave();
+      }
+    }
+  };
+
+  const updateStudioCameraFrame = (
+    show: BotcastShow,
+    shot: BotcastDirectedCameraShot,
+    update: Partial<BotcastCameraFrame>,
+  ): void => {
+    const previousDraft = studioCameraFramingDraftRef.current;
+    const previousFraming = normalizeBotcastCameraFraming(
+      previousDraft?.showId === show.id
+        ? previousDraft.framing
+        : show.cameraFraming,
+    );
+    const framing = normalizeBotcastCameraFraming(
+      {
+        ...previousFraming,
+        [shot]: {
+          ...previousFraming[shot],
+          ...update,
+        },
+      },
+      previousFraming,
+    );
+    studioCameraFramingDraftRef.current = {
+      showId: show.id,
+      framing,
+      revision:
+        previousDraft?.showId === show.id ? previousDraft.revision + 1 : 1,
+    };
+    setShows((current) =>
+      current.map((candidate) =>
+        candidate.id === show.id
+          ? { ...candidate, cameraFraming: framing }
+          : candidate,
+      ),
+    );
+    void flushStudioCameraFramingSave();
   };
 
   const flushStudioGlowTuningSave = async (): Promise<void> => {
@@ -6590,6 +6724,17 @@ export function BotcastExperience({
     replayPlaybackSource === "studio-cut" && studioCutReady
       ? studioCut?.audioUrl ?? null
       : replayRecording?.audioUrl ?? null;
+  const replayPlaybackLabel =
+    replayPlaybackSource === "studio-cut" && studioCutReady
+      ? "Studio Cut"
+      : "On Air";
+  const replayPlaybackDescription =
+    replayPlaybackSource === "studio-cut" && studioCutReady
+      ? "Enhanced voice performance"
+      : "Original live recording";
+  const replayActiveDownloadUrl = replayActiveAudioUrl
+    ? `${replayActiveAudioUrl}?download=1`
+    : null;
   const replayActiveTimeline =
     replayPlaybackSource === "studio-cut" && studioCutReady
       ? studioCut?.timeline ?? null
@@ -7149,6 +7294,7 @@ export function BotcastExperience({
   const requestStudioCut = async (regenerate: boolean): Promise<void> => {
     if (!replayRecording || studioCutBusy) return;
     setStudioCutBusy(true);
+    setStudioCutRequestPhase("checking");
     try {
       const eligibility = await replayStudioCutEligibility(replayRecording.id);
       setStudioCutEligibilityState(eligibility);
@@ -7161,36 +7307,86 @@ export function BotcastExperience({
         );
         return;
       }
-      const confirmed = window.confirm(
-        [
-          regenerate ? "Try another Studio Cut?" : "Make a Studio Cut?",
-          "",
-          `Estimated ElevenLabs use: ${eligibility.characterEstimate.toLocaleString()} characters across ${eligibility.requestEstimate} request${eligibility.requestEstimate === 1 ? "" : "s"}.`,
-          "PRISM will send the canonical episode dialogue and saved ElevenLabs voice IDs to ElevenLabs.",
-          "",
-          "This is a paid generation. Your exact On Air recording remains unchanged.",
-        ].join("\n"),
-      );
-      if (!confirmed) return;
-      const recording = await startReplayStudioCut(replayRecording.id, regenerate);
+      setStudioCutConfirmation({
+        kind: "generate",
+        recordingId: replayRecording.id,
+        regenerate,
+        eligibility,
+      });
+    } catch (studioCutError) {
+      setError(signalErrorToast("Make Studio Cut", studioCutError));
+    } finally {
+      setStudioCutRequestPhase(null);
+      setStudioCutBusy(false);
+    }
+  };
+
+  const confirmStudioCut = async (): Promise<void> => {
+    if (
+      !studioCutConfirmation ||
+      studioCutConfirmation.kind !== "generate" ||
+      studioCutBusy
+    ) {
+      return;
+    }
+    const { recordingId, regenerate } = studioCutConfirmation;
+    setStudioCutConfirmation(null);
+    setStudioCutBusy(true);
+    setStudioCutRequestPhase("starting");
+    try {
+      const recording = await startReplayStudioCut(recordingId, regenerate);
       setReplayRecording(recording);
     } catch (studioCutError) {
       setError(signalErrorToast("Make Studio Cut", studioCutError));
     } finally {
+      setStudioCutRequestPhase(null);
+      setStudioCutBusy(false);
+    }
+  };
+
+  const remixStudioCut = async (): Promise<void> => {
+    if (
+      !replayRecording ||
+      studioCutBusy ||
+      !studioCut?.masterReady
+    ) {
+      return;
+    }
+    setStudioCutBusy(true);
+    setStudioCutRequestPhase("retrying");
+    try {
+      setReplayRecording(await retryReplayStudioCutMix(replayRecording.id));
+    } catch (studioCutError) {
+      setError(signalErrorToast("Remix Studio Cut", studioCutError));
+    } finally {
+      setStudioCutRequestPhase(null);
       setStudioCutBusy(false);
     }
   };
 
   const removeStudioCut = async (): Promise<void> => {
     if (!replayRecording || studioCutBusy) return;
-    if (!window.confirm("Remove this Studio Cut? Your exact On Air recording will remain.")) {
+    setStudioCutConfirmation({
+      kind: "remove",
+      recordingId: replayRecording.id,
+    });
+  };
+
+  const confirmRemoveStudioCut = async (): Promise<void> => {
+    if (
+      !studioCutConfirmation ||
+      studioCutConfirmation.kind !== "remove" ||
+      studioCutBusy
+    ) {
       return;
     }
+    const { recordingId } = studioCutConfirmation;
+    setStudioCutConfirmation(null);
     setStudioCutBusy(true);
     try {
       stopReplayPlayback();
       setReplayPlaybackSource("on-air");
-      setReplayRecording(await removeReplayStudioCut(replayRecording.id));
+      setReplayRecording(await removeReplayStudioCut(recordingId));
     } catch (studioCutError) {
       setError(signalErrorToast("Remove Studio Cut", studioCutError));
     } finally {
@@ -7523,6 +7719,10 @@ export function BotcastExperience({
     const studioLayout = normalizeBotcastStudioLayout(
       replayVisualMetadata?.studioLayout ?? args.show.studioLayout,
     );
+    const cameraFraming = normalizeBotcastCameraFraming(
+      replayVisualMetadata?.cameraFraming ?? args.show.cameraFraming,
+    );
+    const activeCameraFrame = cameraFraming[args.shot];
     const stageVisualShow: BotcastShow =
       args.replay && replayPresentationManifestV2
         ? {
@@ -7711,6 +7911,18 @@ export function BotcastExperience({
         ? botPowerAvatarVisibilityModeV1(snapshot)
         : (resolveAvatarVisibilityMode?.(bot) ?? null);
     };
+    const roleAvatarColorCycle = (
+      role: "host" | "guest",
+      bot: BotcastBotSummary,
+    ): boolean => {
+      const snapshot = botcastSnapshotPowersForRoleV1(
+        args.currentEpisode,
+        role,
+      );
+      return snapshot !== null
+        ? botPowerHasAvatarColorCycleV1(snapshot)
+        : (resolveAvatarColorCycle?.(bot) ?? false);
+    };
     const manualProducerGuestSip = Boolean(
       !args.replay &&
         args.currentEpisode.guestKind === "producer" &&
@@ -7869,11 +8081,14 @@ export function BotcastExperience({
       ["--botcast-camera-offset-x" as string]: `${botcastCameraOffsetXPercent(
         args.shot,
         studioLayout,
-      )}%`,
+        activeCameraFrame.zoom,
+      ) + activeCameraFrame.panX}%`,
       ["--botcast-camera-offset-y" as string]: `${botcastCameraOffsetYPercent(
         args.shot,
         studioLayout,
-      )}%`,
+        activeCameraFrame.zoom,
+      ) + activeCameraFrame.panY}%`,
+      ["--botcast-camera-zoom" as string]: activeCameraFrame.zoom,
       ...(stageAtmosphere.imageUrl
         ? {
             ["--botcast-atmosphere" as string]: `url("${stageAtmosphere.imageUrl}")`,
@@ -7947,6 +8162,7 @@ export function BotcastExperience({
         talking,
         thinking,
         sipping,
+        avatarColorCycle: roleAvatarColorCycle(role, bot),
         replayAudioMaster: args.replay && replayFaithful,
         role,
         surface: "stage",
@@ -8097,6 +8313,11 @@ export function BotcastExperience({
                 data-power-avatar-scale={
                   roleAvatarScaleMode("host", args.host) ?? undefined
                 }
+                data-power-avatar-color-cycle={
+                  roleAvatarColorCycle("host", args.host)
+                    ? "spectrum"
+                    : undefined
+                }
                 data-listener-reaction={
                   roleIsListenerReacting("host")
                     ? listenerReactionPlan?.visualAction
@@ -8210,6 +8431,11 @@ export function BotcastExperience({
                 }
                 data-power-avatar-scale={
                   roleAvatarScaleMode("guest", args.guest) ?? undefined
+                }
+                data-power-avatar-color-cycle={
+                  roleAvatarColorCycle("guest", args.guest)
+                    ? "spectrum"
+                    : undefined
                 }
                 data-listener-reaction={
                   roleIsListenerReacting("guest")
@@ -8542,6 +8768,8 @@ export function BotcastExperience({
     const stageAtmosphere = activeShowAtmosphere(show, previewTheme);
     const studioMix = normalizeBotcastStudioAtmosphereMix(show.atmosphereMix);
     const layout = normalizeBotcastStudioLayout(show.studioLayout);
+    const cameraFraming = normalizeBotcastCameraFraming(show.cameraFraming);
+    const previewCameraFrame = cameraFraming[studioCameraPreviewShot];
     const studioGlowTuning = normalizeBotcastStudioGlowTuning(
       show.studioGlowTuning,
     );
@@ -8603,6 +8831,17 @@ export function BotcastExperience({
         host.color ?? show.accentColor,
         previewTheme,
       ),
+      ["--botcast-camera-offset-x" as string]: `${botcastCameraOffsetXPercent(
+        studioCameraPreviewShot,
+        layout,
+        previewCameraFrame.zoom,
+      ) + previewCameraFrame.panX}%`,
+      ["--botcast-camera-offset-y" as string]: `${botcastCameraOffsetYPercent(
+        studioCameraPreviewShot,
+        layout,
+        previewCameraFrame.zoom,
+      ) + previewCameraFrame.panY}%`,
+      ["--botcast-camera-zoom" as string]: previewCameraFrame.zoom,
       ...(stageAtmosphere.imageUrl
         ? {
             ["--botcast-atmosphere" as string]: `url("${stageAtmosphere.imageUrl}")`,
@@ -8816,6 +9055,7 @@ export function BotcastExperience({
                   </div>
                   <span aria-live="polite">
                     {studioLayoutSaving ||
+                    studioCameraFramingSaving ||
                     studioGlowTuningSaving ||
                     studioVoiceLevelsSaving ||
                     studioAtmosphereMixSaving
@@ -8892,7 +9132,7 @@ export function BotcastExperience({
               </section>
               <section
                 className={styles.stageViewport}
-                data-shot="wide"
+                data-shot={studioCameraPreviewShot}
                 data-layout-editor="true"
                 data-signal-layout-stage="true"
                 data-studio-source={
@@ -8964,6 +9204,102 @@ export function BotcastExperience({
                     ? layoutHandle("guestCup", cupPreview(guest, "guest"))
                     : null}
                 </div>
+                <section
+                  className={styles.stageCameraTuner}
+                  aria-label="Show camera alignment"
+                >
+                  <header>
+                    <div
+                      className={styles.stageCameraShotToggle}
+                      role="group"
+                      aria-label="Camera to align"
+                    >
+                      {(["left", "right", "wide"] as const).map((shot) => (
+                        <button
+                          key={shot}
+                          type="button"
+                          aria-pressed={studioCameraPreviewShot === shot}
+                          onClick={() => setStudioCameraPreviewShot(shot)}
+                        >
+                          {shot[0]!.toUpperCase() + shot.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateStudioCameraFrame(
+                          show,
+                          studioCameraPreviewShot,
+                          BOTCAST_DEFAULT_CAMERA_FRAMING[
+                            studioCameraPreviewShot
+                          ],
+                        )
+                      }
+                      disabled={
+                        previewCameraFrame.zoom ===
+                          BOTCAST_DEFAULT_CAMERA_FRAMING[
+                            studioCameraPreviewShot
+                          ].zoom &&
+                        previewCameraFrame.panX === 0 &&
+                        previewCameraFrame.panY === 0
+                      }
+                    >
+                      Reset camera
+                    </button>
+                  </header>
+                  <div className={styles.stageCameraSliders}>
+                    <label>
+                      <span>
+                        Zoom
+                        <output>{previewCameraFrame.zoom.toFixed(2)}×</output>
+                      </span>
+                      <input
+                        type="range"
+                        min={BOTCAST_CAMERA_ZOOM_MIN}
+                        max={BOTCAST_CAMERA_ZOOM_MAX}
+                        step={BOTCAST_CAMERA_ZOOM_STEP}
+                        value={previewCameraFrame.zoom}
+                        aria-label={`${studioCameraPreviewShot} camera zoom`}
+                        onChange={(event) =>
+                          updateStudioCameraFrame(
+                            show,
+                            studioCameraPreviewShot,
+                            { zoom: Number(event.currentTarget.value) },
+                          )
+                        }
+                      />
+                    </label>
+                    {(["panX", "panY"] as const).map((axis) => (
+                      <label key={axis}>
+                        <span>
+                          {axis === "panX" ? "Pan X" : "Pan Y"}
+                          <output>
+                            {previewCameraFrame[axis] > 0 ? "+" : ""}
+                            {previewCameraFrame[axis].toFixed(2)}%
+                          </output>
+                        </span>
+                        <input
+                          type="range"
+                          min={BOTCAST_CAMERA_PAN_MIN}
+                          max={BOTCAST_CAMERA_PAN_MAX}
+                          step={BOTCAST_CAMERA_PAN_STEP}
+                          value={previewCameraFrame[axis]}
+                          aria-label={`${studioCameraPreviewShot} camera ${
+                            axis === "panX" ? "horizontal" : "vertical"
+                          } pan`}
+                          onChange={(event) =>
+                            updateStudioCameraFrame(
+                              show,
+                              studioCameraPreviewShot,
+                              { [axis]: Number(event.currentTarget.value) },
+                            )
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </section>
               </section>
               <section
                 className={styles.stageScreenTreatment}
@@ -11408,141 +11744,271 @@ export function BotcastExperience({
                   onError={() => setReplayPlaying(false)}
                 />
               ) : null}
-              <div
-                className={styles.replayControls}
+              <section
+                className={styles.replayPlayer}
                 aria-label="Signal replay playback"
+                data-playing={replayPlaying ? "true" : undefined}
+                data-source={replayPlaybackSource}
               >
-              <button
-                type="button"
-                onClick={() => {
-                  if (!replayFaithful) return;
-                  if (replayPlaying) {
-                    stopReplayPlayback();
-                  } else {
-                    startReplayPlayback();
+                <header className={styles.replayPlayerHeader}>
+                  <div className={styles.replayPlayerIdentity}>
+                    <span>Now playing</span>
+                    <div>
+                      <strong>{replayPlaybackLabel}</strong>
+                      <small>{replayPlaybackDescription}</small>
+                    </div>
+                  </div>
+                  {studioCutReady ? (
+                    <div
+                      className={styles.replaySourceToggle}
+                      role="group"
+                      aria-label="Choose replay audio"
+                    >
+                      <button
+                        type="button"
+                        aria-pressed={replayPlaybackSource === "on-air"}
+                        onClick={() => {
+                          stopReplayPlayback();
+                          setReplayElapsedMs(0);
+                          setReplayPlaybackSource("on-air");
+                        }}
+                      >
+                        On Air
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={replayPlaybackSource === "studio-cut"}
+                        onClick={() => {
+                          stopReplayPlayback();
+                          setReplayElapsedMs(0);
+                          setReplayPlaybackSource("studio-cut");
+                        }}
+                      >
+                        <Sparkles aria-hidden="true" />
+                        Studio Cut
+                      </button>
+                    </div>
+                  ) : (
+                    <span className={styles.replaySourceBadge}>On Air</span>
+                  )}
+                </header>
+
+                <div
+                  className={styles.replayTransport}
+                  style={
+                    {
+                      "--replay-progress": `${
+                        replayDurationMs > 0
+                          ? Math.min(
+                              100,
+                              Math.max(
+                                0,
+                                (replayElapsedMs / replayDurationMs) * 100,
+                              ),
+                            )
+                          : 0
+                      }%`,
+                    } as CSSProperties
                   }
-                }}
-                disabled={!replayFaithful}
-              >
-                {replayFaithful
-                  ? replayPlaying
-                    ? "Pause"
-                    : "Play"
-                  : "Transcript only"}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={replayDurationMs}
-                step={100}
-                value={replayElapsedMs}
-                onChange={(event) => {
-                  stopReplayPlayback();
-                  const nextMs = Number(event.target.value);
-                  setReplayElapsedMs(nextMs);
-                  if (replayAudioRef.current) {
-                    replayAudioRef.current.currentTime = nextMs / 1_000;
-                  }
-                }}
-                aria-label="Replay position"
-                disabled={!replayFaithful}
-              />
-              {replayRecording?.audioUrl ? (
-                <a href={`${replayRecording.audioUrl}?download=1`} download>
-                  Download On Air
-                </a>
-              ) : null}
-              {studioCutReady ? (
-                <>
+                >
                   <button
+                    className={styles.replayPlayButton}
                     type="button"
-                    aria-pressed={replayPlaybackSource === "on-air"}
-                    onClick={() => {
-                      stopReplayPlayback();
-                      setReplayElapsedMs(0);
-                      setReplayPlaybackSource("on-air");
-                    }}
-                  >
-                    On Air
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={replayPlaybackSource === "studio-cut"}
-                    onClick={() => {
-                      stopReplayPlayback();
-                      setReplayElapsedMs(0);
-                      setReplayPlaybackSource("studio-cut");
-                    }}
-                  >
-                    Studio Cut ✨
-                  </button>
-                  <button
-                    type="button"
-                    disabled={
-                      studioCutBusy ||
-                      studioCutPending ||
-                      studioCutEligibilityState?.eligible === false
+                    title={
+                      replayFaithful
+                        ? replayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "This episode has no faithful audio"
                     }
-                    title={studioCutEligibilityState?.blockedReason ?? undefined}
-                    onClick={() => void requestStudioCut(true)}
+                    aria-label={
+                      replayFaithful
+                        ? replayPlaying
+                          ? "Pause replay"
+                          : "Play replay"
+                        : "Transcript only"
+                    }
+                    onClick={() => {
+                      if (!replayFaithful) return;
+                      if (replayPlaying) {
+                        stopReplayPlayback();
+                      } else {
+                        startReplayPlayback();
+                      }
+                    }}
+                    disabled={!replayFaithful}
                   >
-                    Try another
+                    {replayPlaying ? (
+                      <Pause aria-hidden="true" />
+                    ) : (
+                      <Play aria-hidden="true" />
+                    )}
                   </button>
-                  <a href={`${studioCut?.audioUrl}?download=1`} download>
-                    Download Studio Cut
-                  </a>
-                  <button
-                    type="button"
-                    disabled={studioCutBusy}
-                    onClick={() => void removeStudioCut()}
-                  >
-                    Remove
-                  </button>
-                  {studioCutPending ? (
-                    <span role="status">
-                      New Studio Cut {Math.round(studioCut.progress * 100)}%
+                  <span className={styles.replayTime}>
+                    <strong>{runtimeLabel(replayElapsedMs)}</strong>
+                    <span aria-hidden="true">/</span>
+                    <span>{runtimeLabel(replayDurationMs)}</span>
+                  </span>
+                  <label className={styles.replayProgress}>
+                    <span className={styles.replayProgressTrack}>
+                      <span className={styles.replayProgressFill} />
                     </span>
-                  ) : null}
-                  {studioCut?.phase === "failed" && studioCut.error ? (
-                    <span role="status">{studioCut.error}</span>
-                  ) : null}
-                </>
-              ) : (
-                <button
-                  type="button"
-                  disabled={
-                    studioCutBusy ||
-                    studioCutPending ||
-                    studioCutEligibilityState?.eligible === false
-                  }
-                  title={studioCutEligibilityState?.blockedReason ?? undefined}
-                  onClick={() => void requestStudioCut(Boolean(studioCut))}
-                >
-                  {studioCut?.phase === "mastering_voices"
-                    ? `Studio Cut: voices ${Math.round(studioCut.progress * 100)}%`
-                    : studioCut?.phase === "mixing_episode" ||
-                        studioCut?.phase === "rendering_studio" ||
-                        studioCut?.phase === "finalizing"
-                      ? `Studio Cut: mixing ${Math.round(studioCut.progress * 100)}%`
-                      : studioCut?.phase === "failed"
-                        ? "Retry Studio Cut ✨"
-                        : "Studio Cut ✨"}
-                </button>
-              )}
-              {!studioCutReady &&
-              studioCutEligibilityState?.eligible === false &&
-              studioCutEligibilityState.blockedReason ? (
-                <span role="status">{studioCutEligibilityState.blockedReason}</span>
-              ) : null}
-              {replayRecording?.transcriptMarkdownUrl ? (
-                <a
-                  href={replayRecording.transcriptMarkdownUrl}
-                  download
-                >
-                  Download transcript
-                </a>
-              ) : null}
-            </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={replayDurationMs}
+                      step={100}
+                      value={replayElapsedMs}
+                      onChange={(event) => {
+                        stopReplayPlayback();
+                        const nextMs = Number(event.target.value);
+                        setReplayElapsedMs(nextMs);
+                        if (replayAudioRef.current) {
+                          replayAudioRef.current.currentTime = nextMs / 1_000;
+                        }
+                      }}
+                      aria-label="Replay position"
+                      disabled={!replayFaithful}
+                    />
+                  </label>
+                </div>
+
+                <footer className={styles.replayPlayerFooter}>
+                  <div className={styles.replayFileActions}>
+                    {replayActiveDownloadUrl ? (
+                      <a
+                        className={styles.replayAction}
+                        href={replayActiveDownloadUrl}
+                        download
+                      >
+                        <Download aria-hidden="true" />
+                        Download audio
+                      </a>
+                    ) : null}
+                    {replayRecording?.transcriptMarkdownUrl ? (
+                      <a
+                        className={styles.replayAction}
+                        href={replayRecording.transcriptMarkdownUrl}
+                        download
+                      >
+                        <FileText aria-hidden="true" />
+                        Transcript
+                      </a>
+                    ) : null}
+                  </div>
+                  <div className={styles.replayStudioActions}>
+                    {studioCutReady ? (
+                      <>
+                        <button
+                          className={styles.replayAction}
+                          type="button"
+                          aria-busy={studioCutBusy}
+                          disabled={studioCutBusy || studioCutPending}
+                          title="Reapply saved voice pitch, effects, levels, and production layers without another paid generation"
+                          onClick={() => void remixStudioCut()}
+                        >
+                          <RefreshCw aria-hidden="true" />
+                          Remix cut
+                        </button>
+                        <button
+                          className={styles.replayAction}
+                          type="button"
+                          aria-busy={studioCutBusy}
+                          disabled={
+                            studioCutBusy ||
+                            studioCutPending ||
+                            studioCutEligibilityState?.eligible === false
+                          }
+                          title={
+                            studioCutEligibilityState?.blockedReason ?? undefined
+                          }
+                          onClick={() => void requestStudioCut(true)}
+                        >
+                          <Sparkles aria-hidden="true" />
+                          New Studio Cut
+                        </button>
+                        <button
+                          className={`${styles.replayAction} ${styles.replayRemoveAction}`}
+                          type="button"
+                          disabled={studioCutBusy}
+                          onClick={() => void removeStudioCut()}
+                        >
+                          <Trash2 aria-hidden="true" />
+                          Remove cut
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        className={`${styles.replayAction} ${styles.replayStudioCutAction}`}
+                        type="button"
+                        aria-busy={studioCutBusy}
+                        disabled={
+                          studioCutBusy ||
+                          studioCutPending ||
+                          studioCutEligibilityState?.eligible === false
+                        }
+                        title={
+                          studioCutEligibilityState?.blockedReason ?? undefined
+                        }
+                        onClick={() =>
+                          void (studioCut?.phase === "failed" &&
+                          studioCut.masterReady
+                            ? remixStudioCut()
+                            : requestStudioCut(Boolean(studioCut)))
+                        }
+                      >
+                        <Sparkles aria-hidden="true" />
+                        {studioCutRequestPhase === "checking"
+                          ? "Checking Studio Cut…"
+                          : studioCutRequestPhase === "retrying"
+                            ? "Restarting Studio Cut mix…"
+                            : studioCutRequestPhase === "starting"
+                              ? "Starting Studio Cut…"
+                              : studioCut?.phase === "mastering_voices"
+                                ? `Studio Cut: voices ${Math.round(studioCut.progress * 100)}%`
+                                : studioCut?.phase === "mixing_episode" ||
+                                    studioCut?.phase === "rendering_studio" ||
+                                    studioCut?.phase === "finalizing"
+                                  ? `Studio Cut: mixing ${Math.round(studioCut.progress * 100)}%`
+                                  : studioCut?.phase === "failed"
+                                    ? studioCut.masterReady
+                                      ? "Retry Studio Cut mix"
+                                      : "Retry Studio Cut"
+                                    : "Create Studio Cut"}
+                      </button>
+                    )}
+                  </div>
+                </footer>
+
+                {studioCutPending && studioCutReady ? (
+                  <span className={styles.replayStatus} role="status">
+                    New Studio Cut {Math.round(studioCut.progress * 100)}%
+                  </span>
+                ) : null}
+                {studioCutReady &&
+                studioCut?.phase === "failed" &&
+                studioCut.error ? (
+                  <span className={styles.replayStatus} role="status">
+                    {studioCut.error}
+                  </span>
+                ) : null}
+                {studioCutRequestPhase ? (
+                  <span className={styles.replayStatus} role="status">
+                    {studioCutRequestPhase === "checking"
+                      ? "Checking Studio Cut availability…"
+                      : studioCutRequestPhase === "retrying"
+                        ? "Remixing the saved Studio Cut voices and production layers without another paid generation…"
+                        : "Starting paid Studio Cut generation…"}
+                  </span>
+                ) : null}
+                {!studioCutReady &&
+                studioCutEligibilityState?.eligible === false &&
+                studioCutEligibilityState.blockedReason ? (
+                  <span className={styles.replayStatus} role="status">
+                    {studioCutEligibilityState.blockedReason}
+                  </span>
+                ) : null}
+              </section>
             <div className={styles.replayTranscript}>
               {replayIntroDurationMs > 0 ? (
                 <button
@@ -12449,6 +12915,83 @@ export function BotcastExperience({
                   {busy
                     ? "Removing…"
                     : deleteConfirmationCopy(deleteTarget).action}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+      {studioCutConfirmation ? (
+        <div className={styles.deleteBackdrop}>
+          <button
+            type="button"
+            className={styles.deleteBackdropDismiss}
+            onClick={() => setStudioCutConfirmation(null)}
+            tabIndex={-1}
+            aria-label="Cancel Studio Cut"
+          />
+          <section
+            className={styles.deleteDialog}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="signal-studio-cut-title"
+            aria-describedby="signal-studio-cut-description"
+          >
+            <span className={styles.eyebrow}>
+              {studioCutConfirmation.kind === "generate"
+                ? "Paid generation"
+                : "Alternate cut"}
+            </span>
+            <h2 id="signal-studio-cut-title">
+              {studioCutConfirmation.kind === "remove"
+                ? "Remove this Studio Cut?"
+                : studioCutConfirmation.regenerate
+                  ? "Try another Studio Cut?"
+                  : "Make a Studio Cut?"}
+            </h2>
+            <p id="signal-studio-cut-description">
+              {studioCutConfirmation.kind === "remove" ? (
+                "Your exact On Air recording will remain."
+              ) : (
+                <>
+                  Estimated ElevenLabs use:{" "}
+                  {studioCutConfirmation.eligibility.characterEstimate.toLocaleString()}{" "}
+                  characters across{" "}
+                  {studioCutConfirmation.eligibility.requestEstimate} request
+                  {studioCutConfirmation.eligibility.requestEstimate === 1
+                    ? ""
+                    : "s"}
+                  . PRISM will send the canonical episode dialogue and saved
+                  ElevenLabs voice IDs to ElevenLabs.
+                </>
+              )}
+            </p>
+            {studioCutConfirmation.kind === "generate" ? (
+              <p>
+                This is a paid generation. Your exact On Air recording remains
+                unchanged.
+              </p>
+            ) : null}
+            <div className={styles.deleteDialogActions}>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setStudioCutConfirmation(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  void (studioCutConfirmation.kind === "remove"
+                    ? confirmRemoveStudioCut()
+                    : confirmStudioCut())
+                }
+              >
+                {studioCutConfirmation.kind === "remove"
+                  ? "Remove Studio Cut"
+                  : studioCutConfirmation.regenerate
+                    ? "Try another"
+                    : "Make Studio Cut"}
               </button>
             </div>
           </section>

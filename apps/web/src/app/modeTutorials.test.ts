@@ -1123,7 +1123,7 @@ describe("mode tutorials", () => {
       );
       assert.match(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",
-        /Natural room silence, interruptions, crosstalk, retorts/u,
+        /Natural room silence, listener acknowledgements, interruptions, crosstalk, retorts/u,
       );
       assert.doesNotMatch(
         MODE_TUTORIALS.botcast.steps[9]?.body ?? "",

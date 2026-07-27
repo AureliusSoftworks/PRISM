@@ -1,13 +1,16 @@
 import {
+  applyVoiceDeliveryMoodToProfile,
   BOT_VOICE_HIGH_SHELF_HZ,
   BOT_VOICE_LOW_SHELF_HZ,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotVoiceVolume,
   normalizeVoiceEffect,
   expectedVoicePlaybackDurationMs,
   resolveBotVoiceCharacter,
   resolveVoicePlaybackTransform,
   type BotAudioVoiceProfileV1,
   type CoffeeVoiceDeliveryEnvelope,
+  type VoiceDeliveryMood,
   type VoiceEffect,
 } from "@localai/shared";
 import {
@@ -443,7 +446,7 @@ function distortionCurve(amount: number, bitDepth = 16): Float32Array<ArrayBuffe
   return curve;
 }
 
-function createNoiseBuffer(context: AudioContext, durationSeconds: number, seed: string): AudioBuffer {
+function createNoiseBuffer(context: BaseAudioContext, durationSeconds: number, seed: string): AudioBuffer {
   const length = Math.max(1, Math.ceil(context.sampleRate * durationSeconds));
   const buffer = context.createBuffer(1, length, context.sampleRate);
   const data = buffer.getChannelData(0);
@@ -469,16 +472,16 @@ type FormantCorrectionNodeLike = AudioNode & {
 };
 
 let formantCorrectionRegistration: Promise<
-  (new (options: { context: AudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null
+  (new (options: { context: BaseAudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null
 > | null = null;
-let formantCorrectionContext: AudioContext | null = null;
+let formantCorrectionContext: BaseAudioContext | null = null;
 
 /** The copied MPL processor is deliberately a public asset: AudioWorklet
  * modules are fetched by the browser rather than bundled into Next's normal
  * client graph. A failed registration leaves tempo intact and pitch neutral. */
 async function formantCorrectionNodeConstructor(
-  context: AudioContext,
-): Promise<(new (options: { context: AudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null> {
+  context: BaseAudioContext,
+): Promise<(new (options: { context: BaseAudioContext; outputChannelCount?: 1 | 2 }) => FormantCorrectionNodeLike) | null> {
   if (!context.audioWorklet || typeof AudioWorkletNode !== "function") return null;
   if (formantCorrectionContext !== context) {
     formantCorrectionContext = context;
@@ -489,16 +492,262 @@ async function formantCorrectionNodeConstructor(
   )
     .then(async ({ FormantCorrectionNode }) => {
       await FormantCorrectionNode.register(
-        context,
+        context as AudioContext,
         "/worklets/formant-correction-processor.js",
       );
       return FormantCorrectionNode as unknown as new (options: {
-        context: AudioContext;
+        context: BaseAudioContext;
         outputChannelCount?: 1 | 2;
       }) => FormantCorrectionNodeLike;
     })
     .catch(() => null);
   return formantCorrectionRegistration;
+}
+
+export interface OfflineVoiceTakeRender {
+  buffer: AudioBuffer;
+  speechDurationMs: number;
+  pitchPreserved: boolean;
+}
+
+/**
+ * Rebuild a captured voice take through the same authored profile controls used
+ * on air. Studio Cut uses this bounded, per-utterance render so its new edit
+ * can keep pitch, pace, texture, effect, room, level, and pan without sending
+ * the already-generated Premium dialogue back to a provider.
+ */
+export async function renderOfflineVoiceTake(args: {
+  sourceBuffer: AudioBuffer;
+  sourceOffsetSeconds: number;
+  sourceDurationSeconds: number;
+  profile: BotAudioVoiceProfileV1;
+  moodKey?: VoiceDeliveryMood | null;
+  effectsEnabled: boolean;
+  gain: number;
+  stereoPan: number;
+  seed: string;
+  roomAcoustics?: RoomAcousticsSend;
+}): Promise<OfflineVoiceTakeRender> {
+  const profile = {
+    ...applyVoiceDeliveryMoodToProfile(args.profile, args.moodKey),
+    volume: normalizeBotVoiceVolume(args.gain),
+  };
+  const sourceOffsetSeconds = Math.max(0, args.sourceOffsetSeconds);
+  const sourceDurationSeconds = Math.max(
+    0.001,
+    Math.min(
+      args.sourceDurationSeconds,
+      args.sourceBuffer.duration - sourceOffsetSeconds,
+    ),
+  );
+  const transform = resolveVoicePlaybackTransform(profile);
+  const speechDurationSeconds = sourceDurationSeconds / transform.tempo;
+  const effect = resolveVoiceEffectPlan(
+    args.effectsEnabled
+      ? normalizeVoiceEffect(profile.elevenLabsEffect)
+      : "clean",
+  );
+  const texture = resolveVoiceTexture(profile, args.effectsEnabled);
+  const character = resolveBotVoiceCharacter(profile);
+  const longestParallelDelay = effect.parallelVoices.reduce(
+    (maximum, voice) =>
+      Math.max(
+        maximum,
+        voice.delaySeconds + Math.abs(voice.delayModulationDepthSeconds ?? 0),
+      ),
+    0,
+  );
+  const roomTailSeconds = args.roomAcoustics?.profile.durationSeconds ?? 0;
+  const renderDurationSeconds =
+    speechDurationSeconds + longestParallelDelay + roomTailSeconds + 0.12;
+  const context = new OfflineAudioContext(
+    2,
+    Math.max(1, Math.ceil(renderDurationSeconds * args.sourceBuffer.sampleRate)),
+    args.sourceBuffer.sampleRate,
+  );
+  const FormantCorrectionNode = await formantCorrectionNodeConstructor(context);
+
+  const createPitchTransform = (
+    effectDetuneCents = 0,
+  ): FormantCorrectionNodeLike | null => {
+    if (!FormantCorrectionNode) return null;
+    const node = new FormantCorrectionNode({
+      context,
+      outputChannelCount: args.sourceBuffer.numberOfChannels === 1 ? 1 : 2,
+    });
+    node.playbackRate.setValueAtTime(transform.tempo, 0);
+    node.formantStrength.setValueAtTime(1, 0);
+    const basePitchCents = transform.pitchCents + effectDetuneCents;
+    for (
+      let elapsedSeconds = 0, index = 0;
+      elapsedSeconds < speechDurationSeconds;
+      elapsedSeconds = Math.min(speechDurationSeconds, elapsedSeconds + 0.32), index += 1
+    ) {
+      const pitchRatio = 2 ** (
+        (
+          basePitchCents +
+          voiceLiltDetuneCents(profile.lilt, elapsedSeconds)
+        ) / 1_200
+      );
+      if (index === 0) node.pitch.setValueAtTime(pitchRatio, 0);
+      else node.pitch.linearRampToValueAtTime(pitchRatio, elapsedSeconds);
+      if (elapsedSeconds === speechDurationSeconds) break;
+    }
+    return node;
+  };
+  const createSpeechSource = (
+    startAt: number,
+    effectDetuneCents = 0,
+  ): { source: AudioBufferSourceNode; transform: FormantCorrectionNodeLike | null } => {
+    const source = context.createBufferSource();
+    source.buffer = args.sourceBuffer;
+    source.playbackRate.setValueAtTime(transform.tempo, startAt);
+    return { source, transform: createPitchTransform(effectDetuneCents) };
+  };
+
+  const highpass = context.createBiquadFilter();
+  const lowpass = context.createBiquadFilter();
+  const shaper = context.createWaveShaper();
+  const dryGain = context.createGain();
+  const speechGain = context.createGain();
+  const outputGain = context.createGain();
+  const lowShelf = context.createBiquadFilter();
+  const highShelf = context.createBiquadFilter();
+  const limiter = context.createDynamicsCompressor();
+  highpass.type = "highpass";
+  highpass.frequency.value = Math.max(
+    effect.highpassHz,
+    25 + (1 - texture.bandwidth) * 300,
+  );
+  lowpass.type = "lowpass";
+  lowpass.frequency.value = Math.min(
+    Math.max(10_000, Math.min(20_000, Math.round(16_000 - profile.warmth * 6_000))),
+    effect.lowpassHz,
+    20_000 - (1 - texture.bandwidth) * 16_200,
+  );
+  shaper.curve = distortionCurve(
+    Math.max(texture.distortion, effect.drive),
+    effect.bitDepth,
+  );
+  shaper.oversample = "2x";
+  dryGain.gain.value = effect.dryGain;
+  speechGain.gain.value = effect.modulationBaseGain;
+  outputGain.gain.value =
+    Math.min(1.25, profile.volume) *
+    0.88 *
+    effect.outputTrim *
+    character.gainMultiplier;
+  lowShelf.type = "lowshelf";
+  lowShelf.frequency.value = BOT_VOICE_LOW_SHELF_HZ;
+  lowShelf.gain.value = character.lowShelfDb;
+  highShelf.type = "highshelf";
+  highShelf.frequency.value = BOT_VOICE_HIGH_SHELF_HZ;
+  highShelf.gain.value = character.highShelfDb;
+  limiter.threshold.value = -4;
+  limiter.knee.value = 8;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.12;
+
+  const primary = createSpeechSource(0);
+  if (primary.transform) primary.source.connect(primary.transform).connect(dryGain);
+  else primary.source.connect(dryGain);
+  dryGain.connect(highpass).connect(lowpass).connect(shaper).connect(speechGain);
+  speechGain.connect(outputGain);
+  outputGain.connect(lowShelf).connect(highShelf).connect(limiter);
+  connectRoomAcoustics({
+    context,
+    input: limiter,
+    destination: context.destination,
+    send: args.roomAcoustics,
+    stereoPan: args.stereoPan,
+  });
+  primary.source.start(0, sourceOffsetSeconds, sourceDurationSeconds);
+
+  for (const voice of effect.parallelVoices) {
+    const modulationFrequency = voice.delayModulationFrequencyHz ?? 0;
+    const modulationDepth = voice.delayModulationDepthSeconds ?? 0;
+    if (modulationFrequency > 0 && modulationDepth !== 0) {
+      const delay = context.createDelay();
+      const gain = context.createGain();
+      const oscillator = context.createOscillator();
+      const modulation = context.createGain();
+      delay.delayTime.value = voice.delaySeconds;
+      gain.gain.value = voice.gain;
+      oscillator.frequency.value = modulationFrequency;
+      modulation.gain.value = modulationDepth;
+      oscillator.connect(modulation).connect(delay.delayTime);
+      (primary.transform ?? primary.source).connect(delay).connect(gain).connect(highpass);
+      oscillator.start(0);
+      oscillator.stop(speechDurationSeconds + longestParallelDelay);
+      continue;
+    }
+    const parallel = createSpeechSource(voice.delaySeconds, voice.detuneCents);
+    const gain = context.createGain();
+    gain.gain.value = voice.gain;
+    if (parallel.transform) parallel.source.connect(parallel.transform).connect(gain);
+    else parallel.source.connect(gain);
+    gain.connect(highpass);
+    parallel.source.start(
+      voice.delaySeconds,
+      sourceOffsetSeconds,
+      sourceDurationSeconds,
+    );
+  }
+
+  for (const event of buildVoiceDamageSchedule(
+    args.seed,
+    speechDurationSeconds * 1_000,
+    texture.damage,
+  )) {
+    const at = event.atMs / 1_000;
+    const end = at + event.durationMs / 1_000;
+    speechGain.gain.setValueAtTime(1, at);
+    speechGain.gain.linearRampToValueAtTime(1 - event.depth, at + 0.003);
+    speechGain.gain.setValueAtTime(1 - event.depth, Math.max(at + 0.003, end - 0.004));
+    speechGain.gain.linearRampToValueAtTime(1, end);
+  }
+  if (args.effectsEnabled && effect.modulationDepth > 0) {
+    const oscillator = context.createOscillator();
+    const modulation = context.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = effect.modulationFrequencyHz;
+    modulation.gain.value = effect.modulationDepth;
+    oscillator.connect(modulation).connect(speechGain.gain);
+    oscillator.start(0);
+    oscillator.stop(speechDurationSeconds + longestParallelDelay);
+  }
+  if (texture.noise > 0 || effect.noiseGain > 0) {
+    const noise = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const gain = context.createGain();
+    noise.buffer = createNoiseBuffer(
+      context,
+      speechDurationSeconds + longestParallelDelay,
+      `${args.seed}:noise`,
+    );
+    filter.type = "bandpass";
+    filter.frequency.value = 1_800;
+    filter.Q.value = 0.55;
+    gain.gain.value = texture.noise * 0.075 + effect.noiseGain;
+    noise.connect(filter).connect(gain).connect(outputGain);
+    noise.start(0);
+  }
+  if (texture.instability > 0) {
+    const oscillator = context.createOscillator();
+    const modulation = context.createGain();
+    oscillator.frequency.value = 2.2 + stableUnit(`${args.seed}:wow`) * 4.1;
+    modulation.gain.value = texture.instability * 0.12;
+    oscillator.connect(modulation).connect(speechGain.gain);
+    oscillator.start(0);
+    oscillator.stop(speechDurationSeconds);
+  }
+
+  return {
+    buffer: await context.startRendering(),
+    speechDurationMs: Math.max(1, Math.round(speechDurationSeconds * 1_000)),
+    pitchPreserved: transform.pitchCents === 0 || Boolean(FormantCorrectionNode),
+  };
 }
 
 interface ActiveVoiceChannelState {

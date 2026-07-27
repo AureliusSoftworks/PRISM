@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 import {
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
+  BOTCAST_DEFAULT_CAMERA_FRAMING,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DIRECTOR_MIN_SHOT_MS,
@@ -2808,6 +2809,7 @@ describe("Botcast persistence and isolation", () => {
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
       assert.deepEqual(show.studioLayout, BOTCAST_DEFAULT_STUDIO_LAYOUT);
+      assert.deepEqual(show.cameraFraming, BOTCAST_DEFAULT_CAMERA_FRAMING);
 
       const updated = updateBotcastShow(db, "user-1", show.id, {
         studioLayout: {
@@ -2817,6 +2819,11 @@ describe("Botcast persistence and isolation", () => {
           guestCup: { x: 70.129, y: 82.876 },
           hostFloorGlow: { x: 70, y: 140, scale: 0.2 },
           guestFloorGlow: { x: -30, y: 43.125, scale: 0.7 },
+        },
+        cameraFraming: {
+          left: { zoom: 1.55, panX: -6, panY: 3.25 },
+          right: { zoom: 1.3, panX: 7.5, panY: -2 },
+          wide: { zoom: 1.12, panX: 2, panY: 1 },
         },
       });
       assert.deepEqual(updated.studioLayout, {
@@ -2832,9 +2839,13 @@ describe("Botcast persistence and isolation", () => {
         updated.studioLayout,
       );
       assert.deepEqual(
+        getBotcastShow(db, "user-1", show.id).cameraFraming,
+        updated.cameraFraming,
+      );
+      assert.deepEqual(
         updateBotcastShow(db, "user-1", show.id, { name: "Aligned Signal" })
-          .studioLayout,
-        updated.studioLayout,
+          .cameraFraming,
+        updated.cameraFraming,
       );
       assert.throws(
         () =>
@@ -4441,6 +4452,101 @@ describe("Botcast persistence and isolation", () => {
         .join("\n");
       assert.match(payoffPrompt, /Four consecutive ordinary silent beats/u);
       assert.match(payoffPrompt, /substantive conversational payoff/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a mature Auto interview open after a guest social silence", async () => {
+    const db = fixture();
+    const continuedQuestion =
+      "That question is still unanswered: what makes a transaction high-risk without turning every routine decision into an identity checkpoint?";
+    const provider = recordingProvider([continuedQuestion], []);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The politics of a name reset",
+      });
+      db.prepare(
+        "UPDATE botcast_episodes SET segment = 'interview' WHERE id = ?",
+      ).run(episode.id);
+
+      const insertMessage = db.prepare(
+        `INSERT INTO botcast_messages
+          (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
+         VALUES (?, 'user-1', ?, ?, ?, ?, ?)`,
+      );
+      for (let index = 0; index < 18; index += 1) {
+        const speakerRole = index % 2 === 0 ? "host" : "guest";
+        insertMessage.run(
+          `mature-silence-${index + 1}`,
+          episode.id,
+          speakerRole,
+          speakerRole === "host" ? "host-1" : "guest-1",
+          index === 17
+            ? "..."
+            : "This concrete exchange keeps developing one unresolved consequence of the identity policy.",
+          `2026-01-02T00:00:${String(index).padStart(2, "0")}.000Z`,
+        );
+      }
+      const marker = {
+        v: 1,
+        name: "socialSilence",
+        provenance: "social",
+        mode: "signal",
+        seed: `signal-social-silence:${episode.id}:guest-1:17`,
+        volleyTurn: 1,
+        holdMs: 900,
+      };
+      db.prepare(
+        `INSERT INTO botcast_events
+          (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+         VALUES ('mature-silence-event', 'user-1', ?,
+                 (SELECT COALESCE(MAX(sequence), 0) + 1
+                    FROM botcast_events
+                   WHERE episode_id = ?),
+                 'utterance', ?, '2026-01-02T00:00:17.000Z')`,
+      ).run(
+        episode.id,
+        episode.id,
+        JSON.stringify({
+          messageId: "mature-silence-18",
+          speakerRole: "guest",
+          botId: "guest-1",
+          segment: "interview",
+          provider: "deterministic",
+          model: "social-silence",
+          responseMode: "auto",
+          socialSilence: marker,
+          substantive: false,
+          moodKey: "neutral",
+        }),
+      );
+
+      const before = getBotcastEpisode(db, "user-1", episode.id);
+      assert.equal(before.messages.at(-1)?.socialSilence?.mode, "signal");
+
+      const advanced = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          ...generation(provider),
+          signalSocialSilenceChanceOverride: 0,
+        },
+      );
+
+      assert.equal(advanced.episode.segment, "interview");
+      assert.equal(advanced.message?.speakerRole, "host");
+      assert.equal(advanced.message?.content, continuedQuestion);
+      const utterance = advanced.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === advanced.message?.id,
+      );
+      assert.equal(utterance?.payload.segment, "interview");
     } finally {
       db.close();
     }
@@ -6540,7 +6646,10 @@ describe("Botcast persistence and isolation", () => {
     const organicOpening =
       "Some questions refuse to stay politely theoretical, and this one has been needling me all week. I'm Mara Vale, this is Mara Vale in the Margins, and Ivo Stone is here to help me put it under pressure. Ivo, do you believe there is a god—and what would count as evidence?";
     const provider = recordingProvider(
-      [organicOpening],
+      [
+        organicOpening,
+        "You make it sound like the question has teeth, Mara. Good—it should. Evidence has to survive contact with doubt, not merely decorate belief.",
+      ],
       captures,
     );
     try {
@@ -6573,6 +6682,9 @@ describe("Botcast persistence and isolation", () => {
       assert.match(prompt, /genuine personal desire to be on mic/u);
       assert.match(prompt, /fresh opening architecture/u);
       assert.match(prompt, /protected identity lead/u);
+      assert.match(prompt, /person already in the room/u);
+      assert.match(prompt, /beginning of an interaction, not a host monologue/u);
+      assert.match(prompt, /one clean conversational opening/u);
       assert.match(
         prompt,
         /show name and your host identification in the first sentence/u,
@@ -6595,6 +6707,38 @@ describe("Botcast persistence and isolation", () => {
         /Today we (?:are|'re) going to talk about/iu,
       );
       assert.doesNotMatch(advanced.message?.content ?? "", /^Welcome to/iu);
+      const openingShots = advanced.episode.events
+        .filter(
+          (event) =>
+            event.kind === "camera_suggestion" &&
+            event.payload.messageId === advanced.message?.id,
+        )
+        .map((event) => event.payload);
+      assert.deepEqual(
+        openingShots.map((shot) => shot.shot),
+        ["left", "right"],
+      );
+      assert.equal(openingShots[0]?.reason, "opening");
+      assert.equal(openingShots[0]?.minimumHoldMs, 1_800);
+      assert.equal(openingShots[1]?.reason, "introduction");
+      assert.equal(openingShots[1]?.speakerRole, "guest");
+      assert.ok(
+        Number(openingShots[1]?.atMs) > Number(openingShots[0]?.atMs),
+      );
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generation(provider),
+      );
+      const guestPrompt = captures[1]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(guestPrompt, /first on-mic reply/u);
+      assert.match(guestPrompt, /actual welcome, guest-specific observation/u);
+      assert.match(guestPrompt, /generic "glad to be here" podcast filler/u);
     } finally {
       db.close();
     }
@@ -8389,6 +8533,10 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
+      /body\.cameraFraming !== undefined[\s\S]{0,180}cameraFraming/u,
+    );
+    assert.match(
+      serverSource,
       /body\.voiceLevelsByBotId !== undefined[\s\S]{0,180}voiceLevelsByBotId/u,
     );
     assert.match(
@@ -8623,6 +8771,14 @@ describe("Botcast persistence and isolation", () => {
       assert.match(
         show.nightAtmosphere.prompt,
         /keep the table below both seated-bot silhouettes/iu,
+      );
+      assert.match(
+        show.dayAtmosphere.prompt,
+        /exactly two empty, clearly visible cup coasters[\s\S]*36\.25% and 63\.75%/iu,
+      );
+      assert.match(
+        show.nightAtmosphere.prompt,
+        /Each coaster must sit flat and unobstructed[\s\S]*full rim/iu,
       );
       assert.match(
         show.dayAtmosphere.prompt,
@@ -14752,7 +14908,9 @@ describe("Botcast persistence and isolation", () => {
       assert.match(hostWrapPrompt, /Private live producer cue: wrap_up/u);
       assert.match(hostWrapPrompt, /invite exactly one final response/u);
       assert.doesNotMatch(guestWrapPrompt, /producer cue|wrap_up/iu);
-      assert.doesNotMatch(guestWrapPrompt, /episode is wrapping up/iu);
+      assert.match(guestWrapPrompt, /host has opened the closing exchange/u);
+      assert.match(guestWrapPrompt, /If this guest genuinely wants the moment/u);
+      assert.match(guestWrapPrompt, /one brief final comment/u);
 
       const hostClose = await advanceBotcastEpisode(
         db,

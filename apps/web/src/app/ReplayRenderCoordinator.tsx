@@ -48,6 +48,7 @@ async function mixStudioCut(recordingId: string): Promise<void> {
     const prepared = await prepareSignalStudioCut(
       claim.recording,
       claim.premiumSegments,
+      claim.takes,
     );
     await encodeReplayAudioWindows({
       recordingId,

@@ -186,6 +186,8 @@ export {
   botPowerDeterministicHalfChanceV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
+  botPowerHasAvatarColorCycleFromEffectsV1,
+  botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeFromEffectsV1,
   botPowerAvatarVisibilityModeV1,
   botPowerCupRateMultiplierForBotV1,

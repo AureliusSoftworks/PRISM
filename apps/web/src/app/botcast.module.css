@@ -623,7 +623,7 @@
 .atmosphereMixerSliders output { color: var(--botcast-ink); font-variant-numeric: tabular-nums; }
 .atmosphereMixerSliders input { width: 100%; margin: 0; accent-color: var(--prism-s); }
 .atmosphereMixer > small { grid-column: 1 / -1; margin-top: -6px; color: var(--botcast-muted); font-size: .58rem; }
-.stageScene { position: absolute; inset: 0; transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
+.stageScene { position: absolute; inset: 0; transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(var(--botcast-camera-zoom, 1)); transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
 .liveCaption { position: absolute; left: 50%; bottom: 6.5%; z-index: 18; width: min(76%, 780px); display: grid; justify-items: center; gap: 5px; transform: translateX(-50%); color: #fff; text-align: center; pointer-events: none; animation: signalVoiceActionIn 160ms ease-out both; }
 .liveCaption strong { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 8px; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.1); font: 820 clamp(.52rem, .9vw, .68rem)/1 system-ui; letter-spacing: .11em; text-transform: uppercase; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
 .liveCaption span { max-width: 100%; border-radius: 10px; padding: 7px 12px 8px; background: rgba(4,6,11,.76); backdrop-filter: blur(9px) saturate(1.08); font: 720 clamp(.72rem, 1.45vw, 1.05rem)/1.28 system-ui; letter-spacing: .004em; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
@@ -634,8 +634,6 @@
 .stageViewport[data-model-warmup] .stageScene *,
 .stageViewport[data-model-warmup] .stageScene *::before,
 .stageViewport[data-model-warmup] .stageScene *::after { animation-play-state: paused !important; }
-.stageViewport[data-shot="left"] .stageScene,
-.stageViewport[data-shot="right"] .stageScene { transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(1.42); }
 .atmosphere { position: absolute; inset: -5%; overflow: hidden; background-color: #11121a; background-size: cover; background-position: center; filter: saturate(1.08) contrast(1.04); }
 .stageViewport[data-studio-source="image"] .atmosphere { background-image: var(--botcast-atmosphere); }
 .signalMicrophoneTintLayer { position: absolute; inset: -5%; z-index: 1; isolation: isolate; pointer-events: none; }
@@ -730,6 +728,18 @@
 .stageViewport[data-layout-editor="true"] .stageScene { transition: none; }
 .stageViewport[data-layout-editor="true"] .avatarRig { animation-play-state: paused; }
 .stageViewport[data-layout-editor="true"] .studioSpotlight { animation-play-state: paused; transform: translateX(-50%) rotate(0deg); }
+.stageCameraTuner { position: absolute; right: 12px; bottom: 12px; left: 12px; z-index: 60; display: grid; gap: 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 9px 11px; color: #fff; background: rgba(5,7,12,.82); box-shadow: 0 12px 32px rgba(0,0,0,.34); backdrop-filter: blur(14px) saturate(1.1); }
+.stageCameraTuner > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stageCameraTuner button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; padding: 6px 8px; color: rgba(255,255,255,.8); background: rgba(255,255,255,.06); font: 740 .56rem/1 system-ui; cursor: pointer; }
+.stageCameraTuner button:disabled { opacity: .42; cursor: default; }
+.stageCameraShotToggle { display: inline-flex; gap: 3px; border: 1px solid rgba(255,255,255,.14); border-radius: 9px; padding: 3px; background: rgba(255,255,255,.04); }
+.stageCameraShotToggle button { border: 0; background: transparent; }
+.stageCameraShotToggle button[aria-pressed="true"] { color: #fff; background: color-mix(in srgb, var(--botcast-host-accent) 34%, rgba(255,255,255,.1)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--botcast-host-accent) 55%, rgba(255,255,255,.2)); }
+.stageCameraSliders { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stageCameraSliders label { min-width: 0; display: grid; gap: 4px; }
+.stageCameraSliders label > span { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: rgba(255,255,255,.7); font: 700 .54rem/1 system-ui; }
+.stageCameraSliders output { color: #fff; font-variant-numeric: tabular-nums; }
+.stageCameraSliders input { width: 100%; margin: 0; accent-color: var(--botcast-host-accent); }
 .mugFallback { display: grid; place-items: center; width: 100%; height: 100%; font-size: clamp(1.5rem, 3vw, 2.5rem); filter: drop-shadow(0 7px 8px rgba(0,0,0,.5)); }
 .emptyChairLabel { position: absolute; z-index: 4; top: 47%; max-width: 150px; border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 7px 11px; color: rgba(255,255,255,.58); background: rgba(7,8,12,.52); backdrop-filter: blur(8px); text-align: center; font-size: .64rem; animation: signalEmptyChairReveal 260ms ease-out 640ms both; }
 
@@ -792,9 +802,56 @@
 .replayHeader { max-width: 1180px; margin: 0 auto 12px; display: flex; justify-content: space-between; align-items: end; gap: 20px; }
 .replayHeader h2 { margin: 6px 0; }.replayHeader p { margin: 0; color: var(--botcast-muted); font-size: .78rem; }
 .replayHeaderActions { display: flex; gap: 8px; }
-.replayControls { max-width: 1180px; margin: 12px auto; display: flex; gap: 12px; align-items: center; border: 1px solid var(--botcast-line); border-radius: 14px; padding: 10px 12px; background: var(--botcast-panel); box-shadow: 0 14px 36px var(--botcast-shadow); }
-.replayControls > button { min-width: 86px; min-height: 42px; border: 1px solid rgba(255,255,255,.12); border-radius: 10px; color: inherit; background: rgba(255,255,255,.04); padding: 9px 13px; font-weight: 780; cursor: pointer; }
-.replayControls > input { flex: 1; accent-color: var(--prism-m); }
+.replayPlayer { position: relative; isolation: isolate; max-width: 1180px; margin: 12px auto; overflow: hidden; border: 1px solid color-mix(in srgb, var(--prism-s) 16%, var(--botcast-line)); border-radius: 18px; padding: 17px 18px 14px; background: radial-gradient(circle at 4% -12%, color-mix(in srgb, var(--prism-m) 12%, transparent), transparent 34%), linear-gradient(180deg, color-mix(in srgb, #fff 3.5%, transparent), transparent 46%), var(--botcast-panel); box-shadow: 0 18px 46px var(--botcast-shadow), inset 0 1px rgba(255,255,255,.055); }
+.replayPlayer::before { content: ""; position: absolute; inset: 0 12% auto; z-index: -1; height: 1px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-p) 52%, transparent), color-mix(in srgb, var(--prism-i) 56%, transparent), color-mix(in srgb, var(--prism-s) 52%, transparent), transparent); opacity: .72; pointer-events: none; }
+.replayPlayerHeader { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-width: 0; }
+.replayPlayerIdentity { min-width: 0; display: flex; align-items: center; gap: 12px; }
+.replayPlayerIdentity > span { flex: 0 0 auto; color: var(--prism-m); font: 800 .57rem/1 system-ui; letter-spacing: .16em; text-transform: uppercase; }
+.replayPlayerIdentity > div { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
+.replayPlayerIdentity strong { overflow: hidden; color: var(--botcast-ink); font: 820 .92rem/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.replayPlayerIdentity small { overflow: hidden; color: var(--botcast-muted); font: 650 .69rem/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; }
+.replaySourceToggle { flex: 0 0 auto; display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 3px; border: 1px solid color-mix(in srgb, var(--prism-s) 20%, var(--botcast-line)); border-radius: 999px; background: color-mix(in srgb, var(--botcast-field) 82%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.035); }
+.replaySourceToggle button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 999px; padding: 6px 13px; color: var(--botcast-muted); background: transparent; font: 780 .68rem/1 system-ui; cursor: pointer; transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.replaySourceToggle button svg { width: 12px; height: 12px; }
+.replaySourceToggle button:hover { color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-s) 8%, transparent); }
+.replaySourceToggle button[aria-pressed="true"] { color: #17131d; background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 78%, var(--prism-s)); box-shadow: 0 6px 16px color-mix(in srgb, var(--prism-m) 18%, transparent); }
+.replaySourceToggle button[aria-pressed="true"]:hover { color: #17131d; background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 78%, var(--prism-s)); }
+.replaySourceBadge { flex: 0 0 auto; border: 1px solid var(--botcast-line); border-radius: 999px; padding: 6px 11px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-field) 78%, transparent); font: 780 .65rem/1 system-ui; }
+.replayTransport { --replay-progress: 0%; position: relative; display: grid; grid-template-columns: 38px max-content minmax(80px, 1fr); align-items: center; gap: 10px; min-width: 0; min-height: 48px; margin-top: 14px; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 4px 7px 4px 5px; background: radial-gradient(circle at 13% 0%, color-mix(in srgb, var(--prism-m) 10%, transparent), transparent 43%), linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)), color-mix(in srgb, var(--botcast-field) 90%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.06), inset 0 -1px rgba(0,0,0,.34), 0 9px 24px rgba(0,0,0,.2); transition: border-color 180ms ease, box-shadow 180ms ease; }
+.replayTransport::after { content: ""; position: absolute; top: -1px; left: 14%; width: 72%; height: 1px; border-radius: 999px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-p) 42%, transparent), color-mix(in srgb, var(--prism-i) 52%, transparent), color-mix(in srgb, var(--prism-s) 48%, transparent), transparent); opacity: .66; pointer-events: none; }
+.replayPlayer[data-playing="true"] .replayTransport { border-color: color-mix(in srgb, var(--prism-s) 30%, var(--botcast-line)); box-shadow: inset 0 1px rgba(255,255,255,.07), inset 0 -1px rgba(0,0,0,.32), 0 9px 25px rgba(0,0,0,.24), 0 0 24px color-mix(in srgb, var(--prism-s) 8%, transparent); }
+.replayPlayButton { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 0; color: color-mix(in srgb, var(--botcast-ink) 86%, var(--prism-s)); background: radial-gradient(circle at 34% 26%, rgba(255,255,255,.11), transparent 42%), rgba(255,255,255,.045); box-shadow: inset 0 1px rgba(255,255,255,.06); cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
+.replayPlayButton svg { width: 16px; height: 16px; fill: currentColor; }
+.replayPlayButton svg[data-lucide="play"] { transform: translateX(1px); }
+.replayPlayButton:hover:not(:disabled) { color: #fff; border-color: color-mix(in srgb, var(--prism-s) 50%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-s) 12%, rgba(255,255,255,.05)); box-shadow: inset 0 1px rgba(255,255,255,.1), 0 0 16px color-mix(in srgb, var(--prism-s) 14%, transparent); }
+.replayPlayer[data-playing="true"] .replayPlayButton { color: #071014; border-color: transparent; background: radial-gradient(circle at 34% 24%, rgba(255,255,255,.58), transparent 30%), linear-gradient(135deg, var(--prism-i), var(--prism-s) 58%, var(--prism-m)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--prism-s) 32%, transparent), 0 0 18px color-mix(in srgb, var(--prism-s) 26%, transparent); }
+.replayPlayButton:disabled { opacity: .42; cursor: default; }
+.replayTime { min-width: 66px; display: inline-flex; align-items: baseline; gap: 4px; color: var(--botcast-muted); font: 690 .67rem/1 system-ui; font-variant-numeric: tabular-nums; letter-spacing: .025em; white-space: nowrap; }
+.replayTime strong { color: color-mix(in srgb, var(--botcast-ink) 82%, var(--prism-s)); font: inherit; }
+.replayProgress { position: relative; display: grid; align-items: center; min-width: 0; height: 26px; cursor: pointer; }
+.replayProgressTrack { position: absolute; inset: auto 1px; height: 5px; overflow: hidden; border: 1px solid rgba(255,255,255,.045); border-radius: 999px; background: repeating-linear-gradient(90deg, transparent 0 16px, rgba(255,255,255,.055) 16px 17px), rgba(255,255,255,.065); box-shadow: inset 0 1px 2px rgba(0,0,0,.45); pointer-events: none; }
+.replayProgressFill { position: relative; display: block; width: var(--replay-progress); height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--prism-p), var(--prism-r) 27%, var(--prism-i) 52%, var(--prism-s) 75%, var(--prism-m)); box-shadow: 0 0 10px color-mix(in srgb, var(--prism-s) 36%, transparent); transition: width 60ms linear; }
+.replayProgressFill::after { content: ""; position: absolute; top: 50%; right: -3px; width: 7px; height: 7px; border-radius: 50%; background: #f7ffff; box-shadow: 0 0 7px color-mix(in srgb, var(--prism-s) 82%, transparent), 0 0 12px color-mix(in srgb, var(--prism-m) 54%, transparent); opacity: 0; transform: translateY(-50%) scale(.7); transition: opacity 120ms ease, transform 120ms ease; }
+.replayProgress:hover .replayProgressFill::after, .replayProgress:focus-within .replayProgressFill::after, .replayPlayer[data-playing="true"] .replayProgressFill::after { opacity: 1; transform: translateY(-50%) scale(1); }
+.replayProgress input { position: relative; z-index: 1; width: 100%; height: 26px; margin: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+.replayProgress input::-webkit-slider-runnable-track { height: 5px; background: transparent; }
+.replayProgress input::-webkit-slider-thumb { width: 13px; height: 13px; margin-top: -4px; appearance: none; -webkit-appearance: none; border: 2px solid rgba(7,16,20,.92); border-radius: 50%; background: color-mix(in srgb, var(--prism-s) 74%, #fff); box-shadow: 0 0 8px color-mix(in srgb, var(--prism-s) 60%, transparent); opacity: 0; transition: opacity 120ms ease; }
+.replayProgress input::-moz-range-track { height: 5px; background: transparent; }
+.replayProgress input::-moz-range-thumb { width: 9px; height: 9px; border: 2px solid rgba(7,16,20,.92); border-radius: 50%; background: color-mix(in srgb, var(--prism-s) 74%, #fff); box-shadow: 0 0 8px color-mix(in srgb, var(--prism-s) 60%, transparent); opacity: 0; }
+.replayProgress:hover input::-webkit-slider-thumb, .replayProgress:focus-within input::-webkit-slider-thumb { opacity: 1; }
+.replayProgress:hover input::-moz-range-thumb, .replayProgress:focus-within input::-moz-range-thumb { opacity: 1; }
+.replayProgress input:disabled { cursor: default; }
+.replayPlayerFooter { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 11px; padding: 0 3px; }
+.replayFileActions, .replayStudioActions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.replayAction { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--botcast-line) 92%, transparent); border-radius: 9px; padding: 6px 10px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-soft-panel) 78%, transparent); font: 760 .67rem/1 system-ui; text-decoration: none; cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease; }
+.replayAction svg { width: 14px; height: 14px; }
+.replayAction:hover:not(:disabled) { color: var(--botcast-ink); border-color: color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-s) 8%, var(--botcast-soft-panel)); transform: translateY(-1px); }
+.replayAction:disabled { opacity: .46; cursor: default; }
+.replayStudioCutAction { border-color: color-mix(in srgb, var(--prism-m) 32%, var(--botcast-line)); color: color-mix(in srgb, var(--prism-m) 56%, var(--botcast-ink)); background: color-mix(in srgb, var(--prism-m) 8%, var(--botcast-soft-panel)); }
+.replayRemoveAction { color: color-mix(in srgb, var(--prism-p) 52%, var(--botcast-muted)); }
+.replayRemoveAction:hover:not(:disabled) { color: color-mix(in srgb, var(--prism-p) 72%, var(--botcast-ink)); border-color: color-mix(in srgb, var(--prism-p) 36%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 8%, var(--botcast-soft-panel)); }
+.replayStatus { display: block; margin: 10px 3px 0; color: var(--botcast-muted); font: 680 .68rem/1.4 system-ui; }
+.replayPlayer button:focus-visible, .replayPlayer a:focus-visible, .replayProgress input:focus-visible { outline: 2px solid color-mix(in srgb, var(--prism-s) 76%, #fff); outline-offset: 2px; }
 .replayTranscript { max-width: 1180px; max-height: 320px; margin: 0 auto; overflow: auto; padding: 8px; }
 .replayTranscript button { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; text-align: left; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
 .replayTranscript button[data-botcast-replay-intro-row="true"] { margin-bottom: 5px; border: 1px solid color-mix(in srgb, var(--prism-m) 18%, var(--botcast-line)); color: var(--botcast-muted); background: color-mix(in srgb, var(--prism-m) 5%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-m) 48%, transparent); }
@@ -956,7 +1013,6 @@
 .shell[data-theme="light"] .productionHeading button,
 .shell[data-theme="light"] .replayHeader button,
 .shell[data-theme="light"] .returnButton,
-.shell[data-theme="light"] .replayControls button,
 .shell[data-theme="light"] .liveCameraControls button,
 .shell[data-theme="light"] .producerControls button,
 .shell[data-theme="light"] .producerGuestSipButton,
@@ -1045,6 +1101,8 @@
   .stageLayoutModal .atmosphereMixer { grid-column: 1; grid-row: auto; width: 100%; max-width: none; }
   .stageLayoutEditorHeader { align-items: flex-start; flex-direction: column; }
   .stageLayoutEditorHeader > div { width: 100%; flex-wrap: wrap; }
+  .stageCameraTuner { position: relative; inset: auto; margin-top: 8px; }
+  .stageCameraSliders { grid-template-columns: 1fr; }
   .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues" "status"; }
   .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cueGrid .refocusCue { grid-column: 1 / -1; }
@@ -1058,7 +1116,11 @@
   .stageVoiceMixer { grid-template-columns: 1fr; }
   .stageVoiceMixer > header { align-items: flex-start; }
   .stageVoiceMixerSliders { grid-template-columns: 1fr; }
-  .replayControls { flex-wrap: wrap; }.replayControls > input { order: 3; flex-basis: 100%; }
+  .replayPlayerHeader, .replayPlayerFooter { align-items: stretch; flex-direction: column; }
+  .replaySourceToggle { align-self: flex-start; }
+  .replayPlayerIdentity { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .replayPlayerIdentity > div { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .replayFileActions, .replayStudioActions { width: 100%; }
   .liveCameraControls { justify-content: flex-start; flex-wrap: wrap; }
 }
 
@@ -1081,6 +1143,7 @@
   .studioSpotlight { animation: none !important; transform: translateX(-50%) rotate(0deg); }
   .preRollSignalField i, .preRollEyebrow, .preRollLogo, .preRollOrbit, .preRollLockup h1, .preRollLockup p, .preRollLockup strong, .preRollMeters i, .showIntroPulse i { animation: none !important; }
   .signalToast { animation: none !important; }
+  .replayAction, .replayPlayButton, .replaySourceToggle button, .replayProgressFill { transition: none !important; }
 }
 
 @keyframes signalStudioSpotlightSweep {

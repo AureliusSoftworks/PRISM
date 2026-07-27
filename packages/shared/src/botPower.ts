@@ -39,6 +39,8 @@ export type BotPowerMemoryMode = "remember" | "forget";
 export type BotPowerResponseBudgetMode = "minimal" | "brief" | "expansive";
 export type BotPowerEnforcement = "soft" | "hard";
 export type BotPowerAvatarScaleMode = "larger" | "smaller";
+export type BotPowerAvatarColorCyclePaletteV1 = "spectrum";
+export type BotPowerAvatarColorCycleSpeedV1 = "steady";
 export type BotPowerAvatarVisibilityModeV1 =
   | "speaking_only"
   | "hidden"
@@ -118,6 +120,12 @@ export type BotPowerEffectV1 =
   | { type: "avatar_visibility"; mode: BotPowerAvatarVisibilityModeV1 }
   /** Render the holder at a restrained relative size without changing layout. */
   | { type: "avatar_scale"; mode: BotPowerAvatarScaleMode }
+  /** Cycle the holder's rendered accent without changing the saved bot color. */
+  | {
+      type: "avatar_color_cycle";
+      palette: BotPowerAvatarColorCyclePaletteV1;
+      speed: BotPowerAvatarColorCycleSpeedV1;
+    }
   /** Apply a fixed audible and typographic presence without changing saved voice settings. */
   | { type: "voice_presence"; mode: BotPowerVoicePresenceMode }
   /** Replace every public spoken word with deterministic normal-volume gibberish. */
@@ -542,6 +550,13 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
     (effect.mode === "larger" || effect.mode === "smaller")
   ) {
     return { type: "avatar_scale", mode: effect.mode };
+  }
+  if (effect.type === "avatar_color_cycle") {
+    return {
+      type: "avatar_color_cycle",
+      palette: "spectrum",
+      speed: "steady",
+    };
   }
   if (
     effect.type === "voice_presence" &&
@@ -1852,6 +1867,24 @@ export function botPowerAvatarScaleModeV1(
   value: unknown,
 ): BotPowerAvatarScaleMode | null {
   return botPowerAvatarScaleModeFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/** Whether an effect snapshot gives the holder a steady spectrum color cycle. */
+export function botPowerHasAvatarColorCycleFromEffectsV1(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(
+    (effect) =>
+      normalizeBotPowerEffectV1(effect)?.type === "avatar_color_cycle",
+  );
+}
+
+/** Whether enabled Ready Powers give the holder a steady spectrum color cycle. */
+export function botPowerHasAvatarColorCycleV1(value: unknown): boolean {
+  return botPowerHasAvatarColorCycleFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+  );
 }
 
 export type BotPowerResponseBudgetEffectV1 = Extract<

@@ -19,14 +19,14 @@ import {
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
 
 describe("listener reaction planning", () => {
-  it("is deterministic and keeps Signal opening and closing reactions visual-only", () => {
+  it("is deterministic and keeps Signal closing reactions visual-only", () => {
     const input = {
       episodeId: "episode-1",
       messageId: "message-4",
       speakerBotId: "guest",
       listenerBotId: "host",
       listenerRole: "host" as const,
-      segment: "opening" as const,
+      segment: "closing" as const,
       mood: "warm" as const,
       tensionLevel: 0,
     };
@@ -35,9 +35,33 @@ describe("listener reaction planning", () => {
     assert.equal(first?.spokenCue, undefined);
   });
 
+  it("lets the guest acknowledge an opening only after the cast introduction", () => {
+    const opening = Array.from({ length: 2_000 }, (_, index) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "opening-frequency",
+        messageId: `message-${index}`,
+        speakerBotId: "host",
+        listenerBotId: "guest",
+        listenerRole: "guest",
+        segment: "opening",
+        mood: "warm",
+        tensionLevel: 0,
+        minimumTargetProgress: 0.62,
+      }),
+    ).filter((plan) => plan !== null);
+    const audible = opening.filter((plan) => plan.spokenCue || plan.vocalFoley);
+
+    assert.ok(opening.length > 1_580 && opening.length < 1_700);
+    assert.ok(audible.length / 2_000 > 0.5);
+    assert.ok(audible.length / opening.length > 0.63);
+    assert.ok(audible.length / opening.length < 0.73);
+    assert.ok(opening.every((plan) => plan.targetProgress >= 0.62));
+  });
+
   it("keeps Signal reactions present on most turns without making every beat audible", () => {
     let visual = 0;
     let audible = 0;
+    let spoken = 0;
     let vocalFoley = 0;
     for (let index = 0; index < 8_000; index += 1) {
       const plan = buildSignalListenerReactionPlanV1({
@@ -52,16 +76,18 @@ describe("listener reaction planning", () => {
       });
       if (plan) visual += 1;
       if (plan?.spokenCue || plan?.vocalFoley) audible += 1;
+      if (plan?.spokenCue) spoken += 1;
       if (plan?.vocalFoley) vocalFoley += 1;
-      assert.equal(plan?.spokenCue, undefined);
       assert.equal(plan?.interjectionAttempt, undefined);
     }
     assert.ok(visual / 8_000 > 0.79 && visual / 8_000 < 0.85);
-    assert.ok(audible / visual > 0.09 && audible / visual < 0.13);
-    assert.equal(vocalFoley, audible);
+    assert.ok(audible / 8_000 > 0.5);
+    assert.ok(audible / visual > 0.68 && audible / visual < 0.76);
+    assert.ok(spoken / audible > 0.89 && spoken / audible < 0.95);
+    assert.equal(spoken + vocalFoley, audible);
   });
 
-  it("keeps ordinary Signal reactions nonverbal even under tension", () => {
+  it("keeps tense Signal backchannels brief without turning them into interruptions", () => {
     const warningReactions = Array.from({ length: 2_000 }, (_, index) =>
       buildSignalListenerReactionPlanV1({
         episodeId: "warning",
@@ -76,7 +102,13 @@ describe("listener reaction planning", () => {
     ).filter((plan) => plan !== null);
 
     assert.ok(warningReactions.length > 1_580 && warningReactions.length < 1_700);
-    assert.ok(warningReactions.every((plan) => plan?.spokenCue === undefined));
+    assert.ok(
+      warningReactions.every(
+        (plan) =>
+          plan?.spokenCue === undefined ||
+          ["hmm", "I see", "right"].includes(plan.spokenCue),
+      ),
+    );
     assert.ok(
       warningReactions.every((plan) => plan?.interjectionAttempt === undefined),
     );

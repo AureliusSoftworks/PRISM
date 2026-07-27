@@ -242,6 +242,7 @@ export function buildSignalReplayManifestV1(args: {
         microphoneTintMaskUrl:
           atmosphere?.microphoneTintMaskUrl ?? null,
         studioLayout: args.show.studioLayout,
+        cameraFraming: args.show.cameraFraming,
         studioGlowTuning: args.show.studioGlowTuning,
         logoImageUrl: args.show.logo?.imageUrl ?? null,
         runtimeMs: args.episode.runtimeMs,

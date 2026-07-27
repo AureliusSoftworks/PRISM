@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY,
   BOT_POWER_AVATAR_SCALE_MODE_POLICY,
+  BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY,
   BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY,
   BOT_POWER_CANDOR_MODE_POLICY,
   BOT_POWER_DESIGNATION_MODE_POLICY,
@@ -61,20 +62,20 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.34");
-    assert.equal(PRISM_APPLETS.zen.version, "1.32");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.38");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.38");
+    assert.equal(PRISM_APPLETS.chat.version, "1.35");
+    assert.equal(PRISM_APPLETS.zen.version, "1.33");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.39");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.39");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.28");
+    assert.equal(PRISM_APPLETS.story.version, "0.29");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.34");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.32");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.38");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.38");
-    assert.equal(prismAppletVersionLabel("story"), "v0.28");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.35");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.33");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.39");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.39");
+    assert.equal(prismAppletVersionLabel("story"), "v0.29");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });
 
@@ -103,6 +104,28 @@ describe("applet version helpers", () => {
       Object.keys(PRISM_APPLETS),
     );
     assert.deepEqual(BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      arena: "deferred",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares holder avatar color cycling for every current and planned applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
       arena: "deferred",

@@ -368,6 +368,17 @@ export async function claimReplayStudioCutMix(recordingId: string): Promise<{
   return result.claimed;
 }
 
+export async function retryReplayStudioCutMix(
+  recordingId: string,
+): Promise<ReplayRecordingV1> {
+  const result = await replayJson<{ ok: true; recording: ReplayRecordingV1 }>(
+    `/api/replays/${encodeURIComponent(recordingId)}/studio-cut/mix/retry`,
+    { method: "POST", body: "{}" },
+  );
+  window.dispatchEvent(new CustomEvent("prism:replay-recording-changed"));
+  return result.recording;
+}
+
 export async function completeReplayStudioCutMix(args: {
   recordingId: string;
   renderToken: string;

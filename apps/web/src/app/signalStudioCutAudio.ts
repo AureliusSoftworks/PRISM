@@ -3,14 +3,26 @@ import type {
   ReplayMouthCueV2,
   ReplayPremiumSegmentV1,
   ReplayRecordingV1,
+  ReplayVoiceTakeRecordV1,
   ReplayTimelineBeatV1,
   ReplayTimelineV1,
   BotcastSoundboardCueKind,
 } from "@localai/shared";
+import { normalizeBotcastStudioAtmosphereMix } from "@localai/shared";
 import { replayFetch } from "./replayClient";
 import { bundledCoffeeActionSfxPlaybackForSeed } from "./coffee-action-sfx";
+import { resolvePreSpeechBreathPlan } from "./preSpeechBreath";
+import {
+  connectRoomAcoustics,
+  SIGNAL_STUDIO_FOLEY_ROOM_SEND,
+  SIGNAL_STUDIO_VOICE_ROOM_SEND,
+  type RoomAcousticsSend,
+} from "./roomAcoustics";
+import { sessionAtmosphereBusVolume } from "./session-atmosphere-audio";
 import { signalSoundboardPlaybackPlan } from "./signalSoundboard";
 import { SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS } from "./signalReplayVideoFrame";
+import { compactSignalStudioCutMouthCues } from "./signalStudioCutMouth";
+import { renderOfflineVoiceTake } from "./voiceEffects";
 
 const SAMPLE_RATE = 48_000;
 const SEGMENT_GAP_MS = 320;
@@ -23,6 +35,10 @@ type ScheduledBuffer = {
   loop?: boolean;
   stopMs?: number;
   playbackRate?: number;
+  sourceOffsetSeconds?: number;
+  sourceDurationSeconds?: number;
+  roomAcoustics?: RoomAcousticsSend;
+  stereoPan?: number;
 };
 
 export interface PreparedSignalStudioCut {
@@ -58,6 +74,7 @@ function mouthShape(character: string): ReplayMouthCueV2["shape"] {
 export async function prepareSignalStudioCut(
   recording: ReplayRecordingV1,
   segments: readonly ReplayPremiumSegmentV1[],
+  takes: readonly ReplayVoiceTakeRecordV1[],
 ): Promise<PreparedSignalStudioCut> {
   if (!recording.manifest || recording.manifest.v !== 2) {
     throw new Error("Studio Cut requires a Replay V2 Signal manifest.");
@@ -72,6 +89,18 @@ export async function prepareSignalStudioCut(
     })),
   );
   const metadata = sourceManifest.visual.metadata ?? {};
+  const signalAudioMix =
+    metadata.signalAudioMix && typeof metadata.signalAudioMix === "object"
+      ? metadata.signalAudioMix as Record<string, unknown>
+      : {};
+  const masterVolume =
+    typeof signalAudioMix.masterVolume === "number" &&
+    Number.isFinite(signalAudioMix.masterVolume)
+      ? Math.max(0, Math.min(1, signalAudioMix.masterVolume))
+      : 1;
+  const atmosphereMix = normalizeBotcastStudioAtmosphereMix(
+    metadata.atmosphereMix,
+  );
   const introUrl = metadataUrl(metadata, "introAudioUrl");
   const outdentUrl = metadataUrl(metadata, "outdentAudioUrl");
   const atmosphereUrl = metadataUrl(metadata, "atmosphereAudioUrl");
@@ -91,20 +120,127 @@ export async function prepareSignalStudioCut(
     { startMs: number; endMs: number; alignment: ReplayPremiumSegmentV1["timings"][number]["alignment"] }
   >();
   const scheduled: ScheduledBuffer[] = [];
-  if (intro) scheduled.push({ buffer: intro, startMs: 0, gain: 1 });
-  for (const { segment, buffer } of decodedSegments) {
-    scheduled.push({ buffer, startMs: cursorMs, gain: 1 });
-    for (const timing of segment.timings) {
-      timingByMessageId.set(timing.sourceMessageId, {
-        startMs: cursorMs + timing.startMs,
-        endMs: cursorMs + Math.max(timing.startMs + 1, timing.endMs),
-        alignment: timing.alignment,
-      });
-    }
-    cursorMs += Math.max(segment.durationMs, Math.round(buffer.duration * 1_000)) +
-      SEGMENT_GAP_MS;
-  }
   const warnings: string[] = [];
+  const primaryTakeByMessageId = new Map(
+    takes
+      .filter(
+        (take) =>
+          take.snapshot.channel === "primary" &&
+          take.snapshot.sourceMessageId &&
+          take.status !== "failed",
+      )
+      .map((take) => [take.snapshot.sourceMessageId!, take]),
+  );
+  if (intro) scheduled.push({ buffer: intro, startMs: 0, gain: masterVolume });
+  for (const { segment, buffer } of decodedSegments) {
+    let segmentCursorMs = cursorMs;
+    let previousSourceEndMs = 0;
+    const sortedTimings = [...segment.timings].sort(
+      (left, right) => left.startMs - right.startMs,
+    );
+    for (const timing of sortedTimings) {
+      segmentCursorMs += Math.max(0, timing.startMs - previousSourceEndMs);
+      const sourceDurationMs = Math.max(1, timing.endMs - timing.startMs);
+      const take = primaryTakeByMessageId.get(timing.sourceMessageId);
+      if (!take) {
+        warnings.push(
+          `The saved voice profile for ${timing.sourceMessageId} was unavailable; that line uses the Premium source unchanged.`,
+        );
+        scheduled.push({
+          buffer,
+          startMs: segmentCursorMs,
+          gain: masterVolume,
+          playbackRate: 1,
+          sourceOffsetSeconds: timing.startMs / 1_000,
+          sourceDurationSeconds: sourceDurationMs / 1_000,
+        });
+        timingByMessageId.set(timing.sourceMessageId, {
+          startMs: segmentCursorMs,
+          endMs: segmentCursorMs + sourceDurationMs,
+          alignment: timing.alignment,
+        });
+        segmentCursorMs += sourceDurationMs;
+        previousSourceEndMs = timing.endMs;
+        continue;
+      }
+      const rendered = await renderOfflineVoiceTake({
+        sourceBuffer: buffer,
+        sourceOffsetSeconds: timing.startMs / 1_000,
+        sourceDurationSeconds: sourceDurationMs / 1_000,
+        profile: take.snapshot.profile,
+        moodKey: take.snapshot.moodKey,
+        effectsEnabled: take.snapshot.effectsEnabled,
+        gain: take.snapshot.gain,
+        stereoPan: take.snapshot.stereoPan,
+        seed: take.snapshot.seed,
+        roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+      });
+      if (!rendered.pitchPreserved) {
+        warnings.push(
+          `The pitch processor was unavailable for ${take.snapshot.speakerName}; that line kept its saved pace and other effects but not its pitch shift.`,
+        );
+      }
+      scheduled.push({
+        buffer: rendered.buffer,
+        startMs: segmentCursorMs,
+        gain: 1,
+      });
+      const alignmentScale = rendered.speechDurationMs / sourceDurationMs;
+      const alignment = timing.alignment
+        ? {
+            characters: timing.alignment.characters,
+            characterStartTimesSeconds:
+              timing.alignment.characterStartTimesSeconds.map(
+                (seconds) => seconds * alignmentScale,
+              ),
+            characterEndTimesSeconds:
+              timing.alignment.characterEndTimesSeconds.map(
+                (seconds) => seconds * alignmentScale,
+              ),
+          }
+        : null;
+      timingByMessageId.set(timing.sourceMessageId, {
+        startMs: segmentCursorMs,
+        endMs: segmentCursorMs + rendered.speechDurationMs,
+        alignment,
+      });
+      const breathPlan = resolvePreSpeechBreathPlan({
+        seed: take.snapshot.seed,
+        text: take.snapshot.spokenText,
+        surface: "signal",
+        mood: take.snapshot.moodKey,
+        authoredPerformanceText: take.snapshot.performanceText,
+        enabled: take.snapshot.effectsEnabled,
+      });
+      if (breathPlan) {
+        const breath = await decodeAudio(breathPlan.url).catch(() => null);
+        if (breath) {
+          scheduled.push({
+            buffer: breath,
+            startMs: Math.max(
+              0,
+              segmentCursorMs -
+                Math.max(0, breath.duration * 1_000 - breathPlan.voiceOverlapMs),
+            ),
+            gain:
+              Math.min(1.25, take.snapshot.gain) * breathPlan.gain,
+            roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+            stereoPan: take.snapshot.stereoPan,
+          });
+        }
+      }
+      segmentCursorMs += rendered.speechDurationMs;
+      previousSourceEndMs = timing.endMs;
+    }
+    if (sortedTimings.length === 0) {
+      scheduled.push({ buffer, startMs: segmentCursorMs, gain: masterVolume });
+      segmentCursorMs += Math.max(
+        segment.durationMs,
+        Math.round(buffer.duration * 1_000),
+      );
+    }
+    cursorMs = segmentCursorMs + SEGMENT_GAP_MS;
+  }
   for (const event of sourceManifest.direction) {
     if (event.kind !== "action" || !event.sourceMessageId) continue;
     const messageTiming = timingByMessageId.get(event.sourceMessageId);
@@ -147,13 +283,18 @@ export async function prepareSignalStudioCut(
     scheduled.push({
       buffer,
       startMs: messageTiming.startMs,
-      gain,
+      gain: gain * masterVolume * atmosphereMix.foley,
       playbackRate,
+      roomAcoustics: SIGNAL_STUDIO_FOLEY_ROOM_SEND,
     });
   }
   const outdentStartMs = cursorMs + 180;
   if (outdent) {
-    scheduled.push({ buffer: outdent, startMs: outdentStartMs, gain: 0.9 });
+    scheduled.push({
+      buffer: outdent,
+      startMs: outdentStartMs,
+      gain: 0.9 * masterVolume,
+    });
   }
   const durationMs = Math.max(
     outdentStartMs + (outdent ? Math.round(outdent.duration * 1_000) : 1_200),
@@ -163,7 +304,11 @@ export async function prepareSignalStudioCut(
     scheduled.push({
       buffer: atmosphere,
       startMs: 0,
-      gain: 0.16,
+      gain: sessionAtmosphereBusVolume({
+        volume: masterVolume,
+        mix: atmosphereMix,
+        bus: "background",
+      }),
       loop: true,
       stopMs: durationMs,
     });
@@ -323,7 +468,10 @@ export async function prepareSignalStudioCut(
       cues.push({ atMs: timing.endMs, shape: "closed" });
     }
     return cues.length > 0
-      ? [{ participantId: participant.id, cues: cues.sort((a, b) => a.atMs - b.atMs) }]
+      ? [{
+          participantId: participant.id,
+          cues: compactSignalStudioCutMouthCues(cues),
+        }]
       : [];
   });
   const manifest: ReplayManifestV2 = {
@@ -331,7 +479,7 @@ export async function prepareSignalStudioCut(
     privacyMode: "online",
     direction: [...remappedDirection, ...generatedOverlaps]
       .sort((left, right) => left.atMs - right.atMs || left.sequence - right.sequence)
-      .map((event, sequence) => ({ ...event, sequence })),
+      .map((event, sequence) => ({ ...event, sequence: sequence + 1 })),
     presentation: {
       ...sourceManifest.presentation,
       mouthTracks,
@@ -349,7 +497,16 @@ export async function prepareSignalStudioCut(
       for (const asset of scheduled) {
         const assetEndMs = asset.loop
           ? (asset.stopMs ?? durationMs)
-          : asset.startMs + asset.buffer.duration * 1_000;
+          : asset.startMs +
+            (
+              asset.sourceDurationSeconds ??
+              Math.max(
+                0,
+                asset.buffer.duration - (asset.sourceOffsetSeconds ?? 0),
+              )
+            ) *
+              1_000 /
+              (asset.playbackRate ?? 1);
         const overlapStart = Math.max(startMs, asset.startMs);
         const overlapEnd = Math.min(startMs + currentWindowMs, assetEndMs);
         if (overlapEnd <= overlapStart) continue;
@@ -359,12 +516,26 @@ export async function prepareSignalStudioCut(
         source.loop = asset.loop === true;
         source.playbackRate.value = asset.playbackRate ?? 1;
         gain.gain.value = asset.gain;
-        source.connect(gain).connect(context.destination);
-        const offsetSeconds = Math.max(0, (overlapStart - asset.startMs) / 1_000);
+        source.connect(gain);
+        connectRoomAcoustics({
+          context,
+          input: gain,
+          destination: context.destination,
+          send: asset.roomAcoustics,
+          stereoPan: asset.stereoPan,
+        });
+        const outputOffsetSeconds = Math.max(
+          0,
+          (overlapStart - asset.startMs) / 1_000,
+        );
+        const offsetSeconds =
+          (asset.sourceOffsetSeconds ?? 0) +
+          outputOffsetSeconds * (asset.playbackRate ?? 1);
         source.start(
           (overlapStart - startMs) / 1_000,
           asset.loop ? offsetSeconds % asset.buffer.duration : offsetSeconds,
-          (overlapEnd - overlapStart) / 1_000,
+          ((overlapEnd - overlapStart) / 1_000) *
+            (asset.playbackRate ?? 1),
         );
       }
       yield await context.startRendering();

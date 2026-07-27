@@ -29,15 +29,15 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.33 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
-| Zen | v1.31 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.37 | Active | Two-to-five-bot tables with composable identity Powers, directional interruption irritation, synthesized identity, surreal café atmospheres, and faithful replay. |
-| Signal | v1.37 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
+| Chat | v1.35 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
+| Zen | v1.33 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
+| Coffee | v2.39 | Active | Two-to-five-bot tables with composable identity Powers, directional interruption irritation, synthesized identity, surreal café atmospheres, and faithful replay. |
+| Signal | v1.39 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
-| Story | v0.27 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
+| Story | v0.29 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
 | Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
@@ -90,6 +90,11 @@ stages do not block the standalone preview.
 
 ### 2026-07-26
 
+- Bumped `Chat` to `v1.35`, `Zen` to `v1.33`, `Coffee` to `v2.39`,
+  `Signal` to `v1.39`, and planned `Story` to `v0.29` for the holder-scoped
+  spectrum Power. A Ready RGB, rainbow, or color-cycling Power continuously
+  changes the embodied avatar accent without mutating the bot's authored
+  resting color; reduced motion restores that authored color.
 - Bumped `Signal` to `v1.37` to restore the Align Studio cosmetic production
   layer: extracted microphones take separate host and guest accent masks,
   generated lighting uses its receiver map, floor glows can be placed and

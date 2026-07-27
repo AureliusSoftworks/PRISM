@@ -831,6 +831,43 @@ test("compiler deterministically distinguishes larger and smaller physical forms
   ]);
 });
 
+test("compiler deterministically turns RGB and rainbow wording into a color-cycling avatar", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Chroma",
+    powers: [{
+      version: 1,
+      id: "rgb",
+      name: "RGB",
+      intent: "The bot continuously cycles through every color of the rainbow.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "avatar_color_cycle",
+    palette: "spectrum",
+    speed: "steady",
+  }]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
+    "Spectrum color cycle",
+  ]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /authored color/u);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /do not know/u);
+});
+
 test("compiler turns a terse prompt-authored size edit into a deterministic smaller avatar", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {

@@ -21,6 +21,7 @@ function show(overrides: Partial<BotcastShow> = {}): BotcastShow {
       imageUrl: "/night.png",
     } as BotcastShow["nightAtmosphere"],
     studioLayout: {} as BotcastShow["studioLayout"],
+    cameraFraming: {} as BotcastShow["cameraFraming"],
     voiceLevelsByBotId: {},
     atmosphereMix: {} as BotcastShow["atmosphereMix"],
     logo: { imageUrl: "/logo.png" } as BotcastShow["logo"],

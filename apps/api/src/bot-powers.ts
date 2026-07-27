@@ -1161,6 +1161,44 @@ function deterministicAvatarScalePower(
   };
 }
 
+function deterministicAvatarColorCyclePower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 120)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 500)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const namedCycle =
+    /^(?:rgb|rainbow|color cycle|colour cycle|color cycling|colour cycling|spectrum|prismatic|chromatic)$/u.test(
+      name,
+    );
+  const describesCycle =
+    [
+      /\b(?:cycle|cycles|cycling|shift|shifts|shifting|change|changes|changing|rotate|rotates|rotating)\b[\s\S]{0,64}\b(?:colou?r|hue|rgb|rainbow|spectrum|chromatic)\b/u,
+      /\b(?:colou?r|hue|rgb|rainbow|spectrum|chromatic)\b[\s\S]{0,64}\b(?:cycle|cycles|cycling|shift|shifts|shifting|change|changes|changing|rotate|rotates|rotating)\b/u,
+      /\b(?:through|across)\s+(?:all|every|the)\s+(?:colou?rs?|hues?|rainbow|spectrum)\b/u,
+    ].some((pattern) => pattern.test(intent));
+  if (!namedCycle && !describesCycle) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Your visible avatar accent continuously cycles through the full color spectrum. Your underlying authored color remains your resting form. Mention this only when relevant. You cannot perceive the resting hue yourself: if asked to name it, say you do not know unless another speaker already told you.",
+    observerCue:
+      `${subject}'s visible avatar accent continuously cycles through the full color spectrum; their authored color remains underneath.`,
+    effects: [{
+      type: "avatar_color_cycle",
+      palette: "spectrum",
+      speed: "steady",
+    }],
+    ruleLabels: ["Spectrum color cycle"],
+  };
+}
+
 function deterministicGradualMoodPower(
   source: BotPowerV1,
   botName: string,
@@ -1359,6 +1397,7 @@ function deterministicPower(
     deterministicAddressedFandomPower(source, botName) ??
     deterministicGhostPower(source, botName) ??
     deterministicInvisiblePower(source, botName) ??
+    deterministicAvatarColorCyclePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
@@ -1435,11 +1474,14 @@ function compiledEntrySatisfiesIntent(
 ): boolean {
   const requiredAvatarEffects = [
     ...(deterministicAvatarScalePower(source, "")?.effects ?? []),
+    ...(deterministicAvatarColorCyclePower(source, "")?.effects ?? []),
     ...(deterministicInvisiblePower(source, "")?.effects ?? []),
     ...(deterministicHardAudiencePower(source, "")?.effects ?? []),
   ].filter(
     (effect) =>
-      effect.type === "avatar_scale" || effect.type === "avatar_visibility",
+      effect.type === "avatar_scale" ||
+      effect.type === "avatar_color_cycle" ||
+      effect.type === "avatar_visibility",
   );
   if (
     requiredAvatarEffects.some(
@@ -1699,6 +1741,9 @@ function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string
   if (deterministicAvatarScalePower(power, "")) {
     return `Local power compilation failed: invalid compiler output; required avatar-size rule missing. ${compilerDiagnosticContext(provider)}; describe the physical size clearly, then retry.`;
   }
+  if (deterministicAvatarColorCyclePower(power, "")) {
+    return `Local power compilation failed: invalid compiler output; required avatar color-cycle rule missing. ${compilerDiagnosticContext(provider)}; describe the cycling colors clearly, then retry.`;
+  }
   if (deterministicGhostPower(power, "")) {
     return `Local power compilation failed: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
   }
@@ -1737,6 +1782,7 @@ function promptPowerDisplayName(
   if (types.has("mood_boost")) return "Radiant Wake";
   if (types.has("mood_drain")) return "Gravitic Gloom";
   if (types.has("response_budget")) return "Measured Tongue";
+  if (types.has("avatar_color_cycle")) return "Living Spectrum";
   const avatarScale = compiled.effects.find(
     (effect) => effect.type === "avatar_scale",
   );
@@ -1906,6 +1952,7 @@ export async function compileBotPowers(args: {
         '- {"type":"speech_audience","allowed":[target...],"excluded":[target...] (optional)},',
         '- {"type":"avatar_visibility","mode":"speaking_only|hidden|translucent"},',
         '- {"type":"avatar_scale","mode":"larger|smaller"},',
+        '- {"type":"avatar_color_cycle","palette":"spectrum","speed":"steady"},',
         '- {"type":"voice_presence","mode":"loud|quiet"},',
         '- {"type":"speech_obfuscation","mode":"gibberish"},',
         '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
@@ -1970,7 +2017,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
+          "Every current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, avatar color-cycle, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {
@@ -1979,7 +2026,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

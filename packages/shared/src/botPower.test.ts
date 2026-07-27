@@ -18,6 +18,8 @@ import {
   botPowerResponseHasAddressedInsultV1,
   botPowerAvatarScaleModeFromEffectsV1,
   botPowerAvatarScaleModeV1,
+  botPowerHasAvatarColorCycleFromEffectsV1,
+  botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeFromEffectsV1,
   botPowerAvatarVisibilityModeV1,
   botPowerDeterministicHalfChanceV1,
@@ -1405,6 +1407,55 @@ test("avatar scale effects normalize safely and smaller wins without stacking", 
   assert.equal(
     botPowerAvatarScaleModeV1([{ ...readyPower, enabled: false }]),
     null,
+  );
+});
+
+test("avatar color-cycle effects normalize to one bounded holder presentation", () => {
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({
+      type: "avatar_color_cycle",
+      palette: "neon",
+      speed: "dangerously_fast",
+    }),
+    {
+      type: "avatar_color_cycle",
+      palette: "spectrum",
+      speed: "steady",
+    },
+  );
+  assert.equal(
+    botPowerHasAvatarColorCycleFromEffectsV1([
+      { type: "avatar_color_cycle", palette: "spectrum", speed: "steady" },
+    ]),
+    true,
+  );
+
+  const name = "RGB";
+  const intent = "The bot continuously cycles through every color of the rainbow.";
+  const readyPower = {
+    version: 1 as const,
+    id: "rgb",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Your visible accent continuously cycles through the spectrum; you do not know the resting hue.",
+      observerCue: "Their visible accent continuously cycles through the spectrum.",
+      effects: [{
+        type: "avatar_color_cycle" as const,
+        palette: "spectrum" as const,
+        speed: "steady" as const,
+      }],
+      ruleLabels: ["Spectrum color cycle"],
+    },
+  };
+  assert.equal(botPowerHasAvatarColorCycleV1([readyPower]), true);
+  assert.equal(
+    botPowerHasAvatarColorCycleV1([{ ...readyPower, enabled: false }]),
+    false,
   );
 });
 

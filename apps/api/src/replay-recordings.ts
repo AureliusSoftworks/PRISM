@@ -943,7 +943,9 @@ export function storeReplayPremiumAudio(
 ): ReplayRecordingV1 | null {
   const row = recordingRow(db, userId, recordingId);
   const production = premiumProductionRow(db, userId, recordingId);
-  if (!row || !production?.master_ready) return null;
+  if (!row || !production?.master_ready || production.phase !== "failed") {
+    return null;
+  }
   const relativePath = replayPremiumAudioRelativePath({
     userId,
     recordingId,

@@ -73,11 +73,13 @@ export type ListenerReactionVisualAction =
   | "thoughtful_hmm";
 export type ListenerReactionSpokenCue =
   | "mm-hm"
+  | "mm-hmm"
   | "I see"
   | "hmm"
   | "right"
   | "oh"
   | "go on"
+  | "sure, sure"
   | "No, hold on."
   | "Let me answer that."
   | "That's not fair."
@@ -154,11 +156,13 @@ const VISUAL_ACTIONS = new Set<ListenerReactionVisualAction>([
 ]);
 const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "mm-hm",
+  "mm-hmm",
   "I see",
   "hmm",
   "right",
   "oh",
   "go on",
+  "sure, sure",
   "No, hold on.",
   "Let me answer that.",
   "That's not fair.",
@@ -631,6 +635,23 @@ function signalVocalFoley(
   );
 }
 
+function signalSpokenBackchannel(
+  seed: string,
+  mood: VoiceDeliveryMood,
+  tensionLevel: number,
+  recentSpokenCues: readonly ListenerReactionSpokenCue[],
+): ListenerReactionSpokenCue {
+  const bank: readonly ListenerReactionSpokenCue[] =
+    tensionLevel >= 2 || mood === "strained"
+      ? ["hmm", "I see", "right"]
+      : mood === "warm" || mood === "joyful"
+        ? ["mm-hmm", "right", "sure, sure", "go on"]
+        : ["mm-hmm", "right", "I see", "hmm", "sure, sure", "oh"];
+  const recent = new Set(recentSpokenCues.slice(-2));
+  const fresh = bank.filter((cue) => !recent.has(cue));
+  return choose(`${seed}:spoken`, fresh.length > 0 ? fresh : bank);
+}
+
 export function buildSignalListenerReactionPlanV1(args: {
   episodeId: string;
   messageId: string;
@@ -640,6 +661,10 @@ export function buildSignalListenerReactionPlanV1(args: {
   segment: "opening" | "interview" | "closing";
   mood: VoiceDeliveryMood;
   tensionLevel: number;
+  /** Keeps an opening acknowledgement behind the completed cast introduction. */
+  minimumTargetProgress?: number;
+  /** Recent saved cues keep conversational acknowledgements from looping. */
+  recentSpokenCues?: readonly ListenerReactionSpokenCue[];
 }): ListenerReactionPlanV1 | null {
   if (!args.messageId || !args.speakerBotId || !args.listenerBotId) return null;
   const seed = [
@@ -656,13 +681,33 @@ export function buildSignalListenerReactionPlanV1(args: {
   if (stableUnit(`${seed}:visual-roll`) >= SIGNAL_VISUAL_REACTION_CHANCE) {
     return null;
   }
-  const audioChance = args.listenerRole === "host" ? 0.4 : 0.3;
-  const audible = args.segment === "interview" &&
+  const audioChance =
+    args.segment === "opening" && args.listenerRole === "guest"
+      ? 0.68
+      : args.listenerRole === "host"
+        ? 0.72
+        : 0.68;
+  const audible =
+    args.segment !== "closing" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
-  const vocalFoley = audible &&
-      stableUnit(`${seed}:foley-roll`) < 0.28
-    ? signalVocalFoley(seed, args.mood, tensionLevel)
-    : undefined;
+  const spokenCue =
+    audible && stableUnit(`${seed}:spoken-roll`) < 0.92
+      ? signalSpokenBackchannel(
+          seed,
+          args.mood,
+          tensionLevel,
+          args.recentSpokenCues ?? [],
+        )
+      : undefined;
+  const vocalFoley =
+    audible && !spokenCue
+      ? signalVocalFoley(seed, args.mood, tensionLevel)
+      : undefined;
+  const minimumTargetProgress =
+    typeof args.minimumTargetProgress === "number" &&
+    Number.isFinite(args.minimumTargetProgress)
+      ? Math.max(0.3, Math.min(0.9, args.minimumTargetProgress))
+      : 0.3;
   return {
     v: LISTENER_REACTION_PLAN_VERSION,
     name: "listenerReaction",
@@ -671,8 +716,9 @@ export function buildSignalListenerReactionPlanV1(args: {
     messageId: args.messageId,
     targetSource: "role",
     visualAction: signalVisualAction(seed, args.mood, args.tensionLevel),
+    ...(spokenCue ? { spokenCue } : {}),
     ...(vocalFoley ? { vocalFoley } : {}),
-    targetProgress: targetProgress(seed),
+    targetProgress: Math.max(targetProgress(seed), minimumTargetProgress),
     seed,
     cameraCutEligible:
       stableUnit(`${seed}:camera-roll`) < 0.22,

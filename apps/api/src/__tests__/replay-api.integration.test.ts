@@ -244,6 +244,62 @@ describe("faithful replay API", () => {
       /AUTO or ONLINE|LOCAL mode/u,
     );
 
+    const mixToken = "1234567890abcdef1234567890abcdef1234";
+    db.prepare(
+      `INSERT INTO replay_premium_productions (
+         recording_id, user_id, phase, progress, master_ready,
+         render_token, created_at, updated_at
+       ) VALUES (?, ?, 'rendering_studio', 0.5, 1, ?, ?, ?)`,
+    ).run(recordingId, ownerId, mixToken, now, now);
+    const studioCutAudioChunk = new Uint8Array([
+      0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42, 0x82, 0x88,
+    ]);
+    const uploadedStudioCutChunk = await owner.request(
+      `/api/replays/${recordingId}/studio-cut/mix/audio-chunk`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/octet-stream",
+          "x-prism-replay-token": mixToken,
+          "x-prism-replay-position": "0",
+        },
+        body: studioCutAudioChunk,
+      },
+    );
+    const uploadedStudioCutChunkPayload = await json(uploadedStudioCutChunk);
+    assert.equal(
+      uploadedStudioCutChunk.status,
+      201,
+      JSON.stringify(uploadedStudioCutChunkPayload),
+    );
+    assert.equal(
+      uploadedStudioCutChunkPayload.sizeBytes,
+      studioCutAudioChunk.byteLength,
+    );
+    db.prepare(
+      `UPDATE replay_premium_productions
+          SET phase = 'failed', error = 'Local mix failed'
+        WHERE recording_id = ? AND user_id = ?`,
+    ).run(recordingId, ownerId);
+    const retriedStudioCutMix = await owner.request(
+      `/api/replays/${recordingId}/studio-cut/mix/retry`,
+      jsonInit({}),
+    );
+    assert.equal(retriedStudioCutMix.status, 200);
+    const retriedStudioCutMixPayload = await json(retriedStudioCutMix);
+    assert.equal(
+      retriedStudioCutMixPayload.recording.studioCutProduction.phase,
+      "mixing_episode",
+    );
+    assert.equal(
+      retriedStudioCutMixPayload.recording.studioCutProduction.masterReady,
+      true,
+    );
+    assert.equal(
+      retriedStudioCutMixPayload.recording.studioCutProduction.error,
+      null,
+    );
+
     const ranged = await owner.request(`/api/replays/${recordingId}/audio`, {
       headers: { range: "bytes=2-5" },
     });
