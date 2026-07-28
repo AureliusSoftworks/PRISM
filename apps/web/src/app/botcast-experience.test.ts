@@ -957,6 +957,14 @@ describe("Signal experience shell", () => {
       source,
       /signalReplayInterviewFootageElapsedMs\(\{[\s\S]{0,180}introCardEndMs: replayIntroCardEndMs/u,
     );
+    assert.match(
+      source,
+      /const replayInterviewFootageOffsetMs =[\s\S]{0,220}signalReplayInterviewFootageOffsetMs\(\{[\s\S]{0,140}introCardEndMs: replayIntroCardEndMs/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /replayIntroCardEndMs - replayIntroDurationMs/u,
+    );
     assert.match(replayBookendSource, /data-replay-bookend=\{kind\}/u);
     assert.match(
       replayBookendSource,
@@ -1779,12 +1787,13 @@ describe("Signal experience shell", () => {
       source,
       /signalReplayIntroDurationMs\(replayActiveTimeline\)/u,
     );
-    assert.match(source, /className=\{styles\.replaySourceToggle\}/u);
-    assert.match(source, /aria-label="Choose replay audio"/u);
-    assert.match(source, />\s*Studio Cut\s*</u);
-    assert.match(source, /startReplayStudioCut\(replayRecording\.id, regenerate\)/u);
+    assert.match(source, /className=\{styles\.replayVersionMenu\}/u);
+    assert.match(source, /aria-label="Choose replay version"/u);
+    assert.match(source, /"Premium repair"/u);
+    assert.match(source, /startReplayStudioCut\(recordingId, intent\)/u);
     assert.match(source, /Estimated ElevenLabs use:/u);
-    assert.match(source, />\s*On Air\s*</u);
+    assert.match(source, /Original broadcast/u);
+    assert.doesNotMatch(source, />\s*Create Studio Cut\s*</u);
     assert.match(source, /data-botcast-replay-intro-row="true"/u);
     assert.match(
       source,
@@ -2382,6 +2391,18 @@ describe("Signal experience shell", () => {
     );
     assert.match(source, /aria-label="Show camera alignment"/u);
     assert.match(source, /\(\["left", "right", "wide"\] as const\)\.map/u);
+    assert.match(
+      source,
+      /className=\{styles\.stageViewportColumn\}[\s\S]*className=\{styles\.stageViewport\}[\s\S]*<\/section>\s*<section\s+className=\{styles\.stageCameraTuner\}/u,
+    );
+    assert.match(
+      css,
+      /\.stageLayoutModal \.stageViewportColumn\s*\{[^}]*display:\s*grid[^}]*gap:\s*10px/iu,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.stageCameraTuner\s*\{[^}]*position:\s*absolute/iu,
+    );
     assert.match(source, /body: JSON\.stringify\(\{ cameraFraming: draft\.framing \}\)/u);
     assert.match(source, /replayVisualMetadata\?\.cameraFraming \?\? args\.show\.cameraFraming/u);
     assert.match(source, /BOTCAST_DEFAULT_CAMERA_FRAMING\[[\s\S]{0,100}studioCameraPreviewShot/u);

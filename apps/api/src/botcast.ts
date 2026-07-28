@@ -145,6 +145,7 @@ import {
   botPowerAddressedFandomCueV1,
   botPowerRequiresAddressedInsultV1,
   botPowerResponseHasAddressedInsultV1,
+  botPowerResponseIsFirstIntroductionV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
   botPowerBotNamingCueV1,
@@ -9504,6 +9505,7 @@ type BotcastUtteranceRepairReason =
   | "non_answering_deferral"
   | "peer_label"
   | "policy_refusal"
+  | "power_fresh_contact"
   | "production_meta"
   | "speaker_identity_swap";
 
@@ -9759,6 +9761,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   speakerRole: BotcastSpeakerRole;
   hostClosing?: boolean;
   rejectPeerIdentityClaim?: boolean;
+  requireFreshContact?: boolean;
   requireAddressedInsult?: boolean;
 }):
   | { ok: true; value: string }
@@ -9780,6 +9783,11 @@ function validateBotcastAutoSpeakerUtterance(input: {
     botcastUtteranceClaimsSignalHistory(spokenContent) ||
     (input.hostClosing &&
       botcastHostClosingNeedsPersonaRetry(spokenContent)) ||
+    (input.requireFreshContact &&
+      !botPowerResponseIsFirstIntroductionV1(
+        spokenContent,
+        input.speakerName,
+      )) ||
     (input.requireAddressedInsult &&
       !botPowerResponseHasAddressedInsultV1(spokenContent, input.peerName)) ||
     BOTCAST_NON_ANSWERING_DEFERRAL_PATTERNS.some((pattern) =>
@@ -12035,6 +12043,7 @@ export async function advanceBotcastEpisode(
     ...(speakerEternallyIntroduces
       ? [
           `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
+          `Hard Power output contract: begin this exact turn with a brief, sincere first-contact self-introduction that names you as ${speaker.name}, then respond only to the current other-speaker line. This applies even during a live cue or closing beat.`,
         ]
       : []),
     ...(speakerRequiresAddressedInsult
@@ -12175,6 +12184,7 @@ export async function advanceBotcastEpisode(
                   speakerRole,
                   hostClosing: hostClosingTurn,
                   rejectPeerIdentityClaim: speakerEternallyIntroduces,
+                  requireFreshContact: speakerEternallyIntroduces,
                   requireAddressedInsult: speakerRequiresAddressedInsult,
                 }),
             }),
@@ -12215,6 +12225,7 @@ export async function advanceBotcastEpisode(
             speakerRole,
             hostClosing: hostClosingTurn,
             rejectPeerIdentityClaim: speakerEternallyIntroduces,
+            requireFreshContact: speakerEternallyIntroduces,
             requireAddressedInsult: speakerRequiresAddressedInsult,
           }),
         validationRetryInstruction,
@@ -12295,7 +12306,9 @@ export async function advanceBotcastEpisode(
       });
       raw = localTurn.value;
       if (
-        (hostClosingTurn || speakerRequiresAddressedInsult) &&
+        (hostClosingTurn ||
+          speakerEternallyIntroduces ||
+          speakerRequiresAddressedInsult) &&
         !speakerIsMutedForTurn &&
         !validateBotcastAutoSpeakerUtterance({
           raw,
@@ -12305,6 +12318,7 @@ export async function advanceBotcastEpisode(
           hostClosing: hostClosingTurn,
           requireAddressedInsult: speakerRequiresAddressedInsult,
           rejectPeerIdentityClaim: speakerEternallyIntroduces,
+          requireFreshContact: speakerEternallyIntroduces,
         }).ok
       ) {
         try {
@@ -12635,6 +12649,17 @@ export async function advanceBotcastEpisode(
       ? botcastStripPrematureHostSignoff(silentGuestAnswerSafeContent, host.name) ||
         fallback
       : silentGuestAnswerSafeContent;
+  const eternalIntroductionAdjustedContent = speakerEternallyIntroduces
+    ? applyBotPowerEternalIntroductionResponseV1(
+        cleanGeneratedContent,
+        speaker.name,
+        episode.messages.at(-1)?.content ?? "",
+        { hasPreviousOnAirTurn: speakerHasSpoken },
+      )
+    : cleanGeneratedContent;
+  const freshContactRepairApplied =
+    speakerEternallyIntroduces &&
+    eternalIntroductionAdjustedContent !== cleanGeneratedContent;
   const powerPresentationContent = picklesBeatKind
     ? cleanGeneratedContent
     : socialSilenceMarker
@@ -12642,12 +12667,7 @@ export async function advanceBotcastEpisode(
     : speakerIsMutedForTurn
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : speakerEternallyIntroduces
-      ? applyBotPowerEternalIntroductionResponseV1(
-          cleanGeneratedContent,
-          speaker.name,
-          episode.messages.at(-1)?.content ?? "",
-          { hasPreviousOnAirTurn: speakerHasSpoken },
-        )
+      ? eternalIntroductionAdjustedContent
     : speakerRepeatsForHearingPower
       ? hearingRepeatDirective!.repeatedContent
     : speakerEchoesForTurn
@@ -13119,16 +13139,23 @@ export async function advanceBotcastEpisode(
     ...(autoRecovery ? { autoRecovery } : {}),
     // Intentional silence/mute already owns the on-air content; ellipsis cleanup
     // must not look like a failed model repair in the production log.
-    ...((generatedUtterance.repairReason || closingContractRepaired) &&
+    ...((generatedUtterance.repairReason ||
+      closingContractRepaired ||
+      freshContactRepairApplied) &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn
       ? {
           utteranceRepair: {
             v: 1,
-            source: "sanitizer",
+            source:
+              generatedUtterance.repairReason || closingContractRepaired
+                ? "sanitizer"
+                : "power_runtime",
             reason:
               generatedUtterance.repairReason ??
-              ("generic_closing" as BotcastUtteranceRepairReason),
+              (closingContractRepaired
+                ? "generic_closing"
+                : "power_fresh_contact"),
             fallbackKind:
               speakerRole === "guest"
                 ? "guest_substantive_answer"

@@ -130,6 +130,7 @@ import {
   type ReplayCameraDirectionPayloadV2,
   type ReplayVoiceSelectionSnapshotV2,
   type ReplayManifestV2,
+  type ReplayPremiumAudioActionV1,
   type ReplayRecordingV1,
   type ReplayStudioCutEligibilityV1,
   type PrismRefractResponse,
@@ -144,7 +145,6 @@ import {
   LoaderCircle,
   Pause,
   Play,
-  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -290,6 +290,7 @@ import {
   signalReplayIntroIsLanding,
   signalReplayIntroLandingFadeMs,
   signalReplayInterviewFootageElapsedMs,
+  signalReplayInterviewFootageOffsetMs,
   signalReplayIntroVisualOffsetMs,
 } from "./signalReplayVideoFrame";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
@@ -778,7 +779,7 @@ type SignalStudioCutConfirmation =
   | {
       kind: "generate";
       recordingId: string;
-      regenerate: boolean;
+      intent: ReplayPremiumAudioActionV1;
       eligibility: ReplayStudioCutEligibilityV1;
     }
   | {
@@ -1535,6 +1536,7 @@ export function BotcastExperience({
     useState<SignalStudioCutConfirmation | null>(null);
   const [studioCutEligibilityState, setStudioCutEligibilityState] =
     useState<ReplayStudioCutEligibilityV1 | null>(null);
+  const premiumAutoSelectionRef = useRef<string | null>(null);
   const replayAudioRef = useRef<HTMLAudioElement | null>(null);
   const signalCaptureSourceIdRef = useRef<string | null>(null);
   const selectedShowRef = useRef<BotcastShow | null>(null);
@@ -6689,7 +6691,21 @@ export function BotcastExperience({
       setReplayElapsedMs(0);
       setReplayPlaying(false);
       setReplayIntroRevealed(false);
-      setReplayPlaybackSource("on-air");
+      setStudioCutEligibilityState(null);
+      const loadedRecording = recordingDetail?.recording ?? recording;
+      const loadedPremiumReady = Boolean(
+        loadedRecording?.studioCutProduction?.audioUrl &&
+          loadedRecording.studioCutProduction.timeline &&
+          loadedRecording.studioCutProduction.manifest,
+      );
+      const loadedQuality = loadedRecording?.voiceQuality?.status;
+      const selectPremium =
+        loadedPremiumReady &&
+        (loadedQuality === "repairable" || loadedQuality === "upgradeable");
+      setReplayPlaybackSource(selectPremium ? "studio-cut" : "on-air");
+      premiumAutoSelectionRef.current = selectPremium
+        ? loadedRecording?.id ?? null
+        : null;
     } catch (replayError) {
       if (replayVoiceRunIdRef.current === replayRunId) {
         setError(signalErrorToast("Load Signal replay", replayError));
@@ -6712,6 +6728,8 @@ export function BotcastExperience({
     [replayEpisode],
   );
   const studioCut = replayRecording?.studioCutProduction ?? null;
+  const replayVoiceQuality = replayRecording?.voiceQuality ?? null;
+  const premiumAction = replayVoiceQuality?.recommendedAction ?? null;
   const studioCutReady = Boolean(
     studioCut?.audioUrl && studioCut.timeline && studioCut.manifest,
   );
@@ -6720,18 +6738,65 @@ export function BotcastExperience({
     studioCut?.phase === "mixing_episode" ||
     studioCut?.phase === "rendering_studio" ||
     studioCut?.phase === "finalizing";
+  useEffect(() => {
+    if (
+      !replayRecordingId ||
+      !studioCutReady ||
+      !premiumAction ||
+      premiumAutoSelectionRef.current === replayRecordingId
+    ) {
+      return;
+    }
+    replayAudioRef.current?.pause();
+    setReplayPlaying(false);
+    setReplayElapsedMs(0);
+    setReplayPlaybackSource("studio-cut");
+    premiumAutoSelectionRef.current = replayRecordingId;
+  }, [premiumAction, replayRecordingId, studioCutReady]);
   const replayActiveAudioUrl =
     replayPlaybackSource === "studio-cut" && studioCutReady
       ? studioCut?.audioUrl ?? null
       : replayRecording?.audioUrl ?? null;
   const replayPlaybackLabel =
     replayPlaybackSource === "studio-cut" && studioCutReady
-      ? "Studio Cut"
-      : "On Air";
+      ? premiumAction === "repair"
+        ? "Premium repair"
+        : "Premium audio"
+      : "Original broadcast";
   const replayPlaybackDescription =
     replayPlaybackSource === "studio-cut" && studioCutReady
-      ? "Enhanced voice performance"
-      : "Original live recording";
+      ? "Polished voices with saved production layers"
+      : "The exact audio heard on air";
+  const premiumActionLabel =
+    premiumAction === "repair" ? "Repair voice" : "Upgrade voices";
+  const replayVoiceQualityLabel =
+    replayVoiceQuality?.status === "premium"
+      ? "Premium audio"
+      : replayVoiceQuality?.status === "repairable"
+        ? `Premium audio · ${replayVoiceQuality.fallbackLineCount} fallback ${
+            replayVoiceQuality.fallbackLineCount === 1 ? "line" : "lines"
+          }`
+        : replayVoiceQuality?.status === "upgradeable"
+          ? "Original voice mix"
+          : "Original audio";
+  const premiumProgressLabel =
+    studioCutRequestPhase === "checking"
+      ? "Checking availability…"
+      : studioCutRequestPhase === "retrying"
+        ? "Finishing Premium mix…"
+        : studioCutRequestPhase === "starting"
+          ? `Sending ${replayVoiceQuality?.targetLineCount ?? 0} ${
+              replayVoiceQuality?.targetLineCount === 1 ? "line" : "lines"
+            }…`
+          : studioCut?.phase === "mastering_voices"
+            ? `Generating replacement ${
+                replayVoiceQuality?.targetLineCount === 1 ? "voice" : "voices"
+              } · ${Math.round(studioCut.progress * 100)}%`
+            : studioCut?.phase === "mixing_episode" ||
+                studioCut?.phase === "rendering_studio" ||
+                studioCut?.phase === "finalizing"
+              ? `Mixing Premium audio · ${Math.round(studioCut.progress * 100)}%`
+              : null;
   const replayActiveDownloadUrl = replayActiveAudioUrl
     ? `${replayActiveAudioUrl}?download=1`
     : null;
@@ -6777,7 +6842,12 @@ export function BotcastExperience({
     replayActiveTimeline,
   );
   const replayInterviewFootageOffsetMs =
-    replayIntroCardEndMs - replayIntroDurationMs;
+    replayFaithful && replayActiveTimeline
+      ? signalReplayInterviewFootageOffsetMs({
+          timeline: replayActiveTimeline,
+          introCardEndMs: replayIntroCardEndMs,
+        })
+      : 0;
   const replayInterviewFootageElapsedMs =
     replayFaithful && replayActiveTimeline
       ? signalReplayInterviewFootageElapsedMs({
@@ -7291,18 +7361,25 @@ export function BotcastExperience({
     };
   }, [refreshReplayRecording, replayEpisode]);
 
-  const requestStudioCut = async (regenerate: boolean): Promise<void> => {
+  const requestStudioCut = async (
+    intent: ReplayPremiumAudioActionV1,
+  ): Promise<void> => {
     if (!replayRecording || studioCutBusy) return;
     setStudioCutBusy(true);
     setStudioCutRequestPhase("checking");
     try {
       const eligibility = await replayStudioCutEligibility(replayRecording.id);
       setStudioCutEligibilityState(eligibility);
-      if (!eligibility.eligible) {
+      if (
+        !eligibility.eligible ||
+        eligibility.recommendedAction !== intent
+      ) {
         setError(
           signalErrorToast(
-            "Make Studio Cut",
-            new Error(eligibility.blockedReason ?? "Studio Cut is unavailable."),
+            intent === "repair" ? "Repair voice" : "Upgrade voices",
+            new Error(
+              eligibility.blockedReason ?? "Premium audio is unavailable.",
+            ),
           ),
         );
         return;
@@ -7310,11 +7387,16 @@ export function BotcastExperience({
       setStudioCutConfirmation({
         kind: "generate",
         recordingId: replayRecording.id,
-        regenerate,
+        intent,
         eligibility,
       });
     } catch (studioCutError) {
-      setError(signalErrorToast("Make Studio Cut", studioCutError));
+      setError(
+        signalErrorToast(
+          intent === "repair" ? "Repair voice" : "Upgrade voices",
+          studioCutError,
+        ),
+      );
     } finally {
       setStudioCutRequestPhase(null);
       setStudioCutBusy(false);
@@ -7329,15 +7411,20 @@ export function BotcastExperience({
     ) {
       return;
     }
-    const { recordingId, regenerate } = studioCutConfirmation;
+    const { recordingId, intent } = studioCutConfirmation;
     setStudioCutConfirmation(null);
     setStudioCutBusy(true);
     setStudioCutRequestPhase("starting");
     try {
-      const recording = await startReplayStudioCut(recordingId, regenerate);
+      const recording = await startReplayStudioCut(recordingId, intent);
       setReplayRecording(recording);
     } catch (studioCutError) {
-      setError(signalErrorToast("Make Studio Cut", studioCutError));
+      setError(
+        signalErrorToast(
+          intent === "repair" ? "Repair voice" : "Upgrade voices",
+          studioCutError,
+        ),
+      );
     } finally {
       setStudioCutRequestPhase(null);
       setStudioCutBusy(false);
@@ -7357,7 +7444,7 @@ export function BotcastExperience({
     try {
       setReplayRecording(await retryReplayStudioCutMix(replayRecording.id));
     } catch (studioCutError) {
-      setError(signalErrorToast("Remix Studio Cut", studioCutError));
+      setError(signalErrorToast("Finish Premium audio", studioCutError));
     } finally {
       setStudioCutRequestPhase(null);
       setStudioCutBusy(false);
@@ -7386,9 +7473,10 @@ export function BotcastExperience({
     try {
       stopReplayPlayback();
       setReplayPlaybackSource("on-air");
+      premiumAutoSelectionRef.current = null;
       setReplayRecording(await removeReplayStudioCut(recordingId));
     } catch (studioCutError) {
-      setError(signalErrorToast("Remove Studio Cut", studioCutError));
+      setError(signalErrorToast("Remove Premium version", studioCutError));
     } finally {
       setStudioCutBusy(false);
     }
@@ -9130,80 +9218,82 @@ export function BotcastExperience({
                   {guest ? voiceLevelControl(guest, "Guest") : null}
                 </div>
               </section>
-              <section
-                className={styles.stageViewport}
-                data-shot={studioCameraPreviewShot}
-                data-layout-editor="true"
-                data-signal-layout-stage="true"
-                data-studio-source={
-                  stageAtmosphere.imageUrl ? "image" : "fallback"
-                }
-                style={stageStyle}
-                aria-label={`Align the ${show.name} studio stage`}
-              >
-                <div className={styles.stageScene}>
-                  <div className={styles.atmosphere} aria-hidden="true">
-                    {!stageAtmosphere.imageUrl ? (
-                      <SignalFallbackStudio
-                        surface="stage"
-                        accentVariant={show.fallbackStudioAccentVariant}
-                      />
+              <div className={styles.stageViewportColumn}>
+                <section
+                  className={styles.stageViewport}
+                  data-shot={studioCameraPreviewShot}
+                  data-layout-editor="true"
+                  data-signal-layout-stage="true"
+                  data-studio-source={
+                    stageAtmosphere.imageUrl ? "image" : "fallback"
+                  }
+                  style={stageStyle}
+                  aria-label={`Align the ${show.name} studio stage`}
+                >
+                  <div className={styles.stageScene}>
+                    <div className={styles.atmosphere} aria-hidden="true">
+                      {!stageAtmosphere.imageUrl ? (
+                        <SignalFallbackStudio
+                          surface="stage"
+                          accentVariant={show.fallbackStudioAccentVariant}
+                        />
+                      ) : null}
+                    </div>
+                    <SignalStudioMicrophoneTint
+                      atmosphere={stageAtmosphere}
+                      layout={layout}
+                      hostColor={host.color ?? show.accentColor}
+                      guestColor={guest?.color ?? show.accentColor}
+                      theme={previewTheme}
+                    />
+                    <div className={styles.wordmark}>
+                      <SignalShowLogo show={show} />
+                      <strong>{show.name}</strong>
+                    </div>
+                    <div
+                      className={styles.studioGlow}
+                      data-generated-lighting={
+                        show.studioLighting?.status === "ready"
+                          ? "true"
+                          : undefined
+                      }
+                      data-talk-reactive="true"
+                      data-host-talking={
+                        studioSoundcheckSpeech?.botId === host.id
+                          ? "true"
+                          : undefined
+                      }
+                      data-guest-talking={
+                        guest && studioSoundcheckSpeech?.botId === guest.id
+                          ? "true"
+                          : undefined
+                      }
+                      aria-hidden="true"
+                    />
+                    <div
+                      className={styles.signalFloorGlowLayer}
+                      aria-hidden="true"
+                    >
+                      {floorGlowPreview("host", host.color)}
+                      {floorGlowPreview("guest", guest?.color)}
+                    </div>
+                    {show.studioLighting?.status !== "ready" ? (
+                      <SignalStudioSpotlight />
                     ) : null}
+                    {layoutHandle("hostFloorGlow", null)}
+                    {layoutHandle("guestFloorGlow", null)}
+                    {layoutHandle("hostBot", avatarPreview(host, "host"))}
+                    {hostHasCoffeeCup
+                      ? layoutHandle("hostCup", cupPreview(host, "host"))
+                      : null}
+                    {guest
+                      ? layoutHandle("guestBot", avatarPreview(guest, "guest"))
+                      : null}
+                    {guest && guestHasCoffeeCup
+                      ? layoutHandle("guestCup", cupPreview(guest, "guest"))
+                      : null}
                   </div>
-                  <SignalStudioMicrophoneTint
-                    atmosphere={stageAtmosphere}
-                    layout={layout}
-                    hostColor={host.color ?? show.accentColor}
-                    guestColor={guest?.color ?? show.accentColor}
-                    theme={previewTheme}
-                  />
-                  <div className={styles.wordmark}>
-                    <SignalShowLogo show={show} />
-                    <strong>{show.name}</strong>
-                  </div>
-                  <div
-                    className={styles.studioGlow}
-                    data-generated-lighting={
-                      show.studioLighting?.status === "ready"
-                        ? "true"
-                        : undefined
-                    }
-                    data-talk-reactive="true"
-                    data-host-talking={
-                      studioSoundcheckSpeech?.botId === host.id
-                        ? "true"
-                        : undefined
-                    }
-                    data-guest-talking={
-                      guest && studioSoundcheckSpeech?.botId === guest.id
-                        ? "true"
-                        : undefined
-                    }
-                    aria-hidden="true"
-                  />
-                  <div
-                    className={styles.signalFloorGlowLayer}
-                    aria-hidden="true"
-                  >
-                    {floorGlowPreview("host", host.color)}
-                    {floorGlowPreview("guest", guest?.color)}
-                  </div>
-                  {show.studioLighting?.status !== "ready" ? (
-                    <SignalStudioSpotlight />
-                  ) : null}
-                  {layoutHandle("hostFloorGlow", null)}
-                  {layoutHandle("guestFloorGlow", null)}
-                  {layoutHandle("hostBot", avatarPreview(host, "host"))}
-                  {hostHasCoffeeCup
-                    ? layoutHandle("hostCup", cupPreview(host, "host"))
-                    : null}
-                  {guest
-                    ? layoutHandle("guestBot", avatarPreview(guest, "guest"))
-                    : null}
-                  {guest && guestHasCoffeeCup
-                    ? layoutHandle("guestCup", cupPreview(guest, "guest"))
-                    : null}
-                </div>
+                </section>
                 <section
                   className={styles.stageCameraTuner}
                   aria-label="Show camera alignment"
@@ -9300,7 +9390,7 @@ export function BotcastExperience({
                     ))}
                   </div>
                 </section>
-              </section>
+              </div>
               <section
                 className={styles.stageScreenTreatment}
                 aria-label="Signal screen treatment"
@@ -11759,37 +11849,75 @@ export function BotcastExperience({
                     </div>
                   </div>
                   {studioCutReady ? (
-                    <div
-                      className={styles.replaySourceToggle}
-                      role="group"
-                      aria-label="Choose replay audio"
-                    >
-                      <button
-                        type="button"
-                        aria-pressed={replayPlaybackSource === "on-air"}
-                        onClick={() => {
-                          stopReplayPlayback();
-                          setReplayElapsedMs(0);
-                          setReplayPlaybackSource("on-air");
-                        }}
-                      >
-                        On Air
-                      </button>
-                      <button
-                        type="button"
-                        aria-pressed={replayPlaybackSource === "studio-cut"}
-                        onClick={() => {
-                          stopReplayPlayback();
-                          setReplayElapsedMs(0);
-                          setReplayPlaybackSource("studio-cut");
-                        }}
-                      >
-                        <Sparkles aria-hidden="true" />
-                        Studio Cut
-                      </button>
-                    </div>
+                    <details className={styles.replayVersionMenu}>
+                      <summary>
+                        <span>Version</span>
+                        <strong>{replayPlaybackLabel}</strong>
+                      </summary>
+                      <div role="menu" aria-label="Choose replay version">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={replayPlaybackSource === "studio-cut"}
+                          onClick={(event) => {
+                            stopReplayPlayback();
+                            setReplayElapsedMs(0);
+                            setReplayPlaybackSource("studio-cut");
+                            event.currentTarget
+                              .closest("details")
+                              ?.removeAttribute("open");
+                          }}
+                        >
+                          <Sparkles aria-hidden="true" />
+                          <span>
+                            <strong>
+                              {premiumAction === "repair"
+                                ? "Premium repair"
+                                : "Premium audio"}
+                            </strong>
+                            <small>Polished voice mix</small>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={replayPlaybackSource === "on-air"}
+                          onClick={(event) => {
+                            stopReplayPlayback();
+                            setReplayElapsedMs(0);
+                            setReplayPlaybackSource("on-air");
+                            event.currentTarget
+                              .closest("details")
+                              ?.removeAttribute("open");
+                          }}
+                        >
+                          <span>
+                            <strong>Original broadcast</strong>
+                            <small>Exactly as aired</small>
+                          </span>
+                        </button>
+                        <span className={styles.replayVersionDivider} />
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className={styles.replayVersionRemove}
+                          disabled={studioCutBusy}
+                          onClick={(event) => {
+                            event.currentTarget
+                              .closest("details")
+                              ?.removeAttribute("open");
+                            void removeStudioCut();
+                          }}
+                        >
+                          <Trash2 aria-hidden="true" />
+                          Remove Premium version
+                        </button>
+                      </div>
+                    </details>
                   ) : (
-                    <span className={styles.replaySourceBadge}>On Air</span>
+                    <span className={styles.replaySourceBadge}>
+                      Original broadcast
+                    </span>
                   )}
                 </header>
 
@@ -11896,116 +12024,65 @@ export function BotcastExperience({
                       </a>
                     ) : null}
                   </div>
-                  <div className={styles.replayStudioActions}>
-                    {studioCutReady ? (
-                      <>
-                        <button
-                          className={styles.replayAction}
-                          type="button"
-                          aria-busy={studioCutBusy}
-                          disabled={studioCutBusy || studioCutPending}
-                          title="Reapply saved voice pitch, effects, levels, and production layers without another paid generation"
-                          onClick={() => void remixStudioCut()}
-                        >
-                          <RefreshCw aria-hidden="true" />
-                          Remix cut
-                        </button>
-                        <button
-                          className={styles.replayAction}
-                          type="button"
-                          aria-busy={studioCutBusy}
-                          disabled={
-                            studioCutBusy ||
-                            studioCutPending ||
-                            studioCutEligibilityState?.eligible === false
-                          }
-                          title={
-                            studioCutEligibilityState?.blockedReason ?? undefined
-                          }
-                          onClick={() => void requestStudioCut(true)}
-                        >
-                          <Sparkles aria-hidden="true" />
-                          New Studio Cut
-                        </button>
-                        <button
-                          className={`${styles.replayAction} ${styles.replayRemoveAction}`}
-                          type="button"
-                          disabled={studioCutBusy}
-                          onClick={() => void removeStudioCut()}
-                        >
-                          <Trash2 aria-hidden="true" />
-                          Remove cut
-                        </button>
-                      </>
-                    ) : (
+                  <div className={styles.replayQuality}>
+                    <span>
+                      <span
+                        className={styles.replayQualityDot}
+                        data-quality={replayVoiceQuality?.status ?? "original_only"}
+                      />
+                      {replayVoiceQualityLabel}
+                    </span>
+                    {premiumProgressLabel ? (
+                      <span className={styles.replayQualityProgress} role="status">
+                        <LoaderCircle aria-hidden="true" />
+                        {premiumProgressLabel}
+                      </span>
+                    ) : !studioCutReady &&
+                      premiumAction &&
+                      studioCut?.phase === "failed" &&
+                      (studioCut.masterReady ||
+                        studioCutEligibilityState?.eligible === true) ? (
                       <button
                         className={`${styles.replayAction} ${styles.replayStudioCutAction}`}
                         type="button"
                         aria-busy={studioCutBusy}
-                        disabled={
-                          studioCutBusy ||
-                          studioCutPending ||
-                          studioCutEligibilityState?.eligible === false
-                        }
+                        disabled={studioCutBusy}
                         title={
                           studioCutEligibilityState?.blockedReason ?? undefined
                         }
                         onClick={() =>
-                          void (studioCut?.phase === "failed" &&
-                          studioCut.masterReady
+                          void (studioCut.masterReady
                             ? remixStudioCut()
-                            : requestStudioCut(Boolean(studioCut)))
+                            : requestStudioCut(premiumAction))
                         }
                       >
                         <Sparkles aria-hidden="true" />
-                        {studioCutRequestPhase === "checking"
-                          ? "Checking Studio Cut…"
-                          : studioCutRequestPhase === "retrying"
-                            ? "Restarting Studio Cut mix…"
-                            : studioCutRequestPhase === "starting"
-                              ? "Starting Studio Cut…"
-                              : studioCut?.phase === "mastering_voices"
-                                ? `Studio Cut: voices ${Math.round(studioCut.progress * 100)}%`
-                                : studioCut?.phase === "mixing_episode" ||
-                                    studioCut?.phase === "rendering_studio" ||
-                                    studioCut?.phase === "finalizing"
-                                  ? `Studio Cut: mixing ${Math.round(studioCut.progress * 100)}%`
-                                  : studioCut?.phase === "failed"
-                                    ? studioCut.masterReady
-                                      ? "Retry Studio Cut mix"
-                                      : "Retry Studio Cut"
-                                    : "Create Studio Cut"}
+                        {premiumAction === "repair"
+                          ? "Retry repair"
+                          : "Retry upgrade"}
                       </button>
-                    )}
+                    ) : !studioCutReady &&
+                      premiumAction &&
+                      studioCutEligibilityState?.eligible === true ? (
+                      <button
+                        className={`${styles.replayAction} ${styles.replayStudioCutAction}`}
+                        type="button"
+                        disabled={studioCutBusy || studioCutPending}
+                        onClick={() => void requestStudioCut(premiumAction)}
+                      >
+                        <Sparkles aria-hidden="true" />
+                        {premiumActionLabel}
+                      </button>
+                    ) : null}
                   </div>
                 </footer>
 
-                {studioCutPending && studioCutReady ? (
-                  <span className={styles.replayStatus} role="status">
-                    New Studio Cut {Math.round(studioCut.progress * 100)}%
-                  </span>
-                ) : null}
-                {studioCutReady &&
+                {!studioCutReady &&
+                premiumAction &&
                 studioCut?.phase === "failed" &&
                 studioCut.error ? (
                   <span className={styles.replayStatus} role="status">
                     {studioCut.error}
-                  </span>
-                ) : null}
-                {studioCutRequestPhase ? (
-                  <span className={styles.replayStatus} role="status">
-                    {studioCutRequestPhase === "checking"
-                      ? "Checking Studio Cut availability…"
-                      : studioCutRequestPhase === "retrying"
-                        ? "Remixing the saved Studio Cut voices and production layers without another paid generation…"
-                        : "Starting paid Studio Cut generation…"}
-                  </span>
-                ) : null}
-                {!studioCutReady &&
-                studioCutEligibilityState?.eligible === false &&
-                studioCutEligibilityState.blockedReason ? (
-                  <span className={styles.replayStatus} role="status">
-                    {studioCutEligibilityState.blockedReason}
                   </span>
                 ) : null}
               </section>
@@ -12927,7 +13004,7 @@ export function BotcastExperience({
             className={styles.deleteBackdropDismiss}
             onClick={() => setStudioCutConfirmation(null)}
             tabIndex={-1}
-            aria-label="Cancel Studio Cut"
+            aria-label="Cancel Premium audio action"
           />
           <section
             className={styles.deleteDialog}
@@ -12939,36 +13016,44 @@ export function BotcastExperience({
             <span className={styles.eyebrow}>
               {studioCutConfirmation.kind === "generate"
                 ? "Paid generation"
-                : "Alternate cut"}
+                : "Saved version"}
             </span>
             <h2 id="signal-studio-cut-title">
               {studioCutConfirmation.kind === "remove"
-                ? "Remove this Studio Cut?"
-                : studioCutConfirmation.regenerate
-                  ? "Try another Studio Cut?"
-                  : "Make a Studio Cut?"}
+                ? "Remove this Premium version?"
+                : studioCutConfirmation.intent === "repair"
+                  ? "Repair the fallback voice?"
+                  : "Upgrade these voices?"}
             </h2>
             <p id="signal-studio-cut-description">
               {studioCutConfirmation.kind === "remove" ? (
-                "Your exact On Air recording will remain."
+                "Your exact original broadcast will remain."
               ) : (
                 <>
                   Estimated ElevenLabs use:{" "}
                   {studioCutConfirmation.eligibility.characterEstimate.toLocaleString()}{" "}
-                  characters across{" "}
+                  characters from{" "}
+                  {studioCutConfirmation.eligibility.targetLineCount}{" "}
+                  {studioCutConfirmation.eligibility.targetLineCount === 1
+                    ? "line"
+                    : "lines"}
+                  , across{" "}
                   {studioCutConfirmation.eligibility.requestEstimate} request
                   {studioCutConfirmation.eligibility.requestEstimate === 1
                     ? ""
                     : "s"}
-                  . PRISM will send the canonical episode dialogue and saved
-                  ElevenLabs voice IDs to ElevenLabs.
+                  . PRISM sends only the lines being{" "}
+                  {studioCutConfirmation.intent === "repair"
+                    ? "repaired"
+                    : "upgraded"}{" "}
+                  and their saved ElevenLabs voice IDs.
                 </>
               )}
             </p>
             {studioCutConfirmation.kind === "generate" ? (
               <p>
-                This is a paid generation. Your exact On Air recording remains
-                unchanged.
+                Existing Premium performances are reused without regeneration.
+                Your exact original broadcast remains unchanged.
               </p>
             ) : null}
             <div className={styles.deleteDialogActions}>
@@ -12988,10 +13073,10 @@ export function BotcastExperience({
                 }
               >
                 {studioCutConfirmation.kind === "remove"
-                  ? "Remove Studio Cut"
-                  : studioCutConfirmation.regenerate
-                    ? "Try another"
-                    : "Make Studio Cut"}
+                  ? "Remove Premium version"
+                  : studioCutConfirmation.intent === "repair"
+                    ? "Repair voice"
+                    : "Upgrade voices"}
               </button>
             </div>
           </section>

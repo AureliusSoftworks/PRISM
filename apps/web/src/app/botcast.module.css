@@ -390,7 +390,8 @@
 .stageLayoutModalHeader > button { flex: 0 0 auto; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 44%, var(--botcast-line)); border-radius: 10px; padding: 10px 18px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 14%, var(--botcast-soft-panel)); font: 760 .7rem/1 system-ui; cursor: pointer; }
 .stageLayoutModalBody { width: min(1600px, 100%); height: 100%; min-height: 0; margin: 0 auto; box-sizing: border-box; overflow: hidden; padding: clamp(12px, 2vw, 28px); }
 .stageLayoutEditor { height: 100%; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(290px, 350px); grid-template-rows: auto auto auto auto minmax(0, 1fr); gap: 12px 18px; }
-.stageLayoutModal .stageViewport { grid-column: 1; grid-row: 2 / 6; align-self: center; width: min(100%, calc((100dvh - 180px) * 1.7778)); max-width: 1320px; max-height: 100%; }
+.stageLayoutModal .stageViewportColumn { grid-column: 1; grid-row: 2 / 6; align-self: center; width: min(100%, calc((100dvh - 280px) * 1.7778)); max-width: 1320px; min-width: 0; display: grid; gap: 10px; }
+.stageLayoutModal .stageViewport { width: 100%; max-width: none; }
 .stageLayoutModal .stageSoundcheckStatus { grid-column: 2; grid-row: 2; }
 .stageLayoutModal .stageVoiceMixer { grid-column: 2; grid-row: 3; grid-template-columns: 1fr; gap: 9px; }
 .stageLayoutModal .stageScreenTreatment { grid-column: 2; grid-row: 4; }
@@ -728,7 +729,7 @@
 .stageViewport[data-layout-editor="true"] .stageScene { transition: none; }
 .stageViewport[data-layout-editor="true"] .avatarRig { animation-play-state: paused; }
 .stageViewport[data-layout-editor="true"] .studioSpotlight { animation-play-state: paused; transform: translateX(-50%) rotate(0deg); }
-.stageCameraTuner { position: absolute; right: 12px; bottom: 12px; left: 12px; z-index: 60; display: grid; gap: 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 9px 11px; color: #fff; background: rgba(5,7,12,.82); box-shadow: 0 12px 32px rgba(0,0,0,.34); backdrop-filter: blur(14px) saturate(1.1); }
+.stageCameraTuner { position: relative; z-index: 1; width: 100%; box-sizing: border-box; display: grid; gap: 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 9px 11px; color: #fff; background: rgba(5,7,12,.82); box-shadow: 0 12px 32px rgba(0,0,0,.34); backdrop-filter: blur(14px) saturate(1.1); }
 .stageCameraTuner > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .stageCameraTuner button { border: 1px solid rgba(255,255,255,.18); border-radius: 7px; padding: 6px 8px; color: rgba(255,255,255,.8); background: rgba(255,255,255,.06); font: 740 .56rem/1 system-ui; cursor: pointer; }
 .stageCameraTuner button:disabled { opacity: .42; cursor: default; }
@@ -810,12 +811,22 @@
 .replayPlayerIdentity > div { min-width: 0; display: flex; align-items: baseline; gap: 9px; }
 .replayPlayerIdentity strong { overflow: hidden; color: var(--botcast-ink); font: 820 .92rem/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; }
 .replayPlayerIdentity small { overflow: hidden; color: var(--botcast-muted); font: 650 .69rem/1.2 system-ui; text-overflow: ellipsis; white-space: nowrap; }
-.replaySourceToggle { flex: 0 0 auto; display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 3px; border: 1px solid color-mix(in srgb, var(--prism-s) 20%, var(--botcast-line)); border-radius: 999px; background: color-mix(in srgb, var(--botcast-field) 82%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.035); }
-.replaySourceToggle button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 0; border-radius: 999px; padding: 6px 13px; color: var(--botcast-muted); background: transparent; font: 780 .68rem/1 system-ui; cursor: pointer; transition: color 150ms ease, background 150ms ease, box-shadow 150ms ease; }
-.replaySourceToggle button svg { width: 12px; height: 12px; }
-.replaySourceToggle button:hover { color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-s) 8%, transparent); }
-.replaySourceToggle button[aria-pressed="true"] { color: #17131d; background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 78%, var(--prism-s)); box-shadow: 0 6px 16px color-mix(in srgb, var(--prism-m) 18%, transparent); }
-.replaySourceToggle button[aria-pressed="true"]:hover { color: #17131d; background: linear-gradient(110deg, var(--prism-p), var(--prism-r) 42%, var(--prism-i) 78%, var(--prism-s)); }
+.replayVersionMenu { position: relative; flex: 0 0 auto; }
+.replayVersionMenu summary { min-height: 34px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--prism-s) 22%, var(--botcast-line)); border-radius: 999px; padding: 7px 12px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-field) 82%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.035); cursor: pointer; list-style: none; font: 720 .65rem/1 system-ui; }
+.replayVersionMenu summary::-webkit-details-marker { display: none; }
+.replayVersionMenu summary::after { content: "⌄"; margin-top: -3px; color: var(--prism-s); font-size: .82rem; }
+.replayVersionMenu summary strong { color: var(--botcast-ink); font: 790 .68rem/1 system-ui; }
+.replayVersionMenu[open] summary { border-color: color-mix(in srgb, var(--prism-s) 46%, var(--botcast-line)); }
+.replayVersionMenu > div { position: absolute; top: calc(100% + 7px); right: 0; z-index: 8; min-width: 232px; display: grid; gap: 3px; border: 1px solid color-mix(in srgb, var(--prism-s) 20%, var(--botcast-line)); border-radius: 12px; padding: 6px; background: color-mix(in srgb, var(--botcast-panel) 96%, #070810); box-shadow: 0 18px 40px rgba(0,0,0,.42); }
+.replayVersionMenu button { width: 100%; min-height: 42px; display: flex; align-items: center; gap: 9px; border: 0; border-radius: 8px; padding: 7px 9px; color: var(--botcast-muted); background: transparent; text-align: left; cursor: pointer; }
+.replayVersionMenu button:hover:not(:disabled), .replayVersionMenu button[aria-checked="true"] { color: var(--botcast-ink); background: color-mix(in srgb, var(--prism-s) 9%, transparent); }
+.replayVersionMenu button > svg { width: 14px; height: 14px; color: var(--prism-m); }
+.replayVersionMenu button > span { display: grid; gap: 3px; }
+.replayVersionMenu button strong { font: 760 .69rem/1 system-ui; }
+.replayVersionMenu button small { color: var(--botcast-muted); font: 620 .61rem/1 system-ui; }
+.replayVersionDivider { height: 1px; margin: 3px 5px; background: var(--botcast-line); }
+.replayVersionMenu .replayVersionRemove { min-height: 32px; color: color-mix(in srgb, var(--prism-p) 58%, var(--botcast-muted)); font: 720 .65rem/1 system-ui; }
+.replayVersionMenu button:disabled { opacity: .46; cursor: default; }
 .replaySourceBadge { flex: 0 0 auto; border: 1px solid var(--botcast-line); border-radius: 999px; padding: 6px 11px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-field) 78%, transparent); font: 780 .65rem/1 system-ui; }
 .replayTransport { --replay-progress: 0%; position: relative; display: grid; grid-template-columns: 38px max-content minmax(80px, 1fr); align-items: center; gap: 10px; min-width: 0; min-height: 48px; margin-top: 14px; border: 1px solid color-mix(in srgb, var(--botcast-line) 88%, transparent); border-radius: 999px; padding: 4px 7px 4px 5px; background: radial-gradient(circle at 13% 0%, color-mix(in srgb, var(--prism-m) 10%, transparent), transparent 43%), linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.015)), color-mix(in srgb, var(--botcast-field) 90%, transparent); box-shadow: inset 0 1px rgba(255,255,255,.06), inset 0 -1px rgba(0,0,0,.34), 0 9px 24px rgba(0,0,0,.2); transition: border-color 180ms ease, box-shadow 180ms ease; }
 .replayTransport::after { content: ""; position: absolute; top: -1px; left: 14%; width: 72%; height: 1px; border-radius: 999px; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--prism-p) 42%, transparent), color-mix(in srgb, var(--prism-i) 52%, transparent), color-mix(in srgb, var(--prism-s) 48%, transparent), transparent); opacity: .66; pointer-events: none; }
@@ -842,7 +853,15 @@
 .replayProgress:hover input::-moz-range-thumb, .replayProgress:focus-within input::-moz-range-thumb { opacity: 1; }
 .replayProgress input:disabled { cursor: default; }
 .replayPlayerFooter { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 11px; padding: 0 3px; }
-.replayFileActions, .replayStudioActions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.replayFileActions, .replayQuality { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.replayQuality { justify-content: flex-end; color: var(--botcast-muted); font: 720 .68rem/1.2 system-ui; }
+.replayQuality > span { display: inline-flex; align-items: center; gap: 7px; }
+.replayQualityDot { width: 7px; height: 7px; border-radius: 50%; background: var(--botcast-muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--botcast-muted) 12%, transparent); }
+.replayQualityDot[data-quality="premium"] { background: var(--prism-s); box-shadow: 0 0 0 3px color-mix(in srgb, var(--prism-s) 14%, transparent), 0 0 9px color-mix(in srgb, var(--prism-s) 34%, transparent); }
+.replayQualityDot[data-quality="repairable"] { background: var(--prism-i); box-shadow: 0 0 0 3px color-mix(in srgb, var(--prism-i) 14%, transparent); }
+.replayQualityDot[data-quality="upgradeable"] { background: var(--prism-m); box-shadow: 0 0 0 3px color-mix(in srgb, var(--prism-m) 14%, transparent); }
+.replayQualityProgress svg { width: 13px; height: 13px; animation: replayQualitySpin 900ms linear infinite; }
+@keyframes replayQualitySpin { to { transform: rotate(360deg); } }
 .replayAction { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--botcast-line) 92%, transparent); border-radius: 9px; padding: 6px 10px; color: var(--botcast-muted); background: color-mix(in srgb, var(--botcast-soft-panel) 78%, transparent); font: 760 .67rem/1 system-ui; text-decoration: none; cursor: pointer; transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease; }
 .replayAction svg { width: 14px; height: 14px; }
 .replayAction:hover:not(:disabled) { color: var(--botcast-ink); border-color: color-mix(in srgb, var(--prism-s) 34%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-s) 8%, var(--botcast-soft-panel)); transform: translateY(-1px); }
@@ -851,7 +870,7 @@
 .replayRemoveAction { color: color-mix(in srgb, var(--prism-p) 52%, var(--botcast-muted)); }
 .replayRemoveAction:hover:not(:disabled) { color: color-mix(in srgb, var(--prism-p) 72%, var(--botcast-ink)); border-color: color-mix(in srgb, var(--prism-p) 36%, var(--botcast-line)); background: color-mix(in srgb, var(--prism-p) 8%, var(--botcast-soft-panel)); }
 .replayStatus { display: block; margin: 10px 3px 0; color: var(--botcast-muted); font: 680 .68rem/1.4 system-ui; }
-.replayPlayer button:focus-visible, .replayPlayer a:focus-visible, .replayProgress input:focus-visible { outline: 2px solid color-mix(in srgb, var(--prism-s) 76%, #fff); outline-offset: 2px; }
+.replayPlayer button:focus-visible, .replayPlayer a:focus-visible, .replayPlayer summary:focus-visible, .replayProgress input:focus-visible { outline: 2px solid color-mix(in srgb, var(--prism-s) 76%, #fff); outline-offset: 2px; }
 .replayTranscript { max-width: 1180px; max-height: 320px; margin: 0 auto; overflow: auto; padding: 8px; }
 .replayTranscript button { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; text-align: left; border: 0; border-radius: 7px; padding: 9px 10px; color: var(--botcast-ink); background: transparent; cursor: pointer; }
 .replayTranscript button[data-botcast-replay-intro-row="true"] { margin-bottom: 5px; border: 1px solid color-mix(in srgb, var(--prism-m) 18%, var(--botcast-line)); color: var(--botcast-muted); background: color-mix(in srgb, var(--prism-m) 5%, transparent); box-shadow: inset 3px 0 color-mix(in srgb, var(--prism-m) 48%, transparent); }
@@ -1097,11 +1116,10 @@
   .stageLayoutModal .stageLayoutEditorHeader,
   .stageLayoutModal .stageSoundcheckStatus,
   .stageLayoutModal .stageVoiceMixer,
-  .stageLayoutModal .stageViewport,
+  .stageLayoutModal .stageViewportColumn,
   .stageLayoutModal .atmosphereMixer { grid-column: 1; grid-row: auto; width: 100%; max-width: none; }
   .stageLayoutEditorHeader { align-items: flex-start; flex-direction: column; }
   .stageLayoutEditorHeader > div { width: 100%; flex-wrap: wrap; }
-  .stageCameraTuner { position: relative; inset: auto; margin-top: 8px; }
   .stageCameraSliders { grid-template-columns: 1fr; }
   .producerControls { grid-template-columns: minmax(0, 1fr); grid-template-areas: "composer" "cues" "status"; }
   .cueGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1117,10 +1135,11 @@
   .stageVoiceMixer > header { align-items: flex-start; }
   .stageVoiceMixerSliders { grid-template-columns: 1fr; }
   .replayPlayerHeader, .replayPlayerFooter { align-items: stretch; flex-direction: column; }
-  .replaySourceToggle { align-self: flex-start; }
+  .replayVersionMenu { align-self: flex-start; }
   .replayPlayerIdentity { align-items: flex-start; flex-direction: column; gap: 5px; }
   .replayPlayerIdentity > div { align-items: flex-start; flex-direction: column; gap: 3px; }
-  .replayFileActions, .replayStudioActions { width: 100%; }
+  .replayFileActions, .replayQuality { width: 100%; }
+  .replayQuality { justify-content: flex-start; }
   .liveCameraControls { justify-content: flex-start; flex-wrap: wrap; }
 }
 
@@ -1143,7 +1162,8 @@
   .studioSpotlight { animation: none !important; transform: translateX(-50%) rotate(0deg); }
   .preRollSignalField i, .preRollEyebrow, .preRollLogo, .preRollOrbit, .preRollLockup h1, .preRollLockup p, .preRollLockup strong, .preRollMeters i, .showIntroPulse i { animation: none !important; }
   .signalToast { animation: none !important; }
-  .replayAction, .replayPlayButton, .replaySourceToggle button, .replayProgressFill { transition: none !important; }
+  .replayAction, .replayPlayButton, .replayVersionMenu button, .replayProgressFill { transition: none !important; }
+  .replayQualityProgress svg { animation: none; }
 }
 
 @keyframes signalStudioSpotlightSweep {

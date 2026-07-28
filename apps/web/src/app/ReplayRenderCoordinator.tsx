@@ -53,7 +53,7 @@ async function mixStudioCut(recordingId: string): Promise<void> {
     await encodeReplayAudioWindows({
       recordingId,
       renderToken: claim.renderToken,
-      title: `${claim.recording.manifest?.title ?? "Signal"} — Studio Cut`,
+      title: `${claim.recording.manifest?.title ?? "Signal"} — Premium audio`,
       uploadPath: `/api/replays/${encodeURIComponent(recordingId)}/studio-cut/mix/audio-chunk`,
       windows: prepared.renderWindows(),
     });
@@ -69,7 +69,7 @@ async function mixStudioCut(recordingId: string): Promise<void> {
     await failReplayStudioCutMix({
       recordingId,
       renderToken: claim.renderToken,
-      error: error instanceof Error ? error.message : "Studio Cut mixing failed.",
+      error: error instanceof Error ? error.message : "Premium audio mixing failed.",
     }).catch(() => undefined);
   } finally {
     window.dispatchEvent(new CustomEvent(REPLAY_RECORDING_CHANGED_EVENT));

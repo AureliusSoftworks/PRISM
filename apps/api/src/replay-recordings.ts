@@ -16,6 +16,7 @@ import {
   type ReplayManifestV1,
   type ReplayManifestV2,
   type ReplayPremiumProductionV1,
+  type ReplayPremiumAudioActionV1,
   type ReplayPremiumSegmentV1,
   type ReplayStudioCutEligibilityV1,
   type ReplayRenderKindV1,
@@ -24,6 +25,7 @@ import {
   type ReplaySurfaceV1,
   type ReplayTimelineV1,
   type ReplayVoiceTakeRecordV1,
+  type ReplayVoiceQualityV1,
   type ReplayVoiceTakeV1,
 } from "@localai/shared";
 import { resolveAbsoluteUnderDataRoot } from "./image-storage.ts";
@@ -46,6 +48,7 @@ import {
   writeReplayRenderChunk,
 } from "./replay-storage.ts";
 import {
+  classifyReplayVoiceQuality,
   generateReplayPremiumSegment,
   planReplayPremiumSegments,
   replayPremiumInputHash,
@@ -285,6 +288,13 @@ function mapRecordingRow(db: DatabaseSync, row: ReplayRecordingRow): ReplayRecor
       : manifest
         ? "transcript_only"
         : "saving";
+  const voiceQuality: ReplayVoiceQualityV1 | null =
+    row.surface === "signal" && manifest
+      ? classifyReplayVoiceQuality(
+          manifest,
+          replayVoiceTakesForRecording(db, row.user_id, row.id),
+        )
+      : null;
   return {
     id: row.id,
     surface: row.surface,
@@ -319,6 +329,7 @@ function mapRecordingRow(db: DatabaseSync, row: ReplayRecordingRow): ReplayRecor
       ? `/api/replays/${encodeURIComponent(row.id)}/transcript.md`
       : null,
     availability,
+    voiceQuality,
     warning: row.warning,
     error: row.error,
     premiumProduction: null,
@@ -773,6 +784,7 @@ export async function startReplayPremiumProduction(args: {
   userId: string;
   recordingId: string;
   apiKey: string;
+  intent?: ReplayPremiumAudioActionV1;
   regenerate?: boolean;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
@@ -793,11 +805,21 @@ export async function startReplayPremiumProduction(args: {
   }
   const takes = replayVoiceTakesForRecording(db, userId, recordingId);
   const existingProduction = premiumProductionRow(db, userId, recordingId);
+  const quality = classifyReplayVoiceQuality(manifest, takes);
+  const intent = args.intent ?? quality.recommendedAction;
+  if (args.intent && args.intent !== quality.recommendedAction) {
+    throw new Error("The requested Premium audio action no longer matches this recording.");
+  }
   const generationSeed =
     args.regenerate || !existingProduction?.generation_seed
       ? randomBytes(8).toString("hex")
       : existingProduction.generation_seed;
-  const planned = planReplayPremiumSegments(manifest, takes, generationSeed);
+  const planned = planReplayPremiumSegments(
+    manifest,
+    takes,
+    generationSeed,
+    intent ?? undefined,
+  );
   if (planned.length === 0) {
     throw new Error("This Signal replay has no audible dialogue to enhance.");
   }
@@ -1022,6 +1044,25 @@ export function replayStudioCutEligibility(
     return {
       eligible: false,
       blockedReason: "A completed Replay V2 Signal episode is required.",
+      recommendedAction: null,
+      targetLineCount: 0,
+      characterEstimate: 0,
+      requestEstimate: 0,
+      missingSpeakers: [],
+    };
+  }
+  const takes = replayVoiceTakesForRecording(db, userId, recordingId);
+  const quality = classifyReplayVoiceQuality(manifest, takes);
+  if (!quality.recommendedAction) {
+    return {
+      eligible: false,
+      blockedReason:
+        quality.blockedReason ??
+        (quality.status === "premium"
+          ? "This episode already has Premium audio."
+          : "Premium audio is unavailable for this recording."),
+      recommendedAction: null,
+      targetLineCount: 0,
       characterEstimate: 0,
       requestEstimate: 0,
       missingSpeakers: [],
@@ -1030,7 +1071,9 @@ export function replayStudioCutEligibility(
   try {
     const planned = planReplayPremiumSegments(
       manifest,
-      replayVoiceTakesForRecording(db, userId, recordingId),
+      takes,
+      "studio-cut",
+      quality.recommendedAction,
     );
     const characterEstimate = planned.reduce(
       (sum, segment) =>
@@ -1043,15 +1086,20 @@ export function replayStudioCutEligibility(
     return {
       eligible: planned.length > 0,
       blockedReason: planned.length > 0 ? null : "This replay has no audible dialogue.",
+      recommendedAction: quality.recommendedAction,
+      targetLineCount: quality.targetLineCount,
       characterEstimate,
       requestEstimate: planned.length,
       missingSpeakers: [],
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Studio Cut is unavailable.";
+    const message =
+      error instanceof Error ? error.message : "Premium audio is unavailable.";
     return {
       eligible: false,
       blockedReason: message,
+      recommendedAction: quality.recommendedAction,
+      targetLineCount: 0,
       characterEstimate: 0,
       requestEstimate: 0,
       missingSpeakers:
@@ -1138,7 +1186,7 @@ export function completeReplayStudioCutMix(
 ): ReplayRecordingV1 {
   const lease = requireActiveRender(db, userId, recordingId, renderToken);
   if (lease.renderKind !== "premium" || !lease.uploadRelativePath) {
-    throw new Error("Studio Cut mix lease is no longer active.");
+    throw new Error("Premium audio mix lease is no longer active.");
   }
   if (
     metadata.timeline.v !== 1 ||
@@ -1146,7 +1194,7 @@ export function completeReplayStudioCutMix(
     metadata.timeline.durationMs <= 0 ||
     !replayManifestV2IsValid(metadata.manifest)
   ) {
-    throw new Error("Studio Cut timing is invalid.");
+    throw new Error("Premium audio timing is invalid.");
   }
   const audioRelativePath = replayStudioCutAudioRelativePath({
     userId,
@@ -1182,7 +1230,7 @@ export function completeReplayStudioCutMix(
   );
   if (Number(updated.changes ?? 0) === 0) {
     removeReplayFile(audioRelativePath);
-    throw new Error("Studio Cut mix lease expired before promotion.");
+    throw new Error("Premium audio mix lease expired before promotion.");
   }
   if (previousAudio && previousAudio !== audioRelativePath) {
     removeReplayFile(previousAudio);
@@ -1199,7 +1247,7 @@ export function failReplayStudioCutMix(
 ): ReplayRecordingV1 {
   const lease = requireActiveRender(db, userId, recordingId, renderToken);
   if (lease.renderKind !== "premium") {
-    throw new Error("Studio Cut mix lease is no longer active.");
+    throw new Error("Premium audio mix lease is no longer active.");
   }
   removeReplayFile(lease.uploadRelativePath);
   db.prepare(
@@ -1208,7 +1256,7 @@ export function failReplayStudioCutMix(
             error = ?, updated_at = ?
       WHERE recording_id = ? AND user_id = ? AND render_token = ?`,
   ).run(
-    boundedMessage(error, 1_000) ?? "Studio Cut mixing failed.",
+    boundedMessage(error, 1_000) ?? "Premium audio mixing failed.",
     new Date().toISOString(),
     recordingId,
     userId,

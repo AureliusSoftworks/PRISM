@@ -393,8 +393,24 @@ describe("mode tutorials", () => {
       assert.match(joinStep?.body ?? "", /Review stays quiet/u);
       assert.match(joinStep?.body ?? "", /remain off camera/u);
       assert.doesNotMatch(joinStep?.body ?? "", /Prism leave first/u);
-      assert.match(joinStep?.body ?? "", /each bot physically depart/u);
-    });
+    assert.match(joinStep?.body ?? "", /each bot physically depart/u);
+  });
+
+  it("explains automatic Signal audio quality and selective Premium repair", () => {
+    const replayStep = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Watch the saved cut",
+    );
+    const copy = replayStep?.body ?? "";
+
+    assert.match(copy, /recorded voice provenance/u);
+    assert.match(copy, /already marked Premium audio and needs no extra step/u);
+    assert.match(copy, /Repair voice action sends only the fallback line/u);
+    assert.match(copy, /Upgrade voices sends only those non-Premium lines/u);
+    assert.match(copy, /selective character, line, and request estimate/u);
+    assert.match(copy, /without regeneration or rebilling/u);
+    assert.match(copy, /immutable Original broadcast/u);
+    assert.match(copy, /Hard LOCAL mode keeps the passive provenance status/u);
+  });
 
   it("clamps restored progress to a valid step", () => {
       assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");

@@ -434,34 +434,34 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
   );
   assert.equal(
     botPowerResponseIsFirstIntroductionV1(
-      "Hello. I'm Forgetful Freddie. Everyone seems oddly tense.",
+      "Hello. I'm Freddie. Everyone seems oddly tense. Why are you upset?",
       name,
     ),
     true,
   );
-  assert.equal(
+  assert.match(
     applyBotPowerEternalIntroductionResponseV1(
       "I'm sorry, I think I did forget. I think yard sales are fun. Why do you ask?",
       name,
       "Did you forget?",
     ),
-    "I'm sorry, I think I did forget. I think yard sales are fun. Why do you ask?",
+    /^(?:Hello—I'm Forgetful Freddie\.|I'm Forgetful Freddie; it's good to meet you\.|Pleased to meet you—I'm Forgetful Freddie\.) I'm sorry, I think I did forget\. I think yard sales are fun\. Why do you ask\?$/u,
   );
-  assert.equal(
+  assert.match(
     applyBotPowerEternalIntroductionResponseV1(
       "Love what? Sorry.",
       name,
       "Yeah, I love them! I'm about to go to one now.",
     ),
-    "Love what? Sorry.",
+    /^(?:Hello—I'm Forgetful Freddie\.|I'm Forgetful Freddie; it's good to meet you\.|Pleased to meet you—I'm Forgetful Freddie\.) Love what\? Sorry\.$/u,
   );
-  assert.equal(
+  assert.match(
     applyBotPowerEternalIntroductionResponseV1(
       "The archive key is under the blue case.",
       name,
       "Where is the archive key?",
     ),
-    "The archive key is under the blue case.",
+    /^(?:Hello—I'm Forgetful Freddie\.|I'm Forgetful Freddie; it's good to meet you\.|Pleased to meet you—I'm Forgetful Freddie\.) The archive key is under the blue case\.$/u,
   );
   assert.equal(
     applyBotPowerEternalIntroductionResponseV1(
@@ -472,13 +472,13 @@ test("forgetful context normalizes legacy Powers into the current-other-speaker 
     ),
     "I'm Forgetful Freddie; pleased to meet you. The archive key is under the blue case.",
   );
-  assert.equal(
+  assert.match(
     applyBotPowerEternalIntroductionResponseV1(
       "We've known each other for years.",
       name,
       "Do you remember me?",
     ),
-    "We've known each other for years.",
+    /^(?:Hello—I'm Forgetful Freddie\.|I'm Forgetful Freddie; it's good to meet you\.|Pleased to meet you—I'm Forgetful Freddie\.) We've known each other for years\.$/u,
   );
 });
 

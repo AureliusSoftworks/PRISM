@@ -10,6 +10,7 @@ import {
   createTestDatabase,
   withTestRegistrationAcceptance,
 } from "../test-support.ts";
+import { upsertReplayVoiceTake } from "../replay-recordings.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-faithful-replay-api-"));
 process.env.PRISM_API_DISABLE_AUTOSTART = "1";
@@ -22,6 +23,7 @@ const db = createTestDatabase();
 const config = {
   ...getAppConfig(),
   apiPort: 0,
+  elevenLabsApiKey: "integration-elevenlabs-key",
   sessionCookieName: "prism_replay_test_session",
   lanAccessEnabled: false,
   discoveryEnabled: false,
@@ -242,6 +244,84 @@ describe("faithful replay API", () => {
     assert.match(
       String((await json(blockedStudioCut)).error),
       /AUTO or ONLINE|LOCAL mode/u,
+    );
+
+    db.prepare(
+      "UPDATE users SET auto_switch_model = 1 WHERE id = ?",
+    ).run(ownerId);
+    upsertReplayVoiceTake(db, ownerId, "signal", "episode-api", {
+      v: 1,
+      sourceKey: "line-api",
+      sourceMessageId: "line-api",
+      sourceEventId: null,
+      speakerId: "host-api",
+      speakerName: "Host",
+      spokenText: "Exact output.",
+      performanceText: null,
+      mode: "english",
+      requestedEngine: "elevenlabs",
+      resolvedEngine: "builtin-provider-fallback",
+      profile: {
+        v: 1,
+        baseVoiceId: "base-host",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        elevenLabsVoiceId: "host-elevenlabs",
+      },
+      moodKey: "neutral",
+      effectsEnabled: true,
+      gain: 1,
+      stereoPan: 0,
+      channel: "primary",
+      seed: "host-api:line-api",
+      audible: true,
+      durationMs: 1_500,
+      alignment: null,
+    });
+    const selectiveEligibility = await owner.request(
+      `/api/replays/${recordingId}/studio-cut/eligibility`,
+    );
+    const selectiveEligibilityPayload = await json(selectiveEligibility);
+    assert.equal(selectiveEligibility.status, 200);
+    assert.deepEqual(
+      {
+        eligible: selectiveEligibilityPayload.eligibility.eligible,
+        recommendedAction:
+          selectiveEligibilityPayload.eligibility.recommendedAction,
+        targetLineCount:
+          selectiveEligibilityPayload.eligibility.targetLineCount,
+        characterEstimate:
+          selectiveEligibilityPayload.eligibility.characterEstimate,
+        requestEstimate:
+          selectiveEligibilityPayload.eligibility.requestEstimate,
+      },
+      {
+        eligible: true,
+        recommendedAction: "repair",
+        targetLineCount: 1,
+        characterEstimate: Array.from("Exact output.").length,
+        requestEstimate: 1,
+      },
+    );
+    const missingIntent = await owner.request(
+      `/api/replays/${recordingId}/studio-cut`,
+      jsonInit({ confirm: "send-to-elevenlabs" }),
+    );
+    assert.equal(missingIntent.status, 409);
+    assert.match(
+      String((await json(missingIntent)).error),
+      /action no longer matches/u,
+    );
+    const wrongIntent = await owner.request(
+      `/api/replays/${recordingId}/studio-cut`,
+      jsonInit({ confirm: "send-to-elevenlabs", intent: "upgrade" }),
+    );
+    assert.equal(wrongIntent.status, 409);
+    assert.match(
+      String((await json(wrongIntent)).error),
+      /action no longer matches/u,
     );
 
     const mixToken = "1234567890abcdef1234567890abcdef1234";

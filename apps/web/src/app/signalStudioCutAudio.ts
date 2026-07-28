@@ -51,7 +51,7 @@ export interface PreparedSignalStudioCut {
 
 async function decodeAudio(url: string): Promise<AudioBuffer> {
   const response = await replayFetch(url);
-  if (!response.ok) throw new Error(`Studio Cut asset is unavailable (${response.status}).`);
+  if (!response.ok) throw new Error(`Premium audio asset is unavailable (${response.status}).`);
   const bytes = await response.arrayBuffer();
   const context = new OfflineAudioContext(2, 1, SAMPLE_RATE);
   return context.decodeAudioData(bytes.slice(0));
@@ -77,11 +77,13 @@ export async function prepareSignalStudioCut(
   takes: readonly ReplayVoiceTakeRecordV1[],
 ): Promise<PreparedSignalStudioCut> {
   if (!recording.manifest || recording.manifest.v !== 2) {
-    throw new Error("Studio Cut requires a Replay V2 Signal manifest.");
+    throw new Error("Premium audio requires a Replay V2 Signal manifest.");
   }
   const sourceManifest = recording.manifest;
   const sortedSegments = [...segments].sort((left, right) => left.index - right.index);
-  if (sortedSegments.length === 0) throw new Error("Studio Cut voice segments are missing.");
+  if (sortedSegments.length === 0) {
+    throw new Error("Premium replacement voice segments are missing.");
+  }
   const decodedSegments = await Promise.all(
     sortedSegments.map(async (segment) => ({
       segment,
@@ -131,115 +133,153 @@ export async function prepareSignalStudioCut(
       )
       .map((take) => [take.snapshot.sourceMessageId!, take]),
   );
-  if (intro) scheduled.push({ buffer: intro, startMs: 0, gain: masterVolume });
+  const generatedSourceByMessageId = new Map<
+    string,
+    {
+      buffer: AudioBuffer;
+      timing: ReplayPremiumSegmentV1["timings"][number];
+      gapBeforeMs: number;
+    }
+  >();
   for (const { segment, buffer } of decodedSegments) {
-    let segmentCursorMs = cursorMs;
-    let previousSourceEndMs = 0;
     const sortedTimings = [...segment.timings].sort(
       (left, right) => left.startMs - right.startMs,
     );
-    for (const timing of sortedTimings) {
-      segmentCursorMs += Math.max(0, timing.startMs - previousSourceEndMs);
-      const sourceDurationMs = Math.max(1, timing.endMs - timing.startMs);
-      const take = primaryTakeByMessageId.get(timing.sourceMessageId);
-      if (!take) {
-        warnings.push(
-          `The saved voice profile for ${timing.sourceMessageId} was unavailable; that line uses the Premium source unchanged.`,
-        );
-        scheduled.push({
-          buffer,
-          startMs: segmentCursorMs,
-          gain: masterVolume,
-          playbackRate: 1,
-          sourceOffsetSeconds: timing.startMs / 1_000,
-          sourceDurationSeconds: sourceDurationMs / 1_000,
-        });
-        timingByMessageId.set(timing.sourceMessageId, {
-          startMs: segmentCursorMs,
-          endMs: segmentCursorMs + sourceDurationMs,
-          alignment: timing.alignment,
-        });
-        segmentCursorMs += sourceDurationMs;
-        previousSourceEndMs = timing.endMs;
-        continue;
-      }
-      const rendered = await renderOfflineVoiceTake({
-        sourceBuffer: buffer,
-        sourceOffsetSeconds: timing.startMs / 1_000,
-        sourceDurationSeconds: sourceDurationMs / 1_000,
-        profile: take.snapshot.profile,
-        moodKey: take.snapshot.moodKey,
-        effectsEnabled: take.snapshot.effectsEnabled,
-        gain: take.snapshot.gain,
-        stereoPan: take.snapshot.stereoPan,
-        seed: take.snapshot.seed,
-        roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+    let previousEndMs = 0;
+    sortedTimings.forEach((timing, index) => {
+      generatedSourceByMessageId.set(timing.sourceMessageId, {
+        buffer,
+        timing,
+        gapBeforeMs:
+          index === 0
+            ? SEGMENT_GAP_MS
+            : Math.max(0, timing.startMs - previousEndMs),
       });
-      if (!rendered.pitchPreserved) {
-        warnings.push(
-          `The pitch processor was unavailable for ${take.snapshot.speakerName}; that line kept its saved pace and other effects but not its pitch shift.`,
-        );
-      }
-      scheduled.push({
-        buffer: rendered.buffer,
-        startMs: segmentCursorMs,
-        gain: 1,
-      });
-      const alignmentScale = rendered.speechDurationMs / sourceDurationMs;
-      const alignment = timing.alignment
-        ? {
-            characters: timing.alignment.characters,
-            characterStartTimesSeconds:
-              timing.alignment.characterStartTimesSeconds.map(
-                (seconds) => seconds * alignmentScale,
-              ),
-            characterEndTimesSeconds:
-              timing.alignment.characterEndTimesSeconds.map(
-                (seconds) => seconds * alignmentScale,
-              ),
-          }
-        : null;
-      timingByMessageId.set(timing.sourceMessageId, {
-        startMs: segmentCursorMs,
-        endMs: segmentCursorMs + rendered.speechDurationMs,
-        alignment,
-      });
-      const breathPlan = resolvePreSpeechBreathPlan({
-        seed: take.snapshot.seed,
-        text: take.snapshot.spokenText,
-        surface: "signal",
-        mood: take.snapshot.moodKey,
-        authoredPerformanceText: take.snapshot.performanceText,
-        enabled: take.snapshot.effectsEnabled,
-      });
-      if (breathPlan) {
-        const breath = await decodeAudio(breathPlan.url).catch(() => null);
-        if (breath) {
-          scheduled.push({
-            buffer: breath,
-            startMs: Math.max(
-              0,
-              segmentCursorMs -
-                Math.max(0, breath.duration * 1_000 - breathPlan.voiceOverlapMs),
-            ),
-            gain:
-              Math.min(1.25, take.snapshot.gain) * breathPlan.gain,
-            roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
-            stereoPan: take.snapshot.stereoPan,
-          });
-        }
-      }
-      segmentCursorMs += rendered.speechDurationMs;
-      previousSourceEndMs = timing.endMs;
-    }
-    if (sortedTimings.length === 0) {
-      scheduled.push({ buffer, startMs: segmentCursorMs, gain: masterVolume });
-      segmentCursorMs += Math.max(
-        segment.durationMs,
-        Math.round(buffer.duration * 1_000),
+      previousEndMs = timing.endMs;
+    });
+  }
+  const capturedTakeBuffers = new Map<string, Promise<AudioBuffer>>();
+  const capturedTakeBuffer = (take: ReplayVoiceTakeRecordV1): Promise<AudioBuffer> => {
+    const existing = capturedTakeBuffers.get(take.id);
+    if (existing) return existing;
+    if (!take.audioUrl) {
+      return Promise.reject(
+        new Error(
+          `The reusable Premium take for ${take.snapshot.speakerName} is unavailable.`,
+        ),
       );
     }
-    cursorMs = segmentCursorMs + SEGMENT_GAP_MS;
+    const pending = decodeAudio(take.audioUrl);
+    capturedTakeBuffers.set(take.id, pending);
+    return pending;
+  };
+  if (intro) scheduled.push({ buffer: intro, startMs: 0, gain: masterVolume });
+  let scheduledSpeechCount = 0;
+  for (const utterance of sourceManifest.utterances) {
+    if (!utterance.audible) continue;
+    const take = primaryTakeByMessageId.get(utterance.sourceMessageId);
+    if (!take) {
+      throw new Error(
+        `The saved voice profile for ${utterance.sourceMessageId} is unavailable.`,
+      );
+    }
+    const generated = generatedSourceByMessageId.get(utterance.sourceMessageId);
+    if (!generated && take.snapshot.resolvedEngine !== "elevenlabs") {
+      throw new Error(
+        `The Premium replacement for ${take.snapshot.speakerName} is unavailable.`,
+      );
+    }
+    const buffer = generated
+      ? generated.buffer
+      : await capturedTakeBuffer(take);
+    const sourceOffsetSeconds = generated
+      ? generated.timing.startMs / 1_000
+      : 0;
+    const sourceDurationMs = generated
+      ? Math.max(1, generated.timing.endMs - generated.timing.startMs)
+      : Math.max(
+          1,
+          take.snapshot.durationMs ??
+            Math.round(buffer.duration * 1_000),
+        );
+    const sourceDurationSeconds = Math.min(
+      Math.max(0.001, sourceDurationMs / 1_000),
+      Math.max(0.001, buffer.duration - sourceOffsetSeconds),
+    );
+    if (scheduledSpeechCount > 0) {
+      cursorMs += generated?.gapBeforeMs ?? SEGMENT_GAP_MS;
+    }
+    const rendered = await renderOfflineVoiceTake({
+      sourceBuffer: buffer,
+      sourceOffsetSeconds,
+      sourceDurationSeconds,
+      profile: take.snapshot.profile,
+      moodKey: take.snapshot.moodKey,
+      effectsEnabled: take.snapshot.effectsEnabled,
+      gain: take.snapshot.gain,
+      stereoPan: take.snapshot.stereoPan,
+      seed: take.snapshot.seed,
+      roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+    });
+    if (!rendered.pitchPreserved) {
+      warnings.push(
+        `The pitch processor was unavailable for ${take.snapshot.speakerName}; that line kept its saved pace and other effects but not its pitch shift.`,
+      );
+    }
+    scheduled.push({
+      buffer: rendered.buffer,
+      startMs: cursorMs,
+      gain: 1,
+    });
+    const sourceAlignment =
+      generated?.timing.alignment ?? take.snapshot.alignment;
+    const alignmentScale =
+      rendered.speechDurationMs / Math.max(1, sourceDurationMs);
+    const alignment = sourceAlignment
+      ? {
+          characters: sourceAlignment.characters,
+          characterStartTimesSeconds:
+            sourceAlignment.characterStartTimesSeconds.map(
+              (seconds) => seconds * alignmentScale,
+            ),
+          characterEndTimesSeconds:
+            sourceAlignment.characterEndTimesSeconds.map(
+              (seconds) => seconds * alignmentScale,
+            ),
+        }
+      : null;
+    timingByMessageId.set(utterance.sourceMessageId, {
+      startMs: cursorMs,
+      endMs: cursorMs + rendered.speechDurationMs,
+      alignment,
+    });
+    const breathPlan = resolvePreSpeechBreathPlan({
+      seed: take.snapshot.seed,
+      text: take.snapshot.spokenText,
+      surface: "signal",
+      mood: take.snapshot.moodKey,
+      authoredPerformanceText: take.snapshot.performanceText,
+      enabled: take.snapshot.effectsEnabled,
+    });
+    if (breathPlan) {
+      const breath = await decodeAudio(breathPlan.url).catch(() => null);
+      if (breath) {
+        scheduled.push({
+          buffer: breath,
+          startMs: Math.max(
+            0,
+            cursorMs -
+              Math.max(0, breath.duration * 1_000 - breathPlan.voiceOverlapMs),
+          ),
+          gain:
+            Math.min(1.25, take.snapshot.gain) * breathPlan.gain,
+          roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+          stereoPan: take.snapshot.stereoPan,
+        });
+      }
+    }
+    cursorMs += rendered.speechDurationMs;
+    scheduledSpeechCount += 1;
   }
   for (const event of sourceManifest.direction) {
     if (event.kind !== "action" || !event.sourceMessageId) continue;

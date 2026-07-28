@@ -22,7 +22,7 @@ const voiceEffects = readFileSync(
 const client = readFileSync(new URL("./replayClient.ts", import.meta.url), "utf8");
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-describe("Signal Studio Cut contract", () => {
+describe("Signal Premium audio contract", () => {
   it("emits Replay V2-valid direction and mouth-track sequences", () => {
     assert.match(
       mixer,
@@ -44,14 +44,14 @@ describe("Signal Studio Cut contract", () => {
     );
   });
 
-  it("keeps On Air as a distinct source and confirms every paid take", () => {
+  it("keeps the original broadcast distinct and confirms selective paid work", () => {
     assert.match(experience, /"on-air" \| "studio-cut"/u);
-    assert.match(experience, /Checking Studio Cut…/u);
-    assert.match(experience, /Starting paid Studio Cut generation…/u);
-    assert.match(
-      experience,
-      /Remixing the saved Studio Cut voices and production layers without another paid generation…/u,
-    );
+    assert.match(experience, /Premium audio ·/u);
+    assert.match(experience, /Repair voice/u);
+    assert.match(experience, /Upgrade voices/u);
+    assert.match(experience, /Original broadcast/u);
+    assert.match(experience, /role="menu" aria-label="Choose replay version"/u);
+    assert.doesNotMatch(experience, /replaySourceToggle/u);
     assert.match(experience, /aria-busy=\{studioCutBusy\}/u);
     assert.doesNotMatch(experience, /window\.confirm\(/u);
     assert.match(experience, /role="alertdialog"[\s\S]*signal-studio-cut-title/u);
@@ -60,10 +60,11 @@ describe("Signal Studio Cut contract", () => {
     assert.match(experience, /Estimated ElevenLabs use:/u);
     assert.match(
       experience,
-      /canonical episode dialogue and saved\s+ElevenLabs voice IDs/u,
+      /sends only the lines being/u,
     );
-    assert.match(experience, /exact On Air recording remains\s+unchanged/u);
+    assert.match(experience, /exact original broadcast remains unchanged/u);
     assert.match(client, /confirm: "send-to-elevenlabs"/u);
+    assert.match(client, /intent,/u);
   });
 
   it("freezes every audible on-air line and its resolved voice audio", () => {
@@ -97,6 +98,9 @@ describe("Signal Studio Cut contract", () => {
   it("reapplies saved per-line voice processing and production mix layers", () => {
     assert.match(coordinator, /claim\.takes/u);
     assert.match(mixer, /primaryTakeByMessageId/u);
+    assert.match(mixer, /generatedSourceByMessageId/u);
+    assert.match(mixer, /capturedTakeBuffer\(take\)/u);
+    assert.match(mixer, /take\.snapshot\.resolvedEngine !== "elevenlabs"/u);
     assert.match(mixer, /renderOfflineVoiceTake\(\{[\s\S]*profile: take\.snapshot\.profile/u);
     assert.match(mixer, /moodKey: take\.snapshot\.moodKey/u);
     assert.match(mixer, /effectsEnabled: take\.snapshot\.effectsEnabled/u);
@@ -119,14 +123,17 @@ describe("Signal Studio Cut contract", () => {
     assert.match(mixer, /alignment\.characters/u);
   });
 
-  it("offers retry, download, and removal while preserving the previous cut", () => {
-    assert.match(experience, /New Studio Cut/u);
-    assert.match(experience, /Remix cut/u);
+  it("offers one contextual retry and keeps version actions compact", () => {
+    assert.doesNotMatch(experience, /New Studio Cut/u);
+    assert.doesNotMatch(experience, /Remix cut/u);
+    assert.doesNotMatch(experience, /Create Studio Cut/u);
     assert.match(experience, /retryReplayStudioCutMix/u);
-    assert.match(experience, /Retry Studio Cut mix/u);
+    assert.match(experience, /Retry repair/u);
+    assert.match(experience, /Retry upgrade/u);
     assert.match(experience, /Download audio/u);
     assert.match(experience, /replayActiveDownloadUrl/u);
-    assert.match(experience, /Remove cut/u);
+    assert.match(experience, /Remove Premium version/u);
+    assert.match(experience, /premiumAutoSelectionRef/u);
     assert.match(coordinator, /resumeReplayStudioCut/u);
   });
 });

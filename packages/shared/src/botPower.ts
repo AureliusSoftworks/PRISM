@@ -2158,50 +2158,92 @@ function botPowerIntroductionNameV1(value: unknown): string {
   return name || "your new companion";
 }
 
+function botPowerIntroductionNameAliasesV1(value: unknown): string[] {
+  const name = botPowerIntroductionNameV1(value);
+  const parts = name
+    .split(/\s+/u)
+    .map((part) => part.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter(
+      (part) =>
+        part.length >= 3 &&
+        !/^(?:the|doctor|dr|mister|mr|miss|mrs|ms|professor|prof)$/iu.test(
+          part,
+        ),
+    );
+  return [...new Set([name, parts[0], parts.at(-1)].filter(Boolean) as string[])]
+    .sort((left, right) => right.length - left.length);
+}
+
 function botPowerEscapeRegExpV1(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
-/** True only for a short self-introduction with no continuity claim or return question. */
+/** True when the holder audibly identifies themself as part of fresh contact. */
 export function botPowerResponseIsFirstIntroductionV1(
   value: unknown,
   botName: unknown,
 ): boolean {
   if (typeof value !== "string") return false;
   const source = value.replace(/\s+/gu, " ").trim();
-  const name = botPowerIntroductionNameV1(botName);
-  if (!source || source.includes("?")) return false;
+  if (!source) return false;
   if (
-    /\b(?:again|as I (?:said|mentioned)|earlier|previously|last time|remember|we (?:already|were)|you (?:already|still) know me)\b/iu.test(
+    /\b(?:again|as I (?:said|mentioned)|earlier|previously|last time|we (?:already|were)|you (?:already|still) know me)\b/iu.test(
       source,
     )
   ) {
     return false;
   }
-  const escapedName = botPowerEscapeRegExpV1(name);
+  const escapedName = botPowerIntroductionNameAliasesV1(botName)
+    .map(botPowerEscapeRegExpV1)
+    .join("|");
+  if (!escapedName) return false;
   const explicitSelfIntroduction = new RegExp(
-    `\\b(?:i am|i['’]m|my name is|call me)\\s+${escapedName}(?:\\b|$)`,
+    `\\b(?:i am|i['’]m|my name is|call me|this is)\\s+(?:${escapedName})(?:\\b|$)`,
     "iu",
   );
   const greetingIntroduction = new RegExp(
-    `\\b(?:hello|hi|hey|greetings|nice to meet you|pleased to meet you|let me introduce myself)\\b[\\s\\S]{0,120}\\b${escapedName}(?:\\b|$)`,
+    `\\b(?:hello|hi|hey|greetings|nice to meet you|pleased to meet you|let me introduce myself)\\b[\\s\\S]{0,120}\\b(?:${escapedName})(?:\\b|$)`,
     "iu",
   );
   return explicitSelfIntroduction.test(source) || greetingIntroduction.test(source);
 }
 
 /**
- * Short-term amnesia is enforced by wiping prior prompt context each turn.
- * Do not rewrite the model's reply — organic confusion, repair, or admission
- * of forgetting is the intended fiction.
+ * Enforces the audible half of short-term amnesia after prompt context has been
+ * wiped. Provider retries get the first chance; this bounded, varied prefix is
+ * the final runtime guarantee when a model still omits fresh contact.
  */
 export function applyBotPowerEternalIntroductionResponseV1(
   value: unknown,
-  _botName?: unknown,
-  _currentInput?: unknown,
-  _options?: { hasPreviousOnAirTurn?: boolean },
+  botName?: unknown,
+  currentInput?: unknown,
+  options?: { hasPreviousOnAirTurn?: boolean },
 ): string {
-  return typeof value === "string" ? value.trim() : "";
+  const source = typeof value === "string" ? value.trim() : "";
+  if (
+    !source ||
+    botPowerResponseIsSilentV1(source) ||
+    botPowerResponseIsFirstIntroductionV1(source, botName)
+  ) {
+    return source;
+  }
+  const name = botPowerIntroductionNameV1(botName);
+  const introductions = options?.hasPreviousOnAirTurn
+    ? [
+        `Hello—I'm ${name}.`,
+        `Pleased to meet you—I'm ${name}.`,
+        `I'm ${name}; I don't believe we've met.`,
+        `Forgive me, I should introduce myself: I'm ${name}.`,
+      ]
+    : [
+        `Hello—I'm ${name}.`,
+        `I'm ${name}; it's good to meet you.`,
+        `Pleased to meet you—I'm ${name}.`,
+      ];
+  const seed = `${name}:${compactText(currentInput, 400)}:${source}`;
+  const introduction =
+    introductions[botPowerAddressedInsultHashV1(seed) % introductions.length]!;
+  return `${introduction} ${source}`;
 }
 
 /** Repeats addressed speech verbatim, or remains canonically silent when none exists. */

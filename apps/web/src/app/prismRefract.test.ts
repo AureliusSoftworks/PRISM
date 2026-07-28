@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { nextPrismRefractChoice } from "./prismRefract.ts";
+import {
+  nextPrismRefractChoice,
+  prismRefractModifierClickDecision,
+} from "./prismRefract.ts";
 
 describe("Prism Refract helpers", () => {
   it("uses every unrejected valid choice before resetting the shuffle bag", () => {
@@ -32,6 +35,52 @@ describe("Prism Refract helpers", () => {
         [],
       ),
       null,
+    );
+  });
+
+  it("uses modifier-click to reroll in place or accept and continue", () => {
+    const active = {
+      activeTargetId: "topic",
+      activeTargetKind: "field" as const,
+      canAccept: true,
+      canReroll: true,
+    };
+    assert.equal(
+      prismRefractModifierClickDecision({
+        ...active,
+        clickedTargetId: "topic",
+      }),
+      "reroll",
+    );
+    assert.equal(
+      prismRefractModifierClickDecision({
+        ...active,
+        clickedTargetId: "private-comments",
+      }),
+      "accept-and-begin",
+    );
+  });
+
+  it("waits for an unsettled draft before modifier-click chaining", () => {
+    assert.equal(
+      prismRefractModifierClickDecision({
+        activeTargetId: "topic",
+        activeTargetKind: "field",
+        clickedTargetId: "private-comments",
+        canAccept: false,
+        canReroll: false,
+      }),
+      "wait",
+    );
+    assert.equal(
+      prismRefractModifierClickDecision({
+        activeTargetId: null,
+        activeTargetKind: null,
+        clickedTargetId: "topic",
+        canAccept: false,
+        canReroll: false,
+      }),
+      "begin",
     );
   });
 });

@@ -71,8 +71,10 @@ import {
   subscribePrismCompanionSuppression,
 } from "./prismCompanionPresence";
 import {
+  PRISM_REFRACT_TARGET_ATTRIBUTE,
   focusedPrismRefractTargetId,
   nextPrismRefractChoice,
+  prismRefractModifierClickDecision,
   prismRefractTargetIdAtPoint,
   registeredPrismRefractTarget,
   requestPrismRefract,
@@ -1020,7 +1022,7 @@ export default function PrismCompanion({
         markRefractTarget(readySession, "ready");
         updateRefractSession(readySession);
         setRefractStatus(
-          `${choice.label} is ready. Space rerolls, Enter or Tab keeps it, and Escape restores.`,
+          `${choice.label} is ready. Click, Enter, or Tab keeps it. Space or ${modifierPresentation.modifierLabel}-click here rerolls; ${modifierPresentation.modifierLabel}-click another control keeps this and moves Prism there. Escape restores.`,
         );
         return;
       }
@@ -1063,7 +1065,7 @@ export default function PrismCompanion({
           markRefractTarget(readySession, "ready");
           updateRefractSession(readySession);
           setRefractStatus(
-            `${target.label} is ready. Space rerolls, Enter or Tab keeps it, and Escape restores.`,
+            `${target.label} is ready. Click, Enter, or Tab keeps it. Space or ${modifierPresentation.modifierLabel}-click here rerolls; ${modifierPresentation.modifierLabel}-click another control keeps this and moves Prism there. Escape restores.`,
           );
         })
         .catch((error) => {
@@ -1091,7 +1093,12 @@ export default function PrismCompanion({
           onError?.(message);
         });
     },
-    [markRefractTarget, onError, updateRefractSession],
+    [
+      markRefractTarget,
+      modifierPresentation.modifierLabel,
+      onError,
+      updateRefractSession,
+    ],
   );
 
   const beginPrismRefract = useCallback(
@@ -1341,6 +1348,7 @@ export default function PrismCompanion({
 
   useEffect(() => {
     if (!refractSession) return;
+    const platform = navigator.platform;
     const revealCursor = (): void => {
       document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
     };
@@ -1358,6 +1366,57 @@ export default function PrismCompanion({
         eventTarget instanceof Element &&
         eventTarget.closest('[data-prism-refract-tutorial-card="true"]')
       ) {
+        return;
+      }
+      const shiftedRefractTarget =
+        event.button === 0 &&
+        isPrismCompanionModifierHeld(event, platform) &&
+        eventTarget instanceof Element
+          ? eventTarget.closest<HTMLElement>(
+              `[${PRISM_REFRACT_TARGET_ATTRIBUTE}]`,
+            )
+          : null;
+      const shiftedRefractTargetId = shiftedRefractTarget?.getAttribute(
+        PRISM_REFRACT_TARGET_ATTRIBUTE,
+      );
+      const shiftedRegistration = shiftedRefractTargetId
+        ? registeredPrismRefractTarget(shiftedRefractTargetId)
+        : null;
+      if (
+        shiftedRegistration?.element === shiftedRefractTarget &&
+        !shiftedRegistration.target.disabled?.()
+      ) {
+        const decision = prismRefractModifierClickDecision({
+          activeTargetId: session.registration.target.id,
+          activeTargetKind: session.registration.target.kind,
+          clickedTargetId: shiftedRegistration.target.id,
+          canAccept:
+            session.phase === "ready" && session.candidateValue !== null,
+          canReroll:
+            session.phase === "ready" || session.phase === "error",
+        });
+        if (decision === "reroll") {
+          rerollPrismRefract();
+        } else if (decision === "wait") {
+          setRefractStatus("Prism is still refracting.");
+        } else {
+          if (decision === "accept-and-begin") acceptPrismRefract();
+          requestPrismRefract(
+            shiftedRegistration.target.id,
+            "modifier-click",
+            { clientX: event.clientX, clientY: event.clientY },
+          );
+        }
+        wieldSuppressedClickRef.current = shiftedRegistration.element;
+        if (wieldSuppressedClickTimerRef.current !== null) {
+          window.clearTimeout(wieldSuppressedClickTimerRef.current);
+        }
+        wieldSuppressedClickTimerRef.current = window.setTimeout(() => {
+          wieldSuppressedClickRef.current = null;
+          wieldSuppressedClickTimerRef.current = null;
+        }, 1_500);
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       if (
@@ -1414,7 +1473,12 @@ export default function PrismCompanion({
         true,
       );
     };
-  }, [acceptPrismRefract, refractSession, releasePrismRefract]);
+  }, [
+    acceptPrismRefract,
+    refractSession,
+    releasePrismRefract,
+    rerollPrismRefract,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -2314,8 +2378,8 @@ export default function PrismCompanion({
                 {refractTutorialStage === "summon"
                   ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, focus it and use ${modifierPresentation.spokenLabel}, or drag the orb onto it.`
                   : refractTutorialStage === "reroll"
-                    ? "Space refracts another candidate. It never types into the captured field."
-                    : "Enter or Tab keeps the draft. Escape restores the original."}
+                    ? `Space or ${modifierPresentation.modifierLabel}-clicking the same control refracts another candidate. It never types into the captured field.`
+                    : `Enter, Tab, or ${modifierPresentation.modifierLabel}-clicking another registered control keeps the draft. Escape restores the original.`}
               </p>
               <div>
                 <button

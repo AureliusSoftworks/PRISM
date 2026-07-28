@@ -22,6 +22,7 @@ import {
   signalReplayIntroLandingFadeMs,
   signalReplayIntroLandingRemainingMs,
   signalReplayInterviewFootageElapsedMs,
+  signalReplayInterviewFootageOffsetMs,
   signalReplayIntroVisualElapsedMs,
   signalReplayIntroVisualOffsetMs,
   signalReplayVideoEventElapsedMs,
@@ -155,6 +156,45 @@ describe("signalReplayInterviewFootageElapsedMs", () => {
       9_967,
     );
     assert.equal(firstAnimatedMouthFrameAudioMs - 9_327, 63);
+  });
+
+  it("keeps a long recorded provider wait on the faithful audio and camera clock", () => {
+    const delayedFirstTurnTimeline: ReplayTimelineV1 = {
+      ...timeline,
+      durationMs: 292_571,
+      beats: [
+        {
+          ...timeline.beats[0],
+          endMs: 8_750,
+        },
+        {
+          ...timeline.beats[1],
+          startMs: 28_445,
+          endMs: 57_130,
+        },
+        {
+          ...timeline.beats[3],
+          startMs: 292_571,
+          endMs: 292_571,
+        },
+      ],
+    };
+
+    assert.equal(
+      signalReplayInterviewFootageOffsetMs({
+        timeline: delayedFirstTurnTimeline,
+        introCardEndMs: 8_750,
+      }),
+      0,
+    );
+    assert.equal(
+      signalReplayInterviewFootageElapsedMs({
+        timeline: delayedFirstTurnTimeline,
+        replayElapsedMs: 28_500,
+        introCardEndMs: 8_750,
+      }),
+      28_500,
+    );
   });
 
   it("starts the interview footage when the intro card ends", () => {

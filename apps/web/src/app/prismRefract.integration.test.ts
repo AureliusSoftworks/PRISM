@@ -131,6 +131,17 @@ describe("Prism Refract Signal integration", () => {
     assert.doesNotMatch(refractSource, /shift-click|shiftKey|onClickCapture/u);
   });
 
+  it("rerolls same-target modifier-clicks and accepts before chaining to another target", () => {
+    assert.match(
+      companionSource,
+      /isPrismCompanionModifierHeld\(event, platform\)[\s\S]*prismRefractModifierClickDecision[\s\S]*decision === "reroll"[\s\S]*rerollPrismRefract\(\)[\s\S]*decision === "accept-and-begin"[\s\S]*acceptPrismRefract\(\)[\s\S]*"modifier-click"/u,
+    );
+    assert.match(
+      companionSource,
+      /wieldSuppressedClickRef\.current = shiftedRegistration\.element[\s\S]*event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)/u,
+    );
+  });
+
   it("arms Wield Prism deliberately and follows through compositor frames", () => {
     assert.match(
       companionSource,
@@ -153,6 +164,14 @@ describe("Prism Refract Signal integration", () => {
     assert.match(
       companionStyles,
       /\.anchor\[data-wielding="true"\][\s\S]*width: 28px[\s\S]*translate3d/u,
+    );
+    assert.match(
+      companionStyles,
+      /\.anchor\[data-wielding="true"\] \.avatar::after \{[\s\S]*radial-gradient\([\s\S]*#fff[\s\S]*box-shadow:[\s\S]*0 0 18px 5px #ffffff45/u,
+    );
+    assert.match(
+      companionStyles,
+      /\.anchor\[data-wielding="true"\] \.orb \{[\s\S]*opacity: 0;[\s\S]*transform: scale\(\.45\)/u,
     );
   });
 
@@ -236,7 +255,10 @@ describe("Prism Refract Signal integration", () => {
   it("keeps the ritual skippable, remindable, resettable, and persisted outside the walkthrough", () => {
     assert.match(tutorialSource, /skippable Refract ritual/u);
     assert.match(tutorialSource, /skippable Wield Prism teaching beat/u);
-    assert.match(tutorialSource, /Space rerolls[\s\S]*Escape[\s\S]*restores/u);
+    assert.match(
+      tutorialSource,
+      /Space rerolls[\s\S]*Option-clicking the same control[\s\S]*Control-clicking the same control[\s\S]*Enter or Tab keeps the current draft[\s\S]*Option-clicking a different registered control[\s\S]*Control-clicking a different registered control[\s\S]*Escape[\s\S]*restores/u,
+    );
     assert.match(pageSource, /tutorialProgress\.prismWield/u);
     assert.match(pageSource, /tutorialProgress\.signalRefract/u);
     assert.match(

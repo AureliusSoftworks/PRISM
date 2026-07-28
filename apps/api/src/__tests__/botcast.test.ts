@@ -6897,9 +6897,9 @@ describe("Botcast persistence and isolation", () => {
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       [
-        "Welcome to The Signal Hour. What is your view on the topic?",
+        "Welcome to The Signal Hour. I'm Mara Vale. What is your view on the topic?",
         "Karen stored the ledger checksum in the state machine before the launch.",
-        "Karen's checksum changes the state machine. What follows from that?",
+        "I'm Mara Vale; pleased to meet you. Karen's checksum changes the state machine. What follows from that?",
       ],
       captures,
     );
@@ -6957,7 +6957,7 @@ describe("Botcast persistence and isolation", () => {
 
       assert.equal(
         third.message?.content,
-        "Karen's checksum changes the state machine. What follows from that?",
+        "I'm Mara Vale; pleased to meet you. Karen's checksum changes the state machine. What follows from that?",
       );
       const thirdPrompt = captures[2]!.map((message) => message.content).join("\n");
       assert.match(thirdPrompt, /Hard fresh-contact rule/iu);
@@ -7192,6 +7192,121 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.match(thirdPrompt, /Current other-speaker on-air message/iu);
       assert.doesNotMatch(thirdPrompt, /Repetition and patience/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("retries and records a bounded Power repair when a forgetful host skips fresh contact", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "I'm Mara Vale. You seem tense, but it's nice to meet you.",
+        "Its wear records a life more honestly than decoration can.",
+        "Ivo, when wear records a life, what separates attention from decoration?",
+        "When wear records a life, what tells you the attention is honest?",
+      ],
+      captures,
+    );
+    const powerName = "Eternal Introduction";
+    const powerIntent =
+      "Every message is only a sincere first introduction. Mara has no awareness of her own prior messages or the earlier conversation.";
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+        JSON.stringify([
+          {
+            version: 1,
+            id: "eternal-introduction",
+            name: powerName,
+            intent: powerIntent,
+            enabled: true,
+            compileStatus: "ready",
+            compiled: {
+              version: 1,
+              sourceHash: botPowerSourceHashV1(powerName, powerIntent),
+              selfCue: "Every request is first contact.",
+              observerCue: "Remember every repetition and react naturally.",
+              effects: [
+                {
+                  type: "eternal_introduction",
+                  memory: "current_other_speaker_message",
+                },
+              ],
+              ruleLabels: ["Current other-speaker message only"],
+            },
+          },
+        ]),
+      );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The moral weight of looking",
+        preferredProvider: "openai",
+        modelOverride: "gpt-signal-test",
+        responseMode: "online",
+      });
+      const generationOptions = {
+        preferredProvider: "openai" as const,
+        providerFactory: (() => provider) as typeof selectProvider,
+        signalSocialSilenceChanceOverride: 0,
+      };
+
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+      const repaired = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        generationOptions,
+      );
+
+      assert.equal(captures.length, 4);
+      assert.match(
+        repaired.message?.content ?? "",
+        /^(?:Hello—I'm Mara Vale\.|Pleased to meet you—I'm Mara Vale\.|I'm Mara Vale; I don't believe we've met\.|Forgive me, I should introduce myself: I'm Mara Vale\.) When wear records a life, what tells you the attention is honest\?$/u,
+      );
+      const utterance = repaired.episode.events.findLast(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === repaired.message?.id,
+      );
+      assert.deepEqual(utterance?.payload.utteranceRepair, {
+        v: 1,
+        source: "power_runtime",
+        reason: "power_fresh_contact",
+        fallbackKind: "host_follow_up",
+      });
+      assert.equal(utterance?.payload.providerRecovery?.trigger, "content_validation");
+      assert.deepEqual(
+        utterance?.payload.providerRecovery?.attempts?.map(
+          (attempt: SignalOnlineTurnAttemptV1) => ({
+            outcome: attempt.outcome,
+            reason: attempt.reason,
+          }),
+        ),
+        [
+          { outcome: "rejected", reason: "invalid_output" },
+          { outcome: "rejected", reason: "invalid_output" },
+        ],
+      );
+      assert.match(
+        captures[3]!.map((message) => message.content).join("\n"),
+        /Hard Power output contract:[\s\S]*first-contact self-introduction[\s\S]*Mara Vale/iu,
+      );
     } finally {
       db.close();
     }

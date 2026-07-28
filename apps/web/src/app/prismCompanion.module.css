@@ -48,22 +48,53 @@
 
 .anchor[data-wielding="true"] .avatar {
   pointer-events: none;
-  opacity: .72;
+  opacity: 1;
   transform: scale(1);
-  filter:
-    drop-shadow(0 0 5px #ffffff70)
-    drop-shadow(0 0 11px color-mix(in srgb, var(--companion-i) 68%, transparent));
+  filter: none;
 }
 
 .anchor[data-wielding="true"] .avatar::before {
-  inset: -1px;
-  opacity: .48;
-  filter: blur(4px);
+  inset: -4px;
+  background: radial-gradient(
+    circle,
+    #fff 0 12%,
+    #ffffffd9 24%,
+    #ffffff70 42%,
+    #ffffff22 60%,
+    transparent 76%
+  );
+  opacity: .94;
+  filter: blur(3px);
+  animation: none;
+}
+
+.anchor[data-wielding="true"] .avatar::after {
+  position: absolute;
+  inset: 5px;
+  z-index: 1;
+  border: 1px solid #fff;
+  border-radius: 50%;
+  content: "";
+  background: radial-gradient(
+    circle at 35% 30%,
+    #fff 0 18%,
+    #fff 34%,
+    #f8fbff 58%,
+    #dde8ef 82%,
+    #b8c9d5 100%
+  );
+  box-shadow:
+    inset 2px 2px 4px #fff,
+    inset -2px -3px 5px #71869655,
+    0 0 4px 1px #fff,
+    0 0 10px 3px #ffffffa8,
+    0 0 18px 5px #ffffff45;
 }
 
 .anchor[data-wielding="true"] .orb {
   --prism-orb-size: 28px;
-  opacity: .82;
+  opacity: 0;
+  transform: scale(.45);
 }
 
 .backdrop {

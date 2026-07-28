@@ -14813,7 +14813,7 @@ function buildRoutes(): RouteDefinition[] {
       if (userBlocksOnlineCapabilities(user)) {
         eligibility.eligible = false;
         eligibility.blockedReason =
-          "Studio Cut is unavailable in hard LOCAL mode.";
+          "Premium voice repair and upgrades are unavailable in hard LOCAL mode.";
       } else {
         const userKey = decryptUserKey(userId);
         const apiKey =
@@ -14821,7 +14821,7 @@ function buildRoutes(): RouteDefinition[] {
         if (!apiKey) {
           eligibility.eligible = false;
           eligibility.blockedReason =
-            "Connect ElevenLabs in Settings → Keys to make a Studio Cut.";
+            "Connect ElevenLabs in Settings → Keys to repair or upgrade voices.";
         }
       }
       json(ctx.res, 200, { ok: true, eligibility });
@@ -14836,12 +14836,25 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         throw new HttpError(
           409,
-          "Studio Cut requires AUTO or ONLINE mode and explicit confirmation before sending the canonical transcript and voice IDs to ElevenLabs.",
+          "Premium voice repair and upgrades require AUTO or ONLINE mode and explicit confirmation before sending selected dialogue and voice IDs to ElevenLabs.",
         );
       }
       const eligibility = replayStudioCutEligibility(db, userId, ctx.params.id);
       if (!eligibility.eligible) {
-        throw new HttpError(409, eligibility.blockedReason ?? "Studio Cut is unavailable.");
+        throw new HttpError(
+          409,
+          eligibility.blockedReason ?? "Premium audio is unavailable.",
+        );
+      }
+      const intent =
+        body.intent === "repair" || body.intent === "upgrade"
+          ? body.intent
+          : null;
+      if (!intent || intent !== eligibility.recommendedAction) {
+        throw new HttpError(
+          409,
+          "The requested Premium audio action no longer matches this recording.",
+        );
       }
       const userKey = decryptUserKey(userId);
       const apiKey =
@@ -14859,6 +14872,7 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           recordingId: ctx.params.id,
           apiKey,
+          intent,
           regenerate: body.regenerate === true,
         })
           .then(() => undefined)
@@ -14886,7 +14900,10 @@ function buildRoutes(): RouteDefinition[] {
         return;
       }
       if (userBlocksOnlineCapabilities(user)) {
-        throw new HttpError(409, "Studio Cut cannot resume in hard LOCAL mode.");
+        throw new HttpError(
+          409,
+          "Premium voice generation cannot resume in hard LOCAL mode.",
+        );
       }
       const userKey = decryptUserKey(userId);
       const apiKey =
@@ -14901,6 +14918,8 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           recordingId: ctx.params.id,
           apiKey,
+          intent:
+            detail.recording.voiceQuality?.recommendedAction ?? undefined,
         })
           .then(() => undefined)
           .catch((error) => {
@@ -14924,7 +14943,7 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
       );
       if (!recording) {
-        throw new HttpError(409, "No saved Studio Cut voice master is available.");
+        throw new HttpError(409, "No saved Premium voice master is available.");
       }
       json(ctx.res, 200, { ok: true, recording });
     }),
@@ -14932,7 +14951,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const renderToken = readReplayRenderToken(ctx);
       if (!(ctx.body instanceof Uint8Array)) {
-        throw new HttpError(400, "Studio Cut audio chunk must be binary.");
+        throw new HttpError(400, "Premium audio chunk must be binary.");
       }
       const rawPosition = ctx.req.headers["x-prism-replay-position"];
       const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
@@ -14979,7 +14998,7 @@ function buildRoutes(): RouteDefinition[] {
       requireAuth(ctx);
       throw new HttpError(
         410,
-        "The retired replay enhancement endpoint is unavailable. Use Studio Cut.",
+        "The retired replay enhancement endpoint is unavailable.",
       );
     }),
     route("POST", "/api/replays/:id/premium/retry", async (ctx) => {
@@ -15002,18 +15021,18 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.params.segmentId,
       );
-      if (!file) throw new HttpError(404, "Studio Cut voice segment not found.");
+      if (!file) throw new HttpError(404, "Premium voice segment not found.");
       streamReplayFile(ctx, file);
     }),
     route("GET", "/api/replays/:id/studio-cut/audio", async (ctx) => {
       const userId = requireAuth(ctx);
       const file = replayPremiumAudioFile(db, userId, ctx.params.id);
-      if (!file) throw new HttpError(404, "Studio Cut audio not found.");
+      if (!file) throw new HttpError(404, "Premium audio not found.");
       streamReplayFile(ctx, file, {
         range: true,
         attachmentName:
           ctx.query.get("download") === "1"
-            ? "prism-signal-studio-cut.webm"
+            ? "prism-signal-premium-audio.webm"
             : undefined,
       });
     }),
@@ -15021,7 +15040,10 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       if (body.confirm !== "delete-studio-cut") {
-        throw new HttpError(400, "Studio Cut removal requires explicit confirmation.");
+        throw new HttpError(
+          400,
+          "Premium version removal requires explicit confirmation.",
+        );
       }
       const recording = deleteReplayPremiumMedia(db, userId, ctx.params.id);
       if (!recording) throw new HttpError(404, "Replay recording not found.");

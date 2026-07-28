@@ -7,6 +7,7 @@ import type {
 import {
   REPLAY_PREMIUM_DIALOGUE_MAX_CHARACTERS,
   ReplayStudioCutEligibilityError,
+  classifyReplayVoiceQuality,
   generateReplayPremiumSegment,
   planReplayPremiumSegments,
 } from "../replay-premium.ts";
@@ -99,6 +100,187 @@ function fixture(lines: Array<{
 }
 
 describe("Signal Premium voice planning", () => {
+  it("classifies the actual captured engine instead of configured voice intent", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+    for (const take of takes) take.audioUrl = `/takes/${take.id}`;
+    assert.equal(classifyReplayVoiceQuality(manifest, takes).status, "premium");
+
+    takes[0]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    assert.deepEqual(classifyReplayVoiceQuality(manifest, takes), {
+      status: "repairable",
+      recommendedAction: "repair",
+      totalLineCount: 2,
+      premiumLineCount: 1,
+      fallbackLineCount: 1,
+      standardLineCount: 0,
+      targetLineCount: 1,
+      targetCharacterEstimate: 8,
+      blockedReason: null,
+    });
+
+    takes[0]!.snapshot.requestedEngine = "builtin";
+    takes[0]!.snapshot.resolvedEngine = "builtin";
+    assert.equal(classifyReplayVoiceQuality(manifest, takes).status, "upgradeable");
+    assert.equal(
+      classifyReplayVoiceQuality(manifest, takes).recommendedAction,
+      "upgrade",
+    );
+  });
+
+  it("counts multiple fallbacks, mixed intentional styles, missing takes, and silence", () => {
+    const { manifest, takes } = fixture([
+      { id: "fallback-one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "First." },
+      { id: "fallback-two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Second." },
+      { id: "standard", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Third." },
+      { id: "premium", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Fourth." },
+    ]);
+    for (const take of takes) take.audioUrl = `/takes/${take.id}`;
+    takes[0]!.snapshot.resolvedEngine = "builtin-provider-fallback";
+    takes[1]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    takes[2]!.snapshot.requestedEngine = "builtin";
+    takes[2]!.snapshot.resolvedEngine = "builtin";
+
+    assert.deepEqual(classifyReplayVoiceQuality(manifest, takes), {
+      status: "upgradeable",
+      recommendedAction: "upgrade",
+      totalLineCount: 4,
+      premiumLineCount: 1,
+      fallbackLineCount: 2,
+      standardLineCount: 1,
+      targetLineCount: 3,
+      targetCharacterEstimate: 19,
+      blockedReason: null,
+    });
+
+    assert.equal(
+      classifyReplayVoiceQuality(manifest, takes.slice(1)).status,
+      "original_only",
+    );
+    takes[0]!.snapshot.resolvedEngine = null;
+    assert.match(
+      classifyReplayVoiceQuality(manifest, takes).blockedReason ?? "",
+      /missing reliable recorded voice provenance/u,
+    );
+    for (const utterance of manifest.utterances) utterance.audible = false;
+    assert.deepEqual(classifyReplayVoiceQuality(manifest, takes), {
+      status: "original_only",
+      recommendedAction: null,
+      totalLineCount: 0,
+      premiumLineCount: 0,
+      fallbackLineCount: 0,
+      standardLineCount: 0,
+      targetLineCount: 0,
+      targetCharacterEstimate: 0,
+      blockedReason: "This replay has no audible dialogue.",
+    });
+  });
+
+  it("blocks selective production when reusable Premium audio or a target voice is missing", () => {
+    const { manifest, takes } = fixture([
+      { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
+      { id: "two", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Thanks." },
+    ]);
+    takes[0]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    takes[0]!.audioUrl = "/takes/one";
+    assert.match(
+      classifyReplayVoiceQuality(manifest, takes).blockedReason ?? "",
+      /successful Premium lines are missing reusable captured takes/u,
+    );
+    takes[1]!.audioUrl = "/takes/two";
+    takes[0]!.snapshot.profile = {
+      ...takes[0]!.snapshot.profile,
+      elevenLabsVoiceId: null,
+    };
+    assert.match(
+      classifyReplayVoiceQuality(manifest, takes).blockedReason ?? "",
+      /needs a saved ElevenLabs voice/u,
+    );
+  });
+
+  it("plans only fallback lines for repair and only non-Premium lines for upgrade", () => {
+    const { manifest, takes } = fixture([
+      { id: "fallback", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Fallback." },
+      { id: "premium", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Premium." },
+      { id: "standard", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Standard." },
+    ]);
+    takes[0]!.snapshot.resolvedEngine = "builtin-local-fallback";
+    takes[2]!.snapshot.requestedEngine = "builtin";
+    takes[2]!.snapshot.resolvedEngine = "builtin";
+    takes[1]!.snapshot.profile = {
+      ...takes[1]!.snapshot.profile,
+      elevenLabsVoiceId: null,
+    };
+    assert.deepEqual(
+      planReplayPremiumSegments(manifest, takes, "repair", "repair").flatMap(
+        (segment) => segment.inputs.map((input) => input.sourceMessageId),
+      ),
+      ["fallback"],
+    );
+    assert.deepEqual(
+      planReplayPremiumSegments(manifest, takes, "upgrade", "upgrade").flatMap(
+        (segment) => segment.inputs.map((input) => input.sourceMessageId),
+      ),
+      ["fallback", "standard"],
+    );
+  });
+
+  it("regenerates and bills only the first fallback when later Premium lines succeeded", async () => {
+    const { manifest, takes } = fixture([
+      { id: "first", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Fallback first." },
+      { id: "second", speakerId: "guest", speakerName: "Guest", voiceId: "guest-voice", text: "Premium second." },
+      { id: "third", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Premium third." },
+    ]);
+    for (const take of takes) take.audioUrl = `/takes/${take.id}`;
+    takes[0]!.snapshot.resolvedEngine = "builtin-provider-fallback";
+    const segments = planReplayPremiumSegments(
+      manifest,
+      takes,
+      "first-fallback",
+      "repair",
+    );
+    const requests: string[] = [];
+    let characterCost = 0;
+    for (const segment of segments) {
+      const generated = await generateReplayPremiumSegment({
+        segment,
+        apiKey: "test-key",
+        fetchImpl: async (_input, init) => {
+          const body = JSON.parse(String(init?.body)) as { text: string };
+          requests.push(body.text);
+          return new Response(JSON.stringify({
+            audio_base64: Buffer.from("fallback-audio").toString("base64"),
+            normalized_alignment: {
+              characters: [..."Fallback first."],
+              character_start_times_seconds: Array.from(
+                { length: 15 },
+                (_, index) => index * 0.05,
+              ),
+              character_end_times_seconds: Array.from(
+                { length: 15 },
+                (_, index) => (index + 1) * 0.05,
+              ),
+            },
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      });
+      characterCost += generated.characterCost;
+    }
+    assert.deepEqual(
+      segments.flatMap((segment) =>
+        segment.inputs.map((input) => input.sourceMessageId),
+      ),
+      ["first"],
+    );
+    assert.deepEqual(requests, ["Fallback first."]);
+    assert.equal(characterCost, Array.from("Fallback first.").length);
+  });
+
   it("reports every speaker whose audible line lacks a saved voice snapshot", () => {
     const { manifest } = fixture([
       { id: "one", speakerId: "host", speakerName: "Host", voiceId: "host-voice", text: "Welcome." },
@@ -111,7 +293,7 @@ describe("Signal Premium voice planning", () => {
         assert.ok(error instanceof ReplayStudioCutEligibilityError);
         assert.equal(
           error.message,
-          "Host and Guest need an audible saved replay voice snapshot before Studio Cut can begin.",
+          "Host and Guest need an audible saved replay voice snapshot before Premium audio can be created.",
         );
         assert.deepEqual(error.missingSpeakers, ["Host", "Guest"]);
         return true;
@@ -131,7 +313,7 @@ describe("Signal Premium voice planning", () => {
         assert.ok(error instanceof ReplayStudioCutEligibilityError);
         assert.equal(
           error.message,
-          "Guest needs an audible saved replay voice snapshot before Studio Cut can begin.",
+          "Guest needs an audible saved replay voice snapshot before Premium audio can be created.",
         );
         assert.deepEqual(error.missingSpeakers, ["Guest"]);
         return true;
@@ -166,7 +348,7 @@ describe("Signal Premium voice planning", () => {
         assert.ok(error instanceof ReplayStudioCutEligibilityError);
         assert.equal(
           error.message,
-          "Host and Guest need an ElevenLabs voice before Studio Cut can begin.",
+          "Host and Guest need an ElevenLabs voice before Premium audio can be created.",
         );
         assert.deepEqual(error.missingSpeakers, ["Host", "Guest"]);
         return true;

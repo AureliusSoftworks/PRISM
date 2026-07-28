@@ -335,9 +335,31 @@ export interface ReplayStudioCutProductionV1 {
   updatedAt: string | null;
 }
 
+export type ReplayPremiumAudioActionV1 = "repair" | "upgrade";
+
+export type ReplayVoiceQualityStatusV1 =
+  | "premium"
+  | "repairable"
+  | "upgradeable"
+  | "original_only";
+
+export interface ReplayVoiceQualityV1 {
+  status: ReplayVoiceQualityStatusV1;
+  recommendedAction: ReplayPremiumAudioActionV1 | null;
+  totalLineCount: number;
+  premiumLineCount: number;
+  fallbackLineCount: number;
+  standardLineCount: number;
+  targetLineCount: number;
+  targetCharacterEstimate: number;
+  blockedReason: string | null;
+}
+
 export interface ReplayStudioCutEligibilityV1 {
   eligible: boolean;
   blockedReason: string | null;
+  recommendedAction: ReplayPremiumAudioActionV1 | null;
+  targetLineCount: number;
   characterEstimate: number;
   requestEstimate: number;
   missingSpeakers: string[];
@@ -390,6 +412,8 @@ export interface ReplayRecordingV1 {
   transcriptMarkdownUrl: string | null;
   /** V2 availability is derived from durable audio + manifest presence. */
   availability?: ReplayAvailabilityV2;
+  /** Derived from the voice takes that were actually heard during recording. */
+  voiceQuality?: ReplayVoiceQualityV1 | null;
   warning: string | null;
   error: string | null;
   premiumProduction?: ReplayPremiumProductionV1 | null;

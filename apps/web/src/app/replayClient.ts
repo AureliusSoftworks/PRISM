@@ -4,6 +4,7 @@ import type {
   ReplayPremiumSegmentV1,
   ReplayRecordingV1,
   ReplayStudioCutEligibilityV1,
+  ReplayPremiumAudioActionV1,
   ReplayTimelineV1,
   ReplayVoiceTakeRecordV1,
   ReplayVoiceTakeV1,
@@ -324,7 +325,7 @@ export async function replayStudioCutEligibility(
 
 export async function startReplayStudioCut(
   recordingId: string,
-  regenerate = false,
+  intent: ReplayPremiumAudioActionV1,
 ): Promise<ReplayRecordingV1> {
   const result = await replayJson<{
     ok: true;
@@ -333,7 +334,7 @@ export async function startReplayStudioCut(
     method: "POST",
     body: JSON.stringify({
       confirm: "send-to-elevenlabs",
-      regenerate,
+      intent,
     }),
   });
   window.dispatchEvent(new CustomEvent("prism:replay-recording-changed"));

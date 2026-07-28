@@ -6,7 +6,9 @@ import {
   normalizeBotAudioVoiceProfileV1,
   normalizeElevenLabsVoiceDirection,
   type ReplayManifest,
+  type ReplayPremiumAudioActionV1,
   type ReplayPremiumVoiceTimingV1,
+  type ReplayVoiceQualityV1,
   type ReplayVoiceTakeRecordV1,
 } from "@localai/shared";
 import {
@@ -107,9 +109,190 @@ function premiumPerformanceText(take: ReplayVoiceTakeRecordV1): string {
   return `${prefix} ${exactPerformanceText}`;
 }
 
+function takeByAudibleMessageId(
+  manifest: ReplayManifest,
+  takes: readonly ReplayVoiceTakeRecordV1[],
+): Map<string, ReplayVoiceTakeRecordV1> {
+  const audibleMessageIds = new Set(
+    manifest.utterances
+      .filter((utterance) => utterance.audible)
+      .map((utterance) => utterance.sourceMessageId),
+  );
+  return new Map(
+    takes
+      .filter(
+        (take) =>
+          take.snapshot.channel === "primary" &&
+          take.snapshot.sourceMessageId &&
+          audibleMessageIds.has(take.snapshot.sourceMessageId),
+      )
+      .map((take) => [take.snapshot.sourceMessageId as string, take]),
+  );
+}
+
+function premiumTargetMessageIds(
+  manifest: ReplayManifest,
+  takes: readonly ReplayVoiceTakeRecordV1[],
+  intent: ReplayPremiumAudioActionV1,
+): Set<string> {
+  const takeByMessageId = takeByAudibleMessageId(manifest, takes);
+  return new Set(
+    manifest.utterances
+      .filter((utterance) => utterance.audible)
+      .flatMap((utterance) => {
+        const take = takeByMessageId.get(utterance.sourceMessageId);
+        if (!take || take.snapshot.resolvedEngine === "elevenlabs") return [];
+        if (
+          intent === "repair" &&
+          take.snapshot.requestedEngine !== "elevenlabs"
+        ) {
+          return [];
+        }
+        return [utterance.sourceMessageId];
+      }),
+  );
+}
+
+export function classifyReplayVoiceQuality(
+  manifest: ReplayManifest,
+  takes: readonly ReplayVoiceTakeRecordV1[],
+): ReplayVoiceQualityV1 {
+  const audibleUtterances = manifest.utterances.filter(
+    (utterance) => utterance.audible,
+  );
+  const takeByMessageId = takeByAudibleMessageId(manifest, takes);
+  let premiumLineCount = 0;
+  let fallbackLineCount = 0;
+  let standardLineCount = 0;
+  const missingTakeNames: string[] = [];
+  const missingProvenanceNames: string[] = [];
+  const missingVoiceNames: string[] = [];
+  for (const utterance of audibleUtterances) {
+    const take = takeByMessageId.get(utterance.sourceMessageId);
+    if (
+      !take ||
+      !take.snapshot.audible ||
+      take.snapshot.mode === "mute"
+    ) {
+      missingTakeNames.push(utterance.speakerRole);
+      continue;
+    }
+    if (!take.snapshot.resolvedEngine) {
+      missingProvenanceNames.push(take.snapshot.speakerName);
+      continue;
+    }
+    if (take.snapshot.resolvedEngine === "elevenlabs") {
+      premiumLineCount += 1;
+    } else if (take.snapshot.requestedEngine === "elevenlabs") {
+      fallbackLineCount += 1;
+    } else {
+      standardLineCount += 1;
+    }
+    if (
+      take.snapshot.resolvedEngine !== "elevenlabs" &&
+      !resolveElevenLabsVoiceId(take.snapshot.profile)
+    ) {
+      missingVoiceNames.push(take.snapshot.speakerName);
+    }
+  }
+  const totalLineCount = audibleUtterances.length;
+  if (totalLineCount === 0) {
+    return {
+      status: "original_only",
+      recommendedAction: null,
+      totalLineCount,
+      premiumLineCount,
+      fallbackLineCount,
+      standardLineCount,
+      targetLineCount: 0,
+      targetCharacterEstimate: 0,
+      blockedReason: "This replay has no audible dialogue.",
+    };
+  }
+  if (missingTakeNames.length > 0 || missingProvenanceNames.length > 0) {
+    const missingNames = uniqueNames([
+      ...missingTakeNames,
+      ...missingProvenanceNames,
+    ]);
+    return {
+      status: "original_only",
+      recommendedAction: null,
+      totalLineCount,
+      premiumLineCount,
+      fallbackLineCount,
+      standardLineCount,
+      targetLineCount: 0,
+      targetCharacterEstimate: 0,
+      blockedReason: `${speakerList(missingNames)} ${
+        missingNames.length === 1 ? "is" : "are"
+      } missing reliable recorded voice provenance.`,
+    };
+  }
+  if (fallbackLineCount === 0 && standardLineCount === 0) {
+    return {
+      status: "premium",
+      recommendedAction: null,
+      totalLineCount,
+      premiumLineCount,
+      fallbackLineCount,
+      standardLineCount,
+      targetLineCount: 0,
+      targetCharacterEstimate: 0,
+      blockedReason: null,
+    };
+  }
+  const recommendedAction: ReplayPremiumAudioActionV1 =
+    standardLineCount > 0 ? "upgrade" : "repair";
+  const targetMessageIds = premiumTargetMessageIds(
+    manifest,
+    takes,
+    recommendedAction,
+  );
+  const preservedPremiumWithoutAudio = audibleUtterances.some((utterance) => {
+    const take = takeByMessageId.get(utterance.sourceMessageId);
+    return (
+      take?.snapshot.resolvedEngine === "elevenlabs" &&
+      (take.status !== "captured" || !take.audioUrl)
+    );
+  });
+  const targetTakes = audibleUtterances.flatMap((utterance) => {
+    if (!targetMessageIds.has(utterance.sourceMessageId)) return [];
+    const take = takeByMessageId.get(utterance.sourceMessageId);
+    return take ? [take] : [];
+  });
+  const targetCharacterEstimate = targetTakes.reduce(
+    (sum, take) => sum + Array.from(premiumPerformanceText(take)).length,
+    0,
+  );
+  const blockedReason =
+    missingVoiceNames.length > 0
+      ? `${speakerList(uniqueNames(missingVoiceNames))} ${
+          uniqueNames(missingVoiceNames).length === 1 ? "needs" : "need"
+        } a saved ElevenLabs voice.`
+      : preservedPremiumWithoutAudio
+        ? "The successful Premium lines are missing reusable captured takes."
+        : null;
+  return {
+    status: blockedReason
+      ? "original_only"
+      : recommendedAction === "repair"
+        ? "repairable"
+        : "upgradeable",
+    recommendedAction: blockedReason ? null : recommendedAction,
+    totalLineCount,
+    premiumLineCount,
+    fallbackLineCount,
+    standardLineCount,
+    targetLineCount: targetMessageIds.size,
+    targetCharacterEstimate,
+    blockedReason,
+  };
+}
+
 function primaryPremiumInputs(
   manifest: ReplayManifest,
   takes: readonly ReplayVoiceTakeRecordV1[],
+  targetMessageIds: ReadonlySet<string> | null = null,
 ): ReplayPremiumPlannedInput[] {
   const takeByMessageId = new Map(
     takes
@@ -123,7 +306,9 @@ function primaryPremiumInputs(
     manifest.participants.map((participant) => [participant.id, participant.name]),
   );
   const audibleUtterances = manifest.utterances.filter(
-    (utterance) => utterance.audible,
+    (utterance) =>
+      utterance.audible &&
+      (!targetMessageIds || targetMessageIds.has(utterance.sourceMessageId)),
   );
   const missingSnapshotSpeakers = uniqueNames(
     audibleUtterances.flatMap((utterance) => {
@@ -163,18 +348,18 @@ function primaryPremiumInputs(
       );
     }
     throw new ReplayStudioCutEligibilityError(
-      `${reasons.join("; ")} before Studio Cut can begin.`,
+      `${reasons.join("; ")} before Premium audio can be created.`,
       uniqueNames([...missingSnapshotSpeakers, ...missingVoiceSpeakers]),
     );
   }
   return audibleUtterances.map((utterance) => {
     const take = takeByMessageId.get(utterance.sourceMessageId);
     if (!take) {
-      throw new Error("Studio Cut voice snapshot validation failed.");
+      throw new Error("Premium audio voice snapshot validation failed.");
     }
     const voiceId = resolveElevenLabsVoiceId(take.snapshot.profile);
     if (!voiceId) {
-      throw new Error("Studio Cut ElevenLabs voice validation failed.");
+      throw new Error("Premium audio ElevenLabs voice validation failed.");
     }
     const text = premiumPerformanceText(take);
     if (Array.from(text).length > REPLAY_PREMIUM_DIALOGUE_MAX_CHARACTERS) {
@@ -196,8 +381,12 @@ export function planReplayPremiumSegments(
   manifest: ReplayManifest,
   takes: readonly ReplayVoiceTakeRecordV1[],
   generationSeed = "studio-cut",
+  intent?: ReplayPremiumAudioActionV1,
 ): ReplayPremiumPlannedSegment[] {
-  const inputs = primaryPremiumInputs(manifest, takes);
+  const targetMessageIds = intent
+    ? premiumTargetMessageIds(manifest, takes, intent)
+    : null;
+  const inputs = primaryPremiumInputs(manifest, takes, targetMessageIds);
   const speakersByVoiceId = new Map<string, Set<string>>();
   for (const input of inputs) {
     const speakers = speakersByVoiceId.get(input.voiceId) ?? new Set<string>();

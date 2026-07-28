@@ -11,6 +11,7 @@ import { prismCompanionModifierPresentation } from "./prismCompanionState.ts";
 export const PRISM_REFRACT_TARGET_ATTRIBUTE = "data-prism-refract-id";
 
 export type PrismRefractInvocation =
+  | "modifier-click"
   | "wield-click"
   | "focused-shortcut"
   | "orb-drop";
@@ -63,6 +64,28 @@ export type PrismRefractTarget =
   | PrismRefractFieldTarget
   | PrismRefractChoiceTarget
   | PrismRefractMagicTarget;
+
+export type PrismRefractModifierClickDecision =
+  | "begin"
+  | "reroll"
+  | "accept-and-begin"
+  | "wait";
+
+export function prismRefractModifierClickDecision(input: {
+  activeTargetId: string | null;
+  activeTargetKind: PrismRefractTarget["kind"] | null;
+  clickedTargetId: string;
+  canAccept: boolean;
+  canReroll: boolean;
+}): PrismRefractModifierClickDecision {
+  if (!input.activeTargetId || input.activeTargetKind === "magic") {
+    return "begin";
+  }
+  if (input.activeTargetId === input.clickedTargetId) {
+    return input.canReroll ? "reroll" : "wait";
+  }
+  return input.canAccept ? "accept-and-begin" : "wait";
+}
 
 export interface RegisteredPrismRefractTarget {
   target: PrismRefractTarget;

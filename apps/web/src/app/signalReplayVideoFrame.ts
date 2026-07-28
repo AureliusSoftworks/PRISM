@@ -42,6 +42,11 @@ const SIGNAL_REPLAY_INTRO_TO_STUDIO_LEAD_MS = 1_800;
 const SIGNAL_REPLAY_INTRO_MIN_VISIBLE_MS = 1_000;
 /** Calibrated against the faithful master so recorded mouths land on speech. */
 export const SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS = 8_750;
+/**
+ * The retired calibration control was intentionally bounded to +/-5 seconds.
+ * A larger gap is recorded pre-speech waiting, not a puppeteering correction.
+ */
+const SIGNAL_REPLAY_MAX_INTERVIEW_FOOTAGE_OFFSET_MS = 5_000;
 /** Logo dissolves into the studio over this window when the pad is long enough. */
 export const SIGNAL_REPLAY_INTRO_LANDING_FADE_MS = 650;
 
@@ -227,13 +232,7 @@ export function signalReplayInterviewFootageElapsedMs(args: {
     0,
     Math.min(args.timeline.durationMs, args.replayElapsedMs),
   );
-  const firstUtteranceStartMs =
-    signalReplayFirstUtteranceStartMs(args.timeline);
-  if (firstUtteranceStartMs === null) return boundedAudioElapsedMs;
-  const introCardEndMs = Number.isFinite(args.introCardEndMs)
-    ? Math.max(0, Math.round(args.introCardEndMs))
-    : firstUtteranceStartMs;
-  const footageOffsetMs = introCardEndMs - firstUtteranceStartMs;
+  const footageOffsetMs = signalReplayInterviewFootageOffsetMs(args);
   return Math.max(
     0,
     Math.min(
@@ -241,6 +240,28 @@ export function signalReplayInterviewFootageElapsedMs(args: {
       boundedAudioElapsedMs - footageOffsetMs,
     ),
   );
+}
+
+/**
+ * Resolve the small, approved intro-to-puppeteering calibration. Long provider
+ * waits remain on the faithful audio/camera clock instead of being mistaken
+ * for an offset and projected into every later replay beat.
+ */
+export function signalReplayInterviewFootageOffsetMs(args: {
+  timeline: ReplayTimelineV1;
+  introCardEndMs: number;
+}): number {
+  const firstUtteranceStartMs =
+    signalReplayFirstUtteranceStartMs(args.timeline);
+  if (firstUtteranceStartMs === null) return 0;
+  const introCardEndMs = Number.isFinite(args.introCardEndMs)
+    ? Math.max(0, Math.round(args.introCardEndMs))
+    : firstUtteranceStartMs;
+  const requestedOffsetMs = introCardEndMs - firstUtteranceStartMs;
+  return Math.abs(requestedOffsetMs) <=
+    SIGNAL_REPLAY_MAX_INTERVIEW_FOOTAGE_OFFSET_MS
+    ? requestedOffsetMs
+    : 0;
 }
 
 /** Default branded-card window on the picture clock. */
