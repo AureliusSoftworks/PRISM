@@ -213,7 +213,7 @@ import {
 
 /**
  * Coffee mode is the multi-bot turn-taking primitive that downstream
- * modes (Arena, Polling, Feed) build on. These tests pin the small,
+ * modes (Debate, Polling, Feed) build on. These tests pin the small,
  * pure helpers that decide WHICH bot speaks each turn — the part the
  * design discussion locked as "reactive routing via an LLM moderator
  * with a graceful round-robin fallback when the moderator misfires."

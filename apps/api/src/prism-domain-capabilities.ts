@@ -89,6 +89,11 @@ import {
   previewPrismImageDeletion,
   undoPrismImageDeletion,
 } from "./prism-image-mutations.ts";
+import {
+  deleteDebateSession,
+  getDebateSession,
+  restoreDeletedDebateSession,
+} from "./debate.ts";
 
 export interface PrismDomainCapabilityDependencies {
   primaryOllamaHost?: string;
@@ -1385,6 +1390,125 @@ function storySessionDeleteCapability(): PrismCapabilityDefinition {
         before: inverse.before as PrismJsonObject,
         expectedRevision: null,
       });
+      return { affectedEntities: [] };
+    },
+  };
+}
+
+function debateSessionDeleteCapability(): PrismCapabilityDefinition {
+  const capabilityDescriptor = descriptor({
+    id: "debate.session.delete",
+    label: "Delete a Debate session",
+    description:
+      "Quarantines one owned Debate session for 30-day undo.",
+    execution: "server",
+    surfaces: [],
+    unavailableWhileLive: false,
+    risk: "destructive",
+    confirmation: "explicit-confirmation",
+    privacy: "private",
+    provider: "none",
+    cost: "none",
+    undo: "quarantine",
+    idempotent: true,
+  });
+  const validated = (input: PrismJsonObject) => {
+    const expectedRevision = input.expectedRevision;
+    if (
+      typeof expectedRevision !== "number" ||
+      !Number.isInteger(expectedRevision) ||
+      expectedRevision < 1
+    ) {
+      throw new Error("expectedRevision must be a positive integer.");
+    }
+    return {
+      sessionId: requiredString(input, "sessionId", 200),
+      expectedRevision,
+    };
+  };
+  return {
+    descriptor: capabilityDescriptor,
+    validateInput: (input) => validated(input),
+    preview: (context, input) => {
+      const value = validated(input);
+      const session = getDebateSession(
+        context.db,
+        context.userId,
+        value.sessionId,
+      );
+      if (session.revision !== value.expectedRevision) {
+        throw new Error(
+          `Debate changed from revision ${value.expectedRevision} to ${session.revision}. Refresh and retry.`,
+        );
+      }
+      return {
+        ...simplePreview(
+          `Delete “${session.motion.motion}” and quarantine it for 30 days.`,
+          [
+            {
+              schemaVersion: PRISM_ORCHESTRATION_VERSION,
+              entityType: "debate-session",
+              id: session.id,
+              label: session.motion.motion,
+              revision: String(session.revision),
+            },
+          ],
+        ),
+        consequences: [
+          "The Debate disappears immediately but can be restored for 30 days.",
+        ],
+      };
+    },
+    execute: (context, input) => {
+      const value = validated(input);
+      const before = getDebateSession(
+        context.db,
+        context.userId,
+        value.sessionId,
+      );
+      deleteDebateSession(
+        context.db,
+        context.userId,
+        value.sessionId,
+        {
+          expectedRevision: value.expectedRevision,
+          idempotencyKey: `journal:${context.runId ?? "debate-delete"}`,
+        },
+      );
+      return {
+        result: {
+          sessionId: before.id,
+          motion: before.motion.motion,
+        },
+        affectedEntities: [
+          {
+            schemaVersion: PRISM_ORCHESTRATION_VERSION,
+            entityType: "debate-session",
+            id: before.id,
+            label: before.motion.motion,
+            revision: String(before.revision),
+          },
+        ],
+        inverse: {
+          before: JSON.parse(JSON.stringify(before)) as PrismJsonObject,
+        },
+      };
+    },
+    undo: (context, inverse) => {
+      if (
+        !inverse.before ||
+        typeof inverse.before !== "object" ||
+        Array.isArray(inverse.before)
+      ) {
+        throw new Error("Debate undo data is invalid.");
+      }
+      restoreDeletedDebateSession(
+        context.db,
+        context.userId,
+        inverse.before as unknown as Parameters<
+          typeof restoreDeletedDebateSession
+        >[2],
+      );
       return { affectedEntities: [] };
     },
   };
@@ -4980,6 +5104,7 @@ export function createPrismDomainCapabilityRegistry(
   registry.register(storySessionCreateCapability(dependencies));
   registry.register(storySessionAdvanceCapability());
   registry.register(storySessionDeleteCapability());
+  registry.register(debateSessionDeleteCapability());
   registry.register(slateSeriesCreateCapability());
   registry.register(slateProjectCreateCapability());
   registry.register(slateProjectFieldsUpdateCapability());
@@ -5052,6 +5177,7 @@ export const PRISM_CAPABILITY_COVERAGE_MANIFEST = {
     "story.session.delete",
     "human-only:manual-drawing",
   ],
+  Debate: ["debate.session.delete"],
   Images: ["images.delete", "human-only:os-file-picker"],
   Marketplace: ["marketplace.install"],
   Memories: ["memories.delete"],

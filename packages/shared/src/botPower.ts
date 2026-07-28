@@ -275,6 +275,12 @@ export interface CoffeePowerPlanV1 {
   warnings: string[];
 }
 
+/**
+ * Frozen, relationship-agnostic social Power plan shared by live ensemble
+ * Experiences. Coffee remains the original wire name for compatibility.
+ */
+export type SocialPowerPlanV1 = CoffeePowerPlanV1;
+
 export interface BotPowerPairwisePerceptionV1 {
   version: 1;
   visible: boolean;

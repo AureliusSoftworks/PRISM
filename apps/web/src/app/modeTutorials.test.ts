@@ -14,6 +14,27 @@ describe("mode tutorials", () => {
       }
     });
 
+  it("teaches the complete Debate contract with stable targets", () => {
+    const tutorial = MODE_TUTORIALS.debate;
+    assert.deepEqual(
+      tutorial.steps.map((step) => step.targetSelector),
+      [
+        '[data-tutorial-target="debate-new"]',
+        '[data-tutorial-target="debate-synthesize"]',
+        '[data-tutorial-target="debate-consent"]',
+        '[data-tutorial-target="debate-evidence"]',
+        '[data-tutorial-target="debate-start"]',
+        '[data-tutorial-target="debate-case-board"]',
+      ],
+    );
+    const copy = tutorial.steps.map((step) => step.body).join(" ");
+    assert.match(copy, /Devil’s Advocate/u);
+    assert.match(copy, /immutable prep packet/u);
+    assert.match(copy, /never reads or writes relationship memory/u);
+    assert.match(copy, /pause and resume the exact next action/u);
+    assert.match(copy, /three-bot majority/u);
+  });
+
   it("teaches the non-blocking Coffee Group identity synthesis flow", () => {
       const groupCreationCopy = MODE_TUTORIALS.coffee.steps[0]?.body ?? "";
       assert.match(groupCreationCopy, /saves the table immediately/u);

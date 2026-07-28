@@ -184,6 +184,19 @@ import {
   startCoffeeTurnJob,
 } from "./coffee-turn-jobs.ts";
 import {
+  advanceDebateSession,
+  checkDebateAdvocacyRoles,
+  createDebateSession,
+  getDebateSession,
+  listDebateSessions,
+  pauseDebateSession,
+  resumeDebateSession,
+  submitDebatePlayerTurn,
+  submitDebateVerdict,
+  synthesizeDebateSlates,
+  type DebateAiRuntime,
+} from "./debate.ts";
+import {
   SignalOnlineTurnError,
   advanceBotcastEpisode,
   botcastEpisodePowerSnapshotForRole,
@@ -487,6 +500,7 @@ import {
   generateBotField,
 } from "./bot-generator.ts";
 import { resolveCoffeePowersForSession } from "./coffee-powers.ts";
+import { searchWebWithBrave } from "./web-search.ts";
 import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   BOT_PROFILE_PICTURE_SIZE,
@@ -3235,6 +3249,62 @@ function readProvider(value: unknown): ProviderName | undefined {
   return value === "local" || value === "openai" || value === "anthropic"
     ? value
     : undefined;
+}
+
+function debateAiRuntimeForUser(
+  userId: string,
+  requestedProvider: unknown,
+): DebateAiRuntime {
+  const user = getUserRow(userId);
+  const hardLocal = userBlocksOnlineCapabilities(user);
+  const requested =
+    requestedProvider === "local" ||
+    requestedProvider === "openai" ||
+    requestedProvider === "anthropic"
+      ? requestedProvider
+      : user.preferred_provider === "local"
+        ? "local"
+        : user.preferred_provider;
+  const preferredProvider = hardLocal ? "local" : requested;
+  const localModel =
+    user.preferred_local_model?.trim() || defaultModelIdForProvider("local");
+  const local = {
+    provider: providerFactoryOverride(
+      "local",
+      undefined,
+      user.secondary_ollama_host,
+      undefined,
+    ),
+    providerName: "local" as const,
+    model: localModel,
+  };
+  const auxiliary = auxiliaryProviderFactoryOverride(
+    user.prism_default_llm_model,
+    dualOllamaWorkloadOptions(user),
+  );
+  if (preferredProvider === "local") {
+    return { local, auxiliary, preferredProvider };
+  }
+  const userKey = decryptUserKey(userId);
+  const onlineProvider =
+    preferredProvider === "anthropic" ? "anthropic" : "openai";
+  const onlineApiKey =
+    onlineProvider === "anthropic"
+      ? getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey
+      : getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+  const online: NonNullable<DebateAiRuntime["online"]> = {
+    provider: providerFactoryOverride(
+      onlineProvider,
+      onlineApiKey,
+      user.secondary_ollama_host,
+      undefined,
+    ),
+    providerName: onlineProvider,
+    model:
+      user.preferred_online_model?.trim() ||
+      defaultModelIdForProvider(onlineProvider),
+  };
+  return { local, online, auxiliary, preferredProvider };
 }
 
 function readResolvedPowerTheme(value: unknown): "light" | "dark" | undefined {
@@ -10088,6 +10158,239 @@ function buildRoutes(): RouteDefinition[] {
         provider: result.provider,
         model: result.model,
       });
+    }),
+    // Debate is an isolated Experience. It snapshots persona, voice, model,
+    // evidence, and Powers but never reads or writes relationship continuity.
+    route("POST", "/api/debates/synthesize", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = debateAiRuntimeForUser(userId, body.preferredProvider);
+      const lane =
+        runtime.preferredProvider !== "local" && runtime.online
+          ? runtime.online
+          : runtime.local;
+      const slates = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => synthesizeDebateSlates(body.topic, lane),
+      );
+      json(ctx.res, 200, { ok: true, slates });
+    }),
+    route("POST", "/api/debates/research", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      if (
+        body.preferredProvider === "local" ||
+        userBlocksOnlineCapabilities(user)
+      ) {
+        throw new HttpError(
+          409,
+          "Brave Search is unavailable in LOCAL mode. Add player notes or switch the account to ONLINE before searching.",
+        );
+      }
+      const query =
+        typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
+      if (!query) throw new HttpError(400, "Enter an evidence search query.");
+      const userKey = decryptUserKey(userId);
+      const payload = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          searchWebWithBrave({
+            query,
+            apiKey:
+              getBraveSearchApiKeyForUser(userId, userKey) ??
+              config.braveSearchApiKey,
+          }),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        sources: payload.results.map((result, index) => ({
+          id: `brave-${index + 1}`,
+          title: result.title,
+          url: result.url,
+          snippet: result.snippet ?? "",
+          publishedAt: result.publishedAt ?? null,
+        })),
+      });
+    }),
+    route("POST", "/api/debates/role-checks", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = debateAiRuntimeForUser(userId, body.preferredProvider);
+      const checks = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          checkDebateAdvocacyRoles(
+            db,
+            userId,
+            {
+              motion: body.motion,
+              forAdvocateBotId: body.forAdvocateBotId,
+              againstAdvocateBotId: body.againstAdvocateBotId,
+            },
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, checks });
+    }),
+    route("POST", "/api/debates", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = debateAiRuntimeForUser(userId, body.preferredProvider);
+      const session = createDebateSession(
+        db,
+        userId,
+        body as unknown as Parameters<typeof createDebateSession>[2],
+        runtime,
+      );
+      json(ctx.res, 201, { ok: true, session });
+    }),
+    route("GET", "/api/debates", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        sessions: listDebateSessions(db, userId),
+      });
+    }),
+    route("GET", "/api/debates/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        session: getDebateSession(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/:id/advance", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const frozenProvider =
+        frozen.moderator.provider !== "local"
+          ? frozen.moderator.provider
+          : frozen.forAdvocate.provider !== "local"
+            ? frozen.forAdvocate.provider
+            : frozen.againstAdvocate.provider;
+      const runtime = debateAiRuntimeForUser(userId, frozenProvider);
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          advanceDebateSession(
+            db,
+            userId,
+            ctx.params.id,
+            body as unknown as Parameters<typeof advanceDebateSession>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/player-turn", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const runtime = debateAiRuntimeForUser(userId, "local");
+      const session = submitDebatePlayerTurn(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof submitDebatePlayerTurn>[3],
+        runtime.auxiliary,
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/verdict", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = submitDebateVerdict(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof submitDebateVerdict>[3],
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/pause", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = pauseDebateSession(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof pauseDebateSession>[3],
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/resume", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = resumeDebateSession(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof resumeDebateSession>[3],
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("DELETE", "/api/debates/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (
+        typeof body.expectedRevision !== "number" ||
+        !Number.isInteger(body.expectedRevision) ||
+        body.expectedRevision < 1
+      ) {
+        throw new HttpError(400, "A valid expected revision is required.");
+      }
+      const user = getUserRow(userId);
+      const capabilityContext = prismCapabilityContext(
+        userId,
+        user,
+        { surfaceId: "debate" },
+        "ui",
+      );
+      const proposal = prismCapabilityRegistry.createProposal({
+        context: capabilityContext,
+        capabilityId: "debate.session.delete",
+        input: {
+          sessionId: ctx.params.id,
+          expectedRevision: body.expectedRevision,
+        },
+      });
+      const run = await prismCapabilityRegistry.executeProposal({
+        context: capabilityContext,
+        proposalId: proposal.id,
+        confirmation: true,
+        idempotencyKey:
+          typeof body.idempotencyKey === "string" &&
+          body.idempotencyKey.trim()
+            ? body.idempotencyKey.trim().slice(0, 240)
+            : `ui:debate-delete:${ctx.params.id}:${randomId()}`,
+      });
+      if (run.status !== "committed") {
+        throw new HttpError(
+          409,
+          run.error ?? "Debate session could not be deleted.",
+        );
+      }
+      json(ctx.res, 200, { ok: true, actionRun: run });
     }),
     route("GET", "/api/botcast/shows", async (ctx) => {
       const userId = requireAuth(ctx);

@@ -34,7 +34,7 @@ describe("applet version helpers", () => {
   it("keeps the app switcher focused on usable top-level applets", () => {
     assert.deepEqual(
       prismTopLevelSwitcherApplets().map((applet) => applet.id),
-      ["chat", "coffee", "botcast", "slate"]
+      ["chat", "coffee", "debate", "botcast", "slate"]
     );
     assert.deepEqual(
       new Set(prismTopLevelSwitcherApplets().map((applet) => applet.status)),
@@ -47,7 +47,6 @@ describe("applet version helpers", () => {
     const switcherIds = prismTopLevelSwitcherApplets().map((applet) => applet.id);
 
     assert.deepEqual(plannedIds, [
-      "arena",
       "polling",
       "feed",
       "games",
@@ -65,6 +64,8 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.chat.version, "1.35");
     assert.equal(PRISM_APPLETS.zen.version, "1.33");
     assert.equal(PRISM_APPLETS.coffee.version, "2.39");
+    assert.equal(PRISM_APPLETS.debate.version, "0.1");
+    assert.equal(PRISM_APPLETS.debate.status, "preview");
     assert.equal(PRISM_APPLETS.botcast.version, "1.39");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.29");
@@ -74,6 +75,7 @@ describe("applet version helpers", () => {
     assert.equal(prismAppletVersionLabel("chat"), "v1.35");
     assert.equal(prismAppletVersionLabel("zen"), "v1.33");
     assert.equal(prismAppletVersionLabel("coffee"), "v2.39");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.1");
     assert.equal(prismAppletVersionLabel("botcast"), "v1.39");
     assert.equal(prismAppletVersionLabel("story"), "v0.29");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
@@ -84,7 +86,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_DESIGNATION_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -106,7 +108,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -128,7 +130,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -150,7 +152,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "adapted",
       botcast: "adapted",
@@ -181,7 +183,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_MOOD_BOOST_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "adapted",
       botcast: "adapted",
@@ -200,7 +202,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_MOOD_DRAIN_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "adapted",
       botcast: "adapted",
@@ -219,7 +221,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_THEME_COMPOUND_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "adapted",
       botcast: "adapted",
@@ -238,7 +240,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_CANDOR_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -260,7 +262,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "adapted",
       botcast: "adapted",
@@ -279,7 +281,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_GHOST_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -301,7 +303,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -323,7 +325,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_AVATAR_SCALE_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -345,7 +347,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_VOICE_PRESENCE_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -367,7 +369,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "adapted",
@@ -389,7 +391,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY, {
       chat: "enforced",
       zen: "enforced",
-      arena: "required_before_activation",
+      debate: "enforced",
       polling: "required_before_activation",
       coffee: "enforced",
       botcast: "enforced",
@@ -411,7 +413,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_RESPONSE_BUDGET_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "adapted",
       botcast: "adapted",
@@ -433,7 +435,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_HEARING_REPEAT_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "required_before_activation",
+      debate: "enforced",
       polling: "required_before_activation",
       coffee: "enforced",
       botcast: "adapted",
@@ -455,7 +457,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_INTERRUPTION_MODE_POLICY, {
       chat: "cue",
       zen: "cue",
-      arena: "deferred",
+      debate: "adapted",
       polling: "deferred",
       coffee: "direct",
       botcast: "adapted",
@@ -477,7 +479,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_IDENTITY_MIRROR_MODE_POLICY, {
       chat: "irrelevant",
       zen: "irrelevant",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -499,7 +501,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",
@@ -521,7 +523,7 @@ describe("applet version helpers", () => {
     assert.deepEqual(BOT_POWER_FALSE_NAME_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
-      arena: "deferred",
+      debate: "direct",
       polling: "deferred",
       coffee: "direct",
       botcast: "direct",

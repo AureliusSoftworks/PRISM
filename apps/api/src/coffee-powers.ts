@@ -574,17 +574,31 @@ export function resolveCoffeePowersForSession(
   const existing = parseCoffeePowerPlan(conversation.coffee_power_plan_json);
   if (existing) return existing;
   const botIds = parseStringArray(conversation.bot_group_ids);
+  const plan = resolveSocialPowersForBots(db, userId, botIds);
+  db.prepare(
+    "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ? AND coffee_power_plan_json IS NULL"
+  ).run(JSON.stringify(plan), conversationId, userId);
+  applySessionStartSocial(db, userId, conversationId, plan);
+  return plan;
+}
+
+/**
+ * Resolve a frozen, relationship-agnostic social Power plan. Coffee persists
+ * this plan on its conversation; Debate freezes the same canonical effects in
+ * its own session snapshot.
+ */
+export function resolveSocialPowersForBots(
+  db: DatabaseSync,
+  userId: string,
+  botIds: readonly string[],
+): CoffeePowerPlanV1 {
   if (botIds.length === 0) {
-    const emptyPlan: CoffeePowerPlanV1 = {
+    return {
       version: 1,
       resolvedAt: new Date().toISOString(),
       bots: {},
       warnings: [],
     };
-    db.prepare(
-      "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ? AND coffee_power_plan_json IS NULL"
-    ).run(JSON.stringify(emptyPlan), conversationId, userId);
-    return emptyPlan;
   }
   const placeholders = botIds.map(() => "?").join(", ");
   const rows = db.prepare(
@@ -680,10 +694,6 @@ export function resolveCoffeePowersForSession(
     bots: planBots,
     warnings: [...new Set(planWarnings)],
   };
-  db.prepare(
-    "UPDATE conversations SET coffee_power_plan_json = ? WHERE id = ? AND user_id = ? AND coffee_power_plan_json IS NULL"
-  ).run(JSON.stringify(plan), conversationId, userId);
-  applySessionStartSocial(db, userId, conversationId, plan);
   return plan;
 }
 

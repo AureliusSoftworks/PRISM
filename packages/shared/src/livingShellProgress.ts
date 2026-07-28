@@ -23,6 +23,7 @@ export const PRISM_TUTORIAL_IDS = [
   "zen",
   "chat",
   "coffee",
+  "debate",
   "botcast",
   "prismWield",
   "signalRefract",
@@ -225,7 +226,7 @@ export function normalizePrismTutorialProgress(
       if (!isRecord(raw)) {
         return [
           id,
-          id === "prismWield" || id === "signalRefract"
+          id === "debate" || id === "prismWield" || id === "signalRefract"
             ? { status: "pending", step: 0, remindAfter: null }
             : fallback[id],
         ];
