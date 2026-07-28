@@ -1561,6 +1561,64 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(episode_id) REFERENCES botcast_episodes(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS debate_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+      status TEXT NOT NULL
+        CHECK(status IN (
+          'live', 'waiting_for_player', 'paused', 'completed',
+          'cancelled', 'failed'
+        )),
+      phase TEXT NOT NULL
+        CHECK(phase IN ('opening', 'challenge', 'rebuttal', 'closing', 'verdict')),
+      step_key TEXT NOT NULL,
+      player_role TEXT NOT NULL
+        CHECK(player_role IN ('judge', 'participant', 'spectator')),
+      player_side_id TEXT CHECK(player_side_id IS NULL OR player_side_id IN ('for', 'against')),
+      create_idempotency_key TEXT NOT NULL,
+      motion TEXT NOT NULL,
+      winner_side_id TEXT CHECK(winner_side_id IS NULL OR winner_side_id IN ('for', 'against')),
+      session_json TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_debate_sessions_user_create_key
+      ON debate_sessions(user_id, create_idempotency_key);
+    CREATE INDEX IF NOT EXISTS idx_debate_sessions_user_updated
+      ON debate_sessions(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS debate_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL CHECK(sequence >= 1),
+      phase TEXT NOT NULL
+        CHECK(phase IN ('opening', 'challenge', 'rebuttal', 'closing', 'verdict')),
+      step_key TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      event_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, session_id, sequence),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_events_user_session
+      ON debate_events(user_id, session_id, sequence);
+    CREATE TABLE IF NOT EXISTS debate_mutations (
+      user_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      expected_revision INTEGER NOT NULL,
+      result_revision INTEGER NOT NULL,
+      response_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, session_id, idempotency_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS replay_recordings (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

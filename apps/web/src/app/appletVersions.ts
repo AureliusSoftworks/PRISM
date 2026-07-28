@@ -1,7 +1,7 @@
 export const PRISM_APPLET_ORDER = [
   "chat",
   "zen",
-  "arena",
+  "debate",
   "polling",
   "coffee",
   "botcast",
@@ -79,11 +79,11 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
     version: "1.33",
     status: "active",
   },
-  arena: {
-    id: "arena",
-    name: "Arena",
-    version: "0.0",
-    status: "planned",
+  debate: {
+    id: "debate",
+    name: "Debate",
+    version: "0.1",
+    status: "preview",
   },
   polling: {
     id: "polling",
@@ -154,7 +154,7 @@ export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -174,7 +174,7 @@ export const BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -194,7 +194,7 @@ export const BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -214,7 +214,7 @@ export const BOT_POWER_IDENTITY_MIRROR_MODE_POLICY: Record<
 > = {
   chat: "irrelevant",
   zen: "irrelevant",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -234,7 +234,7 @@ export const BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -254,7 +254,7 @@ export const BOT_POWER_FALSE_NAME_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -274,7 +274,7 @@ export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -291,7 +291,7 @@ export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
 export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModePolicy> = {
   chat: "enforced",
   zen: "enforced",
-  arena: "required_before_activation",
+  debate: "enforced",
   polling: "required_before_activation",
   coffee: "enforced",
   botcast: "enforced",
@@ -308,7 +308,7 @@ export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModeP
 export const BOT_POWER_CANDOR_MODE_POLICY: Record<PrismAppletId, BotPowerCandorModePolicy> = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -328,7 +328,7 @@ export const BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -348,7 +348,7 @@ export const BOT_POWER_MOOD_BOOST_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -368,7 +368,7 @@ export const BOT_POWER_MOOD_DRAIN_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -388,7 +388,7 @@ export const BOT_POWER_THEME_COMPOUND_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -408,7 +408,7 @@ export const BOT_POWER_HEARING_REPEAT_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "required_before_activation",
+  debate: "enforced",
   polling: "required_before_activation",
   coffee: "enforced",
   botcast: "adapted",
@@ -425,7 +425,7 @@ export const BOT_POWER_HEARING_REPEAT_MODE_POLICY: Record<
 export const BOT_POWER_GHOST_MODE_POLICY: Record<PrismAppletId, BotPowerGhostModePolicy> = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -445,7 +445,7 @@ export const BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -465,7 +465,7 @@ export const BOT_POWER_AVATAR_SCALE_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -485,7 +485,7 @@ export const BOT_POWER_VOICE_PRESENCE_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
@@ -505,7 +505,7 @@ export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "direct",
   polling: "deferred",
   coffee: "direct",
   botcast: "adapted",
@@ -525,7 +525,7 @@ export const BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY: Record<
 > = {
   chat: "enforced",
   zen: "enforced",
-  arena: "required_before_activation",
+  debate: "enforced",
   polling: "required_before_activation",
   coffee: "enforced",
   botcast: "enforced",
@@ -545,7 +545,7 @@ export const BOT_POWER_RESPONSE_BUDGET_MODE_POLICY: Record<
 > = {
   chat: "direct",
   zen: "direct",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "adapted",
   botcast: "adapted",
@@ -565,7 +565,7 @@ export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
 > = {
   chat: "cue",
   zen: "cue",
-  arena: "deferred",
+  debate: "adapted",
   polling: "deferred",
   coffee: "direct",
   botcast: "adapted",
@@ -581,6 +581,7 @@ export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
 export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
   "coffee",
+  "debate",
   "botcast",
   "slate",
 ] as const satisfies readonly PrismAppletId[];

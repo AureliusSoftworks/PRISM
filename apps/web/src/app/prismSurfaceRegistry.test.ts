@@ -21,7 +21,7 @@ describe("PRISM living-shell surface registry", () => {
     );
     assert.deepEqual(
       prismSurfacesByClassification("experience").map((surface) => surface.id),
-      ["coffee", "signal", "story"],
+      ["coffee", "debate", "signal", "story"],
     );
     assert.deepEqual(
       prismSurfacesByClassification("studio").map((surface) => surface.id),
@@ -59,7 +59,7 @@ describe("PRISM living-shell surface registry", () => {
     assert.equal("last_workspace" in PRISM_SURFACES, false);
   });
 
-  it("requires Coffee and Signal to begin from bot or group context", () => {
+  it("supports the Debate lobby while keeping Coffee and Signal contextual", () => {
     assert.deepEqual(PRISM_SURFACES.coffee.entryRequirement, {
       kind: "selected_bots_or_group",
       minimumSelectedBots: 2,
@@ -68,12 +68,18 @@ describe("PRISM living-shell surface registry", () => {
     assert.deepEqual(PRISM_SURFACES.signal.entryRequirement, {
       kind: "selected_bot_or_group",
     });
+    assert.deepEqual(PRISM_SURFACES.debate.entryRequirement, { kind: "none" });
+    assert.equal(PRISM_SURFACES.debate.status, "preview");
     assert.equal(
       PRISM_SURFACES.coffee.returnBehavior,
       "restore_origin_checkpoint",
     );
     assert.equal(
       PRISM_SURFACES.signal.returnBehavior,
+      "restore_origin_checkpoint",
+    );
+    assert.equal(
+      PRISM_SURFACES.debate.returnBehavior,
       "restore_origin_checkpoint",
     );
   });
@@ -103,6 +109,9 @@ describe("PRISM living-shell surface registry", () => {
       () => prismContextualSurfaceEntry("slate", checkpoint),
       /does not use a contextual return checkpoint/u,
     );
+    const debateEntry = prismContextualSurfaceEntry("debate", checkpoint);
+    assert.equal(debateEntry.destination.href, "/?view=debate");
+    assert.deepEqual(debateEntry.origin, checkpoint);
   });
 
   it("lets explicit URLs take precedence over account startup settings", () => {

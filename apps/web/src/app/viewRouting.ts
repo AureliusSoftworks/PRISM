@@ -5,6 +5,7 @@ export type PrismSurfaceView =
   | "chat"
   | "sandbox"
   | "coffee"
+  | "debate"
   | "botcast"
   | "slate"
   | "story";
@@ -19,6 +20,7 @@ export function prismSurfaceViewForRouteParam(viewParam: string | null): PrismSu
     return "chat";
   }
   if (viewParam === "coffee") return "coffee";
+  if (viewParam === "debate") return "debate";
   if (viewParam === "botcast") return "botcast";
   if (viewParam === "slate") return "slate";
   if (
@@ -35,6 +37,7 @@ export function prismHrefForSurfaceView(view: PrismSurfaceView): string {
     return PRISM_SURFACES.home.href;
   }
   if (view === "coffee") return PRISM_SURFACES.coffee.href;
+  if (view === "debate") return PRISM_SURFACES.debate.href;
   if (view === "botcast") return PRISM_SURFACES.signal.href;
   if (view === "slate") return PRISM_SURFACES.slate.href;
   if (view === "story" && PRISM_SURFACES.story.status !== "planned") {

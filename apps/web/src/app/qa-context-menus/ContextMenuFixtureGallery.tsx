@@ -201,6 +201,7 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
     { id: "available", kind: "label", label: "Available applets" },
     action("chat", "Chat", <MessageSquare />, { kind: "radio", group: "app", checked: true }),
     action("coffee", "Coffee", <Users />, { kind: "radio", group: "app", checked: false }),
+    action("debate", "Debate", <Users />, { kind: "radio", group: "app", checked: false }),
     action("slate", "Slate", <PencilLine />, { kind: "radio", group: "app", checked: false }),
     { id: "roadmap-separator", kind: "separator" },
     {
@@ -209,7 +210,6 @@ function fixtureEntries(id: FixtureId): PrismMenuEntry[] {
       label: "Roadmap",
       description: "Planned for future PRISM releases.",
       entries: [
-        action("arena", "Arena", <Users />, { disabled: true, disabledReason: "Planned" }),
         action("games", "Games", <Sparkles />, { disabled: true, disabledReason: "Planned" }),
       ],
     },

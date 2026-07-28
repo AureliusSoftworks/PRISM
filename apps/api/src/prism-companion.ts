@@ -360,6 +360,12 @@ function prismCompanionScreenContextLines(
         companionInput,
         ...playerMessageControls("the Story experience"),
       ];
+    case "debate":
+      return [
+        `Screen: Debate, a structured live Duel with ${selectedBotNames.join(", ") || "the selected cast"}.`,
+        companionInput,
+        "Motion, cast, frozen evidence, floor controls, and the case board belong to the Debate experience.",
+      ];
     case "marketplace":
       return [
         "Screen: Marketplace, a tool for discovering bot personas.",

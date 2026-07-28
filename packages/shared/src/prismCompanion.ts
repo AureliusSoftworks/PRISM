@@ -14,6 +14,7 @@ export const PRISM_COMPANION_SURFACE_IDS = [
   "signal",
   "slate",
   "story",
+  "debate",
   "marketplace",
   "avatar-studio",
   "images",
@@ -32,6 +33,7 @@ export interface PrismCompanionSurfaceReference {
   slateProjectId?: string;
   slateSectionId?: string;
   storySessionId?: string;
+  debateSessionId?: string;
   imageId?: string;
   libraryGroupId?: string;
 }
@@ -142,6 +144,9 @@ export function normalizePrismCompanionSurfaceReference(
       : {}),
     ...(boundedId(value.storySessionId)
       ? { storySessionId: boundedId(value.storySessionId) }
+      : {}),
+    ...(boundedId(value.debateSessionId)
+      ? { debateSessionId: boundedId(value.debateSessionId) }
       : {}),
     ...(boundedId(value.imageId)
       ? { imageId: boundedId(value.imageId) }

@@ -6,6 +6,7 @@ export const PRISM_SURFACE_ORDER = [
   "zen",
   "group-home",
   "coffee",
+  "debate",
   "signal",
   "story",
   "slate",
@@ -105,6 +106,16 @@ export const PRISM_SURFACES: Record<PrismSurfaceId, PrismSurfaceDefinition> = {
     returnBehavior: "restore_origin_checkpoint",
     href: "/?view=coffee",
   },
+  debate: {
+    id: "debate",
+    name: "Debate",
+    classification: "experience",
+    status: "preview",
+    startupEligible: false,
+    entryRequirement: { kind: "none" },
+    returnBehavior: "restore_origin_checkpoint",
+    href: "/?view=debate",
+  },
   signal: {
     id: "signal",
     name: "Signal",
@@ -202,6 +213,7 @@ export interface PrismContextualSurfaceEntry {
 const PRISM_RESTORABLE_WORKSPACE_VIEW_PARAMS = new Set([
   "chat",
   "coffee",
+  "debate",
   "botcast",
   "slate",
   "story",

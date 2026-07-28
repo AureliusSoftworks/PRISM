@@ -3073,3 +3073,4 @@ export * from "./replay.js";
 export * from "./livingShell.js";
 export * from "./livingShellProgress.js";
 export * from "./slateHandoff.js";
+export * from "./debate.js";

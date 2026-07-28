@@ -5,9 +5,9 @@ They no longer define PRISM's product navigation. The living shell classifies
 public surfaces as **Home**, **Experiences**, **Studios**, or **Tools**; see
 [Living Shell Architecture](./living-shell-architecture.md).
 
-Chat and Zen now belong to Home, Coffee and Signal are Experiences, and Slate
-is a Studio. Their applet versions continue to track felt product behavior, not
-internal implementation churn.
+Chat and Zen now belong to Home; Coffee, Debate, and Signal are Experiences;
+and Slate is a Studio. Their applet versions continue to track felt product
+behavior, not internal implementation churn.
 
 Applet versions are independent from the Prism app release version. Prism can
 ship as `0.5.2` while Coffee is `v0.7`.
@@ -33,7 +33,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Zen | v1.33 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Coffee | v2.39 | Active | Two-to-five-bot tables with composable identity Powers, directional interruption irritation, synthesized identity, surreal café atmospheres, and faithful replay. |
 | Signal | v1.39 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
-| Arena | v0.0 | Planned | Moderated bot debate surface. |
+| Debate | v0.1 | Preview | One-on-one Prismatic Forum Duels with frozen evidence, explicit advocacy consent, live roles, scoreless case boards, and durable verdicts. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
@@ -42,6 +42,9 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
+
+Debate's release boundary and platform QA gaps are recorded in
+[Debate v0.1 Preview verification](./debate-v0.1-verification.md).
 
 ## Slate roadmap
 
@@ -80,13 +83,21 @@ stages do not block the standalone preview.
   without retroactively informing unaware participants. Mute, fully hidden or
   Microscopic presentation, canonical silence, and speech obfuscation retain
   precedence. Ordinary private channels remain private in replay.
-- Signal and Coffee enforce this directly. Chat and Zen preserve direct human
-  access to the selected companion. Slate has no participant-observer contract,
-  so the policy is irrelevant there. Arena, Polling, Feed, Games, Gym, Pseudo,
-  Surf, and other unimplemented applets remain deferred until they define both
-  perspectives.
+- Signal, Coffee, and Debate enforce this directly. Chat and Zen preserve
+  direct human access to the selected companion. Slate has no
+  participant-observer contract, so the policy is irrelevant there. Polling,
+  Feed, Games, Gym, Pseudo, Surf, and other unimplemented applets remain
+  deferred until they define both perspectives.
 
 ## Changelog
+
+### 2026-07-28
+
+- Replaced the planned Arena identifier with `Debate v0.1 Preview`: a complete
+  Judge, Participant, or Spectator Duel with private role consent, explicit
+  Devil's Advocate framing, immutable shared evidence, revisioned live turns,
+  scoreless public case-board truth, independent ballots, resumable history,
+  frozen Powers, live voices, and the authored Light/Dark Prismatic Forum.
 
 ### 2026-07-26
 

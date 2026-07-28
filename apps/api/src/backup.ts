@@ -463,6 +463,36 @@ export interface BackupSnapshot {
       occurredAt: string;
     }>;
   };
+  /** Optional in older v1 snapshots. Debate preserves frozen sessions and public event history. */
+  debates?: {
+    sessions: Array<{
+      id: string;
+      revision: number;
+      status: string;
+      phase: string;
+      stepKey: string;
+      playerRole: string;
+      playerSideId: string | null;
+      createIdempotencyKey: string;
+      motion: string;
+      winnerSideId: string | null;
+      sessionJson: string;
+      error: string | null;
+      createdAt: string;
+      updatedAt: string;
+      completedAt: string | null;
+    }>;
+    events: Array<{
+      id: string;
+      sessionId: string;
+      sequence: number;
+      phase: string;
+      stepKey: string;
+      kind: string;
+      eventJson: string;
+      createdAt: string;
+    }>;
+  };
   /** Derived video bytes are excluded; these portable inputs can rebuild them. */
   replays?: {
     recordings: Array<{
@@ -2263,6 +2293,26 @@ export function exportUserSnapshot(
         ORDER BY take.created_at, take.rowid`,
     )
     .all(userId) as Array<Record<string, string | number | null>>;
+  const debateSessions = db
+    .prepare(
+      `SELECT id, revision, status, phase, step_key, player_role,
+              player_side_id, create_idempotency_key, motion, winner_side_id,
+              session_json, error, created_at, updated_at, completed_at
+         FROM debate_sessions
+        WHERE user_id = ? AND status != 'cancelled'
+        ORDER BY created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
+  const debateEvents = db
+    .prepare(
+      `SELECT event.id, event.session_id, event.sequence, event.phase,
+              event.step_key, event.kind, event.event_json, event.created_at
+         FROM debate_events AS event
+         JOIN debate_sessions AS session ON session.id = event.session_id
+        WHERE event.user_id = ? AND session.status != 'cancelled'
+        ORDER BY event.session_id, event.sequence`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
 
   return {
     version: 1,
@@ -2551,6 +2601,38 @@ export function exportUserSnapshot(
         occurredAt: String(row.occurred_at),
       })),
     },
+    debates: {
+      sessions: debateSessions.map((row) => ({
+        id: String(row.id),
+        revision: Number(row.revision ?? 1),
+        status: String(row.status),
+        phase: String(row.phase),
+        stepKey: String(row.step_key),
+        playerRole: String(row.player_role),
+        playerSideId:
+          typeof row.player_side_id === "string" ? row.player_side_id : null,
+        createIdempotencyKey: String(row.create_idempotency_key),
+        motion: String(row.motion),
+        winnerSideId:
+          typeof row.winner_side_id === "string" ? row.winner_side_id : null,
+        sessionJson: String(row.session_json),
+        error: typeof row.error === "string" ? row.error : null,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at),
+        completedAt:
+          typeof row.completed_at === "string" ? row.completed_at : null,
+      })),
+      events: debateEvents.map((row) => ({
+        id: String(row.id),
+        sessionId: String(row.session_id),
+        sequence: Number(row.sequence ?? 1),
+        phase: String(row.phase),
+        stepKey: String(row.step_key),
+        kind: String(row.kind),
+        eventJson: String(row.event_json),
+        createdAt: String(row.created_at),
+      })),
+    },
     replays: {
       recordings: replayRecordings.map((row) => ({
         id: String(row.id),
@@ -2624,6 +2706,8 @@ function assertSnapshotIdsStayWithinTenant(
       | "botcast_episode_segments"
       | "botcast_messages"
       | "botcast_events"
+      | "debate_sessions"
+      | "debate_events"
       | "replay_recordings"
       | "replay_voice_takes"
       | SlateBackupTable,
@@ -2747,6 +2831,16 @@ function assertSnapshotIdsStayWithinTenant(
     assertIds(
       "replay_voice_takes",
       snapshot.replays.voiceTakes.map((item) => item.id),
+    );
+  }
+  if (snapshot.debates) {
+    assertIds(
+      "debate_sessions",
+      snapshot.debates.sessions.map((item) => item.id),
+    );
+    assertIds(
+      "debate_events",
+      snapshot.debates.events.map((item) => item.id),
     );
   }
   const slate = snapshot.slate;
@@ -3769,6 +3863,115 @@ function importUserSnapshotWithinTransaction(
           "UPDATE messages SET coffee_audience_bot_ids = ? WHERE id = ? AND user_id = ?",
         ).run(JSON.stringify(message.coffeeAudienceBotIds), message.id, userId);
       }
+    }
+  }
+
+  if (snapshot.debates) {
+    const sessionIds = new Set<string>();
+    const statuses = new Set([
+      "live",
+      "waiting_for_player",
+      "paused",
+      "completed",
+      "cancelled",
+      "failed",
+    ]);
+    const phases = new Set([
+      "opening",
+      "challenge",
+      "rebuttal",
+      "closing",
+      "verdict",
+    ]);
+    const playerRoles = new Set(["judge", "participant", "spectator"]);
+    const sides = new Set(["for", "against"]);
+    const insertSession = db.prepare(
+      `INSERT OR REPLACE INTO debate_sessions
+         (id, user_id, revision, status, phase, step_key, player_role,
+          player_side_id, create_idempotency_key, motion, winner_side_id,
+          session_json, error, created_at, updated_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const session of snapshot.debates.sessions) {
+      if (
+        !session?.id?.trim() ||
+        !statuses.has(session.status) ||
+        !phases.has(session.phase) ||
+        !playerRoles.has(session.playerRole) ||
+        !session.stepKey?.trim() ||
+        !session.motion?.trim()
+      ) {
+        throw new Error("Account backup contains an invalid Debate session.");
+      }
+      if (
+        session.playerSideId !== null &&
+        !sides.has(session.playerSideId)
+      ) {
+        throw new Error("Account backup contains an invalid Debate player side.");
+      }
+      if (
+        session.winnerSideId !== null &&
+        !sides.has(session.winnerSideId)
+      ) {
+        throw new Error("Account backup contains an invalid Debate winner.");
+      }
+      try {
+        JSON.parse(session.sessionJson);
+      } catch {
+        throw new Error("Account backup contains invalid Debate session JSON.");
+      }
+      insertSession.run(
+        session.id,
+        userId,
+        Math.max(1, Math.floor(session.revision || 1)),
+        session.status,
+        session.phase,
+        session.stepKey,
+        session.playerRole,
+        session.playerSideId,
+        session.createIdempotencyKey?.trim() || `backup:${session.id}`,
+        session.motion,
+        session.winnerSideId,
+        session.sessionJson,
+        session.error,
+        session.createdAt,
+        session.updatedAt,
+        session.completedAt,
+      );
+      sessionIds.add(session.id);
+    }
+    const insertEvent = db.prepare(
+      `INSERT OR REPLACE INTO debate_events
+         (id, user_id, session_id, sequence, phase, step_key, kind,
+          event_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const event of snapshot.debates.events) {
+      if (
+        !event?.id?.trim() ||
+        !sessionIds.has(event.sessionId) ||
+        !phases.has(event.phase) ||
+        !event.stepKey?.trim() ||
+        !event.kind?.trim()
+      ) {
+        throw new Error("Account backup contains an invalid Debate event.");
+      }
+      try {
+        JSON.parse(event.eventJson);
+      } catch {
+        throw new Error("Account backup contains invalid Debate event JSON.");
+      }
+      insertEvent.run(
+        event.id,
+        userId,
+        event.sessionId,
+        Math.max(1, Math.floor(event.sequence || 1)),
+        event.phase,
+        event.stepKey,
+        event.kind,
+        event.eventJson,
+        event.createdAt,
+      );
     }
   }
 

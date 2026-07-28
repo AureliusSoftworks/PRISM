@@ -146,6 +146,10 @@ import {
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { CoffeeAtmosphereScene } from "./CoffeeAtmosphereScene";
+import {
+  DebateExperience,
+  type DebateUtterance,
+} from "./DebateExperience";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
 import {
   coffeeGroupAtmosphereImageUrl,
@@ -24366,7 +24370,7 @@ function GlyphChat({ size = 88 }: GlyphProps): React.JSX.Element {
   );
 }
 
-function GlyphArena({ size = 88 }: GlyphProps): React.JSX.Element {
+function GlyphDebate({ size = 88 }: GlyphProps): React.JSX.Element {
   return (
     <svg
       width={size}
@@ -42198,6 +42202,7 @@ function HomeContent(): React.JSX.Element {
     [triggerConversationModeExitCompaction],
   );
   const coffeeConfigurationLockedRef = useRef(false);
+  const debateOriginLocationRef = useRef<string | null>(null);
   const navigateToView = useCallback(
     (next: View) => {
       if (next === view) return;
@@ -66099,9 +66104,11 @@ function HomeContent(): React.JSX.Element {
         ? "zen"
         : view === "sandbox"
           ? "chat"
-          : view === "coffee"
-            ? "coffee"
-            : view === "botcast"
+            : view === "coffee"
+              ? "coffee"
+              : view === "debate"
+                ? "debate"
+              : view === "botcast"
               ? "botcast"
               : view === "slate"
                 ? "slate"
@@ -69815,6 +69822,8 @@ function HomeContent(): React.JSX.Element {
           ? "chat"
           : view === "coffee"
             ? "coffee"
+            : view === "debate"
+              ? "debate"
             : view === "botcast"
               ? "botcast"
               : view === "slate"
@@ -97130,6 +97139,15 @@ function HomeContent(): React.JSX.Element {
           ...(storySession ? { storySessionId: storySession.id } : {}),
         };
       }
+      if (view === "debate") {
+        return {
+          surfaceId: "debate",
+          botIds: (
+            activeBotLibraryGroupFilter?.botIds ??
+            (activeBot?.id ? [activeBot.id] : [])
+          ).slice(0, 5),
+        };
+      }
       if (activeBotLibraryGroupFilter) {
         return {
           surfaceId: "group-home",
@@ -98153,6 +98171,8 @@ function HomeContent(): React.JSX.Element {
     const currentAppletId: PrismAppletId =
       view === "coffee"
         ? "coffee"
+        : view === "debate"
+          ? "debate"
         : view === "botcast"
           ? "botcast"
           : view === "story"
@@ -98163,7 +98183,7 @@ function HomeContent(): React.JSX.Element {
     const menuId = "prism-app-switcher-menu";
     const disabled = options.disabled === true;
     const appletGlyph = (appletId: PrismAppletId): React.ReactNode => {
-      if (appletId === "arena") return <GlyphArena size={18} />;
+      if (appletId === "debate") return <GlyphDebate size={18} />;
       if (appletId === "polling") return <GlyphPolling size={18} />;
       if (appletId === "coffee") return <GlyphCoffee size={18} />;
       if (appletId === "botcast") return <GlyphSignal size={18} />;
@@ -98178,6 +98198,7 @@ function HomeContent(): React.JSX.Element {
     };
     const appletIsSelected = (appletId: PrismAppletId): boolean => {
       if (appletId === "coffee") return view === "coffee";
+      if (appletId === "debate") return view === "debate";
       if (appletId === "botcast") return view === "botcast";
       if (appletId === "story") return view === "story";
       if (appletId === "slate") return view === "slate";
@@ -98188,6 +98209,16 @@ function HomeContent(): React.JSX.Element {
       setAppSwitcherOpen(false);
       if (appletId === "coffee") {
         if (view !== "coffee") navigateToView("coffee");
+        return;
+      }
+      if (appletId === "debate") {
+        if (view !== "debate") {
+          debateOriginLocationRef.current =
+            typeof window === "undefined"
+              ? "/?view=chat"
+              : `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          navigateToView("debate");
+        }
         return;
       }
       if (appletId === "botcast") {
@@ -128333,6 +128364,104 @@ function HomeContent(): React.JSX.Element {
   // ── Legacy Hub ──
   // Root/default routing now opens product Chat. This branch stays as a
   // defensive fallback for stale in-memory navigation state only.
+  if (view === "debate") {
+    const initialDebateBotIds =
+      activeBotLibraryGroupFilter?.botIds.length
+        ? activeBotLibraryGroupFilter.botIds
+        : activeBot?.id
+          ? [activeBot.id]
+          : [];
+    const debateBots = bots.map((bot) => ({
+      id: bot.id,
+      name: bot.name,
+      color: bot.color,
+      glyph: bot.glyph,
+      hardMuted: botPowerIsMutedV1(bot.powers),
+    }));
+    const playDebateUtterance = async (
+      utterance: DebateUtterance,
+    ): Promise<boolean> => {
+      const speakerBot = utterance.speaker
+        ? bots.find((candidate) => candidate.id === utterance.speaker?.id)
+        : null;
+      const voiceBot = utterance.voiceSourceBotId
+        ? bots.find(
+            (candidate) => candidate.id === utterance.voiceSourceBotId,
+          )
+        : speakerBot;
+      const speakerId = voiceBot?.id ?? "__debate_player__";
+      return playBotcastUtterance(
+        {
+          id: utterance.event.id,
+          episodeId: utterance.sessionId,
+          speakerRole: utterance.player ? "guest" : "host",
+          botId: speakerId,
+          content: utterance.spokenText,
+          stageActionText: null,
+          voicePerformanceText: null,
+          moodKey: "neutral",
+          createdAt: utterance.event.createdAt,
+        },
+        {
+          id: speakerId,
+          name: speakerBot?.name ?? user?.displayName?.trim() ?? "You",
+          color: speakerBot?.color ?? PRISM_COLORS.i,
+          glyph: speakerBot?.glyph ?? "◇",
+          online_enabled: voiceBot?.online_enabled ?? 1,
+          muted: speakerBot
+            ? botPowerIsMutedV1(speakerBot.powers)
+            : false,
+          voiceGainMultiplier: speakerBot
+            ? botPowerVoiceGainMultiplierV1(speakerBot.powers)
+            : 1,
+          voicePresence: speakerBot
+            ? botPowerVoicePresenceModeV1(speakerBot.powers)
+            : null,
+          personaTemperament: signalPersonaTemperamentFor(
+            speakerBot?.system_prompt ?? "",
+          ),
+          producerGuest: utterance.player,
+        },
+        {},
+        1,
+        utterance.event.sideId === "for"
+          ? -0.36
+          : utterance.event.sideId === "against"
+            ? 0.36
+            : 0,
+      );
+    };
+    return (
+      <div className={themeClass}>
+        <DebateExperience
+          bots={debateBots}
+          initialBotIds={initialDebateBotIds}
+          preferredProvider={settings?.preferredProvider ?? "local"}
+          graphicsQuality={graphicsQuality}
+          theme={resolvedTheme}
+          request={api}
+          onExit={() => {
+            stopBotcastUtterance();
+            const origin = debateOriginLocationRef.current;
+            debateOriginLocationRef.current = null;
+            if (origin) {
+              router.replace(origin);
+              return;
+            }
+            navigateToView("chat");
+          }}
+          onUtterance={playDebateUtterance}
+          onStopUtterance={stopBotcastUtterance}
+          onResetTutorial={() => resetSingleModeTutorial("debate")}
+        />
+        {renderModeTutorialOverlay()}
+        {renderViewSwitchOverlay()}
+        {renderBackendUnavailableNotice("banner")}
+        {renderGlobalPrismCompanion()}
+        <GlyphTooltipLayer />
+      </div>
+    );
+  }
   if (view === "coffee") return renderCoffeeShell();
   if (view === "botcast") {
     const signalProvider = settings?.preferredProvider ?? "local";

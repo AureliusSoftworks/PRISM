@@ -1,4 +1,10 @@
-export type TutorialMode = "zen" | "chat" | "coffee" | "botcast" | "slate";
+export type TutorialMode =
+  | "zen"
+  | "chat"
+  | "coffee"
+  | "debate"
+  | "botcast"
+  | "slate";
 
 export interface ModeTutorialStep {
   heading: string;
@@ -121,6 +127,47 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         body: "The live session stays overhead. Type into the message box or let the bots carry the room. You remain off camera: there is no player avatar or mug. Drag the pot from the composer to top off an eligible seated bot before its farewell begins; no waiter, barista, or service bot can refill anyone. A bot whose Power refuses coffee has no mug, steam, sip, refill, or pot target; its invisible visit clock still winds down normally and cannot be refilled. Once an ordinary cup empties, that bot must leave within two or three table replies unless you top it off first, though mood and context can still send anyone home earlier. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Shh remains a separate interruption control, so it never replaces the table draft you are writing. Type / for Prompt Center prompts and ! for wildcard decks; both expand when you send. Any idle audible bot may make a sparse prerecorded throat-clear, swallow, lip smack, sigh, or inhale; its mouth moves with the local cue, independent of its speaking style or voice engine. Watch a directly addressed bot: while listening, it may also give a small nod, lean, expression, brief spoken acknowledgement, or restrained ElevenLabs vocal reaction without taking a turn or entering the transcript. Your Cross-talk setting controls how often those contextual audible overlaps happen, from nearly silent in Rare to lively in Pile-up; inferred listeners remain visual only. When one bot cuts off another, the interrupter speaks a short hold-on over the outgoing voice before that voice releases; the interrupted bot takes a brief processing beat, then answers with an annoyed, abandoned ending over the handoff. The saved cutoff still shows only what reached the table. If a reply takes long enough to leave awkward dead air, another seated bot may occasionally speak one brief mood-aware aside (heard, with mouth motion, not shown as a seat action) without stealing the slow bot’s turn; the slow bot can begin answering over the aside’s natural ending. Ambient sips continue through quiet beats and listening moments, while the active speaker keeps their cup down; cup-return sounds stay synchronized with the visible cup motion. When an eligible bot has a non-neutral mood, Eleven v3 automatically carries that feeling into its next spoken line; neutral speech stays untagged. With Voice Effects on, longer bot turns may take a sparse mic-ready breath before speaking. A clear table goodbye ends the session naturally; Review stays quiet while the bots finish their private wrap. Prism's floating assistant steps out once the live Coffee Session begins and returns for setup, review, and replay. The finished Review keeps the saved table in view, offers Coffee home to return to setup, and one readable transcript download. Cross-talk, interruptions, ambient reactions, thinking intervals, sips, departures, and top-offs are captured in one faithful audio master as they happen. Replay plays that private master once at normal speed while its detailed direction track drives frozen bot appearances and voices, thinking spinners, mouths, reveals, pot motion, seeking, pausing, and each bot physically departing after the closing exchange. It does not re-synthesize voices, replay effects on top, add an AI conversation turn, or generate a video. A session without its exact master remains transcript-only. Poll votes and team choices share the Table Talk rail; drag its left edge or the topic divider when you want more room.",
         clickLabel: "the Coffee message box",
         targetSelector: '[data-tutorial-target="composer"]',
+      },
+    ],
+  },
+  debate: {
+    title: "Debate walkthrough",
+    steps: [
+      {
+        heading: "Enter the Forum",
+        body: "A Debate is a saved 8–12 minute Duel with one moderator and two advocates. You can return to an unfinished proceeding or reopen a completed result from this lobby.",
+        clickLabel: "New Debate",
+        targetSelector: '[data-tutorial-target="debate-new"]',
+      },
+      {
+        heading: "Shape a balanced motion",
+        body: "Write a topic, then use Synthesize options—or Wield Prism on the same action—to create three complete balanced slates. Choosing one replaces the motion, For brief, Against brief, and both side labels together; every field remains yours to edit.",
+        clickLabel: "Synthesize options",
+        targetSelector: '[data-tutorial-target="debate-synthesize"]',
+      },
+      {
+        heading: "Invite willing advocates",
+        body: "Choose exactly one moderator and two advocates, then choose whether you will Judge, participate on one side, or watch. Each advocate privately checks the exact motion and side brief. A genuine boundary can decline and cannot be overridden; a willing Devil’s Advocate keeps their identity and receives visible framing.",
+        clickLabel: "Check roles & continue",
+        targetSelector: '[data-tutorial-target="debate-consent"]',
+      },
+      {
+        heading: "Freeze one shared record",
+        body: "Add player notes and, only while ONLINE, explicitly run Brave Search. The resulting titles, links, snippets, dates, and source IDs form one immutable prep packet. Start performs no more research, and Debate never reads or writes relationship memory.",
+        clickLabel: "Review frozen Duel",
+        targetSelector: '[data-tutorial-target="debate-evidence"]',
+      },
+      {
+        heading: "Begin the proceeding",
+        body: "Review the cast, motion, consent, evidence, provider choices, and resolved Powers. Start freezes that complete contract. Live controls can pause and resume the exact next action; Judge and Participant input waits indefinitely until you speak or pass.",
+        clickLabel: "Start Duel",
+        targetSelector: '[data-tutorial-target="debate-start"]',
+      },
+      {
+        heading: "Read the living case",
+        body: "The scoreless case board keeps at most four public claims per side and marks them active, challenged, conceded, or unanswered. Hidden, muted, and obfuscated content cannot enter it. After closing, every bot votes independently: a Judge’s ruling is final, while Participant and Spectator Duels use the three-bot majority.",
+        clickLabel: "the living case board",
+        targetSelector: '[data-tutorial-target="debate-case-board"]',
       },
     ],
   },
