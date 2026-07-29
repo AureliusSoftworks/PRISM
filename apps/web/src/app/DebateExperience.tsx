@@ -233,6 +233,7 @@ type DebateStageGavelPose = "lowered" | "raised";
 type DebateStageSoundCheckState = {
   role: DebateStageAlignmentRole;
   status: "playing" | "unavailable";
+  speechTiming: DebateSpeechTiming | null;
 } | null;
 type DebateLiveReveal = {
   eventId: string;
@@ -1924,12 +1925,38 @@ export function DebateExperience(
     stageAlignmentSoundCheckRunRef.current += 1;
     const runId = stageAlignmentSoundCheckRunRef.current;
     onStopUtterance?.();
-    setStageAlignmentSoundCheck({ role, status: "playing" });
+    setStageAlignmentSoundCheck({
+      role,
+      status: "playing",
+      speechTiming: null,
+    });
     const sideId =
       role === "for" ? "for" : role === "against" ? "against" : null;
     const soundCheckSessionId = `${DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX}${props.storageScopeId}:${runId}`;
     const spokenText = `Sound check. ${bot.name}, ${DEBATE_STAGE_ALIGNMENT_LABELS[role]}, standing by.`;
     const createdAt = new Date().toISOString();
+    let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
+    let playbackDurationMs = Math.max(1, debateRevealDurationMs(spokenText));
+    let lastSpeechRenderAt = 0;
+    const updateSpeechTiming = (
+      elapsedMs: number,
+      durationMs: number,
+    ): void => {
+      if (stageAlignmentSoundCheckRunRef.current !== runId) return;
+      setStageAlignmentSoundCheck((current) =>
+        current?.role === role && current.status === "playing"
+          ? {
+              ...current,
+              speechTiming: {
+                text: spokenText,
+                elapsedMs: Math.min(durationMs, Math.max(0, elapsedMs)),
+                durationMs,
+                alignment: playbackAlignment,
+              },
+            }
+          : current,
+      );
+    };
     const played = await onUtterance({
       event: {
         version: DEBATE_SCHEMA_VERSION,
@@ -1951,10 +1978,39 @@ export function DebateExperience(
       player: false,
       spokenText,
       voiceSourceBotId: bot.id,
+      lifecycle: {
+        onStart: (durationMs, alignment) => {
+          if (stageAlignmentSoundCheckRunRef.current !== runId) return;
+          playbackAlignment = alignment ?? null;
+          playbackDurationMs = Math.max(1, durationMs ?? playbackDurationMs);
+          lastSpeechRenderAt = performance.now();
+          updateSpeechTiming(0, playbackDurationMs);
+        },
+        onProgress: (elapsedMs, durationMs) => {
+          if (stageAlignmentSoundCheckRunRef.current !== runId) return;
+          playbackDurationMs = Math.max(1, durationMs);
+          const now = performance.now();
+          if (
+            elapsedMs < playbackDurationMs &&
+            now - lastSpeechRenderAt < DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS
+          ) {
+            return;
+          }
+          lastSpeechRenderAt = now;
+          updateSpeechTiming(elapsedMs, playbackDurationMs);
+        },
+        onEnd: () => {
+          updateSpeechTiming(playbackDurationMs, playbackDurationMs);
+        },
+        onCancel: () => {
+          if (stageAlignmentSoundCheckRunRef.current !== runId) return;
+          setStageAlignmentSoundCheck(null);
+        },
+      },
     });
     if (stageAlignmentSoundCheckRunRef.current !== runId) return;
     setStageAlignmentSoundCheck(
-      played ? null : { role, status: "unavailable" },
+      played ? null : { role, status: "unavailable", speechTiming: null },
     );
   };
 
@@ -5440,6 +5496,9 @@ export function DebateExperience(
                           const soundCheckPlaying =
                             stageAlignmentSoundCheck?.role === role &&
                             stageAlignmentSoundCheck.status === "playing";
+                          const soundCheckSpeechTiming = soundCheckPlaying
+                            ? stageAlignmentSoundCheck.speechTiming
+                            : null;
                           const target = stageAlignmentTargetForRole(
                             role,
                             "bot",
@@ -5479,6 +5538,12 @@ export function DebateExperience(
                                   soundCheckPlaying ? "true" : undefined
                                 }
                                 data-scale={presentation.scale}
+                                data-debate-stage-compact={
+                                  role === "moderator" &&
+                                  stageAlignmentPreviewCamera !== "moderator"
+                                    ? "true"
+                                    : undefined
+                                }
                               >
                                 {props.renderBotAvatar ? (
                                   props.renderBotAvatar(bot, {
@@ -5491,7 +5556,7 @@ export function DebateExperience(
                                     talking: soundCheckPlaying,
                                     thinking: false,
                                     colorCycle: presentation.colorCycle,
-                                    speechTiming: null,
+                                    speechTiming: soundCheckSpeechTiming,
                                     foleyMouthShape: null,
                                     listenerReaction: null,
                                   })
@@ -6533,6 +6598,12 @@ export function DebateExperience(
                               }
                               data-vocal-foley={
                                 foleyMouthShape ? "true" : undefined
+                              }
+                              data-debate-stage-compact={
+                                role === "moderator" &&
+                                cameraView !== "moderator"
+                                  ? "true"
+                                  : undefined
                               }
                             >
                               {props.renderBotAvatar ? (

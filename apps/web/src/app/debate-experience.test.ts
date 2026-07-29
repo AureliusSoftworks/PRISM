@@ -916,6 +916,14 @@ describe("Debate experience", () => {
       /detailLevel=\{avatarState\.compact \? "reduced" : "full"\}/u,
     );
     assert.match(
+      source,
+      /data-debate-stage-compact=\{\s*role === "moderator" &&\s*cameraView !== "moderator"\s*\? "true"/u,
+    );
+    assert.match(
+      source,
+      /data-debate-stage-compact=\{\s*role === "moderator" &&\s*stageAlignmentPreviewCamera !== "moderator"\s*\? "true"/u,
+    );
+    assert.match(
       page,
       /<ZenLiveBotMannequin[\s\S]{0,180}faceScaleY=\{faceScaleY\}/u,
     );
@@ -926,6 +934,14 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       pageCss,
       /\.debateBotPresencePlate\[data-debate-compact="true"\]\s+\.zenLiveBotPresenceBody\[data-avatar-details-visuals="true"\]\s*\{/u,
+    );
+    assert.match(
+      css,
+      /\.botStagePresence\[data-debate-stage-compact="true"\]\s*\{[^}]*position:\s*relative[^}]*aspect-ratio:\s*1/u,
+    );
+    assert.match(
+      pageCss,
+      /:global\(\[data-debate-stage-compact="true"\]\)\s*>\s*\.debateBotPresencePlate\[data-debate-compact="true"\]\s*\{[^}]*position:\s*absolute[^}]*width:\s*215\.054%[^}]*translateX\(-50%\) scale\(0\.465\)[^}]*transform-origin:\s*50% 100%/u,
     );
     assert.match(
       pageCss,
@@ -1239,6 +1255,16 @@ describe("Debate experience", () => {
     assert.match(source, /kind: "speech"/u);
     assert.match(source, /speakerBotId: bot\.id/u);
     assert.match(source, /voiceSourceBotId: bot\.id/u);
+    assert.match(source, /lifecycle:\s*\{/u);
+    assert.match(
+      source,
+      /onStart: \(durationMs, alignment\) => \{[\s\S]*updateSpeechTiming\(0, playbackDurationMs\)/u,
+    );
+    assert.match(
+      source,
+      /onProgress: \(elapsedMs, durationMs\) => \{[\s\S]*updateSpeechTiming\(elapsedMs, playbackDurationMs\)/u,
+    );
+    assert.match(source, /speechTiming: soundCheckSpeechTiming/u);
     assert.match(
       source,
       /data-speaking=\{\s*soundCheckPlaying \? "true" : undefined\s*\}/u,

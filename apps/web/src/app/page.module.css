@@ -25836,6 +25836,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-ambient-hover-amplitude: 0.5px;
 }
 
+:global([data-debate-stage-compact="true"])
+  > .debateBotPresencePlate[data-debate-compact="true"] {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 215.054%;
+  transform: translateX(-50%) scale(0.465);
+  transform-origin: 50% 100%;
+}
+
+@media (max-width: 900px) {
+  :global([data-debate-stage-compact="true"])
+    > .debateBotPresencePlate[data-debate-compact="true"] {
+    width: 235.294%;
+    transform: translateX(-50%) scale(0.425);
+  }
+}
+
 .debateBotPresencePlate .botFaceFrameLed {
   background: var(--coffee-bot-color);
   -webkit-mask-image: url("/bot-frame/bot-frame-led.png?v=1000");

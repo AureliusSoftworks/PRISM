@@ -1765,6 +1765,11 @@
   width: clamp(53px, 4.65vw, 74px);
 }
 
+.botStagePresence[data-debate-stage-compact="true"] {
+  position: relative;
+  aspect-ratio: 1;
+}
+
 .forumCamera[data-camera-view="moderator"]
   .botPosition[data-role="moderator"]
   .botStagePresence {
