@@ -187,11 +187,13 @@ import {
   advanceDebateSession,
   checkDebateAdvocacyRoles,
   createDebateSession,
+  debateSessionForPlayer,
   endDebateSessionEarly,
   getDebateSession,
   listDebateSessions,
   pauseDebateSession,
   resumeDebateSession,
+  skipDebateJuryDeliberation,
   submitDebateInterjection,
   submitDebatePlayerTurn,
   submitDebateTurnaboutAction,
@@ -10240,7 +10242,7 @@ function buildRoutes(): RouteDefinition[] {
           mode: "debate",
           surface: "debate",
         },
-        () => synthesizeDebateSlates(body.topic, runtime),
+        () => synthesizeDebateSlates(body.topic, body.formality, runtime),
       );
       json(ctx.res, 200, { ok: true, slates });
     }),
@@ -10314,6 +10316,7 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             {
               format: body.format,
+              formality: body.formality,
               motion: body.motion,
               forAdvocateBotId: body.forAdvocateBotId,
               againstAdvocateBotId: body.againstAdvocateBotId,
@@ -10338,7 +10341,10 @@ function buildRoutes(): RouteDefinition[] {
         body as unknown as Parameters<typeof createDebateSession>[2],
         runtime,
       );
-      json(ctx.res, 201, { ok: true, session });
+      json(ctx.res, 201, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("GET", "/api/debates", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10351,7 +10357,10 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, {
         ok: true,
-        session: getDebateSession(db, userId, ctx.params.id),
+        session: debateSessionForPlayer(
+          getDebateSession(db, userId, ctx.params.id),
+          ctx.query.get("perspective") === "replay" ? "replay" : "live",
+        ),
       });
     }),
     route("POST", "/api/debates/:id/advance", async (ctx) => {
@@ -10382,7 +10391,10 @@ function buildRoutes(): RouteDefinition[] {
             runtime,
           ),
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("POST", "/api/debates/:id/interject", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10411,7 +10423,10 @@ function buildRoutes(): RouteDefinition[] {
             runtime,
           ),
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("POST", "/api/debates/:id/turnabout-action", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10440,7 +10455,10 @@ function buildRoutes(): RouteDefinition[] {
             runtime,
           ),
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("POST", "/api/debates/:id/player-turn", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10452,7 +10470,10 @@ function buildRoutes(): RouteDefinition[] {
         ctx.body as Parameters<typeof submitDebatePlayerTurn>[3],
         runtime.auxiliary,
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("POST", "/api/debates/:id/verdict", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10462,7 +10483,10 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.body as Parameters<typeof submitDebateVerdict>[3],
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("POST", "/api/debates/:id/pause", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10472,7 +10496,10 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.body as Parameters<typeof pauseDebateSession>[3],
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("POST", "/api/debates/:id/end-early", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -10482,8 +10509,28 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.body as Parameters<typeof endDebateSessionEarly>[3],
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
+    route(
+      "POST",
+      "/api/debates/:id/jury/skip-deliberation",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const session = skipDebateJuryDeliberation(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Parameters<typeof skipDebateJuryDeliberation>[3],
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      },
+    ),
     route("POST", "/api/debates/:id/resume", async (ctx) => {
       const userId = requireAuth(ctx);
       const session = resumeDebateSession(
@@ -10492,7 +10539,10 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.body as Parameters<typeof resumeDebateSession>[3],
       );
-      json(ctx.res, 200, { ok: true, session });
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
     }),
     route("DELETE", "/api/debates/:id", async (ctx) => {
       const userId = requireAuth(ctx);

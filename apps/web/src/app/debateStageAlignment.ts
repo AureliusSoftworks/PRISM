@@ -1,9 +1,15 @@
 import type { CSSProperties } from "react";
 
-export const DEBATE_STAGE_ALIGNMENT_VERSION = 3 as const;
+export const DEBATE_STAGE_ALIGNMENT_VERSION = 4 as const;
 export const DEBATE_STAGE_ALIGNMENT_MIN = -12;
 export const DEBATE_STAGE_ALIGNMENT_MAX = 12;
 export const DEBATE_STAGE_ALIGNMENT_STEP = 0.5;
+export const DEBATE_STAGE_GAVEL_SIZE_MIN = 50;
+export const DEBATE_STAGE_GAVEL_SIZE_MAX = 200;
+export const DEBATE_STAGE_GAVEL_SIZE_STEP = 5;
+export const DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN = 0;
+export const DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX = 100;
+export const DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP = 5;
 export const DEBATE_STAGE_LIGHT_BLEND_MODES = ["screen", "overlay"] as const;
 
 export type DebateStageAlignmentRole = "for" | "moderator" | "against";
@@ -20,16 +26,16 @@ export interface DebateStageOffsetV1 {
   y: number;
 }
 
-export interface DebateStageRolePlacementV3 {
+export interface DebateStageRolePlacementV4 {
   bot: DebateStageOffsetV1;
   nameplate: DebateStageOffsetV1;
   glyph: DebateStageOffsetV1;
 }
 
-export interface DebateStageAlignmentWideV3 {
-  for: DebateStageRolePlacementV3;
-  moderator: DebateStageRolePlacementV3;
-  against: DebateStageRolePlacementV3;
+export interface DebateStageAlignmentWideV4 {
+  for: DebateStageRolePlacementV4;
+  moderator: DebateStageRolePlacementV4;
+  against: DebateStageRolePlacementV4;
 }
 
 export interface DebateStageLightBlendModesV1 {
@@ -37,11 +43,22 @@ export interface DebateStageLightBlendModesV1 {
   light: DebateStageLightBlendMode;
 }
 
-export interface DebateStageAlignmentV3 {
+export interface DebateStageLightMaskOpacitiesV1 {
+  dark: number;
+  light: number;
+}
+
+export interface DebateStageGavelV1 extends DebateStageOffsetV1 {
+  size: number;
+}
+
+export interface DebateStageAlignmentV4 {
   version: typeof DEBATE_STAGE_ALIGNMENT_VERSION;
-  wide: DebateStageAlignmentWideV3;
-  moderator: DebateStageRolePlacementV3;
+  wide: DebateStageAlignmentWideV4;
+  moderator: DebateStageRolePlacementV4;
+  gavel: DebateStageGavelV1;
   lightBlendModes: DebateStageLightBlendModesV1;
+  lightMaskOpacities: DebateStageLightMaskOpacitiesV1;
 }
 
 export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
@@ -49,7 +66,7 @@ export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
 export const DEBATE_STAGE_ALIGNMENT_ITEMS: readonly DebateStageAlignmentItem[] =
   ["bot", "nameplate", "glyph"];
 
-function defaultPlacement(): DebateStageRolePlacementV3 {
+function defaultPlacement(): DebateStageRolePlacementV4 {
   return {
     bot: { x: 0, y: 0 },
     nameplate: { x: 0, y: 0 },
@@ -57,7 +74,7 @@ function defaultPlacement(): DebateStageRolePlacementV3 {
   };
 }
 
-export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV3 = {
+export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV4 = {
   version: DEBATE_STAGE_ALIGNMENT_VERSION,
   wide: {
     for: defaultPlacement(),
@@ -65,22 +82,56 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV3 = {
     against: defaultPlacement(),
   },
   moderator: defaultPlacement(),
+  gavel: {
+    x: 0,
+    y: 0,
+    size: 100,
+  },
   lightBlendModes: {
     dark: "screen",
     light: "overlay",
   },
+  lightMaskOpacities: {
+    dark: 100,
+    light: 100,
+  },
 };
 
-function normalizedOffset(value: unknown): number {
+function normalizedNumber(
+  value: unknown,
+  min: number,
+  max: number,
+  fallback: number,
+): number {
   const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return 0;
-  return (
-    Math.round(
-      Math.max(
-        DEBATE_STAGE_ALIGNMENT_MIN,
-        Math.min(DEBATE_STAGE_ALIGNMENT_MAX, numeric),
-      ) * 100,
-    ) / 100
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.round(Math.max(min, Math.min(max, numeric)) * 100) / 100;
+}
+
+function normalizedOffset(value: unknown): number {
+  return normalizedNumber(
+    value,
+    DEBATE_STAGE_ALIGNMENT_MIN,
+    DEBATE_STAGE_ALIGNMENT_MAX,
+    0,
+  );
+}
+
+function normalizedGavelSize(value: unknown): number {
+  return normalizedNumber(
+    value,
+    DEBATE_STAGE_GAVEL_SIZE_MIN,
+    DEBATE_STAGE_GAVEL_SIZE_MAX,
+    100,
+  );
+}
+
+function normalizedLightMaskOpacity(value: unknown): number {
+  return normalizedNumber(
+    value,
+    DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN,
+    DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX,
+    100,
   );
 }
 
@@ -107,7 +158,7 @@ function hasNestedPlacement(value: unknown): boolean {
 function normalizeStagePlacement(
   value: unknown,
   legacyNameplateOffset: unknown = value,
-): DebateStageRolePlacementV3 {
+): DebateStageRolePlacementV4 {
   if (!hasNestedPlacement(value)) {
     return {
       bot: normalizeStageOffset(value),
@@ -136,7 +187,7 @@ function normalizeLightBlendMode(
 
 export function normalizeDebateStageAlignment(
   value: unknown,
-): DebateStageAlignmentV3 {
+): DebateStageAlignmentV4 {
   const candidate =
     typeof value === "object" && value !== null
       ? (value as Record<string, unknown>)
@@ -152,6 +203,15 @@ export function normalizeDebateStageAlignment(
     candidate.lightBlendModes !== null
       ? (candidate.lightBlendModes as Record<string, unknown>)
       : {};
+  const gavel =
+    typeof candidate.gavel === "object" && candidate.gavel !== null
+      ? (candidate.gavel as Record<string, unknown>)
+      : {};
+  const lightMaskOpacities =
+    typeof candidate.lightMaskOpacities === "object" &&
+    candidate.lightMaskOpacities !== null
+      ? (candidate.lightMaskOpacities as Record<string, unknown>)
+      : {};
   return {
     version: DEBATE_STAGE_ALIGNMENT_VERSION,
     wide: {
@@ -162,16 +222,24 @@ export function normalizeDebateStageAlignment(
     moderator: normalizeStagePlacement(
       nestedWide ? candidate.moderator : legacyModerator,
     ),
+    gavel: {
+      ...normalizeStageOffset(gavel),
+      size: normalizedGavelSize(gavel.size),
+    },
     lightBlendModes: {
       dark: normalizeLightBlendMode(lightBlendModes.dark, "screen"),
       light: normalizeLightBlendMode(lightBlendModes.light, "overlay"),
+    },
+    lightMaskOpacities: {
+      dark: normalizedLightMaskOpacity(lightMaskOpacities.dark),
+      light: normalizedLightMaskOpacity(lightMaskOpacities.light),
     },
   };
 }
 
 export function copyDebateStageAlignment(
-  alignment: DebateStageAlignmentV3,
-): DebateStageAlignmentV3 {
+  alignment: DebateStageAlignmentV4,
+): DebateStageAlignmentV4 {
   return normalizeDebateStageAlignment(alignment);
 }
 
@@ -202,7 +270,7 @@ function debateStageAlignmentTargetParts(target: DebateStageAlignmentTarget): {
 }
 
 export function debateStageAlignmentOffset(
-  alignment: DebateStageAlignmentV3,
+  alignment: DebateStageAlignmentV4,
   target: DebateStageAlignmentTarget,
 ): DebateStageOffsetV1 {
   const { role, item, view } = debateStageAlignmentTargetParts(target);
@@ -212,10 +280,10 @@ export function debateStageAlignmentOffset(
 }
 
 export function updateDebateStageAlignmentOffset(
-  alignment: DebateStageAlignmentV3,
+  alignment: DebateStageAlignmentV4,
   target: DebateStageAlignmentTarget,
   update: Partial<DebateStageOffsetV1>,
-): DebateStageAlignmentV3 {
+): DebateStageAlignmentV4 {
   const { role, item, view } = debateStageAlignmentTargetParts(target);
   if (view === "moderator") {
     return normalizeDebateStageAlignment({
@@ -239,10 +307,10 @@ export function updateDebateStageAlignmentOffset(
 }
 
 export function updateDebateStageLightBlendMode(
-  alignment: DebateStageAlignmentV3,
+  alignment: DebateStageAlignmentV4,
   theme: "light" | "dark",
   blendMode: DebateStageLightBlendMode,
-): DebateStageAlignmentV3 {
+): DebateStageAlignmentV4 {
   return normalizeDebateStageAlignment({
     ...alignment,
     lightBlendModes: {
@@ -252,7 +320,38 @@ export function updateDebateStageLightBlendMode(
   });
 }
 
+export function updateDebateStageLightMaskOpacity(
+  alignment: DebateStageAlignmentV4,
+  theme: "light" | "dark",
+  opacity: number,
+): DebateStageAlignmentV4 {
+  return normalizeDebateStageAlignment({
+    ...alignment,
+    lightMaskOpacities: {
+      ...alignment.lightMaskOpacities,
+      [theme]: opacity,
+    },
+  });
+}
+
+export function updateDebateStageGavel(
+  alignment: DebateStageAlignmentV4,
+  update: Partial<DebateStageGavelV1>,
+): DebateStageAlignmentV4 {
+  return normalizeDebateStageAlignment({
+    ...alignment,
+    gavel: {
+      ...alignment.gavel,
+      ...update,
+    },
+  });
+}
+
 export function debateStageAlignmentStorageKey(scopeId: string): string {
+  return `prism_debate_stage_alignment_v4:${scopeId}`;
+}
+
+function v3DebateStageAlignmentStorageKey(scopeId: string): string {
   return `prism_debate_stage_alignment_v3:${scopeId}`;
 }
 
@@ -267,10 +366,11 @@ function legacyDebateStageAlignmentStorageKey(scopeId: string): string {
 export function readDebateStageAlignment(
   storage: Pick<Storage, "getItem">,
   scopeId: string,
-): DebateStageAlignmentV3 {
+): DebateStageAlignmentV4 {
   try {
     const serialized =
       storage.getItem(debateStageAlignmentStorageKey(scopeId)) ??
+      storage.getItem(v3DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v2DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(legacyDebateStageAlignmentStorageKey(scopeId));
     return serialized
@@ -284,7 +384,7 @@ export function readDebateStageAlignment(
 export function writeDebateStageAlignment(
   storage: Pick<Storage, "setItem">,
   scopeId: string,
-  alignment: DebateStageAlignmentV3,
+  alignment: DebateStageAlignmentV4,
 ): void {
   storage.setItem(
     debateStageAlignmentStorageKey(scopeId),
@@ -293,7 +393,7 @@ export function writeDebateStageAlignment(
 }
 
 export function debateStageAlignmentStyle(
-  alignment: DebateStageAlignmentV3,
+  alignment: DebateStageAlignmentV4,
 ): CSSProperties {
   const normalized = normalizeDebateStageAlignment(alignment);
   return {
@@ -321,13 +421,18 @@ export function debateStageAlignmentStyle(
     "--debate-moderator-view-nameplate-offset-y": `${normalized.moderator.nameplate.y}%`,
     "--debate-moderator-view-glyph-offset-x": `${normalized.moderator.glyph.x}%`,
     "--debate-moderator-view-glyph-offset-y": `${normalized.moderator.glyph.y}%`,
+    "--debate-gavel-offset-x": `${normalized.gavel.x}%`,
+    "--debate-gavel-offset-y": `${normalized.gavel.y}%`,
+    "--debate-gavel-scale": `${normalized.gavel.size / 100}`,
     "--debate-light-blend-mode-dark": normalized.lightBlendModes.dark,
     "--debate-light-blend-mode-light": normalized.lightBlendModes.light,
+    "--debate-light-mask-opacity-dark": `${normalized.lightMaskOpacities.dark}%`,
+    "--debate-light-mask-opacity-light": `${normalized.lightMaskOpacities.light}%`,
   } as CSSProperties;
 }
 
 export function formatDebateStageAlignmentClipboard(
-  alignment: DebateStageAlignmentV3,
+  alignment: DebateStageAlignmentV4,
 ): string {
   return JSON.stringify(normalizeDebateStageAlignment(alignment), null, 2);
 }

@@ -6911,7 +6911,7 @@ export async function chatWithBotcastShowHost(
     return ignoredBotcastShowHostChatMessage();
   }
   if (botPowerIsMutedV1(host.powers)) {
-    throw new Error(`${host.name} cannot speak while their mute Power is active.`);
+    return ignoredBotcastShowHostChatMessage();
   }
   const archive = botcastShowHostChatArchive(db, userId, show);
   const guestLibrary = botcastShowHostChatGuestLibrary(
@@ -7216,15 +7216,6 @@ export function createBotcastEpisode(
         );
   if (guestKind === "bot" && host.id === guest.id)
     throw new Error("Choose a different bot as the guest.");
-  if (
-    guestKind === "producer" &&
-    (botPowerIsMutedV1(host.powers) ||
-      botPowerEchoesAddressedSpeechV1(host.powers))
-  ) {
-    throw new Error(
-      "This host's hard speech Power cannot originate the questions required for a Producer-guest episode.",
-    );
-  }
   const guestPresenceMode =
     guestKind === "producer" ? "present" : botcastGuestPresenceMode(host, guest);
   const sessionStartPowerEffects =
@@ -11297,17 +11288,32 @@ export async function advanceBotcastEpisode(
       const hostPowers =
         botcastEpisodePowerSnapshotForRole(episode, "host") ??
         currentHost.powers;
-      if (botPowerIsMutedV1(hostPowers)) {
-        throw new Error("A muted Signal host cannot interrupt aloud.");
-      }
-      const hostEchoes = botPowerEchoesAddressedSpeechV1(hostPowers);
+      const hostMuted = botPowerIsMutedV1(hostPowers);
+      const hostEchoes =
+        !hostMuted && botPowerEchoesAddressedSpeechV1(hostPowers);
       if (!guestHasTheMic) {
         throw new Error(
           "The guest must be speaking or next before the host can interrupt.",
         );
       }
       const show = getBotcastShow(db, userId, episode.showId);
-      if (hostEchoes) {
+      if (hostMuted) {
+        guestInterruption = {
+          ...(guestInterruption?.messageId
+            ? { messageId: guestInterruption.messageId }
+            : {}),
+          ...(guestInterruption?.spokenContent !== undefined
+            ? { spokenContent: guestInterruption.spokenContent }
+            : {}),
+          bridgeLine: BOT_POWER_CANONICAL_SILENCE_V1,
+          ...(guestInterruption?.interruptedSpeakerCue
+            ? {
+                interruptedSpeakerCue:
+                  guestInterruption.interruptedSpeakerCue,
+              }
+            : {}),
+        };
+      } else if (hostEchoes) {
         const echoPhrase = botcastEchoHostInterruptPhrase({
           messages: episode.messages,
           interruption: guestInterruption,
@@ -11361,6 +11367,7 @@ export async function advanceBotcastEpisode(
       );
       if (
         !hostEchoes &&
+        !hostMuted &&
         !show.hostInterruptionLines.includes(bridgeLine)
       ) {
         throw new Error(

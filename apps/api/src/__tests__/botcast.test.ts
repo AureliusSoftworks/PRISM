@@ -1511,7 +1511,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("rejects a Producer-guest booking when the host cannot originate questions", () => {
+  it("lets an echo-bound host take a Producer guest instead of blocking the booking", () => {
     const db = fixture();
     const name = "Echo";
     const intent = "Echo whatever is addressed to this bot and say nothing else.";
@@ -1535,15 +1535,53 @@ describe("Botcast persistence and isolation", () => {
     );
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
-      assert.throws(
-        () => createBotcastEpisode(db, "user-1", show.id, {
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
           guestKind: "producer",
           guestName: BOTCAST_PRODUCER_GUEST_NAME,
           guestContext: "I want to discuss the consequences of automation.",
           topic: "Automation and authorship",
-        }),
-        /cannot originate the questions required for a Producer-guest episode/u,
+      });
+      assert.equal(episode.guestKind, "producer");
+      assert.equal(episode.guestBotId, BOTCAST_PRODUCER_GUEST_ID);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets a muted host open a Producer-guest episode with canonical silence", async () => {
+    const db = fixture();
+    try {
+      db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+        mutedPowers(),
       );
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestKind: "producer",
+        guestName: BOTCAST_PRODUCER_GUEST_NAME,
+        guestContext: "I want to discuss the consequences of automation.",
+        topic: "Automation and authorship",
+      });
+      const captures: ProviderMessage[][] = [];
+      const opening = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(recordingProvider(["This must not be spoken."], captures)),
+      );
+      assert.equal(opening.message?.content, "...");
+      assert.equal(opening.message?.speakerRole, "host");
+      assert.equal(captures.length, 0);
+      const awaitingProducer = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(recordingProvider(["Still not spoken."], captures)),
+      );
+      assert.equal(awaitingProducer.message, null);
+      assert.equal(awaitingProducer.episode.messages.length, 1);
+      assert.equal(captures.length, 0);
     } finally {
       db.close();
     }
@@ -2057,7 +2095,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("does not let a muted Signal host speak off-air", async () => {
+  it("lets a muted Signal host answer off-air with canonical silence", async () => {
     const db = fixture();
     try {
       const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
@@ -2065,16 +2103,16 @@ describe("Botcast persistence and isolation", () => {
         mutedPowers(),
       );
       const captures: ProviderMessage[][] = [];
-      await assert.rejects(
-        chatWithBotcastShowHost(
-          db,
-          "user-1",
-          show.id,
-          { content: "Can we talk?" },
-          generation(recordingProvider(["No."], captures)),
-        ),
-        /cannot speak while their mute Power is active/u,
+      const response = await chatWithBotcastShowHost(
+        db,
+        "user-1",
+        show.id,
+        { content: "Can we talk?" },
+        generation(recordingProvider(["No."], captures)),
       );
+      assert.equal(response.content, "...");
+      assert.equal(response.provider, null);
+      assert.equal(response.model, null);
       assert.equal(captures.length, 0);
     } finally {
       db.close();
@@ -3232,19 +3270,25 @@ describe("Botcast persistence and isolation", () => {
         )?.payload.model,
         "mute-power",
       );
-      await assert.rejects(
-        () =>
-          advanceBotcastEpisode(
-            db,
-            "user-1",
-            episode.id,
-            {
-              cue: { kind: "move_on" },
-              cueDelivery: "interrupt_guest",
-            },
-            generation(provider),
-          ),
-        /muted Signal host cannot interrupt aloud/u,
+      const silentInterruption = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {
+          cue: { kind: "move_on" },
+          cueDelivery: "interrupt_guest",
+        },
+        generation(provider),
+      );
+      assert.equal(silentInterruption.message?.content, "...");
+      assert.equal(captures.length, 0);
+      assert.equal(
+        silentInterruption.episode.events.find(
+          (event) =>
+            event.kind === "producer_cue" &&
+            event.payload.delivery === "interrupt_guest",
+        )?.payload.interruptionBridgeLine,
+        "...",
       );
 
       const guestTurn = await advanceBotcastEpisode(

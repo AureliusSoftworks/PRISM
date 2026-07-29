@@ -39,6 +39,7 @@ import {
   BOTCAST_VOICE_LEVEL_STEP,
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
+  BOT_POWER_CANONICAL_SILENCE_V1,
   botPowerAvatarScaleModeV1,
   botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeV1,
@@ -2619,7 +2620,7 @@ export function BotcastExperience({
   }, [hostChatBubbles, hostChatOpen, hostChatStreamingMessage?.content]);
 
   const toggleSignalHostChat = useCallback((): void => {
-    if (!selectedShow || !hostBot || hostBot.muted || showIdentityControlsExpanded) {
+    if (!selectedShow || !hostBot || showIdentityControlsExpanded) {
       return;
     }
     if (hostChatOpenRef.current) {
@@ -2686,7 +2687,7 @@ export function BotcastExperience({
 
   const sendSignalHostChat = useCallback(async (): Promise<void> => {
     const content = hostChatDraft.trim();
-    if (!content || !selectedShow || !hostBot || hostChatBusy || hostBot.muted) {
+    if (!content || !selectedShow || !hostBot || hostChatBusy) {
       return;
     }
     const showId = selectedShow.id;
@@ -2776,13 +2777,14 @@ export function BotcastExperience({
       episode.guestKind === "producer" ||
       episode.status !== "live" ||
       !selectedShow ||
-      !hostBot ||
-      hostBot.muted
+      !hostBot
     ) {
       return null;
     }
     let bridgeContent: string;
-    if (hostBot.echoesAddressedSpeech) {
+    if (hostBot.muted) {
+      bridgeContent = BOT_POWER_CANONICAL_SILENCE_V1;
+    } else if (hostBot.echoesAddressedSpeech) {
       const activeGuestMessage = episode.messages.find(
         (message) =>
           message.id === speakingMessageId && message.speakerRole === "guest",
@@ -4747,16 +4749,6 @@ export function BotcastExperience({
     const producerGuest = guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
     const producerGuestWantsSurprise =
       producerGuest && !producerGuestContextDraft.trim();
-    if (producerGuest && hostBot?.muted) {
-      setError(
-        signalErrorToast(
-          "Start Signal episode",
-          "This host's hard speech Power cannot originate the questions required to interview the Producer. Choose a bot guest or a different show host.",
-          "host Power compatibility",
-        ),
-      );
-      return;
-    }
     if (
       !selectedShow ||
       !guestDraftId ||
@@ -9698,9 +9690,6 @@ export function BotcastExperience({
     const guestOptions = eligibleBots.filter((bot) => bot.id !== hostBot.id);
     const producerGuestSelected =
       guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
-    const producerGuestUnavailable = Boolean(
-      hostBot?.muted || hostBot?.echoesAddressedSpeech,
-    );
     const selectedEpisodeModelOption = episodeModelDraft
       ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
       : null;
@@ -10025,21 +10014,13 @@ export function BotcastExperience({
                       producerGuestSelected ? "true" : undefined
                     }
                     aria-pressed={producerGuestSelected}
-                    disabled={
-                      producerGuestUnavailable ||
-                      busy ||
-                      Boolean(bookingSuggestionBusy)
-                    }
+                    disabled={busy || Boolean(bookingSuggestionBusy)}
                     onClick={() =>
                       setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID)
                     }
                   >
                     <strong>Me</strong>
-                    <span>
-                      {producerGuestUnavailable
-                        ? "Unavailable for this host"
-                        : "Go on as the guest"}
-                    </span>
+                    <span>Go on as the guest</span>
                   </button>
                   {renderSignalBotPicker({
                     bots: guestOptions,
@@ -11718,9 +11699,11 @@ export function BotcastExperience({
                       disabled={!queuedCueCanInterruptGuest}
                       onClick={interruptGuestWithQueuedCue}
                       title={
-                        hostBot?.echoesAddressedSpeech
-                          ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
-                          : "Have the host take the mic now with this queued cue."
+                        hostBot?.muted
+                          ? "Let the muted host attempt the cut in canonical silence."
+                          : hostBot?.echoesAddressedSpeech
+                            ? "Have the echo-bound host cut in by repeating the last audience-heard phrase."
+                            : "Have the host take the mic now with this queued cue."
                       }
                     >
                       Interrupt guest now
@@ -12693,7 +12676,7 @@ export function BotcastExperience({
                               kind: "magic",
                               label: "Regenerate blurbs",
                               run: regenerateShowBlurbs,
-                              disabled: () => busy || Boolean(hostBot?.muted),
+                              disabled: () => busy,
                             }}
                           >
                             {(binding) => (
@@ -12702,12 +12685,7 @@ export function BotcastExperience({
                                 type="button"
                                 data-signal-identity-action="blurbs"
                                 onClick={() => void regenerateShowBlurbs()}
-                                disabled={busy || hostBot?.muted}
-                                title={
-                                  hostBot?.muted
-                                    ? "This host’s Power allows only ..."
-                                    : undefined
-                                }
+                                disabled={busy}
                               >
                                 Regenerate{" "}
                                 {hostBot?.echoesAddressedSpeech
@@ -12858,20 +12836,14 @@ export function BotcastExperience({
                     className={styles.showCardHostTrigger}
                     data-tutorial-target="botcast-host-chat"
                     aria-label={
-                      hostBot.muted
-                        ? `${hostBot.name} cannot speak while muted`
-                        : hostChatOpen
-                          ? `Close off-air chat with ${hostBot.name}`
-                          : `Talk off-air with ${hostBot.name} about ${selectedShow.name}`
+                      hostChatOpen
+                        ? `Close off-air chat with ${hostBot.name}`
+                        : `Talk off-air with ${hostBot.name} about ${selectedShow.name}`
                     }
                     aria-expanded={hostChatOpen}
                     aria-controls={`signal-show-host-chat-${selectedShow.id}`}
-                    disabled={hostBot.muted || showIdentityControlsExpanded}
-                    title={
-                      hostBot.muted
-                        ? "This host’s mute Power prevents off-air speech."
-                        : `Talk with ${hostBot.name} about this show and its episodes`
-                    }
+                    disabled={showIdentityControlsExpanded}
+                    title={`Talk with ${hostBot.name} about this show and its episodes`}
                     onClick={toggleSignalHostChat}
                   >
                     <div

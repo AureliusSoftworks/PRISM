@@ -64,9 +64,9 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.chat.version, "1.35");
     assert.equal(PRISM_APPLETS.zen.version, "1.33");
     assert.equal(PRISM_APPLETS.coffee.version, "2.39");
-    assert.equal(PRISM_APPLETS.debate.version, "0.1");
+    assert.equal(PRISM_APPLETS.debate.version, "0.2");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.39");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.40");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.29");
     assert.equal(PRISM_APPLETS.story.status, "planned");
@@ -75,8 +75,8 @@ describe("applet version helpers", () => {
     assert.equal(prismAppletVersionLabel("chat"), "v1.35");
     assert.equal(prismAppletVersionLabel("zen"), "v1.33");
     assert.equal(prismAppletVersionLabel("coffee"), "v2.39");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.1");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.39");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.2");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.40");
     assert.equal(prismAppletVersionLabel("story"), "v0.29");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });
@@ -166,7 +166,7 @@ describe("applet version helpers", () => {
     });
   });
 
-  it("requires every bot-embodying future applet to enforce hard mute before activation", () => {
+  it("requires future applets to implement hard mute without making bots ineligible", () => {
     assert.deepEqual(Object.keys(BOT_POWER_MUTE_MODE_POLICY), Object.keys(PRISM_APPLETS));
     for (const applet of Object.values(PRISM_APPLETS)) {
       const policy = BOT_POWER_MUTE_MODE_POLICY[applet.id];

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
+  DEBATE_STAGE_GAVEL_SIZE_MAX,
+  DEBATE_STAGE_GAVEL_SIZE_MIN,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
   debateStageAlignmentOffset,
   debateStageAlignmentStorageKey,
@@ -11,7 +13,9 @@ import {
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
+  updateDebateStageGavel,
   updateDebateStageLightBlendMode,
+  updateDebateStageLightMaskOpacity,
   writeDebateStageAlignment,
 } from "./debateStageAlignment.ts";
 
@@ -41,13 +45,22 @@ describe("Debate stage alignment", () => {
           nameplate: { x: 2.25, y: -1.5 },
           glyph: { x: 0.5, y: -0.5 },
         },
+        gavel: {
+          x: -99,
+          y: 99,
+          size: 900,
+        },
         lightBlendModes: {
           dark: "overlay",
           light: "screen",
         },
+        lightMaskOpacities: {
+          dark: -20,
+          light: 72.5,
+        },
       }),
       {
-        version: 3,
+        version: 4,
         wide: {
           for: {
             bot: { x: -12, y: 2.13 },
@@ -70,15 +83,24 @@ describe("Debate stage alignment", () => {
           nameplate: { x: 2.25, y: -1.5 },
           glyph: { x: 0.5, y: -0.5 },
         },
+        gavel: {
+          x: -12,
+          y: 12,
+          size: DEBATE_STAGE_GAVEL_SIZE_MAX,
+        },
         lightBlendModes: {
           dark: "overlay",
           light: "screen",
+        },
+        lightMaskOpacities: {
+          dark: 0,
+          light: 72.5,
         },
       },
     );
   });
 
-  it("uses tenant-scoped storage and migrates V1 and V2 placements without visual drift", () => {
+  it("uses tenant-scoped storage and migrates prior saved placements without visual drift", () => {
     const values = new Map<string, string>();
     const storage = {
       getItem: (key: string) => values.get(key) ?? null,
@@ -88,22 +110,42 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v3:user-1",
+      "prism_debate_stage_alignment_v4:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
       DEFAULT_DEBATE_STAGE_ALIGNMENT,
     );
     values.set(
-      "prism_debate_stage_alignment_v2:user-1",
+      "prism_debate_stage_alignment_v3:user-1",
       JSON.stringify({
-        version: 2,
+        version: 3,
         wide: {
-          for: { x: 1, y: -2 },
-          moderator: { x: 4, y: 3 },
-          against: { x: -1, y: -2 },
+          for: {
+            bot: { x: 1, y: -2 },
+            nameplate: { x: 1, y: -2 },
+            glyph: { x: 0, y: 0 },
+          },
+          moderator: {
+            bot: { x: 4, y: 3 },
+            nameplate: { x: 4, y: 3 },
+            glyph: { x: 0, y: 0 },
+          },
+          against: {
+            bot: { x: -1, y: -2 },
+            nameplate: { x: -1, y: -2 },
+            glyph: { x: 0, y: 0 },
+          },
         },
-        moderator: { x: 6, y: -4 },
+        moderator: {
+          bot: { x: 6, y: -4 },
+          nameplate: { x: 6, y: -4 },
+          glyph: { x: 0, y: 0 },
+        },
+        lightBlendModes: {
+          dark: "screen",
+          light: "overlay",
+        },
       }),
     );
     const migrated = readDebateStageAlignment(storage, "user-1");
@@ -113,8 +155,13 @@ describe("Debate stage alignment", () => {
     assert.deepEqual(migrated.moderator.bot, { x: 6, y: -4 });
     assert.deepEqual(migrated.moderator.nameplate, { x: 6, y: -4 });
     assert.deepEqual(migrated.moderator.glyph, { x: 0, y: 0 });
+    assert.deepEqual(migrated.gavel, DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel);
+    assert.deepEqual(
+      migrated.lightMaskOpacities,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.lightMaskOpacities,
+    );
     writeDebateStageAlignment(storage, "user-1", {
-      version: 3,
+      version: 4,
       wide: {
         for: {
           bot: { x: 1, y: -2 },
@@ -137,9 +184,18 @@ describe("Debate stage alignment", () => {
         nameplate: { x: 5, y: -3 },
         glyph: { x: 4, y: -2 },
       },
+      gavel: {
+        x: 2,
+        y: -3,
+        size: 125,
+      },
       lightBlendModes: {
         dark: "overlay",
         light: "screen",
+      },
+      lightMaskOpacities: {
+        dark: 65,
+        light: 80,
       },
     });
     assert.deepEqual(
@@ -150,7 +206,7 @@ describe("Debate stage alignment", () => {
 
   it("maps individual Wide and Moderator items into live forum CSS variables", () => {
     const alignment = normalizeDebateStageAlignment({
-      version: 3,
+      version: 4,
       wide: {
         for: {
           bot: { x: 1, y: -2 },
@@ -163,9 +219,18 @@ describe("Debate stage alignment", () => {
         nameplate: { x: 5, y: -3 },
         glyph: { x: 4, y: -2 },
       },
+      gavel: {
+        x: 2.5,
+        y: -4,
+        size: 135,
+      },
       lightBlendModes: {
         dark: "overlay",
         light: "screen",
+      },
+      lightMaskOpacities: {
+        dark: 65,
+        light: 80,
       },
     });
     const style = debateStageAlignmentStyle(alignment) as Record<
@@ -178,8 +243,13 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-moderator-view-offset-x"], "6%");
     assert.equal(style["--debate-moderator-view-nameplate-offset-y"], "-3%");
     assert.equal(style["--debate-moderator-view-glyph-offset-x"], "4%");
+    assert.equal(style["--debate-gavel-offset-x"], "2.5%");
+    assert.equal(style["--debate-gavel-offset-y"], "-4%");
+    assert.equal(style["--debate-gavel-scale"], "1.35");
     assert.equal(style["--debate-light-blend-mode-dark"], "overlay");
     assert.equal(style["--debate-light-blend-mode-light"], "screen");
+    assert.equal(style["--debate-light-mask-opacity-dark"], "65%");
+    assert.equal(style["--debate-light-mask-opacity-light"], "80%");
   });
 
   it("updates one close-up item without mutating its bot or the Wide moderator", () => {
@@ -243,6 +313,29 @@ describe("Debate stage alignment", () => {
     assert.deepEqual(
       JSON.parse(formatDebateStageAlignmentClipboard(tuned)).lightBlendModes,
       tuned.lightBlendModes,
+    );
+  });
+
+  it("updates the gavel and Light/Dark color-mask opacity independently", () => {
+    const resized = updateDebateStageGavel(DEFAULT_DEBATE_STAGE_ALIGNMENT, {
+      x: 3.5,
+      y: -2,
+      size: DEBATE_STAGE_GAVEL_SIZE_MIN - 20,
+    });
+    assert.deepEqual(resized.gavel, {
+      x: 3.5,
+      y: -2,
+      size: DEBATE_STAGE_GAVEL_SIZE_MIN,
+    });
+    const darkTuned = updateDebateStageLightMaskOpacity(resized, "dark", 35);
+    const tuned = updateDebateStageLightMaskOpacity(darkTuned, "light", 70);
+    assert.deepEqual(tuned.lightMaskOpacities, {
+      dark: 35,
+      light: 70,
+    });
+    assert.deepEqual(
+      JSON.parse(formatDebateStageAlignmentClipboard(tuned)).gavel,
+      tuned.gavel,
     );
   });
 });

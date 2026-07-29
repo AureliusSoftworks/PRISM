@@ -4,9 +4,12 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEBATE_SCHEMA_VERSION } from "@localai/shared";
 import {
+  applyDebateSetupPreset,
   copyDebateMotionSlate,
   debateAlignmentPreviewCast,
   debatePrefilledCast,
+  derivedDebateSetupPresetId,
+  randomDebateCast,
 } from "./debateExperienceState.ts";
 
 const source = readFileSync(
@@ -52,6 +55,21 @@ describe("Debate experience", () => {
       forAdvocate: "",
       againstAdvocate: "",
     });
+  });
+
+  it("randomly casts three unique Library bots and fails safely with fewer", () => {
+    assert.deepEqual(
+      randomDebateCast(["m", "f", "a", "extra", "m", ""], () => 0),
+      {
+        moderator: "f",
+        forAdvocate: "a",
+        againstAdvocate: "extra",
+      },
+    );
+    assert.equal(
+      randomDebateCast(["m", "f"], () => 0.5),
+      null,
+    );
   });
 
   it("keeps draft roles and fills incomplete alignment casts with unique stand-ins", () => {
@@ -114,7 +132,10 @@ describe("Debate experience", () => {
     assert.match(source, /option\.productionName/u);
     assert.match(source, /option\.cadence/u);
     assert.match(source, /data-availability=\{option\.availability\}/u);
-    assert.match(source, /disabled=\{option\.availability === "coming_soon"\}/u);
+    assert.match(
+      source,
+      /disabled=\{option\.availability === "coming_soon"\}/u,
+    );
     assert.match(source, />\s*Coming later\s*</u);
     assert.match(
       source,
@@ -146,6 +167,104 @@ describe("Debate experience", () => {
     assert.match(css, /data-debate-format="turnabout"/u);
   });
 
+  it("applies built-in presets without touching proceeding content and derives Custom from manual differences", () => {
+    const consent = [
+      {
+        version: DEBATE_SCHEMA_VERSION,
+        format: "forum" as const,
+        botId: "for",
+        sideId: "for" as const,
+        status: "accept" as const,
+        reason: null,
+        motionHash: "motion",
+        botRevision: "bot",
+        checkedAt: "2026-07-29T00:00:00.000Z",
+      },
+    ];
+    const current = {
+      format: "forum" as const,
+      playerRole: "judge" as const,
+      juryEnabled: false,
+      formality: "heated" as const,
+      roleChecks: consent,
+      motion: { id: "motion" },
+      cast: { moderator: "m", forAdvocate: "f", againstAdvocate: "a" },
+      evidence: { notes: "frozen" },
+      provider: "local",
+      participantSide: "against",
+      alignment: { x: 12 },
+    };
+    const publicForum = applyDebateSetupPreset(current, "public-forum");
+    assert.equal(publicForum.format, "forum");
+    assert.equal(publicForum.formality, "plainspoken");
+    assert.equal(publicForum.playerRole, "spectator");
+    assert.equal(publicForum.juryEnabled, true);
+    assert.deepEqual(publicForum.roleChecks, []);
+    assert.equal(publicForum.motion, current.motion);
+    assert.equal(publicForum.cast, current.cast);
+    assert.equal(publicForum.evidence, current.evidence);
+    assert.equal(publicForum.provider, current.provider);
+    assert.equal(publicForum.participantSide, current.participantSide);
+    assert.equal(publicForum.alignment, current.alignment);
+
+    const juryTrial = applyDebateSetupPreset(current, "jury-trial");
+    assert.equal(juryTrial.format, "turnabout");
+    assert.equal(juryTrial.formality, "structured");
+    assert.deepEqual(juryTrial.roleChecks, []);
+    const universityUnion = applyDebateSetupPreset(
+      { ...current, formality: "parliamentary" as const },
+      "classic-duel",
+    );
+    assert.equal(universityUnion.formality, "parliamentary");
+    assert.equal(universityUnion.roleChecks, consent);
+    assert.equal(
+      derivedDebateSetupPresetId({
+        selectedPresetId: "public-forum",
+        format: "forum",
+        formality: "plainspoken",
+        playerRole: "spectator",
+        juryEnabled: true,
+      }),
+      "public-forum",
+    );
+    assert.equal(
+      derivedDebateSetupPresetId({
+        selectedPresetId: "public-forum",
+        format: "forum",
+        formality: "plainspoken",
+        playerRole: "judge",
+        juryEnabled: true,
+      }),
+      "custom",
+    );
+    assert.equal(
+      derivedDebateSetupPresetId({
+        selectedPresetId: "public-forum",
+        format: "forum",
+        formality: "parliamentary",
+        playerRole: "spectator",
+        juryEnabled: true,
+      }),
+      "custom",
+    );
+  });
+
+  it("keeps a five-stop formality control visible through launch review and session creation", () => {
+    assert.match(source, /useState<DebateFormalityId>\("parliamentary"\)/u);
+    assert.match(source, /DEBATE_FORMALITY_SPECTRUM/u);
+    assert.match(source, /data-tutorial-target="debate-formality"/u);
+    assert.match(source, /aria-label="Debate formality"/u);
+    assert.match(
+      source,
+      /if \(next && next\.id !== formality\)[\s\S]{0,120}setRoleChecks\(\[\]\)/u,
+    );
+    assert.match(source, /formality,\s+motion,/u);
+    assert.match(source, /setFormality\(next\.formality\)/u);
+    assert.match(source, /<span>Formality<\/span>/u);
+    assert.match(source, /debateFormalityDescriptor\(session\.formality\)/u);
+    assert.match(css, /\.formalityControl/u);
+  });
+
   it("routes Forum and Turnabout through distinct room responses", () => {
     assert.match(
       source,
@@ -156,10 +275,7 @@ describe("Debate experience", () => {
       page,
       /debateFormat === "turnabout"[\s\S]{0,120}DEBATE_TURNABOUT_VOICE_ROOM_SEND[\s\S]{0,120}DEBATE_FORUM_VOICE_ROOM_SEND/u,
     );
-    assert.match(
-      page,
-      /"debate",\s*utterance\.format,/u,
-    );
+    assert.match(page, /"debate",\s*utterance\.format,/u);
   });
 
   it("keeps Debate voice playback enabled when optional effects are off", () => {
@@ -227,7 +343,9 @@ describe("Debate experience", () => {
     assert.match(source, /activeCastSlot/u);
     assert.match(source, /assignBotToCastSlot/u);
     assert.match(source, /Already cast/u);
-    assert.match(source, /Hard-muted bots cannot moderate/u);
+    assert.match(source, /aria-label="Randomly select all three actors"/u);
+    assert.match(source, /onClick=\{randomizeCast\}/u);
+    assert.match(source, /disabled=\{bots\.length < 3\}/u);
     assert.match(
       source,
       /className=\{styles\.studioUtilityButton\}[\s\S]*?onClick=\{openStageAlignment\}[\s\S]*?data-tutorial-target="debate-align-stage"/u,
@@ -260,18 +378,75 @@ describe("Debate experience", () => {
       /\.dashboard \.researchBox\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(280px,\s*1fr\) auto/u,
     );
     assert.match(source, /\/end-early/u);
-    assert.match(source, />\s*End early\s*</u);
+    assert.match(source, /\/jury\/skip-deliberation/u);
+    assert.match(
+      source,
+      /juryDeliberating \? "Skip deliberation" : "End early"/u,
+    );
+    assert.match(
+      source,
+      /debateAwaitsJuryDeliberationChoice\(activeSession\)/u,
+    );
+    assert.match(source, /Begin deliberation/u);
+    assert.match(source, /Skip to ballots/u);
+    assert.match(source, /All five jurors will still cast final ballots/u);
     assert.match(source, /role="alertdialog"/u);
-    assert.match(source, /limited public record heard so far/u);
+    assert.match(
+      source,
+      /limited \$\{debatePublicMaterialName\(session\.formality\)\.toLowerCase\(\)\}/u,
+    );
     assert.match(source, /disabled=\{busy \|\| presenting\}/u);
+    assert.match(css, /\.juryDeliberationChoice/u);
     assert.match(css, /\.liveControls \.endEarlyButton/u);
+  });
+
+  it("lets a hard-muted moderator create an open-floor Debate instead of blocking cast", () => {
+    assert.doesNotMatch(source, /Hard-muted bots cannot moderate/u);
+    assert.doesNotMatch(source, /Choose an audible moderator/u);
+    assert.match(
+      source,
+      /This moderator will remain canonically silent[\s\S]*other bots will encounter that silence in character/u,
+    );
+    assert.match(source, /The moderator left the floor open/u);
+    assert.match(source, /No challenge was spoken/u);
+    assert.match(source, /Use the open floor however your side would/u);
+  });
+
+  it("projects invisible moderators through cast perception without voicing neutral ledger events", () => {
+    assert.match(source, /botPowerObserverProjectionFromEffectsV1\(/u);
+    assert.match(
+      source,
+      /cast\.some\(\(participant\) => participant\.id === target\.botId\)/u,
+    );
+    assert.match(
+      source,
+      /observerProjection\.visibility === "hidden"\s*\?\s*"hidden"/u,
+    );
+    assert.match(
+      source,
+      /if \(event\.speakerKind === "system"\)[\s\S]{0,260}revealEventSilently/u,
+    );
+    assert.match(source, /latestModeratorEvent\?\.speakerKind === "system"/u);
+    assert.match(
+      source,
+      /event\.speakerKind === "system"[\s\S]{0,260}session\.formality === "parliamentary"[\s\S]{0,120}Public record/u,
+    );
+    assert.match(
+      source,
+      /archived\.status === "completed" \? "replay" : "live"/u,
+    );
+    assert.match(source, /\?perspective=\$\{perspective\}/u);
   });
 
   it("keeps stable tutorial targets across the complete Duel workflow", () => {
     for (const target of [
       "debate-new",
+      "debate-presets",
       "debate-synthesize",
       "debate-cast",
+      "debate-jury",
+      "debate-jury-roster",
+      "debate-jury-chamber",
       "debate-consent",
       "debate-evidence",
       "debate-readiness",
@@ -311,12 +486,18 @@ describe("Debate experience", () => {
       source.match(
         /const DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS = new Set\(\[([\s\S]*?)\]\);/u,
       )?.[1] ?? "";
-    assert.doesNotMatch(visibleKinds, /"ballot"|"verdict"/u);
+    assert.doesNotMatch(visibleKinds, /"ballot"|"verdict",/u);
   });
 
-  it("presents the debate title at the top and spoken captions at the bottom", () => {
-    assert.match(source, /data-debate-stage-title="true"/u);
-    assert.match(source, /className=\{styles\.stageTitle\}/u);
+  it("presents the motion in the proceedings header and spoken captions at the bottom", () => {
+    assert.match(source, /data-debate-motion-title="true"/u);
+    assert.match(
+      source,
+      /title=\{session\.motion\.motion\}[\s\S]{0,80}\{session\.motion\.motion\}/u,
+    );
+    assert.doesNotMatch(source, /data-debate-stage-title="true"/u);
+    assert.doesNotMatch(source, /className=\{styles\.stageTitle\}/u);
+    assert.doesNotMatch(source, /className=\{styles\.motionPlinth\}/u);
     assert.match(source, /className=\{styles\.liveCaption\}/u);
     assert.match(source, /data-debate-live-caption="true"/u);
     assert.match(source, /debateSpokenText\(activePublicContent\)\.trim\(\)/u);
@@ -324,7 +505,12 @@ describe("Debate experience", () => {
       source,
       /<strong>\{visibleEventName\(session, activeEvent\)\}<\/strong>/u,
     );
-    assert.match(css, /\.stageTitle\s*\{[^}]*top:\s*11px/u);
+    assert.match(
+      css,
+      /\.liveHeader h1\s*\{[^}]*font-family:\s*var\(--font-serif[^}]*text-overflow:\s*ellipsis/u,
+    );
+    assert.doesNotMatch(css, /\.stageTitle\s*\{/u);
+    assert.doesNotMatch(css, /\.motionPlinth\s*\{/u);
     assert.match(css, /\.liveCaption\s*\{[^}]*bottom:\s*4\.5%/u);
   });
 
@@ -358,6 +544,38 @@ describe("Debate experience", () => {
     assert.match(source, /The proceeding is sealed/u);
     assert.match(source, /No prevailing side/u);
     assert.match(css, /\.stageStateOverlay\s*\{[^}]*position:\s*absolute/u);
+  });
+
+  it("keeps live controls, paused copy, and confirmation actions legible in Light Mode", () => {
+    assert.match(
+      css,
+      /\.dashboard\[data-theme="light"\] \.confirmDialog button/u,
+    );
+    assert.match(source, /className=\{styles\.confirmKeepButton\}/u);
+    assert.match(
+      css,
+      /\.dashboard\[data-theme="light"\] \.confirmDialog \.confirmKeepButton/u,
+    );
+    assert.match(
+      css,
+      /\.dashboard\[data-theme="light"\] \.confirmDialog \.confirmDeleteButton/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.liveHeader \.exitButton,\s*\.live\[data-theme="light"\] \.liveControls button\s*\{[^}]*color:\s*#3b3343;[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\)/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.stageStateOverlay > small\s*\{[^}]*color:\s*#5f5666/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.eyebrow\s*\{[^}]*color:\s*#6551b2/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.caseBoard > header span,[\s\S]*?\.live\[data-theme="light"\] \.audienceGallery > header small\s*\{[^}]*color:\s*#655c6d/u,
+    );
   });
 
   it("treats proceedings and evidence as keyboard-operable app surfaces", () => {
@@ -425,6 +643,72 @@ describe("Debate experience", () => {
       /props\.renderBotGlyph\("lucideTriangle",\s*\{[\s\S]{0,100}size: 24/u,
     );
     assert.match(css, /grid-template-columns:\s*repeat\(7,/u);
+  });
+
+  it("uses a persistent five-seat Jury camera with a lower foreground table and ballot pile", () => {
+    assert.match(source, /session\.jury\.jurors\.map/u);
+    assert.match(
+      source,
+      /renderJuryChamber\(session, activeEvent, thinkingBotId\)/u,
+    );
+    assert.match(
+      source,
+      /src=\{`\/coffee-table\/table_\$\{props\.theme\}\.png`\}/u,
+    );
+    assert.match(source, /className=\{styles\.juryChamberBots\}/u);
+    assert.match(source, /className=\{styles\.juryTableRaster\}/u);
+    assert.match(source, /className=\{styles\.juryCenterTranscript\}/u);
+    assert.match(source, /className=\{styles\.juryBallotPile\}/u);
+    assert.match(source, /className=\{styles\.juryBallotSlip\}/u);
+    assert.match(
+      source,
+      /function debateJuryCameraIsActive[\s\S]{0,260}cameraMode === "jury"/u,
+    );
+    assert.match(
+      source,
+      /session\.jury\.phase === "waiting"[\s\S]{0,180}follows the public floor/u,
+    );
+    assert.match(
+      source,
+      /!juryCameraActive[\s\S]{0,180}event\.kind === "jury_deliberation"/u,
+    );
+    assert.match(
+      source,
+      /No juror speech, reaction, voice, or individual ballot/u,
+    );
+    assert.match(source, /!participantJurySealed/u);
+    assert.match(
+      page,
+      /frozenVoiceProfile:\s*utterance\.speaker\?\.voiceProfile \?\? null/u,
+    );
+    assert.match(
+      page,
+      /frozenVoiceProfile \?\?[\s\S]{0,100}settings\.prismDefaultBotAudioVoiceProfile/u,
+    );
+    assert.match(css, /\.juryChamberBots\s*\{[^}]*z-index:\s*2/u);
+    assert.match(css, /\.juryTableRaster\s*\{[^}]*top:\s*4%[^}]*z-index:\s*3/u);
+    assert.match(css, /\.juryBallotPile\s*\{[^}]*z-index:\s*5/u);
+    assert.match(css, /@keyframes jury-ballot-cast/u);
+    assert.match(css, /\.juryChamberSeat\[data-seat="4"\]/u);
+    assert.doesNotMatch(css, /\.juryChamberSeat\[data-seat="5"\]/u);
+    assert.match(css, /\.juryCenterTranscript\s*\{[^}]*z-index:\s*5/u);
+    assert.match(css, /height:\s*calc\(100dvh - 58px\)/u);
+    assert.equal(
+      existsSync(
+        fileURLToPath(
+          new URL("../../public/coffee-table/table_light.png", import.meta.url),
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        fileURLToPath(
+          new URL("../../public/coffee-table/table_dark.png", import.meta.url),
+        ),
+      ),
+      true,
+    );
   });
 
   it("uses authored receivers and raster-aligned alpha light masks", () => {
@@ -663,14 +947,15 @@ describe("Debate experience", () => {
     assert.match(page, /"debate",\s*utterance\.format,\s*\);/u);
   });
 
-  it("directs an instant Auto camera and four manual cameras without breaking podium occlusion", () => {
+  it("directs an instant Auto camera and five manual cameras without breaking podium occlusion", () => {
     assert.match(
       source,
-      /type DebateCameraView = "wide" \| "left" \| "moderator" \| "right"/u,
+      /type DebateCameraView = "wide" \| "left" \| "moderator" \| "right" \| "jury"/u,
     );
     assert.match(source, /type DebateCameraMode = "auto" \| DebateCameraView/u);
     assert.match(source, /const DEBATE_CAMERA_VIEWS/u);
     assert.match(source, /\{ id: "auto", label: "Auto" \}/u);
+    assert.match(source, /\{ id: "jury", label: "Jury" \}/u);
     assert.match(source, /useState<DebateCameraMode>\("auto"\)/u);
     assert.match(
       source,
@@ -678,8 +963,9 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /cameraMode === "auto" \? debateAutoCameraView\(activeRole\) : cameraMode/u,
+      /const juryCameraActive = debateJuryCameraIsActive\(cameraMode, session\)/u,
     );
+    assert.match(source, /juryCameraActive[\s\S]{0,100}\? "jury"/u);
     assert.match(source, /data-camera-view=\{cameraView\}/u);
     assert.match(source, /data-camera-mode=\{cameraMode\}/u);
     assert.match(source, /aria-label="Debate stage cameras"/u);
@@ -711,7 +997,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.forumCamera\[data-camera-view="moderator"\]\s+\.botPosition\[data-role="moderator"\]\s+\.botStagePresence\s*\{[^}]*width:\s*clamp\(106px,\s*9\.3vw,\s*148px\)/u,
+      /\.forumCamera\[data-camera-view="moderator"\]\s+\.botPosition\[data-role="moderator"\]\s+\.botStagePresence\s*\{[^}]*width:\s*clamp\(114px,\s*10vw,\s*160px\)/u,
     );
     assert.match(
       css,
@@ -751,18 +1037,73 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps the motion legible and clear of the Judge marker", () => {
+  it("integrates a persona-tinted moderator-camera gavel with restrained procedural Foley", () => {
+    assert.match(source, /function DebateModeratorGavel/u);
+    assert.match(source, /data-debate-moderator-gavel="true"/u);
+    assert.match(source, /data-gavel-theme=\{props\.theme\}/u);
+    assert.match(source, /magentaTintedRasterUrl/u);
+    assert.match(source, /moderatorGavelFrameDown/u);
+    assert.match(source, /moderatorGavelFrameUp/u);
+    assert.match(source, /color=\{session\.moderator\.color/u);
+    assert.match(source, /DEBATE_GAVEL_IMPACT_DELAY_MS/u);
+    assert.match(source, /DEBATE_GAVEL_FOLEY_URLS\[cueKind\]/u);
+    assert.match(source, /playFoley\(/u);
+    assert.match(
+      source,
+      /controllerHandleRef=\{debateAtmosphereControllerRef\}/u,
+    );
+    assert.match(source, /debateModeratorGavelSpeechLeadMs\(gavelCue\.kind\)/u);
+    assert.match(
+      source,
+      /presenting && presentationEventId === activeEvent\?\.id[\s\S]{0,180}debateModeratorGavelCue/u,
+    );
+    assert.match(
+      source,
+      /visible=\{moderatorPresentation\.visibility !== "hidden"\}/u,
+    );
+    assert.match(
+      css,
+      /\.forumCamera\[data-camera-view="moderator"\][\s\S]{0,100}\.moderatorGavel\[data-visible="true"\][\s\S]{0,100}opacity:\s*1/u,
+    );
+    assert.match(
+      css,
+      /\.moderatorGavel\s*\{[^}]*top:\s*calc\(44\.5% \+ var\(--debate-gavel-offset-y,\s*0%\)\)[^}]*left:\s*calc\(53% \+ var\(--debate-gavel-offset-x,\s*0%\)\)[^}]*scale:\s*var\(--debate-gavel-scale,\s*1\)/u,
+    );
+    assert.doesNotMatch(css, /moderator-gavel-(?:dark|light)-tint-mask\.png/u);
+    assert.match(css, /@keyframes debate-gavel-attention/u);
+    assert.match(css, /@keyframes debate-gavel-order/u);
+    assert.match(css, /@keyframes debate-gavel-attention-frame-up/u);
+    assert.match(css, /@keyframes debate-gavel-order-frame-up/u);
+    const attentionKeyframes =
+      css.match(/@keyframes debate-gavel-attention\s*\{([\s\S]*?)\n\}/u)?.[1] ??
+      "";
+    const orderKeyframes =
+      css.match(/@keyframes debate-gavel-order\s*\{([\s\S]*?)\n\}/u)?.[1] ?? "";
+    assert.doesNotMatch(attentionKeyframes, /rotate\(/u);
+    assert.doesNotMatch(orderKeyframes, /rotate\(/u);
+    assert.match(
+      css,
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]{0,160}\.moderatorGavelMotion/u,
+    );
+    for (const relativePath of [
+      "../../public/debate/moderator-gavel-dark-down.png",
+      "../../public/debate/moderator-gavel-dark-up.png",
+      "../../public/debate/moderator-gavel-light-down.png",
+      "../../public/debate/moderator-gavel-light-up.png",
+      "../../public/audio/debate/gavel-attention.mp3",
+      "../../public/audio/debate/gavel-order.mp3",
+    ]) {
+      assert.equal(
+        existsSync(fileURLToPath(new URL(relativePath, import.meta.url))),
+        true,
+      );
+    }
+  });
+
+  it("keeps the Judge marker and role plates clear of the stage", () => {
     assert.match(
       css,
       /\.playerPresence\[data-role="judge"\]\s*\{[^}]*bottom:\s*14%/u,
-    );
-    assert.match(
-      css,
-      /\.motionPlinth\s*\{[^}]*color:\s*#f5f1f7[^}]*text-shadow:/u,
-    );
-    assert.match(
-      css,
-      /\.live\[data-theme="light"\]\s+\.motionPlinth\s*\{[^}]*color:\s*#211b26[^}]*text-shadow:/u,
     );
     assert.match(
       css,
@@ -817,13 +1158,38 @@ describe("Debate experience", () => {
     assert.match(source, /formatDebateStageAlignmentClipboard/u);
     assert.match(source, /type="range"/u);
     assert.match(source, /writeDebateStageAlignment/u);
-    assert.match(source, /aria-label="Debate light color blend modes"/u);
     assert.match(source, /DEBATE_STAGE_LIGHT_BLEND_MODES\.map/u);
     assert.match(
       source,
       /aria-label=\{`\$\{label\} Debate light blend mode`\}/u,
     );
     assert.match(source, /updateDebateStageLightBlendMode/u);
+    assert.match(source, /aria-label="Debate moderator gavel controls"/u);
+    assert.match(source, /updateDebateStageGavel/u);
+    assert.match(source, /aria-label="Test moderator gavel"/u);
+    assert.match(source, /data-debate-gavel-test="attention"/u);
+    assert.match(source, /data-debate-gavel-test="order"/u);
+    assert.match(source, /previewStageAlignmentGavel\("attention"\)/u);
+    assert.match(source, /previewStageAlignmentGavel\("order"\)/u);
+    assert.match(source, /cue=\{stageAlignmentGavelCue\}/u);
+    assert.match(
+      source,
+      /controllerHandleRef=\{stageAlignmentAtmosphereControllerRef\}/u,
+    );
+    assert.match(
+      source,
+      /sessionKey=\{`debate-alignment:\$\{session\?\.id \?\? props\.storageScopeId\}`\}/u,
+    );
+    assert.match(source, /label: "Horizontal"/u);
+    assert.match(source, /label: "Vertical"/u);
+    assert.match(source, /label: "Size"/u);
+    assert.match(
+      source,
+      /aria-label=\{`Debate moderator gavel \$\{control\.label\.toLowerCase\(\)\}`\}/u,
+    );
+    assert.match(source, /aria-label="Debate light color mask controls"/u);
+    assert.match(source, /updateDebateStageLightMaskOpacity/u);
+    assert.match(source, /Debate color mask opacity/u);
     assert.match(source, /Saved separately for Light and Dark/u);
     assert.match(
       source,
@@ -851,6 +1217,8 @@ describe("Debate experience", () => {
     );
     assert.match(css, /--debate-for-glyph-offset-x/u);
     assert.match(css, /--debate-against-nameplate-offset-y/u);
+    assert.match(css, /--debate-light-mask-opacity-dark/u);
+    assert.match(css, /--debate-light-mask-opacity-light/u);
     assert.match(
       css,
       /\.alignmentViewToggle,[\s\S]*?\.alignmentThemeToggle\s*\{[^}]*border-radius:\s*999px/u,

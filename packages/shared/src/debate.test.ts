@@ -4,19 +4,153 @@ import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMATS,
+  DEBATE_FORMALITY_SPECTRUM,
   DEBATE_FORMAT_SCHEMA_VERSION,
+  DEBATE_JURY_DISCUSSION_TURNS,
   DEBATE_MOTION_MAX_LENGTH,
+  DEBATE_SETUP_PRESETS,
+  defaultDebateJuryStateV1,
   defaultDebateFormatStateV1,
   debateSourceIdsFromText,
   debateSpokenText,
+  debateFormalityGuidance,
+  normalizeDebateFormalityId,
   isValidDebateSourceId,
   normalizeDebateEvidencePacketV1,
   normalizeDebateFormatId,
   normalizeDebateFormatStateV1,
   normalizeDebateIdempotencyKey,
+  normalizeDebateJuryStateV1,
   normalizeDebateMotionSlateV1,
+  normalizeDebateSetupPresetId,
   sanitizeDebateStatementSources,
 } from "./debate.ts";
+
+test("publishes five flavor-first Debate setup presets across the formality spectrum", () => {
+  assert.deepEqual(
+    DEBATE_SETUP_PRESETS.map(
+      ({ id, name, formality, format, playerRole, juryEnabled }) => ({
+        id,
+        name,
+        formality,
+        format,
+        playerRole,
+        juryEnabled,
+      }),
+    ),
+    [
+      {
+        id: "daytime-showdown",
+        name: "Daytime Showdown",
+        formality: "free_for_all",
+        format: "forum",
+        playerRole: "spectator",
+        juryEnabled: true,
+      },
+      {
+        id: "take-the-floor",
+        name: "Crossfire",
+        formality: "heated",
+        format: "forum",
+        playerRole: "participant",
+        juryEnabled: false,
+      },
+      {
+        id: "public-forum",
+        name: "Town Hall",
+        formality: "plainspoken",
+        format: "forum",
+        playerRole: "spectator",
+        juryEnabled: true,
+      },
+      {
+        id: "jury-trial",
+        name: "Bench Trial",
+        formality: "structured",
+        format: "turnabout",
+        playerRole: "judge",
+        juryEnabled: false,
+      },
+      {
+        id: "classic-duel",
+        name: "University Union",
+        formality: "parliamentary",
+        format: "forum",
+        playerRole: "judge",
+        juryEnabled: false,
+      },
+    ],
+  );
+  assert.deepEqual(
+    DEBATE_SETUP_PRESETS.map((preset) => preset.formality).sort(),
+    ["free_for_all", "heated", "parliamentary", "plainspoken", "structured"],
+  );
+  assert.equal(normalizeDebateSetupPresetId("jury-trial"), "jury-trial");
+  assert.equal(normalizeDebateSetupPresetId("unknown"), "custom");
+});
+
+test("publishes a stable five-stop Debate formality spectrum with parliamentary legacy default", () => {
+  assert.deepEqual(
+    DEBATE_FORMALITY_SPECTRUM.map((level) => level.id),
+    ["free_for_all", "heated", "plainspoken", "structured", "parliamentary"],
+  );
+  assert.equal(normalizeDebateFormalityId(undefined), "parliamentary");
+  assert.equal(normalizeDebateFormalityId("unknown"), "parliamentary");
+  assert.equal(normalizeDebateFormalityId("heated"), "heated");
+  assert.match(debateFormalityGuidance("free_for_all"), /daytime-chaos|theatrical/u);
+  assert.match(debateFormalityGuidance("plainspoken"), /Avoid canned parliamentary or court/u);
+  assert.match(debateFormalityGuidance("parliamentary"), /House, record, proceedings, points/u);
+  assert.match(debateFormalityGuidance("heated"), /challenge motives or credibility/u);
+  assert.match(debateFormalityGuidance("structured"), /formal, direct, and disciplined/u);
+});
+
+test("defaults legacy Debate sessions to a disabled Jury", () => {
+  assert.deepEqual(normalizeDebateJuryStateV1(undefined), {
+    ...defaultDebateJuryStateV1(),
+    discussionTurnTarget: DEBATE_JURY_DISCUSSION_TURNS,
+  });
+});
+
+test("migrates seven-seat Jury records to the first five jurors and their ballots", () => {
+  const jurors = Array.from({ length: 7 }, (_, index) => ({
+    role: "juror",
+    sideId: null,
+    id: `juror-${index + 1}`,
+    name: `Juror ${index + 1}`,
+    source: "generic",
+  }));
+  const ballots = jurors.map((juror) => ({
+    jurorBotId: juror.id,
+    stage: "final",
+    sideId: "for",
+  }));
+  const normalized = normalizeDebateJuryStateV1({
+    enabled: true,
+    cadence: "natural-seven",
+    phase: "complete",
+    jurors,
+    forepersonBotId: "juror-1",
+    finalBallots: ballots,
+    speakerCounts: Object.fromEntries(
+      jurors.map((juror) => [juror.id, 1]),
+    ),
+  });
+
+  assert.equal(normalized.cadence, "natural-five");
+  assert.deepEqual(
+    normalized.jurors.map((juror) => juror.id),
+    ["juror-1", "juror-2", "juror-3", "juror-4", "juror-5"],
+  );
+  assert.equal(normalized.finalBallots.length, 5);
+  assert.equal(normalized.forVotes, 5);
+  assert.deepEqual(Object.keys(normalized.speakerCounts), [
+    "juror-1",
+    "juror-2",
+    "juror-3",
+    "juror-4",
+    "juror-5",
+  ]);
+});
 
 test("separates executable Debate formats from visible future productions", () => {
   assert.deepEqual(

@@ -82,7 +82,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.1",
+    version: "0.2",
     status: "preview",
   },
   polling: {
@@ -100,7 +100,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.39",
+    version: "1.40",
     status: "active",
   },
   feed: {
@@ -287,7 +287,10 @@ export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Every future bot-embodying applet must enforce mute before it can activate. */
+/**
+ * Every future bot-embodying applet must implement mute before the applet
+ * activates. This is a shipping requirement, never a bot eligibility gate.
+ */
 export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModePolicy> = {
   chat: "enforced",
   zen: "enforced",

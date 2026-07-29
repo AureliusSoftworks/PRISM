@@ -32,8 +32,8 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Chat | v1.35 | Active | Full playground with independent saved conversations inside each PRISM or persona Home. |
 | Zen | v1.33 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
 | Coffee | v2.39 | Active | Two-to-five-bot tables with composable identity Powers, directional interruption irritation, synthesized identity, surreal café atmospheres, and faithful replay. |
-| Signal | v1.39 | Active | Interview studio with composable identity Powers, directional interruption irritation, one-turn floor reclaim, visible social silence, and faithful replay. |
-| Debate | v0.1 | Preview | One-on-one Prismatic Forum Duels with frozen evidence, explicit advocacy consent, live roles, scoreless case boards, and durable verdicts. |
+| Signal | v1.40 | Active | Interview studio where any host Power can shape bot or Producer-guest encounters without setup rejection, with faithful replay. |
+| Debate | v0.2 | Preview | Power-permissive Forum and Turnabout proceedings with frozen evidence, explicit advocacy consent, organic cast reactions, and durable verdicts. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
@@ -90,6 +90,40 @@ stages do not block the standalone preview.
   deferred until they define both perspectives.
 
 ## Changelog
+
+### 2026-07-29
+
+- Reworked Debate’s five built-in proceeding presets as flavor-first room
+  choices: University Union, Daytime Showdown, Crossfire, Town Hall, and Bench
+  Trial. Each owns one frozen formality level alongside its format, player
+  role, and Jury stance; selecting one preserves motion, cast, evidence,
+  routing, participant side, and stage alignment, but renews advocacy consent
+  whenever its format or formality changes.
+- Added a frozen five-stop Debate formality spectrum from Free-for-all through
+  Parliamentary. The selected register now governs motion synthesis, room
+  naming, moderator procedure, advocacy consent, speeches, Jury discussion,
+  ballots, rulings, early conclusions, and archived transcripts while leaving
+  each bot's authored voice in charge. Parliamentary preserves the existing
+  Assembly Chamber and Court of Record language; casual levels use direct
+  Debate Floor and Turnabout Floor language instead.
+- Reframed Debate's binding Jury as a five-seat live camera. Jurors now follow
+  the case and exchange brief between-turn reactions throughout the proceeding;
+  those reactions play when the Jury camera is active and resolve immediately
+  from other views. Final anonymous ballots slide into a visible center-table
+  pile before the split is read.
+- Bumped `Debate` to `v0.2` and `Signal` to `v1.40` for the
+  no-Power-eligibility-gates contract. A hard-muted moderator now opens with
+  canonical silence while advocates encounter the silence in character and the
+  public ledger preserves required procedure. Debate moderation is also
+  perception-aware: Ryuk completes durable hidden turns, an unaware cast sees
+  and hears only an empty podium plus neutral procedure, a matching Light alone
+  receives his words, and Tiny Bill stays unseen but audible. Inaccessible
+  moderator language never enters the shared case board or listener-facing
+  ballot record. Signal likewise lets mute and echo hosts take a human Producer
+  guest, and muted off-air host chat returns canonical silence instead of
+  rejecting the interaction. A muted host can also attempt `Interrupt guest
+  now`; the saved outcome is silence rather than a disabled control or
+  fabricated interjection.
 
 ### 2026-07-28
 

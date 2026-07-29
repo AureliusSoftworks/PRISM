@@ -61738,6 +61738,12 @@ function HomeContent(): React.JSX.Element {
     ): Promise<boolean> => {
       const voiceSelection = voicePlaybackSelectionRef.current;
       const playerVoice = botSummary.producerGuest === true;
+      const frozenVoiceProfile =
+        (
+          botSummary as BotcastBotSummary & {
+            frozenVoiceProfile?: BotAudioVoiceProfileV1 | null;
+          }
+        ).frozenVoiceProfile ?? null;
       const captureAtMs = replayAudioMasterCaptureElapsedMs(message.episodeId);
       if (captureAtMs !== null) {
         markReplayDirectionEvent({
@@ -61787,25 +61793,27 @@ function HomeContent(): React.JSX.Element {
         return false;
       }
       const bot = bots.find((candidate) => candidate.id === botSummary.id);
-      if (!playerVoice && !bot) return false;
+      if (!playerVoice && !bot && !frozenVoiceProfile) return false;
       const playbackVolume = normalizeBotVoiceVolume(
         settings.voiceVolume *
           normalizeBotcastVoiceLevel(voiceLevel) *
           (playerVoice
             ? 1
             : (botSummary.voiceGainMultiplier ??
-              botPowerVoiceGainMultiplierV1(bot!.powers))),
+              (bot ? botPowerVoiceGainMultiplierV1(bot.powers) : 1))),
       );
       if (playbackVolume <= 0) return false;
-      const profile = playerVoice
-        ? coffeePlayerPlaybackProfile(
-            settings.prismDefaultBotAudioVoiceProfile,
-          )
-        : resolveBotIdentityMirrorVoiceV1(
-            botSummary.identityMirrorState,
-            bot!.authored_audio_voice_profile,
-            bot!.audio_voice_profile_override,
-          );
+      const profile =
+        frozenVoiceProfile ??
+        (playerVoice
+          ? coffeePlayerPlaybackProfile(
+              settings.prismDefaultBotAudioVoiceProfile,
+            )
+          : resolveBotIdentityMirrorVoiceV1(
+              botSummary.identityMirrorState,
+              bot!.authored_audio_voice_profile,
+              bot!.audio_voice_profile_override,
+            ));
       const playbackProfile = applyDirectionalIrritationGainToProfile(
         normalizeBotAudioVoiceProfileV1(profile),
         message.directionalIrritationDelivery?.gainDbBoost,
@@ -128480,7 +128488,16 @@ function HomeContent(): React.JSX.Element {
             (candidate) => candidate.id === utterance.voiceSourceBotId,
           )
         : speakerBot;
-      const speakerId = voiceBot?.id ?? "__debate_player__";
+      const speakerPowers =
+        utterance.speaker?.powers ?? speakerBot?.powers ?? [];
+      const speakerId =
+        voiceBot?.id ??
+        (utterance.player
+          ? "__debate_player__"
+          : "__debate_prism_juror__");
+      const usePrismDefaultVoice =
+        utterance.player ||
+        (!speakerBot && utterance.speaker !== null);
       return playBotcastUtterance(
         {
           id: utterance.event.id,
@@ -128495,23 +128512,28 @@ function HomeContent(): React.JSX.Element {
         },
         {
           id: speakerId,
-          name: speakerBot?.name ?? user?.displayName?.trim() ?? "You",
-          color: speakerBot?.color ?? PRISM_COLORS.i,
-          glyph: speakerBot?.glyph ?? "◇",
+          name:
+            speakerBot?.name ??
+            utterance.speaker?.name ??
+            user?.displayName?.trim() ??
+            "You",
+          color:
+            speakerBot?.color ?? utterance.speaker?.color ?? PRISM_COLORS.i,
+          glyph: speakerBot?.glyph ?? utterance.speaker?.glyph ?? "◇",
           online_enabled: voiceBot?.online_enabled ?? 1,
-          muted: speakerBot
-            ? botPowerIsMutedV1(speakerBot.powers)
-            : false,
-          voiceGainMultiplier: speakerBot
-            ? botPowerVoiceGainMultiplierV1(speakerBot.powers)
-            : 1,
-          voicePresence: speakerBot
-            ? botPowerVoicePresenceModeV1(speakerBot.powers)
-            : null,
+          muted: botPowerIsMutedV1(speakerPowers),
+          voiceGainMultiplier:
+            botPowerVoiceGainMultiplierV1(speakerPowers),
+          voicePresence: botPowerVoicePresenceModeV1(speakerPowers),
           personaTemperament: signalPersonaTemperamentFor(
-            speakerBot?.system_prompt ?? "",
+            utterance.speaker?.systemPrompt ??
+              speakerBot?.system_prompt ??
+              "",
           ),
-          producerGuest: utterance.player,
+          producerGuest: usePrismDefaultVoice,
+          frozenVoiceProfile: utterance.speaker?.voiceProfile ?? null,
+        } as BotcastBotSummary & {
+          frozenVoiceProfile?: BotAudioVoiceProfileV1 | null;
         },
         utterance.lifecycle ?? {},
         1,

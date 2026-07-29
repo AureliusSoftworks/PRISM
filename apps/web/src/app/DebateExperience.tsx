@@ -11,23 +11,30 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   DEBATE_FORMAT_CATALOG,
+  DEBATE_FORMALITY_SPECTRUM,
   DEBATE_SCHEMA_VERSION,
+  DEBATE_SETUP_PRESETS,
+  botPowerObserverProjectionFromEffectsV1,
+  debateFormalityDescriptor,
   debateSpokenText,
   type DebateAdvocacyConsent,
   type DebateCaseCardV1,
   type DebateEventV1,
   type DebateEvidencePacketV1,
   type DebateEvidenceSourceV1,
+  type DebateFormalityId,
   type DebateFormatId,
   type DebateMotionSlateV1,
   type DebateBotSnapshotV1,
   type DebatePlayerRole,
+  type DebateSetupPresetId,
   type DebateSessionListItemV1,
   type DebateSessionV1,
   type DebateSideId,
@@ -44,8 +51,11 @@ import styles from "./DebateExperience.module.css";
 import type { DebateForumRole } from "./DebateForumScene";
 import {
   copyDebateMotionSlate,
+  applyDebateSetupPreset,
   debateAlignmentPreviewCast,
   debatePrefilledCast,
+  derivedDebateSetupPresetId,
+  randomDebateCast,
 } from "./debateExperienceState";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
@@ -64,7 +74,13 @@ import {
   DEBATE_STAGE_ALIGNMENT_ITEMS,
   DEBATE_STAGE_ALIGNMENT_ROLES,
   DEBATE_STAGE_ALIGNMENT_STEP,
+  DEBATE_STAGE_GAVEL_SIZE_MAX,
+  DEBATE_STAGE_GAVEL_SIZE_MIN,
+  DEBATE_STAGE_GAVEL_SIZE_STEP,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
+  DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX,
+  DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN,
+  DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
   copyDebateStageAlignment,
   debateStageAlignmentOffset,
@@ -74,12 +90,14 @@ import {
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
+  updateDebateStageGavel,
   updateDebateStageLightBlendMode,
+  updateDebateStageLightMaskOpacity,
   writeDebateStageAlignment,
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
-  type DebateStageAlignmentV3,
+  type DebateStageAlignmentV4,
   type DebateStageOffsetV1,
 } from "./debateStageAlignment";
 import {
@@ -94,13 +112,22 @@ import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
   type SessionAmbientBotVocalizationCue,
+  type SessionAtmosphereController,
   type SessionAtmosphereMix,
 } from "./session-atmosphere-audio";
-import { debateVocalFoleyTargetId } from "./debateFoley";
+import {
+  DEBATE_GAVEL_FOLEY_URLS,
+  DEBATE_GAVEL_IMPACT_DELAY_MS,
+  debateModeratorGavelCue,
+  debateModeratorGavelSpeechLeadMs,
+  debateVocalFoleyTargetId,
+  type DebateModeratorGavelCue,
+} from "./debateFoley";
 import {
   DEBATE_FORUM_FOLEY_ROOM_SEND,
   DEBATE_TURNABOUT_FOLEY_ROOM_SEND,
 } from "./roomAcoustics";
+import { magentaTintedRasterUrl } from "./magentaKeyRaster";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
@@ -110,6 +137,9 @@ export interface DebateBotSummary {
   color: string | null;
   glyph: string | null;
   avatarDetails?: DebateBotSnapshotV1["avatarDetails"];
+  voiceProfile?: DebateBotSnapshotV1["voiceProfile"];
+  powers?: DebateBotSnapshotV1["powers"];
+  systemPrompt?: string;
   hardMuted: boolean;
 }
 
@@ -183,7 +213,7 @@ export interface DebateExperienceProps {
 type DebateView = "dashboard" | "live";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
-type DebateCameraView = "wide" | "left" | "moderator" | "right";
+type DebateCameraView = "wide" | "left" | "moderator" | "right" | "jury";
 type DebateCameraMode = "auto" | DebateCameraView;
 type DebateClipboardState = "idle" | "copying" | "copied" | "failed";
 type DebateLiveReveal = {
@@ -205,7 +235,7 @@ type DebateStageAlignmentDrag = {
   startClientY: number;
   stageWidth: number;
   stageHeight: number;
-  startAlignment: DebateStageAlignmentV3;
+  startAlignment: DebateStageAlignmentV4;
 };
 
 const DEBATE_GALLERY_COLORS = [
@@ -238,6 +268,7 @@ const DEBATE_CAMERA_VIEWS: ReadonlyArray<{
   { id: "moderator", label: "Moderator" },
   { id: "right", label: "Right" },
   { id: "wide", label: "Wide" },
+  { id: "jury", label: "Jury" },
 ];
 
 function debateAutoCameraView(
@@ -301,6 +332,114 @@ function DebateForumLightMasks(): React.JSX.Element {
   );
 }
 
+function DebateModeratorGavel(props: {
+  theme: "light" | "dark";
+  color?: string | null;
+  cue: DebateModeratorGavelCue | null;
+  sessionId?: string;
+  audioEnabled?: boolean;
+  visible?: boolean;
+  atmosphereControllerRef?: RefObject<SessionAtmosphereController | null>;
+}): React.JSX.Element {
+  const lastPlayedCueRef = useRef<string | null>(null);
+  const downSource = `/debate/moderator-gavel-${props.theme}-down.png`;
+  const upSource = `/debate/moderator-gavel-${props.theme}-up.png`;
+  const spriteRequestKey = `${downSource}|${props.color ?? ""}`;
+  const [spriteSet, setSpriteSet] = useState<{
+    requestKey: string;
+    down: string;
+    up: string;
+  } | null>(null);
+  const downSprite =
+    spriteSet?.requestKey === spriteRequestKey ? spriteSet.down : null;
+  const upSprite =
+    spriteSet?.requestKey === spriteRequestKey ? spriteSet.up : null;
+  const cueKey =
+    props.cue && props.sessionId
+      ? `${props.sessionId}:${props.cue.eventId}:${props.cue.kind}`
+      : null;
+  const cueKind = props.cue?.kind ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      magentaTintedRasterUrl(downSource, props.color),
+      magentaTintedRasterUrl(upSource, props.color),
+    ]).then(([downUrl, upUrl]) => {
+      if (cancelled) return;
+      setSpriteSet({
+        requestKey: spriteRequestKey,
+        down: downUrl,
+        up: upUrl,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [downSource, props.color, spriteRequestKey, upSource]);
+
+  useEffect(() => {
+    if (
+      !cueKind ||
+      !cueKey ||
+      !props.audioEnabled ||
+      !props.atmosphereControllerRef
+    ) {
+      return;
+    }
+    if (lastPlayedCueRef.current === cueKey) return;
+    lastPlayedCueRef.current = cueKey;
+    const timer = window.setTimeout(() => {
+      props.atmosphereControllerRef?.current?.playFoley(
+        DEBATE_GAVEL_FOLEY_URLS[cueKind],
+        {
+          trim: cueKind === "order" ? 0.72 : 0.66,
+          lowCutHz: 65,
+          highCutHz: 12_000,
+          stereoPan: 0.14,
+          tag: `debate-gavel:${cueKey}`,
+        },
+      );
+    }, DEBATE_GAVEL_IMPACT_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [cueKey, cueKind, props.atmosphereControllerRef, props.audioEnabled]);
+
+  return (
+    <div
+      className={styles.moderatorGavel}
+      data-debate-moderator-gavel="true"
+      data-gavel-theme={props.theme}
+      data-visible={props.visible === false ? "false" : "true"}
+      aria-hidden="true"
+    >
+      <div
+        className={styles.moderatorGavelMotion}
+        data-strike={props.cue?.kind}
+        key={cueKey ?? "gavel-rest"}
+      >
+        {/* Runtime-tinted blob URLs cannot use the Next image optimizer. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          className={`${styles.moderatorGavelFrame} ${styles.moderatorGavelFrameDown}`}
+          data-tint-ready={downSprite ? "true" : "false"}
+          src={downSprite ?? downSource}
+          alt=""
+          draggable={false}
+        />
+        {/* Runtime-tinted blob URLs cannot use the Next image optimizer. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          className={`${styles.moderatorGavelFrame} ${styles.moderatorGavelFrameUp}`}
+          data-tint-ready={upSprite ? "true" : "false"}
+          src={upSprite ?? upSource}
+          alt=""
+          draggable={false}
+        />
+      </div>
+    </div>
+  );
+}
+
 function debateAlignmentPreviewSnapshot(
   bot: DebateBotSummary,
   role: DebateBotSnapshotV1["role"],
@@ -338,6 +477,8 @@ const DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS = new Set([
   "reaction",
   "interjection",
   "moderator_ruling",
+  "jury_deliberation",
+  "jury_verdict",
   "error",
 ]);
 
@@ -372,6 +513,12 @@ function debateCaseBoardAtSequence(
 
 function debateExpectedBotId(session: DebateSessionV1): string | null {
   const step = session.stepKey;
+  if (step.startsWith("jury_initial_")) {
+    return session.jury.jurors[session.jury.initialBallots.length]?.id ?? null;
+  }
+  if (step.startsWith("jury_final_")) {
+    return session.jury.jurors[session.jury.finalBallots.length]?.id ?? null;
+  }
   if (
     step === "intro" ||
     step === "turnabout_intro" ||
@@ -410,11 +557,22 @@ function debateExpectedBotId(session: DebateSessionV1): string | null {
 function debatePresentationEvents(
   previous: DebateSessionV1 | null,
   next: DebateSessionV1,
+  juryCameraActive: boolean,
 ): DebateEventV1[] {
   const previousSequence = previous?.events.at(-1)?.sequence ?? 0;
   return next.events.filter(
     (event) =>
       event.sequence > previousSequence &&
+      !(
+        !juryCameraActive &&
+        (event.kind === "jury_deliberation" ||
+          (event.kind === "ballot" && event.speakerKind === "juror"))
+      ) &&
+      !(
+        next.jury.enabled &&
+        next.playerRole === "participant" &&
+        event.kind === "jury_verdict"
+      ) &&
       (event.kind === "speech" ||
         event.kind === "phase" ||
         event.kind === "silence" ||
@@ -428,7 +586,24 @@ function debatePresentationEvents(
         event.kind === "interjection" ||
         event.kind === "moderator_ruling" ||
         event.kind === "ballot" ||
+        event.kind === "jury_deliberation" ||
+        event.kind === "jury_verdict" ||
         (event.kind === "verdict" && event.speakerKind === "player")),
+  );
+}
+
+function debateJuryCameraIsActive(
+  cameraMode: DebateCameraMode,
+  session: DebateSessionV1,
+): boolean {
+  if (!session.jury.enabled || session.playerRole === "participant") {
+    return false;
+  }
+  if (cameraMode === "jury") return true;
+  return (
+    cameraMode === "auto" &&
+    session.jury.phase !== "waiting" &&
+    session.jury.phase !== "disabled"
   );
 }
 
@@ -479,18 +654,34 @@ function phaseLabel(session: DebateSessionV1): string {
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
 }
 
+function debateAwaitsJuryDeliberationChoice(session: DebateSessionV1): boolean {
+  return (
+    session.jury.enabled &&
+    session.stepKey === "jury_deliberation_0" &&
+    session.jury.discussionTurnCount === 0 &&
+    session.jury.calledVoteAt === null
+  );
+}
+
 function roleDescription(
   role: DebatePlayerRole,
   format: DebateFormatId,
+  formality: DebateFormalityId,
 ): string {
   if (format === "turnabout") {
     if (role === "judge") {
-      return "Press or test any statement against frozen evidence, then issue the final record ruling.";
+      return formality === "parliamentary"
+        ? "Press or test any statement against frozen evidence, then issue the final record ruling."
+        : "Press or test any claim against frozen evidence, then make the final call.";
     }
     if (role === "participant") {
-      return "Examine the opposing testimony while your advocate keeps your side’s formal identity.";
+      return formality === "parliamentary"
+        ? "Examine the opposing testimony while your advocate keeps your side’s formal identity."
+        : "Press the opposing claims while your advocate keeps your side’s position.";
     }
-    return "Watch the moderator press every statement before the three-bot public-record resolution.";
+    return formality === "parliamentary"
+      ? "Watch the moderator press every statement before the three-bot public-record resolution."
+      : "Watch the moderator press every claim before the three-bot decision.";
   }
   if (role === "judge") {
     return "Ask one challenge and make the final ruling. Bot ballots become an agreement and dissent epilogue.";
@@ -501,22 +692,55 @@ function roleDescription(
   return "Watch the moderator challenge both advocates. The three-bot majority decides the verdict.";
 }
 
+function debateProductionName(
+  format: DebateFormatId,
+  formality: DebateFormalityId,
+): string {
+  if (formality === "parliamentary") {
+    return format === "turnabout" ? "Court of Record" : "Assembly Chamber";
+  }
+  return format === "turnabout" ? "Turnabout Floor" : "Debate Floor";
+}
+
+function debatePublicMaterialName(formality: DebateFormalityId): string {
+  if (formality === "parliamentary") return "Public record";
+  if (formality === "structured") return "Documented exchange";
+  return "Public exchange";
+}
+
 function roleSummary(
   role: DebatePlayerRole,
   format: DebateFormatId = "forum",
+  formality: DebateFormalityId = "parliamentary",
 ): string {
   if (format === "turnabout") {
-    if (role === "judge") return "Examine the record, then issue the ruling.";
-    if (role === "participant") {
-      return "Examine the opposing testimony for your side.";
+    if (role === "judge") {
+      return formality === "parliamentary"
+        ? "Examine the record, then issue the ruling."
+        : "Test the claims, then make the final call.";
     }
-    return "Observe a neutral examination of every statement.";
+    if (role === "participant") {
+      return formality === "parliamentary"
+        ? "Examine the opposing testimony for your side."
+        : "Press the opposing claims for your side.";
+    }
+    return "Observe a neutral examination of every claim.";
   }
   if (role === "judge") return "Challenge once, then issue the final ruling.";
   if (role === "participant") {
     return "Share the floor with your advocate partner.";
   }
   return "Observe the Duel without taking the floor.";
+}
+
+function juryRoleDescription(role: DebatePlayerRole): string {
+  if (role === "judge") {
+    return "Five sampled jurors follow the floor, discuss the case, and advise your final ruling.";
+  }
+  if (role === "participant") {
+    return "The chamber remains completely sealed. You receive only the winning side and anonymous 5-vote split.";
+  }
+  return "Watch five sampled jurors follow and discuss the case. Their majority becomes the final verdict.";
 }
 
 function verdictLabel(session: DebateSessionV1): string {
@@ -532,6 +756,12 @@ function visibleEventName(
   event: DebateEventV1,
 ): string {
   if (event.speakerKind === "player") return "You";
+  if (event.speakerKind === "system") {
+    if (session.format !== "turnabout") return "Forum";
+    if (session.formality === "parliamentary") return "Public record";
+    if (session.formality === "structured") return "Documented exchange";
+    return "Debate floor";
+  }
   if (event.speakerBotId === session.moderator.id)
     return session.moderator.name;
   if (event.speakerBotId === session.forAdvocate.id) {
@@ -540,7 +770,14 @@ function visibleEventName(
   if (event.speakerBotId === session.againstAdvocate.id) {
     return session.againstAdvocate.name;
   }
-  return session.format === "turnabout" ? "Public record" : "Forum";
+  const juror = session.jury.jurors.find(
+    (candidate) => candidate.id === event.speakerBotId,
+  );
+  if (juror) return juror.name;
+  if (session.format !== "turnabout") return "Forum";
+  if (session.formality === "parliamentary") return "Public record";
+  if (session.formality === "structured") return "Documented exchange";
+  return "Debate floor";
 }
 
 function debateSideLabel(
@@ -567,6 +804,9 @@ export function formatDebateVerboseTranscript(
     `- Status: ${session.status}`,
     `- Revision: ${session.revision}`,
     `- Format: ${session.format} v${session.formatVersion}`,
+    `- Formality: ${debateFormalityDescriptor(session.formality).title}`,
+    `- Preset: ${session.setupPresetId}`,
+    `- Jury: ${session.jury.enabled ? "enabled" : "disabled"}`,
     `- Player role: ${session.playerRole}${session.playerSideId ? ` — ${debateSideLabel(session, session.playerSideId)}` : ""}`,
     `- Created: ${session.createdAt}`,
     `- Updated: ${session.updatedAt}`,
@@ -650,7 +890,7 @@ export function formatDebateVerboseTranscript(
     ]),
     ...(session.formatState.format === "turnabout"
       ? [
-          "## Turnabout public record",
+          `## Turnabout ${debatePublicMaterialName(session.formality).toLowerCase()}`,
           "",
           `- Format phase: ${session.formatState.phase}`,
           `- Reversal count: ${Math.max(0, session.formatState.round - 1)}`,
@@ -676,6 +916,18 @@ export function formatDebateVerboseTranscript(
     "",
     "## Ballots and verdict",
     "",
+    ...(session.jury.enabled
+      ? [
+          `- Jury split: ${session.jury.forVotes}–${session.jury.againstVotes}`,
+          `- Jury majority: ${session.jury.majoritySideId ? debateSideLabel(session, session.jury.majoritySideId) : "Not decided"}`,
+          ...session.jury.finalBallots.map((ballot) => {
+            const juror = session.jury.jurors.find(
+              (candidate) => candidate.id === ballot.jurorBotId,
+            );
+            return `- ${juror?.name ?? "Juror"}: ${debateSideLabel(session, ballot.sideId)} — ${ballot.reason}`;
+          }),
+        ]
+      : []),
     ...session.ballots.map((ballot) => {
       const voter =
         ballot.voterBotId === session.moderator.id
@@ -798,6 +1050,8 @@ function debateBotSnapshot(
   if (botId === session.moderator.id) return session.moderator;
   if (botId === session.forAdvocate.id) return session.forAdvocate;
   if (botId === session.againstAdvocate.id) return session.againstAdvocate;
+  const juror = session.jury.jurors.find((candidate) => candidate.id === botId);
+  if (juror) return juror;
   return null;
 }
 
@@ -805,6 +1059,7 @@ function debateBotPresentation(
   session: DebateSessionV1,
   bot: DebateBotSnapshotV1,
   beforeSequence = Number.POSITIVE_INFINITY,
+  observerPerspective: "live" | "replay" = "live",
 ): {
   displayName: string;
   identityLabel: string | null;
@@ -827,6 +1082,7 @@ function debateBotPresentation(
     session.moderator,
     session.forAdvocate,
     session.againstAdvocate,
+    ...session.jury.jurors,
   ];
   let identitySource: DebateBotSnapshotV1 | null = null;
   if (effects.some((effect) => effect.type === "identity_mirror")) {
@@ -861,6 +1117,14 @@ function debateBotPresentation(
     (effect) => effect.type === "avatar_visibility",
   );
   const scaleEffect = effects.find((effect) => effect.type === "avatar_scale");
+  const observerProjection = botPowerObserverProjectionFromEffectsV1(
+    effects,
+    observerPerspective,
+    (target) =>
+      target.kind === "bot" &&
+      cast.some((participant) => participant.id === target.botId),
+    { holderSpeaking: true },
+  );
   return {
     displayName,
     identityLabel: identitySource
@@ -871,9 +1135,11 @@ function debateBotPresentation(
     glyph: identitySource?.glyph ?? bot.glyph,
     voiceSourceBotId: identitySource?.id ?? bot.id,
     visibility:
-      visibilityEffect?.type === "avatar_visibility"
-        ? visibilityEffect.mode
-        : "visible",
+      observerProjection.visibility === "hidden"
+        ? "hidden"
+        : visibilityEffect?.type === "avatar_visibility"
+          ? visibilityEffect.mode
+          : "visible",
     scale: scaleEffect?.type === "avatar_scale" ? scaleEffect.mode : "normal",
     colorCycle: effects.some((effect) => effect.type === "avatar_color_cycle"),
   };
@@ -892,6 +1158,9 @@ export function DebateExperience(
     request,
   } = props;
   const [view, setView] = useState<DebateView>("dashboard");
+  const [observerPerspective, setObserverPerspective] = useState<
+    "live" | "replay"
+  >("live");
   const [studioPanel, setStudioPanel] = useState<DebateStudioPanel>("motion");
   const [sessions, setSessions] = useState<DebateSessionListItemV1[]>([]);
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
@@ -899,6 +1168,10 @@ export function DebateExperience(
   );
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<DebateFormatId>("forum");
+  const [formality, setFormality] =
+    useState<DebateFormalityId>("parliamentary");
+  const [selectedPresetId, setSelectedPresetId] =
+    useState<DebateSetupPresetId>("classic-duel");
   const [slates, setSlates] = useState<DebateMotionSlateV1[]>([]);
   const [motion, setMotion] = useState<DebateMotionSlateV1>(EMPTY_SLATE);
   const [cast, setCast] = useState(() =>
@@ -909,6 +1182,7 @@ export function DebateExperience(
   const [castPickerSearch, setCastPickerSearch] = useState("");
   const [castPickerGroupId, setCastPickerGroupId] = useState("all");
   const [playerRole, setPlayerRole] = useState<DebatePlayerRole>("judge");
+  const [juryEnabled, setJuryEnabled] = useState(false);
   const [playerSideId, setPlayerSideId] = useState<DebateSideId>("for");
   const [roleChecks, setRoleChecks] = useState<DebateAdvocacyConsent[]>([]);
   const [evidence, setEvidence] =
@@ -936,11 +1210,11 @@ export function DebateExperience(
   const [presenting, setPresenting] = useState(false);
   const [interjectionDraft, setInterjectionDraft] = useState("");
   const [cameraMode, setCameraMode] = useState<DebateCameraMode>("auto");
-  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV3>(
+  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV4>(
     () => copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
   );
   const [stageAlignmentDraft, setStageAlignmentDraft] =
-    useState<DebateStageAlignmentV3>(() =>
+    useState<DebateStageAlignmentV4>(() =>
       copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
     );
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
@@ -951,6 +1225,8 @@ export function DebateExperience(
   const [stageAlignmentPreviewTheme, setStageAlignmentPreviewTheme] = useState<
     "light" | "dark"
   >(props.theme);
+  const [stageAlignmentGavelCue, setStageAlignmentGavelCue] =
+    useState<DebateModeratorGavelCue | null>(null);
   const [stageAlignmentSelectedItems, setStageAlignmentSelectedItems] =
     useState<Record<DebateStageAlignmentRole, DebateStageAlignmentItem>>({
       for: "bot",
@@ -1006,6 +1282,11 @@ export function DebateExperience(
   const sourceDrawerReturnFocusRef = useRef<HTMLElement | null>(null);
   const stageAlignmentSaveButtonRef = useRef<HTMLButtonElement | null>(null);
   const stageAlignmentDragRef = useRef<DebateStageAlignmentDrag | null>(null);
+  const stageAlignmentGavelPreviewCounterRef = useRef(0);
+  const stageAlignmentAtmosphereControllerRef =
+    useRef<SessionAtmosphereController | null>(null);
+  const debateAtmosphereControllerRef =
+    useRef<SessionAtmosphereController | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -1098,6 +1379,7 @@ export function DebateExperience(
       stageAlignmentDragRef.current = null;
       setStageAlignmentDraggingTarget(null);
       setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
+      setStageAlignmentGavelCue(null);
       setStageAlignmentOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1297,7 +1579,7 @@ export function DebateExperience(
     motion.againstSide.label.trim() &&
     motion.againstSide.brief.trim(),
   );
-  const moderatorMuted = botById.get(cast.moderator)?.hardMuted === true;
+  const moderatorHardMuted = botById.get(cast.moderator)?.hardMuted === true;
   const mutedAdvocates = [cast.forAdvocate, cast.againstAdvocate]
     .map((id) => botById.get(id))
     .filter((bot): bot is DebateBotSummary => bot?.hardMuted === true);
@@ -1306,11 +1588,24 @@ export function DebateExperience(
   );
   const roleChecksComplete =
     roleChecks.length === 2 && declinedChecks.length === 0;
-  const debateCanStart =
-    motionComplete && castComplete && !moderatorMuted && roleChecksComplete;
+  const debateCanStart = motionComplete && castComplete && roleChecksComplete;
+  const selectedPreset = DEBATE_SETUP_PRESETS.find(
+    (preset) => preset.id === selectedPresetId,
+  )!;
+  const formalityDescriptor = debateFormalityDescriptor(formality);
+  const formalityIndex = DEBATE_FORMALITY_SPECTRUM.findIndex(
+    (level) => level.id === formality,
+  );
+  const effectivePresetId = derivedDebateSetupPresetId({
+    selectedPresetId,
+    format,
+    formality,
+    playerRole,
+    juryEnabled,
+  });
   const readinessCount = [
     motionComplete,
-    castComplete && !moderatorMuted,
+    castComplete,
     roleChecksComplete,
     true,
   ].filter(Boolean).length;
@@ -1359,6 +1654,8 @@ export function DebateExperience(
     setActiveSession(null);
     setTopic("");
     setFormat("forum");
+    setFormality("parliamentary");
+    setSelectedPresetId("classic-duel");
     setSlates([]);
     setMotion(EMPTY_SLATE);
     setCast(debatePrefilledCast(props.initialBotIds));
@@ -1366,6 +1663,7 @@ export function DebateExperience(
     setCastPickerSearch("");
     setCastPickerGroupId("all");
     setPlayerRole("judge");
+    setJuryEnabled(false);
     setPlayerSideId("for");
     setRoleChecks([]);
     setEvidence(EMPTY_EVIDENCE);
@@ -1376,9 +1674,22 @@ export function DebateExperience(
     setError(null);
   };
 
+  const applyPreset = (presetId: DebateSetupPresetId): void => {
+    const next = applyDebateSetupPreset(
+      { format, formality, playerRole, juryEnabled, roleChecks },
+      presetId,
+    );
+    setSelectedPresetId(presetId);
+    setFormat(next.format);
+    setFormality(next.formality);
+    setPlayerRole(next.playerRole);
+    setJuryEnabled(next.juryEnabled);
+    setRoleChecks(next.roleChecks);
+  };
+
   const assignBotToCastSlot = (slot: DebateCastSlot, botId: string): void => {
     const bot = botById.get(botId);
-    if (!bot || (slot === "moderator" && bot.hardMuted)) return;
+    if (!bot) return;
     const duplicateSlot = (
       ["moderator", "forAdvocate", "againstAdvocate"] as const
     ).find((candidate) => candidate !== slot && cast[candidate] === botId);
@@ -1405,10 +1716,19 @@ export function DebateExperience(
     setActiveCastSlot(slot);
   };
 
+  const randomizeCast = (): void => {
+    const nextCast = randomDebateCast(bots.map((bot) => bot.id));
+    if (!nextCast) return;
+    setCast(nextCast);
+    setRoleChecks([]);
+    setActiveCastSlot("moderator");
+  };
+
   const openStageAlignment = (): void => {
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentPreviewCamera("wide");
     setStageAlignmentPreviewTheme(props.theme);
+    setStageAlignmentGavelCue(null);
     setStageAlignmentCopyState("idle");
     setStageAlignmentSelectedItems({
       for: "bot",
@@ -1422,6 +1742,7 @@ export function DebateExperience(
 
   const cancelStageAlignment = (): void => {
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
+    setStageAlignmentGavelCue(null);
     setStageAlignmentCopyState("idle");
     setStageAlignmentDraggingTarget(null);
     stageAlignmentDragRef.current = null;
@@ -1438,6 +1759,7 @@ export function DebateExperience(
       );
       setStageAlignment(normalized);
       setStageAlignmentDraft(copyDebateStageAlignment(normalized));
+      setStageAlignmentGavelCue(null);
       setStageAlignmentOpen(false);
     } catch {
       setError("Debate stage alignment could not be saved on this device.");
@@ -1463,6 +1785,16 @@ export function DebateExperience(
       setStageAlignmentCopyState("idle");
       stageAlignmentCopyResetTimerRef.current = null;
     }, 1_800);
+  };
+
+  const previewStageAlignmentGavel = (
+    kind: DebateModeratorGavelCue["kind"],
+  ): void => {
+    stageAlignmentGavelPreviewCounterRef.current += 1;
+    setStageAlignmentGavelCue({
+      eventId: `alignment-preview:${stageAlignmentGavelPreviewCounterRef.current}`,
+      kind,
+    });
   };
 
   const stageAlignmentTargetForRole = (
@@ -1580,6 +1912,7 @@ export function DebateExperience(
         "/api/debates/synthesize",
         requestBody({
           topic,
+          formality,
           preferredProvider: props.modelOverride?.provider ?? preferredProvider,
           modelOverride: props.modelOverride?.model,
           responseMode: props.responseMode,
@@ -1601,6 +1934,7 @@ export function DebateExperience(
     props.modelOverride?.provider,
     props.responseMode,
     request,
+    formality,
     topic,
   ]);
 
@@ -1621,7 +1955,7 @@ export function DebateExperience(
   };
 
   const checkRoles = async (): Promise<boolean> => {
-    if (!castComplete || moderatorMuted) return false;
+    if (!castComplete) return false;
     setBusy(true);
     setError(null);
     try {
@@ -1629,6 +1963,7 @@ export function DebateExperience(
         "/api/debates/role-checks",
         requestBody({
           format,
+          formality,
           motion,
           forAdvocateBotId: cast.forAdvocate,
           againstAdvocateBotId: cast.againstAdvocate,
@@ -1787,7 +2122,11 @@ export function DebateExperience(
       next: DebateSessionV1,
       runId: number,
     ): Promise<void> => {
-      const fresh = debatePresentationEvents(previous, next);
+      const fresh = debatePresentationEvents(
+        previous,
+        next,
+        debateJuryCameraIsActive(cameraMode, next),
+      );
       const recovery = [...fresh]
         .reverse()
         .find((event) => event.autoRecovery)?.autoRecovery;
@@ -1802,12 +2141,32 @@ export function DebateExperience(
         if (presentationRunRef.current !== runId) return;
         setTranscriptVisibleThroughSequence(event.sequence);
         setPresentationEventId(event.id);
+        const gavelCue = debateModeratorGavelCue({
+          format: next.format,
+          event,
+          moderatorBotId: next.moderator.id,
+        });
+        if (gavelCue) {
+          await new Promise((resolve) =>
+            window.setTimeout(
+              resolve,
+              debateModeratorGavelSpeechLeadMs(gavelCue.kind),
+            ),
+          );
+          if (presentationRunRef.current !== runId) return;
+        }
         if (event.kind === "silence") {
           setLiveReveal({
             eventId: event.id,
             visibleContent: event.content,
           });
           await new Promise((resolve) => window.setTimeout(resolve, 900));
+          continue;
+        }
+        if (event.speakerKind === "system") {
+          setLiveReveal({ eventId: event.id, visibleContent: "" });
+          await revealEventSilently(event, debateSpokenText(event.content));
+          if (presentationRunRef.current !== runId) return;
           continue;
         }
         if (
@@ -1820,11 +2179,34 @@ export function DebateExperience(
           await new Promise((resolve) => window.setTimeout(resolve, 900));
           continue;
         }
-        const speaker = event.speakerBotId
-          ? (bots.find((bot) => bot.id === event.speakerBotId) ?? null)
-          : null;
+        if (event.kind === "ballot" && event.speakerKind === "juror") {
+          setLiveReveal(null);
+          await new Promise((resolve) => window.setTimeout(resolve, 900));
+          continue;
+        }
         const spokenText = debateSpokenText(event.content);
         const snapshot = debateBotSnapshot(next, event.speakerBotId);
+        const presentation = snapshot
+          ? debateBotPresentation(next, snapshot, event.sequence)
+          : null;
+        const voiceSnapshot = presentation
+          ? (debateBotSnapshot(next, presentation.voiceSourceBotId) ?? snapshot)
+          : snapshot;
+        const speaker = snapshot
+          ? {
+              id: snapshot.id,
+              name: snapshot.name,
+              color: snapshot.color,
+              glyph: snapshot.glyph,
+              avatarDetails: snapshot.avatarDetails,
+              voiceProfile: voiceSnapshot?.voiceProfile ?? null,
+              powers: snapshot.powers,
+              systemPrompt: snapshot.systemPrompt,
+              hardMuted: next.powerPlan.bots[snapshot.id]?.hardMuted === true,
+            }
+          : event.speakerBotId
+            ? (bots.find((bot) => bot.id === event.speakerBotId) ?? null)
+            : null;
         setLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
         let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
@@ -1840,10 +2222,7 @@ export function DebateExperience(
           speaker,
           player: event.speakerKind === "player",
           spokenText,
-          voiceSourceBotId: snapshot
-            ? debateBotPresentation(next, snapshot, event.sequence)
-                .voiceSourceBotId
-            : null,
+          voiceSourceBotId: presentation?.voiceSourceBotId ?? null,
           lifecycle: {
             onStart: (durationMs, alignment) => {
               if (presentationRunRef.current !== runId) return;
@@ -1923,7 +2302,7 @@ export function DebateExperience(
       setLiveReveal(null);
       setTranscriptVisibleThroughSequence(null);
     },
-    [bots, onUtterance, revealEventSilently],
+    [bots, cameraMode, onUtterance, revealEventSilently],
   );
 
   const adoptSession = useCallback(
@@ -1933,7 +2312,11 @@ export function DebateExperience(
     ): Promise<void> => {
       const runId = presentationRunRef.current + 1;
       presentationRunRef.current = runId;
-      const fresh = debatePresentationEvents(previous, next);
+      const fresh = debatePresentationEvents(
+        previous,
+        next,
+        debateJuryCameraIsActive(cameraMode, next),
+      );
       const first = fresh[0] ?? null;
       if (first) {
         setTranscriptVisibleThroughSequence(first.sequence);
@@ -1947,6 +2330,7 @@ export function DebateExperience(
       setPresenting(fresh.length > 0);
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
+      setObserverPerspective("live");
       setActiveSession(next);
       try {
         await consumeNewEvents(previous, next, runId);
@@ -1957,19 +2341,23 @@ export function DebateExperience(
       }
       void loadSessions();
     },
-    [consumeNewEvents, loadSessions],
+    [cameraMode, consumeNewEvents, loadSessions],
   );
 
-  const openSession = async (id: string): Promise<void> => {
+  const openSession = async (
+    archived: DebateSessionListItemV1,
+  ): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
+      const perspective = archived.status === "completed" ? "replay" : "live";
       const result = await props.request<{ session: DebateSessionV1 }>(
-        `/api/debates/${encodeURIComponent(id)}`,
+        `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
       );
       setCameraMode("auto");
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
+      setObserverPerspective(perspective);
       setActiveSession(result.session);
       setView("live");
     } catch (caught) {
@@ -1987,7 +2375,9 @@ export function DebateExperience(
       const result = await props.request<{ session: DebateSessionV1 }>(
         "/api/debates",
         requestBody({
+          presetId: effectivePresetId,
           format,
+          formality,
           motion,
           evidence,
           moderatorBotId: cast.moderator,
@@ -1995,6 +2385,10 @@ export function DebateExperience(
           againstAdvocateBotId: cast.againstAdvocate,
           playerRole,
           playerSideId: playerRole === "participant" ? playerSideId : null,
+          jury: {
+            enabled: juryEnabled,
+            cadence: "natural-five",
+          },
           advocacyConsent: roleChecks,
           preferredProvider:
             props.modelOverride?.provider ?? props.preferredProvider,
@@ -2064,13 +2458,15 @@ export function DebateExperience(
       !activeSession ||
       activeSession.status !== "live" ||
       busy ||
-      presenting
+      presenting ||
+      earlyEndOpen ||
+      debateAwaitsJuryDeliberationChoice(activeSession)
     ) {
       return;
     }
     const timer = window.setTimeout(() => void advance(false), 520);
     return () => window.clearTimeout(timer);
-  }, [activeSession, advance, busy, presenting, view]);
+  }, [activeSession, advance, busy, earlyEndOpen, presenting, view]);
 
   const submitPlayerTurn = async (
     event: FormEvent<HTMLFormElement>,
@@ -2298,6 +2694,41 @@ export function DebateExperience(
     }
   };
 
+  const skipJuryDeliberation = async (): Promise<void> => {
+    const previous = activeSession;
+    if (
+      !previous ||
+      busy ||
+      presenting ||
+      !previous.jury.enabled ||
+      !previous.stepKey.startsWith("jury_deliberation_")
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(previous.id)}/jury/skip-deliberation`,
+        requestBody({
+          expectedRevision: previous.revision,
+          idempotencyKey: nextMutationKey("jury-skip-deliberation"),
+        }),
+      );
+      setEarlyEndOpen(false);
+      if (mountedRef.current) setBusy(false);
+      await adoptSession(previous, result.session);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Skipping Jury deliberation was unavailable.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
   const submitInterjection = async (
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
@@ -2463,15 +2894,14 @@ export function DebateExperience(
               <button
                 type="button"
                 className={styles.sessionOpen}
-                onClick={() => void openSession(session.id)}
+                onClick={() => void openSession(session)}
                 disabled={busy}
               >
                 <strong>{session.motion}</strong>
                 <span>
-                  {session.format === "turnabout"
-                    ? "Turnabout · Court of Record"
-                    : "Forum · Assembly Chamber"}{" "}
-                  ·{" "}
+                  {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+                  {debateProductionName(session.format, session.formality)} ·{" "}
+                  {debateFormalityDescriptor(session.formality).title} ·{" "}
                   {sessionStatusLabel(session)} · {session.playerRole}
                 </span>
               </button>
@@ -2515,20 +2945,12 @@ export function DebateExperience(
     return (
       <section
         className={styles.forumReadout}
-        aria-label={
-          format === "turnabout"
-            ? "Court of Record schematic"
-            : "Assembly Chamber schematic"
-        }
+        aria-label={`${debateProductionName(format, formality)} schematic`}
         data-format={format}
         data-ready={debateCanStart ? "true" : undefined}
       >
         <header>
-          <span>
-            {format === "turnabout"
-              ? "Court of Record schematic"
-              : "Assembly Chamber schematic"}
-          </span>
+          <span>{debateProductionName(format, formality)} schematic</span>
           <strong>{readinessCount}/4 locked</strong>
         </header>
         <div className={styles.forumCircuit}>
@@ -2559,7 +2981,7 @@ export function DebateExperience(
             ◇
           </span>
         </div>
-        <p>{motion.motion || "The motion has not entered the chamber."}</p>
+        <p>{motion.motion || "The motion is not ready yet."}</p>
         <small className={styles.formatReadout}>
           {format === "turnabout"
             ? "Two pressable statements per side · frozen evidence only"
@@ -2588,9 +3010,8 @@ export function DebateExperience(
           <p className={styles.eyebrow}>PRISM / Debate</p>
           <h1>Debate Studio</h1>
           <span>
-            {format === "turnabout"
-              ? "Turnabout · Court of Record"
-              : "Forum · Assembly Chamber"}
+            {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+            {debateProductionName(format, formality)}
           </span>
         </div>
         <div className={styles.lobbyActions}>
@@ -2647,7 +3068,7 @@ export function DebateExperience(
                   : castComplete
                     ? "Check consent"
                     : "Seat the proceeding",
-                complete: castComplete && !moderatorMuted && roleChecksComplete,
+                complete: castComplete && roleChecksComplete,
                 tutorial: "debate-cast",
               },
               {
@@ -2792,6 +3213,7 @@ export function DebateExperience(
             <div>
               <button
                 type="button"
+                className={styles.confirmKeepButton}
                 onClick={() => setPendingDeleteSession(null)}
                 disabled={busy}
               >
@@ -2839,6 +3261,78 @@ export function DebateExperience(
           sides until the argument feels genuinely live.
         </p>
       </div>
+      <div
+        className={styles.proceedingPresets}
+        data-tutorial-target="debate-presets"
+      >
+        <div>
+          <span>Proceeding preset</span>
+          <strong>
+            {effectivePresetId === "custom" ? "Custom" : selectedPreset.name}
+          </strong>
+        </div>
+        <div role="group" aria-label="Debate proceeding presets">
+          {DEBATE_SETUP_PRESETS.map((preset) => (
+            <button
+              type="button"
+              key={preset.id}
+              data-selected={
+                effectivePresetId === preset.id ? "true" : undefined
+              }
+              aria-pressed={effectivePresetId === preset.id}
+              title={preset.summary}
+              onClick={() => applyPreset(preset.id)}
+            >
+              {preset.name}
+            </button>
+          ))}
+          {effectivePresetId === "custom" ? (
+            <span className={styles.customPresetChip}>Custom</span>
+          ) : null}
+        </div>
+      </div>
+      <div
+        className={styles.formalityControl}
+        data-tutorial-target="debate-formality"
+      >
+        <div>
+          <span>Formality</span>
+          <strong>{formalityDescriptor.title}</strong>
+          <small>{formalityDescriptor.summary}</small>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max={DEBATE_FORMALITY_SPECTRUM.length - 1}
+          step="1"
+          value={formalityIndex}
+          aria-label="Debate formality"
+          aria-valuetext={formalityDescriptor.title}
+          aria-describedby="debate-formality-copy"
+          onChange={(event) => {
+            const next =
+              DEBATE_FORMALITY_SPECTRUM[Number(event.currentTarget.value)];
+            if (next && next.id !== formality) {
+              setFormality(next.id);
+              setRoleChecks([]);
+            }
+          }}
+        />
+        <div className={styles.formalityStops} aria-hidden="true">
+          {DEBATE_FORMALITY_SPECTRUM.map((level) => (
+            <span
+              data-current={level.id === formality ? "true" : undefined}
+              key={level.id}
+            >
+              {level.title}
+            </span>
+          ))}
+        </div>
+        <p id="debate-formality-copy">
+          This register freezes with the proceeding; persona voice stays in
+          charge.
+        </p>
+      </div>
       <fieldset
         className={styles.formatPicker}
         data-tutorial-target="debate-format"
@@ -2878,9 +3372,7 @@ export function DebateExperience(
             </strong>
             <span>{option.summary}</span>
             <small>{option.cadence}</small>
-            {option.availability === "coming_soon" ? (
-              <b>Coming later</b>
-            ) : null}
+            {option.availability === "coming_soon" ? <b>Coming later</b> : null}
           </label>
         ))}
       </fieldset>
@@ -3012,15 +3504,39 @@ export function DebateExperience(
       className={`${styles.setupPanel} ${styles.dashboardPanel}`}
       data-debate-dashboard-section="cast"
     >
-      <div className={styles.setupCopy}>
-        <p className={styles.eyebrow}>
-          02 / {format === "turnabout" ? "Turnabout cast" : "Forum cast"}
-        </p>
-        <h2>Seat every voice</h2>
-        <p>
-          Select a seat, cast directly from your Library, then set your place in
-          the room. Advocacy consent stays private and motion-specific.
-        </p>
+      <div className={styles.castStepHeader}>
+        <div className={styles.setupCopy}>
+          <p className={styles.eyebrow}>
+            02 / {format === "turnabout" ? "Turnabout cast" : "Forum cast"}
+          </p>
+          <h2>Seat every voice</h2>
+          <p>
+            Select a seat, cast directly from your Library, then set your place
+            in the room. Advocacy consent stays private and motion-specific.
+          </p>
+        </div>
+        <button
+          type="button"
+          className={styles.castRandomizeButton}
+          onClick={randomizeCast}
+          disabled={bots.length < 3}
+          aria-label="Randomly select all three actors"
+          title={
+            bots.length < 3
+              ? "At least three Library bots are required"
+              : "Randomly select all three actors"
+          }
+          data-glyph-tooltip="Random actors"
+          data-tutorial-target="debate-random-cast"
+        >
+          <span aria-hidden="true">
+            {props.renderBotGlyph("dice", {
+              size: 18,
+              strokeWidth: 1.8,
+            })}
+          </span>
+          <strong>Random actors</strong>
+        </button>
       </div>
       <div className={styles.castSlotGrid}>
         {(
@@ -3114,11 +3630,7 @@ export function DebateExperience(
               ).find(
                 (slot) => slot !== activeCastSlot && cast[slot] === bot.id,
               );
-              const disabledReason = otherSlot
-                ? "Already cast"
-                : activeCastSlot === "moderator" && bot.hardMuted
-                  ? "Hard-muted bots cannot moderate"
-                  : null;
+              const disabledReason = otherSlot ? "Already cast" : null;
               return (
                 <BotPickerTile
                   key={bot.id}
@@ -3157,10 +3669,10 @@ export function DebateExperience(
           <p className={styles.castPickerEmpty}>No bots match this view.</p>
         )}
       </div>
-      {moderatorMuted ? (
-        <p className={styles.error} role="alert">
-          A hard-muted bot cannot moderate. Its Power remains canonical; choose
-          another moderator.
+      {moderatorHardMuted ? (
+        <p className={styles.notice} role="status">
+          This moderator will remain canonically silent. The proceeding still
+          starts, and the other bots will encounter that silence in character.
         </p>
       ) : null}
       <fieldset className={styles.rolePicker}>
@@ -3178,10 +3690,29 @@ export function DebateExperience(
               onChange={() => setPlayerRole(role)}
             />
             <strong>{role.charAt(0).toUpperCase() + role.slice(1)}</strong>
-            <span>{roleDescription(role, format)}</span>
+            <span>{roleDescription(role, format, formality)}</span>
           </label>
         ))}
       </fieldset>
+      <label
+        className={styles.juryToggle}
+        data-enabled={juryEnabled ? "true" : undefined}
+        data-tutorial-target="debate-jury"
+      >
+        <input
+          type="checkbox"
+          checked={juryEnabled}
+          onChange={(event) => setJuryEnabled(event.currentTarget.checked)}
+        />
+        <span className={styles.juryToggleControl} aria-hidden="true">
+          <i />
+        </span>
+        <span>
+          <strong>Five-seat Jury</strong>
+          <small>{juryRoleDescription(playerRole)}</small>
+        </span>
+        <b>{juryEnabled ? "Enabled" : "Off"}</b>
+      </label>
       {playerRole === "participant" ? (
         <fieldset className={styles.sidePicker}>
           <legend>Your side</legend>
@@ -3257,7 +3788,7 @@ export function DebateExperience(
         <button
           type="button"
           className={styles.primaryButton}
-          disabled={!castComplete || moderatorMuted || busy}
+          disabled={!castComplete || busy}
           onClick={() => {
             if (roleChecksComplete) {
               setStudioPanel("evidence");
@@ -3287,7 +3818,9 @@ export function DebateExperience(
         <h2>Choose what enters the room</h2>
         <p>
           {format === "turnabout"
-            ? "Every participant receives this same immutable packet. When the record opens, only these frozen sources may be presented."
+            ? formality === "parliamentary"
+              ? "Every participant receives this same immutable packet. When the record opens, only these frozen sources may be presented."
+              : "Every participant receives this same immutable packet. Once Turnabout starts, only these frozen sources may be presented."
             : "Every participant receives this same immutable packet. When the Forum opens, outside research stops."}
         </p>
       </div>
@@ -3418,8 +3951,8 @@ export function DebateExperience(
             : "Complete the circuit"}
         </h2>
         <p>
-          Start locks the format, motion, cast, consent, model, Powers, and
-          evidence into one proceeding.
+          Start locks the format, motion, cast, Jury, consent, model, Powers,
+          and evidence into one proceeding.
         </p>
       </div>
       <ul className={styles.readinessList}>
@@ -3434,18 +3967,16 @@ export function DebateExperience(
             </small>
           </div>
         </li>
-        <li data-ready={castComplete && !moderatorMuted ? "true" : undefined}>
-          <span aria-hidden="true">
-            {castComplete && !moderatorMuted ? "✓" : "2"}
-          </span>
+        <li data-ready={castComplete ? "true" : undefined}>
+          <span aria-hidden="true">{castComplete ? "✓" : "2"}</span>
           <div>
             <strong>Proceeding cast</strong>
             <small>
-              {castComplete && !moderatorMuted
-                ? "Three unique seats are filled."
-                : moderatorMuted
-                  ? "Choose an audible moderator."
-                  : "Fill all three seats with unique bots."}
+              {castComplete
+                ? moderatorHardMuted
+                  ? "Three unique seats are filled. The moderator’s silence will shape the proceeding."
+                  : "Three unique seats are filled."
+                : "Fill all three seats with unique bots."}
             </small>
           </div>
         </li>
@@ -3476,17 +4007,32 @@ export function DebateExperience(
       </ul>
       <div className={styles.reviewGrid}>
         <article>
+          <span>Preset</span>
+          <strong>
+            {effectivePresetId === "custom" ? "Custom" : selectedPreset.name}
+          </strong>
+          <p>
+            {effectivePresetId === "custom"
+              ? "Format, formality, role, or Jury differs from the selected preset."
+              : selectedPreset.summary}
+          </p>
+        </article>
+        <article>
           <span>Format</span>
           <strong>
-            {format === "turnabout"
-              ? "Turnabout · Court of Record"
-              : "Forum · Assembly Chamber"}
+            {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+            {debateProductionName(format, formality)}
           </strong>
           <p>
             {format === "turnabout"
               ? "Pressable testimony and frozen-evidence objections"
               : "Structured civic speech and rebuttal"}
           </p>
+        </article>
+        <article>
+          <span>Formality</span>
+          <strong>{formalityDescriptor.title}</strong>
+          <p>{formalityDescriptor.summary}</p>
         </article>
         <article>
           <span>Motion</span>
@@ -3515,7 +4061,18 @@ export function DebateExperience(
                     ? motion.forSide.label
                     : motion.againstSide.label
                 }`
-              : roleSummary(playerRole, format)}
+              : roleSummary(playerRole, format, formality)}
+          </p>
+        </article>
+        <article>
+          <span>Jury</span>
+          <strong>
+            {juryEnabled ? "Five seats · sampled at Start" : "Off"}
+          </strong>
+          <p>
+            {juryEnabled
+              ? juryRoleDescription(playerRole)
+              : "The nonbinding Gallery and traditional three-cast ballot stay intact."}
           </p>
         </article>
         <article>
@@ -3544,7 +4101,7 @@ export function DebateExperience(
       <div className={styles.setupActions}>
         <span className={styles.launchThreshold}>
           {debateCanStart
-            ? "Crossing this threshold freezes the record."
+            ? `Crossing this threshold freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
             : `${4 - readinessCount} lock${4 - readinessCount === 1 ? "" : "s"} remain.`}
         </span>
         <button
@@ -3556,7 +4113,9 @@ export function DebateExperience(
         >
           {busy
             ? format === "turnabout"
-              ? "Opening the record…"
+              ? formality === "parliamentary"
+                ? "Opening the record…"
+                : "Opening Turnabout…"
               : "Opening the Forum…"
             : format === "turnabout"
               ? "Start Turnabout"
@@ -3574,13 +4133,19 @@ export function DebateExperience(
     return (
       <aside
         className={`${styles.caseBoard} ${styles.turnaboutRecord}`}
-        aria-label="Turnabout public record"
+        aria-label={`Turnabout ${debatePublicMaterialName(session.formality).toLowerCase()}`}
         data-tutorial-target="debate-case-board"
       >
         <header>
           <div>
-            <p className={styles.eyebrow}>Public record</p>
-            <span>Statement-bound · frozen evidence only</span>
+            <p className={styles.eyebrow}>
+              {debatePublicMaterialName(session.formality)}
+            </p>
+            <span>
+              {session.formality === "parliamentary"
+                ? "Statement-bound · frozen evidence only"
+                : "Claim-bound · frozen evidence only"}
+            </span>
           </div>
           <strong>Reversal {state ? Math.max(0, state.round - 1) : 0}</strong>
         </header>
@@ -3751,7 +4316,11 @@ export function DebateExperience(
           data-tutorial-target="debate-turnabout-actions"
         >
           <div>
-            <p className={styles.eyebrow}>Statement on the record</p>
+            <p className={styles.eyebrow}>
+              {session.formality === "parliamentary"
+                ? "Statement on the record"
+                : "Active claim"}
+            </p>
             <h2>Examine {speaker.name}</h2>
             <blockquote>{debateSpokenText(statement.content)}</blockquote>
           </div>
@@ -3827,16 +4396,32 @@ export function DebateExperience(
         </section>
       );
     }
+    const latestModeratorEvent = [...session.events]
+      .reverse()
+      .find((event) => event.speakerBotId === session.moderator.id);
+    const silentModeratorChallenge =
+      session.phase === "challenge" &&
+      session.stepKey !== "challenge_judge_question" &&
+      (latestModeratorEvent?.kind === "silence" ||
+        latestModeratorEvent?.speakerKind === "system");
     return (
       <form className={styles.playerWindow} onSubmit={submitPlayerTurn}>
         <p className={styles.eyebrow}>Your floor</p>
         <h2>
           {session.stepKey === "challenge_judge_question"
             ? "Ask one side a question"
-            : session.phase === "challenge"
-              ? "Answer the moderator’s challenge"
-              : "Deliver your rebuttal"}
+            : silentModeratorChallenge
+              ? "The moderator left the floor open"
+              : session.phase === "challenge"
+                ? "Answer the moderator’s challenge"
+                : "Deliver your rebuttal"}
         </h2>
+        {silentModeratorChallenge ? (
+          <p>
+            No challenge was spoken. React to the silence, make your own point,
+            or pass the open floor to your partner.
+          </p>
+        ) : null}
         {session.stepKey === "challenge_judge_question" ? (
           <div className={styles.targetToggle}>
             {(["for", "against"] as const).map((sideId) => (
@@ -3856,7 +4441,11 @@ export function DebateExperience(
         <textarea
           value={playerDraft}
           onChange={(event) => setPlayerDraft(event.currentTarget.value)}
-          placeholder="Speak plainly. You can cite frozen evidence with [[source:id]]."
+          placeholder={
+            silentModeratorChallenge
+              ? "Use the open floor however your side would."
+              : "Speak plainly. You can cite frozen evidence with [[source:id]]."
+          }
           rows={4}
           autoFocus
         />
@@ -3956,7 +4545,10 @@ export function DebateExperience(
           {session.events
             .filter(
               (event) =>
-                DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS.has(event.kind) &&
+                (DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS.has(event.kind) ||
+                  (session.jury.enabled &&
+                    event.kind === "ballot" &&
+                    event.speakerKind === "juror")) &&
                 (transcriptVisibleThroughSequence === null ||
                   event.sequence <= transcriptVisibleThroughSequence),
             )
@@ -4021,6 +4613,60 @@ export function DebateExperience(
   );
 
   const renderGallery = (session: DebateSessionV1): React.JSX.Element => {
+    if (session.jury.enabled) {
+      const activeJurorId = presentationEventId
+        ? session.events.find((event) => event.id === presentationEventId)
+            ?.speakerBotId
+        : null;
+      return (
+        <aside
+          className={`${styles.audienceGallery} ${styles.juryRoster}`}
+          aria-label="Frozen five-seat Jury"
+          data-phase={session.jury.phase}
+          data-tutorial-target="debate-jury-roster"
+        >
+          <header>
+            <div>
+              <p className={styles.eyebrow}>Jury</p>
+              <span>5 seats · binding majority</span>
+            </div>
+            <small>Frozen at Start</small>
+          </header>
+          <div className={styles.juryRosterSeats}>
+            {session.jury.jurors.map((juror, index) => (
+              <span
+                key={juror.id}
+                data-speaking={activeJurorId === juror.id ? "true" : undefined}
+                style={
+                  {
+                    "--gallery-prism-color":
+                      juror.color ?? DEBATE_GALLERY_COLORS[index],
+                  } as CSSProperties
+                }
+                title={`${juror.name} · ${
+                  juror.source === "library" ? "Library" : "PRISM"
+                }`}
+              >
+                {props.renderBotGlyph(juror.glyph ?? "lucideTriangle", {
+                  size: 20,
+                  strokeWidth: 1.45,
+                })}
+                <small>{juror.name}</small>
+              </span>
+            ))}
+          </div>
+          <p>
+            {session.jury.phase === "waiting"
+              ? "The frozen roster follows the floor and talks between turns."
+              : session.playerRole === "participant"
+                ? "The chamber is sealed until the aggregate verdict."
+                : session.jury.phase === "complete"
+                  ? `The Jury has returned ${session.jury.forVotes}–${session.jury.againstVotes}.`
+                  : "The Jury chamber is now in session."}
+          </p>
+        </aside>
+      );
+    }
     const latestPublicEvent =
       (presentationEventId
         ? session.events.find((event) => event.id === presentationEventId)
@@ -4090,6 +4736,208 @@ export function DebateExperience(
     );
   };
 
+  const renderJuryChamber = (
+    session: DebateSessionV1,
+    activeEvent: DebateEventV1 | null,
+    thinkingBotId: string | null,
+  ): React.JSX.Element => {
+    const activeJurorId =
+      activeEvent?.speakerKind === "juror" ? activeEvent.speakerBotId : null;
+    const chamberContent =
+      activeEvent &&
+      (activeEvent.kind === "jury_deliberation" ||
+        activeEvent.kind === "jury_verdict")
+        ? liveReveal?.eventId === activeEvent.id
+          ? liveReveal.visibleContent
+          : activeEvent.content
+        : "";
+    const awaitingDeliberationChoice =
+      debateAwaitsJuryDeliberationChoice(session);
+    return (
+      <div
+        className={styles.juryChamber}
+        data-phase={session.jury.phase}
+        data-theme={props.theme}
+        data-tutorial-target="debate-jury-chamber"
+      >
+        <div className={styles.juryChamberAura} aria-hidden="true" />
+        <div className={styles.juryChamberBots}>
+          {session.jury.jurors.map((juror, index) => {
+            const presentation = debateBotPresentation(
+              session,
+              juror,
+              Number.POSITIVE_INFINITY,
+              observerPerspective,
+            );
+            const appearanceBot =
+              debateBotSnapshot(session, presentation.voiceSourceBotId) ??
+              juror;
+            const talking =
+              presenting &&
+              activeJurorId === juror.id &&
+              activeEvent?.kind !== "silence";
+            const speechTiming =
+              talking &&
+              liveReveal !== null &&
+              liveReveal.eventId === activeEvent?.id
+                ? (liveReveal.speechTiming ?? null)
+                : null;
+            return (
+              <div
+                className={styles.juryChamberSeat}
+                data-seat={index}
+                data-speaking={talking ? "true" : undefined}
+                data-thinking={thinkingBotId === juror.id ? "true" : undefined}
+                data-visibility={presentation.visibility}
+                data-scale={presentation.scale}
+                data-color-cycle={presentation.colorCycle ? "true" : undefined}
+                key={juror.id}
+                style={
+                  {
+                    "--jury-seat-color":
+                      juror.color ?? DEBATE_GALLERY_COLORS[index],
+                  } as CSSProperties
+                }
+              >
+                <div className={styles.juryChamberAvatar}>
+                  {props.renderBotAvatar ? (
+                    props.renderBotAvatar(appearanceBot, {
+                      role:
+                        index === 0
+                          ? "moderator"
+                          : index % 2
+                            ? "for"
+                            : "against",
+                      lookAtRole: null,
+                      compact: true,
+                      talking,
+                      thinking: thinkingBotId === juror.id,
+                      colorCycle: presentation.colorCycle,
+                      speechTiming,
+                      foleyMouthShape: null,
+                      listenerReaction:
+                        activeJurorId && activeJurorId !== juror.id
+                          ? "attentive"
+                          : null,
+                    })
+                  ) : (
+                    <span>
+                      {props.renderBotGlyph(juror.glyph ?? "lucideTriangle", {
+                        size: 38,
+                        strokeWidth: 1.35,
+                      })}
+                    </span>
+                  )}
+                </div>
+                <small>
+                  {index === 0 ? "Foreperson · " : ""}
+                  {presentation.displayName}
+                </small>
+              </div>
+            );
+          })}
+        </div>
+        {/* The transparent raster is intentionally above the bots so its
+            tabletop occludes their lower frames. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          className={styles.juryTableRaster}
+          src={`/coffee-table/table_${props.theme}.png`}
+          alt=""
+          aria-hidden="true"
+        />
+        <div
+          className={styles.juryBallotPile}
+          role="img"
+          aria-label={`${session.jury.finalBallots.length} anonymous Jury ${
+            session.jury.finalBallots.length === 1 ? "ballot" : "ballots"
+          } collected`}
+        >
+          {session.jury.finalBallots.map((ballot, ballotIndex) => (
+            <span
+              className={styles.juryBallotSlip}
+              data-seat={session.jury.jurors.findIndex(
+                (juror) => juror.id === ballot.jurorBotId,
+              )}
+              data-ballot={ballotIndex}
+              key={ballot.jurorBotId}
+              aria-hidden="true"
+            >
+              <i />
+            </span>
+          ))}
+        </div>
+        <div className={styles.jurySeal} aria-hidden="true">
+          <span>◇</span>
+          <strong>Jury Chamber</strong>
+          <small>
+            {session.jury.phase === "initial_ballots"
+              ? "Private leanings"
+              : session.jury.phase === "final_ballots"
+                ? "Ballots settling"
+                : session.jury.phase === "complete"
+                  ? `${session.jury.forVotes}–${session.jury.againstVotes}`
+                  : session.jury.phase === "waiting"
+                    ? "Following the floor"
+                    : `${session.jury.discussionTurnCount} / ${session.jury.discussionTurnTarget}`}
+          </small>
+        </div>
+        <div
+          className={styles.juryCenterTranscript}
+          data-empty={chamberContent ? undefined : "true"}
+          aria-live="polite"
+        >
+          <strong>
+            {activeJurorId
+              ? session.jury.jurors.find((juror) => juror.id === activeJurorId)
+                  ?.name
+              : session.jury.phase === "initial_ballots"
+                ? "Private leanings are forming"
+                : session.jury.phase === "final_ballots"
+                  ? "The Jury is voting"
+                  : "The chamber is settling"}
+          </strong>
+          <p>
+            {chamberContent ||
+              (session.jury.phase === "initial_ballots"
+                ? "No leaning is displayed before deliberation."
+                : session.jury.phase === "final_ballots"
+                  ? activeEvent?.kind === "ballot"
+                    ? "An anonymous ballot slides into the center."
+                    : "All five ballots are collected before the split is read."
+                  : awaitingDeliberationChoice
+                    ? "Hear the chamber work through the debate, or send all five jurors directly to final ballots."
+                    : session.jury.phase === "waiting"
+                      ? "The Jury follows the public floor and talks between turns."
+                      : `The ${debatePublicMaterialName(session.formality).toLowerCase()} remains at the center of the table.`)}
+          </p>
+        </div>
+        {awaitingDeliberationChoice ? (
+          <div
+            className={styles.juryDeliberationChoice}
+            data-context="chamber"
+            aria-label="Choose whether the Jury deliberates"
+          >
+            <button
+              type="button"
+              onClick={() => void advance(false)}
+              disabled={busy || presenting}
+            >
+              Begin deliberation
+            </button>
+            <button
+              type="button"
+              onClick={() => setEarlyEndOpen(true)}
+              disabled={busy}
+            >
+              Skip deliberation
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderStageAlignmentModal = (
     session: DebateSessionV1 | null,
   ): React.JSX.Element | null => {
@@ -4136,7 +4984,12 @@ export function DebateExperience(
       },
     ].map((entry) => {
       const presentation = session
-        ? debateBotPresentation(session, entry.bot)
+        ? debateBotPresentation(
+            session,
+            entry.bot,
+            Number.POSITIVE_INFINITY,
+            observerPerspective,
+          )
         : {
             displayName: entry.bot.name,
             identityLabel: null,
@@ -4162,518 +5015,723 @@ export function DebateExperience(
               debateStageAlignmentTarget(role, item, "wide"),
             ),
           );
-    const previewIsDefault = previewTargets.every((target) => {
+    const placementIsDefault = previewTargets.every((target) => {
       const offset = debateStageAlignmentOffset(stageAlignmentDraft, target);
       return offset.x === 0 && offset.y === 0;
     });
+    const gavelIsDefault =
+      stageAlignmentDraft.gavel.x === DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.x &&
+      stageAlignmentDraft.gavel.y === DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.y &&
+      stageAlignmentDraft.gavel.size ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.size;
+    const previewIsDefault =
+      placementIsDefault &&
+      (stageAlignmentPreviewCamera !== "moderator" || gavelIsDefault);
     const lightBlendModesAreDefault = (["dark", "light"] as const).every(
       (theme) =>
         stageAlignmentDraft.lightBlendModes[theme] ===
         DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes[theme],
     );
+    const lightMaskOpacitiesAreDefault = (["dark", "light"] as const).every(
+      (theme) =>
+        stageAlignmentDraft.lightMaskOpacities[theme] ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.lightMaskOpacities[theme],
+    );
+    const lightingIsDefault =
+      lightBlendModesAreDefault && lightMaskOpacitiesAreDefault;
     return (
-      <div
-        className={styles.alignmentModalBackdrop}
-        data-preview-theme={stageAlignmentPreviewTheme}
-        data-alignment-source={session ? "session" : "dashboard"}
-      >
-        <section
-          className={styles.alignmentModal}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="debate-stage-alignment-title"
-          data-debate-stage-alignment-modal="true"
+      <>
+        <SessionAtmosphereLayer
+          active={Boolean(
+            props.audioEnabled && props.audioVolume > 0 && stageAlignmentOpen,
+          )}
+          sessionKey={`debate-alignment:${session?.id ?? props.storageScopeId}`}
+          volume={props.audioVolume}
+          mix={DEBATE_FOLEY_MIX}
+          foleyRoomAcoustics={
+            session?.format === "turnabout"
+              ? DEBATE_TURNABOUT_FOLEY_ROOM_SEND
+              : DEBATE_FORUM_FOLEY_ROOM_SEND
+          }
+          ambientFoley={false}
+          deferFoley
+          controllerHandleRef={stageAlignmentAtmosphereControllerRef}
+        />
+        <div
+          className={styles.alignmentModalBackdrop}
+          data-preview-theme={stageAlignmentPreviewTheme}
+          data-alignment-source={session ? "session" : "dashboard"}
         >
-          <header className={styles.alignmentModalHeader}>
-            <div>
-              <span className={styles.eyebrow}>Stage placement</span>
-              <h2 id="debate-stage-alignment-title">
-                Align the Prismatic Forum
-              </h2>
-              <p>
-                {session
-                  ? "Calibrate the three frozen roles once for this account and device."
-                  : "Calibrate the Forum at any time. The current draft cast is shown; empty roles use temporary Library stand-ins."}
-              </p>
-            </div>
-            <div>
-              <button
-                type="button"
-                data-debate-stage-alignment-copy="true"
-                data-copy-state={stageAlignmentCopyState}
-                onClick={() => void copyStageAlignmentData()}
-                disabled={stageAlignmentCopyState === "copying"}
-              >
-                {stageAlignmentCopyState === "copying"
-                  ? "Copying…"
-                  : stageAlignmentCopyState === "copied"
-                    ? "Copied"
-                    : stageAlignmentCopyState === "failed"
-                      ? "Copy failed"
-                      : "Copy alignment data"}
-              </button>
-              <button type="button" onClick={cancelStageAlignment}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={styles.alignmentSaveButton}
-                ref={stageAlignmentSaveButtonRef}
-                onClick={saveStageAlignment}
-              >
-                Save alignment
-              </button>
-            </div>
-          </header>
-          <div className={styles.alignmentModalBody}>
-            <div className={styles.alignmentEditorHeader}>
-              <p>
-                {stageAlignmentPreviewCamera === "moderator"
-                  ? "Align the moderator bot, nameplate, and glyph plate independently from Wide."
-                  : "Align every bot, nameplate, and glyph plate in the wide Forum without changing the moderator close-up."}{" "}
-                Drag an item or use arrow keys to nudge by 0.5%; hold Shift for
-                2%. Select the active item in the exact controls below.
-              </p>
+          <section
+            className={styles.alignmentModal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="debate-stage-alignment-title"
+            data-debate-stage-alignment-modal="true"
+          >
+            <header className={styles.alignmentModalHeader}>
               <div>
-                <div
-                  className={styles.alignmentViewToggle}
-                  role="group"
-                  aria-label="Debate alignment preview camera"
-                >
-                  {(["wide", "moderator"] as const).map((previewCamera) => (
-                    <button
-                      type="button"
-                      aria-pressed={
-                        stageAlignmentPreviewCamera === previewCamera
-                      }
-                      onClick={() =>
-                        setStageAlignmentPreviewCamera(previewCamera)
-                      }
-                      key={previewCamera}
-                    >
-                      {previewCamera === "wide" ? "Wide" : "Moderator"}
-                    </button>
-                  ))}
-                </div>
-                <div
-                  className={styles.alignmentThemeToggle}
-                  role="group"
-                  aria-label="Debate alignment preview theme"
-                >
-                  {(["light", "dark"] as const).map((previewTheme) => (
-                    <button
-                      type="button"
-                      aria-pressed={stageAlignmentPreviewTheme === previewTheme}
-                      onClick={() =>
-                        setStageAlignmentPreviewTheme(previewTheme)
-                      }
-                      key={previewTheme}
-                    >
-                      {previewTheme === "light" ? "Light" : "Dark"}
-                    </button>
-                  ))}
-                </div>
+                <span className={styles.eyebrow}>Stage placement</span>
+                <h2 id="debate-stage-alignment-title">
+                  Align the Prismatic Forum
+                </h2>
+                <p>
+                  {session
+                    ? "Calibrate the three frozen roles once for this account and device."
+                    : "Calibrate the Forum at any time. The current draft cast is shown; empty roles use temporary Library stand-ins."}
+                </p>
+              </div>
+              <div>
                 <button
                   type="button"
-                  onClick={() =>
-                    setStageAlignmentDraft((current) =>
-                      stageAlignmentPreviewCamera === "moderator"
-                        ? normalizeDebateStageAlignment({
-                            ...current,
-                            moderator: DEFAULT_DEBATE_STAGE_ALIGNMENT.moderator,
-                          })
-                        : normalizeDebateStageAlignment({
-                            ...current,
-                            wide: DEFAULT_DEBATE_STAGE_ALIGNMENT.wide,
-                          }),
-                    )
-                  }
-                  disabled={previewIsDefault}
+                  data-debate-stage-alignment-copy="true"
+                  data-copy-state={stageAlignmentCopyState}
+                  onClick={() => void copyStageAlignmentData()}
+                  disabled={stageAlignmentCopyState === "copying"}
                 >
-                  {stageAlignmentPreviewCamera === "moderator"
-                    ? "Reset moderator"
-                    : "Reset positions"}
+                  {stageAlignmentCopyState === "copying"
+                    ? "Copying…"
+                    : stageAlignmentCopyState === "copied"
+                      ? "Copied"
+                      : stageAlignmentCopyState === "failed"
+                        ? "Copy failed"
+                        : "Copy alignment data"}
+                </button>
+                <button type="button" onClick={cancelStageAlignment}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={styles.alignmentSaveButton}
+                  ref={stageAlignmentSaveButtonRef}
+                  onClick={saveStageAlignment}
+                >
+                  Save alignment
                 </button>
               </div>
-            </div>
-            <div className={styles.alignmentViewportColumn}>
-              <div
-                className={`${styles.live} ${styles.alignmentPreviewThemeScope}`}
-                data-theme={stageAlignmentPreviewTheme}
-                style={
-                  {
-                    "--debate-active-color": "#9c8cff",
-                    "--debate-for-color": forBot.color ?? "#42d9ff",
-                    "--debate-against-color": againstBot.color ?? "#ff5f8f",
-                    "--debate-moderator-color": moderatorBot.color ?? "#d9d2ff",
-                  } as CSSProperties
-                }
-              >
-                <div
-                  className={`${styles.forum} ${styles.alignmentForum}`}
-                  data-debate-alignment-stage="true"
-                  data-debate-stage-viewport="alignment"
-                >
+            </header>
+            <div className={styles.alignmentModalBody}>
+              <div className={styles.alignmentEditorHeader}>
+                <p>
+                  {stageAlignmentPreviewCamera === "moderator"
+                    ? "Align the moderator bot, nameplate, and glyph plate independently from Wide."
+                    : "Align every bot, nameplate, and glyph plate in the wide Forum without changing the moderator close-up."}{" "}
+                  Drag an item or use arrow keys to nudge by 0.5%; hold Shift
+                  for 2%. Select the active item in the exact controls below.
+                </p>
+                <div>
                   <div
-                    className={styles.forumCamera}
-                    data-camera-view={stageAlignmentPreviewCamera}
-                    style={debateStageAlignmentStyle(stageAlignmentDraft)}
+                    className={styles.alignmentViewToggle}
+                    role="group"
+                    aria-label="Debate alignment preview camera"
                   >
-                    <div className={styles.receiverMatte} aria-hidden="true" />
-                    <DebateForumLightMasks />
-                    {interactiveAlignmentCast.map(
-                      ({ role, bot, presentation }) => {
-                        const appearanceBot = session
-                          ? (debateBotSnapshot(
-                              session,
-                              presentation.voiceSourceBotId,
-                            ) ?? bot)
-                          : bot;
-                        const target = stageAlignmentTargetForRole(role, "bot");
-                        return (
-                          <div
-                            className={`${styles.botPosition} ${styles.alignmentHandle}`}
-                            data-role={role}
-                            data-dragging={
-                              stageAlignmentDraggingTarget === target
-                                ? "true"
-                                : undefined
-                            }
-                            data-selected={
-                              stageAlignmentSelectedItems[role] === "bot"
-                                ? "true"
-                                : undefined
-                            }
-                            data-alignment-item="bot"
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`Move ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} bot. Use arrow keys to nudge.`}
-                            onPointerDown={(event) =>
-                              beginStageAlignmentDrag(event, role, "bot")
-                            }
-                            onPointerMove={moveStageAlignmentDrag}
-                            onPointerUp={finishStageAlignmentDrag}
-                            onPointerCancel={finishStageAlignmentDrag}
-                            onKeyDown={(event) =>
-                              nudgeStageAlignmentItem(event, role, "bot")
-                            }
-                            key={`alignment-avatar:${bot.id}`}
-                          >
-                            <div
-                              className={styles.botStagePresence}
-                              data-scale={presentation.scale}
-                            >
-                              {props.renderBotAvatar ? (
-                                props.renderBotAvatar(appearanceBot, {
-                                  role,
-                                  lookAtRole: null,
-                                  compact:
-                                    role === "moderator" &&
-                                    stageAlignmentPreviewCamera !== "moderator",
-                                  talking: false,
-                                  thinking: false,
-                                  colorCycle: presentation.colorCycle,
-                                  speechTiming: null,
-                                  foleyMouthShape: null,
-                                  listenerReaction: null,
-                                })
-                              ) : (
-                                <span className={styles.botGlyphFallback}>
-                                  {props.renderBotGlyph(presentation.glyph, {
-                                    size: 42,
-                                    strokeWidth: 1.35,
-                                  })}
-                                </span>
-                              )}
-                            </div>
-                            <span className={styles.alignmentHandleLabel}>
-                              {DEBATE_STAGE_ALIGNMENT_LABELS[role]} · Bot
-                            </span>
-                          </div>
-                        );
-                      },
-                    )}
-                    <div
-                      className={styles.podiumForeground}
-                      aria-hidden="true"
-                    />
-                    {interactiveAlignmentCast.map(
-                      ({ role, bot, presentation }) => {
-                        const target = stageAlignmentTargetForRole(
-                          role,
-                          "glyph",
-                        );
-                        return (
-                          <div
-                            className={`${styles.podiumGlyphPosition} ${styles.alignmentHandle}`}
-                            data-role={role}
-                            data-visibility={presentation.visibility}
-                            data-dragging={
-                              stageAlignmentDraggingTarget === target
-                                ? "true"
-                                : undefined
-                            }
-                            data-selected={
-                              stageAlignmentSelectedItems[role] === "glyph"
-                                ? "true"
-                                : undefined
-                            }
-                            data-alignment-item="glyph"
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`Move ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} glyph plate. Use arrow keys to nudge.`}
-                            onPointerDown={(event) =>
-                              beginStageAlignmentDrag(event, role, "glyph")
-                            }
-                            onPointerMove={moveStageAlignmentDrag}
-                            onPointerUp={finishStageAlignmentDrag}
-                            onPointerCancel={finishStageAlignmentDrag}
-                            onKeyDown={(event) =>
-                              nudgeStageAlignmentItem(event, role, "glyph")
-                            }
-                            key={`alignment-podium-glyph:${bot.id}`}
-                          >
-                            <span className={styles.podiumGlyphScreen}>
-                              <span className={styles.podiumGlyphMark}>
-                                {props.renderBotGlyph(presentation.glyph, {
-                                  size: 48,
-                                  strokeWidth: 1.5,
-                                })}
-                              </span>
-                            </span>
-                            <span className={styles.alignmentHandleLabel}>
-                              {DEBATE_STAGE_ALIGNMENT_LABELS[role]} · Glyph
-                            </span>
-                          </div>
-                        );
-                      },
-                    )}
-                    {interactiveAlignmentCast.map(
-                      ({ role, bot, presentation, roleLabel }) => {
-                        const target = stageAlignmentTargetForRole(
-                          role,
-                          "nameplate",
-                        );
-                        return (
-                          <div
-                            className={`${styles.botIdentityPosition} ${styles.alignmentHandle}`}
-                            data-role={role}
-                            data-dragging={
-                              stageAlignmentDraggingTarget === target
-                                ? "true"
-                                : undefined
-                            }
-                            data-selected={
-                              stageAlignmentSelectedItems[role] === "nameplate"
-                                ? "true"
-                                : undefined
-                            }
-                            data-alignment-item="nameplate"
-                            role="button"
-                            tabIndex={0}
-                            aria-label={`Move ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} nameplate. Use arrow keys to nudge.`}
-                            onPointerDown={(event) =>
-                              beginStageAlignmentDrag(event, role, "nameplate")
-                            }
-                            onPointerMove={moveStageAlignmentDrag}
-                            onPointerUp={finishStageAlignmentDrag}
-                            onPointerCancel={finishStageAlignmentDrag}
-                            onKeyDown={(event) =>
-                              nudgeStageAlignmentItem(event, role, "nameplate")
-                            }
-                            key={`alignment-identity:${bot.id}`}
-                          >
-                            <div className={styles.botIdentityPlate}>
-                              <strong>{presentation.displayName}</strong>
-                              <small>{roleLabel}</small>
-                            </div>
-                            <span className={styles.alignmentHandleLabel}>
-                              {DEBATE_STAGE_ALIGNMENT_LABELS[role]} · Nameplate
-                            </span>
-                          </div>
-                        );
-                      },
-                    )}
-                    <div className={styles.motionPlinth}>
-                      <span>The motion</span>
-                      <strong>
-                        {alignmentMotion.motion.trim() ||
-                          "Your next motion will appear here."}
-                      </strong>
-                    </div>
+                    {(["wide", "moderator"] as const).map((previewCamera) => (
+                      <button
+                        type="button"
+                        aria-pressed={
+                          stageAlignmentPreviewCamera === previewCamera
+                        }
+                        onClick={() =>
+                          setStageAlignmentPreviewCamera(previewCamera)
+                        }
+                        key={previewCamera}
+                      >
+                        {previewCamera === "wide" ? "Wide" : "Moderator"}
+                      </button>
+                    ))}
                   </div>
-                </div>
-              </div>
-              <section
-                className={styles.alignmentLightingTuner}
-                aria-label="Debate light color blend modes"
-              >
-                <header>
-                  <div>
-                    <span className={styles.eyebrow}>Color blend</span>
-                    <strong>Architectural bounce</strong>
+                  <div
+                    className={styles.alignmentThemeToggle}
+                    role="group"
+                    aria-label="Debate alignment preview theme"
+                  >
+                    {(["light", "dark"] as const).map((previewTheme) => (
+                      <button
+                        type="button"
+                        aria-pressed={
+                          stageAlignmentPreviewTheme === previewTheme
+                        }
+                        onClick={() =>
+                          setStageAlignmentPreviewTheme(previewTheme)
+                        }
+                        key={previewTheme}
+                      >
+                        {previewTheme === "light" ? "Light" : "Dark"}
+                      </button>
+                    ))}
                   </div>
                   <button
                     type="button"
-                    disabled={lightBlendModesAreDefault}
                     onClick={() =>
                       setStageAlignmentDraft((current) =>
-                        normalizeDebateStageAlignment({
-                          ...current,
-                          lightBlendModes:
-                            DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes,
-                        }),
+                        stageAlignmentPreviewCamera === "moderator"
+                          ? normalizeDebateStageAlignment({
+                              ...current,
+                              moderator:
+                                DEFAULT_DEBATE_STAGE_ALIGNMENT.moderator,
+                              gavel: DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel,
+                            })
+                          : normalizeDebateStageAlignment({
+                              ...current,
+                              wide: DEFAULT_DEBATE_STAGE_ALIGNMENT.wide,
+                            }),
                       )
                     }
+                    disabled={previewIsDefault}
                   >
-                    Reset
+                    {stageAlignmentPreviewCamera === "moderator"
+                      ? "Reset moderator"
+                      : "Reset positions"}
                   </button>
-                </header>
-                <div className={styles.alignmentLightingTunerRows}>
-                  {(["dark", "light"] as const).map((theme) => {
-                    const label = theme === "dark" ? "Dark" : "Light";
-                    return (
+                </div>
+              </div>
+              <div className={styles.alignmentViewportColumn}>
+                <div
+                  className={`${styles.live} ${styles.alignmentPreviewThemeScope}`}
+                  data-theme={stageAlignmentPreviewTheme}
+                  style={
+                    {
+                      "--debate-active-color": "#9c8cff",
+                      "--debate-for-color": forBot.color ?? "#42d9ff",
+                      "--debate-against-color": againstBot.color ?? "#ff5f8f",
+                      "--debate-moderator-color":
+                        moderatorBot.color ?? "#d9d2ff",
+                    } as CSSProperties
+                  }
+                >
+                  <div
+                    className={`${styles.forum} ${styles.alignmentForum}`}
+                    data-debate-alignment-stage="true"
+                    data-debate-stage-viewport="alignment"
+                  >
+                    <div
+                      className={styles.forumCamera}
+                      data-camera-view={stageAlignmentPreviewCamera}
+                      style={debateStageAlignmentStyle(stageAlignmentDraft)}
+                    >
                       <div
-                        className={styles.alignmentLightingTunerRow}
-                        data-active={
-                          stageAlignmentPreviewTheme === theme
-                            ? "true"
-                            : undefined
-                        }
-                        key={theme}
-                      >
-                        <strong>{label}</strong>
-                        <div
-                          className={styles.alignmentLightingBlendToggle}
-                          role="group"
-                          aria-label={`${label} Debate light blend mode`}
-                        >
-                          {DEBATE_STAGE_LIGHT_BLEND_MODES.map((blendMode) => (
-                            <button
-                              type="button"
-                              aria-pressed={
-                                stageAlignmentDraft.lightBlendModes[theme] ===
-                                blendMode
+                        className={styles.receiverMatte}
+                        aria-hidden="true"
+                      />
+                      <DebateForumLightMasks />
+                      {interactiveAlignmentCast.map(
+                        ({ role, bot, presentation }) => {
+                          const appearanceBot = session
+                            ? (debateBotSnapshot(
+                                session,
+                                presentation.voiceSourceBotId,
+                              ) ?? bot)
+                            : bot;
+                          const target = stageAlignmentTargetForRole(
+                            role,
+                            "bot",
+                          );
+                          return (
+                            <div
+                              className={`${styles.botPosition} ${styles.alignmentHandle}`}
+                              data-role={role}
+                              data-dragging={
+                                stageAlignmentDraggingTarget === target
+                                  ? "true"
+                                  : undefined
                               }
-                              onClick={() => {
+                              data-selected={
+                                stageAlignmentSelectedItems[role] === "bot"
+                                  ? "true"
+                                  : undefined
+                              }
+                              data-alignment-item="bot"
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Move ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} bot. Use arrow keys to nudge.`}
+                              onPointerDown={(event) =>
+                                beginStageAlignmentDrag(event, role, "bot")
+                              }
+                              onPointerMove={moveStageAlignmentDrag}
+                              onPointerUp={finishStageAlignmentDrag}
+                              onPointerCancel={finishStageAlignmentDrag}
+                              onKeyDown={(event) =>
+                                nudgeStageAlignmentItem(event, role, "bot")
+                              }
+                              key={`alignment-avatar:${bot.id}`}
+                            >
+                              <div
+                                className={styles.botStagePresence}
+                                data-scale={presentation.scale}
+                              >
+                                {props.renderBotAvatar ? (
+                                  props.renderBotAvatar(appearanceBot, {
+                                    role,
+                                    lookAtRole: null,
+                                    compact:
+                                      role === "moderator" &&
+                                      stageAlignmentPreviewCamera !==
+                                        "moderator",
+                                    talking: false,
+                                    thinking: false,
+                                    colorCycle: presentation.colorCycle,
+                                    speechTiming: null,
+                                    foleyMouthShape: null,
+                                    listenerReaction: null,
+                                  })
+                                ) : (
+                                  <span className={styles.botGlyphFallback}>
+                                    {props.renderBotGlyph(presentation.glyph, {
+                                      size: 42,
+                                      strokeWidth: 1.35,
+                                    })}
+                                  </span>
+                                )}
+                              </div>
+                              <span className={styles.alignmentHandleLabel}>
+                                {DEBATE_STAGE_ALIGNMENT_LABELS[role]} · Bot
+                              </span>
+                            </div>
+                          );
+                        },
+                      )}
+                      <div
+                        className={styles.podiumForeground}
+                        aria-hidden="true"
+                      />
+                      <DebateModeratorGavel
+                        theme={stageAlignmentPreviewTheme}
+                        color={moderatorBot.color ?? "#d9d2ff"}
+                        cue={stageAlignmentGavelCue}
+                        sessionId="alignment-preview"
+                        audioEnabled={
+                          props.audioEnabled && props.audioVolume > 0
+                        }
+                        atmosphereControllerRef={
+                          stageAlignmentAtmosphereControllerRef
+                        }
+                      />
+                      {interactiveAlignmentCast.map(
+                        ({ role, bot, presentation }) => {
+                          const target = stageAlignmentTargetForRole(
+                            role,
+                            "glyph",
+                          );
+                          return (
+                            <div
+                              className={`${styles.podiumGlyphPosition} ${styles.alignmentHandle}`}
+                              data-role={role}
+                              data-visibility={presentation.visibility}
+                              data-dragging={
+                                stageAlignmentDraggingTarget === target
+                                  ? "true"
+                                  : undefined
+                              }
+                              data-selected={
+                                stageAlignmentSelectedItems[role] === "glyph"
+                                  ? "true"
+                                  : undefined
+                              }
+                              data-alignment-item="glyph"
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Move ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} glyph plate. Use arrow keys to nudge.`}
+                              onPointerDown={(event) =>
+                                beginStageAlignmentDrag(event, role, "glyph")
+                              }
+                              onPointerMove={moveStageAlignmentDrag}
+                              onPointerUp={finishStageAlignmentDrag}
+                              onPointerCancel={finishStageAlignmentDrag}
+                              onKeyDown={(event) =>
+                                nudgeStageAlignmentItem(event, role, "glyph")
+                              }
+                              key={`alignment-podium-glyph:${bot.id}`}
+                            >
+                              <span className={styles.podiumGlyphScreen}>
+                                <span className={styles.podiumGlyphMark}>
+                                  {props.renderBotGlyph(presentation.glyph, {
+                                    size: 48,
+                                    strokeWidth: 1.5,
+                                  })}
+                                </span>
+                              </span>
+                              <span className={styles.alignmentHandleLabel}>
+                                {DEBATE_STAGE_ALIGNMENT_LABELS[role]} · Glyph
+                              </span>
+                            </div>
+                          );
+                        },
+                      )}
+                      {interactiveAlignmentCast.map(
+                        ({ role, bot, presentation, roleLabel }) => {
+                          const target = stageAlignmentTargetForRole(
+                            role,
+                            "nameplate",
+                          );
+                          return (
+                            <div
+                              className={`${styles.botIdentityPosition} ${styles.alignmentHandle}`}
+                              data-role={role}
+                              data-dragging={
+                                stageAlignmentDraggingTarget === target
+                                  ? "true"
+                                  : undefined
+                              }
+                              data-selected={
+                                stageAlignmentSelectedItems[role] ===
+                                "nameplate"
+                                  ? "true"
+                                  : undefined
+                              }
+                              data-alignment-item="nameplate"
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Move ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} nameplate. Use arrow keys to nudge.`}
+                              onPointerDown={(event) =>
+                                beginStageAlignmentDrag(
+                                  event,
+                                  role,
+                                  "nameplate",
+                                )
+                              }
+                              onPointerMove={moveStageAlignmentDrag}
+                              onPointerUp={finishStageAlignmentDrag}
+                              onPointerCancel={finishStageAlignmentDrag}
+                              onKeyDown={(event) =>
+                                nudgeStageAlignmentItem(
+                                  event,
+                                  role,
+                                  "nameplate",
+                                )
+                              }
+                              key={`alignment-identity:${bot.id}`}
+                            >
+                              <div className={styles.botIdentityPlate}>
+                                <strong>{presentation.displayName}</strong>
+                                <small>{roleLabel}</small>
+                              </div>
+                              <span className={styles.alignmentHandleLabel}>
+                                {DEBATE_STAGE_ALIGNMENT_LABELS[role]} ·
+                                Nameplate
+                              </span>
+                            </div>
+                          );
+                        },
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {stageAlignmentPreviewCamera === "moderator" ? (
+                  <section
+                    className={styles.alignmentGavelTuner}
+                    aria-label="Debate moderator gavel controls"
+                  >
+                    <header>
+                      <div>
+                        <span className={styles.eyebrow}>Moderator view</span>
+                        <strong>Gavel</strong>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={gavelIsDefault}
+                        onClick={() =>
+                          setStageAlignmentDraft((current) =>
+                            normalizeDebateStageAlignment({
+                              ...current,
+                              gavel: DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel,
+                            }),
+                          )
+                        }
+                      >
+                        Reset
+                      </button>
+                    </header>
+                    <div className={styles.alignmentGavelTunerRows}>
+                      {(
+                        [
+                          {
+                            key: "x",
+                            label: "Horizontal",
+                            min: DEBATE_STAGE_ALIGNMENT_MIN,
+                            max: DEBATE_STAGE_ALIGNMENT_MAX,
+                            step: DEBATE_STAGE_ALIGNMENT_STEP,
+                          },
+                          {
+                            key: "y",
+                            label: "Vertical",
+                            min: DEBATE_STAGE_ALIGNMENT_MIN,
+                            max: DEBATE_STAGE_ALIGNMENT_MAX,
+                            step: DEBATE_STAGE_ALIGNMENT_STEP,
+                          },
+                          {
+                            key: "size",
+                            label: "Size",
+                            min: DEBATE_STAGE_GAVEL_SIZE_MIN,
+                            max: DEBATE_STAGE_GAVEL_SIZE_MAX,
+                            step: DEBATE_STAGE_GAVEL_SIZE_STEP,
+                          },
+                        ] as const
+                      ).map((control) => {
+                        const value = stageAlignmentDraft.gavel[control.key];
+                        return (
+                          <label key={control.key}>
+                            <span>
+                              {control.label}
+                              <output>
+                                {control.key !== "size" && value > 0 ? "+" : ""}
+                                {value.toFixed(control.key === "size" ? 0 : 1)}%
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={control.min}
+                              max={control.max}
+                              step={control.step}
+                              value={value}
+                              aria-label={`Debate moderator gavel ${control.label.toLowerCase()}`}
+                              onChange={(event) =>
+                                setStageAlignmentDraft((current) =>
+                                  updateDebateStageGavel(current, {
+                                    [control.key]: Number(
+                                      event.currentTarget.value,
+                                    ),
+                                  }),
+                                )
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div
+                      className={styles.alignmentGavelPreviewActions}
+                      role="group"
+                      aria-label="Test moderator gavel"
+                    >
+                      <strong>Test gavel</strong>
+                      <div>
+                        <button
+                          type="button"
+                          data-debate-gavel-test="attention"
+                          onClick={() =>
+                            previewStageAlignmentGavel("attention")
+                          }
+                        >
+                          One strike
+                        </button>
+                        <button
+                          type="button"
+                          data-debate-gavel-test="order"
+                          onClick={() => previewStageAlignmentGavel("order")}
+                        >
+                          Two strikes
+                        </button>
+                      </div>
+                      <small>
+                        {props.audioEnabled && props.audioVolume > 0
+                          ? "Live animation and sound."
+                          : "Animation only. Enable audio for sound."}
+                      </small>
+                    </div>
+                  </section>
+                ) : null}
+                <section
+                  className={styles.alignmentLightingTuner}
+                  aria-label="Debate light color mask controls"
+                >
+                  <header>
+                    <div>
+                      <span className={styles.eyebrow}>Color blend</span>
+                      <strong>Architectural bounce</strong>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={lightingIsDefault}
+                      onClick={() =>
+                        setStageAlignmentDraft((current) =>
+                          normalizeDebateStageAlignment({
+                            ...current,
+                            lightBlendModes:
+                              DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes,
+                            lightMaskOpacities:
+                              DEFAULT_DEBATE_STAGE_ALIGNMENT.lightMaskOpacities,
+                          }),
+                        )
+                      }
+                    >
+                      Reset
+                    </button>
+                  </header>
+                  <div className={styles.alignmentLightingTunerRows}>
+                    {(["dark", "light"] as const).map((theme) => {
+                      const label = theme === "dark" ? "Dark" : "Light";
+                      return (
+                        <div
+                          className={styles.alignmentLightingTunerRow}
+                          data-active={
+                            stageAlignmentPreviewTheme === theme
+                              ? "true"
+                              : undefined
+                          }
+                          key={theme}
+                        >
+                          <strong>{label}</strong>
+                          <div
+                            className={styles.alignmentLightingBlendToggle}
+                            role="group"
+                            aria-label={`${label} Debate light blend mode`}
+                          >
+                            {DEBATE_STAGE_LIGHT_BLEND_MODES.map((blendMode) => (
+                              <button
+                                type="button"
+                                aria-pressed={
+                                  stageAlignmentDraft.lightBlendModes[theme] ===
+                                  blendMode
+                                }
+                                onClick={() => {
+                                  setStageAlignmentPreviewTheme(theme);
+                                  setStageAlignmentDraft((current) =>
+                                    updateDebateStageLightBlendMode(
+                                      current,
+                                      theme,
+                                      blendMode,
+                                    ),
+                                  );
+                                }}
+                                key={blendMode}
+                              >
+                                {blendMode === "screen" ? "Screen" : "Overlay"}
+                              </button>
+                            ))}
+                          </div>
+                          <label className={styles.alignmentLightingOpacity}>
+                            <span>
+                              Opacity
+                              <output>
+                                {stageAlignmentDraft.lightMaskOpacities[theme]}%
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN}
+                              max={DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX}
+                              step={DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP}
+                              value={
+                                stageAlignmentDraft.lightMaskOpacities[theme]
+                              }
+                              aria-label={`${label} Debate color mask opacity`}
+                              onChange={(event) => {
                                 setStageAlignmentPreviewTheme(theme);
                                 setStageAlignmentDraft((current) =>
-                                  updateDebateStageLightBlendMode(
+                                  updateDebateStageLightMaskOpacity(
                                     current,
                                     theme,
-                                    blendMode,
+                                    Number(event.currentTarget.value),
                                   ),
                                 );
                               }}
-                              key={blendMode}
+                            />
+                          </label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <small>
+                    Saved separately for Light and Dark on this account and
+                    device.
+                  </small>
+                </section>
+                <section
+                  className={styles.alignmentTuner}
+                  aria-label="Debate stage position controls"
+                  data-camera-view={stageAlignmentPreviewCamera}
+                >
+                  {interactiveAlignmentCast.map(({ role, bot }) => {
+                    const selectedItem = stageAlignmentSelectedItems[role];
+                    const target = stageAlignmentTargetForRole(
+                      role,
+                      selectedItem,
+                    );
+                    const offset = debateStageAlignmentOffset(
+                      stageAlignmentDraft,
+                      target,
+                    );
+                    return (
+                      <div className={styles.alignmentTunerRole} key={role}>
+                        <header>
+                          <div>
+                            <span>{DEBATE_STAGE_ALIGNMENT_LABELS[role]}</span>
+                            <strong>{bot.name}</strong>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={offset.x === 0 && offset.y === 0}
+                            aria-label={`Reset ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[selectedItem].toLowerCase()} position`}
+                            onClick={() =>
+                              updateStageAlignmentTarget(target, { x: 0, y: 0 })
+                            }
+                          >
+                            Reset
+                          </button>
+                        </header>
+                        <div
+                          className={styles.alignmentItemToggle}
+                          role="group"
+                          aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} item`}
+                        >
+                          {DEBATE_STAGE_ALIGNMENT_ITEMS.map((item) => (
+                            <button
+                              type="button"
+                              aria-pressed={selectedItem === item}
+                              onClick={() =>
+                                setStageAlignmentSelectedItems((current) => ({
+                                  ...current,
+                                  [role]: item,
+                                }))
+                              }
+                              key={item}
                             >
-                              {blendMode === "screen" ? "Screen" : "Overlay"}
+                              {DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[item]}
                             </button>
                           ))}
                         </div>
+                        {(["x", "y"] as const).map((axis) => (
+                          <label key={axis}>
+                            <span>
+                              {axis === "x" ? "Horizontal" : "Vertical"}
+                              <output>
+                                {offset[axis] > 0 ? "+" : ""}
+                                {offset[axis].toFixed(1)}%
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={DEBATE_STAGE_ALIGNMENT_MIN}
+                              max={DEBATE_STAGE_ALIGNMENT_MAX}
+                              step={DEBATE_STAGE_ALIGNMENT_STEP}
+                              value={offset[axis]}
+                              aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[selectedItem]} ${
+                                axis === "x" ? "horizontal" : "vertical"
+                              } position`}
+                              onChange={(event) =>
+                                updateStageAlignmentTarget(target, {
+                                  [axis]: Number(event.currentTarget.value),
+                                })
+                              }
+                            />
+                          </label>
+                        ))}
                       </div>
                     );
                   })}
-                </div>
-                <small>
-                  Saved separately for Light and Dark on this account and
-                  device.
-                </small>
-              </section>
-              <section
-                className={styles.alignmentTuner}
-                aria-label="Debate stage position controls"
-                data-camera-view={stageAlignmentPreviewCamera}
-              >
-                {interactiveAlignmentCast.map(({ role, bot }) => {
-                  const selectedItem = stageAlignmentSelectedItems[role];
-                  const target = stageAlignmentTargetForRole(
-                    role,
-                    selectedItem,
-                  );
-                  const offset = debateStageAlignmentOffset(
-                    stageAlignmentDraft,
-                    target,
-                  );
-                  return (
-                    <div className={styles.alignmentTunerRole} key={role}>
-                      <header>
-                        <div>
-                          <span>{DEBATE_STAGE_ALIGNMENT_LABELS[role]}</span>
-                          <strong>{bot.name}</strong>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={offset.x === 0 && offset.y === 0}
-                          aria-label={`Reset ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[selectedItem].toLowerCase()} position`}
-                          onClick={() =>
-                            updateStageAlignmentTarget(target, { x: 0, y: 0 })
-                          }
-                        >
-                          Reset
-                        </button>
-                      </header>
-                      <div
-                        className={styles.alignmentItemToggle}
-                        role="group"
-                        aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} item`}
-                      >
-                        {DEBATE_STAGE_ALIGNMENT_ITEMS.map((item) => (
-                          <button
-                            type="button"
-                            aria-pressed={selectedItem === item}
-                            onClick={() =>
-                              setStageAlignmentSelectedItems((current) => ({
-                                ...current,
-                                [role]: item,
-                              }))
-                            }
-                            key={item}
-                          >
-                            {DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[item]}
-                          </button>
-                        ))}
-                      </div>
-                      {(["x", "y"] as const).map((axis) => (
-                        <label key={axis}>
-                          <span>
-                            {axis === "x" ? "Horizontal" : "Vertical"}
-                            <output>
-                              {offset[axis] > 0 ? "+" : ""}
-                              {offset[axis].toFixed(1)}%
-                            </output>
-                          </span>
-                          <input
-                            type="range"
-                            min={DEBATE_STAGE_ALIGNMENT_MIN}
-                            max={DEBATE_STAGE_ALIGNMENT_MAX}
-                            step={DEBATE_STAGE_ALIGNMENT_STEP}
-                            value={offset[axis]}
-                            aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[selectedItem]} ${
-                              axis === "x" ? "horizontal" : "vertical"
-                            } position`}
-                            onChange={(event) =>
-                              updateStageAlignmentTarget(target, {
-                                [axis]: Number(event.currentTarget.value),
-                              })
-                            }
-                          />
-                        </label>
-                      ))}
-                    </div>
-                  );
-                })}
-              </section>
+                </section>
+              </div>
             </div>
-          </div>
-        </section>
-      </div>
+          </section>
+        </div>
+      </>
     );
   };
 
   const renderLive = (): React.JSX.Element => {
     if (!activeSession) return renderLobby();
     const session = activeSession;
+    const juryCameraActive = debateJuryCameraIsActive(cameraMode, session);
     const activeEvent =
       (presentationEventId
         ? session.events.find((event) => event.id === presentationEventId)
@@ -4682,22 +5740,29 @@ export function DebateExperience(
         .reverse()
         .find(
           (event) =>
-            [
-              "intro",
-              "phase",
-              "speech",
-              "silence",
-              "testimony",
-              "press",
-              "objection",
-              "evidence",
-              "revelation",
-              "player_turn",
-              "reaction",
-              "interjection",
-              "moderator_ruling",
-              "ballot",
-            ].includes(event.kind) ||
+            (!(
+              !juryCameraActive &&
+              (event.kind === "jury_deliberation" ||
+                (event.kind === "ballot" && event.speakerKind === "juror"))
+            ) &&
+              [
+                "intro",
+                "phase",
+                "speech",
+                "silence",
+                "testimony",
+                "press",
+                "objection",
+                "evidence",
+                "revelation",
+                "player_turn",
+                "reaction",
+                "interjection",
+                "moderator_ruling",
+                "ballot",
+                "jury_deliberation",
+                "jury_verdict",
+              ].includes(event.kind)) ||
             (event.kind === "verdict" && event.speakerKind === "player"),
         ) ??
       null;
@@ -4709,7 +5774,8 @@ export function DebateExperience(
           ? session.forAdvocate.color
           : activeSpeakerId === session.againstAdvocate.id
             ? session.againstAdvocate.color
-            : null;
+            : (session.jury.jurors.find((juror) => juror.id === activeSpeakerId)
+                ?.color ?? null);
     const activeRole: DebateForumRole | null =
       activeSpeakerId === session.moderator.id
         ? "moderator"
@@ -4718,8 +5784,21 @@ export function DebateExperience(
           : activeSpeakerId === session.againstAdvocate.id
             ? "against"
             : null;
-    const cameraView =
-      cameraMode === "auto" ? debateAutoCameraView(activeRole) : cameraMode;
+    const activeGavelCue =
+      presenting && presentationEventId === activeEvent?.id
+        ? debateModeratorGavelCue({
+            format: session.format,
+            event: activeEvent,
+            moderatorBotId: session.moderator.id,
+          })
+        : null;
+    const cameraView = juryCameraActive
+      ? "jury"
+      : cameraMode === "auto" || cameraMode === "jury"
+        ? activeGavelCue
+          ? "moderator"
+          : debateAutoCameraView(activeRole)
+        : cameraMode;
     const canInterject =
       session.format === "forum" &&
       session.playerRole === "participant" &&
@@ -4759,22 +5838,43 @@ export function DebateExperience(
                       ? "Moderator transition"
                       : activeEvent?.kind === "ballot"
                         ? "Ballot"
-                        : activeEvent
-                          ? "On the floor"
-                          : "Awaiting the floor";
-    const forPresentation = debateBotPresentation(session, session.forAdvocate);
+                        : activeEvent?.kind === "jury_deliberation"
+                          ? "Jury chamber"
+                          : activeEvent?.kind === "jury_verdict"
+                            ? "Jury verdict"
+                            : activeEvent
+                              ? "On the floor"
+                              : "Awaiting the floor";
+    const forPresentation = debateBotPresentation(
+      session,
+      session.forAdvocate,
+      Number.POSITIVE_INFINITY,
+      observerPerspective,
+    );
     const againstPresentation = debateBotPresentation(
       session,
       session.againstAdvocate,
+      Number.POSITIVE_INFINITY,
+      observerPerspective,
     );
     const moderatorPresentation = debateBotPresentation(
       session,
       session.moderator,
+      Number.POSITIVE_INFINITY,
+      observerPerspective,
     );
     const thinkingBotId =
       busy && !presenting && session.status === "live"
         ? debateExpectedBotId(session)
         : null;
+    const juryChamberVisible = juryCameraActive;
+    const juryDeliberating =
+      session.jury.enabled && session.stepKey.startsWith("jury_deliberation_");
+    const participantJurySealed =
+      session.jury.enabled &&
+      session.playerRole === "participant" &&
+      session.jury.phase !== "waiting" &&
+      session.jury.phase !== "disabled";
     const turnaboutFloorOwnerBotId =
       session.formatState.format === "turnabout"
         ? session.formatState.floorOwnerBotId
@@ -4833,6 +5933,7 @@ export function DebateExperience(
         (session.status !== "live" &&
           session.status !== "waiting_for_player") ||
         (busy && !presenting) ||
+        participantJurySealed ||
         cue.kind === "mouth-sound" ||
         cue.kind === "lip-smack"
       ) {
@@ -4863,7 +5964,9 @@ export function DebateExperience(
           active={Boolean(
             props.audioEnabled &&
             props.audioVolume > 0 &&
-            (session.status === "live" ||
+            !participantJurySealed &&
+            (presenting ||
+              session.status === "live" ||
               session.status === "waiting_for_player"),
           )}
           sessionKey={`debate:${session.id}`}
@@ -4880,6 +5983,7 @@ export function DebateExperience(
           ambientBotVocalizations
           ambientBotVocalizationProfile={DEBATE_VOCAL_FOLEY_PROFILE}
           onAmbientBotVocalization={handleDebateAmbientBotVocalization}
+          controllerHandleRef={debateAtmosphereControllerRef}
         />
         <main
           className={styles.live}
@@ -4888,6 +5992,7 @@ export function DebateExperience(
           data-theme={props.theme}
           data-session-status={session.status}
           data-session-phase={session.phase}
+          data-jury-chamber={juryChamberVisible ? "true" : undefined}
           style={
             {
               "--debate-active-color": activeColor ?? "#9c8cff",
@@ -4918,10 +6023,8 @@ export function DebateExperience(
                 {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
                 {phaseLabel(session)} · {session.playerRole}
               </p>
-              <h1>
-                {session.format === "turnabout"
-                  ? "Court of Record"
-                  : "Assembly Chamber"}
+              <h1 data-debate-motion-title="true" title={session.motion.motion}>
+                {session.motion.motion}
               </h1>
             </div>
             <div className={styles.liveControls}>
@@ -4936,15 +6039,19 @@ export function DebateExperience(
                   >
                     {session.status === "paused" ? "Resume" : "Pause"}
                   </button>
-                  {session.phase !== "verdict" ? (
+                  {session.phase !== "verdict" || juryDeliberating ? (
                     <button
                       type="button"
                       className={styles.endEarlyButton}
                       onClick={() => setEarlyEndOpen(true)}
-                      disabled={busy || presenting}
-                      aria-label="End the Debate early"
+                      disabled={busy || (!juryDeliberating && presenting)}
+                      aria-label={
+                        juryDeliberating
+                          ? "Skip Jury deliberation"
+                          : "End the Debate early"
+                      }
                     >
-                      End early
+                      {juryDeliberating ? "Skip deliberation" : "End early"}
                     </button>
                   ) : null}
                 </>
@@ -4954,167 +6061,184 @@ export function DebateExperience(
           <div className={styles.liveWorkspace}>
             <div className={styles.stageColumn}>
               <div className={styles.forum} data-debate-stage-viewport="live">
-                <div
-                  className={styles.forumCamera}
-                  data-camera-view={cameraView}
-                  data-camera-mode={cameraMode}
-                  data-active-role={activeRole ?? undefined}
-                  style={debateStageAlignmentStyle(stageAlignment)}
-                >
-                  <div className={styles.receiverMatte} aria-hidden="true" />
-                  <DebateForumLightMasks />
-                  {stageCast.map(
-                    ({
-                      role,
-                      bot,
-                      presentation,
-                      listenerReaction: botListenerReaction,
-                    }) => {
-                      const appearanceBot =
-                        debateBotSnapshot(
-                          session,
-                          presentation.voiceSourceBotId,
-                        ) ?? bot;
-                      const talking =
-                        presenting &&
-                        activeSpeakerId === bot.id &&
-                        activeEvent?.kind !== "silence";
-                      const speechTiming =
-                        talking &&
-                        liveReveal &&
-                        liveReveal.eventId === activeEvent?.id
-                          ? (liveReveal.speechTiming ?? null)
-                          : null;
-                      const foleyMouthShape =
-                        !talking &&
-                        debateAmbientBotVocalization?.targetId === bot.id
-                          ? debateAmbientBotVocalizationMouthShape(bot.id)
-                          : null;
-                      return (
-                        <div
-                          className={styles.botPosition}
-                          data-role={role}
-                          key={`avatar:${bot.id}`}
-                        >
+                {juryChamberVisible ? (
+                  renderJuryChamber(session, activeEvent, thinkingBotId)
+                ) : (
+                  <div
+                    className={styles.forumCamera}
+                    data-camera-view={cameraView}
+                    data-camera-mode={cameraMode}
+                    data-active-role={activeRole ?? undefined}
+                    style={debateStageAlignmentStyle(stageAlignment)}
+                  >
+                    <div className={styles.receiverMatte} aria-hidden="true" />
+                    <DebateForumLightMasks />
+                    {stageCast.map(
+                      ({
+                        role,
+                        bot,
+                        presentation,
+                        listenerReaction: botListenerReaction,
+                      }) => {
+                        const appearanceBot =
+                          debateBotSnapshot(
+                            session,
+                            presentation.voiceSourceBotId,
+                          ) ?? bot;
+                        const talking =
+                          presenting &&
+                          activeSpeakerId === bot.id &&
+                          activeEvent?.kind !== "silence";
+                        const speechTiming =
+                          talking &&
+                          liveReveal &&
+                          liveReveal.eventId === activeEvent?.id
+                            ? (liveReveal.speechTiming ?? null)
+                            : null;
+                        const foleyMouthShape =
+                          !talking &&
+                          debateAmbientBotVocalization?.targetId === bot.id
+                            ? debateAmbientBotVocalizationMouthShape(bot.id)
+                            : null;
+                        return (
                           <div
-                            className={styles.botStagePresence}
-                            data-speaking={talking ? "true" : undefined}
-                            data-thinking={
-                              thinkingBotId === bot.id ? "true" : undefined
-                            }
-                            data-visibility={presentation.visibility}
-                            data-scale={presentation.scale}
-                            data-color-cycle={
-                              presentation.colorCycle ? "true" : undefined
-                            }
-                            data-listening-reaction={
-                              botListenerReaction ?? undefined
-                            }
-                            data-vocal-foley={
-                              foleyMouthShape ? "true" : undefined
-                            }
+                            className={styles.botPosition}
+                            data-role={role}
+                            key={`avatar:${bot.id}`}
                           >
-                            {props.renderBotAvatar ? (
-                              props.renderBotAvatar(appearanceBot, {
-                                role,
-                                lookAtRole:
-                                  role === "moderator" ? turnOwnerRole : null,
-                                compact:
-                                  role === "moderator" &&
-                                  cameraView !== "moderator",
-                                talking,
-                                thinking: thinkingBotId === bot.id,
-                                colorCycle: presentation.colorCycle,
-                                speechTiming,
-                                foleyMouthShape,
-                                listenerReaction: botListenerReaction,
-                              })
-                            ) : (
-                              <span className={styles.botGlyphFallback}>
-                                {props.renderBotGlyph(presentation.glyph, {
-                                  size: 42,
-                                  strokeWidth: 1.35,
-                                })}
-                              </span>
-                            )}
+                            <div
+                              className={styles.botStagePresence}
+                              data-speaking={talking ? "true" : undefined}
+                              data-thinking={
+                                thinkingBotId === bot.id ? "true" : undefined
+                              }
+                              data-visibility={presentation.visibility}
+                              data-scale={presentation.scale}
+                              data-color-cycle={
+                                presentation.colorCycle ? "true" : undefined
+                              }
+                              data-listening-reaction={
+                                botListenerReaction ?? undefined
+                              }
+                              data-vocal-foley={
+                                foleyMouthShape ? "true" : undefined
+                              }
+                            >
+                              {props.renderBotAvatar ? (
+                                props.renderBotAvatar(appearanceBot, {
+                                  role,
+                                  lookAtRole:
+                                    role === "moderator" ? turnOwnerRole : null,
+                                  compact:
+                                    role === "moderator" &&
+                                    cameraView !== "moderator",
+                                  talking,
+                                  thinking: thinkingBotId === bot.id,
+                                  colorCycle: presentation.colorCycle,
+                                  speechTiming,
+                                  foleyMouthShape,
+                                  listenerReaction: botListenerReaction,
+                                })
+                              ) : (
+                                <span className={styles.botGlyphFallback}>
+                                  {props.renderBotGlyph(presentation.glyph, {
+                                    size: 42,
+                                    strokeWidth: 1.35,
+                                  })}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    },
-                  )}
-                  <div className={styles.podiumForeground} aria-hidden="true" />
-                  {stageCast.map(({ role, bot, presentation }) => (
+                        );
+                      },
+                    )}
                     <div
-                      className={styles.podiumGlyphPosition}
-                      data-role={role}
-                      data-turn-active={
-                        turnOwnerBotId === bot.id ? "true" : undefined
-                      }
-                      data-visibility={presentation.visibility}
-                      key={`podium-glyph:${bot.id}`}
+                      className={styles.podiumForeground}
                       aria-hidden="true"
-                    >
-                      <span className={styles.podiumGlyphScreen}>
-                        <span className={styles.podiumGlyphMark}>
-                          {props.renderBotGlyph(presentation.glyph, {
-                            size: 48,
-                            strokeWidth: 1.5,
-                          })}
-                        </span>
-                      </span>
-                    </div>
-                  ))}
-                  {stageCast.map(({ role, bot, presentation, roleLabel }) => (
-                    <div
-                      className={styles.botIdentityPosition}
-                      data-role={role}
-                      data-speaking={
-                        activeSpeakerId === bot.id ? "true" : undefined
+                    />
+                    <DebateModeratorGavel
+                      theme={props.theme}
+                      color={session.moderator.color ?? "#d9d2ff"}
+                      cue={activeGavelCue}
+                      sessionId={session.id}
+                      audioEnabled={
+                        props.audioEnabled &&
+                        props.audioVolume > 0 &&
+                        session.status !== "paused" &&
+                        moderatorPresentation.visibility !== "hidden"
                       }
-                      data-visibility={presentation.visibility}
-                      key={`identity:${bot.id}`}
-                    >
-                      <div className={styles.botIdentityPlate}>
-                        <strong>{presentation.displayName}</strong>
-                        <small>{roleLabel}</small>
-                        {presentation.identityLabel ? (
-                          <em>{presentation.identityLabel}</em>
-                        ) : null}
-                        {role !== "moderator" &&
-                        session.advocacyConsent.some(
-                          (check) =>
-                            check.botId === bot.id &&
-                            check.status === "devils_advocate",
-                        ) ? (
-                          <b>Devil’s Advocate</b>
-                        ) : null}
+                      visible={moderatorPresentation.visibility !== "hidden"}
+                      atmosphereControllerRef={debateAtmosphereControllerRef}
+                    />
+                    {stageCast.map(({ role, bot, presentation }) => (
+                      <div
+                        className={styles.podiumGlyphPosition}
+                        data-role={role}
+                        data-turn-active={
+                          turnOwnerBotId === bot.id ? "true" : undefined
+                        }
+                        data-visibility={presentation.visibility}
+                        key={`podium-glyph:${bot.id}`}
+                        aria-hidden="true"
+                      >
+                        <span className={styles.podiumGlyphScreen}>
+                          <span className={styles.podiumGlyphMark}>
+                            {props.renderBotGlyph(presentation.glyph, {
+                              size: 48,
+                              strokeWidth: 1.5,
+                            })}
+                          </span>
+                        </span>
                       </div>
-                    </div>
-                  ))}
-                  {session.playerRole === "judge" ? (
-                    <div className={styles.playerPresence} data-role="judge">
-                      <span>◇</span>
-                      Judge
-                    </div>
-                  ) : session.playerRole === "participant" ? (
-                    <div
-                      className={styles.playerPresence}
-                      data-role="participant"
-                      data-side={session.playerSideId ?? undefined}
-                    >
-                      <span>◇</span>
-                      You
-                    </div>
-                  ) : null}
-                </div>
-                <div
-                  className={styles.stageTitle}
-                  data-debate-stage-title="true"
-                >
-                  <span>The motion</span>
-                  <strong>{session.motion.motion}</strong>
-                </div>
-                {presenting && activeEvent && activeCaptionText ? (
+                    ))}
+                    {stageCast.map(({ role, bot, presentation, roleLabel }) => (
+                      <div
+                        className={styles.botIdentityPosition}
+                        data-role={role}
+                        data-speaking={
+                          activeSpeakerId === bot.id ? "true" : undefined
+                        }
+                        data-visibility={presentation.visibility}
+                        key={`identity:${bot.id}`}
+                      >
+                        <div className={styles.botIdentityPlate}>
+                          <strong>{presentation.displayName}</strong>
+                          <small>{roleLabel}</small>
+                          {presentation.identityLabel ? (
+                            <em>{presentation.identityLabel}</em>
+                          ) : null}
+                          {role !== "moderator" &&
+                          session.advocacyConsent.some(
+                            (check) =>
+                              check.botId === bot.id &&
+                              check.status === "devils_advocate",
+                          ) ? (
+                            <b>Devil’s Advocate</b>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                    {session.playerRole === "judge" ? (
+                      <div className={styles.playerPresence} data-role="judge">
+                        <span>◇</span>
+                        Judge
+                      </div>
+                    ) : session.playerRole === "participant" ? (
+                      <div
+                        className={styles.playerPresence}
+                        data-role="participant"
+                        data-side={session.playerSideId ?? undefined}
+                      >
+                        <span>◇</span>
+                        You
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+                {presenting &&
+                activeEvent &&
+                activeCaptionText &&
+                (!juryChamberVisible || activeEvent.speakerKind !== "juror") ? (
                   <div
                     className={styles.liveCaption}
                     data-debate-live-caption="true"
@@ -5126,7 +6250,51 @@ export function DebateExperience(
                     <span>{activeCaptionText}</span>
                   </div>
                 ) : null}
-                {session.status === "paused" ? (
+                {session.jury.enabled &&
+                session.playerRole === "participant" &&
+                session.jury.phase !== "waiting" &&
+                session.jury.phase !== "disabled" &&
+                session.jury.phase !== "complete" ? (
+                  <div
+                    className={styles.stageStateOverlay}
+                    data-kind="jury-sealed"
+                    aria-live="polite"
+                  >
+                    <span aria-hidden="true">◇ ◇ ◇ ◇ ◇</span>
+                    <strong>
+                      {debateAwaitsJuryDeliberationChoice(session)
+                        ? "Choose the Jury’s pace"
+                        : "Deliberation sealed"}
+                    </strong>
+                    <small>
+                      {debateAwaitsJuryDeliberationChoice(session)
+                        ? "You can let the sealed chamber deliberate or send all five jurors directly to final ballots."
+                        : "No juror speech, reaction, voice, or individual ballot enters your record."}
+                    </small>
+                    {debateAwaitsJuryDeliberationChoice(session) ? (
+                      <div
+                        className={styles.juryDeliberationChoice}
+                        data-context="sealed"
+                        aria-label="Choose whether the sealed Jury deliberates"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => void advance(false)}
+                          disabled={busy || presenting}
+                        >
+                          Begin deliberation
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEarlyEndOpen(true)}
+                          disabled={busy}
+                        >
+                          Skip deliberation
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : session.status === "paused" ? (
                   <div className={styles.stageStateOverlay} data-kind="paused">
                     <span aria-hidden="true">Ⅱ</span>
                     <strong>
@@ -5136,7 +6304,8 @@ export function DebateExperience(
                     </strong>
                     <small>The exact next action is preserved.</small>
                   </div>
-                ) : session.status === "waiting_for_player" ? (
+                ) : session.status === "waiting_for_player" &&
+                  !juryChamberVisible ? (
                   <div
                     className={styles.stageStateOverlay}
                     data-kind="player"
@@ -5145,7 +6314,7 @@ export function DebateExperience(
                     <span>◇</span>
                     <strong>The floor turns to you</strong>
                   </div>
-                ) : session.status === "completed" ? (
+                ) : session.status === "completed" && !juryChamberVisible ? (
                   <div
                     className={styles.stageStateOverlay}
                     data-kind="verdict"
@@ -5187,7 +6356,12 @@ export function DebateExperience(
                   data-tutorial-target="debate-camera"
                 >
                   <span>Camera</span>
-                  {DEBATE_CAMERA_VIEWS.map((camera) => (
+                  {DEBATE_CAMERA_VIEWS.filter(
+                    (camera) =>
+                      camera.id !== "jury" ||
+                      (session.jury.enabled &&
+                        session.playerRole !== "participant"),
+                  ).map((camera) => (
                     <button
                       type="button"
                       data-selected={
@@ -5259,13 +6433,16 @@ export function DebateExperience(
                     >
                       Retry
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => void advance(true)}
-                      disabled={busy}
-                    >
-                      Skip without dialogue
-                    </button>
+                    {session.stepKey.startsWith("jury_deliberation_") ||
+                    !session.stepKey.startsWith("jury_") ? (
+                      <button
+                        type="button"
+                        onClick={() => void advance(true)}
+                        disabled={busy}
+                      >
+                        Skip without dialogue
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -5280,41 +6457,85 @@ export function DebateExperience(
                   <p className={styles.eyebrow}>Verdict</p>
                   <h2>{verdictLabel(session)}</h2>
                   <p>
-                    {session.endedEarlyAt
-                      ? session.playerRole === "judge"
-                        ? "Your limited-record ruling is final. The bot ballots below show agreement and dissent."
-                        : "The three-bot majority reached a brief verdict from the limited public record."
-                      : session.playerRole === "judge"
-                        ? session.format === "turnabout"
-                          ? "Your public-record ruling is final. The bot ballots below show agreement and dissent."
-                          : "Your ruling is final. The bot ballots below show agreement and dissent."
-                        : session.format === "turnabout"
-                          ? "The three-bot majority resolved the public record."
-                          : "The three-bot majority decided the Duel."}
+                    {session.jury.enabled
+                      ? session.playerRole === "participant"
+                        ? "The sealed Jury majority is final. Individual jurors, speech, reactions, votes, and reasons are not part of your record."
+                        : session.playerRole === "judge"
+                          ? "Your ruling is final. The named Jury ballots below preserve the chamber’s advice."
+                          : "The five-seat Jury majority is final."
+                      : session.endedEarlyAt
+                        ? session.playerRole === "judge"
+                          ? `Your decision from the limited ${debatePublicMaterialName(session.formality).toLowerCase()} is final. The bot ballots below show agreement and dissent.`
+                          : `The three-bot majority reached a brief verdict from the limited ${debatePublicMaterialName(session.formality).toLowerCase()}.`
+                        : session.playerRole === "judge"
+                          ? session.format === "turnabout" &&
+                            session.formality === "parliamentary"
+                            ? "Your public-record ruling is final. The bot ballots below show agreement and dissent."
+                            : "Your decision is final. The bot ballots below show agreement and dissent."
+                          : session.format === "turnabout"
+                            ? `The three-bot majority resolved the ${debatePublicMaterialName(session.formality).toLowerCase()}.`
+                            : "The three-bot majority decided the Duel."}
                   </p>
                   <ul>
-                    {session.ballots.map((ballot) => {
-                      const voter =
-                        ballot.voterBotId === session.moderator.id
-                          ? session.moderator
-                          : ballot.voterBotId === session.forAdvocate.id
-                            ? session.forAdvocate
-                            : session.againstAdvocate;
-                      return (
-                        <li key={ballot.voterBotId}>
-                          <strong>{voter.name}</strong>
-                          <span>
-                            {ballot.sideId === "for"
-                              ? session.motion.forSide.label
-                              : session.motion.againstSide.label}
-                          </span>
-                          <p>
-                            {ballot.reason ??
-                              "Private ballot — no spoken reason exposed."}
-                          </p>
-                        </li>
-                      );
-                    })}
+                    {session.jury.enabled &&
+                    session.playerRole === "participant"
+                      ? Array.from({ length: 7 }, (_, index) => {
+                          const sideId: DebateSideId =
+                            index < session.jury.forVotes ? "for" : "against";
+                          return (
+                            <li
+                              className={styles.anonymousJuryBallot}
+                              data-side={sideId}
+                              key={`anonymous-jury:${index}`}
+                            >
+                              <strong>Anonymous ballot {index + 1}</strong>
+                              <span>
+                                {sideId === "for"
+                                  ? session.motion.forSide.label
+                                  : session.motion.againstSide.label}
+                              </span>
+                            </li>
+                          );
+                        })
+                      : session.jury.enabled
+                        ? session.jury.finalBallots.map((ballot) => {
+                            const juror = session.jury.jurors.find(
+                              (candidate) => candidate.id === ballot.jurorBotId,
+                            );
+                            return (
+                              <li key={ballot.jurorBotId}>
+                                <strong>{juror?.name ?? "Juror"}</strong>
+                                <span>
+                                  {ballot.sideId === "for"
+                                    ? session.motion.forSide.label
+                                    : session.motion.againstSide.label}
+                                </span>
+                                <p>{ballot.reason}</p>
+                              </li>
+                            );
+                          })
+                        : session.ballots.map((ballot) => {
+                            const voter =
+                              ballot.voterBotId === session.moderator.id
+                                ? session.moderator
+                                : ballot.voterBotId === session.forAdvocate.id
+                                  ? session.forAdvocate
+                                  : session.againstAdvocate;
+                            return (
+                              <li key={ballot.voterBotId}>
+                                <strong>{voter.name}</strong>
+                                <span>
+                                  {ballot.sideId === "for"
+                                    ? session.motion.forSide.label
+                                    : session.motion.againstSide.label}
+                                </span>
+                                <p>
+                                  {ballot.reason ??
+                                    "Private ballot — no spoken reason exposed."}
+                                </p>
+                              </li>
+                            );
+                          })}
                   </ul>
                   <button type="button" onClick={() => setView("dashboard")}>
                     Return to studio
@@ -5398,12 +6619,22 @@ export function DebateExperience(
                 aria-labelledby="debate-end-early-title"
                 aria-describedby="debate-end-early-description"
               >
-                <p className={styles.eyebrow}>Accelerated verdict</p>
-                <h2 id="debate-end-early-title">End this Debate early?</h2>
+                <p className={styles.eyebrow}>
+                  {juryDeliberating ? "Jury chamber" : "Accelerated verdict"}
+                </p>
+                <h2 id="debate-end-early-title">
+                  {juryDeliberating
+                    ? "Skip Jury deliberation?"
+                    : "End this Debate early?"}
+                </h2>
                 <p id="debate-end-early-description">
-                  {session.playerRole === "judge"
-                    ? "The remaining rounds will be skipped. You will rule immediately from only the limited public record heard so far."
-                    : "The remaining rounds will be skipped. The three-bot panel will cast brief ballots from only the limited public record heard so far."}
+                  {juryDeliberating
+                    ? "The chamber will skip every remaining discussion turn. All five jurors will still cast final ballots, and the full five-ballot Jury result remains intact."
+                    : session.jury.enabled
+                      ? `The remaining rounds will be skipped. The Jury will hold a shorter three-turn deliberation from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} and will not penalize unheard rounds.`
+                      : session.playerRole === "judge"
+                        ? `The remaining rounds will be skipped. You will decide immediately from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`
+                        : `The remaining rounds will be skipped. The three-bot panel will cast brief ballots from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`}
                 </p>
                 <div>
                   <button
@@ -5411,16 +6642,26 @@ export function DebateExperience(
                     onClick={() => setEarlyEndOpen(false)}
                     disabled={busy}
                   >
-                    Continue Debate
+                    {juryDeliberating ? "Keep deliberating" : "Continue Debate"}
                   </button>
                   <button
                     ref={earlyEndConfirmButtonRef}
                     type="button"
                     className={styles.confirmEarlyEndButton}
-                    onClick={() => void endDebateEarly()}
+                    onClick={() =>
+                      void (juryDeliberating
+                        ? skipJuryDeliberation()
+                        : endDebateEarly())
+                    }
                     disabled={busy || presenting}
                   >
-                    {busy ? "Concluding…" : "Conclude now"}
+                    {busy
+                      ? juryDeliberating
+                        ? "Skipping…"
+                        : "Concluding…"
+                      : juryDeliberating
+                        ? "Skip to ballots"
+                        : "Conclude now"}
                   </button>
                 </div>
               </section>

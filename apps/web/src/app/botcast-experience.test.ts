@@ -1473,12 +1473,9 @@ describe("Signal experience shell", () => {
       source,
       /topic: producerGuestWantsSurprise\s*\? current\.topic\s*: response\.episode\.topic/u,
     );
-    assert.match(source, /hostBot\?\.muted \|\| hostBot\?\.echoesAddressedSpeech/u);
-    assert.match(
-      source,
-      /disabled=\{\s*producerGuestUnavailable \|\|\s*busy \|\|\s*Boolean\(bookingSuggestionBusy\)\s*\}/u,
-    );
-    assert.match(source, /Unavailable for this host/u);
+    assert.doesNotMatch(source, /producerGuestUnavailable/u);
+    assert.doesNotMatch(source, /Unavailable for this host/u);
+    assert.match(source, /<span>Go on as the guest<\/span>/u);
     assert.match(pageSource, /echoesAddressedSpeech: botPowerEchoesAddressedSpeechV1/u);
     assert.match(source, /renderProducerGuestComposer\?\.\(\{/u);
     assert.match(source, /episode\.guestKind !== "producer" \? \(/u);
@@ -1874,7 +1871,15 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /disabled=\{hostBot\.muted \|\| showIdentityControlsExpanded\}/u,
+      /if \(hostBot\.muted\) \{[\s\S]{0,100}bridgeContent = BOT_POWER_CANONICAL_SILENCE_V1/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /!hostBot \|\|[\s\S]{0,30}hostBot\.muted[\s\S]{0,30}return null/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /hostBot\.muted \|\| showIdentityControlsExpanded/u,
     );
     assert.match(
       css,
@@ -2663,6 +2668,16 @@ describe("Signal experience shell", () => {
     assert.match(source, /className=\{styles\.showCardHostTrigger\}/u);
     assert.match(source, /aria-expanded=\{hostChatOpen\}/u);
     assert.match(source, /onClick=\{toggleSignalHostChat\}/u);
+    assert.doesNotMatch(
+      source,
+      /disabled=\{hostBot\.muted \|\| showIdentityControlsExpanded\}/u,
+    );
+    assert.doesNotMatch(source, /mute Power prevents off-air speech/u);
+    assert.match(source, /disabled=\{showIdentityControlsExpanded\}/u);
+    assert.match(
+      source,
+      /id: `signal-refresh-blurbs-\$\{selectedShow\.id\}`[\s\S]{0,260}disabled: \(\) => busy/u,
+    );
     assert.match(
       source,
       /`\/api\/botcast\/shows\/\$\{encodeURIComponent\(showId\)\}\/host-chat`/u,

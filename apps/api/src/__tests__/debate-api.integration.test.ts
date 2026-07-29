@@ -62,6 +62,29 @@ class DebateApiProvider implements LlmProvider {
         reason: "The For side answered the central tradeoff.",
       });
     }
+    if (
+      text.includes("Form a private initial leaning") ||
+      text.includes("Cast your final independent Jury ballot")
+    ) {
+      return JSON.stringify({
+        sideId: "for",
+        confidence: 0.7,
+        personaInstinct: "The exact motion matters most.",
+        reason: "The For side answered the motion more directly.",
+      });
+    }
+    if (text.includes("silently route one natural turn")) {
+      return JSON.stringify({
+        botId: text.match(/^- ([^ |]+) \|/mu)?.[1] ?? "",
+        reason: "A distinct juror should answer.",
+        directive: "Address the latest record point.",
+      });
+    }
+    if (text.includes("Speak for one short Jury turn")) {
+      return JSON.stringify({
+        content: "The public record turns on which side answered the motion.",
+      });
+    }
     if (text.includes("Ask one concise, difficult")) {
       return JSON.stringify({
         content: "Which implementation cost most threatens this position?",
@@ -469,6 +492,113 @@ describe("Debate API", () => {
         role === "judge" ? "against" : "for",
       );
     }
+
+    const juryParticipantCreated = await owner.request(
+      "/api/debates",
+      jsonInit({
+        presetId: "custom",
+        motion,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Frozen Jury privacy check.",
+          sources: [],
+          frozenAt: null,
+        },
+        moderatorBotId: "moderator",
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        playerRole: "participant",
+        playerSideId: "against",
+        jury: { enabled: true, cadence: "natural-five" },
+        advocacyConsent: checks,
+        preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
+        theme: "dark",
+        idempotencyKey: "api:create:jury-participant",
+      }),
+    );
+    assert.equal(juryParticipantCreated.status, 201);
+    let juryParticipant = (await payload(juryParticipantCreated))
+      .session as DebateSessionV1;
+    const juryEarly = await owner.request(
+      `/api/debates/${juryParticipant.id}/end-early`,
+      jsonInit({
+        expectedRevision: juryParticipant.revision,
+        idempotencyKey: "api:jury-participant:end-early",
+      }),
+    );
+    assert.equal(juryEarly.status, 200);
+    juryParticipant = (await payload(juryEarly)).session as DebateSessionV1;
+    let juryTurn = 0;
+    while (juryParticipant.jury.phase === "initial_ballots") {
+      juryTurn += 1;
+      assert.ok(juryTurn < 24);
+      const response = await owner.request(
+        `/api/debates/${juryParticipant.id}/advance`,
+        jsonInit({
+          expectedRevision: juryParticipant.revision,
+          idempotencyKey: `api:jury-participant:advance:${juryTurn}`,
+        }),
+      );
+      assert.equal(response.status, 200);
+      juryParticipant = (await payload(response)).session as DebateSessionV1;
+      assert.deepEqual(juryParticipant.jury.initialBallots, []);
+      assert.deepEqual(juryParticipant.jury.finalBallots, []);
+      assert.equal(
+        juryParticipant.events.some(
+          (event) =>
+            event.kind === "jury_deliberation" ||
+            (event.kind === "ballot" && event.speakerKind === "juror"),
+        ),
+        false,
+      );
+    }
+    assert.equal(juryParticipant.stepKey, "jury_deliberation_0");
+    const skipDeliberation = await owner.request(
+      `/api/debates/${juryParticipant.id}/jury/skip-deliberation`,
+      jsonInit({
+        expectedRevision: juryParticipant.revision,
+        idempotencyKey: "api:jury-participant:skip-deliberation",
+      }),
+    );
+    assert.equal(skipDeliberation.status, 200);
+    juryParticipant = (await payload(skipDeliberation))
+      .session as DebateSessionV1;
+    assert.equal(juryParticipant.stepKey, "jury_final_0");
+    assert.equal(juryParticipant.jury.phase, "final_ballots");
+    assert.deepEqual(juryParticipant.jury.initialBallots, []);
+    assert.deepEqual(juryParticipant.jury.finalBallots, []);
+    assert.equal(
+      juryParticipant.events.some(
+        (event) => event.kind === "jury_deliberation",
+      ),
+      false,
+    );
+    while (juryParticipant.status !== "completed") {
+      juryTurn += 1;
+      assert.ok(juryTurn < 24);
+      const response = await owner.request(
+        `/api/debates/${juryParticipant.id}/advance`,
+        jsonInit({
+          expectedRevision: juryParticipant.revision,
+          idempotencyKey: `api:jury-participant:final:${juryTurn}`,
+        }),
+      );
+      assert.equal(response.status, 200);
+      juryParticipant = (await payload(response)).session as DebateSessionV1;
+    }
+    assert.equal(juryParticipant.jury.forVotes, 5);
+    assert.equal(juryParticipant.jury.againstVotes, 0);
+    const juryParticipantGet = (await payload(
+      await owner.request(`/api/debates/${juryParticipant.id}`),
+    )).session as DebateSessionV1;
+    assert.deepEqual(juryParticipantGet.jury.finalBallots, []);
+    assert.equal(
+      juryParticipantGet.events.some(
+        (event) => event.speakerKind === "juror",
+      ),
+      false,
+    );
 
     const turnaboutRoleChecks = await owner.request(
       "/api/debates/role-checks",

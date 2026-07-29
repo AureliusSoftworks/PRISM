@@ -22,6 +22,9 @@ export const DEBATE_EVIDENCE_SOURCE_MAX_COUNT = 12;
 export const DEBATE_PLAYER_TURN_MAX_LENGTH = 4_000;
 export const DEBATE_CASE_CARDS_PER_SIDE = 4;
 export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
+export const DEBATE_JURY_SIZE = 5;
+export const DEBATE_JURY_DISCUSSION_TURNS = 5;
+export const DEBATE_JURY_EARLY_DISCUSSION_TURNS = 3;
 
 export type DebateFormatId = "forum" | "turnabout";
 export type DebateFormatCatalogId =
@@ -30,6 +33,28 @@ export type DebateFormatCatalogId =
   | "cypher";
 export type DebatePlayerRole = "judge" | "participant" | "spectator";
 export type DebateSideId = "for" | "against";
+/** Frozen social register for one Debate proceeding, from chaotic to formal. */
+export type DebateFormalityId =
+  | "free_for_all"
+  | "heated"
+  | "plainspoken"
+  | "structured"
+  | "parliamentary";
+export type DebateSetupPresetId =
+  | "classic-duel"
+  | "daytime-showdown"
+  | "jury-trial"
+  | "public-forum"
+  | "take-the-floor";
+export type DebateJuryCadence = "natural-five";
+export type DebateJuryPhase =
+  | "disabled"
+  | "waiting"
+  | "initial_ballots"
+  | "deliberating"
+  | "final_ballots"
+  | "complete";
+export type DebateJurorSource = "library" | "generic";
 export type DebatePhase =
   | "opening"
   | "challenge"
@@ -52,7 +77,96 @@ export type DebateCaseCardStatus =
   | "challenged"
   | "conceded"
   | "unanswered";
-export type DebateBotRole = "moderator" | "advocate";
+export type DebateBotRole = "moderator" | "advocate" | "juror";
+
+export interface DebateFormalityDescriptorV1 {
+  id: DebateFormalityId;
+  title: string;
+  summary: string;
+  vocabulary: string;
+  tone: string;
+  aggression: string;
+  prohibitedRegister: string;
+}
+
+/**
+ * The single formality contract for Debate UI and generation. Persona diction
+ * remains the higher-priority voice constraint when this guidance is applied.
+ */
+export const DEBATE_FORMALITY_SPECTRUM: readonly DebateFormalityDescriptorV1[] = [
+  {
+    id: "free_for_all",
+    title: "Free-for-all",
+    summary: "Theatrical daytime-chaos energy; spar freely without inventing facts.",
+    vocabulary: "vivid everyday language, playful jabs, and fast reactions",
+    tone: "theatrical, messy, high-energy, and openly combative",
+    aggression: "ad hominem sparring is permitted within safety boundaries; challenge motives or credibility without inventing facts",
+    prohibitedRegister: "Do not default to House, record, parliamentary procedure, court language, or ceremonial rulings.",
+  },
+  {
+    id: "heated",
+    title: "Heated",
+    summary: "Sharp, interruptive confrontation with the facts kept intact.",
+    vocabulary: "plain sharp language, direct accusations, and quick rebuttals",
+    tone: "confrontational, urgent, and interruptive",
+    aggression: "may challenge motives or credibility without inventing facts; keep attacks within safety boundaries",
+    prohibitedRegister: "Avoid canned parliamentary, court, and ceremonial debate phrasing unless the persona naturally uses it.",
+  },
+  {
+    id: "plainspoken",
+    title: "Plainspoken",
+    summary: "Ordinary conversational debate: clear, direct, and human.",
+    vocabulary: "ordinary conversational language and concrete examples",
+    tone: "direct, grounded, and candid",
+    aggression: "firm disagreement without theatrical escalation",
+    prohibitedRegister: "Avoid canned parliamentary or court phrasing, including House, record, proceedings, objections, and ceremonial address.",
+  },
+  {
+    id: "structured",
+    title: "Structured",
+    summary: "Formal, direct rounds with clear claims and clean responses.",
+    vocabulary: "clear claims, orderly rebuttals, and concise transitions",
+    tone: "formal, direct, and disciplined",
+    aggression: "controlled adversarial pressure focused on the argument",
+    prohibitedRegister: "Avoid ornate parliamentary ritual and courtroom theatrics unless the format specifically requires them.",
+  },
+  {
+    id: "parliamentary",
+    title: "Parliamentary",
+    summary: "Disciplined institutional debate with the most formal register.",
+    vocabulary: "House, record, proceedings, points, and disciplined institutional language when natural",
+    tone: "measured, public-minded, and procedurally crisp",
+    aggression: "firm but decorous challenge centered on the public case",
+    prohibitedRegister: "Do not flatten a persona into generic official prose or use courtroom rulings outside Turnabout.",
+  },
+] as const;
+
+export function isDebateFormalityId(value: unknown): value is DebateFormalityId {
+  return DEBATE_FORMALITY_SPECTRUM.some((level) => level.id === value);
+}
+
+/** Legacy proceedings used the existing most-formal parliamentary delivery. */
+export function normalizeDebateFormalityId(value: unknown): DebateFormalityId {
+  return isDebateFormalityId(value) ? value : "parliamentary";
+}
+
+export function debateFormalityDescriptor(
+  value: unknown,
+): DebateFormalityDescriptorV1 {
+  const id = normalizeDebateFormalityId(value);
+  return DEBATE_FORMALITY_SPECTRUM.find((level) => level.id === id)!;
+}
+
+/** Canonical prompt-ready register guidance for every Debate generation path. */
+export function debateFormalityGuidance(value: unknown): string {
+  const level = debateFormalityDescriptor(value);
+  return [
+    `Frozen formality — ${level.title}: use ${level.vocabulary}.`,
+    `Tone: ${level.tone}. Aggression: ${level.aggression}.`,
+    `Register guardrail: ${level.prohibitedRegister}`,
+    "Persona-specific diction, cadence, limitations, and identity outrank this generic register. Never polish or flatten a persona to satisfy the formality level.",
+  ].join("\n");
+}
 
 export interface DebateFormatDescriptorV1 {
   id: DebateFormatId;
@@ -120,6 +234,70 @@ export const DEBATE_FORMATS: readonly DebateFormatDescriptorV1[] =
     (entry): entry is DebateFormatDescriptorV1 =>
       entry.availability === "available",
   );
+
+export interface DebateSetupPresetDescriptorV1 {
+  id: DebateSetupPresetId;
+  name: string;
+  summary: string;
+  format: DebateFormatId;
+  formality: DebateFormalityId;
+  playerRole: DebatePlayerRole;
+  juryEnabled: boolean;
+  juryCadence: DebateJuryCadence;
+}
+
+export const DEBATE_SETUP_PRESETS: readonly DebateSetupPresetDescriptorV1[] = [
+  {
+    id: "daytime-showdown",
+    name: "Daytime Showdown",
+    summary: "Watch a free-for-all Forum and let the five-seat Jury carry the verdict.",
+    format: "forum",
+    formality: "free_for_all",
+    playerRole: "spectator",
+    juryEnabled: true,
+    juryCadence: "natural-five",
+  },
+  {
+    id: "take-the-floor",
+    name: "Crossfire",
+    summary: "Take one side in a heated Forum with no Jury between you and the room.",
+    format: "forum",
+    formality: "heated",
+    playerRole: "participant",
+    juryEnabled: false,
+    juryCadence: "natural-five",
+  },
+  {
+    id: "public-forum",
+    name: "Town Hall",
+    summary: "Watch a plainspoken Forum and let the five-seat Jury carry the verdict.",
+    format: "forum",
+    formality: "plainspoken",
+    playerRole: "spectator",
+    juryEnabled: true,
+    juryCadence: "natural-five",
+  },
+  {
+    id: "jury-trial",
+    name: "Bench Trial",
+    summary: "Preside over a structured Turnabout and make the final ruling.",
+    format: "turnabout",
+    formality: "structured",
+    playerRole: "judge",
+    juryEnabled: false,
+    juryCadence: "natural-five",
+  },
+  {
+    id: "classic-duel",
+    name: "University Union",
+    summary: "A parliamentary Forum where you preside over the classic direct duel.",
+    format: "forum",
+    formality: "parliamentary",
+    playerRole: "judge",
+    juryEnabled: false,
+    juryCadence: "natural-five",
+  },
+] as const;
 
 export type DebateTurnaboutPhase =
   | "testimony"
@@ -206,6 +384,8 @@ export interface DebateEvidencePacketV1 {
 export interface DebateAdvocacyConsent {
   version: typeof DEBATE_SCHEMA_VERSION;
   format?: DebateFormatId;
+  /** The accepted delivery register; legacy consent normalizes to parliamentary. */
+  formality?: DebateFormalityId;
   botId: string;
   sideId: DebateSideId;
   status: DebateAdvocacyConsentStatus;
@@ -233,6 +413,12 @@ export interface DebateBotSnapshotV1 {
   provider: LlmProviderName;
   model: string;
   revision: string;
+}
+
+export interface DebateJurorSnapshotV1 extends DebateBotSnapshotV1 {
+  role: "juror";
+  sideId: null;
+  source: DebateJurorSource;
 }
 
 export type DebatePowerPolicyV1 = "enforced" | "direct" | "adapted";
@@ -286,10 +472,17 @@ export type DebateEventKind =
   | "moderator_ruling"
   | "case_board"
   | "ballot"
+  | "jury_deliberation"
+  | "jury_verdict"
   | "verdict"
   | "error";
 
-export type DebateSpeakerKind = "moderator" | "advocate" | "player" | "system";
+export type DebateSpeakerKind =
+  | "moderator"
+  | "advocate"
+  | "juror"
+  | "player"
+  | "system";
 
 export interface DebateEventV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
@@ -327,6 +520,39 @@ export interface DebateBallotV1 {
   createdAt: string;
 }
 
+export interface DebateJuryBallotV1 {
+  version: typeof DEBATE_SCHEMA_VERSION;
+  jurorBotId: string;
+  stage: "initial" | "final";
+  sideId: DebateSideId;
+  confidence: number;
+  personaInstinct: string;
+  reason: string;
+  provider?: LlmProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+  createdAt: string;
+}
+
+export interface DebateJuryStateV1 {
+  version: typeof DEBATE_SCHEMA_VERSION;
+  enabled: boolean;
+  cadence: DebateJuryCadence;
+  phase: DebateJuryPhase;
+  jurors: DebateJurorSnapshotV1[];
+  forepersonBotId: string | null;
+  initialBallots: DebateJuryBallotV1[];
+  finalBallots: DebateJuryBallotV1[];
+  discussionTurnTarget: number;
+  discussionTurnCount: number;
+  speakerCounts: Record<string, number>;
+  majoritySideId: DebateSideId | null;
+  forVotes: number;
+  againstVotes: number;
+  calledVoteAt: string | null;
+  completedAt: string | null;
+}
+
 export interface DebateSessionV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   id: string;
@@ -343,6 +569,9 @@ export interface DebateSessionV1 {
   format: DebateFormatId;
   formatVersion: typeof DEBATE_FORMAT_SCHEMA_VERSION;
   formatState: DebateFormatStateV1;
+  /** Frozen at creation; legacy records normalize to parliamentary. */
+  formality: DebateFormalityId;
+  setupPresetId: DebateSetupPresetId | "custom";
   playerRole: DebatePlayerRole;
   playerSideId: DebateSideId | null;
   motion: DebateMotionSlateV1;
@@ -354,6 +583,7 @@ export interface DebateSessionV1 {
   powerPlan: DebatePowerPlanV1;
   caseBoard: DebateCaseCardV1[];
   ballots: DebateBallotV1[];
+  jury: DebateJuryStateV1;
   playerVerdict: DebateSideId | null;
   winnerSideId: DebateSideId | null;
   events: DebateEventV1[];
@@ -366,6 +596,7 @@ export interface DebateSessionV1 {
 
 export interface DebateSynthesizeRequest {
   topic: string;
+  formality?: DebateFormalityId;
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
   responseMode?: ResponseMode;
@@ -387,6 +618,7 @@ export interface DebateResearchResponse {
 
 export interface DebateRoleChecksRequest {
   format?: DebateFormatId;
+  formality?: DebateFormalityId;
   motion: DebateMotionSlateV1;
   forAdvocateBotId: string;
   againstAdvocateBotId: string;
@@ -401,6 +633,12 @@ export interface DebateRoleChecksResponse {
 
 export interface DebateSessionCreateRequest {
   format?: DebateFormatId;
+  formality?: DebateFormalityId;
+  presetId?: DebateSetupPresetId | "custom";
+  jury?: {
+    enabled?: boolean;
+    cadence?: DebateJuryCadence;
+  };
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
   moderatorBotId: string;
@@ -459,6 +697,9 @@ export interface DebateSessionListItemV1 {
   status: DebateStatus;
   phase: DebatePhase;
   motion: string;
+  setupPresetId: DebateSetupPresetId | "custom";
+  formality: DebateFormalityId;
+  juryEnabled: boolean;
   playerRole: DebatePlayerRole;
   winnerSideId: DebateSideId | null;
   updatedAt: string;
@@ -661,6 +902,168 @@ export function isDebateFormatId(value: unknown): value is DebateFormatId {
 
 export function normalizeDebateFormatId(value: unknown): DebateFormatId {
   return value === "turnabout" ? "turnabout" : "forum";
+}
+
+export function isDebateSetupPresetId(
+  value: unknown,
+): value is DebateSetupPresetId {
+  return DEBATE_SETUP_PRESETS.some((preset) => preset.id === value);
+}
+
+export function normalizeDebateSetupPresetId(
+  value: unknown,
+): DebateSetupPresetId | "custom" {
+  return isDebateSetupPresetId(value) ? value : "custom";
+}
+
+export function defaultDebateJuryStateV1(): DebateJuryStateV1 {
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    enabled: false,
+    cadence: "natural-five",
+    phase: "disabled",
+    jurors: [],
+    forepersonBotId: null,
+    initialBallots: [],
+    finalBallots: [],
+    discussionTurnTarget: DEBATE_JURY_DISCUSSION_TURNS,
+    discussionTurnCount: 0,
+    speakerCounts: {},
+    majoritySideId: null,
+    forVotes: 0,
+    againstVotes: 0,
+    calledVoteAt: null,
+    completedAt: null,
+  };
+}
+
+export function normalizeDebateJuryStateV1(
+  value: unknown,
+): DebateJuryStateV1 {
+  const fallback = defaultDebateJuryStateV1();
+  const source =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  if (source.enabled !== true) return fallback;
+
+  const jurors = Array.isArray(source.jurors)
+    ? source.jurors.filter((juror): juror is DebateJurorSnapshotV1 => {
+        if (!juror || typeof juror !== "object") return false;
+        const row = juror as Partial<DebateJurorSnapshotV1>;
+        return (
+          row.role === "juror" &&
+          row.sideId === null &&
+          typeof row.id === "string" &&
+          row.id.trim().length > 0 &&
+          typeof row.name === "string" &&
+          row.name.trim().length > 0 &&
+          (row.source === "library" || row.source === "generic")
+        );
+      })
+    : [];
+  const selectedJurors = jurors.slice(0, DEBATE_JURY_SIZE);
+  const selectedJurorIds = new Set(selectedJurors.map((juror) => juror.id));
+  const initialBallots = Array.isArray(source.initialBallots)
+    ? source.initialBallots.filter(
+        (ballot): ballot is DebateJuryBallotV1 =>
+          Boolean(
+            ballot &&
+              typeof ballot === "object" &&
+              (ballot as DebateJuryBallotV1).stage === "initial" &&
+              selectedJurorIds.has(
+                (ballot as DebateJuryBallotV1).jurorBotId,
+              ) &&
+              isDebateSideId((ballot as DebateJuryBallotV1).sideId),
+          ),
+      ).slice(0, DEBATE_JURY_SIZE)
+    : [];
+  const finalBallots = Array.isArray(source.finalBallots)
+    ? source.finalBallots.filter(
+        (ballot): ballot is DebateJuryBallotV1 =>
+          Boolean(
+            ballot &&
+              typeof ballot === "object" &&
+              (ballot as DebateJuryBallotV1).stage === "final" &&
+              selectedJurorIds.has(
+                (ballot as DebateJuryBallotV1).jurorBotId,
+              ) &&
+              isDebateSideId((ballot as DebateJuryBallotV1).sideId),
+          ),
+      ).slice(0, DEBATE_JURY_SIZE)
+    : [];
+  const phase: DebateJuryPhase =
+    source.phase === "waiting" ||
+    source.phase === "initial_ballots" ||
+    source.phase === "deliberating" ||
+    source.phase === "final_ballots" ||
+    source.phase === "complete"
+      ? source.phase
+      : "waiting";
+  const speakerCounts =
+    source.speakerCounts &&
+    typeof source.speakerCounts === "object" &&
+    !Array.isArray(source.speakerCounts)
+      ? Object.fromEntries(
+          Object.entries(source.speakerCounts as Record<string, unknown>)
+            .filter(
+              ([id, count]) =>
+                selectedJurorIds.has(id) &&
+                typeof count === "number" &&
+                count >= 0,
+            )
+            .map(([id, count]) => [id, Math.floor(count as number)]),
+        )
+      : {};
+  const forVotes = finalBallots.filter(
+    (ballot) => ballot.sideId === "for",
+  ).length;
+  const againstVotes = finalBallots.filter(
+    (ballot) => ballot.sideId === "against",
+  ).length;
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    enabled: true,
+    cadence: "natural-five",
+    phase,
+    jurors: selectedJurors,
+    forepersonBotId:
+      typeof source.forepersonBotId === "string" &&
+      selectedJurorIds.has(source.forepersonBotId)
+        ? source.forepersonBotId
+        : (selectedJurors[0]?.id ?? null),
+    initialBallots,
+    finalBallots,
+    discussionTurnTarget:
+      typeof source.discussionTurnTarget === "number"
+        ? Math.max(
+            0,
+            Math.min(
+              DEBATE_JURY_DISCUSSION_TURNS,
+              Math.floor(source.discussionTurnTarget),
+            ),
+          )
+        : DEBATE_JURY_DISCUSSION_TURNS,
+    discussionTurnCount:
+      typeof source.discussionTurnCount === "number"
+        ? Math.max(0, Math.floor(source.discussionTurnCount))
+        : 0,
+    speakerCounts,
+    majoritySideId:
+      isDebateSideId(source.majoritySideId)
+        ? source.majoritySideId
+        : finalBallots.length === DEBATE_JURY_SIZE
+          ? forVotes > againstVotes
+            ? "for"
+            : "against"
+          : null,
+    forVotes,
+    againstVotes,
+    calledVoteAt:
+      typeof source.calledVoteAt === "string" ? source.calledVoteAt : null,
+    completedAt:
+      typeof source.completedAt === "string" ? source.completedAt : null,
+  };
 }
 
 export function defaultDebateFormatStateV1(
