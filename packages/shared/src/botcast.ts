@@ -460,7 +460,7 @@ export const BOTCAST_STUDIO_FLOOR_GLOW_SCALE_STEP = 0.05;
 
 export type BotcastVoiceLevelsByBotId = Record<string, number>;
 
-export type BotcastStudioGlowBlendMode = "screen" | "overlay";
+export type BotcastStudioGlowBlendMode = "hard-light" | "screen" | "overlay";
 
 export interface BotcastStudioGlowThemeTuning {
   opacity: number;
@@ -473,8 +473,8 @@ export interface BotcastStudioGlowTuning {
 }
 
 export const BOTCAST_DEFAULT_STUDIO_GLOW_TUNING: Readonly<BotcastStudioGlowTuning> = {
-  dark: { opacity: 1, blendMode: "overlay" },
-  light: { opacity: 1, blendMode: "overlay" },
+  dark: { opacity: 1, blendMode: "hard-light" },
+  light: { opacity: 1, blendMode: "hard-light" },
 };
 
 function normalizeBotcastStudioGlowThemeTuning(
@@ -499,7 +499,9 @@ function normalizeBotcastStudioGlowThemeTuning(
       ).toFixed(2),
     ),
     blendMode:
-      container.blendMode === "screen" || container.blendMode === "overlay"
+      container.blendMode === "hard-light" ||
+      container.blendMode === "screen" ||
+      container.blendMode === "overlay"
         ? container.blendMode
         : fallback.blendMode,
   };

@@ -25860,6 +25860,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --zen-live-bot-frame-tint-color,
     var(--coffee-seat-emotion-color, var(--coffee-bot-color, var(--accent)))
   );
+  --bot-light-glow-blend-mode: hard-light;
   --bot-ambient-hover-amplitude: 1.5px;
   --bot-ambient-hover-duration: 9s;
   --bot-ambient-delay: 0s;
@@ -25940,7 +25941,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transparent 74%
   );
   filter: blur(clamp(12px, 1.2vw, 22px));
-  mix-blend-mode: screen;
+  mix-blend-mode: var(--bot-light-glow-blend-mode, hard-light);
 }
 
 .botAmbientSpeakingLight {
@@ -25957,7 +25958,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     color-mix(in srgb, var(--bot-ambient-color) 18%, transparent) 42%,
     transparent 76%
   );
-  mix-blend-mode: screen;
+  mix-blend-mode: var(--bot-light-glow-blend-mode, hard-light);
   opacity: var(--bot-ambient-speaking-low-opacity);
 }
 
@@ -26042,11 +26043,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-ambient-speaking-low-opacity: 0.026;
   --bot-ambient-speaking-mid-opacity: 0.034;
   --bot-ambient-speaking-high-opacity: 0.042;
-}
-
-.botAmbientPresenceRig[data-theme="light"] .botAmbientUnderglow::after,
-.botAmbientPresenceRig[data-theme="light"] .botAmbientSpeakingPulse {
-  mix-blend-mode: multiply;
 }
 
 @media (prefers-reduced-motion: reduce) {

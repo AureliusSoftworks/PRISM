@@ -13,16 +13,19 @@ export interface DebateModeratorGavelCue {
 }
 
 export const DEBATE_GAVEL_FOLEY_URLS = {
-  attention: "/audio/debate/gavel-attention.mp3",
-  order: "/audio/debate/gavel-order.mp3",
+  attention: "/audio/debate/gavel-attention-v2.wav",
+  order: "/audio/debate/gavel-order-v2.wav",
 } as const satisfies Record<DebateModeratorGavelCueKind, string>;
 
-export const DEBATE_GAVEL_IMPACT_DELAY_MS = 220;
+export const DEBATE_GAVEL_IMPACT_DELAYS_MS = {
+  attention: 220,
+  order: 272,
+} as const satisfies Record<DebateModeratorGavelCueKind, number>;
 
 export function debateModeratorGavelSpeechLeadMs(
   kind: DebateModeratorGavelCueKind,
 ): number {
-  return kind === "order" ? 1_050 : 520;
+  return kind === "order" ? 1_450 : 680;
 }
 
 export function debateModeratorGavelCue(args: {

@@ -128475,6 +128475,8 @@ function HomeContent(): React.JSX.Element {
       color: bot.color,
       glyph: bot.glyph,
       avatarDetails: bot.avatarDetails ?? null,
+      powers: bot.powers,
+      systemPrompt: bot.system_prompt,
       hardMuted: botPowerIsMutedV1(bot.powers),
     }));
     const playDebateUtterance = async (

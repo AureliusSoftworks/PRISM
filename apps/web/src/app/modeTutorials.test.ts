@@ -1500,7 +1500,8 @@ describe("mode tutorials", () => {
     assert.match(booking?.body ?? "", /separate Host and Guest floor glows/u);
     assert.match(booking?.body ?? "", /extracted microphone masks/u);
     assert.match(booking?.body ?? "", /saved film grain/u);
-    assert.match(booking?.body ?? "", /100% Overlay/u);
+    assert.match(booking?.body ?? "", /Hard Light, Screen, or Overlay/u);
+    assert.match(booking?.body ?? "", /100% Hard Light/u);
     assert.match(booking?.body ?? "", /faithful replay/u);
     assert.match(
       booking?.body ?? "",

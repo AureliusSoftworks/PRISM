@@ -57,6 +57,7 @@ import {
   debatePrefilledCast,
   derivedDebateSetupPresetId,
   randomDebateCast,
+  type DebateCastSelection,
 } from "./debateExperienceState";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import { randomDebateTerritory } from "./debateTerritoryRandomizer";
@@ -99,7 +100,6 @@ import {
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
-  updateDebateStageGavel,
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
@@ -107,7 +107,7 @@ import {
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
-  type DebateStageAlignmentV5,
+  type DebateStageAlignmentV6,
   type DebateStageLightBlendMode,
   type DebateStageOffsetV1,
 } from "./debateStageAlignment";
@@ -129,7 +129,7 @@ import {
 } from "./session-atmosphere-audio";
 import {
   DEBATE_GAVEL_FOLEY_URLS,
-  DEBATE_GAVEL_IMPACT_DELAY_MS,
+  DEBATE_GAVEL_IMPACT_DELAYS_MS,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -142,6 +142,7 @@ import {
 import { magentaTintedRasterUrl } from "./magentaKeyRaster";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
+import { DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX } from "./signalStageSoundcheck";
 
 export interface DebateBotSummary {
   id: string;
@@ -229,6 +230,10 @@ type DebateCameraView = "wide" | "left" | "moderator" | "right" | "jury";
 type DebateCameraMode = "auto" | DebateCameraView;
 type DebateClipboardState = "idle" | "copying" | "copied" | "failed";
 type DebateStageGavelPose = "lowered" | "raised";
+type DebateStageSoundCheckState = {
+  role: DebateStageAlignmentRole;
+  status: "playing" | "unavailable";
+} | null;
 type DebateLiveReveal = {
   eventId: string;
   visibleContent: string;
@@ -248,7 +253,7 @@ type DebateStageAlignmentDrag = {
   startClientY: number;
   stageWidth: number;
   stageHeight: number;
-  startAlignment: DebateStageAlignmentV5;
+  startAlignment: DebateStageAlignmentV6;
 };
 
 const DEBATE_STAGE_ALIGNMENT_ENABLED = prismBranchIsDev(
@@ -312,37 +317,26 @@ const DEBATE_STAGE_ALIGNMENT_ITEM_LABELS: Record<
   glyph: "Glyph plate",
 };
 
-function DebateForumLightMasks(): React.JSX.Element {
+function DebateForumLightMasks(props: {
+  depth: "backdrop" | "foreground";
+}): React.JSX.Element {
+  const foregroundClass =
+    props.depth === "foreground" ? ` ${styles.lightMaskForeground}` : "";
   return (
     <>
       <div
-        className={styles.lightMaskFor}
-        data-light-depth="backdrop"
+        className={`${styles.lightMaskFor}${foregroundClass}`}
+        data-light-depth={props.depth}
         aria-hidden="true"
       />
       <div
-        className={styles.lightMaskAgainst}
-        data-light-depth="backdrop"
+        className={`${styles.lightMaskAgainst}${foregroundClass}`}
+        data-light-depth={props.depth}
         aria-hidden="true"
       />
       <div
-        className={styles.lightMaskModerator}
-        data-light-depth="backdrop"
-        aria-hidden="true"
-      />
-      <div
-        className={`${styles.lightMaskFor} ${styles.lightMaskForeground}`}
-        data-light-depth="foreground"
-        aria-hidden="true"
-      />
-      <div
-        className={`${styles.lightMaskAgainst} ${styles.lightMaskForeground}`}
-        data-light-depth="foreground"
-        aria-hidden="true"
-      />
-      <div
-        className={`${styles.lightMaskModerator} ${styles.lightMaskForeground}`}
-        data-light-depth="foreground"
+        className={`${styles.lightMaskModerator}${foregroundClass}`}
+        data-light-depth={props.depth}
         aria-hidden="true"
       />
     </>
@@ -396,7 +390,7 @@ function DebateModeratorGavel(props: {
     };
   }, [downSource, props.color, spriteRequestKey, upSource]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (
       !cueKind ||
       !cueKey ||
@@ -418,7 +412,7 @@ function DebateModeratorGavel(props: {
           tag: `debate-gavel:${cueKey}`,
         },
       );
-    }, DEBATE_GAVEL_IMPACT_DELAY_MS);
+    }, DEBATE_GAVEL_IMPACT_DELAYS_MS[cueKind]);
     return () => window.clearTimeout(timer);
   }, [cueKey, cueKind, props.atmosphereControllerRef, props.audioEnabled]);
 
@@ -468,14 +462,14 @@ function debateAlignmentPreviewSnapshot(
     version: DEBATE_SCHEMA_VERSION,
     id: bot.id,
     name: bot.name,
-    systemPrompt: "",
+    systemPrompt: bot.systemPrompt ?? "",
     role,
     sideId,
     color: bot.color,
     glyph: bot.glyph,
     avatarDetails: bot.avatarDetails ?? null,
-    voiceProfile: null,
-    powers: [],
+    voiceProfile: bot.voiceProfile ?? null,
+    powers: bot.powers ?? [],
     provider: "local",
     model: "alignment-preview",
     revision: `alignment-preview:${bot.id}`,
@@ -1229,14 +1223,18 @@ export function DebateExperience(
   const [presenting, setPresenting] = useState(false);
   const [interjectionDraft, setInterjectionDraft] = useState("");
   const [cameraMode, setCameraMode] = useState<DebateCameraMode>("auto");
-  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV5>(
+  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV6>(
     () => copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
   );
   const [stageAlignmentDraft, setStageAlignmentDraft] =
-    useState<DebateStageAlignmentV5>(() =>
+    useState<DebateStageAlignmentV6>(() =>
       copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
     );
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
+  const [stageAlignmentPreviewCastIds, setStageAlignmentPreviewCastIds] =
+    useState<DebateCastSelection | null>(null);
+  const [stageAlignmentSoundCheck, setStageAlignmentSoundCheck] =
+    useState<DebateStageSoundCheckState>(null);
   const [stageAlignmentCopyState, setStageAlignmentCopyState] =
     useState<DebateClipboardState>("idle");
   const [stageAlignmentPreviewCamera, setStageAlignmentPreviewCamera] =
@@ -1248,6 +1246,8 @@ export function DebateExperience(
     useState<DebateModeratorGavelCue | null>(null);
   const [stageAlignmentGavelPose, setStageAlignmentGavelPose] =
     useState<DebateStageGavelPose>("lowered");
+  const [stageAlignmentGavelPosesLinked, setStageAlignmentGavelPosesLinked] =
+    useState(false);
   const [stageAlignmentSelectedItems, setStageAlignmentSelectedItems] =
     useState<Record<DebateStageAlignmentRole, DebateStageAlignmentItem>>({
       for: "bot",
@@ -1304,6 +1304,7 @@ export function DebateExperience(
   const stageAlignmentSaveButtonRef = useRef<HTMLButtonElement | null>(null);
   const stageAlignmentDragRef = useRef<DebateStageAlignmentDrag | null>(null);
   const stageAlignmentGavelPreviewCounterRef = useRef(0);
+  const stageAlignmentSoundCheckRunRef = useRef(0);
   const stageAlignmentAtmosphereControllerRef =
     useRef<SessionAtmosphereController | null>(null);
   const debateAtmosphereControllerRef =
@@ -1401,6 +1402,11 @@ export function DebateExperience(
       setStageAlignmentDraggingTarget(null);
       setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
       setStageAlignmentGavelCue(null);
+      stageAlignmentSoundCheckRunRef.current += 1;
+      if (stageAlignmentSoundCheck?.status === "playing") {
+        onStopUtterance?.();
+      }
+      setStageAlignmentSoundCheck(null);
       setStageAlignmentOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
@@ -1408,7 +1414,12 @@ export function DebateExperience(
       window.cancelAnimationFrame(frameId);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [stageAlignment, stageAlignmentOpen]);
+  }, [
+    onStopUtterance,
+    stageAlignment,
+    stageAlignmentOpen,
+    stageAlignmentSoundCheck?.status,
+  ]);
 
   const liveSessionActive = view === "live" && activeSession !== null;
   useEffect(() => {
@@ -1423,18 +1434,22 @@ export function DebateExperience(
     () => new Map(bots.map((bot) => [bot.id, bot])),
     [bots],
   );
-  const dashboardAlignmentPreviewCast = useMemo(() => {
-    const previewIds = debateAlignmentPreviewCast(
-      bots.map((bot) => bot.id),
-      cast,
+  const stageAlignmentCastCandidates = useMemo(() => {
+    const audible = bots.filter((bot) => !bot.hardMuted);
+    return audible.length >= 3 ? audible : bots;
+  }, [bots]);
+  const stageAlignmentCanOpen =
+    new Set(stageAlignmentCastCandidates.map((bot) => bot.id)).size >= 3;
+  const stageAlignmentPreviewCast = useMemo(() => {
+    if (!stageAlignmentPreviewCastIds) return null;
+    const moderator = botById.get(stageAlignmentPreviewCastIds.moderator);
+    const forAdvocate = botById.get(stageAlignmentPreviewCastIds.forAdvocate);
+    const againstAdvocate = botById.get(
+      stageAlignmentPreviewCastIds.againstAdvocate,
     );
-    if (!previewIds) return null;
-    const moderator = botById.get(previewIds.moderator);
-    const forAdvocate = botById.get(previewIds.forAdvocate);
-    const againstAdvocate = botById.get(previewIds.againstAdvocate);
     if (!moderator || !forAdvocate || !againstAdvocate) return null;
     return { moderator, forAdvocate, againstAdvocate };
-  }, [botById, bots, cast]);
+  }, [botById, stageAlignmentPreviewCastIds]);
   const selectedSource = sourceDrawerId
     ? (activeSession?.evidence.sources.find(
         (source) => source.id === sourceDrawerId,
@@ -1746,13 +1761,50 @@ export function DebateExperience(
     setActiveCastSlot("moderator");
   };
 
+  const stopStageAlignmentSoundCheck = (): void => {
+    stageAlignmentSoundCheckRunRef.current += 1;
+    if (stageAlignmentSoundCheck?.status === "playing") {
+      onStopUtterance?.();
+    }
+    setStageAlignmentSoundCheck(null);
+  };
+
+  const randomizeStageAlignmentPreviewCast = (): boolean => {
+    const randomized = debateAlignmentPreviewCast(
+      stageAlignmentCastCandidates.map((bot) => bot.id),
+    );
+    if (!randomized) {
+      setError(
+        "Create at least three Library bots to calibrate the Debate stage.",
+      );
+      return false;
+    }
+    const previewIds =
+      stageAlignmentPreviewCastIds &&
+      randomized.moderator === stageAlignmentPreviewCastIds.moderator &&
+      randomized.forAdvocate === stageAlignmentPreviewCastIds.forAdvocate &&
+      randomized.againstAdvocate ===
+        stageAlignmentPreviewCastIds.againstAdvocate
+        ? {
+            moderator: randomized.forAdvocate,
+            forAdvocate: randomized.againstAdvocate,
+            againstAdvocate: randomized.moderator,
+          }
+        : randomized;
+    setStageAlignmentPreviewCastIds(previewIds);
+    return true;
+  };
+
   const openStageAlignment = (): void => {
     if (!DEBATE_STAGE_ALIGNMENT_ENABLED) return;
+    if (!randomizeStageAlignmentPreviewCast()) return;
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentPreviewCamera("wide");
     setStageAlignmentPreviewTheme(props.theme);
     setStageAlignmentGavelCue(null);
     setStageAlignmentGavelPose("lowered");
+    setStageAlignmentGavelPosesLinked(false);
+    setStageAlignmentSoundCheck(null);
     setStageAlignmentCopyState("idle");
     setStageAlignmentSelectedItems({
       for: "bot",
@@ -1765,9 +1817,11 @@ export function DebateExperience(
   };
 
   const cancelStageAlignment = (): void => {
+    stopStageAlignmentSoundCheck();
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentGavelCue(null);
     setStageAlignmentGavelPose("lowered");
+    setStageAlignmentGavelPosesLinked(false);
     setStageAlignmentCopyState("idle");
     setStageAlignmentDraggingTarget(null);
     stageAlignmentDragRef.current = null;
@@ -1777,6 +1831,7 @@ export function DebateExperience(
   const saveStageAlignment = (): void => {
     const normalized = normalizeDebateStageAlignment(stageAlignmentDraft);
     try {
+      stopStageAlignmentSoundCheck();
       writeDebateStageAlignment(
         window.localStorage,
         props.storageScopeId,
@@ -1786,6 +1841,7 @@ export function DebateExperience(
       setStageAlignmentDraft(copyDebateStageAlignment(normalized));
       setStageAlignmentGavelCue(null);
       setStageAlignmentGavelPose("lowered");
+      setStageAlignmentGavelPosesLinked(false);
       setStageAlignmentOpen(false);
     } catch {
       setError("Debate stage alignment could not be saved on this device.");
@@ -1842,6 +1898,64 @@ export function DebateExperience(
       eventId: `alignment-preview:${stageAlignmentGavelPreviewCounterRef.current}`,
       kind,
     });
+  };
+
+  const previewStageAlignmentVoice = async (
+    role: DebateStageAlignmentRole,
+    bot: DebateBotSummary,
+    soundCheckFormat: DebateFormatId,
+  ): Promise<void> => {
+    if (
+      !onUtterance ||
+      !props.audioEnabled ||
+      props.audioVolume <= 0 ||
+      bot.hardMuted
+    ) {
+      return;
+    }
+    if (
+      stageAlignmentSoundCheck?.role === role &&
+      stageAlignmentSoundCheck.status === "playing"
+    ) {
+      stopStageAlignmentSoundCheck();
+      return;
+    }
+
+    stageAlignmentSoundCheckRunRef.current += 1;
+    const runId = stageAlignmentSoundCheckRunRef.current;
+    onStopUtterance?.();
+    setStageAlignmentSoundCheck({ role, status: "playing" });
+    const sideId =
+      role === "for" ? "for" : role === "against" ? "against" : null;
+    const soundCheckSessionId = `${DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX}${props.storageScopeId}:${runId}`;
+    const spokenText = `Sound check. ${bot.name}, ${DEBATE_STAGE_ALIGNMENT_LABELS[role]}, standing by.`;
+    const createdAt = new Date().toISOString();
+    const played = await onUtterance({
+      event: {
+        version: DEBATE_SCHEMA_VERSION,
+        id: `${soundCheckSessionId}:${role}`,
+        sequence: 0,
+        phase: "opening",
+        stepKey: "alignment_sound_check",
+        kind: "speech",
+        speakerKind: role === "moderator" ? "moderator" : "advocate",
+        speakerBotId: bot.id,
+        sideId,
+        content: spokenText,
+        sourceIds: [],
+        createdAt,
+      },
+      format: soundCheckFormat,
+      sessionId: soundCheckSessionId,
+      speaker: bot,
+      player: false,
+      spokenText,
+      voiceSourceBotId: bot.id,
+    });
+    if (stageAlignmentSoundCheckRunRef.current !== runId) return;
+    setStageAlignmentSoundCheck(
+      played ? null : { role, status: "unavailable" },
+    );
   };
 
   const stageAlignmentTargetForRole = (
@@ -3168,10 +3282,10 @@ export function DebateExperience(
               type="button"
               className={styles.studioUtilityButton}
               onClick={openStageAlignment}
-              disabled={!dashboardAlignmentPreviewCast}
+              disabled={!stageAlignmentCanOpen}
               aria-label="Align stage"
               title={
-                dashboardAlignmentPreviewCast
+                stageAlignmentCanOpen
                   ? "Advanced stage geometry for this account and device."
                   : "Create at least three Library bots to calibrate the Debate stage."
               }
@@ -5036,63 +5150,56 @@ export function DebateExperience(
     session: DebateSessionV1 | null,
   ): React.JSX.Element | null => {
     if (!DEBATE_STAGE_ALIGNMENT_ENABLED || !stageAlignmentOpen) return null;
-    if (!session && !dashboardAlignmentPreviewCast) return null;
+    if (!stageAlignmentPreviewCast) return null;
     const alignmentMotion = session?.motion ?? motion;
-    const forBot =
-      session?.forAdvocate ??
-      debateAlignmentPreviewSnapshot(
-        dashboardAlignmentPreviewCast!.forAdvocate,
-        "advocate",
-        "for",
-      );
-    const moderatorBot =
-      session?.moderator ??
-      debateAlignmentPreviewSnapshot(
-        dashboardAlignmentPreviewCast!.moderator,
-        "moderator",
-        null,
-      );
-    const againstBot =
-      session?.againstAdvocate ??
-      debateAlignmentPreviewSnapshot(
-        dashboardAlignmentPreviewCast!.againstAdvocate,
-        "advocate",
-        "against",
-      );
+    const forSourceBot = stageAlignmentPreviewCast.forAdvocate;
+    const moderatorSourceBot = stageAlignmentPreviewCast.moderator;
+    const againstSourceBot = stageAlignmentPreviewCast.againstAdvocate;
+    const forBot = debateAlignmentPreviewSnapshot(
+      forSourceBot,
+      "advocate",
+      "for",
+    );
+    const moderatorBot = debateAlignmentPreviewSnapshot(
+      moderatorSourceBot,
+      "moderator",
+      null,
+    );
+    const againstBot = debateAlignmentPreviewSnapshot(
+      againstSourceBot,
+      "advocate",
+      "against",
+    );
     const alignmentCast = [
       {
         role: "for" as const,
         bot: forBot,
+        sourceBot: forSourceBot,
         roleLabel: alignmentMotion.forSide.label.trim() || "For",
       },
       {
         role: "moderator" as const,
         bot: moderatorBot,
+        sourceBot: moderatorSourceBot,
         roleLabel:
           session?.format === "turnabout" ? "Moderator / Judge" : "Moderator",
       },
       {
         role: "against" as const,
         bot: againstBot,
+        sourceBot: againstSourceBot,
         roleLabel: alignmentMotion.againstSide.label.trim() || "Against",
       },
     ].map((entry) => {
-      const presentation = session
-        ? debateBotPresentation(
-            session,
-            entry.bot,
-            Number.POSITIVE_INFINITY,
-            observerPerspective,
-          )
-        : {
-            displayName: entry.bot.name,
-            identityLabel: null,
-            glyph: entry.bot.glyph,
-            voiceSourceBotId: entry.bot.id,
-            visibility: "visible" as const,
-            scale: "normal" as const,
-            colorCycle: false,
-          };
+      const presentation = {
+        displayName: entry.bot.name,
+        identityLabel: null,
+        glyph: entry.bot.glyph,
+        voiceSourceBotId: entry.bot.id,
+        visibility: "visible" as const,
+        scale: "normal" as const,
+        colorCycle: false,
+      };
       return { ...entry, presentation };
     });
     const interactiveAlignmentCast =
@@ -5111,20 +5218,23 @@ export function DebateExperience(
           );
     const placementIsDefault = previewTargets.every((target) => {
       const offset = debateStageAlignmentOffset(stageAlignmentDraft, target);
-      return offset.x === 0 && offset.y === 0;
-    });
-    const gavelIsDefault =
-      stageAlignmentDraft.gavel.size ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.size &&
-      (["lowered", "raised"] as const).every(
-        (pose) =>
-          stageAlignmentDraft.gavel[pose].x ===
-            DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].x &&
-          stageAlignmentDraft.gavel[pose].y ===
-            DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].y &&
-          stageAlignmentDraft.gavel[pose].rotation ===
-            DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].rotation,
+      const defaultOffset = debateStageAlignmentOffset(
+        DEFAULT_DEBATE_STAGE_ALIGNMENT,
+        target,
       );
+      return offset.x === defaultOffset.x && offset.y === defaultOffset.y;
+    });
+    const gavelIsDefault = (["lowered", "raised"] as const).every(
+      (pose) =>
+        stageAlignmentDraft.gavel[pose].x ===
+          DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].x &&
+        stageAlignmentDraft.gavel[pose].y ===
+          DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].y &&
+        stageAlignmentDraft.gavel[pose].rotation ===
+          DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].rotation &&
+        stageAlignmentDraft.gavel[pose].size ===
+          DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].size,
+    );
     const activeGavelPose = stageAlignmentDraft.gavel[stageAlignmentGavelPose];
     const previewIsDefault =
       placementIsDefault &&
@@ -5178,12 +5288,21 @@ export function DebateExperience(
                   Align the Prismatic Forum
                 </h2>
                 <p>
-                  {session
-                    ? "Calibrate the three frozen roles once for this account and device."
-                    : "Calibrate the Forum at any time. The current draft cast is shown; empty roles use temporary Library stand-ins."}
+                  Calibrate the Forum with a fresh random Library cast. Shuffle
+                  the cast to check varied silhouettes and voices.
                 </p>
               </div>
               <div>
+                <button
+                  type="button"
+                  data-debate-stage-alignment-shuffle="true"
+                  onClick={() => {
+                    stopStageAlignmentSoundCheck();
+                    void randomizeStageAlignmentPreviewCast();
+                  }}
+                >
+                  Shuffle cast
+                </button>
                 <button
                   type="button"
                   data-debate-stage-alignment-copy="true"
@@ -5315,15 +5434,12 @@ export function DebateExperience(
                         className={styles.receiverMatte}
                         aria-hidden="true"
                       />
-                      <DebateForumLightMasks />
+                      <DebateForumLightMasks depth="backdrop" />
                       {interactiveAlignmentCast.map(
                         ({ role, bot, presentation }) => {
-                          const appearanceBot = session
-                            ? (debateBotSnapshot(
-                                session,
-                                presentation.voiceSourceBotId,
-                              ) ?? bot)
-                            : bot;
+                          const soundCheckPlaying =
+                            stageAlignmentSoundCheck?.role === role &&
+                            stageAlignmentSoundCheck.status === "playing";
                           const target = stageAlignmentTargetForRole(
                             role,
                             "bot",
@@ -5359,17 +5475,20 @@ export function DebateExperience(
                             >
                               <div
                                 className={styles.botStagePresence}
+                                data-speaking={
+                                  soundCheckPlaying ? "true" : undefined
+                                }
                                 data-scale={presentation.scale}
                               >
                                 {props.renderBotAvatar ? (
-                                  props.renderBotAvatar(appearanceBot, {
+                                  props.renderBotAvatar(bot, {
                                     role,
                                     lookAtRole: null,
                                     compact:
                                       role === "moderator" &&
                                       stageAlignmentPreviewCamera !==
                                         "moderator",
-                                    talking: false,
+                                    talking: soundCheckPlaying,
                                     thinking: false,
                                     colorCycle: presentation.colorCycle,
                                     speechTiming: null,
@@ -5396,6 +5515,7 @@ export function DebateExperience(
                         className={styles.podiumForeground}
                         aria-hidden="true"
                       />
+                      <DebateForumLightMasks depth="foreground" />
                       <DebateModeratorGavel
                         theme={stageAlignmentPreviewTheme}
                         color={moderatorBot.color ?? "#d9d2ff"}
@@ -5411,6 +5531,9 @@ export function DebateExperience(
                       />
                       {interactiveAlignmentCast.map(
                         ({ role, bot, presentation }) => {
+                          const soundCheckPlaying =
+                            stageAlignmentSoundCheck?.role === role &&
+                            stageAlignmentSoundCheck.status === "playing";
                           const target = stageAlignmentTargetForRole(
                             role,
                             "glyph",
@@ -5419,6 +5542,9 @@ export function DebateExperience(
                             <div
                               className={`${styles.podiumGlyphPosition} ${styles.alignmentHandle}`}
                               data-role={role}
+                              data-turn-active={
+                                soundCheckPlaying ? "true" : undefined
+                              }
                               data-visibility={presentation.visibility}
                               data-dragging={
                                 stageAlignmentDraggingTarget === target
@@ -5462,6 +5588,9 @@ export function DebateExperience(
                       )}
                       {interactiveAlignmentCast.map(
                         ({ role, bot, presentation, roleLabel }) => {
+                          const soundCheckPlaying =
+                            stageAlignmentSoundCheck?.role === role &&
+                            stageAlignmentSoundCheck.status === "playing";
                           const target = stageAlignmentTargetForRole(
                             role,
                             "nameplate",
@@ -5470,6 +5599,9 @@ export function DebateExperience(
                             <div
                               className={`${styles.botIdentityPosition} ${styles.alignmentHandle}`}
                               data-role={role}
+                              data-speaking={
+                                soundCheckPlaying ? "true" : undefined
+                              }
                               data-dragging={
                                 stageAlignmentDraggingTarget === target
                                   ? "true"
@@ -5545,25 +5677,78 @@ export function DebateExperience(
                       </button>
                     </header>
                     <div className={styles.alignmentGavelPoseEditor}>
-                      <div
-                        className={styles.alignmentGavelPoseToggle}
-                        role="group"
-                        aria-label="Gavel pose to align"
-                      >
-                        {(["lowered", "raised"] as const).map((pose) => (
-                          <button
-                            type="button"
-                            aria-pressed={stageAlignmentGavelPose === pose}
-                            data-debate-gavel-pose={pose}
-                            onClick={() => {
-                              setStageAlignmentGavelCue(null);
-                              setStageAlignmentGavelPose(pose);
-                            }}
-                            key={pose}
+                      <div className={styles.alignmentGavelPoseControls}>
+                        <div
+                          className={styles.alignmentGavelPoseToggle}
+                          role="group"
+                          aria-label="Gavel pose to align"
+                        >
+                          {(["lowered", "raised"] as const).map((pose) => (
+                            <button
+                              type="button"
+                              aria-pressed={stageAlignmentGavelPose === pose}
+                              data-debate-gavel-pose={pose}
+                              onClick={() => {
+                                setStageAlignmentGavelCue(null);
+                                setStageAlignmentGavelPose(pose);
+                              }}
+                              key={pose}
+                            >
+                              {pose === "lowered" ? "Lowered" : "Raised"}
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className={styles.alignmentGavelLinkToggle}
+                          data-linked={
+                            stageAlignmentGavelPosesLinked ? "true" : "false"
+                          }
+                          data-debate-gavel-link="true"
+                          aria-pressed={stageAlignmentGavelPosesLinked}
+                          aria-label={
+                            stageAlignmentGavelPosesLinked
+                              ? "Unlock gavel poses"
+                              : "Lock gavel poses"
+                          }
+                          title={
+                            stageAlignmentGavelPosesLinked
+                              ? "Linked: adjustments move both poses"
+                              : "Independent: adjustments move one pose"
+                          }
+                          onClick={() => {
+                            setStageAlignmentGavelCue(null);
+                            setStageAlignmentGavelPosesLinked(
+                              (current) => !current,
+                            );
+                          }}
+                        >
+                          <svg
+                            viewBox="0 0 20 20"
+                            aria-hidden="true"
+                            focusable="false"
                           >
-                            {pose === "lowered" ? "Lowered" : "Raised"}
-                          </button>
-                        ))}
+                            <rect
+                              x="4.5"
+                              y="8.5"
+                              width="11"
+                              height="8"
+                              rx="2"
+                            />
+                            <path
+                              d={
+                                stageAlignmentGavelPosesLinked
+                                  ? "M6.75 8.5V6.25a3.25 3.25 0 0 1 6.5 0V8.5"
+                                  : "M13.25 8.5V6.25a3.25 3.25 0 0 0-6.5 0"
+                              }
+                            />
+                          </svg>
+                          <span>
+                            {stageAlignmentGavelPosesLinked
+                              ? "Linked"
+                              : "Independent"}
+                          </span>
+                        </button>
                       </div>
                       <div className={styles.alignmentGavelTunerRows}>
                         {(
@@ -5592,6 +5777,14 @@ export function DebateExperience(
                               step: DEBATE_STAGE_GAVEL_ROTATION_STEP,
                               suffix: "°",
                             },
+                            {
+                              key: "size",
+                              label: "Size",
+                              min: DEBATE_STAGE_GAVEL_SIZE_MIN,
+                              max: DEBATE_STAGE_GAVEL_SIZE_MAX,
+                              step: DEBATE_STAGE_GAVEL_SIZE_STEP,
+                              suffix: "%",
+                            },
                           ] as const
                         ).map((control) => {
                           const value = activeGavelPose[control.key];
@@ -5600,9 +5793,14 @@ export function DebateExperience(
                               <span>
                                 {control.label}
                                 <output>
-                                  {value > 0 ? "+" : ""}
+                                  {control.key !== "size" && value > 0
+                                    ? "+"
+                                    : ""}
                                   {value.toFixed(
-                                    control.key === "rotation" ? 0 : 1,
+                                    control.key === "rotation" ||
+                                      control.key === "size"
+                                      ? 0
+                                      : 1,
                                   )}
                                   {control.suffix}
                                 </output>
@@ -5626,6 +5824,7 @@ export function DebateExperience(
                                       {
                                         [control.key]: nextValue,
                                       },
+                                      stageAlignmentGavelPosesLinked,
                                     ),
                                   );
                                 }}
@@ -5633,33 +5832,6 @@ export function DebateExperience(
                             </label>
                           );
                         })}
-                        <label>
-                          <span>
-                            Size
-                            <output>
-                              {stageAlignmentDraft.gavel.size.toFixed(0)}%
-                            </output>
-                          </span>
-                          <input
-                            type="range"
-                            min={DEBATE_STAGE_GAVEL_SIZE_MIN}
-                            max={DEBATE_STAGE_GAVEL_SIZE_MAX}
-                            step={DEBATE_STAGE_GAVEL_SIZE_STEP}
-                            value={stageAlignmentDraft.gavel.size}
-                            aria-label="Debate moderator gavel size"
-                            onChange={(event) => {
-                              const nextSize = Number(
-                                event.currentTarget.value,
-                              );
-                              setStageAlignmentGavelCue(null);
-                              setStageAlignmentDraft((current) =>
-                                updateDebateStageGavel(current, {
-                                  size: nextSize,
-                                }),
-                              );
-                            }}
-                          />
-                        </label>
                       </div>
                     </div>
                     <div
@@ -5821,14 +5993,25 @@ export function DebateExperience(
                   aria-label="Debate stage position controls"
                   data-camera-view={stageAlignmentPreviewCamera}
                 >
-                  {interactiveAlignmentCast.map(({ role, bot }) => {
+                  {interactiveAlignmentCast.map(({ role, bot, sourceBot }) => {
                     const selectedItem = stageAlignmentSelectedItems[role];
+                    const soundCheckState =
+                      stageAlignmentSoundCheck?.role === role
+                        ? stageAlignmentSoundCheck.status
+                        : null;
+                    const anotherSoundCheckIsPlaying =
+                      stageAlignmentSoundCheck?.status === "playing" &&
+                      stageAlignmentSoundCheck.role !== role;
                     const target = stageAlignmentTargetForRole(
                       role,
                       selectedItem,
                     );
                     const offset = debateStageAlignmentOffset(
                       stageAlignmentDraft,
+                      target,
+                    );
+                    const defaultOffset = debateStageAlignmentOffset(
+                      DEFAULT_DEBATE_STAGE_ALIGNMENT,
                       target,
                     );
                     return (
@@ -5838,16 +6021,64 @@ export function DebateExperience(
                             <span>{DEBATE_STAGE_ALIGNMENT_LABELS[role]}</span>
                             <strong>{bot.name}</strong>
                           </div>
-                          <button
-                            type="button"
-                            disabled={offset.x === 0 && offset.y === 0}
-                            aria-label={`Reset ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[selectedItem].toLowerCase()} position`}
-                            onClick={() =>
-                              updateStageAlignmentTarget(target, { x: 0, y: 0 })
-                            }
-                          >
-                            Reset
-                          </button>
+                          <div className={styles.alignmentTunerRoleActions}>
+                            <button
+                              type="button"
+                              data-debate-stage-sound-check={role}
+                              data-sound-check-state={
+                                soundCheckState ?? undefined
+                              }
+                              disabled={
+                                !onUtterance ||
+                                !props.audioEnabled ||
+                                props.audioVolume <= 0 ||
+                                sourceBot.hardMuted ||
+                                anotherSoundCheckIsPlaying
+                              }
+                              aria-label={`Sound check ${sourceBot.name} as ${DEBATE_STAGE_ALIGNMENT_LABELS[role]}`}
+                              aria-pressed={soundCheckState === "playing"}
+                              title={
+                                sourceBot.hardMuted
+                                  ? `${sourceBot.name} is fully muted.`
+                                  : !onUtterance ||
+                                      !props.audioEnabled ||
+                                      props.audioVolume <= 0
+                                    ? "Enable voice and volume to run this sound check."
+                                    : `Test ${sourceBot.name}'s configured voice.`
+                              }
+                              onClick={() =>
+                                void previewStageAlignmentVoice(
+                                  role,
+                                  sourceBot,
+                                  session?.format ?? format,
+                                )
+                              }
+                            >
+                              {sourceBot.hardMuted
+                                ? "Muted"
+                                : soundCheckState === "playing"
+                                  ? "Stop check"
+                                  : soundCheckState === "unavailable"
+                                    ? "Unavailable"
+                                    : "Sound check"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                offset.x === defaultOffset.x &&
+                                offset.y === defaultOffset.y
+                              }
+                              aria-label={`Reset ${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${DEBATE_STAGE_ALIGNMENT_ITEM_LABELS[selectedItem].toLowerCase()} position`}
+                              onClick={() =>
+                                updateStageAlignmentTarget(
+                                  target,
+                                  defaultOffset,
+                                )
+                              }
+                            >
+                              Reset
+                            </button>
+                          </div>
                         </header>
                         <div
                           className={styles.alignmentItemToggle}
@@ -6252,7 +6483,7 @@ export function DebateExperience(
                     style={debateStageAlignmentStyle(stageAlignment)}
                   >
                     <div className={styles.receiverMatte} aria-hidden="true" />
-                    <DebateForumLightMasks />
+                    <DebateForumLightMasks depth="backdrop" />
                     {stageCast.map(
                       ({
                         role,
@@ -6336,6 +6567,7 @@ export function DebateExperience(
                       className={styles.podiumForeground}
                       aria-hidden="true"
                     />
+                    <DebateForumLightMasks depth="foreground" />
                     <DebateModeratorGavel
                       theme={props.theme}
                       color={session.moderator.color ?? "#d9d2ff"}

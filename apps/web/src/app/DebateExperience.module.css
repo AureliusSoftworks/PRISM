@@ -1498,7 +1498,7 @@
   -webkit-mask-size: cover;
   mask-size: cover;
   mask-mode: alpha;
-  mix-blend-mode: var(--debate-light-blend-mode-dark, screen);
+  mix-blend-mode: var(--debate-light-blend-mode-dark, hard-light);
   filter: opacity(var(--debate-light-mask-opacity-dark, 100%));
   opacity: 0.2;
   transition: opacity 520ms ease;
@@ -1535,7 +1535,7 @@
 
 .live[data-theme="light"]
   :is(.lightMaskFor, .lightMaskAgainst, .lightMaskModerator) {
-  mix-blend-mode: var(--debate-light-blend-mode-light, overlay);
+  mix-blend-mode: var(--debate-light-blend-mode-light, color);
   filter: opacity(var(--debate-light-mask-opacity-light, 100%));
   opacity: 0.16;
 }
@@ -1879,10 +1879,9 @@
   position: absolute;
   top: 44.5%;
   left: 53%;
-  z-index: 6;
+  z-index: 3;
   width: clamp(130px, 12%, 175px);
   aspect-ratio: 1;
-  scale: var(--debate-gavel-scale, 1);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -1921,21 +1920,23 @@
 .moderatorGavelFrameDown {
   opacity: 1;
   transform: translate3d(
-      var(--debate-gavel-lowered-offset-x, 0%),
-      var(--debate-gavel-lowered-offset-y, 0%),
+      var(--debate-gavel-lowered-offset-x, -138.5%),
+      var(--debate-gavel-lowered-offset-y, 12.5%),
       0
     )
-    rotate(var(--debate-gavel-lowered-rotation, 0deg));
+    rotate(var(--debate-gavel-lowered-rotation, -131deg))
+    scale(var(--debate-gavel-lowered-scale, 0.75));
 }
 
 .moderatorGavelFrameUp {
   opacity: 0;
   transform: translate3d(
-      var(--debate-gavel-raised-offset-x, 8%),
-      var(--debate-gavel-raised-offset-y, -24%),
+      var(--debate-gavel-raised-offset-x, -130.5%),
+      var(--debate-gavel-raised-offset-y, -4.5%),
       0
     )
-    rotate(var(--debate-gavel-raised-rotation, 0deg));
+    rotate(var(--debate-gavel-raised-rotation, -77deg))
+    scale(var(--debate-gavel-raised-scale, 0.9));
 }
 
 .moderatorGavel[data-preview-pose="raised"] .moderatorGavelFrameDown {
@@ -2103,7 +2104,7 @@
   aspect-ratio: 1;
   place-items: center;
   color: var(--debate-moderator-color);
-  opacity: 0.62;
+  opacity: 1;
   pointer-events: none;
   transform: translate(-50%, -50%);
   transition:
@@ -2148,6 +2149,9 @@
     inset -4px -6px 9px rgba(0, 0, 0, 0.48),
     0 4px 8px rgba(0, 0, 0, 0.42);
   transform-origin: center;
+  transition:
+    border-color 220ms ease,
+    box-shadow 280ms ease;
 }
 
 .podiumGlyphMark {
@@ -2155,6 +2159,8 @@
   width: 64%;
   height: 64%;
   place-items: center;
+  opacity: 1;
+  transition: filter 240ms ease;
 }
 
 .podiumGlyphMark > svg {
@@ -2206,8 +2212,24 @@
 
 .podiumGlyphPosition[data-turn-active="true"] {
   opacity: 1;
-  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.9))
-    drop-shadow(0 0 9px currentColor) drop-shadow(0 0 20px currentColor);
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
+    drop-shadow(0 0 12px currentColor) drop-shadow(0 0 30px currentColor);
+}
+
+.podiumGlyphPosition[data-turn-active="true"] .podiumGlyphScreen {
+  border-color: color-mix(in srgb, currentColor 88%, white 12%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    inset 0 0 14px color-mix(in srgb, currentColor 32%, transparent),
+    inset -4px -6px 9px rgba(0, 0, 0, 0.38),
+    0 0 10px color-mix(in srgb, currentColor 90%, transparent),
+    0 0 28px color-mix(in srgb, currentColor 70%, transparent),
+    0 0 52px color-mix(in srgb, currentColor 44%, transparent);
+}
+
+.podiumGlyphPosition[data-turn-active="true"] .podiumGlyphMark {
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.95))
+    drop-shadow(0 0 7px currentColor) drop-shadow(0 0 16px currentColor);
 }
 
 .botIdentityPosition {
@@ -3221,6 +3243,13 @@
   gap: 7px;
 }
 
+.alignmentGavelPoseControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .alignmentGavelPoseToggle {
   display: flex;
   width: fit-content;
@@ -3242,6 +3271,38 @@
   color: var(--alignment-ink);
   background: color-mix(in srgb, #a995ff 22%, var(--alignment-panel-raised));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+}
+
+.alignmentGavelLinkToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: var(--alignment-border);
+  padding: 5px 8px;
+  color: var(--alignment-muted);
+  background: color-mix(in srgb, var(--alignment-panel) 80%, transparent);
+  font-size: 9px;
+}
+
+.alignmentGavelLinkToggle svg {
+  width: 12px;
+  height: 12px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.alignmentGavelLinkToggle rect {
+  fill: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.alignmentGavelLinkToggle[data-linked="true"] {
+  border-color: color-mix(in srgb, #a995ff 60%, var(--alignment-border));
+  color: var(--alignment-ink);
+  background: color-mix(in srgb, #a995ff 18%, var(--alignment-panel-raised));
 }
 
 .alignmentGavelTunerRows {
@@ -3466,7 +3527,7 @@
   gap: 12px;
 }
 
-.alignmentTunerRole > header > div {
+.alignmentTunerRole > header > div:first-child {
   display: grid;
   min-width: 0;
   gap: 2px;
@@ -3490,6 +3551,25 @@
 .alignmentTunerRole button {
   padding: 5px 9px;
   font-size: 9px;
+}
+
+.alignmentTunerRoleActions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.alignmentTunerRoleActions
+  [data-debate-stage-sound-check][data-sound-check-state="playing"] {
+  border-color: color-mix(in srgb, currentColor 72%, var(--alignment-border));
+  color: #f6f2ff;
+  background: color-mix(in srgb, #7963dd 44%, var(--alignment-panel-raised));
+  box-shadow: 0 0 14px color-mix(in srgb, #9f8cff 42%, transparent);
+}
+
+.alignmentTunerRoleActions
+  [data-debate-stage-sound-check][data-sound-check-state="unavailable"] {
+  color: var(--alignment-muted);
 }
 
 .alignmentItemToggle {

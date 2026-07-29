@@ -21,6 +21,10 @@ const css = readFileSync(
   fileURLToPath(new URL("./DebateExperience.module.css", import.meta.url)),
   "utf8",
 );
+const forumSceneSource = readFileSync(
+  fileURLToPath(new URL("./DebateForumScene.tsx", import.meta.url)),
+  "utf8",
+);
 const page = readFileSync(
   fileURLToPath(new URL("./page.tsx", import.meta.url)),
   "utf8",
@@ -73,37 +77,17 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps draft roles and fills incomplete alignment casts with unique stand-ins", () => {
+  it("gives stage alignment a fresh random three-bot Library cast", () => {
     assert.deepEqual(
-      debateAlignmentPreviewCast(["m", "f", "a", "extra"], {
-        moderator: "m",
-        forAdvocate: "",
-        againstAdvocate: "a",
-      }),
+      debateAlignmentPreviewCast(["m", "f", "a", "extra"], () => 0),
       {
-        moderator: "m",
-        forAdvocate: "f",
-        againstAdvocate: "a",
-      },
-    );
-    assert.deepEqual(
-      debateAlignmentPreviewCast(["m", "f", "a"], {
-        moderator: "missing",
-        forAdvocate: "f",
-        againstAdvocate: "f",
-      }),
-      {
-        moderator: "m",
-        forAdvocate: "f",
-        againstAdvocate: "a",
+        moderator: "f",
+        forAdvocate: "a",
+        againstAdvocate: "extra",
       },
     );
     assert.equal(
-      debateAlignmentPreviewCast(["m", "f"], {
-        moderator: "m",
-        forAdvocate: "f",
-        againstAdvocate: "",
-      }),
+      debateAlignmentPreviewCast(["m", "f"], () => 0.5),
       null,
     );
   });
@@ -407,8 +391,16 @@ describe("Debate experience", () => {
       source,
       /data-alignment-source=\{session \? "session" : "dashboard"\}/u,
     );
-    assert.match(source, /current draft cast is shown/u);
+    assert.match(source, /fresh random Library cast/u);
+    assert.match(
+      source,
+      /const randomized = debateAlignmentPreviewCast\(\s*stageAlignmentCastCandidates\.map/u,
+    );
+    assert.match(source, /data-debate-stage-alignment-shuffle="true"/u);
+    assert.match(source, /Shuffle cast/u);
     assert.match(page, /avatarDetails:\s*bot\.avatarDetails \?\? null/u);
+    assert.match(page, /powers:\s*bot\.powers/u);
+    assert.match(page, /systemPrompt:\s*bot\.system_prompt/u);
     assert.match(
       css,
       /\.dashboard \.dashboardRail \.setupActions\s*\{[^}]*position:\s*sticky[^}]*bottom:\s*0/u,
@@ -795,11 +787,15 @@ describe("Debate experience", () => {
       /\.forumCamera\[data-camera-view="moderator"\]\s+\.lightMaskModerator\s*\{[^}]*background:\s*var\(--debate-moderator-color\)[^}]*moderator-light-mask\.png/u,
     );
     assert.match(source, /className=\{styles\.podiumForeground\}/u);
-    assert.match(source, /data-light-depth="backdrop"/u);
-    assert.match(source, /data-light-depth="foreground"/u);
+    assert.match(source, /<DebateForumLightMasks depth="backdrop" \/>/u);
+    assert.match(source, /<DebateForumLightMasks depth="foreground" \/>/u);
     assert.match(
       source,
-      /className=\{`\$\{styles\.lightMaskFor\} \$\{styles\.lightMaskForeground\}`\}/u,
+      /className=\{`\$\{styles\.lightMaskFor\}\$\{foregroundClass\}`\}/u,
+    );
+    assert.match(
+      source,
+      /className=\{styles\.podiumForeground\}[\s\S]{0,120}<DebateForumLightMasks depth="foreground" \/>/u,
     );
     assert.match(source, /data-active-role=\{activeRole \?\? undefined\}/u);
     assert.doesNotMatch(source, /<DebateForumScene/u);
@@ -855,12 +851,13 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /mix-blend-mode:\s*var\(--debate-light-blend-mode-dark,\s*screen\)/u,
+      /mix-blend-mode:\s*var\(--debate-light-blend-mode-dark,\s*hard-light\)/u,
     );
     assert.match(
       css,
-      /mix-blend-mode:\s*var\(--debate-light-blend-mode-light,\s*overlay\)/u,
+      /mix-blend-mode:\s*var\(--debate-light-blend-mode-light,\s*color\)/u,
     );
+    assert.match(forumSceneSource, /blendMode:\s*"hard-light"/u);
     assert.match(css, /prefers-reduced-motion/u);
   });
 
@@ -947,6 +944,7 @@ describe("Debate experience", () => {
       /\.debateBotPresencePlate\[data-debate-compact="true"\]\s+\.botFaceFrame[\s\S]*?display:\s*none/u,
     );
     assert.match(css, /\.podiumGlyphPosition\s*\{[^}]*z-index:\s*5/u);
+    assert.match(css, /\.podiumGlyphPosition\s*\{[^}]*opacity:\s*1/u);
     assert.match(
       css,
       /\.podiumGlyphPosition\[data-role="for"\]\s*\{[^}]*left:\s*calc\(16\.5% \+ var\(--debate-for-glyph-offset-x,\s*0%\)\)/u,
@@ -977,7 +975,15 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.podiumGlyphPosition\[data-turn-active="true"\]\s*\{[^}]*drop-shadow/u,
+      /\.podiumGlyphPosition\[data-turn-active="true"\]\s*\{[^}]*drop-shadow\(0 0 30px currentColor\)/u,
+    );
+    assert.match(
+      css,
+      /\.podiumGlyphPosition\[data-turn-active="true"\]\s+\.podiumGlyphScreen\s*\{[^}]*0 0 52px color-mix/u,
+    );
+    assert.match(
+      css,
+      /\.podiumGlyphPosition\[data-turn-active="true"\]\s+\.podiumGlyphMark\s*\{[^}]*drop-shadow\(0 0 16px currentColor\)/u,
     );
   });
 
@@ -1096,7 +1102,7 @@ describe("Debate experience", () => {
     assert.match(source, /moderatorGavelFrameDown/u);
     assert.match(source, /moderatorGavelFrameUp/u);
     assert.match(source, /color=\{session\.moderator\.color/u);
-    assert.match(source, /DEBATE_GAVEL_IMPACT_DELAY_MS/u);
+    assert.match(source, /DEBATE_GAVEL_IMPACT_DELAYS_MS\[cueKind\]/u);
     assert.match(source, /DEBATE_GAVEL_FOLEY_URLS\[cueKind\]/u);
     assert.match(source, /playFoley\(/u);
     assert.match(
@@ -1118,19 +1124,20 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.moderatorGavel\s*\{[^}]*top:\s*44\.5%[^}]*left:\s*53%[^}]*scale:\s*var\(--debate-gavel-scale,\s*1\)/u,
+      /\.moderatorGavel\s*\{[^}]*top:\s*44\.5%[^}]*left:\s*53%[^}]*z-index:\s*3/u,
     );
+    assert.doesNotMatch(css, /--debate-gavel-scale/u);
     assert.match(
       source,
       /data-preview-pose=\{props\.cue \? undefined : props\.previewPose\}/u,
     );
     assert.match(
       css,
-      /\.moderatorGavelFrameDown\s*\{[^}]*--debate-gavel-lowered-offset-x[^}]*--debate-gavel-lowered-rotation/u,
+      /\.moderatorGavelFrameDown\s*\{[^}]*--debate-gavel-lowered-offset-x[^}]*--debate-gavel-lowered-rotation[^}]*--debate-gavel-lowered-scale/u,
     );
     assert.match(
       css,
-      /\.moderatorGavelFrameUp\s*\{[^}]*--debate-gavel-raised-offset-x[^}]*--debate-gavel-raised-rotation/u,
+      /\.moderatorGavelFrameUp\s*\{[^}]*--debate-gavel-raised-offset-x[^}]*--debate-gavel-raised-rotation[^}]*--debate-gavel-raised-scale/u,
     );
     assert.doesNotMatch(css, /moderator-gavel-(?:dark|light)-tint-mask\.png/u);
     assert.match(css, /@keyframes debate-gavel-attention/u);
@@ -1153,8 +1160,8 @@ describe("Debate experience", () => {
       "../../public/debate/moderator-gavel-dark-up.png",
       "../../public/debate/moderator-gavel-light-down.png",
       "../../public/debate/moderator-gavel-light-up.png",
-      "../../public/audio/debate/gavel-attention.mp3",
-      "../../public/audio/debate/gavel-order.mp3",
+      "../../public/audio/debate/gavel-attention-v2.wav",
+      "../../public/audio/debate/gavel-order-v2.wav",
     ]) {
       assert.equal(
         existsSync(fileURLToPath(new URL(relativePath, import.meta.url))),
@@ -1221,9 +1228,36 @@ describe("Debate experience", () => {
     assert.match(source, /data-alignment-item="bot"/u);
     assert.match(source, /data-alignment-item="nameplate"/u);
     assert.match(source, /data-alignment-item="glyph"/u);
+    assert.match(source, /data-debate-stage-sound-check=\{role\}/u);
+    assert.match(
+      source,
+      /aria-label=\{`Sound check \$\{sourceBot\.name\} as \$\{DEBATE_STAGE_ALIGNMENT_LABELS\[role\]\}`\}/u,
+    );
+    assert.match(source, /aria-pressed=\{soundCheckState === "playing"\}/u);
+    assert.match(source, /DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX/u);
+    assert.match(source, /stepKey: "alignment_sound_check"/u);
+    assert.match(source, /kind: "speech"/u);
+    assert.match(source, /speakerBotId: bot\.id/u);
+    assert.match(source, /voiceSourceBotId: bot\.id/u);
+    assert.match(
+      source,
+      /data-speaking=\{\s*soundCheckPlaying \? "true" : undefined\s*\}/u,
+    );
+    assert.match(
+      source,
+      /data-turn-active=\{\s*soundCheckPlaying \? "true" : undefined\s*\}/u,
+    );
     assert.match(
       source,
       /debateStageAlignmentTarget\("moderator", item, "moderator"\)/u,
+    );
+    assert.match(
+      source,
+      /const defaultOffset = debateStageAlignmentOffset\(\s*DEFAULT_DEBATE_STAGE_ALIGNMENT,\s*target,\s*\)/u,
+    );
+    assert.match(
+      source,
+      /updateStageAlignmentTarget\(\s*target,\s*defaultOffset,\s*\)/u,
     );
     assert.match(source, /Copy alignment data/u);
     assert.match(source, /formatDebateStageAlignmentClipboard/u);
@@ -1242,12 +1276,21 @@ describe("Debate experience", () => {
     assert.match(source, /value as DebateStageLightBlendMode/u);
     assert.match(source, /updateDebateStageLightBlendMode/u);
     assert.match(source, /aria-label="Debate moderator gavel controls"/u);
-    assert.match(source, /updateDebateStageGavel/u);
     assert.match(source, /updateDebateStageGavelPose/u);
     assert.match(source, /aria-label="Gavel pose to align"/u);
     assert.match(source, /data-debate-gavel-pose=\{pose\}/u);
     assert.match(source, /pose === "lowered" \? "Lowered" : "Raised"/u);
+    assert.match(source, /data-debate-gavel-link="true"/u);
+    assert.match(source, /aria-pressed=\{stageAlignmentGavelPosesLinked\}/u);
+    assert.match(source, /"Unlock gavel poses"/u);
+    assert.match(source, /"Lock gavel poses"/u);
+    assert.match(
+      source,
+      /\{\s*\[control\.key\]: nextValue,\s*\},\s*stageAlignmentGavelPosesLinked,/u,
+    );
     assert.match(source, /label: "Rotation"/u);
+    assert.match(source, /label: "Size"/u);
+    assert.match(source, /value = activeGavelPose\[control\.key\]/u);
     assert.match(source, /Copy gavel JSON/u);
     assert.match(source, /formatDebateStageGavelClipboard/u);
     assert.match(source, /data-debate-gavel-copy="true"/u);
@@ -1291,6 +1334,11 @@ describe("Debate experience", () => {
     assert.doesNotMatch(css, /\.alignmentForum\s*\{[^}]*aspect-ratio:/u);
     assert.doesNotMatch(css, /\.alignmentForum\s*\{[^}]*min-height:/u);
     assert.match(css, /\.alignmentTuner\s*\{[^}]*position:\s*relative/u);
+    assert.match(css, /\.alignmentTunerRoleActions\s*\{[^}]*display:\s*flex/u);
+    assert.match(
+      css,
+      /\[data-debate-stage-sound-check\]\[data-sound-check-state="playing"\]/u,
+    );
     assert.match(
       css,
       /\.alignmentLightingTuner\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/u,

@@ -794,7 +794,7 @@ describe("Signal studio atmosphere mix", () => {
 });
 
 describe("Signal studio underglow", () => {
-  it("defaults both themes to full-strength Overlay and bounds saved show tuning", () => {
+  it("defaults both themes to full-strength Hard Light and bounds saved show tuning", () => {
     assert.deepEqual(
       normalizeBotcastStudioGlowTuning(undefined),
       BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
@@ -803,8 +803,15 @@ describe("Signal studio underglow", () => {
       dark: { opacity: 4, blendMode: "multiply" },
       light: { opacity: "0.37", blendMode: "screen" },
     }), {
-      dark: { opacity: 1, blendMode: "overlay" },
+      dark: { opacity: 1, blendMode: "hard-light" },
       light: { opacity: 0.37, blendMode: "screen" },
+    });
+    assert.deepEqual(normalizeBotcastStudioGlowTuning({
+      dark: { opacity: 0.5, blendMode: "overlay" },
+      light: { opacity: 0.75, blendMode: "hard-light" },
+    }), {
+      dark: { opacity: 0.5, blendMode: "overlay" },
+      light: { opacity: 0.75, blendMode: "hard-light" },
     });
   });
 });

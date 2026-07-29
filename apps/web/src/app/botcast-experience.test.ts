@@ -37,6 +37,26 @@ const pageCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("defaults generated bot lighting to Hard Light in both themes", () => {
+    assert.match(
+      source,
+      /\(\["hard-light", "screen", "overlay"\] as const\)\.map/u,
+    );
+    assert.match(
+      source,
+      /blendMode === "hard-light"[\s\S]{0,80}\? "Hard Light"/u,
+    );
+    assert.match(source, /New shows start at 100% Hard Light/u);
+    assert.match(
+      css,
+      /mix-blend-mode:\s*var\(--signal-studio-glow-blend-mode,\s*hard-light\)\s*;/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /var\(--signal-studio-glow-blend-mode,\s*(?:screen|overlay)\)/u,
+    );
+  });
+
   it("uses the shared visual bot picker for hosts and guests", () => {
     assert.match(source, /<BotPickerGrid/u);
     assert.match(source, /<BotPickerTile/u);

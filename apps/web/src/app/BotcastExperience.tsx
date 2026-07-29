@@ -9647,7 +9647,7 @@ export function BotcastExperience({
                             role="group"
                             aria-label={`${label} underglow blend mode`}
                           >
-                            {(["screen", "overlay"] as const).map(
+                            {(["hard-light", "screen", "overlay"] as const).map(
                               (blendMode) => (
                                 <button
                                   key={blendMode}
@@ -9661,9 +9661,11 @@ export function BotcastExperience({
                                     })
                                   }
                                 >
-                                  {blendMode === "screen"
-                                    ? "Screen"
-                                    : "Overlay"}
+                                  {blendMode === "hard-light"
+                                    ? "Hard Light"
+                                    : blendMode === "screen"
+                                      ? "Screen"
+                                      : "Overlay"}
                                 </button>
                               ),
                             )}
@@ -9673,7 +9675,7 @@ export function BotcastExperience({
                     })}
                   </div>
                   <small>
-                    Saved for this show. New shows start at 100% Overlay.
+                    Saved for this show. New shows start at 100% Hard Light.
                   </small>
                 </div>
               </section>

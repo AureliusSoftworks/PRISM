@@ -72,7 +72,7 @@ class DebateForumController {
       const sprite = new this.pixi.Sprite({
         texture: this.glowTexture,
         anchor: 0.5,
-        blendMode: "screen",
+        blendMode: "hard-light",
         alpha: 0.22,
       });
       sprite.mask = mask;
