@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
+  DEBATE_STAGE_GAVEL_POSITION_MAX,
+  DEBATE_STAGE_GAVEL_POSITION_MIN,
+  DEBATE_STAGE_GAVEL_ROTATION_MAX,
+  DEBATE_STAGE_GAVEL_ROTATION_MIN,
   DEBATE_STAGE_GAVEL_SIZE_MAX,
   DEBATE_STAGE_GAVEL_SIZE_MIN,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
@@ -10,16 +14,23 @@ import {
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
   formatDebateStageAlignmentClipboard,
+  formatDebateStageGavelClipboard,
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
   updateDebateStageGavel,
+  updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
   writeDebateStageAlignment,
 } from "./debateStageAlignment.ts";
 
 describe("Debate stage alignment", () => {
+  it("gives both gavel pose axes a generous six-hundred-percent span", () => {
+    assert.equal(DEBATE_STAGE_GAVEL_POSITION_MIN, -300);
+    assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
+  });
+
   it("normalizes every movable item in independent Wide and Moderator views", () => {
     assert.deepEqual(
       normalizeDebateStageAlignment({
@@ -46,9 +57,9 @@ describe("Debate stage alignment", () => {
           glyph: { x: 0.5, y: -0.5 },
         },
         gavel: {
-          x: -99,
-          y: 99,
           size: 900,
+          lowered: { x: -999, y: 999, rotation: 999 },
+          raised: { x: 25, y: -30, rotation: -999 },
         },
         lightBlendModes: {
           dark: "overlay",
@@ -60,7 +71,7 @@ describe("Debate stage alignment", () => {
         },
       }),
       {
-        version: 4,
+        version: 5,
         wide: {
           for: {
             bot: { x: -12, y: 2.13 },
@@ -84,9 +95,17 @@ describe("Debate stage alignment", () => {
           glyph: { x: 0.5, y: -0.5 },
         },
         gavel: {
-          x: -12,
-          y: 12,
           size: DEBATE_STAGE_GAVEL_SIZE_MAX,
+          lowered: {
+            x: DEBATE_STAGE_GAVEL_POSITION_MIN,
+            y: DEBATE_STAGE_GAVEL_POSITION_MAX,
+            rotation: DEBATE_STAGE_GAVEL_ROTATION_MAX,
+          },
+          raised: {
+            x: 25,
+            y: -30,
+            rotation: DEBATE_STAGE_GAVEL_ROTATION_MIN,
+          },
         },
         lightBlendModes: {
           dark: "overlay",
@@ -110,7 +129,7 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v4:user-1",
+      "prism_debate_stage_alignment_v5:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
@@ -160,8 +179,20 @@ describe("Debate stage alignment", () => {
       migrated.lightMaskOpacities,
       DEFAULT_DEBATE_STAGE_ALIGNMENT.lightMaskOpacities,
     );
+    values.set(
+      "prism_debate_stage_alignment_v4:user-1",
+      JSON.stringify({
+        version: 4,
+        gavel: { x: 2, y: -3, size: 125 },
+      }),
+    );
+    assert.deepEqual(readDebateStageAlignment(storage, "user-1").gavel, {
+      size: 125,
+      lowered: { x: 2, y: -3, rotation: 0 },
+      raised: { x: 10, y: -27, rotation: 0 },
+    });
     writeDebateStageAlignment(storage, "user-1", {
-      version: 4,
+      version: 5,
       wide: {
         for: {
           bot: { x: 1, y: -2 },
@@ -185,9 +216,9 @@ describe("Debate stage alignment", () => {
         glyph: { x: 4, y: -2 },
       },
       gavel: {
-        x: 2,
-        y: -3,
         size: 125,
+        lowered: { x: 2, y: -3, rotation: 12 },
+        raised: { x: 10, y: -27, rotation: -34 },
       },
       lightBlendModes: {
         dark: "overlay",
@@ -206,7 +237,7 @@ describe("Debate stage alignment", () => {
 
   it("maps individual Wide and Moderator items into live forum CSS variables", () => {
     const alignment = normalizeDebateStageAlignment({
-      version: 4,
+      version: 5,
       wide: {
         for: {
           bot: { x: 1, y: -2 },
@@ -220,9 +251,9 @@ describe("Debate stage alignment", () => {
         glyph: { x: 4, y: -2 },
       },
       gavel: {
-        x: 2.5,
-        y: -4,
         size: 135,
+        lowered: { x: 2.5, y: -4, rotation: 11 },
+        raised: { x: 14, y: -31.5, rotation: -28 },
       },
       lightBlendModes: {
         dark: "overlay",
@@ -243,8 +274,12 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-moderator-view-offset-x"], "6%");
     assert.equal(style["--debate-moderator-view-nameplate-offset-y"], "-3%");
     assert.equal(style["--debate-moderator-view-glyph-offset-x"], "4%");
-    assert.equal(style["--debate-gavel-offset-x"], "2.5%");
-    assert.equal(style["--debate-gavel-offset-y"], "-4%");
+    assert.equal(style["--debate-gavel-lowered-offset-x"], "2.5%");
+    assert.equal(style["--debate-gavel-lowered-offset-y"], "-4%");
+    assert.equal(style["--debate-gavel-lowered-rotation"], "11deg");
+    assert.equal(style["--debate-gavel-raised-offset-x"], "14%");
+    assert.equal(style["--debate-gavel-raised-offset-y"], "-31.5%");
+    assert.equal(style["--debate-gavel-raised-rotation"], "-28deg");
     assert.equal(style["--debate-gavel-scale"], "1.35");
     assert.equal(style["--debate-light-blend-mode-dark"], "overlay");
     assert.equal(style["--debate-light-blend-mode-light"], "screen");
@@ -289,26 +324,46 @@ describe("Debate stage alignment", () => {
   });
 
   it("keeps independent Light and Dark blend modes inside the saved alignment", () => {
-    assert.deepEqual(DEBATE_STAGE_LIGHT_BLEND_MODES, ["screen", "overlay"]);
-    const darkOverlay = updateDebateStageLightBlendMode(
+    assert.deepEqual(DEBATE_STAGE_LIGHT_BLEND_MODES, [
+      "normal",
+      "multiply",
+      "screen",
+      "overlay",
+      "darken",
+      "lighten",
+      "color-dodge",
+      "color-burn",
+      "hard-light",
+      "soft-light",
+      "difference",
+      "exclusion",
+      "hue",
+      "saturation",
+      "color",
+      "luminosity",
+    ]);
+    const darkMultiply = updateDebateStageLightBlendMode(
       DEFAULT_DEBATE_STAGE_ALIGNMENT,
       "dark",
-      "overlay",
+      "multiply",
     );
     const tuned = updateDebateStageLightBlendMode(
-      darkOverlay,
+      darkMultiply,
       "light",
-      "screen",
+      "soft-light",
     );
     assert.deepEqual(tuned.lightBlendModes, {
-      dark: "overlay",
-      light: "screen",
+      dark: "multiply",
+      light: "soft-light",
     });
     assert.deepEqual(
       normalizeDebateStageAlignment({
-        lightBlendModes: { dark: "multiply", light: "invalid" },
+        lightBlendModes: { dark: "color-dodge", light: "invalid" },
       }).lightBlendModes,
-      DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes,
+      {
+        dark: "color-dodge",
+        light: DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes.light,
+      },
     );
     assert.deepEqual(
       JSON.parse(formatDebateStageAlignmentClipboard(tuned)).lightBlendModes,
@@ -316,18 +371,34 @@ describe("Debate stage alignment", () => {
     );
   });
 
-  it("updates the gavel and Light/Dark color-mask opacity independently", () => {
+  it("updates both gavel poses and Light/Dark color-mask opacity independently", () => {
     const resized = updateDebateStageGavel(DEFAULT_DEBATE_STAGE_ALIGNMENT, {
-      x: 3.5,
-      y: -2,
       size: DEBATE_STAGE_GAVEL_SIZE_MIN - 20,
     });
-    assert.deepEqual(resized.gavel, {
+    const lowered = updateDebateStageGavelPose(resized, "lowered", {
       x: 3.5,
       y: -2,
-      size: DEBATE_STAGE_GAVEL_SIZE_MIN,
+      rotation: 17,
     });
-    const darkTuned = updateDebateStageLightMaskOpacity(resized, "dark", 35);
+    const raised = updateDebateStageGavelPose(lowered, "raised", {
+      x: 13,
+      y: -32,
+      rotation: -41,
+    });
+    assert.deepEqual(raised.gavel, {
+      size: DEBATE_STAGE_GAVEL_SIZE_MIN,
+      lowered: { x: 3.5, y: -2, rotation: 17 },
+      raised: { x: 13, y: -32, rotation: -41 },
+    });
+    assert.deepEqual(
+      JSON.parse(formatDebateStageGavelClipboard(raised.gavel)),
+      {
+        size: DEBATE_STAGE_GAVEL_SIZE_MIN,
+        lowered: { x: 3.5, y: -2, rotation: 17 },
+        raised: { x: 13, y: -32, rotation: -41 },
+      },
+    );
+    const darkTuned = updateDebateStageLightMaskOpacity(raised, "dark", 35);
     const tuned = updateDebateStageLightMaskOpacity(darkTuned, "light", 70);
     assert.deepEqual(tuned.lightMaskOpacities, {
       dark: 35,

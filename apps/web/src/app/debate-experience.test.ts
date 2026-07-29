@@ -7,6 +7,7 @@ import {
   applyDebateSetupPreset,
   copyDebateMotionSlate,
   debateAlignmentPreviewCast,
+  debateMotionRevealState,
   debatePrefilledCast,
   derivedDebateSetupPresetId,
   randomDebateCast,
@@ -111,6 +112,57 @@ describe("Debate experience", () => {
     assert.match(source, /PrismRefractTarget target=\{synthesisMagic\}/u);
     assert.match(source, /data-tutorial-target="debate-synthesize"/u);
     assert.match(source, /Refract into motions/u);
+  });
+
+  it("adds an inline editable Territory dice without changing the motion slate", () => {
+    assert.match(source, /randomDebateTerritory/u);
+    assert.match(source, /data-debate-territory-randomize="true"/u);
+    assert.match(source, /aria-label="Generate a random Debate territory"/u);
+    assert.match(
+      source,
+      /setTopic\(\(current\) => randomDebateTerritory\(current\)\)/u,
+    );
+    assert.match(source, /renderBotGlyph\("dice"/u);
+    assert.match(css, /\.territoryRandomizeButton\s*\{/u);
+  });
+
+  it("reveals motion inputs incrementally without hiding populated downstream work", () => {
+    const emptySlate = {
+      version: DEBATE_SCHEMA_VERSION,
+      id: "custom-motion",
+      motion: "",
+      forSide: { label: "", brief: "" },
+      againstSide: { label: "", brief: "" },
+    };
+    assert.deepEqual(debateMotionRevealState("", emptySlate), {
+      motion: false,
+      positions: false,
+      briefs: false,
+    });
+    assert.deepEqual(debateMotionRevealState("Public transit", emptySlate), {
+      motion: true,
+      positions: false,
+      briefs: false,
+    });
+    assert.deepEqual(
+      debateMotionRevealState("Public transit", {
+        ...emptySlate,
+        motion: "This house would make transit free.",
+      }),
+      { motion: true, positions: true, briefs: false },
+    );
+    assert.deepEqual(
+      debateMotionRevealState("", {
+        ...emptySlate,
+        forSide: { label: "Access", brief: "Mobility is a public good." },
+        againstSide: { label: "Cost", brief: "" },
+      }),
+      { motion: true, positions: true, briefs: true },
+    );
+    assert.match(source, /data-debate-motion-stage="motion"/u);
+    assert.match(source, /data-debate-motion-stage="positions"/u);
+    assert.match(source, /data-debate-motion-stage="briefs"/u);
+    assert.match(css, /@keyframes debate-motion-reveal/u);
   });
 
   it("generates randomized evidence through real-source research only", () => {
@@ -348,7 +400,7 @@ describe("Debate experience", () => {
     assert.match(source, /disabled=\{bots\.length < 3\}/u);
     assert.match(
       source,
-      /className=\{styles\.studioUtilityButton\}[\s\S]*?onClick=\{openStageAlignment\}[\s\S]*?data-tutorial-target="debate-align-stage"/u,
+      /DEBATE_STAGE_ALIGNMENT_ENABLED \? \([\s\S]*?className=\{styles\.studioUtilityButton\}[\s\S]*?onClick=\{openStageAlignment\}/u,
     );
     assert.match(source, /\{renderStageAlignmentModal\(null\)\}/u);
     assert.match(
@@ -453,7 +505,6 @@ describe("Debate experience", () => {
       "debate-start",
       "debate-case-board",
       "debate-camera",
-      "debate-align-stage",
       "debate-copy-transcript",
     ]) {
       assert.match(source, new RegExp(target, "u"));
@@ -1067,7 +1118,19 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.moderatorGavel\s*\{[^}]*top:\s*calc\(44\.5% \+ var\(--debate-gavel-offset-y,\s*0%\)\)[^}]*left:\s*calc\(53% \+ var\(--debate-gavel-offset-x,\s*0%\)\)[^}]*scale:\s*var\(--debate-gavel-scale,\s*1\)/u,
+      /\.moderatorGavel\s*\{[^}]*top:\s*44\.5%[^}]*left:\s*53%[^}]*scale:\s*var\(--debate-gavel-scale,\s*1\)/u,
+    );
+    assert.match(
+      source,
+      /data-preview-pose=\{props\.cue \? undefined : props\.previewPose\}/u,
+    );
+    assert.match(
+      css,
+      /\.moderatorGavelFrameDown\s*\{[^}]*--debate-gavel-lowered-offset-x[^}]*--debate-gavel-lowered-rotation/u,
+    );
+    assert.match(
+      css,
+      /\.moderatorGavelFrameUp\s*\{[^}]*--debate-gavel-raised-offset-x[^}]*--debate-gavel-raised-rotation/u,
     );
     assert.doesNotMatch(css, /moderator-gavel-(?:dark|light)-tint-mask\.png/u);
     assert.match(css, /@keyframes debate-gavel-attention/u);
@@ -1129,6 +1192,14 @@ describe("Debate experience", () => {
 
   it("provides a persistent Light and Dark stage alignment workspace", () => {
     assert.match(source, /Align stage/u);
+    assert.match(
+      source,
+      /const DEBATE_STAGE_ALIGNMENT_ENABLED = prismBranchIsDev\(\s*process\.env\.NEXT_PUBLIC_PRISM_BRANCH/u,
+    );
+    assert.match(
+      source,
+      /if \(!DEBATE_STAGE_ALIGNMENT_ENABLED \|\| !stageAlignmentOpen\) return null/u,
+    );
     assert.match(source, /aria-label="More stage controls"/u);
     assert.match(source, /className=\{styles\.cameraAdvanced\}/u);
     assert.match(source, /data-debate-stage-alignment-modal="true"/u);
@@ -1159,14 +1230,28 @@ describe("Debate experience", () => {
     assert.match(source, /type="range"/u);
     assert.match(source, /writeDebateStageAlignment/u);
     assert.match(source, /DEBATE_STAGE_LIGHT_BLEND_MODES\.map/u);
+    assert.match(source, /className=\{styles\.alignmentLightingBlendSelect\}/u);
     assert.match(
       source,
       /aria-label=\{`\$\{label\} Debate light blend mode`\}/u,
     );
+    assert.match(
+      source,
+      /value=\{\s*stageAlignmentDraft\.lightBlendModes\[theme\]\s*\}/u,
+    );
+    assert.match(source, /value as DebateStageLightBlendMode/u);
     assert.match(source, /updateDebateStageLightBlendMode/u);
     assert.match(source, /aria-label="Debate moderator gavel controls"/u);
     assert.match(source, /updateDebateStageGavel/u);
-    assert.match(source, /aria-label="Test moderator gavel"/u);
+    assert.match(source, /updateDebateStageGavelPose/u);
+    assert.match(source, /aria-label="Gavel pose to align"/u);
+    assert.match(source, /data-debate-gavel-pose=\{pose\}/u);
+    assert.match(source, /pose === "lowered" \? "Lowered" : "Raised"/u);
+    assert.match(source, /label: "Rotation"/u);
+    assert.match(source, /Copy gavel JSON/u);
+    assert.match(source, /formatDebateStageGavelClipboard/u);
+    assert.match(source, /data-debate-gavel-copy="true"/u);
+    assert.match(source, /aria-label="Preview and export moderator gavel"/u);
     assert.match(source, /data-debate-gavel-test="attention"/u);
     assert.match(source, /data-debate-gavel-test="order"/u);
     assert.match(source, /previewStageAlignmentGavel\("attention"\)/u);
@@ -1182,10 +1267,9 @@ describe("Debate experience", () => {
     );
     assert.match(source, /label: "Horizontal"/u);
     assert.match(source, /label: "Vertical"/u);
-    assert.match(source, /label: "Size"/u);
     assert.match(
       source,
-      /aria-label=\{`Debate moderator gavel \$\{control\.label\.toLowerCase\(\)\}`\}/u,
+      /aria-label=\{`\$\{stageAlignmentGavelPose\} gavel \$\{control\.label\.toLowerCase\(\)\}`\}/u,
     );
     assert.match(source, /aria-label="Debate light color mask controls"/u);
     assert.match(source, /updateDebateStageLightMaskOpacity/u);

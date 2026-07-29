@@ -34,7 +34,6 @@ describe("mode tutorials", () => {
         '[data-tutorial-target="debate-jury-chamber"]',
         '[data-tutorial-target="debate-camera"]',
         '[data-tutorial-target="debate-copy-transcript"]',
-        '[data-tutorial-target="debate-align-stage"]',
       ],
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
@@ -94,6 +93,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Changing format or formality clears advocacy consent/u);
     assert.match(copy, /Flyting and Cypher are visible as coming-later/u);
     assert.match(copy, /cannot be selected or sent to the server/u);
+    assert.match(copy, /use its dice for a fresh editable seed/u);
     assert.match(
       copy,
       /pause and resume the exact next juror, discussion turn, or ballot/u,
@@ -122,41 +122,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /full-width command deck rises/u);
     assert.match(copy, /Auto is the quiet default camera/u);
     assert.match(copy, /cuts instantly/u);
-    assert.match(copy, /advanced production control/u);
-    assert.match(copy, /temporary unique Library stand-ins/u);
-    assert.match(copy, /Wide and Moderator/u);
-    assert.match(
-      copy,
-      /independent Bot, Nameplate, and Glyph plate placement/u,
-    );
-    assert.match(copy, /Drag the visible item/u);
-    assert.match(copy, /account and device/u);
-    assert.match(copy, /Copy alignment data/u);
-    assert.match(copy, /paste-ready JSON/u);
     assert.match(copy, /Choose a manual view to hold the shot/u);
     assert.match(copy, /only the heard fragment remains public/u);
     assert.match(copy, /safe Markdown/u);
     assert.match(copy, /Copy verbose transcript/u);
-  });
-
-  it("teaches the adjustable Debate gavel and architectural color masks", () => {
-    const alignmentCopy =
-      MODE_TUTORIALS.debate.steps.find(
-        (step) =>
-          step.targetSelector === '[data-tutorial-target="debate-align-stage"]',
-      )?.body ?? "";
-    assert.match(
-      alignmentCopy,
-      /Moderator also saves the gavel’s position and size/u,
-    );
-    assert.match(
-      alignmentCopy,
-      /use One strike or Two strikes to test its live animation and sound/u,
-    );
-    assert.match(
-      alignmentCopy,
-      /Light and Dark each save their own architectural color-mask opacity and blend/u,
-    );
   });
 
   it("teaches Debate's one-click random actor casting", () => {

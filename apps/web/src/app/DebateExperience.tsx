@@ -53,11 +53,13 @@ import {
   copyDebateMotionSlate,
   applyDebateSetupPreset,
   debateAlignmentPreviewCast,
+  debateMotionRevealState,
   debatePrefilledCast,
   derivedDebateSetupPresetId,
   randomDebateCast,
 } from "./debateExperienceState";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
+import { randomDebateTerritory } from "./debateTerritoryRandomizer";
 import {
   debateMarkdownSource,
   debateGalleryReactingIndices,
@@ -74,6 +76,12 @@ import {
   DEBATE_STAGE_ALIGNMENT_ITEMS,
   DEBATE_STAGE_ALIGNMENT_ROLES,
   DEBATE_STAGE_ALIGNMENT_STEP,
+  DEBATE_STAGE_GAVEL_POSITION_MAX,
+  DEBATE_STAGE_GAVEL_POSITION_MIN,
+  DEBATE_STAGE_GAVEL_POSITION_STEP,
+  DEBATE_STAGE_GAVEL_ROTATION_MAX,
+  DEBATE_STAGE_GAVEL_ROTATION_MIN,
+  DEBATE_STAGE_GAVEL_ROTATION_STEP,
   DEBATE_STAGE_GAVEL_SIZE_MAX,
   DEBATE_STAGE_GAVEL_SIZE_MIN,
   DEBATE_STAGE_GAVEL_SIZE_STEP,
@@ -87,19 +95,23 @@ import {
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
   formatDebateStageAlignmentClipboard,
+  formatDebateStageGavelClipboard,
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
   updateDebateStageGavel,
+  updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
   writeDebateStageAlignment,
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
-  type DebateStageAlignmentV4,
+  type DebateStageAlignmentV5,
+  type DebateStageLightBlendMode,
   type DebateStageOffsetV1,
 } from "./debateStageAlignment";
+import { prismBranchIsDev } from "./prismDevGating";
 import {
   BotPickerGrid,
   BotPickerTile,
@@ -216,6 +228,7 @@ type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
 type DebateCameraView = "wide" | "left" | "moderator" | "right" | "jury";
 type DebateCameraMode = "auto" | DebateCameraView;
 type DebateClipboardState = "idle" | "copying" | "copied" | "failed";
+type DebateStageGavelPose = "lowered" | "raised";
 type DebateLiveReveal = {
   eventId: string;
   visibleContent: string;
@@ -235,8 +248,12 @@ type DebateStageAlignmentDrag = {
   startClientY: number;
   stageWidth: number;
   stageHeight: number;
-  startAlignment: DebateStageAlignmentV4;
+  startAlignment: DebateStageAlignmentV5;
 };
+
+const DEBATE_STAGE_ALIGNMENT_ENABLED = prismBranchIsDev(
+  process.env.NEXT_PUBLIC_PRISM_BRANCH,
+);
 
 const DEBATE_GALLERY_COLORS = [
   "#ff5f8f",
@@ -339,6 +356,7 @@ function DebateModeratorGavel(props: {
   sessionId?: string;
   audioEnabled?: boolean;
   visible?: boolean;
+  previewPose?: DebateStageGavelPose;
   atmosphereControllerRef?: RefObject<SessionAtmosphereController | null>;
 }): React.JSX.Element {
   const lastPlayedCueRef = useRef<string | null>(null);
@@ -410,6 +428,7 @@ function DebateModeratorGavel(props: {
       data-debate-moderator-gavel="true"
       data-gavel-theme={props.theme}
       data-visible={props.visible === false ? "false" : "true"}
+      data-preview-pose={props.cue ? undefined : props.previewPose}
       aria-hidden="true"
     >
       <div
@@ -611,8 +630,8 @@ const EMPTY_SLATE: DebateMotionSlateV1 = {
   version: DEBATE_SCHEMA_VERSION,
   id: "custom-motion",
   motion: "",
-  forSide: { label: "For", brief: "" },
-  againstSide: { label: "Against", brief: "" },
+  forSide: { label: "", brief: "" },
+  againstSide: { label: "", brief: "" },
 };
 
 const EMPTY_EVIDENCE: DebateEvidencePacketV1 = {
@@ -1210,11 +1229,11 @@ export function DebateExperience(
   const [presenting, setPresenting] = useState(false);
   const [interjectionDraft, setInterjectionDraft] = useState("");
   const [cameraMode, setCameraMode] = useState<DebateCameraMode>("auto");
-  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV4>(
+  const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV5>(
     () => copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
   );
   const [stageAlignmentDraft, setStageAlignmentDraft] =
-    useState<DebateStageAlignmentV4>(() =>
+    useState<DebateStageAlignmentV5>(() =>
       copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
     );
   const [stageAlignmentOpen, setStageAlignmentOpen] = useState(false);
@@ -1227,6 +1246,8 @@ export function DebateExperience(
   >(props.theme);
   const [stageAlignmentGavelCue, setStageAlignmentGavelCue] =
     useState<DebateModeratorGavelCue | null>(null);
+  const [stageAlignmentGavelPose, setStageAlignmentGavelPose] =
+    useState<DebateStageGavelPose>("lowered");
   const [stageAlignmentSelectedItems, setStageAlignmentSelectedItems] =
     useState<Record<DebateStageAlignmentRole, DebateStageAlignmentItem>>({
       for: "bot",
@@ -1579,6 +1600,7 @@ export function DebateExperience(
     motion.againstSide.label.trim() &&
     motion.againstSide.brief.trim(),
   );
+  const motionReveal = debateMotionRevealState(topic, motion);
   const moderatorHardMuted = botById.get(cast.moderator)?.hardMuted === true;
   const mutedAdvocates = [cast.forAdvocate, cast.againstAdvocate]
     .map((id) => botById.get(id))
@@ -1725,10 +1747,12 @@ export function DebateExperience(
   };
 
   const openStageAlignment = (): void => {
+    if (!DEBATE_STAGE_ALIGNMENT_ENABLED) return;
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentPreviewCamera("wide");
     setStageAlignmentPreviewTheme(props.theme);
     setStageAlignmentGavelCue(null);
+    setStageAlignmentGavelPose("lowered");
     setStageAlignmentCopyState("idle");
     setStageAlignmentSelectedItems({
       for: "bot",
@@ -1743,6 +1767,7 @@ export function DebateExperience(
   const cancelStageAlignment = (): void => {
     setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
     setStageAlignmentGavelCue(null);
+    setStageAlignmentGavelPose("lowered");
     setStageAlignmentCopyState("idle");
     setStageAlignmentDraggingTarget(null);
     stageAlignmentDragRef.current = null;
@@ -1760,6 +1785,7 @@ export function DebateExperience(
       setStageAlignment(normalized);
       setStageAlignmentDraft(copyDebateStageAlignment(normalized));
       setStageAlignmentGavelCue(null);
+      setStageAlignmentGavelPose("lowered");
       setStageAlignmentOpen(false);
     } catch {
       setError("Debate stage alignment could not be saved on this device.");
@@ -1776,6 +1802,27 @@ export function DebateExperience(
     try {
       await writeDebateClipboardText(
         formatDebateStageAlignmentClipboard(stageAlignmentDraft),
+      );
+      setStageAlignmentCopyState("copied");
+    } catch {
+      setStageAlignmentCopyState("failed");
+    }
+    stageAlignmentCopyResetTimerRef.current = setTimeout(() => {
+      setStageAlignmentCopyState("idle");
+      stageAlignmentCopyResetTimerRef.current = null;
+    }, 1_800);
+  };
+
+  const copyStageGavelData = async (): Promise<void> => {
+    if (stageAlignmentCopyState === "copying") return;
+    if (stageAlignmentCopyResetTimerRef.current) {
+      clearTimeout(stageAlignmentCopyResetTimerRef.current);
+      stageAlignmentCopyResetTimerRef.current = null;
+    }
+    setStageAlignmentCopyState("copying");
+    try {
+      await writeDebateClipboardText(
+        formatDebateStageGavelClipboard(stageAlignmentDraft.gavel),
       );
       setStageAlignmentCopyState("copied");
     } catch {
@@ -3116,22 +3163,23 @@ export function DebateExperience(
             </small>
             <i aria-hidden="true">›</i>
           </button>
-          <button
-            type="button"
-            className={styles.studioUtilityButton}
-            onClick={openStageAlignment}
-            disabled={!dashboardAlignmentPreviewCast}
-            aria-label="Align stage"
-            title={
-              dashboardAlignmentPreviewCast
-                ? "Advanced stage geometry for this account and device."
-                : "Create at least three Library bots to calibrate the Debate stage."
-            }
-            data-tutorial-target="debate-align-stage"
-          >
-            <span aria-hidden="true">⌖</span>
-            Stage geometry
-          </button>
+          {DEBATE_STAGE_ALIGNMENT_ENABLED ? (
+            <button
+              type="button"
+              className={styles.studioUtilityButton}
+              onClick={openStageAlignment}
+              disabled={!dashboardAlignmentPreviewCast}
+              aria-label="Align stage"
+              title={
+                dashboardAlignmentPreviewCast
+                  ? "Advanced stage geometry for this account and device."
+                  : "Create at least three Library bots to calibrate the Debate stage."
+              }
+            >
+              <span aria-hidden="true">⌖</span>
+              Stage geometry
+            </button>
+          ) : null}
           <div className={styles.studioNavStatus}>
             <span>Launch circuit</span>
             <strong>
@@ -3377,15 +3425,33 @@ export function DebateExperience(
         ))}
       </fieldset>
       <div className={styles.motionSeed}>
-        <label className={styles.field}>
-          <span>Territory</span>
-          <textarea
-            value={topic}
-            onChange={(event) => setTopic(event.currentTarget.value)}
-            placeholder="Housing near transit, whether art can be separated from its creator…"
-            rows={3}
-          />
-        </label>
+        <div className={`${styles.field} ${styles.territoryField}`}>
+          <label htmlFor="debate-territory">Territory</label>
+          <div className={styles.territoryInput}>
+            <textarea
+              id="debate-territory"
+              value={topic}
+              onChange={(event) => setTopic(event.currentTarget.value)}
+              placeholder="Housing near transit, whether art can be separated from its creator…"
+              rows={3}
+            />
+            <button
+              type="button"
+              className={styles.territoryRandomizeButton}
+              aria-label="Generate a random Debate territory"
+              title="Generate a random territory"
+              data-debate-territory-randomize="true"
+              onClick={() =>
+                setTopic((current) => randomDebateTerritory(current))
+              }
+            >
+              {props.renderBotGlyph("dice", {
+                size: 18,
+                strokeWidth: 1.8,
+              })}
+            </button>
+          </div>
+        </div>
         <PrismRefractTarget target={synthesisMagic}>
           {(binding) => (
             <button
@@ -3420,73 +3486,100 @@ export function DebateExperience(
           ))}
         </div>
       ) : null}
-      <div className={styles.motionEditor}>
-        <label className={styles.fieldWide}>
-          <span>Motion</span>
-          <textarea
-            value={motion.motion}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setMotion((current) => ({
-                ...current,
-                id: "custom-motion",
-                motion: value,
-              }));
-              setRoleChecks([]);
-            }}
-            rows={3}
-          />
-        </label>
-        {(["for", "against"] as const).map((sideId) => {
-          const side = sideId === "for" ? motion.forSide : motion.againstSide;
-          return (
-            <div className={styles.sideEditor} key={sideId} data-side={sideId}>
-              <label className={styles.field}>
-                <span>{sideId === "for" ? "For" : "Against"} label</span>
-                <input
-                  value={side.label}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setMotion((current) => ({
-                      ...current,
-                      id: "custom-motion",
-                      [sideId === "for" ? "forSide" : "againstSide"]: {
-                        ...side,
-                        label: value,
-                      },
-                    }));
-                    setRoleChecks([]);
-                  }}
-                />
-              </label>
-              <label className={styles.field}>
-                <span>{sideId === "for" ? "For" : "Against"} brief</span>
-                <textarea
-                  value={side.brief}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setMotion((current) => ({
-                      ...current,
-                      id: "custom-motion",
-                      [sideId === "for" ? "forSide" : "againstSide"]: {
-                        ...side,
-                        brief: value,
-                      },
-                    }));
-                    setRoleChecks([]);
-                  }}
-                  rows={5}
-                />
-              </label>
-            </div>
-          );
-        })}
-      </div>
+      {motionReveal.motion ? (
+        <div
+          className={`${styles.motionEditor} ${styles.motionRevealGroup}`}
+          data-debate-motion-stage="motion"
+        >
+          <label className={styles.fieldWide}>
+            <span>Motion</span>
+            <textarea
+              value={motion.motion}
+              onChange={(event) => {
+                const value = event.currentTarget.value;
+                setMotion((current) => ({
+                  ...current,
+                  id: "custom-motion",
+                  motion: value,
+                }));
+                setRoleChecks([]);
+              }}
+              rows={3}
+            />
+          </label>
+          {motionReveal.positions
+            ? (["for", "against"] as const).map((sideId) => {
+                const side =
+                  sideId === "for" ? motion.forSide : motion.againstSide;
+                return (
+                  <div
+                    className={`${styles.sideEditor} ${styles.motionRevealGroup}`}
+                    key={sideId}
+                    data-side={sideId}
+                    data-debate-motion-stage="positions"
+                  >
+                    <label className={styles.field}>
+                      <span>{sideId === "for" ? "For" : "Against"} label</span>
+                      <input
+                        value={side.label}
+                        placeholder={sideId === "for" ? "For" : "Against"}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setMotion((current) => ({
+                            ...current,
+                            id: "custom-motion",
+                            [sideId === "for" ? "forSide" : "againstSide"]: {
+                              ...side,
+                              label: value,
+                            },
+                          }));
+                          setRoleChecks([]);
+                        }}
+                      />
+                    </label>
+                    {motionReveal.briefs ? (
+                      <label
+                        className={`${styles.field} ${styles.motionRevealGroup}`}
+                        data-debate-motion-stage="briefs"
+                      >
+                        <span>
+                          {sideId === "for" ? "For" : "Against"} brief
+                        </span>
+                        <textarea
+                          value={side.brief}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            setMotion((current) => ({
+                              ...current,
+                              id: "custom-motion",
+                              [sideId === "for" ? "forSide" : "againstSide"]: {
+                                ...side,
+                                brief: value,
+                              },
+                            }));
+                            setRoleChecks([]);
+                          }}
+                          rows={5}
+                        />
+                      </label>
+                    ) : null}
+                  </div>
+                );
+              })
+            : null}
+        </div>
+      ) : null}
       <div className={styles.panelAdvance}>
-        <span>
+        <span aria-live="polite">
           {motionComplete
             ? "The motion and both positions are bound."
-            : "Complete the motion, labels, and both briefs to continue."}
+            : !motionReveal.motion
+              ? "Add a territory to begin shaping the motion."
+              : !motionReveal.positions
+                ? "Shape the motion to reveal its two positions."
+                : !motionReveal.briefs
+                  ? "Name both positions to reveal their briefs."
+                  : "Brief both positions to cast the proceeding."}
         </span>
         <button
           type="button"
@@ -4036,9 +4129,10 @@ export function DebateExperience(
         </article>
         <article>
           <span>Motion</span>
-          <strong>{motion.motion}</strong>
+          <strong>{motion.motion || "Not yet shaped"}</strong>
           <p>
-            {motion.forSide.label} ↔ {motion.againstSide.label}
+            {motion.forSide.label || "For"} ↔{" "}
+            {motion.againstSide.label || "Against"}
           </p>
         </article>
         <article>
@@ -4941,7 +5035,7 @@ export function DebateExperience(
   const renderStageAlignmentModal = (
     session: DebateSessionV1 | null,
   ): React.JSX.Element | null => {
-    if (!stageAlignmentOpen) return null;
+    if (!DEBATE_STAGE_ALIGNMENT_ENABLED || !stageAlignmentOpen) return null;
     if (!session && !dashboardAlignmentPreviewCast) return null;
     const alignmentMotion = session?.motion ?? motion;
     const forBot =
@@ -5020,10 +5114,18 @@ export function DebateExperience(
       return offset.x === 0 && offset.y === 0;
     });
     const gavelIsDefault =
-      stageAlignmentDraft.gavel.x === DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.x &&
-      stageAlignmentDraft.gavel.y === DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.y &&
       stageAlignmentDraft.gavel.size ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.size;
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel.size &&
+      (["lowered", "raised"] as const).every(
+        (pose) =>
+          stageAlignmentDraft.gavel[pose].x ===
+            DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].x &&
+          stageAlignmentDraft.gavel[pose].y ===
+            DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].y &&
+          stageAlignmentDraft.gavel[pose].rotation ===
+            DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel[pose].rotation,
+      );
+    const activeGavelPose = stageAlignmentDraft.gavel[stageAlignmentGavelPose];
     const previewIsDefault =
       placementIsDefault &&
       (stageAlignmentPreviewCamera !== "moderator" || gavelIsDefault);
@@ -5298,6 +5400,7 @@ export function DebateExperience(
                         theme={stageAlignmentPreviewTheme}
                         color={moderatorBot.color ?? "#d9d2ff"}
                         cue={stageAlignmentGavelCue}
+                        previewPose={stageAlignmentGavelPose}
                         sessionId="alignment-preview"
                         audioEnabled={
                           props.audioEnabled && props.audioVolume > 0
@@ -5441,70 +5544,146 @@ export function DebateExperience(
                         Reset
                       </button>
                     </header>
-                    <div className={styles.alignmentGavelTunerRows}>
-                      {(
-                        [
-                          {
-                            key: "x",
-                            label: "Horizontal",
-                            min: DEBATE_STAGE_ALIGNMENT_MIN,
-                            max: DEBATE_STAGE_ALIGNMENT_MAX,
-                            step: DEBATE_STAGE_ALIGNMENT_STEP,
-                          },
-                          {
-                            key: "y",
-                            label: "Vertical",
-                            min: DEBATE_STAGE_ALIGNMENT_MIN,
-                            max: DEBATE_STAGE_ALIGNMENT_MAX,
-                            step: DEBATE_STAGE_ALIGNMENT_STEP,
-                          },
-                          {
-                            key: "size",
-                            label: "Size",
-                            min: DEBATE_STAGE_GAVEL_SIZE_MIN,
-                            max: DEBATE_STAGE_GAVEL_SIZE_MAX,
-                            step: DEBATE_STAGE_GAVEL_SIZE_STEP,
-                          },
-                        ] as const
-                      ).map((control) => {
-                        const value = stageAlignmentDraft.gavel[control.key];
-                        return (
-                          <label key={control.key}>
-                            <span>
-                              {control.label}
-                              <output>
-                                {control.key !== "size" && value > 0 ? "+" : ""}
-                                {value.toFixed(control.key === "size" ? 0 : 1)}%
-                              </output>
-                            </span>
-                            <input
-                              type="range"
-                              min={control.min}
-                              max={control.max}
-                              step={control.step}
-                              value={value}
-                              aria-label={`Debate moderator gavel ${control.label.toLowerCase()}`}
-                              onChange={(event) =>
-                                setStageAlignmentDraft((current) =>
-                                  updateDebateStageGavel(current, {
-                                    [control.key]: Number(
-                                      event.currentTarget.value,
+                    <div className={styles.alignmentGavelPoseEditor}>
+                      <div
+                        className={styles.alignmentGavelPoseToggle}
+                        role="group"
+                        aria-label="Gavel pose to align"
+                      >
+                        {(["lowered", "raised"] as const).map((pose) => (
+                          <button
+                            type="button"
+                            aria-pressed={stageAlignmentGavelPose === pose}
+                            data-debate-gavel-pose={pose}
+                            onClick={() => {
+                              setStageAlignmentGavelCue(null);
+                              setStageAlignmentGavelPose(pose);
+                            }}
+                            key={pose}
+                          >
+                            {pose === "lowered" ? "Lowered" : "Raised"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className={styles.alignmentGavelTunerRows}>
+                        {(
+                          [
+                            {
+                              key: "x",
+                              label: "Horizontal",
+                              min: DEBATE_STAGE_GAVEL_POSITION_MIN,
+                              max: DEBATE_STAGE_GAVEL_POSITION_MAX,
+                              step: DEBATE_STAGE_GAVEL_POSITION_STEP,
+                              suffix: "%",
+                            },
+                            {
+                              key: "y",
+                              label: "Vertical",
+                              min: DEBATE_STAGE_GAVEL_POSITION_MIN,
+                              max: DEBATE_STAGE_GAVEL_POSITION_MAX,
+                              step: DEBATE_STAGE_GAVEL_POSITION_STEP,
+                              suffix: "%",
+                            },
+                            {
+                              key: "rotation",
+                              label: "Rotation",
+                              min: DEBATE_STAGE_GAVEL_ROTATION_MIN,
+                              max: DEBATE_STAGE_GAVEL_ROTATION_MAX,
+                              step: DEBATE_STAGE_GAVEL_ROTATION_STEP,
+                              suffix: "°",
+                            },
+                          ] as const
+                        ).map((control) => {
+                          const value = activeGavelPose[control.key];
+                          return (
+                            <label key={control.key}>
+                              <span>
+                                {control.label}
+                                <output>
+                                  {value > 0 ? "+" : ""}
+                                  {value.toFixed(
+                                    control.key === "rotation" ? 0 : 1,
+                                  )}
+                                  {control.suffix}
+                                </output>
+                              </span>
+                              <input
+                                type="range"
+                                min={control.min}
+                                max={control.max}
+                                step={control.step}
+                                value={value}
+                                aria-label={`${stageAlignmentGavelPose} gavel ${control.label.toLowerCase()}`}
+                                onChange={(event) => {
+                                  const nextValue = Number(
+                                    event.currentTarget.value,
+                                  );
+                                  setStageAlignmentGavelCue(null);
+                                  setStageAlignmentDraft((current) =>
+                                    updateDebateStageGavelPose(
+                                      current,
+                                      stageAlignmentGavelPose,
+                                      {
+                                        [control.key]: nextValue,
+                                      },
                                     ),
-                                  }),
-                                )
-                              }
-                            />
-                          </label>
-                        );
-                      })}
+                                  );
+                                }}
+                              />
+                            </label>
+                          );
+                        })}
+                        <label>
+                          <span>
+                            Size
+                            <output>
+                              {stageAlignmentDraft.gavel.size.toFixed(0)}%
+                            </output>
+                          </span>
+                          <input
+                            type="range"
+                            min={DEBATE_STAGE_GAVEL_SIZE_MIN}
+                            max={DEBATE_STAGE_GAVEL_SIZE_MAX}
+                            step={DEBATE_STAGE_GAVEL_SIZE_STEP}
+                            value={stageAlignmentDraft.gavel.size}
+                            aria-label="Debate moderator gavel size"
+                            onChange={(event) => {
+                              const nextSize = Number(
+                                event.currentTarget.value,
+                              );
+                              setStageAlignmentGavelCue(null);
+                              setStageAlignmentDraft((current) =>
+                                updateDebateStageGavel(current, {
+                                  size: nextSize,
+                                }),
+                              );
+                            }}
+                          />
+                        </label>
+                      </div>
                     </div>
                     <div
                       className={styles.alignmentGavelPreviewActions}
                       role="group"
-                      aria-label="Test moderator gavel"
+                      aria-label="Preview and export moderator gavel"
                     >
-                      <strong>Test gavel</strong>
+                      <strong>Preview &amp; export</strong>
                       <div>
+                        <button
+                          type="button"
+                          data-debate-gavel-copy="true"
+                          data-copy-state={stageAlignmentCopyState}
+                          onClick={() => void copyStageGavelData()}
+                          disabled={stageAlignmentCopyState === "copying"}
+                        >
+                          {stageAlignmentCopyState === "copying"
+                            ? "Copying…"
+                            : stageAlignmentCopyState === "copied"
+                              ? "Copied"
+                              : stageAlignmentCopyState === "failed"
+                                ? "Copy failed"
+                                : "Copy gavel JSON"}
+                        </button>
                         <button
                           type="button"
                           data-debate-gavel-test="attention"
@@ -5571,34 +5750,35 @@ export function DebateExperience(
                           key={theme}
                         >
                           <strong>{label}</strong>
-                          <div
-                            className={styles.alignmentLightingBlendToggle}
-                            role="group"
+                          <select
+                            className={styles.alignmentLightingBlendSelect}
                             aria-label={`${label} Debate light blend mode`}
+                            value={stageAlignmentDraft.lightBlendModes[theme]}
+                            onChange={(event) => {
+                              setStageAlignmentPreviewTheme(theme);
+                              setStageAlignmentDraft((current) =>
+                                updateDebateStageLightBlendMode(
+                                  current,
+                                  theme,
+                                  event.currentTarget
+                                    .value as DebateStageLightBlendMode,
+                                ),
+                              );
+                            }}
                           >
                             {DEBATE_STAGE_LIGHT_BLEND_MODES.map((blendMode) => (
-                              <button
-                                type="button"
-                                aria-pressed={
-                                  stageAlignmentDraft.lightBlendModes[theme] ===
-                                  blendMode
-                                }
-                                onClick={() => {
-                                  setStageAlignmentPreviewTheme(theme);
-                                  setStageAlignmentDraft((current) =>
-                                    updateDebateStageLightBlendMode(
-                                      current,
-                                      theme,
-                                      blendMode,
-                                    ),
-                                  );
-                                }}
-                                key={blendMode}
-                              >
-                                {blendMode === "screen" ? "Screen" : "Overlay"}
-                              </button>
+                              <option value={blendMode} key={blendMode}>
+                                {blendMode
+                                  .split("-")
+                                  .map(
+                                    (word) =>
+                                      word.charAt(0).toUpperCase() +
+                                      word.slice(1),
+                                  )
+                                  .join(" ")}
+                              </option>
                             ))}
-                          </div>
+                          </select>
                           <label className={styles.alignmentLightingOpacity}>
                             <span>
                               Opacity
@@ -6374,30 +6554,31 @@ export function DebateExperience(
                       {camera.label}
                     </button>
                   ))}
-                  <details className={styles.cameraAdvanced}>
-                    <summary
-                      aria-label="More stage controls"
-                      title="More stage controls"
-                      data-tutorial-target="debate-align-stage"
-                    >
-                      •••
-                    </summary>
-                    <div>
-                      <button
-                        type="button"
-                        className={styles.alignmentLaunchButton}
-                        onClick={(event) => {
-                          event.currentTarget
-                            .closest("details")
-                            ?.removeAttribute("open");
-                          openStageAlignment();
-                        }}
-                        aria-label="Align stage"
+                  {DEBATE_STAGE_ALIGNMENT_ENABLED ? (
+                    <details className={styles.cameraAdvanced}>
+                      <summary
+                        aria-label="More stage controls"
+                        title="More stage controls"
                       >
-                        Stage geometry
-                      </button>
-                    </div>
-                  </details>
+                        •••
+                      </summary>
+                      <div>
+                        <button
+                          type="button"
+                          className={styles.alignmentLaunchButton}
+                          onClick={(event) => {
+                            event.currentTarget
+                              .closest("details")
+                              ?.removeAttribute("open");
+                            openStageAlignment();
+                          }}
+                          aria-label="Align stage"
+                        >
+                          Stage geometry
+                        </button>
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
               </div>
               <div className={styles.stageSupport}>

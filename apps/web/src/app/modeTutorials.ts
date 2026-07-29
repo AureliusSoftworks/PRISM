@@ -154,7 +154,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Shape a balanced motion",
-        body: "Write the territory, then choose Refract into motions to create three complete balanced slates. Choosing one replaces the motion, For brief, Against brief, and both side labels together; every field remains yours to edit.",
+        body: "Write the territory—or use its dice for a fresh editable seed—to reveal the Motion field. Shaping the motion reveals both position labels; naming both positions reveals their briefs. You can also choose Refract into motions to create three complete balanced slates at once. Choosing one replaces the motion, both labels, and both briefs together; every field remains yours to edit.",
         clickLabel: "Refract into motions",
         targetSelector: '[data-tutorial-target="debate-synthesize"]',
       },
@@ -217,12 +217,6 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         body: "Proceedings render safe Markdown and source chips in the chamber's tonal transcript rail. It follows every growing live turn until you deliberately scroll back; choose Live to return to the newest phrase. With Jury off, a Judge's ruling is final and Participant or Spectator Duels use the traditional three-cast majority. With Jury on, the majority binds Spectators and Participants but advises a human Judge. Judge and Spectator records keep named deliberation and ballots; Participant API responses, transcript copies, archives, and replay-facing event data retain only the aggregate split and verdict. Copy verbose transcript creates one review-ready role-safe record with frozen setup, runtime snapshots, evidence, event metadata, interruptions, moderator rulings, case-board state, and permitted public ballot reasons.",
         clickLabel: "Copy verbose transcript",
         targetSelector: '[data-tutorial-target="debate-copy-transcript"]',
-      },
-      {
-        heading: "Calibrate advanced stage geometry",
-        body: "Stage geometry is an advanced production control in the Studio and behind the live camera bar’s overflow. It previews the current cast and fills empty roles with temporary unique Library stand-ins. Use Wide and Moderator to calibrate independent Bot, Nameplate, and Glyph plate placement for this account and device. Moderator also saves the gavel’s position and size; use One strike or Two strikes to test its live animation and sound. Light and Dark each save their own architectural color-mask opacity and blend. Drag the visible item where available, or use the exact controls, then save. Copy alignment data produces paste-ready JSON, including unsaved adjustments. Calibration changes presentation only—not the proceeding.",
-        clickLabel: "More stage controls",
-        targetSelector: '[data-tutorial-target="debate-align-stage"]',
       },
     ],
   },

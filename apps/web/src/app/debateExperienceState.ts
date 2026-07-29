@@ -105,6 +105,36 @@ export function copyDebateMotionSlate(
   };
 }
 
+export interface DebateMotionRevealState {
+  motion: boolean;
+  positions: boolean;
+  briefs: boolean;
+}
+
+/**
+ * Reveal the motion editor in authored order while keeping every populated
+ * downstream field reachable if an earlier value is later cleared.
+ */
+export function debateMotionRevealState(
+  topic: string,
+  slate: DebateMotionSlateV1,
+): DebateMotionRevealState {
+  const hasMotion = Boolean(slate.motion.trim());
+  const hasForLabel = Boolean(slate.forSide.label.trim());
+  const hasAgainstLabel = Boolean(slate.againstSide.label.trim());
+  const hasForBrief = Boolean(slate.forSide.brief.trim());
+  const hasAgainstBrief = Boolean(slate.againstSide.brief.trim());
+  const hasPositionContent =
+    hasForLabel || hasAgainstLabel || hasForBrief || hasAgainstBrief;
+  const hasBriefContent = hasForBrief || hasAgainstBrief;
+
+  return {
+    motion: Boolean(topic.trim()) || hasMotion || hasPositionContent,
+    positions: hasMotion || hasPositionContent,
+    briefs: (hasForLabel && hasAgainstLabel) || hasBriefContent,
+  };
+}
+
 export function derivedDebateSetupPresetId(args: {
   selectedPresetId: DebateSetupPresetId;
   format: DebateFormatId;

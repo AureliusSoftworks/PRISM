@@ -12,9 +12,17 @@ function envFlagIsEnabled(value: string | undefined): boolean {
   return normalized === "1" || normalized === "true";
 }
 
-export function prismBranchAllowsDevTools(branchName: string | undefined): boolean {
+export function prismBranchAllowsDevTools(
+  branchName: string | undefined,
+): boolean {
   const normalized = (branchName ?? "").trim().toLowerCase();
-  return Boolean(normalized) && normalized !== "main" && normalized !== "unknown";
+  return (
+    Boolean(normalized) && normalized !== "main" && normalized !== "unknown"
+  );
+}
+
+export function prismBranchIsDev(branchName: string | undefined): boolean {
+  return (branchName ?? "").trim().toLowerCase() === "dev";
 }
 
 /** Marketplace shelves can pin to an exact git branch (today: `dev` only). */
@@ -23,7 +31,8 @@ export type PrismMarketplaceBranchLock = "dev";
 export function normalizePrismMarketplaceBranchLock(
   value: unknown,
 ): PrismMarketplaceBranchLock | null {
-  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  const normalized =
+    typeof value === "string" ? value.trim().toLowerCase() : "";
   return normalized === "dev" ? "dev" : null;
 }
 
@@ -36,7 +45,7 @@ export function prismMarketplaceBranchLockAllows(
   branchName: string | undefined,
 ): boolean {
   if (!branchLock) return true;
-  return (branchName ?? "").trim().toLowerCase() === branchLock;
+  return branchLock === "dev" && prismBranchIsDev(branchName);
 }
 
 export function prismWebDevToolsEnabled(env: PrismDevEnv): boolean {
@@ -49,7 +58,10 @@ export function prismWebDevToolsEnabled(env: PrismDevEnv): boolean {
 
 export function prismWebDevChatCommandsEnabled(env: PrismDevEnv): boolean {
   if (!prismBranchAllowsDevTools(env.NEXT_PUBLIC_PRISM_BRANCH)) return false;
-  return env.NODE_ENV !== "production" || envFlagIsEnabled(env.NEXT_PUBLIC_PRISM_DEV_COMMANDS);
+  return (
+    env.NODE_ENV !== "production" ||
+    envFlagIsEnabled(env.NEXT_PUBLIC_PRISM_DEV_COMMANDS)
+  );
 }
 
 /** Unfinished Avatar Details stays on development branches and out of release builds. */

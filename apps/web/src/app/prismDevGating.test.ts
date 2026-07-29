@@ -5,6 +5,7 @@ import {
   normalizePrismMarketplaceBranchLock,
   prismAvatarDetailsPaneEnabled,
   prismBranchAllowsDevTools,
+  prismBranchIsDev,
   prismMarketplaceBranchLockAllows,
   prismWebDevChatCommandsEnabled,
   prismWebDevToolsEnabled,
@@ -58,7 +59,7 @@ test("avatar details stay locked on release branches without an override", () =>
         NEXT_PUBLIC_PRISM_BRANCH: branch,
         NEXT_PUBLIC_AVATAR_DETAILS: "1",
       }),
-      false
+      false,
     );
   }
 });
@@ -69,7 +70,7 @@ test("avatar details can be parked on dev without affecting other dev tools", ()
       NEXT_PUBLIC_PRISM_BRANCH: "dev",
       NEXT_PUBLIC_AVATAR_DETAILS: "0",
     }),
-    false
+    false,
   );
 });
 
@@ -79,7 +80,7 @@ test("production dev commands require explicit opt-in on non-main branches", () 
       NODE_ENV: "production",
       NEXT_PUBLIC_PRISM_BRANCH: "dev",
     }),
-    false
+    false,
   );
   assert.equal(
     prismWebDevChatCommandsEnabled({
@@ -87,11 +88,15 @@ test("production dev commands require explicit opt-in on non-main branches", () 
       NEXT_PUBLIC_PRISM_BRANCH: "dev",
       NEXT_PUBLIC_PRISM_DEV_COMMANDS: "1",
     }),
-    true
+    true,
   );
 });
 
 test("marketplace branch locks require an exact branch match", () => {
+  assert.equal(prismBranchIsDev("dev"), true);
+  assert.equal(prismBranchIsDev("DEV"), true);
+  assert.equal(prismBranchIsDev("feature/dev"), false);
+  assert.equal(prismBranchIsDev(undefined), false);
   assert.equal(normalizePrismMarketplaceBranchLock("dev"), "dev");
   assert.equal(normalizePrismMarketplaceBranchLock("DEV"), "dev");
   assert.equal(normalizePrismMarketplaceBranchLock("main"), null);
