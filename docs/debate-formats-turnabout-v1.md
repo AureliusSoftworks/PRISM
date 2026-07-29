@@ -4,16 +4,25 @@ Last reviewed: 2026-07-28
 
 ## Product direction
 
-Debate formats are rulesets, not themes. A format may define its own phases,
-legal player actions, orchestration, prompts, public record, and stage
-presentation while sharing Debate's cast, frozen motion and evidence,
-provider/model freeze, privacy boundary, durability, and replay machinery.
+Debate formats are rulesets with signature productions, not themes. A format
+may define its own phases, legal player actions, orchestration, prompts, public
+record, procedural vocabulary, room response, and stage presentation while
+sharing Debate's cast, frozen motion and evidence, provider/model freeze,
+privacy boundary, durability, and replay machinery.
 
 - **Forum** is the existing Duel flow. It remains the default and preserves
-  legacy behavior.
+  legacy behavior. Its **Assembly Chamber** production uses parliamentary
+  address, a neutral chair, recognized speakers, floor procedure, and a motion
+  carried or defeated.
 - **Turnabout** is an original PRISM courtroom format. It builds a public record
   from pressable testimony, exact frozen-evidence objections, immediate neutral
-  moderator rulings, grounded reversals, and a decisive resolution.
+  moderator rulings, grounded reversals, and a decisive resolution. Its
+  **Court of Record** production uses taut examination language and a distinct,
+  restrained judicial room response without borrowing protected characters,
+  catchphrases, writing, artwork, or presentation.
+- **Flyting / Mead Hall** and **Cypher / The Cypher** are cataloged as disabled
+  future productions. Their IDs are deliberately excluded from the executable
+  server format union until their own rules and validators exist.
 
 The neutral moderator controls procedure and rules on evidence. A player in the
 Judge role delivers the final ruling; Participants examine the opposing side;
@@ -30,17 +39,20 @@ ruling validation, ballots, hard mute, or advocacy consent.
 The format seam is additive and persisted inside the existing `session_json`.
 No Debate table rewrite is required for V1.
 
-- `packages/shared/src/debate.ts` owns the format registry, versioned
-  discriminated format state, Turnabout statements and contradictions, event
-  metadata, request contracts, and legacy normalization.
+- `packages/shared/src/debate.ts` owns both the executable format registry and
+  the visible production catalog, plus versioned discriminated format state,
+  Turnabout statements and contradictions, event metadata, request contracts,
+  and legacy normalization. Catalog previews never become accepted format IDs.
 - `apps/api/src/debate.ts` retains the Forum engine and dispatches Turnabout to
-  its own transitions and action validator. Exact quote grounding is checked
-  server-side before any objection can be sustained.
+  its own transitions and action validator. A server-owned production voice
+  contract reaches every generated speech and ballot while exact quote
+  grounding is checked server-side before any objection can be sustained.
 - `apps/api/src/server.ts` exposes the Turnabout action route while reusing the
   frozen Debate provider/model runtime and action-session accounting.
 - `apps/web/src/app/DebateExperience.tsx` freezes format during Start, renders
-  the Turnabout public record, and submits Press, Present Evidence, and Pass
-  actions without coupling canonical state to animation or audio timing.
+  the production catalog and Turnabout public record, selects format-specific
+  room acoustics, and submits Press, Present Evidence, and Pass actions without
+  coupling canonical state to animation or audio timing.
 - `apps/web/src/app/modeTutorials.ts` and first-run onboarding introduce the
   format choice, frozen-record rule, and Turnabout action deck.
 
@@ -104,7 +116,9 @@ identity use the same canonical Debate persistence path as Forum.
 V1 proves that one Debate shell can host two genuinely different rulesets:
 
 - durable format registry and versioned state;
+- a separate visible production catalog with non-executable future entries;
 - backward-compatible Forum default;
+- distinct Assembly Chamber and Court of Record language and room response;
 - one witness-equivalent advocate per side with two statements each;
 - Judge, Participant, and Spectator adaptations;
 - Press, Object/Present Evidence, and Pass;
@@ -113,11 +127,11 @@ V1 proves that one Debate shell can host two genuinely different rulesets:
 - a public-record panel and action deck within the current Debate stage;
 - focused shared, API, integration, web, onboarding, and tutorial coverage.
 
-V1 deliberately defers authored courtroom artwork, freeform evidence creation,
-multiple witnesses, cross-session case libraries, custom objection animations,
-interruptible voice choreography, and format plugins outside the built-in
-registry. Those additions should follow playtesting of the rules and record
-clarity, not precede it.
+V1 deliberately defers authored per-format environment artwork, freeform
+evidence creation, multiple witnesses, cross-session case libraries, custom
+objection animations, interruptible voice choreography, executable Flyting or
+Cypher rules, and third-party format plugins. Those additions should follow
+playtesting of the rules, voice, and record clarity, not precede it.
 
 ## Compatibility and risks
 
@@ -135,6 +149,9 @@ clarity, not precede it.
   or interjection routes. Floor ownership remains a stable bot ID.
 - **Presentation:** audio, reveal cadence, animation, camera direction, and
   objection staging may react to events but must never advance or mutate them.
+- **Catalog safety:** only entries in the executable registry may pass shared
+  validation or reach session creation. Disabled production cards are visible
+  discovery, not placeholder server behavior.
 - **Replay:** new event kinds and metadata must remain additive so older Forum
   sessions and exports can still render.
 - **Language:** Turnabout is a PRISM-native working name and interaction system;

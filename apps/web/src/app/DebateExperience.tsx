@@ -16,7 +16,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  DEBATE_FORMATS,
+  DEBATE_FORMAT_CATALOG,
   DEBATE_SCHEMA_VERSION,
   debateSpokenText,
   type DebateAdvocacyConsent,
@@ -97,7 +97,10 @@ import {
   type SessionAtmosphereMix,
 } from "./session-atmosphere-audio";
 import { debateVocalFoleyTargetId } from "./debateFoley";
-import { DEBATE_FORUM_FOLEY_ROOM_SEND } from "./roomAcoustics";
+import {
+  DEBATE_FORUM_FOLEY_ROOM_SEND,
+  DEBATE_TURNABOUT_FOLEY_ROOM_SEND,
+} from "./roomAcoustics";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 
@@ -112,6 +115,7 @@ export interface DebateBotSummary {
 
 export interface DebateUtterance {
   event: DebateEventV1;
+  format: DebateFormatId;
   sessionId: string;
   speaker: DebateBotSummary | null;
   player: boolean;
@@ -566,6 +570,7 @@ export function formatDebateVerboseTranscript(
     `- Player role: ${session.playerRole}${session.playerSideId ? ` — ${debateSideLabel(session, session.playerSideId)}` : ""}`,
     `- Created: ${session.createdAt}`,
     `- Updated: ${session.updatedAt}`,
+    `- Ended early: ${session.endedEarlyAt ?? "No"}`,
     `- Completed: ${session.completedAt ?? "No"}`,
     "",
     "## Motion",
@@ -920,6 +925,7 @@ export function DebateExperience(
     useState<DebateClipboardState>("idle");
   const [pendingDeleteSession, setPendingDeleteSession] =
     useState<DebateSessionListItemV1 | null>(null);
+  const [earlyEndOpen, setEarlyEndOpen] = useState(false);
   const [deleteUndo, setDeleteUndo] = useState<DebateDeleteUndo | null>(null);
   const [transcriptAtLive, setTranscriptAtLive] = useState(true);
   const [liveReveal, setLiveReveal] = useState<DebateLiveReveal | null>(null);
@@ -995,6 +1001,7 @@ export function DebateExperience(
   const transcriptFeedRef = useRef<HTMLDivElement | null>(null);
   const transcriptContentRef = useRef<HTMLDivElement | null>(null);
   const deleteConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const earlyEndConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
   const sourceDrawerCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const sourceDrawerReturnFocusRef = useRef<HTMLElement | null>(null);
   const stageAlignmentSaveButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -1242,6 +1249,22 @@ export function DebateExperience(
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [pendingDeleteSession]);
+  useEffect(() => {
+    if (!earlyEndOpen) return;
+    const frameId = window.requestAnimationFrame(() => {
+      earlyEndConfirmButtonRef.current?.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setEarlyEndOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [earlyEndOpen]);
 
   const copyVerboseTranscript = useCallback(async (): Promise<void> => {
     if (!activeSession || transcriptCopyState === "copying") return;
@@ -1812,6 +1835,7 @@ export function DebateExperience(
         let lastSpeechRenderAt = 0;
         const played = await onUtterance?.({
           event,
+          format: next.format,
           sessionId: next.id,
           speaker,
           player: event.speakerKind === "player",
@@ -2246,6 +2270,34 @@ export function DebateExperience(
     }
   };
 
+  const endDebateEarly = async (): Promise<void> => {
+    const previous = activeSession;
+    if (!previous || busy || presenting) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(previous.id)}/end-early`,
+        requestBody({
+          expectedRevision: previous.revision,
+          idempotencyKey: nextMutationKey("end-early"),
+        }),
+      );
+      setEarlyEndOpen(false);
+      setPlayerDraft("");
+      if (mountedRef.current) setBusy(false);
+      await adoptSession(previous, result.session);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The early conclusion was unavailable.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
   const submitInterjection = async (
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> => {
@@ -2416,7 +2468,10 @@ export function DebateExperience(
               >
                 <strong>{session.motion}</strong>
                 <span>
-                  {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+                  {session.format === "turnabout"
+                    ? "Turnabout · Court of Record"
+                    : "Forum · Assembly Chamber"}{" "}
+                  ·{" "}
                   {sessionStatusLabel(session)} · {session.playerRole}
                 </span>
               </button>
@@ -2461,14 +2516,18 @@ export function DebateExperience(
       <section
         className={styles.forumReadout}
         aria-label={
-          format === "turnabout" ? "Record schematic" : "Forum schematic"
+          format === "turnabout"
+            ? "Court of Record schematic"
+            : "Assembly Chamber schematic"
         }
         data-format={format}
         data-ready={debateCanStart ? "true" : undefined}
       >
         <header>
           <span>
-            {format === "turnabout" ? "Record schematic" : "Forum schematic"}
+            {format === "turnabout"
+              ? "Court of Record schematic"
+              : "Assembly Chamber schematic"}
           </span>
           <strong>{readinessCount}/4 locked</strong>
         </header>
@@ -2530,8 +2589,8 @@ export function DebateExperience(
           <h1>Debate Studio</h1>
           <span>
             {format === "turnabout"
-              ? "Turnabout · Testimony · Evidence"
-              : "Forum · Construct · Cast · Convene"}
+              ? "Turnabout · Court of Record"
+              : "Forum · Assembly Chamber"}
           </span>
         </div>
         <div className={styles.lobbyActions}>
@@ -2785,28 +2844,43 @@ export function DebateExperience(
         data-tutorial-target="debate-format"
       >
         <legend>Debate format</legend>
-        {DEBATE_FORMATS.map((option) => (
+        {DEBATE_FORMAT_CATALOG.map((option) => (
           <label
             key={option.id}
-            data-selected={format === option.id ? "true" : undefined}
+            data-selected={
+              option.availability === "available" && format === option.id
+                ? "true"
+                : undefined
+            }
+            data-availability={option.availability}
+            aria-disabled={
+              option.availability === "coming_soon" ? "true" : undefined
+            }
+            tabIndex={option.availability === "coming_soon" ? 0 : undefined}
           >
             <input
               type="radio"
               name="debate-format"
               value={option.id}
-              checked={format === option.id}
+              checked={
+                option.availability === "available" && format === option.id
+              }
+              disabled={option.availability === "coming_soon"}
               onChange={() => {
+                if (option.availability !== "available") return;
                 setFormat(option.id);
                 setRoleChecks([]);
               }}
             />
-            <strong>{option.name}</strong>
+            <strong>
+              {option.name}
+              <em>{option.productionName}</em>
+            </strong>
             <span>{option.summary}</span>
-            <small>
-              {option.id === "turnabout"
-                ? "Press · Object · Present Evidence"
-                : "Opening · Challenge · Rebuttal · Closing"}
-            </small>
+            <small>{option.cadence}</small>
+            {option.availability === "coming_soon" ? (
+              <b>Coming later</b>
+            ) : null}
           </label>
         ))}
       </fieldset>
@@ -3403,7 +3477,11 @@ export function DebateExperience(
       <div className={styles.reviewGrid}>
         <article>
           <span>Format</span>
-          <strong>{format === "turnabout" ? "Turnabout" : "Forum"}</strong>
+          <strong>
+            {format === "turnabout"
+              ? "Turnabout · Court of Record"
+              : "Forum · Assembly Chamber"}
+          </strong>
           <p>
             {format === "turnabout"
               ? "Pressable testimony and frozen-evidence objections"
@@ -4657,6 +4735,10 @@ export function DebateExperience(
       activeEvent && liveReveal?.eventId === activeEvent.id
         ? liveReveal.visibleContent
         : (activeEvent?.content ?? "");
+    const activeCaptionText =
+      activeEvent?.kind === "silence"
+        ? ""
+        : debateSpokenText(activePublicContent).trim();
     const listenerReaction = debateGalleryReaction(activePublicContent);
     const floorLabel =
       activeEvent?.kind === "moderator_ruling"
@@ -4787,7 +4869,11 @@ export function DebateExperience(
           sessionKey={`debate:${session.id}`}
           volume={props.audioVolume}
           mix={DEBATE_FOLEY_MIX}
-          foleyRoomAcoustics={DEBATE_FORUM_FOLEY_ROOM_SEND}
+          foleyRoomAcoustics={
+            session.format === "turnabout"
+              ? DEBATE_TURNABOUT_FOLEY_ROOM_SEND
+              : DEBATE_FORUM_FOLEY_ROOM_SEND
+          }
           ambientFoley={false}
           deferFoley
           deferBotVocalization={busy && !presenting}
@@ -4818,6 +4904,7 @@ export function DebateExperience(
               className={styles.exitButton}
               onClick={() => {
                 props.onStopUtterance?.();
+                setEarlyEndOpen(false);
                 setView("dashboard");
                 setActiveSession(null);
                 void loadSessions();
@@ -4831,19 +4918,36 @@ export function DebateExperience(
                 {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
                 {phaseLabel(session)} · {session.playerRole}
               </p>
-              <h1>{session.motion.motion}</h1>
+              <h1>
+                {session.format === "turnabout"
+                  ? "Court of Record"
+                  : "Assembly Chamber"}
+              </h1>
             </div>
             <div className={styles.liveControls}>
               {session.status !== "completed" &&
               session.status !== "failed" &&
               session.status !== "cancelled" ? (
-                <button
-                  type="button"
-                  onClick={() => void pauseOrResume()}
-                  disabled={busy}
-                >
-                  {session.status === "paused" ? "Resume" : "Pause"}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void pauseOrResume()}
+                    disabled={busy}
+                  >
+                    {session.status === "paused" ? "Resume" : "Pause"}
+                  </button>
+                  {session.phase !== "verdict" ? (
+                    <button
+                      type="button"
+                      className={styles.endEarlyButton}
+                      onClick={() => setEarlyEndOpen(true)}
+                      disabled={busy || presenting}
+                      aria-label="End the Debate early"
+                    >
+                      End early
+                    </button>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </header>
@@ -5003,10 +5107,25 @@ export function DebateExperience(
                     </div>
                   ) : null}
                 </div>
-                <div className={styles.motionPlinth}>
+                <div
+                  className={styles.stageTitle}
+                  data-debate-stage-title="true"
+                >
                   <span>The motion</span>
                   <strong>{session.motion.motion}</strong>
                 </div>
+                {presenting && activeEvent && activeCaptionText ? (
+                  <div
+                    className={styles.liveCaption}
+                    data-debate-live-caption="true"
+                    data-event-id={activeEvent.id}
+                    data-speaker-kind={activeEvent.speakerKind}
+                    aria-live="off"
+                  >
+                    <strong>{visibleEventName(session, activeEvent)}</strong>
+                    <span>{activeCaptionText}</span>
+                  </div>
+                ) : null}
                 {session.status === "paused" ? (
                   <div className={styles.stageStateOverlay} data-kind="paused">
                     <span aria-hidden="true">Ⅱ</span>
@@ -5034,7 +5153,11 @@ export function DebateExperience(
                   >
                     <span>Verdict</span>
                     <strong>{verdictLabel(session)}</strong>
-                    <small>The proceeding is sealed.</small>
+                    <small>
+                      {session.endedEarlyAt
+                        ? "The abbreviated proceeding is sealed."
+                        : "The proceeding is sealed."}
+                    </small>
                   </div>
                 ) : session.status === "failed" ||
                   session.status === "cancelled" ? (
@@ -5157,13 +5280,17 @@ export function DebateExperience(
                   <p className={styles.eyebrow}>Verdict</p>
                   <h2>{verdictLabel(session)}</h2>
                   <p>
-                    {session.playerRole === "judge"
-                      ? session.format === "turnabout"
-                        ? "Your public-record ruling is final. The bot ballots below show agreement and dissent."
-                        : "Your ruling is final. The bot ballots below show agreement and dissent."
-                      : session.format === "turnabout"
-                        ? "The three-bot majority resolved the public record."
-                        : "The three-bot majority decided the Duel."}
+                    {session.endedEarlyAt
+                      ? session.playerRole === "judge"
+                        ? "Your limited-record ruling is final. The bot ballots below show agreement and dissent."
+                        : "The three-bot majority reached a brief verdict from the limited public record."
+                      : session.playerRole === "judge"
+                        ? session.format === "turnabout"
+                          ? "Your public-record ruling is final. The bot ballots below show agreement and dissent."
+                          : "Your ruling is final. The bot ballots below show agreement and dissent."
+                        : session.format === "turnabout"
+                          ? "The three-bot majority resolved the public record."
+                          : "The three-bot majority decided the Duel."}
                   </p>
                   <ul>
                     {session.ballots.map((ballot) => {
@@ -5254,6 +5381,50 @@ export function DebateExperience(
                 Open original source
               </a>
             </aside>
+          ) : null}
+          {earlyEndOpen ? (
+            <div
+              className={styles.confirmBackdrop}
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget && !busy) {
+                  setEarlyEndOpen(false);
+                }
+              }}
+            >
+              <section
+                className={styles.confirmDialog}
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby="debate-end-early-title"
+                aria-describedby="debate-end-early-description"
+              >
+                <p className={styles.eyebrow}>Accelerated verdict</p>
+                <h2 id="debate-end-early-title">End this Debate early?</h2>
+                <p id="debate-end-early-description">
+                  {session.playerRole === "judge"
+                    ? "The remaining rounds will be skipped. You will rule immediately from only the limited public record heard so far."
+                    : "The remaining rounds will be skipped. The three-bot panel will cast brief ballots from only the limited public record heard so far."}
+                </p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setEarlyEndOpen(false)}
+                    disabled={busy}
+                  >
+                    Continue Debate
+                  </button>
+                  <button
+                    ref={earlyEndConfirmButtonRef}
+                    type="button"
+                    className={styles.confirmEarlyEndButton}
+                    onClick={() => void endDebateEarly()}
+                    disabled={busy || presenting}
+                  >
+                    {busy ? "Concluding…" : "Conclude now"}
+                  </button>
+                </div>
+              </section>
+            </div>
           ) : null}
         </main>
         {renderStageAlignmentModal(session)}

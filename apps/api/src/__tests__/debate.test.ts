@@ -19,6 +19,7 @@ import {
   checkDebateAdvocacyRoles,
   createDebateSession,
   debateMotionHash,
+  endDebateSessionEarly,
   getDebateSession,
   listDebateSessions,
   pauseDebateSession,
@@ -108,6 +109,46 @@ class PersonaVoicePromptProvider extends DebateProviderStub {
   }
 }
 
+class ConcretePersonaProvider extends DebateProviderStub {
+  public concreteSpeechPrompt = "";
+  public repairPurposes: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("private advocacy consent check")) {
+      return JSON.stringify({ status: "accept", reason: null });
+    }
+    if (text.includes("Persona capability repair")) {
+      const purpose = text.includes("ballot reason") ? "ballot" : "speech";
+      this.repairPurposes.push(purpose);
+      return JSON.stringify({
+        content:
+          purpose === "ballot"
+            ? "I liked that side. It sounded good."
+            : "Homes by the train are good because people can ride the train.",
+      });
+    }
+    if (text.includes("Vote independently")) {
+      return JSON.stringify({
+        sideId: "for",
+        reason:
+          "On balance, the record-backed case best fits the decisive judging criterion.",
+      });
+    }
+    if (text.includes("Parker is goofy, literal-minded, and distractible")) {
+      this.concreteSpeechPrompt = text;
+      return JSON.stringify({
+        content:
+          "I concede the frozen record does not prove every outcome; my claim is that the record-backed case best fits the central tradeoff.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class TurnaboutProvider extends DebateProviderStub {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -146,11 +187,22 @@ class UngroundedTurnaboutProvider extends DebateProviderStub {
 }
 
 class FabricatedTurnaboutTestimonyProvider extends DebateProviderStub {
+  public repairCount = 0;
+
   public override async generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions,
   ): Promise<string> {
     const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("previous draft could not enter the frozen record")) {
+      this.repairCount += 1;
+      return JSON.stringify({
+        content:
+          this.repairCount === 1
+            ? "The city needs more homes near trains."
+            : "Homes by trains let people live near the train.",
+      });
+    }
     if (text.includes("Deliver testimony statement")) {
       return JSON.stringify({
         content:
@@ -446,6 +498,7 @@ function seedBot(
   id: string,
   name: string,
   powers: BotPowerV1[] = [],
+  systemPrompt = `${name} is thoughtful, candid, and concise.`,
 ): void {
   db.prepare(
     `INSERT INTO bots
@@ -455,7 +508,7 @@ function seedBot(
   ).run(
     id,
     name,
-    `${name} is thoughtful, candid, and concise.`,
+    systemPrompt,
     serializeBotPowersV1(powers),
     id === "moderator" ? "#d7d2ff" : id === "for" ? "#59d7ff" : "#ff6d9c",
     id === "moderator" ? "◇" : "◆",
@@ -470,9 +523,16 @@ function seedBot(
 async function createJudgeDebate(
   db: DatabaseSync,
   debateRuntime: DebateAiRuntime = runtime(),
+  options: { forSystemPrompt?: string } = {},
 ) {
   seedBot(db, "moderator", "Mira");
-  seedBot(db, "for", "Avery");
+  seedBot(
+    db,
+    "for",
+    "Avery",
+    [],
+    options.forSystemPrompt ?? "Avery is thoughtful, candid, and concise.",
+  );
   seedBot(db, "against", "Basil");
   const checks = await checkDebateAdvocacyRoles(
     db,
@@ -641,6 +701,169 @@ describe("Debate engine", () => {
     }
   });
 
+  it("keeps a concrete persona from turning into an expert speaker or ballot judge", async () => {
+    const db = createTestDb();
+    const provider = new ConcretePersonaProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        forSystemPrompt: [
+          "Parker is goofy, literal-minded, and distractible.",
+          "Parker uses simple everyday words, follows odd logic, and avoids technical overconfidence.",
+          "Parker can have a good idea by accident but cannot sustain expert analysis.",
+        ].join(" "),
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:persona-capability-intro:0001",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:persona-capability-opening:0001",
+        },
+        debateRuntime,
+      );
+
+      assert.match(
+        provider.concreteSpeechPrompt,
+        /Persona capability is binding, not merely a writing style/u,
+      );
+      assert.match(
+        provider.concreteSpeechPrompt,
+        /Concrete reasoning ceiling for Avery/u,
+      );
+      assert.doesNotMatch(provider.concreteSpeechPrompt, /Judging criteria:/u);
+      assert.doesNotMatch(
+        provider.concreteSpeechPrompt,
+        /Concede fair points when warranted/u,
+      );
+      const opening = [...session.events]
+        .reverse()
+        .find(
+          (event) =>
+            event.kind === "speech" && event.speakerBotId === session.forAdvocate.id,
+        );
+      assert.equal(
+        opening?.content,
+        "Homes by the train are good because people can ride the train.",
+      );
+      assert.deepEqual(provider.repairPurposes, ["speech"]);
+
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "debate.persona-capability:end-early:0001",
+      });
+      session = submitDebateVerdict(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "debate.persona-capability:verdict:0001",
+        sideId: "for",
+        reason: "The limited record favored For.",
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.persona-capability:moderator-ballot:0001",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.persona-capability:concrete-ballot:0001",
+        },
+        debateRuntime,
+      );
+      const ballot = session.ballots.find(
+        (entry) => entry.voterBotId === session.forAdvocate.id,
+      );
+      assert.equal(ballot?.reason, "I liked that side. It sounded good.");
+      assert.deepEqual(provider.repairPurposes, ["speech", "ballot"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("gives Forum and Turnabout distinct original production voice contracts", async () => {
+    const forumDb = createTestDb();
+    try {
+      const forumProvider = new PersonaVoicePromptProvider();
+      let forum = await createJudgeDebate(
+        forumDb,
+        runtimeWith(forumProvider),
+      );
+      forum = await advanceDebateSession(
+        forumDb,
+        "user-1",
+        forum.id,
+        {
+          expectedRevision: forum.revision,
+          idempotencyKey: "debate.advance:forum-production:0001",
+        },
+        runtimeWith(forumProvider),
+      );
+      assert.match(forumProvider.speechPrompt, /Production voice — Assembly Chamber/u);
+      assert.match(forumProvider.speechPrompt, /live parliamentary forum/u);
+      assert.match(forumProvider.speechPrompt, /neutral chair/u);
+      assert.match(forumProvider.speechPrompt, /motion before the chamber/u);
+      assert.doesNotMatch(forumProvider.speechPrompt, /Production voice — Court of Record/u);
+    } finally {
+      forumDb.close();
+    }
+
+    const turnaboutDb = createTestDb();
+    try {
+      const turnaboutProvider = new PersonaVoicePromptProvider();
+      let turnabout = await createTurnaboutForRole(
+        turnaboutDb,
+        "judge",
+        runtimeWith(turnaboutProvider),
+      );
+      turnabout = await advanceDebateSession(
+        turnaboutDb,
+        "user-1",
+        turnabout.id,
+        {
+          expectedRevision: turnabout.revision,
+          idempotencyKey: "debate.advance:turnabout-production:0001",
+        },
+        runtimeWith(turnaboutProvider),
+      );
+      assert.match(turnaboutProvider.speechPrompt, /Production voice — Court of Record/u);
+      assert.match(turnaboutProvider.speechPrompt, /heightened courtroom examination/u);
+      assert.match(turnaboutProvider.speechPrompt, /neutral presiding judge/u);
+      assert.match(turnaboutProvider.speechPrompt, /sustained or overruled only for an actual recorded ruling/u);
+      assert.doesNotMatch(turnaboutProvider.speechPrompt, /Production voice — Assembly Chamber/u);
+
+      assert.match(
+        debateSource,
+        /Voice the reason as a concise Assembly Chamber finding/u,
+      );
+      assert.match(
+        debateSource,
+        /Voice the reason as a concise finding from the Court of Record/u,
+      );
+      assert.doesNotMatch(debateSource, /Phoenix Wright|Ace Attorney/iu);
+    } finally {
+      turnaboutDb.close();
+    }
+  });
+
   it("freezes one runtime model for the session instead of bot model fields", async () => {
     const db = createTestDb();
     try {
@@ -680,6 +903,7 @@ describe("Debate engine", () => {
       delete legacy.format;
       delete legacy.formatVersion;
       delete legacy.formatState;
+      delete legacy.endedEarlyAt;
       db.prepare(
         "UPDATE debate_sessions SET session_json = ? WHERE id = ?",
       ).run(JSON.stringify(legacy), created.id);
@@ -687,7 +911,148 @@ describe("Debate engine", () => {
       const restored = getDebateSession(db, "user-1", created.id);
       assert.equal(restored.format, "forum");
       assert.deepEqual(restored.formatState, { version: 1, format: "forum" });
+      assert.equal(restored.endedEarlyAt, null);
       assert.equal(listDebateSessions(db, "user-1")[0]?.format, "forum");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets a Judge call an idempotent early conclusion and rule from the limited record", async () => {
+    const db = createTestDb();
+    try {
+      let session = await createJudgeDebate(db);
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "early-judge:intro:0001",
+        },
+        runtime(),
+      );
+      const request = {
+        expectedRevision: session.revision,
+        idempotencyKey: "early-judge:conclude:0001",
+      };
+      session = endDebateSessionEarly(db, "user-1", session.id, request);
+      const replay = endDebateSessionEarly(
+        db,
+        "user-1",
+        session.id,
+        request,
+      );
+
+      assert.equal(replay.revision, session.revision);
+      assert.equal(session.phase, "verdict");
+      assert.equal(session.status, "waiting_for_player");
+      assert.equal(session.stepKey, "verdict_player");
+      assert.ok(session.endedEarlyAt);
+      assert.equal(session.events.at(-1)?.stepKey, "early_conclusion");
+      assert.match(
+        session.events.at(-1)?.content ?? "",
+        /limited public record heard so far/u,
+      );
+
+      session = submitDebateVerdict(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "early-judge:verdict:0001",
+        sideId: "for",
+        reason: "The limited record favored the affirmative.",
+      });
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `early-judge:ballot:${mutation}`,
+          },
+          runtime(),
+        );
+        assert.ok(mutation < 8);
+      }
+      assert.equal(session.winnerSideId, "for");
+      assert.equal(session.ballots.length, 3);
+      assert.ok(session.endedEarlyAt);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("sends an early Spectator Debate directly through brief limited-record ballots", async () => {
+    const db = createTestDb();
+    try {
+      let session = await createDebateForRole(db, "spectator");
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "early-spectator:intro:0001",
+        },
+        runtime(),
+      );
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "early-spectator:conclude:0001",
+      });
+      assert.equal(session.phase, "verdict");
+      assert.equal(session.status, "live");
+      assert.equal(session.stepKey, "ballot_moderator");
+
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `early-spectator:ballot:${mutation}`,
+          },
+          runtime(),
+        );
+        assert.ok(mutation < 8);
+      }
+      assert.equal(session.ballots.length, 3);
+      assert.equal(session.winnerSideId, "for");
+      assert.match(
+        debateSource,
+        /The proceeding ended early\. Judge only the limited public record/u,
+      );
+      assert.match(
+        debateSource,
+        /maxTokens: session\.endedEarlyAt \? 140 : 220/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("moves an early Turnabout into a clean resolution state", async () => {
+    const db = createTestDb();
+    try {
+      let session = await createTurnaboutForRole(db, "judge");
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "early-turnabout:conclude:0001",
+      });
+      assert.equal(session.stepKey, "turnabout_verdict_player");
+      assert.equal(session.status, "waiting_for_player");
+      assert.equal(session.formatState.format, "turnabout");
+      if (session.formatState.format !== "turnabout") {
+        assert.fail("Turnabout state should stay discriminated.");
+      }
+      assert.equal(session.formatState.phase, "resolution");
+      assert.equal(session.formatState.activeStatementId, null);
+      assert.equal(session.formatState.floorOwnerBotId, null);
     } finally {
       db.close();
     }
@@ -1038,11 +1403,10 @@ describe("Debate engine", () => {
     }
   });
 
-  it("replaces unsupported evidence-like testimony with a record-bound claim", async () => {
+  it("repairs unsupported testimony without attributing a generic fallback to the persona", async () => {
     const db = createTestDb();
-    const debateRuntime = runtimeWith(
-      new FabricatedTurnaboutTestimonyProvider(),
-    );
+    const provider = new FabricatedTurnaboutTestimonyProvider();
+    const debateRuntime = runtimeWith(provider);
     try {
       let session = await createTurnaboutForRole(
         db,
@@ -1074,13 +1438,16 @@ describe("Debate engine", () => {
         assert.fail("Turnabout state should stay discriminated.");
       }
       assert.equal(session.formatState.statements.length, 2);
+      assert.equal(provider.repairCount, 2);
       assert.ok(
         session.formatState.statements.every(
           (statement) =>
             !/47%|19 minutes|according to a new study/iu.test(
               statement.content,
             ) &&
-            /no independent evidence/iu.test(statement.content),
+            !/no independent evidence|asks the record to test/iu.test(
+              statement.content,
+            ),
         ),
       );
       assert.notEqual(

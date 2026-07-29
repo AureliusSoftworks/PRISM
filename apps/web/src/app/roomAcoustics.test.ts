@@ -4,6 +4,9 @@ import {
   DEBATE_FORUM_FOLEY_ROOM_SEND,
   DEBATE_FORUM_ROOM_PROFILE,
   DEBATE_FORUM_VOICE_ROOM_SEND,
+  DEBATE_TURNABOUT_FOLEY_ROOM_SEND,
+  DEBATE_TURNABOUT_ROOM_PROFILE,
+  DEBATE_TURNABOUT_VOICE_ROOM_SEND,
   SIGNAL_STUDIO_FOLEY_ROOM_SEND,
   SIGNAL_STUDIO_ROOM_PROFILE,
   SIGNAL_STUDIO_VOICE_ROOM_SEND,
@@ -21,6 +24,29 @@ describe("Debate forum room acoustics", () => {
     assert.ok(DEBATE_FORUM_VOICE_ROOM_SEND.wet <= 0.06);
     assert.ok(
       DEBATE_FORUM_FOLEY_ROOM_SEND.wet > DEBATE_FORUM_VOICE_ROOM_SEND.wet,
+    );
+  });
+
+  it("gives Turnabout a distinct larger Court of Record response", () => {
+    assert.notEqual(
+      DEBATE_TURNABOUT_ROOM_PROFILE.id,
+      DEBATE_FORUM_ROOM_PROFILE.id,
+    );
+    assert.ok(
+      DEBATE_TURNABOUT_ROOM_PROFILE.durationSeconds >
+        DEBATE_FORUM_ROOM_PROFILE.durationSeconds,
+    );
+    assert.ok(
+      DEBATE_TURNABOUT_ROOM_PROFILE.preDelaySeconds >
+        DEBATE_FORUM_ROOM_PROFILE.preDelaySeconds,
+    );
+    assert.ok(
+      DEBATE_TURNABOUT_VOICE_ROOM_SEND.wet >
+        DEBATE_FORUM_VOICE_ROOM_SEND.wet,
+    );
+    assert.ok(
+      DEBATE_TURNABOUT_FOLEY_ROOM_SEND.wet >
+        DEBATE_TURNABOUT_VOICE_ROOM_SEND.wet,
     );
   });
 });

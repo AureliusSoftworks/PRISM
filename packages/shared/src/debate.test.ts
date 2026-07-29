@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
+  DEBATE_FORMAT_CATALOG,
+  DEBATE_FORMATS,
   DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_MOTION_MAX_LENGTH,
   defaultDebateFormatStateV1,
@@ -15,6 +17,46 @@ import {
   normalizeDebateMotionSlateV1,
   sanitizeDebateStatementSources,
 } from "./debate.ts";
+
+test("separates executable Debate formats from visible future productions", () => {
+  assert.deepEqual(
+    DEBATE_FORMATS.map((format) => format.id),
+    ["forum", "turnabout"],
+  );
+  assert.deepEqual(
+    DEBATE_FORMAT_CATALOG.map(
+      ({ id, productionName, availability }) => ({
+        id,
+        productionName,
+        availability,
+      }),
+    ),
+    [
+      {
+        id: "forum",
+        productionName: "Assembly Chamber",
+        availability: "available",
+      },
+      {
+        id: "turnabout",
+        productionName: "Court of Record",
+        availability: "available",
+      },
+      {
+        id: "flyting",
+        productionName: "Mead Hall",
+        availability: "coming_soon",
+      },
+      {
+        id: "cypher",
+        productionName: "The Cypher",
+        availability: "coming_soon",
+      },
+    ],
+  );
+  assert.equal(normalizeDebateFormatId("flyting"), "forum");
+  assert.equal(normalizeDebateFormatId("cypher"), "forum");
+});
 
 test("defaults legacy Debate records to Forum and normalizes Turnabout state", () => {
   assert.equal(normalizeDebateFormatId(undefined), "forum");

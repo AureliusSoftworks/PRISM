@@ -1054,6 +1054,7 @@ import {
   type BotcastMessage,
   type CrosstalkReclaimPlanV1,
   type DirectionalIrritationDeliveryPlanV1,
+  type DebateFormatId,
   type ListenerReactionPlanV1,
   type ModelPreparationFailure,
   type ModelPreparationResponse,
@@ -1147,6 +1148,7 @@ import type {
 } from "./voiceEffects";
 import {
   DEBATE_FORUM_VOICE_ROOM_SEND,
+  DEBATE_TURNABOUT_VOICE_ROOM_SEND,
   SIGNAL_STUDIO_VOICE_ROOM_SEND,
   type RoomAcousticsSend,
 } from "./roomAcoustics";
@@ -61732,6 +61734,7 @@ function HomeContent(): React.JSX.Element {
       voiceLevel: number,
       stereoPan = 0,
       playbackSurface: "signal" | "debate" = "signal",
+      debateFormat: DebateFormatId | null = null,
     ): Promise<boolean> => {
       const voiceSelection = voicePlaybackSelectionRef.current;
       const playerVoice = botSummary.producerGuest === true;
@@ -61815,7 +61818,9 @@ function HomeContent(): React.JSX.Element {
           : `debate:${message.episodeId}:${message.id}`;
       const voiceRoomAcoustics =
         playbackSurface === "debate"
-          ? DEBATE_FORUM_VOICE_ROOM_SEND
+          ? debateFormat === "turnabout"
+            ? DEBATE_TURNABOUT_VOICE_ROOM_SEND
+            : DEBATE_FORUM_VOICE_ROOM_SEND
           : SIGNAL_STUDIO_VOICE_ROOM_SEND;
       const requestedEngine: EnglishVoiceEngine | null =
         voiceSelection.voiceMode === "english"
@@ -128516,6 +128521,7 @@ function HomeContent(): React.JSX.Element {
             ? 0.36
             : 0,
         "debate",
+        utterance.format,
       );
     };
     return (

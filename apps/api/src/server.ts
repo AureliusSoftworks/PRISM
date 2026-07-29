@@ -187,6 +187,7 @@ import {
   advanceDebateSession,
   checkDebateAdvocacyRoles,
   createDebateSession,
+  endDebateSessionEarly,
   getDebateSession,
   listDebateSessions,
   pauseDebateSession,
@@ -10470,6 +10471,16 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         ctx.params.id,
         ctx.body as Parameters<typeof pauseDebateSession>[3],
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/end-early", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = endDebateSessionEarly(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof endDebateSessionEarly>[3],
       );
       json(ctx.res, 200, { ok: true, session });
     }),

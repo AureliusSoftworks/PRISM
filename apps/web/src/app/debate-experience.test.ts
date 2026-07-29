@@ -109,10 +109,17 @@ describe("Debate experience", () => {
 
   it("keeps Forum default while exposing a real Turnabout format contract", () => {
     assert.match(source, /useState<DebateFormatId>\("forum"\)/u);
-    assert.match(source, /DEBATE_FORMATS\.map/u);
+    assert.match(source, /DEBATE_FORMAT_CATALOG\.map/u);
     assert.match(source, /data-tutorial-target="debate-format"/u);
-    assert.match(source, /Opening · Challenge · Rebuttal · Closing/u);
-    assert.match(source, /Press · Object · Present Evidence/u);
+    assert.match(source, /option\.productionName/u);
+    assert.match(source, /option\.cadence/u);
+    assert.match(source, /data-availability=\{option\.availability\}/u);
+    assert.match(source, /disabled=\{option\.availability === "coming_soon"\}/u);
+    assert.match(source, />\s*Coming later\s*</u);
+    assert.match(
+      source,
+      /if \(option\.availability !== "available"\) return;/u,
+    );
     assert.match(source, /format,\s+motion,/u);
     assert.match(source, /\/turnabout-action/u);
     assert.match(source, /submitTurnaboutAction\("press"/u);
@@ -125,6 +132,10 @@ describe("Debate experience", () => {
     assert.match(source, /Return to a proceeding/u);
     assert.match(source, /"The record"/u);
     assert.match(css, /\.formatPicker/u);
+    assert.match(
+      css,
+      /\.formatPicker label\[data-availability="coming_soon"\]/u,
+    );
     assert.match(css, /\.turnaboutRecord/u);
     assert.match(css, /\.turnaboutActions/u);
     assert.match(
@@ -133,6 +144,22 @@ describe("Debate experience", () => {
     );
     assert.match(css, /turnaboutActions:has\(\.turnaboutEvidencePicker\)/u);
     assert.match(css, /data-debate-format="turnabout"/u);
+  });
+
+  it("routes Forum and Turnabout through distinct room responses", () => {
+    assert.match(
+      source,
+      /session\.format === "turnabout"[\s\S]{0,120}DEBATE_TURNABOUT_FOLEY_ROOM_SEND[\s\S]{0,120}DEBATE_FORUM_FOLEY_ROOM_SEND/u,
+    );
+    assert.match(source, /format: next\.format/u);
+    assert.match(
+      page,
+      /debateFormat === "turnabout"[\s\S]{0,120}DEBATE_TURNABOUT_VOICE_ROOM_SEND[\s\S]{0,120}DEBATE_FORUM_VOICE_ROOM_SEND/u,
+    );
+    assert.match(
+      page,
+      /"debate",\s*utterance\.format,/u,
+    );
   });
 
   it("keeps Debate voice playback enabled when optional effects are off", () => {
@@ -232,6 +259,12 @@ describe("Debate experience", () => {
       css,
       /\.dashboard \.researchBox\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(280px,\s*1fr\) auto/u,
     );
+    assert.match(source, /\/end-early/u);
+    assert.match(source, />\s*End early\s*</u);
+    assert.match(source, /role="alertdialog"/u);
+    assert.match(source, /limited public record heard so far/u);
+    assert.match(source, /disabled=\{busy \|\| presenting\}/u);
+    assert.match(css, /\.liveControls \.endEarlyButton/u);
   });
 
   it("keeps stable tutorial targets across the complete Duel workflow", () => {
@@ -279,6 +312,20 @@ describe("Debate experience", () => {
         /const DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS = new Set\(\[([\s\S]*?)\]\);/u,
       )?.[1] ?? "";
     assert.doesNotMatch(visibleKinds, /"ballot"|"verdict"/u);
+  });
+
+  it("presents the debate title at the top and spoken captions at the bottom", () => {
+    assert.match(source, /data-debate-stage-title="true"/u);
+    assert.match(source, /className=\{styles\.stageTitle\}/u);
+    assert.match(source, /className=\{styles\.liveCaption\}/u);
+    assert.match(source, /data-debate-live-caption="true"/u);
+    assert.match(source, /debateSpokenText\(activePublicContent\)\.trim\(\)/u);
+    assert.match(
+      source,
+      /<strong>\{visibleEventName\(session, activeEvent\)\}<\/strong>/u,
+    );
+    assert.match(css, /\.stageTitle\s*\{[^}]*top:\s*11px/u);
+    assert.match(css, /\.liveCaption\s*\{[^}]*bottom:\s*4\.5%/u);
   });
 
   it("raises player actions in a full-width command deck without reflowing proceedings", () => {
@@ -613,7 +660,7 @@ describe("Debate experience", () => {
     assert.match(page, /avatarState\.foleyMouthShape \?\? "closed"/u);
     assert.match(page, /DEBATE_FORUM_VOICE_ROOM_SEND/u);
     assert.match(page, /playbackSurface === "debate"/u);
-    assert.match(page, /"debate",\s*\);/u);
+    assert.match(page, /"debate",\s*utterance\.format,\s*\);/u);
   });
 
   it("directs an instant Auto camera and four manual cameras without breaking podium occlusion", () => {

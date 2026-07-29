@@ -24,6 +24,10 @@ export const DEBATE_CASE_CARDS_PER_SIDE = 4;
 export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
 
 export type DebateFormatId = "forum" | "turnabout";
+export type DebateFormatCatalogId =
+  | DebateFormatId
+  | "flyting"
+  | "cypher";
 export type DebatePlayerRole = "judge" | "participant" | "spectator";
 export type DebateSideId = "for" | "against";
 export type DebatePhase =
@@ -53,23 +57,69 @@ export type DebateBotRole = "moderator" | "advocate";
 export interface DebateFormatDescriptorV1 {
   id: DebateFormatId;
   name: string;
+  productionName: string;
   summary: string;
+  cadence: string;
+  availability: "available";
 }
 
-export const DEBATE_FORMATS: readonly DebateFormatDescriptorV1[] = [
+export interface DebateFormatPreviewDescriptorV1 {
+  id: Exclude<DebateFormatCatalogId, DebateFormatId>;
+  name: string;
+  productionName: string;
+  summary: string;
+  cadence: string;
+  availability: "coming_soon";
+}
+
+export type DebateFormatCatalogEntryV1 =
+  | DebateFormatDescriptorV1
+  | DebateFormatPreviewDescriptorV1;
+
+export const DEBATE_FORMAT_CATALOG: readonly DebateFormatCatalogEntryV1[] = [
   {
     id: "forum",
     name: "Forum",
+    productionName: "Assembly Chamber",
     summary:
-      "A structured civic duel of openings, challenges, rebuttals, closings, and verdict.",
+      "A parliamentary forum of opening addresses, direct challenges, rebuttals, and a motion carried or defeated.",
+    cadence: "Opening address · Challenge · Rebuttal · Closing",
+    availability: "available",
   },
   {
     id: "turnabout",
     name: "Turnabout",
+    productionName: "Court of Record",
     summary:
-      "A theatrical record examination built around pressable testimony and frozen-evidence objections.",
+      "An original theatrical courtroom examination built around pressable testimony and frozen-evidence objections.",
+    cadence: "Testimony · Press · Object · Ruling",
+    availability: "available",
+  },
+  {
+    id: "flyting",
+    name: "Flyting",
+    productionName: "Mead Hall",
+    summary:
+      "A ritual contest of boast, insult, answering verse, and crowd acclamation.",
+    cadence: "Boast · Flyte · Rejoinder · Acclamation",
+    availability: "coming_soon",
+  },
+  {
+    id: "cypher",
+    name: "Cypher",
+    productionName: "The Cypher",
+    summary:
+      "A beat-led rap battle shaped by verses, rebuttal bars, and the room's response.",
+    cadence: "Verse · Rebuttal · Counter · Final bar",
+    availability: "coming_soon",
   },
 ] as const;
+
+export const DEBATE_FORMATS: readonly DebateFormatDescriptorV1[] =
+  DEBATE_FORMAT_CATALOG.filter(
+    (entry): entry is DebateFormatDescriptorV1 =>
+      entry.availability === "available",
+  );
 
 export type DebateTurnaboutPhase =
   | "testimony"
@@ -310,6 +360,7 @@ export interface DebateSessionV1 {
   error: string | null;
   createdAt: string;
   updatedAt: string;
+  endedEarlyAt: string | null;
   completedAt: string | null;
 }
 

@@ -54,7 +54,13 @@ describe("mode tutorials", () => {
       /grounded statement excerpt and frozen-evidence excerpt/u,
     );
     assert.match(copy, /never reads or writes relationship memory/u);
+    assert.match(copy, /opens in the Assembly Chamber/u);
+    assert.match(copy, /enters the Court of Record/u);
+    assert.match(copy, /Flyting and Cypher are visible as coming-later/u);
+    assert.match(copy, /cannot be selected or sent to the server/u);
     assert.match(copy, /pause and resume the exact next action/u);
+    assert.match(copy, /End early skips the remaining rounds/u);
+    assert.match(copy, /limited public record already heard/u);
     assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
     assert.match(copy, /fallback chain saved in Settings/u);
     assert.match(copy, /every generated statement and ballot records/u);

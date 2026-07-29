@@ -21,10 +21,12 @@ import {
   normalizeDebateEvidencePacketV1,
   normalizeDebateIdempotencyKey,
   normalizeDebateMotionSlateV1,
+  parseStoredBotPrompt,
   parseStoredBotAudioVoiceProfileV1,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotPowersV1,
   sanitizeDebateStatementSources,
+  stripBotProfileMetaSuffix,
   strongestBotPowerResponseBudgetEffectV1,
   type AutoFallbackModelRef,
   type AutoRecoveryTraceV1,
@@ -153,6 +155,30 @@ const DEBATE_CRITERIA =
   "directness, responsiveness, evidence use, concessions, and clarity";
 const TURNABOUT_CRITERIA =
   "record consistency, grounded evidence use, responsive clarification, concessions, and clarity";
+
+function debateProductionPrompt(
+  format: DebateFormatId,
+  role: DebateBotSnapshotV1["role"],
+): string {
+  if (format === "turnabout") {
+    return [
+      "Production voice — Court of Record: this is an original, heightened courtroom examination. Keep the language taut, immediate, theatrical, and bound to the public record as pressure builds.",
+      role === "moderator"
+        ? "You are the neutral presiding judge. Control the room with concise judicial authority; refer naturally to the court, the record, the active statement, and the evidence. Use sustained or overruled only for an actual recorded ruling."
+        : "You are an advocate giving or defending testimony under examination. Answer the exact statement under pressure, with decisive turns and earned reversals rather than generic debate speech.",
+      "Never imitate a named character or game, quote a signature catchphrase, or borrow protected writing or presentation.",
+      "The production changes cadence and procedural vocabulary, not frozen evidence, formal identity, floor ownership, ballots, the persona's own voice, or the persona's reasoning ability.",
+    ].join("\n");
+  }
+  return [
+    "Production voice — Assembly Chamber: this is a live parliamentary forum. Keep the language measured, public-minded, procedurally crisp, and rhetorically energetic.",
+    role === "moderator"
+      ? "You are the neutral chair. Call the chamber to order, state the motion before the chamber, recognize each speaker, and yield or restore the floor without arguing either side."
+      : "You are a recognized member addressing the chamber. Speak to the motion, answer the opposing case directly, and use parliamentary address naturally without turning every sentence into ceremony.",
+    "Do not recast Forum as a courtroom: avoid witnesses, testimony, objections, evidence rulings, sustained, and overruled unless those words are themselves part of the public record.",
+    "The production changes cadence and procedural vocabulary, not frozen evidence, formal identity, floor ownership, ballots, the persona's own voice, or the persona's reasoning ability.",
+  ].join("\n");
+}
 
 function compactText(value: unknown, maxLength: number): string {
   return typeof value === "string"
@@ -436,7 +462,7 @@ async function roleCheck(
           bot.system_prompt,
           "",
           "This is a private advocacy consent check, not a public debate turn.",
-          `The proposed Debate format is ${format === "turnabout" ? "Turnabout: pressable testimony, frozen-evidence objections, and immediate moderator rulings" : "Forum: openings, challenges, rebuttals, closings, and a verdict"}.`,
+          `The proposed Debate format is ${format === "turnabout" ? "Turnabout in the Court of Record: pressable testimony, frozen-evidence objections, and immediate neutral rulings" : "Forum in the Assembly Chamber: parliamentary opening addresses, challenges, rebuttals, closings, and a verdict"}.`,
           "Choose accept for an ordinary compatible assignment.",
           "Choose devils_advocate when the assignment conflicts with your likely beliefs but can be performed as an explicit role.",
           "Choose decline only for an authored boundary or severe defining-identity conflict. Mere disagreement is never enough.",
@@ -669,6 +695,8 @@ function parseSessionRow(
     winnerSideId: row.winner_side_id,
     error: row.error,
     updatedAt: row.updated_at,
+    endedEarlyAt:
+      typeof parsed.endedEarlyAt === "string" ? parsed.endedEarlyAt : null,
     completedAt: row.completed_at,
     events: eventRows(db, userId, row.id),
   };
@@ -888,6 +916,7 @@ export function createDebateSession(
     error: null,
     createdAt: now,
     updatedAt: now,
+    endedEarlyAt: null,
     completedAt: null,
   };
   db.prepare(
@@ -942,6 +971,8 @@ function mutationReplay(
     format,
     formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
     formatState: normalizeDebateFormatStateV1(parsed.formatState, format),
+    endedEarlyAt:
+      typeof parsed.endedEarlyAt === "string" ? parsed.endedEarlyAt : null,
   };
 }
 
@@ -1293,6 +1324,138 @@ function personaVoicePrompt(snapshot: DebateBotSnapshotV1): string {
   ].join("\n");
 }
 
+type DebatePersonaReasoningLevel = "concrete" | "everyday" | "advanced";
+
+interface DebatePersonaCapability {
+  reasoningLevel: DebatePersonaReasoningLevel;
+}
+
+const CONCRETE_PERSONA_STRONG_CUE =
+  /\b(?:simple-minded|dim-witted|slow-witted|unintelligent|low intelligence|not (?:very )?(?:smart|bright|intelligent)|easily confused|slow thinker)\b/giu;
+const CONCRETE_PERSONA_SUPPORTING_CUE =
+  /\b(?:literal-minded|naive|gullible|foolish|distractible|odd logic|goofy|airheaded|childlike|simple wording|limited vocabulary|avoid technical overconfidence|avoids? complex|confused by complex)\b/giu;
+const ADVANCED_PERSONA_CUE =
+  /\b(?:highly intelligent|brilliant|genius|expert reasoner|rigorous analyst|strategic thinker|trained (?:lawyer|scientist|researcher|philosopher)|legal scholar|academic expert)\b/iu;
+const CONCRETE_SPEECH_UPGRADE_CUE =
+  /\b(?:record-backed|frozen record (?:does not|doesn't) prove|strongest fit|best fits?|on balance|central tradeoff|decisive clash|scope of (?:my|the) claim|I concede|my claim is|the evidence (?:does not|doesn't) prove|inferential claim|judging criterion|weighing the evidence)\b/giu;
+
+function debatePersonaCapability(
+  snapshot: DebateBotSnapshotV1,
+): DebatePersonaCapability {
+  const profile = parseStoredBotPrompt(snapshot.systemPrompt).fields;
+  const description = [
+    stripBotProfileMetaSuffix(snapshot.systemPrompt),
+    profile.purpose.statement,
+    profile.purpose.legacyNotes,
+    profile.core.traits,
+    profile.core.boundaries,
+    profile.core.quirks,
+    profile.identity.background,
+    profile.identity.role,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  if (ADVANCED_PERSONA_CUE.test(description)) {
+    return { reasoningLevel: "advanced" };
+  }
+  const strongCues = description.match(CONCRETE_PERSONA_STRONG_CUE)?.length ?? 0;
+  const supportingCues =
+    description.match(CONCRETE_PERSONA_SUPPORTING_CUE)?.length ?? 0;
+  return {
+    reasoningLevel:
+      strongCues > 0 || supportingCues >= 2 ? "concrete" : "everyday",
+  };
+}
+
+function personaCapabilityPrompt(snapshot: DebateBotSnapshotV1): string {
+  const capability = debatePersonaCapability(snapshot);
+  const shared = [
+    "Persona capability is binding, not merely a writing style.",
+    "The Debate format supplies turn order and a topic; it must not grant this persona extra knowledge, intelligence, logic, self-awareness, strategic discipline, or rhetorical skill.",
+    "Use only reasoning and concepts this saved persona could independently notice, understand, and express. Do not turn source material or production direction into expertise they do not possess.",
+  ];
+  if (capability.reasoningLevel === "concrete") {
+    shared.push(
+      `Concrete reasoning ceiling for ${snapshot.name}: use short, everyday thoughts, one reason at a time.`,
+      "They may repeat an obvious fact from the packet, misunderstand complexity, get distracted, or use odd logic when that fits. Do not convert those traits into a polished multi-factor analysis.",
+      "Do not manufacture strategic concessions, careful scope narrowing, evidence weighing, formal distinctions, or debate meta-language. A brief accidental insight is fine; sustained expert reasoning is not.",
+    );
+  } else if (capability.reasoningLevel === "everyday") {
+    shared.push(
+      `${snapshot.name} may reason coherently at an everyday level, but should not become an expert analyst unless the saved persona explicitly supports it.`,
+    );
+  } else {
+    shared.push(
+      `${snapshot.name} may use sophisticated reasoning where the saved persona supports it, without borrowing knowledge outside the frozen packet.`,
+    );
+  }
+  return shared.join("\n");
+}
+
+function debatePersonaSpeechExceedsCapability(
+  snapshot: DebateBotSnapshotV1,
+  content: string,
+): boolean {
+  if (debatePersonaCapability(snapshot).reasoningLevel !== "concrete") {
+    return false;
+  }
+  const spoken = debateSpokenText(content).replace(/\s+/gu, " ").trim();
+  const words = spoken.match(/[\p{L}\p{N}’'-]+/gu)?.length ?? 0;
+  const sentences = spoken.match(/[^.!?]+(?:[.!?]+|$)/gu)?.length ?? 0;
+  const upgradedCues = spoken.match(CONCRETE_SPEECH_UPGRADE_CUE)?.length ?? 0;
+  return upgradedCues > 0 || words > 70 || sentences > 3;
+}
+
+async function repairPersonaCapabilityText(
+  session: DebateSessionV1,
+  snapshot: DebateBotSnapshotV1,
+  draft: string,
+  runtime: DebateAiRuntime,
+  purpose: "speech" | "ballot reason",
+): Promise<{ content: string; generation: DebateJsonGeneration } | null> {
+  try {
+    const generation = await generateJson(
+      lanesForSession(runtime, session),
+      [
+        {
+          role: "system",
+          content: [
+            snapshot.systemPrompt,
+            personaVoicePrompt(snapshot),
+            personaCapabilityPrompt(snapshot),
+            "This is a bounded persona-capability repair. Preserve the original stance and any valid frozen source markers, but discard analytical language the persona could not produce.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            `Persona capability repair for a ${purpose}.`,
+            "Rewrite the draft from scratch as one or two short sentences this persona could naturally think and say. Use everyday words and one simple reason. Add no facts.",
+            "",
+            "Draft:",
+            draft,
+            "",
+            'Return JSON only: {"content":"repaired text"}',
+          ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 180,
+        temperature: 0.35,
+        validate: (value) =>
+          typeof value.content === "string" &&
+          value.content.trim().length > 0,
+      },
+    );
+    const content = multilineText(generation.value.content, 1_200);
+    return content && !debatePersonaSpeechExceedsCapability(snapshot, content)
+      ? { content, generation }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function publicTranscript(
   session: DebateSessionV1,
   observerBotId?: string,
@@ -1402,7 +1565,7 @@ async function generateSpeech(
       silent: true,
     };
   }
-  const generation = await generateJson(
+  let deliveryGeneration = await generateJson(
     lanesForSession(runtime, session),
     [
       {
@@ -1412,19 +1575,16 @@ async function generateSpeech(
           "",
           session.format === "turnabout"
             ? "You are participating in PRISM Debate: Turnabout, a theatrical but record-bound examination."
-            : "You are participating in PRISM Debate: Forum, a short formal duel.",
+            : "You are participating in PRISM Debate: Forum, a parliamentary proceeding.",
+          debateProductionPrompt(session.format, snapshot.role),
           `Motion: ${session.motion.motion}`,
           `For brief: ${session.motion.forSide.brief}`,
           `Against brief: ${session.motion.againstSide.brief}`,
-          `Judging criteria: ${
-            session.format === "turnabout"
-              ? TURNABOUT_CRITERIA
-              : DEBATE_CRITERIA
-          }.`,
           "Use only the frozen prep packet below. Never claim live research.",
           "Cite a frozen source only as [[source:id]]. Never invent a source ID.",
-          "Concede fair points when warranted. Stay in your assigned formal role.",
+          "Stay in your assigned formal role, but perform it only as well as this persona naturally could.",
           personaVoicePrompt(snapshot),
+          personaCapabilityPrompt(snapshot),
           powerPrompt(session, snapshot.id),
           "",
           evidencePrompt(session.evidence),
@@ -1451,9 +1611,24 @@ async function generateSpeech(
         typeof value.content === "string" && value.content.trim().length > 0,
     },
   );
-  const result = generation.value;
+  const result = deliveryGeneration.value;
   let intended = multilineText(result.content, 6_000);
   if (!intended) throw new Error("The bot returned an empty debate turn.");
+  if (debatePersonaSpeechExceedsCapability(snapshot, intended)) {
+    const repaired = await repairPersonaCapabilityText(
+      session,
+      snapshot,
+      intended,
+      runtime,
+      "speech",
+    );
+    if (repaired) {
+      intended = repaired.content;
+      deliveryGeneration = repaired.generation;
+    } else {
+      intended = BOT_POWER_CANONICAL_SILENCE_V1;
+    }
+  }
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
   intended = applyBotPowerResponseBudgetV1(intended, responseBudget, 3);
   if (
@@ -1481,10 +1656,10 @@ async function generateSpeech(
     content: sanitized.content,
     sourceIds: sanitized.sourceIds,
     silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
-    provider: generation.provider,
-    model: generation.model,
-    ...(generation.autoRecovery
-      ? { autoRecovery: generation.autoRecovery }
+    provider: deliveryGeneration.provider,
+    model: deliveryGeneration.model,
+    ...(deliveryGeneration.autoRecovery
+      ? { autoRecovery: deliveryGeneration.autoRecovery }
       : {}),
   };
 }
@@ -1527,13 +1702,12 @@ function turnaboutFrozenRecordText(
   );
 }
 
-function turnaboutRecordBoundSpeech(
+function turnaboutRecordViolation(
   session: DebateSessionV1,
   speech: DebateSpeechGeneration,
-  fallback: string,
   additionalRecord = "",
-): DebateSpeechGeneration {
-  if (speech.silent) return speech;
+): boolean {
+  if (speech.silent) return false;
   const publicContent = debateSpokenText(speech.content);
   const frozenRecord = turnaboutFrozenRecordText(session, additionalRecord);
   const quantifiedClaims =
@@ -1545,16 +1719,37 @@ function turnaboutRecordBoundSpeech(
   const hasUnsupportedAttribution =
     TURNABOUT_EVIDENCE_ATTRIBUTION_PATTERN.test(publicContent) &&
     speech.sourceIds.length === 0;
-  if (!hasUnsupportedQuantity && !hasUnsupportedAttribution) return speech;
-  const sanitized = sanitizeDebateStatementSources(
-    fallback,
-    session.evidence,
+  return hasUnsupportedQuantity || hasUnsupportedAttribution;
+}
+
+async function turnaboutRecordBoundSpeech(
+  session: DebateSessionV1,
+  speaker: DebateBotSnapshotV1,
+  speech: DebateSpeechGeneration,
+  runtime: DebateAiRuntime,
+  additionalRecord = "",
+): Promise<DebateSpeechGeneration> {
+  if (!turnaboutRecordViolation(session, speech, additionalRecord)) {
+    return speech;
+  }
+  const repaired = await generateSpeech(
+    session,
+    speaker,
+    [
+      "Your previous draft could not enter the frozen record because it attributed unsupported evidence or used a quantity absent from the record.",
+      "Try once more in character. State one simpler claim already supported by the motion, side brief, public transcript, or a valid frozen source marker.",
+      "Do not mention the rejected draft, the repair, or missing evidence. Add no numbers or outside attribution.",
+    ].join(" "),
+    runtime,
   );
+  if (!turnaboutRecordViolation(session, repaired, additionalRecord)) {
+    return repaired;
+  }
   return {
-    ...speech,
-    content: sanitized.content,
-    sourceIds: sanitized.sourceIds,
-    silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
+    ...repaired,
+    content: BOT_POWER_CANONICAL_SILENCE_V1,
+    sourceIds: [],
+    silent: true,
   };
 }
 
@@ -2039,8 +2234,8 @@ function moderatorChallengeInstruction(
   sideId: DebateSideId,
 ): string {
   return [
-    `Ask one concise, difficult, even-handed challenge to the ${sideLabel(session, sideId)} side.`,
-    "Do not answer it. Target a vulnerability in the public argument so far.",
+    `Recognize the ${sideLabel(session, sideId)} side. Ask one concise, difficult, even-handed challenge.`,
+    "Do not answer it. Target a vulnerability in the public argument so far, then yield that side the floor.",
   ].join(" ");
 }
 
@@ -2359,14 +2554,25 @@ function botBallotPrompt(session: DebateSessionV1, voter: DebateBotSnapshotV1): 
     session.format === "turnabout"
       ? "Treat sustained and overruled objections exactly as the public moderator recorded them. Do not invent a contradiction or use an unpresented evidence item."
       : "",
+    session.endedEarlyAt
+      ? "The proceeding ended early. Judge only the limited public record that exists. Do not penalize either side for rounds that were never heard."
+      : "",
+    session.format === "turnabout"
+      ? "Voice the reason as a concise finding from the Court of Record: identify the decisive recorded statement, clarification, contradiction, or concession. Do not add courtroom theatrics to the canonical ruling."
+      : "Voice the reason as a concise Assembly Chamber finding: identify which side carried the motion through the public exchange. Do not use courtroom vocabulary.",
     "Do not use private intent, hidden speech, relationship memory, or numeric scoring.",
     personaVoicePrompt(voter),
+    personaCapabilityPrompt(voter),
     `Motion: ${session.motion.motion}`,
     `For label: ${session.motion.forSide.label}`,
     `Against label: ${session.motion.againstSide.label}`,
     "Public transcript:",
     publicTranscript(session, voter.id, false),
-    'Return JSON only: {"sideId":"for|against","reason":"one concise public reason"}.',
+    `Return JSON only: {"sideId":"for|against","reason":"${
+      session.endedEarlyAt
+        ? "one brief public sentence"
+        : "one concise public reason"
+    }"}.`,
     `You are ${voter.name}.`,
   ].join("\n");
 }
@@ -2376,7 +2582,7 @@ async function generateBallot(
   voter: DebateBotSnapshotV1,
   runtime: DebateAiRuntime,
 ): Promise<DebateBallotV1> {
-  const generation = await generateJson(
+  let deliveryGeneration = await generateJson(
     lanesForSession(runtime, session),
     [
       {
@@ -2389,25 +2595,46 @@ async function generateBallot(
       { role: "user", content: botBallotPrompt(session, voter) },
     ],
     {
-      maxTokens: 220,
+      maxTokens: session.endedEarlyAt ? 140 : 220,
       temperature: 0.2,
       validate: (value) =>
         value.sideId === "for" || value.sideId === "against",
     },
   );
-  const parsed = generation.value;
+  const parsed = deliveryGeneration.value;
   const sideId: DebateSideId = parsed.sideId === "against" ? "against" : "for";
   const muted = session.powerPlan.bots[voter.id]?.hardMuted === true;
+  let reason = compactText(parsed.reason, 600);
+  let capabilityRejected = false;
+  if (!muted && reason && debatePersonaSpeechExceedsCapability(voter, reason)) {
+    const repaired = await repairPersonaCapabilityText(
+      session,
+      voter,
+      reason,
+      runtime,
+      "ballot reason",
+    );
+    if (repaired) {
+      reason = compactText(repaired.content, 600);
+      deliveryGeneration = repaired.generation;
+    } else {
+      reason = "";
+      capabilityRejected = true;
+    }
+  }
   return {
     version: DEBATE_SCHEMA_VERSION,
     voterBotId: voter.id,
     sideId,
-    reason: muted ? null : compactText(parsed.reason, 600) || "That side made the clearer case.",
-    privateReason: muted,
-    provider: generation.provider,
-    model: generation.model,
-    ...(generation.autoRecovery
-      ? { autoRecovery: generation.autoRecovery }
+    reason:
+      muted || capabilityRejected
+        ? null
+        : reason || "That side made the clearer case.",
+    privateReason: muted || capabilityRejected,
+    provider: deliveryGeneration.provider,
+    model: deliveryGeneration.model,
+    ...(deliveryGeneration.autoRecovery
+      ? { autoRecovery: deliveryGeneration.autoRecovery }
       : {}),
     createdAt: new Date().toISOString(),
   };
@@ -2548,25 +2775,20 @@ async function generateTurnaboutTestimony(
       working,
       speaker,
       [
-        `Deliver testimony statement ${index + 1} of ${DEBATE_TURNABOUT_STATEMENTS_PER_SIDE} for ${sideLabel(session, sideId)}.`,
-        "Make one precise, independently pressable factual or inferential claim.",
+        `Deliver testimony statement ${index + 1} of ${DEBATE_TURNABOUT_STATEMENTS_PER_SIDE} for ${sideLabel(session, sideId)} into the Court of Record.`,
+        "State one claim this persona can actually notice and explain. It may be simple, literal, mistaken, or oddly reasoned when that fits the saved persona.",
         index === 0
-          ? "State the strongest foundation for this side."
-          : "Add a distinct claim that creates a real point of examination; do not repeat the first statement.",
+          ? "Give their own most natural reason for this side."
+          : "Add a different natural reason if this persona can think of one; do not force a sophisticated second line of argument.",
         "Keep it to 1-3 sentences. Use only the frozen record and cite frozen sources with valid markers.",
       ].join(" "),
       runtime,
     );
-    const sideBrief =
-      sideId === "for"
-        ? session.motion.forSide.brief
-        : session.motion.againstSide.brief;
-    const speech = turnaboutRecordBoundSpeech(
+    const speech = await turnaboutRecordBoundSpeech(
       session,
+      speaker,
       generatedSpeech,
-      index === 0
-        ? `${sideLabel(session, sideId)} enters this advocacy claim for examination: ${sideBrief} It adds no independent evidence to the frozen record.`
-        : `${sideLabel(session, sideId)} asks the record to test whether that position follows from the frozen motion: “${session.motion.motion}” No independent evidence is added.`,
+      runtime,
     );
     if (speech.silent) {
       const silence = makeEvent(working, {
@@ -2626,7 +2848,7 @@ async function pressTurnaboutStatement(
     sideId: actor === "player" ? session.playerSideId : null,
     content:
       actor === "moderator"
-        ? `The moderator presses statement ${statement.id.slice(0, 8)} for a clearer account.`
+        ? `The court presses statement ${statement.id.slice(0, 8)} for a clearer account.`
         : `Press statement ${statement.id.slice(0, 8)}: explain what this claim rests on.`,
     statementId: statement.id,
     parentEventId: statement.createdEventId,
@@ -2640,16 +2862,17 @@ async function pressTurnaboutStatement(
     speaker,
     [
       `Your recorded statement was: ${statement.content}`,
-      "It has been pressed.",
-      "Clarify the claim directly in 1-3 sentences.",
-      "You may narrow or concede it. Do not introduce evidence outside the frozen record.",
+      "The court has pressed it.",
+      "Answer only as well as this persona can understand the question, in 1-3 sentences.",
+      "Narrow or concede only if this persona would naturally recognize and express that move. Do not introduce evidence outside the frozen record.",
     ].join("\n"),
     runtime,
   );
-  const clarification = turnaboutRecordBoundSpeech(
+  const clarification = await turnaboutRecordBoundSpeech(
     session,
+    speaker,
     generatedClarification,
-    `The advocate narrows the answer to the recorded statement: ${debateSpokenText(statement.content)} No new evidence is added.`,
+    runtime,
     statement.content,
   );
   const clarificationEvent = makeEvent(withPress, {
@@ -2674,8 +2897,8 @@ async function pressTurnaboutStatement(
     speakerKind: "moderator",
     speakerBotId: session.moderator.id,
     content: clarification.silent
-      ? "The witness remains canonically silent. The original statement stays on the public record."
-      : "The clarification is entered. The original statement remains available for a frozen-evidence objection.",
+      ? "The court records canonical silence. The original statement remains on the public record."
+      : "Entered. The original statement remains subject to a frozen-evidence objection.",
     parentEventId: clarificationEvent.id,
     statementId: statement.id,
   });
@@ -2800,7 +3023,7 @@ async function advanceTurnaboutStep(
         session.moderator,
         null,
         [
-          "Open this Turnabout proceeding in 3-5 sentences.",
+          "Call the Court of Record to order and open this Turnabout in 3-5 sentences.",
           `State the exact motion and identify ${session.forAdvocate.name} and ${session.againstAdvocate.name}.`,
           "Explain that each side will enter two pressable statements, objections must identify one statement and one frozen evidence item, and you will rule immediately from the public record.",
           session.evidence.sources.length > 0
@@ -2910,8 +3133,8 @@ async function advanceTurnaboutStep(
           sideId: winnerSideId,
           content:
             session.playerRole === "judge"
-              ? `The Judge's ruling for ${sideLabel(session, winnerSideId)} resolves the Turnabout from the public record. Bot ballots remain an agreement-and-dissent epilogue.`
-              : `${sideLabel(session, winnerSideId)} carries the Turnabout by the three-bot public-record majority.`,
+              ? `From the public record, the Court finds for ${sideLabel(session, winnerSideId)}. The Judge's ruling resolves the Turnabout; bot ballots remain an agreement-and-dissent epilogue.`
+              : `On the public record, ${sideLabel(session, winnerSideId)} carries the Turnabout by the three-bot majority.`,
         },
       );
       return {
@@ -3071,8 +3294,8 @@ async function advanceStep(
         session.moderator,
         null,
         [
-          "Open the Duel in 3-5 sentences.",
-          `State the exact motion, introduce ${session.forAdvocate.name} for ${session.motion.forSide.label} and ${session.againstAdvocate.name} for ${session.motion.againstSide.label}, and name the judging criteria: ${DEBATE_CRITERIA}.`,
+          "Call the Assembly Chamber to order and open the Forum in 3-5 sentences.",
+          `State the exact motion as the question before the chamber, recognize ${session.forAdvocate.name} for ${session.motion.forSide.label} and ${session.againstAdvocate.name} for ${session.motion.againstSide.label}, and name the judging criteria: ${DEBATE_CRITERIA}.`,
           advocacyDisclosure(session),
         ].join(" "),
         runtime,
@@ -3083,7 +3306,7 @@ async function advanceStep(
         session,
         session.forAdvocate,
         "for",
-        `Give the ${session.motion.forSide.label} opening. Establish a focused thesis and the strongest frozen-evidence-supported case.`,
+        `Give the ${session.motion.forSide.label} opening address to the chamber. Establish a focused thesis and make the strongest frozen-evidence-supported case.`,
         runtime,
         (next) => ({ ...next, stepKey: "opening_against" }),
       );
@@ -3092,7 +3315,7 @@ async function advanceStep(
         session,
         session.againstAdvocate,
         "against",
-        `Respond with the ${session.motion.againstSide.label} opening. Establish a distinct thesis and engage what the For side actually said.`,
+        `Respond with the ${session.motion.againstSide.label} opening address to the chamber. Establish a distinct thesis and engage what the For side actually said.`,
         runtime,
         nextAfterOpening,
       );
@@ -3245,8 +3468,8 @@ async function advanceStep(
       return moderatorPhaseTransition(
         session,
         [
-          "Move the Duel into rebuttal in one or two concise sentences.",
-          "Name the central unresolved clash using only what was publicly said, then give the Against side the first rebuttal.",
+          "Move the Assembly Chamber into rebuttal in one or two concise sentences.",
+          "Name the central unresolved clash using only what was publicly said, then recognize the Against side for the first rebuttal.",
           "Do not judge either side, add evidence, or make an argument yourself.",
         ].join(" "),
         runtime,
@@ -3280,8 +3503,8 @@ async function advanceStep(
       return moderatorPhaseTransition(
         session,
         [
-          "Move the Duel into closing statements in one or two concise sentences.",
-          "Identify the single question still left for the verdict, call the Against closing first, and reserve the final reply for For.",
+          "Move the Assembly Chamber into closing addresses in one or two concise sentences.",
+          "Identify the single question still before the chamber, recognize the Against closing first, and reserve the final reply for For.",
           "Do not judge either side, introduce new material, or make an argument yourself.",
         ].join(" "),
         runtime,
@@ -3373,8 +3596,8 @@ async function advanceStep(
           sideId: winnerSideId,
           content:
             session.playerRole === "judge"
-              ? `The Judge's final ruling stands for ${sideLabel(session, winnerSideId)}. Bot ballots are an agreement and dissent epilogue only.`
-              : `${sideLabel(session, winnerSideId)} wins by the three-bot majority.`,
+              ? `The chair records the Judge's decision for ${sideLabel(session, winnerSideId)}. Bot ballots remain an agreement-and-dissent epilogue only.`
+              : `${sideLabel(session, winnerSideId)} carries the motion by the three-bot majority.`,
         },
       );
       return {
@@ -3693,15 +3916,16 @@ export async function submitDebateTurnaboutAction(
       "A frozen-evidence contradiction to your recorded statement was sustained.",
       `Statement excerpt: ${contradiction.statementQuote}`,
       `Evidence excerpt: ${contradiction.evidenceQuote}`,
-      "Respond with one concise reversal: concede, narrow, or reconcile the statement using only the public record.",
+      "Respond as well as this persona can understand the contradiction. Concede, narrow, or reconcile only if that is a move this persona could naturally make.",
       "Do not fabricate evidence, attack the ruling, or repeat the original claim unchanged.",
     ].join("\n"),
     runtime,
   );
-  const reversal = turnaboutRecordBoundSpeech(
+  const reversal = await turnaboutRecordBoundSpeech(
     session,
+    speaker,
     generatedReversal,
-    `The advocate withdraws “${contradiction.statementQuote}” in light of the frozen evidence “${contradiction.evidenceQuote}”. The remaining position rests only on the public record. [[source:${evidenceSourceId}]]`,
+    runtime,
     [
       statement.content,
       contradiction.statementQuote,
@@ -4077,6 +4301,80 @@ export function pauseDebateSession(
     }
     return { ...session, status: "paused" };
   });
+}
+
+export function endDebateSessionEarly(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: { expectedRevision: number; idempotencyKey: string },
+): DebateSessionV1 {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (
+    session.status === "completed" ||
+    session.status === "cancelled" ||
+    session.status === "failed"
+  ) {
+    throw new HttpError(409, "This Debate is already finished.");
+  }
+  if (
+    session.phase === "verdict" ||
+    session.stepKey.includes("verdict") ||
+    session.stepKey.includes("ballot")
+  ) {
+    throw new HttpError(409, "This Debate is already concluding.");
+  }
+
+  const endedEarlyAt = new Date().toISOString();
+  const stepKey =
+    session.format === "turnabout"
+      ? session.playerRole === "judge"
+        ? "turnabout_verdict_player"
+        : "turnabout_ballot_moderator"
+      : session.playerRole === "judge"
+        ? "verdict_player"
+        : "ballot_moderator";
+  const concludingSession: DebateSessionV1 = {
+    ...session,
+    phase: "verdict",
+    stepKey,
+    status: statusForStep(stepKey),
+    endedEarlyAt,
+    error: null,
+  };
+  const nextSession =
+    session.format === "turnabout"
+      ? withTurnaboutState(concludingSession, {
+          ...turnaboutState(session),
+          phase: "resolution",
+          activeStatementId: null,
+          floorOwnerBotId:
+            session.playerRole === "judge" ? null : session.moderator.id,
+        })
+      : concludingSession;
+  const event = makeEvent(nextSession, {
+    kind: "phase",
+    speakerKind: "system",
+    stepKey: "early_conclusion",
+    content:
+      session.format === "turnabout"
+        ? session.playerRole === "judge"
+          ? "The Court of Record closes examination early. The Judge must rule from the limited public record heard so far."
+          : "The Court of Record closes examination early. The panel will decide from the limited public record heard so far."
+        : session.playerRole === "judge"
+          ? "The Assembly Chamber closes debate early. The Judge must decide which side carried the motion on the limited public record heard so far."
+          : "The Assembly Chamber closes debate early. The panel will decide which side carried the motion on the limited public record heard so far.",
+  });
+  return commitMutation(
+    db,
+    userId,
+    session,
+    nextSession,
+    checked.idempotencyKey,
+    [event],
+  );
 }
 
 export function resumeDebateSession(
