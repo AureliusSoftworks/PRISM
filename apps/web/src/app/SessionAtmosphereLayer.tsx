@@ -18,6 +18,7 @@ export interface SessionAtmosphereLayerProps {
   volume: number;
   backgroundUrl?: string | null;
   grainUrl?: string | null;
+  preloadFoleyUrls?: readonly string[];
   mix?: SessionAtmosphereMix;
   backgroundTone?: SessionAtmosphereBackgroundTone;
   foleyRoomAcoustics?: RoomAcousticsSend;
@@ -45,6 +46,7 @@ export function SessionAtmosphereLayer({
   volume,
   backgroundUrl,
   grainUrl,
+  preloadFoleyUrls,
   mix,
   backgroundTone = "neutral",
   foleyRoomAcoustics,
@@ -106,6 +108,7 @@ export function SessionAtmosphereLayer({
       onAmbientBotVocalization: (cue) =>
         ambientBotVocalizationRef.current?.(cue) === true,
     });
+    controller.preloadFoley(preloadFoleyUrls ?? []);
     controllerRef.current = controller;
     if (controllerHandleRef) controllerHandleRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
@@ -136,6 +139,7 @@ export function SessionAtmosphereLayer({
     controllerHandleRef,
     foleyRoomAcoustics,
     grainUrl,
+    preloadFoleyUrls,
     sessionKey,
   ]);
 

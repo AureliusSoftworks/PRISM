@@ -1118,7 +1118,8 @@ describe("Debate experience", () => {
     assert.match(source, /moderatorGavelFrameDown/u);
     assert.match(source, /moderatorGavelFrameUp/u);
     assert.match(source, /color=\{session\.moderator\.color/u);
-    assert.match(source, /DEBATE_GAVEL_IMPACT_DELAYS_MS\[cueKind\]/u);
+    assert.match(source, /preloadFoleyUrls=\{DEBATE_GAVEL_FOLEY_PRELOAD_URLS\}/u);
+    assert.match(source, /\}, 0\);/u);
     assert.match(source, /DEBATE_GAVEL_FOLEY_URLS\[cueKind\]/u);
     assert.match(source, /playFoley\(/u);
     assert.match(
@@ -1176,8 +1177,8 @@ describe("Debate experience", () => {
       "../../public/debate/moderator-gavel-dark-up.png",
       "../../public/debate/moderator-gavel-light-down.png",
       "../../public/debate/moderator-gavel-light-up.png",
-      "../../public/audio/debate/gavel-attention-v2.wav",
-      "../../public/audio/debate/gavel-order-v2.wav",
+      "../../public/audio/debate/gavel-attention-v3.wav",
+      "../../public/audio/debate/gavel-order-v3.wav",
     ]) {
       assert.equal(
         existsSync(fileURLToPath(new URL(relativePath, import.meta.url))),

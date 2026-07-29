@@ -313,6 +313,69 @@ test("Signal can disable generic ambient Foley while preserving synchronized cue
   }
 });
 
+test("preloaded Foley starts from the prepared element without cue-time loading", () => {
+  const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const instances: Array<{
+    loadCalls: number;
+    playCalls: number;
+    src: string;
+  }> = [];
+  class FakeAudio {
+    readonly src: string;
+    preload = "";
+    loop = false;
+    volume = 1;
+    loadCalls = 0;
+    playCalls = 0;
+    constructor(src: string) {
+      this.src = src;
+      instances.push(this);
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    play(): Promise<void> {
+      this.playCalls += 1;
+      return Promise.resolve();
+    }
+    pause(): void {}
+    removeAttribute(): void {}
+    load(): void {
+      this.loadCalls += 1;
+    }
+  }
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: FakeAudio,
+  });
+  try {
+    const controller = startSessionAtmosphere({
+      seed: "preloaded-foley",
+      volume: 1,
+      mix: { background: 0, grain: 0, foley: 0.5 },
+      ambientFoley: false,
+    });
+    controller.preloadFoley(["/audio/debate/gavel-attention-v3.wav"]);
+
+    assert.equal(instances.length, 1);
+    assert.equal(instances[0]?.src, "/audio/debate/gavel-attention-v3.wav");
+    assert.equal(instances[0]?.loadCalls, 1);
+    assert.equal(instances[0]?.playCalls, 0);
+
+    controller.playFoley("/audio/debate/gavel-attention-v3.wav");
+    assert.equal(instances.length, 2);
+    assert.equal(instances[0]?.playCalls, 1);
+    assert.equal(instances[1]?.loadCalls, 1);
+    assert.equal(instances[1]?.playCalls, 0);
+    controller.stop();
+  } finally {
+    if (originalAudio) {
+      Object.defineProperty(globalThis, "Audio", originalAudio);
+    } else {
+      Reflect.deleteProperty(globalThis, "Audio");
+    }
+  }
+});
+
 test("session atmosphere exposes bundled studio and cup-synced foley assets", () => {
   assert.equal(
     DEFAULT_STUDIO_ATMOSPHERE_URL,

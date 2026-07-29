@@ -233,6 +233,7 @@ export function sessionAmbientBotVocalizationTargetId(
 
 export interface SessionAtmosphereController {
   playCue(cue: SessionAtmosphereCue): void;
+  preloadFoley(urls: readonly string[]): void;
   playFoley(
     url: string,
     options?: SessionAtmosphereFoleyPlaybackOptions,
@@ -589,6 +590,7 @@ export function startSessionAtmosphere(args: {
   >();
   const activeLoops = new Set<SessionAtmosphereActiveLoop>();
   const pendingLoopLoads = new Set<AbortController>();
+  const preloadedFoley = new Map<string, HTMLAudioElement[]>();
   let stopped = false;
   let timer: number | null = null;
   let botVocalizationTimer: number | null = null;
@@ -631,6 +633,22 @@ export function startSessionAtmosphere(args: {
     }
   };
 
+  const primeFoley = (url: string): void => {
+    const normalizedUrl = url.trim();
+    if (
+      stopped ||
+      !normalizedUrl ||
+      typeof Audio === "undefined" ||
+      (preloadedFoley.get(normalizedUrl)?.length ?? 0) > 0
+    ) {
+      return;
+    }
+    const audio = new Audio(normalizedUrl);
+    audio.preload = "auto";
+    audio.load();
+    preloadedFoley.set(normalizedUrl, [audio]);
+  };
+
   const play = (
     url: string,
     bus: SessionAtmosphereBus,
@@ -639,7 +657,10 @@ export function startSessionAtmosphere(args: {
     if (stopped || typeof Audio === "undefined") return null;
     const trim = Math.max(0, options.trim ?? 1);
     const loop = options.loop === true;
-    const audio = new Audio(url);
+    const queued = preloadedFoley.get(url);
+    const audio = queued?.shift() ?? new Audio(url);
+    if (queued && queued.length === 0) preloadedFoley.delete(url);
+    if (queued) primeFoley(url);
     audio.preload = "auto";
     audio.loop = loop;
     audio.playbackRate = Math.max(
@@ -822,6 +843,9 @@ export function startSessionAtmosphere(args: {
         { trim: cue === "coffeeSip" ? 1.25 : 1.0625 },
       );
     },
+    preloadFoley(urls) {
+      for (const url of new Set(urls)) primeFoley(url);
+    },
     playFoley(url, options = {}) {
       return play(url, "foley", options) !== null;
     },
@@ -892,6 +916,14 @@ export function startSessionAtmosphere(args: {
         source.leveler?.disconnect();
       }
       activeLoops.clear();
+      for (const queue of preloadedFoley.values()) {
+        for (const audio of queue) {
+          audio.pause();
+          audio.removeAttribute("src");
+          audio.load();
+        }
+      }
+      preloadedFoley.clear();
       for (const audio of [...activeAudio.keys()]) {
         audio.pause();
         audio.removeAttribute("src");

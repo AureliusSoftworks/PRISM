@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "@localai/shared";
 import {
   DEBATE_GAVEL_FOLEY_URLS,
-  DEBATE_GAVEL_IMPACT_DELAYS_MS,
+  DEBATE_GAVEL_VISUAL_IMPACT_MS,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -280,12 +280,27 @@ describe("Debate moderator gavel", () => {
     );
     assert.equal(
       DEBATE_GAVEL_FOLEY_URLS.attention,
-      "/audio/debate/gavel-attention-v2.wav",
+      "/audio/debate/gavel-attention-v3.wav",
     );
     assert.equal(
       DEBATE_GAVEL_FOLEY_URLS.order,
-      "/audio/debate/gavel-order-v2.wav",
+      "/audio/debate/gavel-order-v3.wav",
     );
+  });
+
+  it("keeps both active gavel cues available in the sound bench", () => {
+    const benchSource = readFileSync(
+      new URL("../../public/tools/sound-fx-bench.html", import.meta.url),
+      "utf8",
+    );
+
+    for (const [cue, path] of Object.entries(DEBATE_GAVEL_FOLEY_URLS)) {
+      assert.match(
+        benchSource,
+        new RegExp(`data-demo-cue="debate-gavel-${cue}"`),
+      );
+      assert.ok(benchSource.includes(path));
+    }
   });
 
   it("pins each PCM impact to its visual strike frame", () => {
@@ -295,10 +310,16 @@ describe("Debate moderator gavel", () => {
     const orderFirstPeakMs = loudestFrameMs(order, 0, 300);
     const orderSecondPeakMs = loudestFrameMs(order, 600, 1_050);
 
-    assert.ok(attentionPeakMs < 20);
-    assert.ok(orderFirstPeakMs < 20);
+    assert.ok(
+      attentionPeakMs >= DEBATE_GAVEL_VISUAL_IMPACT_MS.attention &&
+        attentionPeakMs <= DEBATE_GAVEL_VISUAL_IMPACT_MS.attention + 20,
+    );
+    assert.ok(
+      orderFirstPeakMs >= DEBATE_GAVEL_VISUAL_IMPACT_MS.order &&
+        orderFirstPeakMs <= DEBATE_GAVEL_VISUAL_IMPACT_MS.order + 20,
+    );
     assert.ok(Math.abs(orderSecondPeakMs - orderFirstPeakMs - 697) < 2);
-    assert.equal(DEBATE_GAVEL_IMPACT_DELAYS_MS.attention, 220);
-    assert.equal(DEBATE_GAVEL_IMPACT_DELAYS_MS.order, 272);
+    assert.equal(DEBATE_GAVEL_VISUAL_IMPACT_MS.attention, 220);
+    assert.equal(DEBATE_GAVEL_VISUAL_IMPACT_MS.order, 272);
   });
 });

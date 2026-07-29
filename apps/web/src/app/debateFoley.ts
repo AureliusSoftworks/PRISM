@@ -13,11 +13,11 @@ export interface DebateModeratorGavelCue {
 }
 
 export const DEBATE_GAVEL_FOLEY_URLS = {
-  attention: "/audio/debate/gavel-attention-v2.wav",
-  order: "/audio/debate/gavel-order-v2.wav",
+  attention: "/audio/debate/gavel-attention-v3.wav",
+  order: "/audio/debate/gavel-order-v3.wav",
 } as const satisfies Record<DebateModeratorGavelCueKind, string>;
 
-export const DEBATE_GAVEL_IMPACT_DELAYS_MS = {
+export const DEBATE_GAVEL_VISUAL_IMPACT_MS = {
   attention: 220,
   order: 272,
 } as const satisfies Record<DebateModeratorGavelCueKind, number>;

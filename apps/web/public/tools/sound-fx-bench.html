@@ -3332,6 +3332,17 @@
           <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="applause,laughter,gasp,rimshot"></span></div>
         </article>
 
+        <article class="demo-card" data-demo-tone="amber">
+          <div class="demo-card-head"><strong>Debate gavel</strong><span class="demo-mode-tag">Debate</span></div>
+          <div class="demo-mini">
+            <div class="demo-pad-grid">
+              <button class="demo-pad demo-action" type="button" data-demo-cue="debate-gavel-attention">Attention</button>
+              <button class="demo-pad demo-action" type="button" data-demo-cue="debate-gavel-order">Order</button>
+            </div>
+          </div>
+          <div class="demo-card-footer demo-assignment-only"><span class="demo-pool-state" data-pool-keys="debate-gavel-attention,debate-gavel-order"></span></div>
+        </article>
+
         <article class="demo-card" data-demo-tone="violet">
           <div class="demo-card-head"><strong>Avatar thinking</strong><span class="demo-mode-tag">Chat · Zen</span></div>
           <div class="demo-mini">
@@ -3349,6 +3360,7 @@
     if (location.protocol === "file:" || !isPrismServer) document.body.classList.add("raw-mode");
     const sounds = [
       "/audio/avatar/prism-calculating-01.mp3","/audio/avatar/prism-calculating-02.mp3","/audio/avatar/prism-calculating-03.mp3","/audio/avatar/prism-calculating-04.mp3",
+      "/audio/debate/gavel-attention-v3.wav","/audio/debate/gavel-order-v3.wav",
       "/audio/coffee/action-reactions/burp-01.mp3","/audio/coffee/action-reactions/burp-02.mp3","/audio/coffee/action-reactions/burp-03.mp3","/audio/coffee/action-reactions/burp-04.mp3",
       "/audio/coffee/action-reactions/cough-01.mp3","/audio/coffee/action-reactions/cough-02.mp3","/audio/coffee/action-reactions/cough-03.mp3","/audio/coffee/action-reactions/cough-04.mp3",
       "/audio/coffee/action-reactions/fart-01.mp3","/audio/coffee/action-reactions/fart-02.mp3","/audio/coffee/action-reactions/fart-03.mp3","/audio/coffee/action-reactions/fart-04.mp3",
@@ -3362,7 +3374,8 @@
       ["Toggle / checkbox changed", "toggle"], ["Save / confirm completed", "confirm"], ["Coffee cup set down", "cup_set_down"],
       ["Coffee poured", "coffee_pour"], ["Spoon stirred", "spoon_stir"], ["Table knocked", "table_knock"], ["Coffee: fart", "fart"],
       ["Coffee: burp", "burp"], ["Coffee: cough", "cough"], ["Signal: applause", "applause"], ["Signal: laughter", "laughter"],
-      ["Signal: gasp", "gasp"], ["Signal: rimshot", "rimshot"], ["Avatar thinking", "avatar-thinking"], ["Custom action", "custom-action"]
+      ["Signal: gasp", "gasp"], ["Signal: rimshot", "rimshot"], ["Debate: gavel attention", "debate-gavel-attention"],
+      ["Debate: gavel order", "debate-gavel-order"], ["Avatar thinking", "avatar-thinking"], ["Custom action", "custom-action"]
     ];
     const actionFor = (key) => ({ label: actionOptions.find(([label, value]) => value === key)?.[0] || "Custom action", key });
     const $ = (id) => document.getElementById(id);
@@ -3388,7 +3401,9 @@
       applause: ["/audio/signal/soundboard/applause.mp3"],
       laughter: ["/audio/signal/soundboard/laughter.mp3"],
       gasp: ["/audio/signal/soundboard/gasp.mp3"],
-      rimshot: ["/audio/signal/soundboard/rimshot.mp3"]
+      rimshot: ["/audio/signal/soundboard/rimshot.mp3"],
+      "debate-gavel-attention": ["/audio/debate/gavel-attention-v3.wav"],
+      "debate-gavel-order": ["/audio/debate/gavel-order-v3.wav"]
     };
     const storageKey = "prism_sound_fx_bench_v2";
     const savedBenchState = (() => { try { return JSON.parse(localStorage.getItem(storageKey) || "{}"); } catch { return {}; } })();

@@ -129,7 +129,6 @@ import {
 } from "./session-atmosphere-audio";
 import {
   DEBATE_GAVEL_FOLEY_URLS,
-  DEBATE_GAVEL_IMPACT_DELAYS_MS,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -317,6 +316,9 @@ const DEBATE_STAGE_ALIGNMENT_ITEM_LABELS: Record<
   nameplate: "Nameplate",
   glyph: "Glyph plate",
 };
+const DEBATE_GAVEL_FOLEY_PRELOAD_URLS = Object.values(
+  DEBATE_GAVEL_FOLEY_URLS,
+);
 
 function DebateForumLightMasks(props: {
   depth: "backdrop" | "foreground";
@@ -413,7 +415,7 @@ function DebateModeratorGavel(props: {
           tag: `debate-gavel:${cueKey}`,
         },
       );
-    }, DEBATE_GAVEL_IMPACT_DELAYS_MS[cueKind]);
+    }, 0);
     return () => window.clearTimeout(timer);
   }, [cueKey, cueKind, props.atmosphereControllerRef, props.audioEnabled]);
 
@@ -5316,6 +5318,7 @@ export function DebateExperience(
           sessionKey={`debate-alignment:${session?.id ?? props.storageScopeId}`}
           volume={props.audioVolume}
           mix={DEBATE_FOLEY_MIX}
+          preloadFoleyUrls={DEBATE_GAVEL_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
             session?.format === "turnabout"
               ? DEBATE_TURNABOUT_FOLEY_ROOM_SEND
@@ -6448,6 +6451,7 @@ export function DebateExperience(
           sessionKey={`debate:${session.id}`}
           volume={props.audioVolume}
           mix={DEBATE_FOLEY_MIX}
+          preloadFoleyUrls={DEBATE_GAVEL_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
             session.format === "turnabout"
               ? DEBATE_TURNABOUT_FOLEY_ROOM_SEND
