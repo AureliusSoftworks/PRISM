@@ -13,7 +13,7 @@ export type BotFaceFontId = (typeof BOT_FACE_FONT_IDS)[number];
 export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
   neutral: "Core",
   warm: "Soft",
-  concise: "Doto",
+  concise: "Mono",
   playful: "Bounce",
   formal: "Serif",
 };

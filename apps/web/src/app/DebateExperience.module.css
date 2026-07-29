@@ -1355,101 +1355,120 @@
   background-image: url("/debate/moderator-light.png");
 }
 
-.forumScene {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  pointer-events: none;
-}
-
-.forumScene[data-renderer-status="webgl"] ~ .lightMaskFor,
-.forumScene[data-renderer-status="webgl"] ~ .lightMaskAgainst,
-.forumScene[data-renderer-status="webgl"] ~ .lightMaskModerator {
-  opacity: 0;
-}
-
 .lightMaskFor,
 .lightMaskAgainst,
 .lightMaskModerator {
   position: absolute;
   inset: 0;
-  z-index: 5;
-  mix-blend-mode: screen;
-  opacity: 0.34;
-  filter: blur(26px);
-  transition:
-    opacity 520ms ease,
-    transform 620ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  z-index: 2;
+  pointer-events: none;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  -webkit-mask-image: url("/debate/forum-light-mask.png");
+  mask-image: url("/debate/forum-light-mask.png");
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: cover;
+  mask-size: cover;
+  mask-mode: alpha;
+  mix-blend-mode: var(--debate-light-blend-mode-dark, screen);
+  opacity: 0.2;
+  transition: opacity 520ms ease;
 }
 
 .lightMaskFor {
-  background: radial-gradient(
-    ellipse at 17% 58%,
-    var(--debate-for-color),
-    transparent 38%
+  background-image: linear-gradient(
+    90deg,
+    var(--debate-for-color) 0%,
+    var(--debate-for-color) 28%,
+    transparent 45%
   );
-  clip-path: polygon(0 6%, 40.5% 0, 36% 92%, 4% 100%);
 }
 
 .lightMaskAgainst {
-  background: radial-gradient(
-    ellipse at 83% 58%,
-    var(--debate-against-color),
-    transparent 38%
+  background-image: linear-gradient(
+    90deg,
+    transparent 55%,
+    var(--debate-against-color) 72%,
+    var(--debate-against-color) 100%
   );
-  clip-path: polygon(59.5% 0, 100% 6%, 96% 100%, 64% 92%);
 }
 
 .lightMaskModerator {
-  background: radial-gradient(
-    ellipse at 50% 34%,
-    var(--debate-moderator-color),
-    transparent 30%
+  background-image: linear-gradient(
+    90deg,
+    transparent 30%,
+    var(--debate-moderator-color) 43%,
+    var(--debate-moderator-color) 57%,
+    transparent 70%
   );
-  clip-path: polygon(34% 0, 66% 0, 60% 68%, 40% 68%);
-  opacity: 0.25;
+  opacity: 0.17;
 }
 
-.forumCamera[data-camera-view="moderator"] .lightMaskFor {
-  background: radial-gradient(
-    ellipse at 16% 54%,
-    var(--debate-for-color),
-    transparent 34%
-  );
-  clip-path: polygon(0 2%, 32% 0, 29% 96%, 0 100%);
+.live[data-theme="light"]
+  :is(.lightMaskFor, .lightMaskAgainst, .lightMaskModerator) {
+  mix-blend-mode: var(--debate-light-blend-mode-light, overlay);
+  opacity: 0.16;
 }
 
-.forumCamera[data-camera-view="moderator"] .lightMaskAgainst {
-  background: radial-gradient(
-    ellipse at 84% 54%,
-    var(--debate-against-color),
-    transparent 34%
-  );
-  clip-path: polygon(68% 0, 100% 2%, 100% 100%, 71% 96%);
+.lightMaskForeground {
+  z-index: 5;
+  -webkit-mask-image: url("/debate/forum-light-mask-foreground.png");
+  mask-image: url("/debate/forum-light-mask-foreground.png");
+}
+
+.forumCamera[data-active-role="for"] .lightMaskFor,
+.forumCamera[data-active-role="against"] .lightMaskAgainst,
+.forumCamera[data-active-role="moderator"] .lightMaskModerator {
+  opacity: 0.28;
+}
+
+.live[data-theme="light"] .forumCamera[data-active-role="for"] .lightMaskFor,
+.live[data-theme="light"]
+  .forumCamera[data-active-role="against"]
+  .lightMaskAgainst,
+.live[data-theme="light"]
+  .forumCamera[data-active-role="moderator"]
+  .lightMaskModerator {
+  opacity: 0.22;
+}
+
+.forumCamera[data-camera-view="moderator"]
+  :is(.lightMaskFor, .lightMaskAgainst) {
+  opacity: 0;
 }
 
 .forumCamera[data-camera-view="moderator"] .lightMaskModerator {
-  background: radial-gradient(
-    ellipse at 50% 40%,
-    var(--debate-moderator-color),
-    transparent 34%
-  );
-  clip-path: polygon(30.5% 0, 69.5% 0, 66% 82%, 34% 82%);
+  background: var(--debate-moderator-color);
+  -webkit-mask-image: url("/debate/moderator-light-mask.png");
+  mask-image: url("/debate/moderator-light-mask.png");
+  opacity: 0.22;
 }
 
-.forumCamera::after {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  content: "";
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse at 50% 64%,
-    color-mix(in srgb, var(--debate-active-color) 25%, transparent),
-    transparent 32%
-  );
-  mix-blend-mode: screen;
-  transition: background 500ms ease;
+.forumCamera[data-camera-view="moderator"]
+  .lightMaskModerator.lightMaskForeground {
+  -webkit-mask-image: url("/debate/moderator-light-mask-foreground.png");
+  mask-image: url("/debate/moderator-light-mask-foreground.png");
+}
+
+.forumCamera[data-camera-view="moderator"][data-active-role="moderator"]
+  .lightMaskModerator {
+  opacity: 0.46;
+}
+
+.live[data-theme="light"]
+  .forumCamera[data-camera-view="moderator"]
+  .lightMaskModerator {
+  opacity: 0.16;
+}
+
+.live[data-theme="light"]
+  .forumCamera[data-camera-view="moderator"][data-active-role="moderator"]
+  .lightMaskModerator {
+  opacity: 0.3;
 }
 
 .botPosition {
@@ -2535,6 +2554,22 @@
   background: #2a1720;
 }
 
+.autoRecoveryNotice {
+  margin: 0;
+  border: 1px solid color-mix(in srgb, #8fd6c8 38%, transparent);
+  border-radius: 12px;
+  padding: 9px 11px;
+  color: #c9f2e9;
+  background: color-mix(in srgb, #17332f 72%, transparent);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.live[data-theme="light"] .autoRecoveryNotice {
+  color: #1d5c52;
+  background: color-mix(in srgb, #dff4ee 88%, transparent);
+}
+
 .resultCard ul {
   margin: 18px 0;
 }
@@ -2685,6 +2720,7 @@
 
 .alignmentModalHeader button,
 .alignmentEditorHeader button,
+.alignmentLightingTuner button,
 .alignmentTuner button {
   border: 1px solid var(--alignment-border);
   border-radius: 999px;
@@ -2699,6 +2735,7 @@
 
 .alignmentModalHeader button:disabled,
 .alignmentEditorHeader button:disabled,
+.alignmentLightingTuner button:disabled,
 .alignmentTuner button:disabled {
   cursor: default;
   opacity: 0.4;
@@ -2775,6 +2812,105 @@
   width: 100%;
   border-radius: 18px;
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+}
+
+.alignmentLightingTuner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--alignment-border);
+  border-radius: 14px;
+  padding: 9px 11px;
+  background: color-mix(in srgb, var(--alignment-panel) 84%, transparent);
+  box-shadow: inset 3px 0 color-mix(in srgb, #a995ff 44%, transparent);
+}
+
+.alignmentLightingTuner > header {
+  display: flex;
+  min-width: 168px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.alignmentLightingTuner > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.alignmentLightingTuner > header strong {
+  font-size: 11px;
+}
+
+.alignmentLightingTuner > header button {
+  padding: 5px 8px;
+  font-size: 9px;
+}
+
+.alignmentLightingTunerRows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.alignmentLightingTunerRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--alignment-border);
+  border-radius: 9px;
+  padding: 5px 7px;
+  background: color-mix(
+    in srgb,
+    var(--alignment-panel-raised) 76%,
+    transparent
+  );
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.alignmentLightingTunerRow[data-active="true"] {
+  border-color: color-mix(in srgb, #a995ff 58%, var(--alignment-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #a995ff 12%, transparent);
+}
+
+.alignmentLightingTunerRow > strong {
+  color: var(--alignment-muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.alignmentLightingBlendToggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.alignmentLightingBlendToggle button {
+  min-width: 0;
+  border: 0;
+  padding: 5px 6px;
+  background: transparent;
+  font-size: 9px;
+}
+
+.alignmentLightingBlendToggle button[aria-pressed="true"] {
+  color: var(--alignment-ink);
+  background: color-mix(in srgb, #a995ff 22%, var(--alignment-panel-raised));
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.14);
+}
+
+.alignmentLightingTuner > small {
+  max-width: 190px;
+  color: var(--alignment-muted);
+  font-size: 8px;
+  line-height: 1.35;
+  text-align: right;
 }
 
 .alignmentHandle {
@@ -2943,7 +3079,6 @@
   .lightMaskAgainst,
   .lightMaskModerator,
   .forumCamera,
-  .forumCamera::after,
   .botStagePresence,
   .botStagePresence[data-color-cycle="true"],
   .podiumGlyphPosition,
@@ -3596,6 +3731,86 @@
   gap: 12px;
 }
 
+.formatPicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.formatPicker legend {
+  grid-column: 1 / -1;
+  margin-bottom: 2px;
+  color: var(--debate-studio-muted);
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.formatPicker label {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 9px;
+  border: 1px solid var(--debate-studio-line-strong);
+  border-radius: 9px;
+  padding: 13px;
+  background: color-mix(in srgb, var(--debate-studio-raised) 82%, transparent);
+  cursor: pointer;
+}
+
+.formatPicker label[data-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 62%,
+    var(--debate-studio-line-strong)
+  );
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--debate-studio-accent) 12%, transparent),
+    var(--debate-studio-raised)
+  );
+  box-shadow: inset 3px 0 var(--debate-studio-accent);
+}
+
+.formatPicker input {
+  margin-top: 3px;
+  accent-color: var(--debate-studio-accent);
+}
+
+.formatPicker strong {
+  font-size: 13px;
+}
+
+.formatPicker span,
+.formatPicker small {
+  grid-column: 2;
+  color: var(--debate-studio-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.formatPicker small {
+  margin-top: 3px;
+  color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 74%,
+    var(--debate-studio-muted)
+  );
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.dashboard[data-debate-format="turnabout"] {
+  --debate-studio-accent: #d7894f;
+}
+
 .motionSeed .field textarea {
   height: 100%;
   min-height: 102px;
@@ -3825,9 +4040,34 @@
   min-width: 0;
 }
 
-.dashboard .researchBox > button {
+.dashboard .researchActions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.dashboard .researchActions > button {
   min-width: 108px;
   white-space: nowrap;
+}
+
+.dashboard .generateEvidenceButton {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 48%,
+    var(--debate-studio-line-strong)
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 9%,
+    var(--debate-studio-raised)
+  );
+}
+
+.dashboard .generateEvidenceButton span {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--debate-studio-accent);
 }
 
 .dashboard .researchBox p {
@@ -4063,6 +4303,19 @@
   text-align: center;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.formatReadout {
+  color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 70%,
+    var(--debate-studio-muted)
+  );
+  font-size: 8px;
+  font-weight: 720;
+  letter-spacing: 0.07em;
+  text-align: center;
+  text-transform: uppercase;
 }
 
 .dashboard .readinessPanel {
@@ -4635,6 +4888,82 @@
   border-right: 1px solid color-mix(in srgb, currentColor 11%, transparent);
 }
 
+.turnaboutRecord > header strong {
+  color: #e5a16d;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.turnaboutRecord .caseColumns ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.turnaboutRecord .caseColumns li {
+  display: grid;
+  gap: 5px;
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 7px;
+  padding: 8px;
+  background: color-mix(in srgb, #17131d 72%, transparent);
+}
+
+.live[data-theme="light"] .turnaboutRecord .caseColumns li {
+  background: color-mix(in srgb, #fff 64%, transparent);
+}
+
+.turnaboutRecord .caseColumns li[data-active="true"] {
+  border-color: color-mix(in srgb, #e5a16d 56%, transparent);
+  box-shadow: 0 0 18px color-mix(in srgb, #e5a16d 10%, transparent);
+}
+
+.turnaboutRecord .caseColumns li > span,
+.turnaboutRecord .caseColumns li small {
+  color: #b79d8a;
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.turnaboutRecord .caseColumns li[data-status="contradicted"] > span,
+.turnaboutRecord .caseColumns li[data-status="contradicted"] small {
+  color: #f3a37e;
+}
+
+.turnaboutRecord .caseColumns li > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.turnaboutRecord > footer {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  border-top: 1px solid color-mix(in srgb, currentColor 9%, transparent);
+  padding: 8px 12px;
+}
+
+.turnaboutRecord > footer span {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #a99fac;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.turnaboutRecord > footer span[data-ruling="sustained"] {
+  border-color: color-mix(in srgb, #e5a16d 52%, transparent);
+  color: #e5a16d;
+}
+
 .caseBoard > header,
 .audienceGallery > header {
   padding: 10px 12px;
@@ -4838,6 +5167,143 @@
 .liveCommandDeck .playerWindow[data-kind="verdict"] > textarea {
   grid-column: 2;
   grid-row: 1 / 3;
+}
+
+.liveCommandDeck .playerWindow.turnaboutActions {
+  grid-template-columns: minmax(0, 1fr);
+  border-color: color-mix(in srgb, #e5a16d 48%, transparent);
+  background: linear-gradient(
+    125deg,
+    color-mix(in srgb, #e5a16d 11%, rgba(18, 15, 24, 0.98)),
+    rgba(13, 11, 17, 0.99)
+  );
+}
+
+.turnaboutActions > div:first-child {
+  grid-column: 1;
+  display: grid;
+  grid-template-columns: minmax(160px, 0.42fr) minmax(0, 1.58fr);
+  gap: 3px 18px;
+  align-items: start;
+  margin-top: 0;
+}
+
+.turnaboutActions > div:first-child > .eyebrow,
+.turnaboutActions > div:first-child > h2 {
+  grid-column: 1;
+}
+
+.turnaboutActions > div:first-child > h2 {
+  margin: 0;
+  font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
+  font-size: 22px;
+  font-weight: 390;
+  letter-spacing: -0.025em;
+}
+
+.turnaboutActions blockquote {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  margin: 0;
+  border-left: 2px solid #e5a16d;
+  padding-left: 11px;
+  color: #d9d1dc;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.liveCommandDeck .playerWindow.turnaboutActions:has(.turnaboutEvidencePicker) {
+  grid-template-columns: minmax(250px, 0.85fr) minmax(360px, 1.4fr);
+}
+
+.turnaboutActions:has(.turnaboutEvidencePicker) > div:first-child {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.turnaboutActions:has(.turnaboutEvidencePicker)
+  > div:first-child
+  > :is(.eyebrow, h2, blockquote) {
+  grid-column: 1;
+  grid-row: auto;
+}
+
+.turnaboutActions:has(.turnaboutEvidencePicker) blockquote {
+  margin-top: 9px;
+}
+
+.turnaboutEvidencePicker {
+  display: grid;
+  max-height: 180px;
+  grid-column: 2;
+  grid-row: 1;
+  gap: 6px;
+  overflow-y: auto;
+  margin: 0;
+  border: 1px solid color-mix(in srgb, #e5a16d 28%, transparent);
+  border-radius: 8px;
+  padding: 9px;
+  background: rgba(7, 6, 9, 0.56);
+}
+
+.turnaboutEvidencePicker legend {
+  padding: 0 5px;
+  color: #e5a16d;
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.turnaboutEvidencePicker label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 6px;
+  padding: 7px;
+  cursor: pointer;
+}
+
+.turnaboutEvidencePicker label[data-selected="true"] {
+  border-color: color-mix(in srgb, #e5a16d 56%, transparent);
+  background: color-mix(in srgb, #e5a16d 8%, transparent);
+}
+
+.turnaboutEvidencePicker input {
+  grid-row: 1 / 3;
+  accent-color: #e5a16d;
+}
+
+.turnaboutEvidencePicker span {
+  overflow: hidden;
+  color: #9f96a5;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turnaboutEvidencePicker small {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-self: center;
+  color: #b79d8a;
+  font-size: 8px;
+}
+
+.turnaboutActionRow {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.live[data-theme="light"] .turnaboutActions blockquote {
+  color: #4d4352;
+}
+
+.live[data-theme="light"] .turnaboutEvidencePicker {
+  background: rgba(255, 255, 255, 0.58);
 }
 
 .liveCommandDeck .interjectionBar {

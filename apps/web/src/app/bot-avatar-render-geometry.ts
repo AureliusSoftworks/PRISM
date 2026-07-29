@@ -67,6 +67,21 @@ export function botAvatarDetailsFacingOffsetY(
 }
 
 /**
+ * Keep the live face and authored screen ink on one facing contract.
+ * Applying this at the shared mannequin boundary prevents individual
+ * presentation surfaces from mirroring one layer without the other.
+ */
+export function botAvatarFaceFacingStyle(faceScaleY: string | number) {
+  return {
+    "--coffee-plate-emoji-face-scale-y": String(faceScaleY),
+    "--avatar-details-facing-scale-x":
+      botAvatarDetailsFacingScaleX(faceScaleY),
+    "--avatar-details-facing-offset-y":
+      botAvatarDetailsFacingOffsetY(faceScaleY),
+  } as const;
+}
+
+/**
  * Signal's scaled Align-stage preview rasterizes authored ink a touch below
  * the same avatar in Studio and live surfaces. Lift that preview by one pixel
  * on the authored 128px canvas without changing the saved stage coordinate.

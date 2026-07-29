@@ -60,10 +60,10 @@
   --prism-warm-face-font: "Segoe Print", var(--prism-face-font);
   --prism-warm-face-weight: 700;
   --prism-warm-face-letter-spacing: -0.012em;
-  --prism-doto-face-font:
-    var(--font-doto-display), var(--font-geist-mono), monospace;
-  --prism-doto-face-weight: 700;
-  --prism-doto-face-letter-spacing: 0.015em;
+  --prism-mono-face-font:
+    var(--font-technical-mono), var(--font-geist-mono), monospace;
+  --prism-mono-face-weight: 700;
+  --prism-mono-face-letter-spacing: 0.015em;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4);
@@ -1616,10 +1616,10 @@
   --prism-warm-face-font: "Segoe Print", var(--prism-face-font);
   --prism-warm-face-weight: 700;
   --prism-warm-face-letter-spacing: -0.012em;
-  --prism-doto-face-font:
-    var(--font-doto-display), var(--font-geist-mono), monospace;
-  --prism-doto-face-weight: 700;
-  --prism-doto-face-letter-spacing: 0.015em;
+  --prism-mono-face-font:
+    var(--font-technical-mono), var(--font-geist-mono), monospace;
+  --prism-mono-face-weight: 700;
+  --prism-mono-face-letter-spacing: 0.015em;
 
   --shadow-sm: 0 1px 2px rgba(23, 38, 56, 0.08);
   --shadow-md: 0 10px 30px rgba(31, 74, 112, 0.1);
@@ -20442,12 +20442,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .messageMoodCoffeeFace[data-voice-preset="concise"] {
-  font-family: var(--prism-doto-face-font);
-  font-weight: var(--prism-doto-face-weight);
-  letter-spacing: var(--prism-doto-face-letter-spacing);
-  font-variation-settings:
-    "wght" var(--prism-doto-face-weight),
-    "ROND" 55;
+  font-family: var(--prism-mono-face-font);
+  font-weight: var(--prism-mono-face-weight);
+  letter-spacing: var(--prism-mono-face-letter-spacing);
 }
 
 .messageMoodCoffeeFace[data-voice-preset="playful"] {
@@ -25836,34 +25833,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .debateBotPresencePlate[data-debate-compact="true"] {
-  --zen-live-bot-avatar-body-size: 70%;
-  --zen-live-bot-face-y: 51.5%;
-  --zen-live-bot-face-scale: 1.6;
   --bot-ambient-hover-amplitude: 0.5px;
-}
-
-.debateBotPresencePlate[data-debate-compact="true"]
-  .zenLiveBotPresenceBody[data-avatar-details-visuals="true"] {
-  --zen-live-bot-face-thumbnail-scale: 0.88;
-  --zen-live-bot-face-thumbnail-offset-y: 2.5%;
-}
-
-.debateBotPresencePlate[data-debate-compact="true"] .zenLiveBotPresenceFace {
-  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 28%, #56616e 72%);
-  background:
-    radial-gradient(
-      circle at 35% 28%,
-      rgba(255, 255, 255, 0.12) 0 6%,
-      transparent 22%
-    ),
-    radial-gradient(circle at 46% 42%, #22242c 0 24%, #0d0e12 62%, #030304);
-  box-shadow:
-    inset 0 0 0 1px rgba(4, 6, 10, 0.94),
-    inset -5px -7px 12px rgba(0, 0, 0, 0.58),
-    inset 4px 5px 9px rgba(255, 255, 255, 0.075),
-    0 0 0 1px rgba(48, 56, 68, 0.84),
-    0 0 12px color-mix(in srgb, var(--coffee-bot-color) 18%, transparent),
-    0 7px 14px rgba(0, 0, 0, 0.42);
 }
 
 .debateBotPresencePlate .botFaceFrameLed {
@@ -25879,26 +25849,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   filter: drop-shadow(
     0 0 5px color-mix(in srgb, var(--coffee-bot-color) 62%, transparent)
   );
-}
-
-.debateBotPresencePlate[data-debate-compact="true"] .botFaceFrame,
-.debateBotPresencePlate[data-debate-compact="true"]
-  .zenLiveBotPresenceScreenGlassOverlay,
-.debateBotPresencePlate[data-debate-compact="true"] .zenLiveBotPresenceBotGlyph,
-.debateBotPresencePlate[data-debate-compact="true"] .botFaceCrtGrimeLayer,
-.debateBotPresencePlate[data-debate-compact="true"] .botFaceCrtPixelGridLayer {
-  display: none;
-}
-
-.debateBotPresencePlate[data-debate-compact="true"]
-  .zenLiveBotPresenceFaceEmissionMask {
-  --bot-face-screen-mask-image: radial-gradient(
-    circle at center,
-    #000 0 47%,
-    transparent 48%
-  );
-  --crt-vignette-strength: 0.12;
-  background: radial-gradient(circle at 50% 48%, #111219, #030304 72%);
 }
 
 .debateBotPresencePlate .botAmbientUnderglow {
@@ -28526,12 +28476,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenLiveBotPresenceFaceGlyph[data-voice-preset="concise"] {
-  font-family: var(--prism-doto-face-font);
-  font-weight: var(--prism-doto-face-weight);
-  font-variation-settings:
-    "wght" var(--prism-doto-face-weight),
-    "ROND" 55;
-  letter-spacing: var(--prism-doto-face-letter-spacing);
+  font-family: var(--prism-mono-face-font);
+  font-weight: var(--prism-mono-face-weight);
+  letter-spacing: var(--prism-mono-face-letter-spacing);
 }
 
 .zenLiveBotPresenceFaceGlyph[data-voice-preset="playful"] {
@@ -46016,12 +45963,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botAvatarFontOptionSample[data-face-font="concise"] {
-  font-family: var(--prism-doto-face-font);
+  font-family: var(--prism-mono-face-font);
   font-weight: 780;
-  font-variation-settings:
-    "wght" 780,
-    "ROND" 55;
-  letter-spacing: var(--prism-doto-face-letter-spacing);
+  letter-spacing: var(--prism-mono-face-letter-spacing);
   transform: scale(1.08);
 }
 
@@ -66475,12 +66419,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .coffeeSeatPlateEmoji[data-voice-preset="concise"] {
-  font-family: var(--prism-doto-face-font);
-  font-weight: var(--prism-doto-face-weight);
-  font-variation-settings:
-    "wght" var(--prism-doto-face-weight),
-    "ROND" 55;
-  letter-spacing: var(--prism-doto-face-letter-spacing);
+  font-family: var(--prism-mono-face-font);
+  font-weight: var(--prism-mono-face-weight);
+  letter-spacing: var(--prism-mono-face-letter-spacing);
 }
 
 .coffeeSeatPlateEmoji[data-voice-preset="playful"] {
@@ -66554,12 +66495,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   [data-coffee-plate-question-frame][data-face-font="concise"],
 .zenLiveBotPresenceFaceGlyph
   [data-coffee-plate-emoji-part][data-face-font="concise"] {
-  font-family: var(--prism-doto-face-font);
+  font-family: var(--prism-mono-face-font);
   font-weight: inherit;
-  font-variation-settings:
-    "wght" var(--bot-face-font-weight, var(--prism-doto-face-weight)),
-    "ROND" 55;
-  letter-spacing: var(--prism-doto-face-letter-spacing);
+  letter-spacing: var(--prism-mono-face-letter-spacing);
 }
 
 .coffeeSeatPlateEmoji

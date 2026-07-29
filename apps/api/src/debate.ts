@@ -3,15 +3,21 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   DEBATE_CASE_CARDS_PER_SIDE,
+  DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_PLAYER_TURN_MAX_LENGTH,
   DEBATE_SCHEMA_VERSION,
+  DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   debateSourceIdsFromText,
+  debateSpokenText,
+  defaultDebateFormatStateV1,
+  isDebateFormatId,
   isDebatePlayerRole,
   isDebateSideId,
+  normalizeDebateFormatStateV1,
   normalizeDebateEvidencePacketV1,
   normalizeDebateIdempotencyKey,
   normalizeDebateMotionSlateV1,
@@ -31,6 +37,7 @@ import {
   type DebateEventKind,
   type DebateEventV1,
   type DebateEvidencePacketV1,
+  type DebateFormatId,
   type DebateInterjectionRequest,
   type DebateMotionSlateV1,
   type DebatePlayerTurnRequest,
@@ -41,6 +48,10 @@ import {
   type DebateSessionV1,
   type DebateSideId,
   type DebateSpeakerKind,
+  type DebateTurnaboutActionRequest,
+  type DebateTurnaboutContradictionV1,
+  type DebateTurnaboutFormatStateV1,
+  type DebateTurnaboutStatementV1,
   type DebateVerdictRequest,
   type ResponseMode,
 } from "@localai/shared";
@@ -134,10 +145,14 @@ const PLAYER_STEPS = new Set([
   "rebuttal_against_player",
   "rebuttal_for_player",
   "verdict_player",
+  "turnabout_action",
+  "turnabout_verdict_player",
 ]);
 
 const DEBATE_CRITERIA =
   "directness, responsiveness, evidence use, concessions, and clarity";
+const TURNABOUT_CRITERIA =
+  "record consistency, grounded evidence use, responsive clarification, concessions, and clarity";
 
 function compactText(value: unknown, maxLength: number): string {
   return typeof value === "string"
@@ -238,6 +253,7 @@ async function generateJsonOnLane(
     topP?: number;
     topK?: number;
     repetitionPenalty?: number;
+    validate?: (value: Record<string, unknown>) => boolean;
   } = {},
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
@@ -255,7 +271,11 @@ async function generateJsonOnLane(
         jsonMode: true,
         signal,
       });
-      return parsedJsonRecord(response);
+      const parsed = parsedJsonRecord(response);
+      if (options.validate && !options.validate(parsed)) {
+        throw new Error("The model returned an invalid Debate response shape.");
+      }
+      return parsed;
     } catch (error) {
       lastError = error;
       messages = [
@@ -294,6 +314,7 @@ async function generateJson(
     topP?: number;
     topK?: number;
     repetitionPenalty?: number;
+    validate?: (value: Record<string, unknown>) => boolean;
   } = {},
 ): Promise<DebateJsonGeneration> {
   const ordered = Array.isArray(lanes) ? [...lanes] : [lanes];
@@ -370,7 +391,18 @@ export async function synthesizeDebateSlates(
         ].join("\n"),
       },
     ],
-    { maxTokens: 1_800, temperature: 0.65 },
+    {
+      maxTokens: 1_800,
+      temperature: 0.65,
+      validate: (value) =>
+        Array.isArray(value.slates) &&
+        value.slates
+          .map((slate, index) =>
+            normalizeDebateMotionSlateV1(slate, `slate-${index + 1}`),
+          )
+          .filter(completeMotion)
+          .slice(0, 3).length === 3,
+    },
   );
   const parsed = generation.value;
   const rawSlates = Array.isArray(parsed.slates) ? parsed.slates : [];
@@ -390,6 +422,7 @@ async function roleCheck(
   bot: DebateBotRow,
   sideId: DebateSideId,
   motion: DebateMotionSlateV1,
+  format: DebateFormatId,
   runtime: DebateAiRuntime,
 ): Promise<DebateAdvocacyConsent> {
   const side = sideId === "for" ? motion.forSide : motion.againstSide;
@@ -403,6 +436,7 @@ async function roleCheck(
           bot.system_prompt,
           "",
           "This is a private advocacy consent check, not a public debate turn.",
+          `The proposed Debate format is ${format === "turnabout" ? "Turnabout: pressable testimony, frozen-evidence objections, and immediate moderator rulings" : "Forum: openings, challenges, rebuttals, closings, and a verdict"}.`,
           "Choose accept for an ordinary compatible assignment.",
           "Choose devils_advocate when the assignment conflicts with your likely beliefs but can be performed as an explicit role.",
           "Choose decline only for an authored boundary or severe defining-identity conflict. Mere disagreement is never enough.",
@@ -422,6 +456,10 @@ async function roleCheck(
     {
       maxTokens: 220,
       temperature: 0.1,
+      validate: (value) =>
+        value.status === "accept" ||
+        value.status === "devils_advocate" ||
+        value.status === "decline",
     },
   );
   const parsed = generation.value;
@@ -432,6 +470,7 @@ async function roleCheck(
       : "accept";
   return {
     version: DEBATE_SCHEMA_VERSION,
+    format,
     botId: bot.id,
     sideId,
     status,
@@ -452,6 +491,7 @@ export async function checkDebateAdvocacyRoles(
   db: DatabaseSync,
   userId: string,
   request: {
+    format?: unknown;
     motion: unknown;
     forAdvocateBotId: unknown;
     againstAdvocateBotId: unknown;
@@ -467,9 +507,11 @@ export async function checkDebateAdvocacyRoles(
   }
   const rows = botRows(db, userId, [forId, againstId]);
   if (rows.length !== 2) throw new HttpError(404, "One or more advocates were not found.");
+  const format: DebateFormatId =
+    request.format === "turnabout" ? "turnabout" : "forum";
   return Promise.all([
-    roleCheck(rows[0]!, "for", motion, runtime),
-    roleCheck(rows[1]!, "against", motion, runtime),
+    roleCheck(rows[0]!, "for", motion, format, runtime),
+    roleCheck(rows[1]!, "against", motion, format, runtime),
   ]);
 }
 
@@ -598,6 +640,9 @@ function parseSessionRow(
   row: DebateSessionRow,
 ): DebateSessionV1 {
   const parsed = JSON.parse(row.session_json) as DebateSessionV1;
+  const format: DebateFormatId = isDebateFormatId(parsed.format)
+    ? parsed.format
+    : "forum";
   return {
     ...parsed,
     provider: parsed.provider ?? parsed.moderator.provider,
@@ -614,6 +659,9 @@ function parseSessionRow(
             provider: parsed.provider ?? parsed.moderator.provider,
             model: parsed.model ?? parsed.moderator.model,
           }],
+    format,
+    formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
+    formatState: normalizeDebateFormatStateV1(parsed.formatState, format),
     revision: row.revision,
     status: row.status,
     phase: row.phase,
@@ -662,7 +710,7 @@ export function listDebateSessions(
     db
       .prepare(
         `SELECT id, status, phase, motion, player_role, winner_side_id,
-                updated_at, completed_at
+                session_json, updated_at, completed_at
            FROM debate_sessions
           WHERE user_id = ? AND status != 'cancelled'
           ORDER BY updated_at DESC
@@ -675,25 +723,37 @@ export function listDebateSessions(
       motion: string;
       player_role: DebateSessionV1["playerRole"];
       winner_side_id: DebateSideId | null;
+      session_json: string;
       updated_at: string;
       completed_at: string | null;
     }>
-  ).map((row) => ({
-    id: row.id,
-    status: row.status,
-    phase: row.phase,
-    motion: row.motion,
-    playerRole: row.player_role,
-    winnerSideId: row.winner_side_id,
-    updatedAt: row.updated_at,
-    completedAt: row.completed_at,
-  }));
+  ).map((row) => {
+    let format: DebateFormatId = "forum";
+    try {
+      const parsed = JSON.parse(row.session_json) as { format?: unknown };
+      if (isDebateFormatId(parsed.format)) format = parsed.format;
+    } catch {
+      format = "forum";
+    }
+    return {
+      id: row.id,
+      format,
+      status: row.status,
+      phase: row.phase,
+      motion: row.motion,
+      playerRole: row.player_role,
+      winnerSideId: row.winner_side_id,
+      updatedAt: row.updated_at,
+      completedAt: row.completed_at,
+    };
+  });
 }
 
 function validateConsents(
   consents: readonly DebateAdvocacyConsent[],
   motion: DebateMotionSlateV1,
   advocates: readonly DebateBotRow[],
+  format: DebateFormatId,
 ): DebateAdvocacyConsent[] {
   const expectedHash = debateMotionHash(motion);
   return advocates.map((bot, index) => {
@@ -704,7 +764,8 @@ function validateConsents(
     if (
       !consent ||
       consent.motionHash !== expectedHash ||
-      consent.botRevision !== botRevision(bot)
+      consent.botRevision !== botRevision(bot) ||
+      (consent.format ?? "forum") !== format
     ) {
       throw new HttpError(
         409,
@@ -738,6 +799,8 @@ export function createDebateSession(
 
   const motion = normalizeDebateMotionSlateV1(request.motion);
   if (!completeMotion(motion)) throw new HttpError(400, "Complete the motion and both side briefs.");
+  const format: DebateFormatId =
+    request.format === "turnabout" ? "turnabout" : "forum";
   if (!isDebatePlayerRole(request.playerRole)) {
     throw new HttpError(400, "Choose a valid player role.");
   }
@@ -767,6 +830,7 @@ export function createDebateSession(
     request.advocacyConsent,
     motion,
     [forRow, againstRow],
+    format,
   );
   const now = new Date().toISOString();
   const powerPlan = debatePowerPlan(
@@ -794,7 +858,7 @@ export function createDebateSession(
     revision: 1,
     status: "live",
     phase: "opening",
-    stepKey: "intro",
+    stepKey: format === "turnabout" ? "turnabout_intro" : "intro",
     provider: lane.providerName,
     model: lane.model,
     responseMode:
@@ -804,6 +868,9 @@ export function createDebateSession(
           ? "local"
           : "online",
     generationChain,
+    format,
+    formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
+    formatState: defaultDebateFormatStateV1(format),
     playerRole: request.playerRole,
     playerSideId,
     motion,
@@ -866,7 +933,16 @@ function mutationReplay(
     | { response_json?: string }
     | undefined;
   if (!row?.response_json) return null;
-  return JSON.parse(row.response_json) as DebateSessionV1;
+  const parsed = JSON.parse(row.response_json) as DebateSessionV1;
+  const format: DebateFormatId = isDebateFormatId(parsed.format)
+    ? parsed.format
+    : "forum";
+  return {
+    ...parsed,
+    format,
+    formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
+    formatState: normalizeDebateFormatStateV1(parsed.formatState, format),
+  };
 }
 
 function assertMutation(
@@ -1112,6 +1188,9 @@ function makeEvent(
     provider?: ProviderName;
     model?: string;
     autoRecovery?: AutoRecoveryTraceV1;
+    statementId?: string | null;
+    evidenceSourceId?: string | null;
+    ruling?: "sustained" | "overruled" | null;
   },
 ): DebateEventV1 {
   return {
@@ -1138,6 +1217,13 @@ function makeEvent(
     ...(args.provider ? { provider: args.provider } : {}),
     ...(args.model ? { model: args.model } : {}),
     ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
+    ...(args.statementId !== undefined
+      ? { statementId: args.statementId }
+      : {}),
+    ...(args.evidenceSourceId !== undefined
+      ? { evidenceSourceId: args.evidenceSourceId }
+      : {}),
+    ...(args.ruling !== undefined ? { ruling: args.ruling } : {}),
     createdAt: new Date().toISOString(),
   };
 }
@@ -1204,10 +1290,30 @@ function publicTranscript(
   observerBotId?: string,
   includeOwnSpeech = true,
 ): string {
+  const publicKinds =
+    session.format === "turnabout"
+      ? new Set([
+          "intro",
+          "speech",
+          "silence",
+          "testimony",
+          "press",
+          "objection",
+          "evidence",
+          "revelation",
+          "player_turn",
+          "moderator_ruling",
+          "reaction",
+        ])
+      : new Set([
+          "intro",
+          "speech",
+          "silence",
+          "player_turn",
+          "reaction",
+        ]);
   const events = session.events
-    .filter((event) =>
-      ["intro", "speech", "silence", "player_turn", "reaction"].includes(event.kind),
-    )
+    .filter((event) => publicKinds.has(event.kind))
     .filter((event) => {
       if (!observerBotId || !event.speakerBotId) return true;
       if (event.speakerBotId === observerBotId && includeOwnSpeech) return true;
@@ -1296,11 +1402,17 @@ async function generateSpeech(
         content: [
           snapshot.systemPrompt,
           "",
-          "You are participating in PRISM Debate, a short formal duel.",
+          session.format === "turnabout"
+            ? "You are participating in PRISM Debate: Turnabout, a theatrical but record-bound examination."
+            : "You are participating in PRISM Debate: Forum, a short formal duel.",
           `Motion: ${session.motion.motion}`,
           `For brief: ${session.motion.forSide.brief}`,
           `Against brief: ${session.motion.againstSide.brief}`,
-          `Judging criteria: ${DEBATE_CRITERIA}.`,
+          `Judging criteria: ${
+            session.format === "turnabout"
+              ? TURNABOUT_CRITERIA
+              : DEBATE_CRITERIA
+          }.`,
           "Use only the frozen prep packet below. Never claim live research.",
           "Cite a frozen source only as [[source:id]]. Never invent a source ID.",
           "Concede fair points when warranted. Stay in your assigned formal role.",
@@ -1326,6 +1438,8 @@ async function generateSpeech(
     {
       maxTokens: 520,
       temperature: 0.55,
+      validate: (value) =>
+        typeof value.content === "string" && value.content.trim().length > 0,
     },
   );
   const result = generation.value;
@@ -1333,7 +1447,10 @@ async function generateSpeech(
   if (!intended) throw new Error("The bot returned an empty debate turn.");
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
   intended = applyBotPowerResponseBudgetV1(intended, responseBudget, 3);
-  if (session.stepKey === "intro") {
+  if (
+    session.stepKey === "intro" ||
+    session.stepKey === "turnabout_intro"
+  ) {
     const devils = session.advocacyConsent
       .filter((consent) => consent.status === "devils_advocate")
       .map((consent) => botForSide(session, consent.sideId).name);
@@ -1360,6 +1477,75 @@ async function generateSpeech(
     ...(generation.autoRecovery
       ? { autoRecovery: generation.autoRecovery }
       : {}),
+  };
+}
+
+const TURNABOUT_QUANTIFIED_CLAIM_PATTERN =
+  /(?:[$€£]\s*)?\d+(?:[.,]\d+)*(?:\s*(?:%|percent|minutes?|hours?|days?|weeks?|months?|years?|thousand|million|billion|dollars?|euros?|pounds?|per\s+[a-z]+))?/giu;
+const TURNABOUT_EVIDENCE_ATTRIBUTION_PATTERN =
+  /\b(?:according to|research (?:shows|finds)|data (?:shows|indicates)|studies? (?:show|find)|reports? (?:show|find)|surveys? (?:show|find)|statistics? (?:show|indicate))\b/iu;
+
+type DebateSpeechGeneration = Awaited<ReturnType<typeof generateSpeech>>;
+
+function normalizeTurnaboutRecordText(value: string): string {
+  return value
+    .toLocaleLowerCase()
+    .replace(/[“”‘’]/gu, "'")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function turnaboutFrozenRecordText(
+  session: DebateSessionV1,
+  additionalRecord = "",
+): string {
+  return normalizeTurnaboutRecordText(
+    [
+      session.motion.motion,
+      session.motion.forSide.label,
+      session.motion.forSide.brief,
+      session.motion.againstSide.label,
+      session.motion.againstSide.brief,
+      session.evidence.notes,
+      ...session.evidence.sources.flatMap((source) => [
+        source.id,
+        source.title,
+        source.snippet,
+        source.publishedAt ?? "",
+      ]),
+      additionalRecord,
+    ].join("\n"),
+  );
+}
+
+function turnaboutRecordBoundSpeech(
+  session: DebateSessionV1,
+  speech: DebateSpeechGeneration,
+  fallback: string,
+  additionalRecord = "",
+): DebateSpeechGeneration {
+  if (speech.silent) return speech;
+  const publicContent = debateSpokenText(speech.content);
+  const frozenRecord = turnaboutFrozenRecordText(session, additionalRecord);
+  const quantifiedClaims =
+    publicContent.match(TURNABOUT_QUANTIFIED_CLAIM_PATTERN) ?? [];
+  const hasUnsupportedQuantity = quantifiedClaims.some(
+    (claim) =>
+      !frozenRecord.includes(normalizeTurnaboutRecordText(claim)),
+  );
+  const hasUnsupportedAttribution =
+    TURNABOUT_EVIDENCE_ATTRIBUTION_PATTERN.test(publicContent) &&
+    speech.sourceIds.length === 0;
+  if (!hasUnsupportedQuantity && !hasUnsupportedAttribution) return speech;
+  const sanitized = sanitizeDebateStatementSources(
+    fallback,
+    session.evidence,
+  );
+  return {
+    ...speech,
+    content: sanitized.content,
+    sourceIds: sanitized.sourceIds,
+    silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
   };
 }
 
@@ -1828,7 +2014,7 @@ function nextAfterOpening(session: DebateSessionV1): DebateSessionV1 {
       ...session,
       phase: "challenge",
       stepKey: "challenge_participant_prompt",
-      status: "live",
+      status: "live" as const,
     };
   }
   return {
@@ -2081,9 +2267,6 @@ async function speechTransition(
     provider: speech.provider,
     model: speech.model,
     autoRecovery: speech.autoRecovery,
-    provider: speech.provider,
-    model: speech.model,
-    autoRecovery: speech.autoRecovery,
   });
   const repeatSession = {
     ...session,
@@ -2161,7 +2344,12 @@ async function moderatorPhaseTransition(
 function botBallotPrompt(session: DebateSessionV1, voter: DebateBotSnapshotV1): string {
   return [
     "Advocacy has ended. Vote independently for either for or against.",
-    `Judge only ${DEBATE_CRITERIA}; do not vote for your assigned side by default.`,
+    `Judge only ${
+      session.format === "turnabout" ? TURNABOUT_CRITERIA : DEBATE_CRITERIA
+    }; do not vote for your assigned side by default.`,
+    session.format === "turnabout"
+      ? "Treat sustained and overruled objections exactly as the public moderator recorded them. Do not invent a contradiction or use an unpresented evidence item."
+      : "",
     "Do not use private intent, hidden speech, relationship memory, or numeric scoring.",
     `Motion: ${session.motion.motion}`,
     `For label: ${session.motion.forSide.label}`,
@@ -2190,7 +2378,12 @@ async function generateBallot(
       },
       { role: "user", content: botBallotPrompt(session, voter) },
     ],
-    { maxTokens: 220, temperature: 0.2 },
+    {
+      maxTokens: 220,
+      temperature: 0.2,
+      validate: (value) =>
+        value.sideId === "for" || value.sideId === "against",
+    },
   );
   const parsed = generation.value;
   const sideId: DebateSideId = parsed.sideId === "against" ? "against" : "for";
@@ -2213,6 +2406,578 @@ async function generateBallot(
 function majorityWinner(ballots: readonly DebateBallotV1[]): DebateSideId {
   const forVotes = ballots.filter((ballot) => ballot.sideId === "for").length;
   return forVotes >= 2 ? "for" : "against";
+}
+
+function turnaboutState(
+  session: DebateSessionV1,
+): DebateTurnaboutFormatStateV1 {
+  if (session.format !== "turnabout") {
+    throw new HttpError(409, "This action belongs to the Turnabout format.");
+  }
+  const state = normalizeDebateFormatStateV1(
+    session.formatState,
+    "turnabout",
+  );
+  if (state.format !== "turnabout") {
+    throw new HttpError(409, "The Turnabout record is unavailable.");
+  }
+  return state;
+}
+
+function withTurnaboutState(
+  session: DebateSessionV1,
+  state: DebateTurnaboutFormatStateV1,
+): DebateSessionV1 {
+  return {
+    ...session,
+    format: "turnabout",
+    formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
+    formatState: state,
+  };
+}
+
+function turnaboutEligibleStatements(
+  session: DebateSessionV1,
+  state: DebateTurnaboutFormatStateV1,
+): DebateTurnaboutStatementV1[] {
+  if (session.playerRole !== "participant") return state.statements;
+  const opposingSide: DebateSideId =
+    session.playerSideId === "against" ? "for" : "against";
+  return state.statements.filter(
+    (statement) => statement.sideId === opposingSide,
+  );
+}
+
+function turnaboutResolutionStart(
+  session: DebateSessionV1,
+  state: DebateTurnaboutFormatStateV1,
+): DebateSessionV1 {
+  const stepKey =
+    session.playerRole === "judge"
+      ? "turnabout_verdict_player"
+      : "turnabout_ballot_moderator";
+  return withTurnaboutState(
+    {
+      ...session,
+      phase: "verdict",
+      stepKey,
+      status: statusForStep(stepKey),
+    },
+    {
+      ...state,
+      phase: "resolution",
+      activeStatementId: null,
+      floorOwnerBotId:
+        session.playerRole === "judge" ? null : session.moderator.id,
+    },
+  );
+}
+
+function turnaboutNextStatement(
+  session: DebateSessionV1,
+  state: DebateTurnaboutFormatStateV1,
+): DebateSessionV1 {
+  const next = turnaboutEligibleStatements(session, state).find(
+    (statement) =>
+      statement.status === "ready" || statement.status === "pressed",
+  );
+  if (!next) return turnaboutResolutionStart(session, state);
+  return withTurnaboutState(
+    {
+      ...session,
+      phase: "challenge",
+      stepKey:
+        session.playerRole === "spectator"
+          ? "turnabout_spectator_press"
+          : "turnabout_action",
+      status:
+        session.playerRole === "spectator" ? "live" : "waiting_for_player",
+    },
+    {
+      ...state,
+      phase: "examination",
+      activeStatementId: next.id,
+      floorOwnerBotId: next.speakerBotId,
+    },
+  );
+}
+
+function replaceTurnaboutStatement(
+  state: DebateTurnaboutFormatStateV1,
+  statementId: string,
+  update: (
+    statement: DebateTurnaboutStatementV1,
+  ) => DebateTurnaboutStatementV1,
+): DebateTurnaboutFormatStateV1 {
+  return {
+    ...state,
+    statements: state.statements.map((statement) =>
+      statement.id === statementId ? update(statement) : statement,
+    ),
+  };
+}
+
+async function generateTurnaboutTestimony(
+  session: DebateSessionV1,
+  sideId: DebateSideId,
+  runtime: DebateAiRuntime,
+): Promise<{
+  statements: DebateTurnaboutStatementV1[];
+  events: DebateEventV1[];
+}> {
+  const speaker = botForSide(session, sideId);
+  const events: DebateEventV1[] = [];
+  const statements: DebateTurnaboutStatementV1[] = [];
+  let working = session;
+  for (
+    let index = 0;
+    index < DEBATE_TURNABOUT_STATEMENTS_PER_SIDE;
+    index += 1
+  ) {
+    const generatedSpeech = await generateSpeech(
+      working,
+      speaker,
+      [
+        `Deliver testimony statement ${index + 1} of ${DEBATE_TURNABOUT_STATEMENTS_PER_SIDE} for ${sideLabel(session, sideId)}.`,
+        "Make one precise, independently pressable factual or inferential claim.",
+        index === 0
+          ? "State the strongest foundation for this side."
+          : "Add a distinct claim that creates a real point of examination; do not repeat the first statement.",
+        "Keep it to 1-3 sentences. Use only the frozen record and cite frozen sources with valid markers.",
+      ].join(" "),
+      runtime,
+    );
+    const sideBrief =
+      sideId === "for"
+        ? session.motion.forSide.brief
+        : session.motion.againstSide.brief;
+    const speech = turnaboutRecordBoundSpeech(
+      session,
+      generatedSpeech,
+      index === 0
+        ? `${sideLabel(session, sideId)} enters this advocacy claim for examination: ${sideBrief} It adds no independent evidence to the frozen record.`
+        : `${sideLabel(session, sideId)} asks the record to test whether that position follows from the frozen motion: “${session.motion.motion}” No independent evidence is added.`,
+    );
+    if (speech.silent) {
+      const silence = makeEvent(working, {
+        kind: "silence",
+        speakerKind: "advocate",
+        speakerBotId: speaker.id,
+        sideId,
+        content: BOT_POWER_CANONICAL_SILENCE_V1,
+      });
+      events.push(silence);
+      break;
+    }
+    const statementId = randomUUID();
+    const event = makeEvent(working, {
+      kind: "testimony",
+      speakerKind: "advocate",
+      speakerBotId: speaker.id,
+      sideId,
+      content: speech.content,
+      sourceIds: speech.sourceIds,
+      provider: speech.provider,
+      model: speech.model,
+      autoRecovery: speech.autoRecovery,
+      statementId,
+    });
+    const statement: DebateTurnaboutStatementV1 = {
+      id: statementId,
+      sideId,
+      speakerBotId: speaker.id,
+      content: event.content,
+      sourceIds: event.sourceIds,
+      status: "ready",
+      createdEventId: event.id,
+    };
+    events.push(event);
+    statements.push(statement);
+    working = { ...working, events: [...working.events, event] };
+  }
+  return { statements, events };
+}
+
+async function pressTurnaboutStatement(
+  session: DebateSessionV1,
+  statement: DebateTurnaboutStatementV1,
+  runtime: DebateAiRuntime,
+  actor: "player" | "moderator",
+): Promise<{
+  state: DebateTurnaboutFormatStateV1;
+  events: DebateEventV1[];
+}> {
+  const state = turnaboutState(session);
+  const speaker = botForSide(session, statement.sideId);
+  const press = makeEvent(session, {
+    kind: "press",
+    speakerKind: actor,
+    speakerBotId: actor === "moderator" ? session.moderator.id : null,
+    sideId: actor === "player" ? session.playerSideId : null,
+    content:
+      actor === "moderator"
+        ? `The moderator presses statement ${statement.id.slice(0, 8)} for a clearer account.`
+        : `Press statement ${statement.id.slice(0, 8)}: explain what this claim rests on.`,
+    statementId: statement.id,
+    parentEventId: statement.createdEventId,
+  });
+  const withPress: DebateSessionV1 = {
+    ...session,
+    events: [...session.events, press],
+  };
+  const generatedClarification = await generateSpeech(
+    withPress,
+    speaker,
+    [
+      `Your recorded statement was: ${statement.content}`,
+      "It has been pressed.",
+      "Clarify the claim directly in 1-3 sentences.",
+      "You may narrow or concede it. Do not introduce evidence outside the frozen record.",
+    ].join("\n"),
+    runtime,
+  );
+  const clarification = turnaboutRecordBoundSpeech(
+    session,
+    generatedClarification,
+    `The advocate narrows the answer to the recorded statement: ${debateSpokenText(statement.content)} No new evidence is added.`,
+    statement.content,
+  );
+  const clarificationEvent = makeEvent(withPress, {
+    kind: clarification.silent ? "silence" : "speech",
+    speakerKind: "advocate",
+    speakerBotId: speaker.id,
+    sideId: statement.sideId,
+    content: clarification.content,
+    sourceIds: clarification.sourceIds,
+    parentEventId: press.id,
+    provider: clarification.provider,
+    model: clarification.model,
+    autoRecovery: clarification.autoRecovery,
+    statementId: statement.id,
+  });
+  const withClarification: DebateSessionV1 = {
+    ...withPress,
+    events: [...withPress.events, clarificationEvent],
+  };
+  const ruling = makeEvent(withClarification, {
+    kind: "moderator_ruling",
+    speakerKind: "moderator",
+    speakerBotId: session.moderator.id,
+    content: clarification.silent
+      ? "The witness remains canonically silent. The original statement stays on the public record."
+      : "The clarification is entered. The original statement remains available for a frozen-evidence objection.",
+    parentEventId: clarificationEvent.id,
+    statementId: statement.id,
+  });
+  return {
+    state: replaceTurnaboutStatement(
+      state,
+      statement.id,
+      (current) => ({
+        ...current,
+        status: actor === "moderator" ? "resolved" : "pressed",
+      }),
+    ),
+    events: [press, clarificationEvent, ruling],
+  };
+}
+
+function exactGroundedQuote(
+  quoteRaw: unknown,
+  sourceRaw: string,
+): string | null {
+  const quote = compactText(quoteRaw, 600);
+  if (quote.length < 8) return null;
+  const source = sourceRaw.replace(/\s+/gu, " ").trim();
+  const index = source.toLocaleLowerCase().indexOf(quote.toLocaleLowerCase());
+  if (index < 0) return null;
+  return source.slice(index, index + quote.length);
+}
+
+async function assessTurnaboutContradiction(
+  session: DebateSessionV1,
+  statement: DebateTurnaboutStatementV1,
+  evidenceSourceId: string,
+  runtime: DebateAiRuntime,
+): Promise<{
+  contradiction: DebateTurnaboutContradictionV1;
+  provider: ProviderName;
+  model: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+}> {
+  const evidence = session.evidence.sources.find(
+    (source) => source.id === evidenceSourceId,
+  );
+  if (!session.evidence.frozenAt || !evidence) {
+    throw new HttpError(
+      400,
+      "Only an evidence item frozen before Start may be presented.",
+    );
+  }
+  const statementRecord = debateSpokenText(statement.content);
+  const evidenceRecord = `${evidence.title}. ${evidence.snippet}`.trim();
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
+    [
+      {
+        role: "system",
+        content: [
+          "You validate one PRISM Turnabout contradiction against a frozen public record.",
+          "Do not perform theatrics, score either side, infer hidden evidence, or invent language.",
+          "A contradiction is sustained only when the frozen evidence materially conflicts with the recorded statement.",
+          "Both quotes must be exact contiguous excerpts from the supplied records.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: [
+          `Recorded statement: ${statementRecord}`,
+          `Frozen evidence ${evidence.id}: ${evidenceRecord}`,
+          'Return JSON only: {"contradicts":true|false,"statementQuote":"exact excerpt","evidenceQuote":"exact excerpt","reason":"one concise grounded explanation"}.',
+        ].join("\n"),
+      },
+    ],
+    { maxTokens: 320, temperature: 0.1 },
+  );
+  const statementQuote = exactGroundedQuote(
+    generation.value.statementQuote,
+    statementRecord,
+  );
+  const evidenceQuote = exactGroundedQuote(
+    generation.value.evidenceQuote,
+    evidenceRecord,
+  );
+  const grounded = statementQuote !== null && evidenceQuote !== null;
+  const ruling =
+    generation.value.contradicts === true && grounded
+      ? "sustained"
+      : "overruled";
+  return {
+    contradiction: {
+      id: randomUUID(),
+      statementId: statement.id,
+      evidenceSourceId,
+      statementQuote: statementQuote ?? "",
+      evidenceQuote: evidenceQuote ?? "",
+      reason: grounded
+        ? compactText(generation.value.reason, 1_000)
+        : "The proposed contradiction was not grounded in exact public-record excerpts.",
+      grounded,
+      ruling,
+      createdAt: new Date().toISOString(),
+    },
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery
+      ? { autoRecovery: generation.autoRecovery }
+      : {}),
+  };
+}
+
+async function advanceTurnaboutStep(
+  session: DebateSessionV1,
+  runtime: DebateAiRuntime,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  const state = turnaboutState(session);
+  switch (session.stepKey) {
+    case "turnabout_intro":
+      return speechTransition(
+        withTurnaboutState(session, {
+          ...state,
+          phase: "testimony",
+          floorOwnerBotId: session.moderator.id,
+        }),
+        session.moderator,
+        null,
+        [
+          "Open this Turnabout proceeding in 3-5 sentences.",
+          `State the exact motion and identify ${session.forAdvocate.name} and ${session.againstAdvocate.name}.`,
+          "Explain that each side will enter two pressable statements, objections must identify one statement and one frozen evidence item, and you will rule immediately from the public record.",
+          session.evidence.sources.length > 0
+            ? `The frozen record contains ${session.evidence.sources.length} presentable evidence item${session.evidence.sources.length === 1 ? "" : "s"}.`
+            : "The frozen record contains no presentable evidence item. Say clearly that Press and Pass remain available, but Object and Present Evidence are unavailable in this proceeding.",
+          "Do not say testimony must cite evidence. Testimony is a pressable advocacy claim; only a formal evidence presentation needs a frozen item.",
+          "Remain neutral. Do not invent evidence or imply odds.",
+          advocacyDisclosure(session),
+        ].join(" "),
+        runtime,
+        (next) => ({ ...next, stepKey: "turnabout_testimony_for" }),
+      );
+    case "turnabout_testimony_for":
+    case "turnabout_testimony_against": {
+      const sideId: DebateSideId = session.stepKey.endsWith("_for")
+        ? "for"
+        : "against";
+      const testimony = await generateTurnaboutTestimony(
+        session,
+        sideId,
+        runtime,
+      );
+      const nextState: DebateTurnaboutFormatStateV1 = {
+        ...state,
+        phase: "testimony",
+        floorOwnerBotId: botForSide(session, sideId).id,
+        statements: [...state.statements, ...testimony.statements],
+      };
+      if (sideId === "for") {
+        return {
+          session: withTurnaboutState(
+            { ...session, stepKey: "turnabout_testimony_against" },
+            nextState,
+          ),
+          events: testimony.events,
+        };
+      }
+      return {
+        session: turnaboutNextStatement(session, nextState),
+        events: testimony.events,
+      };
+    }
+    case "turnabout_spectator_press": {
+      const statement = state.statements.find(
+        (candidate) => candidate.id === state.activeStatementId,
+      );
+      if (!statement) {
+        return { session: turnaboutResolutionStart(session, state), events: [] };
+      }
+      const pressed = await pressTurnaboutStatement(
+        session,
+        statement,
+        runtime,
+        "moderator",
+      );
+      return {
+        session: turnaboutNextStatement(session, pressed.state),
+        events: pressed.events,
+      };
+    }
+    case "turnabout_ballot_moderator":
+    case "turnabout_ballot_for":
+    case "turnabout_ballot_against": {
+      const voter =
+        session.stepKey === "turnabout_ballot_moderator"
+          ? session.moderator
+          : session.stepKey === "turnabout_ballot_for"
+            ? session.forAdvocate
+            : session.againstAdvocate;
+      const ballot = await generateBallot(session, voter, runtime);
+      const event = makeEvent(session, {
+        kind: "ballot",
+        speakerKind: voter.role,
+        speakerBotId: voter.id,
+        sideId: ballot.sideId,
+        content:
+          ballot.reason ??
+          `${voter.name} cast a private ballot without a spoken reason.`,
+        provider: ballot.provider,
+        model: ballot.model,
+        autoRecovery: ballot.autoRecovery,
+      });
+      const ballots = [...session.ballots, ballot];
+      if (session.stepKey !== "turnabout_ballot_against") {
+        const nextStep =
+          session.stepKey === "turnabout_ballot_moderator"
+            ? "turnabout_ballot_for"
+            : "turnabout_ballot_against";
+        return {
+          session: withTurnaboutState(
+            { ...session, ballots, stepKey: nextStep },
+            { ...state, floorOwnerBotId: voter.id },
+          ),
+          events: [event],
+        };
+      }
+      const winnerSideId =
+        session.playerRole === "judge"
+          ? session.playerVerdict
+          : majorityWinner(ballots);
+      if (!winnerSideId) throw new Error("The Turnabout resolution is missing.");
+      const verdictEvent = makeEvent(
+        { ...session, events: [...session.events, event] },
+        {
+          kind: "verdict",
+          speakerKind: "system",
+          sideId: winnerSideId,
+          content:
+            session.playerRole === "judge"
+              ? `The Judge's ruling for ${sideLabel(session, winnerSideId)} resolves the Turnabout from the public record. Bot ballots remain an agreement-and-dissent epilogue.`
+              : `${sideLabel(session, winnerSideId)} carries the Turnabout by the three-bot public-record majority.`,
+        },
+      );
+      return {
+        session: withTurnaboutState(
+          {
+            ...session,
+            ballots,
+            winnerSideId,
+            status: "completed",
+            completedAt: new Date().toISOString(),
+            stepKey: "completed",
+          },
+          {
+            ...state,
+            phase: "resolution",
+            activeStatementId: null,
+            floorOwnerBotId: null,
+          },
+        ),
+        events: [event, verdictEvent],
+      };
+    }
+    default:
+      throw new HttpError(409, "This Turnabout is waiting for player input.");
+  }
+}
+
+function skippedTurnaboutTransition(
+  session: DebateSessionV1,
+): DebateSessionV1 {
+  const state = turnaboutState(session);
+  if (session.stepKey === "turnabout_intro") {
+    return { ...session, stepKey: "turnabout_testimony_for" };
+  }
+  if (session.stepKey === "turnabout_testimony_for") {
+    return { ...session, stepKey: "turnabout_testimony_against" };
+  }
+  if (session.stepKey === "turnabout_testimony_against") {
+    return turnaboutNextStatement(session, state);
+  }
+  if (session.stepKey === "turnabout_spectator_press") {
+    const currentId = state.activeStatementId;
+    const resolved = currentId
+      ? replaceTurnaboutStatement(state, currentId, (statement) => ({
+          ...statement,
+          status: "resolved",
+        }))
+      : state;
+    return turnaboutNextStatement(session, resolved);
+  }
+  if (
+    session.stepKey === "turnabout_ballot_moderator" ||
+    session.stepKey === "turnabout_ballot_for"
+  ) {
+    return {
+      ...session,
+      stepKey:
+        session.stepKey === "turnabout_ballot_moderator"
+          ? "turnabout_ballot_for"
+          : "turnabout_ballot_against",
+    };
+  }
+  if (session.stepKey === "turnabout_ballot_against") {
+    const winnerSideId =
+      session.playerRole === "judge" ? session.playerVerdict : null;
+    return {
+      ...session,
+      status: winnerSideId ? "completed" : "failed",
+      winnerSideId,
+      completedAt: winnerSideId ? new Date().toISOString() : null,
+      error: winnerSideId
+        ? null
+        : "The Turnabout ended without enough public-record ballots.",
+    };
+  }
+  throw new HttpError(409, "This Turnabout step cannot be skipped.");
 }
 
 function skippedTransition(session: DebateSessionV1): DebateSessionV1 {
@@ -2640,12 +3405,16 @@ export async function advanceDebateSession(
   }
   if (request.skip) {
     const event = skipEvent(session);
-    const next = skippedTransition({
+    const current = {
       ...session,
       error: null,
-      status: "live",
+      status: "live" as const,
       events: [...session.events, event],
-    });
+    };
+    const next =
+      session.format === "turnabout"
+        ? skippedTurnaboutTransition(current)
+        : skippedTransition(current);
     return commitMutation(
       db,
       userId,
@@ -2656,10 +3425,11 @@ export async function advanceDebateSession(
     );
   }
   try {
-    const transitioned = await advanceStep(
-      { ...session, status: "live", error: null },
-      runtime,
-    );
+    const active = { ...session, status: "live" as const, error: null };
+    const transitioned =
+      session.format === "turnabout"
+        ? await advanceTurnaboutStep(active, runtime)
+        : await advanceStep(active, runtime);
     const committed = commitMutation(
       db,
       userId,
@@ -2668,13 +3438,15 @@ export async function advanceDebateSession(
       checked.idempotencyKey,
       transitioned.events,
     );
-    queueCaseBoardRefinement(
-      db,
-      userId,
-      committed,
-      transitioned.events,
-      runtime.auxiliary,
-    );
+    if (session.format === "forum") {
+      queueCaseBoardRefinement(
+        db,
+        userId,
+        committed,
+        transitioned.events,
+        runtime.auxiliary,
+      );
+    }
     return committed;
   } catch (error) {
     if (error instanceof HttpError) throw error;
@@ -2703,6 +3475,254 @@ export async function advanceDebateSession(
   }
 }
 
+export async function submitDebateTurnaboutAction(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateTurnaboutActionRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (
+    session.format !== "turnabout" ||
+    session.status !== "waiting_for_player" ||
+    session.stepKey !== "turnabout_action" ||
+    session.playerRole === "spectator"
+  ) {
+    throw new HttpError(
+      409,
+      "This Turnabout is not waiting for a record action.",
+    );
+  }
+  const state = turnaboutState(session);
+  const statementId = compactText(request.statementId, 120);
+  const statement = state.statements.find(
+    (candidate) =>
+      candidate.id === statementId &&
+      candidate.id === state.activeStatementId,
+  );
+  if (!statement) {
+    throw new HttpError(409, "That statement no longer owns the floor.");
+  }
+
+  if (request.action === "press") {
+    if (statement.status !== "ready") {
+      throw new HttpError(409, "This statement has already been pressed.");
+    }
+    const pressed = await pressTurnaboutStatement(
+      session,
+      statement,
+      runtime,
+      "player",
+    );
+    return commitMutation(
+      db,
+      userId,
+      session,
+      withTurnaboutState(
+        { ...session, status: "waiting_for_player" },
+        {
+          ...pressed.state,
+          phase: "examination",
+          activeStatementId: statement.id,
+          floorOwnerBotId: statement.speakerBotId,
+        },
+      ),
+      checked.idempotencyKey,
+      pressed.events,
+    );
+  }
+
+  if (request.action === "pass") {
+    const pass = makeEvent(session, {
+      kind: "player_turn",
+      speakerKind: "player",
+      sideId: session.playerSideId,
+      content: "Pass. The statement stands on the public record.",
+      statementId: statement.id,
+      parentEventId: statement.createdEventId,
+    });
+    const resolved = replaceTurnaboutStatement(
+      state,
+      statement.id,
+      (current) => ({ ...current, status: "resolved" }),
+    );
+    return commitMutation(
+      db,
+      userId,
+      session,
+      turnaboutNextStatement(session, resolved),
+      checked.idempotencyKey,
+      [pass],
+    );
+  }
+
+  if (request.action !== "present_evidence") {
+    throw new HttpError(400, "Choose Press, Present Evidence, or Pass.");
+  }
+  const evidenceSourceId = compactText(
+    request.evidenceSourceId,
+    48,
+  ).toLowerCase();
+  const evidence = session.evidence.sources.find(
+    (source) => source.id === evidenceSourceId,
+  );
+  if (!session.evidence.frozenAt || !evidence) {
+    throw new HttpError(
+      400,
+      "Only an evidence item frozen before Start may be presented.",
+    );
+  }
+  const assessment = await assessTurnaboutContradiction(
+    session,
+    statement,
+    evidenceSourceId,
+    runtime,
+  );
+  const objection = makeEvent(session, {
+    kind: "objection",
+    speakerKind: "player",
+    sideId: session.playerSideId,
+    content: `Objection to statement ${statement.id.slice(0, 8)}.`,
+    statementId: statement.id,
+    evidenceSourceId,
+    parentEventId: statement.createdEventId,
+  });
+  const withObjection: DebateSessionV1 = {
+    ...session,
+    events: [...session.events, objection],
+  };
+  const publicEvidence = sanitizeDebateStatementSources(
+    `Presenting ${evidence.title}: ${evidence.snippet} [[source:${evidence.id}]]`,
+    session.evidence,
+  );
+  const evidenceEvent = makeEvent(withObjection, {
+    kind: "evidence",
+    speakerKind: "player",
+    sideId: session.playerSideId,
+    content: publicEvidence.content,
+    sourceIds: publicEvidence.sourceIds,
+    statementId: statement.id,
+    evidenceSourceId,
+    parentEventId: objection.id,
+  });
+  const withEvidence: DebateSessionV1 = {
+    ...withObjection,
+    events: [...withObjection.events, evidenceEvent],
+  };
+  const contradiction = assessment.contradiction;
+  const rulingEvent = makeEvent(withEvidence, {
+    kind: "moderator_ruling",
+    speakerKind: "moderator",
+    speakerBotId: session.moderator.id,
+    content:
+      contradiction.ruling === "sustained"
+        ? `Sustained. The statement says “${contradiction.statementQuote}”; the frozen evidence says “${contradiction.evidenceQuote}”. The contradiction is entered.`
+        : "Overruled. The submitted contradiction is not grounded in both the recorded statement and the frozen evidence. The statement remains open.",
+    sourceIds:
+      contradiction.ruling === "sustained" ? [evidenceSourceId] : [],
+    statementId: statement.id,
+    evidenceSourceId,
+    ruling: contradiction.ruling,
+    parentEventId: evidenceEvent.id,
+    provider: assessment.provider,
+    model: assessment.model,
+    autoRecovery: assessment.autoRecovery,
+  });
+  let nextState: DebateTurnaboutFormatStateV1 = {
+    ...state,
+    contradictions: [...state.contradictions, contradiction],
+    floorOwnerBotId:
+      contradiction.ruling === "sustained"
+        ? session.moderator.id
+        : statement.speakerBotId,
+  };
+  const newEvents: DebateEventV1[] = [
+    objection,
+    evidenceEvent,
+    rulingEvent,
+  ];
+  if (contradiction.ruling === "overruled") {
+    return commitMutation(
+      db,
+      userId,
+      session,
+      withTurnaboutState(
+        { ...session, status: "waiting_for_player" },
+        {
+          ...nextState,
+          phase: "examination",
+          activeStatementId: statement.id,
+        },
+      ),
+      checked.idempotencyKey,
+      newEvents,
+    );
+  }
+
+  nextState = replaceTurnaboutStatement(
+    {
+      ...nextState,
+      phase: "reversal",
+      round: nextState.round + 1,
+    },
+    statement.id,
+    (current) => ({ ...current, status: "contradicted" }),
+  );
+  const withRuling: DebateSessionV1 = {
+    ...withTurnaboutState(session, nextState),
+    events: [...withEvidence.events, rulingEvent],
+  };
+  const speaker = botForSide(session, statement.sideId);
+  const generatedReversal = await generateSpeech(
+    withRuling,
+    speaker,
+    [
+      "A frozen-evidence contradiction to your recorded statement was sustained.",
+      `Statement excerpt: ${contradiction.statementQuote}`,
+      `Evidence excerpt: ${contradiction.evidenceQuote}`,
+      "Respond with one concise reversal: concede, narrow, or reconcile the statement using only the public record.",
+      "Do not fabricate evidence, attack the ruling, or repeat the original claim unchanged.",
+    ].join("\n"),
+    runtime,
+  );
+  const reversal = turnaboutRecordBoundSpeech(
+    session,
+    generatedReversal,
+    `The advocate withdraws “${contradiction.statementQuote}” in light of the frozen evidence “${contradiction.evidenceQuote}”. The remaining position rests only on the public record. [[source:${evidenceSourceId}]]`,
+    [
+      statement.content,
+      contradiction.statementQuote,
+      contradiction.evidenceQuote,
+    ].join("\n"),
+  );
+  const revelationEvent = makeEvent(withRuling, {
+    kind: reversal.silent ? "silence" : "revelation",
+    speakerKind: "advocate",
+    speakerBotId: speaker.id,
+    sideId: statement.sideId,
+    content: reversal.content,
+    sourceIds: reversal.sourceIds,
+    statementId: statement.id,
+    evidenceSourceId,
+    parentEventId: rulingEvent.id,
+    provider: reversal.provider,
+    model: reversal.model,
+    autoRecovery: reversal.autoRecovery,
+  });
+  newEvents.push(revelationEvent);
+  return commitMutation(
+    db,
+    userId,
+    session,
+    turnaboutNextStatement(session, nextState),
+    checked.idempotencyKey,
+    newEvents,
+  );
+}
+
 export function submitDebatePlayerTurn(
   db: DatabaseSync,
   userId: string,
@@ -2715,6 +3735,12 @@ export function submitDebatePlayerTurn(
   const session = checked.session;
   if (session.status !== "waiting_for_player") {
     throw new HttpError(409, "This Debate is not waiting for a player turn.");
+  }
+  if (session.format === "turnabout") {
+    throw new HttpError(
+      409,
+      "Use the Turnabout record actions for this proceeding.",
+    );
   }
   const pass = request.pass === true;
   const rawContent = multilineText(request.content, DEBATE_PLAYER_TURN_MAX_LENGTH);
@@ -2801,6 +3827,12 @@ export async function submitDebateInterjection(
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
   const session = checked.session;
+  if (session.format === "turnabout") {
+    throw new HttpError(
+      409,
+      "Use Turnabout objections instead of Forum interjections.",
+    );
+  }
   if (
     session.playerRole !== "participant" ||
     !session.playerSideId ||
@@ -2947,10 +3979,14 @@ export function submitDebateVerdict(
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
   const session = checked.session;
+  const verdictStep =
+    session.format === "turnabout"
+      ? "turnabout_verdict_player"
+      : "verdict_player";
   if (
     session.playerRole !== "judge" ||
     session.status !== "waiting_for_player" ||
-    session.stepKey !== "verdict_player"
+    session.stepKey !== verdictStep
   ) {
     throw new HttpError(409, "This Debate is not waiting for a Judge verdict.");
   }
@@ -2962,17 +3998,39 @@ export function submitDebateVerdict(
     sideId: request.sideId,
     content: reason || `The Judge rules for ${sideLabel(session, request.sideId)}.`,
   });
+  const nextStep =
+    session.format === "turnabout"
+      ? "turnabout_ballot_moderator"
+      : "ballot_moderator";
+  const nextSession =
+    session.format === "turnabout"
+      ? withTurnaboutState(
+          {
+            ...session,
+            playerVerdict: request.sideId,
+            winnerSideId: request.sideId,
+            stepKey: nextStep,
+            status: "live",
+          },
+          {
+            ...turnaboutState(session),
+            phase: "resolution",
+            activeStatementId: null,
+            floorOwnerBotId: session.moderator.id,
+          },
+        )
+      : {
+          ...session,
+          playerVerdict: request.sideId,
+          winnerSideId: request.sideId,
+          stepKey: nextStep,
+          status: "live" as const,
+        };
   return commitMutation(
     db,
     userId,
     session,
-    {
-      ...session,
-      playerVerdict: request.sideId,
-      winnerSideId: request.sideId,
-      stepKey: "ballot_moderator",
-      status: "live",
-    },
+    nextSession,
     checked.idempotencyKey,
     [event],
   );

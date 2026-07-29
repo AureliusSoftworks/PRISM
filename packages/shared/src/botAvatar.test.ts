@@ -71,8 +71,8 @@ describe("bot avatar face style", () => {
     ]);
   });
 
-  it("labels the concise face font as the Doto matrix style", () => {
-    assert.equal(BOT_FACE_FONT_LABELS.concise, "Doto");
+  it("labels the concise face font as the technical Mono style", () => {
+    assert.equal(BOT_FACE_FONT_LABELS.concise, "Mono");
   });
 
   it("normalizes known face font ids only", () => {

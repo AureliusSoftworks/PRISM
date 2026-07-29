@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
+  DEBATE_STAGE_LIGHT_BLEND_MODES,
   debateStageAlignmentOffset,
   debateStageAlignmentStorageKey,
   debateStageAlignmentStyle,
@@ -10,6 +11,7 @@ import {
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
+  updateDebateStageLightBlendMode,
   writeDebateStageAlignment,
 } from "./debateStageAlignment.ts";
 
@@ -39,6 +41,10 @@ describe("Debate stage alignment", () => {
           nameplate: { x: 2.25, y: -1.5 },
           glyph: { x: 0.5, y: -0.5 },
         },
+        lightBlendModes: {
+          dark: "overlay",
+          light: "screen",
+        },
       }),
       {
         version: 3,
@@ -63,6 +69,10 @@ describe("Debate stage alignment", () => {
           bot: { x: -3.25, y: 7.5 },
           nameplate: { x: 2.25, y: -1.5 },
           glyph: { x: 0.5, y: -0.5 },
+        },
+        lightBlendModes: {
+          dark: "overlay",
+          light: "screen",
         },
       },
     );
@@ -127,6 +137,10 @@ describe("Debate stage alignment", () => {
         nameplate: { x: 5, y: -3 },
         glyph: { x: 4, y: -2 },
       },
+      lightBlendModes: {
+        dark: "overlay",
+        light: "screen",
+      },
     });
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1").moderator.glyph,
@@ -149,6 +163,10 @@ describe("Debate stage alignment", () => {
         nameplate: { x: 5, y: -3 },
         glyph: { x: 4, y: -2 },
       },
+      lightBlendModes: {
+        dark: "overlay",
+        light: "screen",
+      },
     });
     const style = debateStageAlignmentStyle(alignment) as Record<
       string,
@@ -160,6 +178,8 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-moderator-view-offset-x"], "6%");
     assert.equal(style["--debate-moderator-view-nameplate-offset-y"], "-3%");
     assert.equal(style["--debate-moderator-view-glyph-offset-x"], "4%");
+    assert.equal(style["--debate-light-blend-mode-dark"], "overlay");
+    assert.equal(style["--debate-light-blend-mode-light"], "screen");
   });
 
   it("updates one close-up item without mutating its bot or the Wide moderator", () => {
@@ -195,6 +215,34 @@ describe("Debate stage alignment", () => {
       JSON.parse(formatDebateStageAlignmentClipboard(updated)).moderator
         .nameplate.x,
       2.5,
+    );
+  });
+
+  it("keeps independent Light and Dark blend modes inside the saved alignment", () => {
+    assert.deepEqual(DEBATE_STAGE_LIGHT_BLEND_MODES, ["screen", "overlay"]);
+    const darkOverlay = updateDebateStageLightBlendMode(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      "dark",
+      "overlay",
+    );
+    const tuned = updateDebateStageLightBlendMode(
+      darkOverlay,
+      "light",
+      "screen",
+    );
+    assert.deepEqual(tuned.lightBlendModes, {
+      dark: "overlay",
+      light: "screen",
+    });
+    assert.deepEqual(
+      normalizeDebateStageAlignment({
+        lightBlendModes: { dark: "multiply", light: "invalid" },
+      }).lightBlendModes,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes,
+    );
+    assert.deepEqual(
+      JSON.parse(formatDebateStageAlignmentClipboard(tuned)).lightBlendModes,
+      tuned.lightBlendModes,
     );
   });
 });

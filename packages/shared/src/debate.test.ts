@@ -2,15 +2,61 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
+  DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_MOTION_MAX_LENGTH,
+  defaultDebateFormatStateV1,
   debateSourceIdsFromText,
   debateSpokenText,
   isValidDebateSourceId,
   normalizeDebateEvidencePacketV1,
+  normalizeDebateFormatId,
+  normalizeDebateFormatStateV1,
   normalizeDebateIdempotencyKey,
   normalizeDebateMotionSlateV1,
   sanitizeDebateStatementSources,
 } from "./debate.ts";
+
+test("defaults legacy Debate records to Forum and normalizes Turnabout state", () => {
+  assert.equal(normalizeDebateFormatId(undefined), "forum");
+  assert.deepEqual(defaultDebateFormatStateV1("forum"), {
+    version: DEBATE_FORMAT_SCHEMA_VERSION,
+    format: "forum",
+  });
+  const state = normalizeDebateFormatStateV1(
+    {
+      format: "turnabout",
+      phase: "reversal",
+      round: 3,
+      activeStatementId: "statement-1",
+      floorOwnerBotId: "bot-stable-1",
+      statements: [
+        {
+          id: "statement-1",
+          sideId: "for",
+          speakerBotId: "bot-stable-1",
+          content: "A frozen, pressable claim.",
+          sourceIds: ["source-1", "bad marker"],
+          status: "pressed",
+          createdEventId: "event-1",
+        },
+      ],
+      contradictions: [],
+    },
+    "turnabout",
+  );
+  assert.equal(state.format, "turnabout");
+  assert.equal(state.phase, "reversal");
+  assert.equal(state.round, 3);
+  assert.equal(state.floorOwnerBotId, "bot-stable-1");
+  assert.deepEqual(state.statements[0]?.sourceIds, ["source-1"]);
+  assert.equal(
+    normalizeDebateFormatStateV1(
+      { version: 1, format: "forum" },
+      "turnabout",
+    ).format,
+    "turnabout",
+  );
+});
 
 test("normalizes motion slates and applies stable side-label fallbacks", () => {
   const slate = normalizeDebateMotionSlateV1({

@@ -1265,7 +1265,7 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.doesNotMatch(pageSource, /botAvatarFeaturePositionSummary/);
   assert.match(pageSource, /const BOT_AVATAR_FACE_PRESETS = \[/);
   assert.match(pageSource, /Classic/);
-  assert.match(pageSource, /Doto/);
+  assert.match(pageSource, /Mono/);
   assert.match(pageSource, /Bouncy/);
   assert.match(pageSource, /Reset face/);
   assert.doesNotMatch(pageSource, /BOT_AVATAR_SCREEN_MASK_BLEND_MODES/);

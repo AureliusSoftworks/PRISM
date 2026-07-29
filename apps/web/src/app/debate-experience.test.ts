@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEBATE_SCHEMA_VERSION } from "@localai/shared";
@@ -15,10 +15,6 @@ const source = readFileSync(
 );
 const css = readFileSync(
   fileURLToPath(new URL("./DebateExperience.module.css", import.meta.url)),
-  "utf8",
-);
-const scene = readFileSync(
-  fileURLToPath(new URL("./DebateForumScene.tsx", import.meta.url)),
   "utf8",
 );
 const page = readFileSync(
@@ -97,6 +93,65 @@ describe("Debate experience", () => {
     assert.match(source, /PrismRefractTarget target=\{synthesisMagic\}/u);
     assert.match(source, /data-tutorial-target="debate-synthesize"/u);
     assert.match(source, /Refract into motions/u);
+  });
+
+  it("generates randomized evidence through real-source research only", () => {
+    assert.match(source, /randomDebateEvidenceQuery\(motion\.motion, topic\)/u);
+    assert.match(
+      source,
+      /aria-label="Generate randomized evidence from the current motion"/u,
+    );
+    assert.match(source, /await research\(query, true\)/u);
+    assert.match(source, /Nothing is fabricated/u);
+    assert.match(source, /props\.responseMode === "local"/u);
+    assert.doesNotMatch(source, /synthetic-[a-z]/u);
+  });
+
+  it("keeps Forum default while exposing a real Turnabout format contract", () => {
+    assert.match(source, /useState<DebateFormatId>\("forum"\)/u);
+    assert.match(source, /DEBATE_FORMATS\.map/u);
+    assert.match(source, /data-tutorial-target="debate-format"/u);
+    assert.match(source, /Opening · Challenge · Rebuttal · Closing/u);
+    assert.match(source, /Press · Object · Present Evidence/u);
+    assert.match(source, /format,\s+motion,/u);
+    assert.match(source, /\/turnabout-action/u);
+    assert.match(source, /submitTurnaboutAction\("press"/u);
+    assert.match(source, /setTurnaboutObjecting/u);
+    assert.match(source, /submitTurnaboutAction\(\s*"present_evidence"/u);
+    assert.match(source, /submitTurnaboutAction\("pass"/u);
+    assert.match(source, /Statement-bound · frozen evidence only/u);
+    assert.match(source, /session\.formatState\.floorOwnerBotId/u);
+    assert.match(source, /"Record ready"/u);
+    assert.match(source, /Return to a proceeding/u);
+    assert.match(source, /"The record"/u);
+    assert.match(css, /\.formatPicker/u);
+    assert.match(css, /\.turnaboutRecord/u);
+    assert.match(css, /\.turnaboutActions/u);
+    assert.match(
+      css,
+      /\.turnaboutActions > div:first-child[\s\S]{0,260}grid-template-columns/u,
+    );
+    assert.match(css, /turnaboutActions:has\(\.turnaboutEvidencePicker\)/u);
+    assert.match(css, /data-debate-format="turnabout"/u);
+  });
+
+  it("keeps Debate voice playback enabled when optional effects are off", () => {
+    assert.match(page, /debateAudioEnabled\(\{/u);
+    assert.doesNotMatch(
+      page,
+      /audioEnabled=\{Boolean\([\s\S]{0,220}voiceEffectsEnabled !== false/u,
+    );
+  });
+
+  it("does not mislabel Debate events as persisted Signal messages for voice synthesis", () => {
+    assert.match(
+      page,
+      /playbackSurface === "signal"[\s\S]{0,120}\? \{ signalMessageId: message\.id \}/u,
+    );
+    assert.match(
+      page,
+      /requestBotcastEnglishClipWithFallback\([\s\S]{0,500}controller\.signal,\s+playbackSurface,/u,
+    );
   });
 
   it("offers all three recovery paths when an advocate declines", () => {
@@ -325,33 +380,105 @@ describe("Debate experience", () => {
     assert.match(css, /grid-template-columns:\s*repeat\(7,/u);
   });
 
-  it("uses authored Light and Dark receivers with adaptive masked fallback", () => {
+  it("uses authored receivers and raster-aligned alpha light masks", () => {
     assert.match(css, /forum-dark\.webp/u);
     assert.match(css, /forum-light\.webp/u);
     assert.match(css, /forum-dark-foreground\.png/u);
     assert.match(css, /forum-light-foreground\.png/u);
     assert.match(css, /\.botPosition\s*\{[^}]*z-index:\s*3/u);
     assert.match(css, /\.podiumForeground\s*\{[^}]*z-index:\s*4/u);
-    assert.match(css, /\.forumScene\s*\{[^}]*z-index:\s*5/u);
     assert.match(
       css,
-      /\.lightMaskFor,[\s\S]*?\.lightMaskModerator\s*\{[^}]*inset:\s*0[^}]*z-index:\s*5/u,
+      /\.lightMaskFor,[\s\S]*?\.lightMaskModerator\s*\{[^}]*inset:\s*0[^}]*z-index:\s*2/u,
     );
     assert.match(
       css,
-      /\.forumCamera\[data-camera-view="moderator"\]\s+\.lightMaskFor\s*\{[^}]*ellipse at 16% 54%[^}]*clip-path:\s*polygon\(0 2%,\s*32% 0,\s*29% 96%,\s*0 100%\)/u,
+      /\.lightMaskForeground\s*\{[^}]*z-index:\s*5[^}]*forum-light-mask-foreground\.png/u,
+    );
+    assert.match(
+      css,
+      /-webkit-mask-image:\s*url\("\/debate\/forum-light-mask\.png"\)/u,
+    );
+    assert.match(
+      css,
+      /mask-image:\s*url\("\/debate\/forum-light-mask\.png"\)/u,
+    );
+    assert.match(css, /mask-size:\s*cover/u);
+    assert.match(
+      css,
+      /\.forumCamera\[data-camera-view="moderator"\][\s\S]*?:is\(\.lightMaskFor,\s*\.lightMaskAgainst\)\s*\{[^}]*opacity:\s*0/u,
+    );
+    assert.match(
+      css,
+      /\.forumCamera\[data-camera-view="moderator"\]\s+\.lightMaskModerator\s*\{[^}]*background:\s*var\(--debate-moderator-color\)[^}]*moderator-light-mask\.png/u,
     );
     assert.match(source, /className=\{styles\.podiumForeground\}/u);
-    assert.match(source, /cameraView=\{stageAlignmentPreviewCamera\}/u);
-    assert.match(source, /cameraView=\{cameraView\}/u);
-    assert.match(scene, /cameraView:\s*DebateForumCameraView/u);
+    assert.match(source, /data-light-depth="backdrop"/u);
+    assert.match(source, /data-light-depth="foreground"/u);
     assert.match(
-      scene,
-      /const moderatorCamera = this\.state\.cameraView === "moderator"/u,
+      source,
+      /className=\{`\$\{styles\.lightMaskFor\} \$\{styles\.lightMaskForeground\}`\}/u,
     );
-    assert.match(scene, /sceneId: "debate-forum"/u);
-    assert.match(scene, /role: DebateForumRole/u);
-    assert.match(css, /data-renderer-status="webgl"/u);
+    assert.match(source, /data-active-role=\{activeRole \?\? undefined\}/u);
+    assert.doesNotMatch(source, /<DebateForumScene/u);
+    assert.doesNotMatch(css, /\.lightMaskFor\s*\{[^}]*clip-path:\s*polygon/u);
+    assert.doesNotMatch(
+      css,
+      /\.lightMaskAgainst\s*\{[^}]*clip-path:\s*polygon/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.lightMaskModerator\s*\{[^}]*clip-path:\s*polygon/u,
+    );
+    assert.equal(
+      existsSync(
+        fileURLToPath(
+          new URL("../../public/debate/forum-light-mask.png", import.meta.url),
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        fileURLToPath(
+          new URL(
+            "../../public/debate/moderator-light-mask.png",
+            import.meta.url,
+          ),
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        fileURLToPath(
+          new URL(
+            "../../public/debate/forum-light-mask-foreground.png",
+            import.meta.url,
+          ),
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(
+        fileURLToPath(
+          new URL(
+            "../../public/debate/moderator-light-mask-foreground.png",
+            import.meta.url,
+          ),
+        ),
+      ),
+      true,
+    );
+    assert.match(
+      css,
+      /mix-blend-mode:\s*var\(--debate-light-blend-mode-dark,\s*screen\)/u,
+    );
+    assert.match(
+      css,
+      /mix-blend-mode:\s*var\(--debate-light-blend-mode-light,\s*overlay\)/u,
+    );
     assert.match(css, /prefers-reduced-motion/u);
   });
 
@@ -378,7 +505,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("uses a compact expressive moderator and inset turn-owned podium screens", () => {
+  it("keeps compact moderators on the registered avatar geometry and inset turn-owned podium screens", () => {
     assert.match(source, /debateTurnOwnerBotId\(\{/u);
     assert.match(
       source,
@@ -410,24 +537,20 @@ describe("Debate experience", () => {
       /detailLevel=\{avatarState\.compact \? "reduced" : "full"\}/u,
     );
     assert.match(
-      pageCss,
-      /\.debateBotPresencePlate\[data-debate-compact="true"\]\s*\{[^}]*--zen-live-bot-avatar-body-size:\s*70%[^}]*--zen-live-bot-face-y:\s*51\.5%[^}]*--zen-live-bot-face-scale:\s*1\.6/u,
-    );
-    assert.match(
-      pageCss,
-      /\.debateBotPresencePlate\[data-debate-compact="true"\][\s\S]*?\.zenLiveBotPresenceBody\[data-avatar-details-visuals="true"\]\s*\{[^}]*--zen-live-bot-face-thumbnail-scale:\s*0\.88[^}]*--zen-live-bot-face-thumbnail-offset-y:\s*2\.5%/u,
-    );
-    assert.match(
       page,
-      /data-avatar-details-visuals=\{\s*hasAvatarDetailsVisuals \? "true" : undefined/u,
-    );
-    assert.match(
-      pageCss,
-      /\.debateBotPresencePlate\[data-debate-compact="true"\][\s\S]*?\.zenLiveBotPresenceFace\s*\{[^}]*border:\s*1px solid[^}]*var\(--coffee-bot-color\)\s+28%,\s*#56616e\s+72%[^}]*radial-gradient/u,
+      /<ZenLiveBotMannequin[\s\S]{0,180}faceScaleY=\{faceScaleY\}/u,
     );
     assert.doesNotMatch(
       pageCss,
-      /\.debateBotPresencePlate\[data-debate-compact="true"\][\s\S]*?\.zenLiveBotPresenceFace\s*\{[^}]*2px solid rgba\(244,\s*246,\s*250,\s*0\.92\)/u,
+      /\.debateBotPresencePlate\[data-debate-compact="true"\]\s*\{[^}]*(?:--zen-live-bot-avatar-body-size|--zen-live-bot-face-y|--zen-live-bot-face-scale)/u,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /\.debateBotPresencePlate\[data-debate-compact="true"\]\s+\.zenLiveBotPresenceBody\[data-avatar-details-visuals="true"\]\s*\{/u,
+    );
+    assert.match(
+      pageCss,
+      /\.debateBotPresencePlate\[data-debate-compact="true"\]\s*\{[^}]*--bot-ambient-hover-amplitude:\s*0\.5px/u,
     );
     assert.match(
       pageCss,
@@ -437,7 +560,7 @@ describe("Debate experience", () => {
       page,
       /\.\.\.botAccentStyle\(\s*botSnapshot\.color \?\? PRISM_DEFAULT_ACCENT,\s*resolvedTheme,\s*\)/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageCss,
       /\.debateBotPresencePlate\[data-debate-compact="true"\]\s+\.botFaceFrame[\s\S]*?display:\s*none/u,
     );
@@ -647,6 +770,14 @@ describe("Debate experience", () => {
     assert.match(source, /formatDebateStageAlignmentClipboard/u);
     assert.match(source, /type="range"/u);
     assert.match(source, /writeDebateStageAlignment/u);
+    assert.match(source, /aria-label="Debate light color blend modes"/u);
+    assert.match(source, /DEBATE_STAGE_LIGHT_BLEND_MODES\.map/u);
+    assert.match(
+      source,
+      /aria-label=\{`\$\{label\} Debate light blend mode`\}/u,
+    );
+    assert.match(source, /updateDebateStageLightBlendMode/u);
+    assert.match(source, /Saved separately for Light and Dark/u);
     assert.match(
       source,
       /style=\{debateStageAlignmentStyle\(stageAlignment\)\}/u,
@@ -663,6 +794,10 @@ describe("Debate experience", () => {
     assert.doesNotMatch(css, /\.alignmentForum\s*\{[^}]*aspect-ratio:/u);
     assert.doesNotMatch(css, /\.alignmentForum\s*\{[^}]*min-height:/u);
     assert.match(css, /\.alignmentTuner\s*\{[^}]*position:\s*relative/u);
+    assert.match(
+      css,
+      /\.alignmentLightingTuner\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/u,
+    );
     assert.match(
       css,
       /\.forumCamera\[data-camera-view="moderator"\][\s\S]*?--debate-moderator-view-nameplate-offset-x/u,
@@ -690,8 +825,13 @@ describe("Debate experience", () => {
     assert.match(page, /data-debate-shell="true"/u);
     assert.match(
       page,
-      /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*showVoiceSelector:\s*true[\s\S]*liveSessionName:\s*"Debate"[\s\S]*renderProviderModeToggle\([\s\S]*<ComposerModelPicker/u,
+      /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*showVoiceSelector:\s*true[\s\S]*liveSessionName:\s*"Debate"[\s\S]*\(\["local", "auto", "online"\] as const\)\.map[\s\S]*<ComposerModelPicker/u,
     );
+    assert.match(page, /data-response-mode=\{debateResponseMode\}/u);
+    assert.match(page, /responseMode=\{debateResponseMode\}/u);
+    assert.match(source, /responseMode:\s*props\.responseMode/u);
+    assert.match(source, /event\.autoRecovery/u);
+    assert.match(source, /All configured Auto models failed|Recovered with/u);
     assert.match(page, /autoOptionLabel="Account default"/u);
     assert.match(page, /Uses the account model for the entire Debate\./u);
     assert.doesNotMatch(page, /Cast models/u);

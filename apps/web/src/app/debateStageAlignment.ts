@@ -4,10 +4,13 @@ export const DEBATE_STAGE_ALIGNMENT_VERSION = 3 as const;
 export const DEBATE_STAGE_ALIGNMENT_MIN = -12;
 export const DEBATE_STAGE_ALIGNMENT_MAX = 12;
 export const DEBATE_STAGE_ALIGNMENT_STEP = 0.5;
+export const DEBATE_STAGE_LIGHT_BLEND_MODES = ["screen", "overlay"] as const;
 
 export type DebateStageAlignmentRole = "for" | "moderator" | "against";
 export type DebateStageAlignmentItem = "bot" | "nameplate" | "glyph";
 export type DebateStageAlignmentView = "wide" | "moderator";
+export type DebateStageLightBlendMode =
+  (typeof DEBATE_STAGE_LIGHT_BLEND_MODES)[number];
 export type DebateStageAlignmentTarget =
   | `${DebateStageAlignmentRole}:${DebateStageAlignmentItem}`
   | `moderatorView:${DebateStageAlignmentItem}`;
@@ -29,10 +32,16 @@ export interface DebateStageAlignmentWideV3 {
   against: DebateStageRolePlacementV3;
 }
 
+export interface DebateStageLightBlendModesV1 {
+  dark: DebateStageLightBlendMode;
+  light: DebateStageLightBlendMode;
+}
+
 export interface DebateStageAlignmentV3 {
   version: typeof DEBATE_STAGE_ALIGNMENT_VERSION;
   wide: DebateStageAlignmentWideV3;
   moderator: DebateStageRolePlacementV3;
+  lightBlendModes: DebateStageLightBlendModesV1;
 }
 
 export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
@@ -56,6 +65,10 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV3 = {
     against: defaultPlacement(),
   },
   moderator: defaultPlacement(),
+  lightBlendModes: {
+    dark: "screen",
+    light: "overlay",
+  },
 };
 
 function normalizedOffset(value: unknown): number {
@@ -110,6 +123,17 @@ function normalizeStagePlacement(
   };
 }
 
+function normalizeLightBlendMode(
+  value: unknown,
+  fallback: DebateStageLightBlendMode,
+): DebateStageLightBlendMode {
+  return DEBATE_STAGE_LIGHT_BLEND_MODES.includes(
+    value as DebateStageLightBlendMode,
+  )
+    ? (value as DebateStageLightBlendMode)
+    : fallback;
+}
+
 export function normalizeDebateStageAlignment(
   value: unknown,
 ): DebateStageAlignmentV3 {
@@ -123,6 +147,11 @@ export function normalizeDebateStageAlignment(
       : null;
   const wideCandidate = nestedWide ?? candidate;
   const legacyModerator = wideCandidate.moderator;
+  const lightBlendModes =
+    typeof candidate.lightBlendModes === "object" &&
+    candidate.lightBlendModes !== null
+      ? (candidate.lightBlendModes as Record<string, unknown>)
+      : {};
   return {
     version: DEBATE_STAGE_ALIGNMENT_VERSION,
     wide: {
@@ -133,6 +162,10 @@ export function normalizeDebateStageAlignment(
     moderator: normalizeStagePlacement(
       nestedWide ? candidate.moderator : legacyModerator,
     ),
+    lightBlendModes: {
+      dark: normalizeLightBlendMode(lightBlendModes.dark, "screen"),
+      light: normalizeLightBlendMode(lightBlendModes.light, "overlay"),
+    },
   };
 }
 
@@ -201,6 +234,20 @@ export function updateDebateStageAlignmentOffset(
         ...alignment.wide[role],
         [item]: { ...alignment.wide[role][item], ...update },
       },
+    },
+  });
+}
+
+export function updateDebateStageLightBlendMode(
+  alignment: DebateStageAlignmentV3,
+  theme: "light" | "dark",
+  blendMode: DebateStageLightBlendMode,
+): DebateStageAlignmentV3 {
+  return normalizeDebateStageAlignment({
+    ...alignment,
+    lightBlendModes: {
+      ...alignment.lightBlendModes,
+      [theme]: blendMode,
     },
   });
 }
@@ -274,6 +321,8 @@ export function debateStageAlignmentStyle(
     "--debate-moderator-view-nameplate-offset-y": `${normalized.moderator.nameplate.y}%`,
     "--debate-moderator-view-glyph-offset-x": `${normalized.moderator.glyph.x}%`,
     "--debate-moderator-view-glyph-offset-y": `${normalized.moderator.glyph.y}%`,
+    "--debate-light-blend-mode-dark": normalized.lightBlendModes.dark,
+    "--debate-light-blend-mode-light": normalized.lightBlendModes.light,
   } as CSSProperties;
 }
 

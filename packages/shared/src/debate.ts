@@ -13,6 +13,7 @@ import type {
 import type { LlmProviderName } from "./index.js";
 
 export const DEBATE_SCHEMA_VERSION = 1 as const;
+export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
 export const DEBATE_MOTION_MAX_LENGTH = 320;
 export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
 export const DEBATE_SIDE_BRIEF_MAX_LENGTH = 1_200;
@@ -20,7 +21,9 @@ export const DEBATE_EVIDENCE_NOTES_MAX_LENGTH = 8_000;
 export const DEBATE_EVIDENCE_SOURCE_MAX_COUNT = 12;
 export const DEBATE_PLAYER_TURN_MAX_LENGTH = 4_000;
 export const DEBATE_CASE_CARDS_PER_SIDE = 4;
+export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
 
+export type DebateFormatId = "forum" | "turnabout";
 export type DebatePlayerRole = "judge" | "participant" | "spectator";
 export type DebateSideId = "for" | "against";
 export type DebatePhase =
@@ -46,6 +49,81 @@ export type DebateCaseCardStatus =
   | "conceded"
   | "unanswered";
 export type DebateBotRole = "moderator" | "advocate";
+
+export interface DebateFormatDescriptorV1 {
+  id: DebateFormatId;
+  name: string;
+  summary: string;
+}
+
+export const DEBATE_FORMATS: readonly DebateFormatDescriptorV1[] = [
+  {
+    id: "forum",
+    name: "Forum",
+    summary:
+      "A structured civic duel of openings, challenges, rebuttals, closings, and verdict.",
+  },
+  {
+    id: "turnabout",
+    name: "Turnabout",
+    summary:
+      "A theatrical record examination built around pressable testimony and frozen-evidence objections.",
+  },
+] as const;
+
+export type DebateTurnaboutPhase =
+  | "testimony"
+  | "examination"
+  | "reversal"
+  | "resolution";
+export type DebateTurnaboutStatementStatus =
+  | "ready"
+  | "pressed"
+  | "contradicted"
+  | "resolved";
+export type DebateTurnaboutRuling = "sustained" | "overruled";
+
+export interface DebateForumFormatStateV1 {
+  version: typeof DEBATE_FORMAT_SCHEMA_VERSION;
+  format: "forum";
+}
+
+export interface DebateTurnaboutStatementV1 {
+  id: string;
+  sideId: DebateSideId;
+  speakerBotId: string;
+  content: string;
+  sourceIds: string[];
+  status: DebateTurnaboutStatementStatus;
+  createdEventId: string;
+}
+
+export interface DebateTurnaboutContradictionV1 {
+  id: string;
+  statementId: string;
+  evidenceSourceId: string;
+  statementQuote: string;
+  evidenceQuote: string;
+  reason: string;
+  grounded: boolean;
+  ruling: DebateTurnaboutRuling;
+  createdAt: string;
+}
+
+export interface DebateTurnaboutFormatStateV1 {
+  version: typeof DEBATE_FORMAT_SCHEMA_VERSION;
+  format: "turnabout";
+  phase: DebateTurnaboutPhase;
+  round: number;
+  activeStatementId: string | null;
+  floorOwnerBotId: string | null;
+  statements: DebateTurnaboutStatementV1[];
+  contradictions: DebateTurnaboutContradictionV1[];
+}
+
+export type DebateFormatStateV1 =
+  | DebateForumFormatStateV1
+  | DebateTurnaboutFormatStateV1;
 
 export interface DebateMotionSideV1 {
   label: string;
@@ -77,6 +155,7 @@ export interface DebateEvidencePacketV1 {
 
 export interface DebateAdvocacyConsent {
   version: typeof DEBATE_SCHEMA_VERSION;
+  format?: DebateFormatId;
   botId: string;
   sideId: DebateSideId;
   status: DebateAdvocacyConsentStatus;
@@ -146,6 +225,11 @@ export type DebateEventKind =
   | "phase"
   | "speech"
   | "silence"
+  | "testimony"
+  | "press"
+  | "objection"
+  | "evidence"
+  | "revelation"
   | "player_turn"
   | "reaction"
   | "interjection"
@@ -175,6 +259,9 @@ export interface DebateEventV1 {
   provider?: LlmProviderName;
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;
+  statementId?: string | null;
+  evidenceSourceId?: string | null;
+  ruling?: DebateTurnaboutRuling | null;
   createdAt: string;
 }
 
@@ -203,6 +290,9 @@ export interface DebateSessionV1 {
   responseMode: ResponseMode;
   /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
   generationChain: AutoFallbackModelRef[];
+  format: DebateFormatId;
+  formatVersion: typeof DEBATE_FORMAT_SCHEMA_VERSION;
+  formatState: DebateFormatStateV1;
   playerRole: DebatePlayerRole;
   playerSideId: DebateSideId | null;
   motion: DebateMotionSlateV1;
@@ -245,6 +335,7 @@ export interface DebateResearchResponse {
 }
 
 export interface DebateRoleChecksRequest {
+  format?: DebateFormatId;
   motion: DebateMotionSlateV1;
   forAdvocateBotId: string;
   againstAdvocateBotId: string;
@@ -258,6 +349,7 @@ export interface DebateRoleChecksResponse {
 }
 
 export interface DebateSessionCreateRequest {
+  format?: DebateFormatId;
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
   moderatorBotId: string;
@@ -299,8 +391,20 @@ export interface DebateInterjectionRequest extends DebateMutationRequest {
   content: string;
 }
 
+export type DebateTurnaboutAction =
+  | "press"
+  | "present_evidence"
+  | "pass";
+
+export interface DebateTurnaboutActionRequest extends DebateMutationRequest {
+  action: DebateTurnaboutAction;
+  statementId: string;
+  evidenceSourceId?: string | null;
+}
+
 export interface DebateSessionListItemV1 {
   id: string;
+  format: DebateFormatId;
   status: DebateStatus;
   phase: DebatePhase;
   motion: string;
@@ -498,6 +602,152 @@ export function isDebatePlayerRole(value: unknown): value is DebatePlayerRole {
 
 export function isDebateSideId(value: unknown): value is DebateSideId {
   return value === "for" || value === "against";
+}
+
+export function isDebateFormatId(value: unknown): value is DebateFormatId {
+  return value === "forum" || value === "turnabout";
+}
+
+export function normalizeDebateFormatId(value: unknown): DebateFormatId {
+  return value === "turnabout" ? "turnabout" : "forum";
+}
+
+export function defaultDebateFormatStateV1(
+  format: DebateFormatId,
+): DebateFormatStateV1 {
+  return format === "turnabout"
+    ? {
+        version: DEBATE_FORMAT_SCHEMA_VERSION,
+        format: "turnabout",
+        phase: "testimony",
+        round: 1,
+        activeStatementId: null,
+        floorOwnerBotId: null,
+        statements: [],
+        contradictions: [],
+      }
+    : {
+        version: DEBATE_FORMAT_SCHEMA_VERSION,
+        format: "forum",
+      };
+}
+
+export function normalizeDebateFormatStateV1(
+  value: unknown,
+  requestedFormat?: unknown,
+): DebateFormatStateV1 {
+  const source =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const format = isDebateFormatId(requestedFormat)
+    ? requestedFormat
+    : normalizeDebateFormatId(source.format);
+  if (format === "forum") return defaultDebateFormatStateV1("forum");
+
+  const statements = Array.isArray(source.statements)
+    ? source.statements.flatMap((item): DebateTurnaboutStatementV1[] => {
+        const row =
+          item && typeof item === "object"
+            ? (item as Record<string, unknown>)
+            : {};
+        const id = normalizedText(row.id, 120);
+        const speakerBotId = normalizedText(row.speakerBotId, 200);
+        const content = normalizedMultilineText(row.content, 6_000);
+        if (!id || !speakerBotId || !content || !isDebateSideId(row.sideId)) {
+          return [];
+        }
+        const status: DebateTurnaboutStatementStatus =
+          row.status === "pressed" ||
+          row.status === "contradicted" ||
+          row.status === "resolved"
+            ? row.status
+            : "ready";
+        return [
+          {
+            id,
+            sideId: row.sideId,
+            speakerBotId,
+            content,
+            sourceIds: Array.isArray(row.sourceIds)
+              ? [
+                  ...new Set(
+                    row.sourceIds.filter(isValidDebateSourceId).map(String),
+                  ),
+                ]
+              : [],
+            status,
+            createdEventId: normalizedText(row.createdEventId, 120),
+          },
+        ];
+      })
+    : [];
+  const contradictions = Array.isArray(source.contradictions)
+    ? source.contradictions.flatMap(
+        (item): DebateTurnaboutContradictionV1[] => {
+          const row =
+            item && typeof item === "object"
+              ? (item as Record<string, unknown>)
+              : {};
+          const id = normalizedText(row.id, 120);
+          const statementId = normalizedText(row.statementId, 120);
+          const evidenceSourceId = normalizedText(
+            row.evidenceSourceId,
+            48,
+          ).toLowerCase();
+          if (
+            !id ||
+            !statementId ||
+            !isValidDebateSourceId(evidenceSourceId)
+          ) {
+            return [];
+          }
+          return [
+            {
+              id,
+              statementId,
+              evidenceSourceId,
+              statementQuote: normalizedText(row.statementQuote, 600),
+              evidenceQuote: normalizedText(row.evidenceQuote, 600),
+              reason: normalizedText(row.reason, 1_000),
+              grounded: row.grounded === true,
+              ruling:
+                row.ruling === "sustained" ? "sustained" : "overruled",
+              createdAt: normalizedText(row.createdAt, 64),
+            },
+          ];
+        },
+      )
+    : [];
+  const phase: DebateTurnaboutPhase =
+    source.phase === "examination" ||
+    source.phase === "reversal" ||
+    source.phase === "resolution"
+      ? source.phase
+      : "testimony";
+  return {
+    version: DEBATE_FORMAT_SCHEMA_VERSION,
+    format: "turnabout",
+    phase,
+    round:
+      typeof source.round === "number" &&
+      Number.isInteger(source.round) &&
+      source.round > 0
+        ? Math.min(source.round, 99)
+        : 1,
+    activeStatementId:
+      typeof source.activeStatementId === "string" &&
+      source.activeStatementId.trim()
+        ? source.activeStatementId.trim().slice(0, 120)
+        : null,
+    floorOwnerBotId:
+      typeof source.floorOwnerBotId === "string" &&
+      source.floorOwnerBotId.trim()
+        ? source.floorOwnerBotId.trim().slice(0, 200)
+        : null,
+    statements,
+    contradictions,
+  };
 }
 
 export function normalizeDebateIdempotencyKey(value: unknown): string {

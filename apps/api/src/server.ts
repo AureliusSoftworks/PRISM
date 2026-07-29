@@ -193,6 +193,7 @@ import {
   resumeDebateSession,
   submitDebateInterjection,
   submitDebatePlayerTurn,
+  submitDebateTurnaboutAction,
   submitDebateVerdict,
   synthesizeDebateSlates,
   type DebateAiRuntime,
@@ -704,6 +705,8 @@ import {
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
   parseStoredAutoFallbackChain,
+  autoFallbackResolvedChain,
+  normalizeAutoFallbackModelRef,
   normalizeResponseMode,
   normalizePrismStartupPreference,
   resolveImageProviderName,
@@ -754,6 +757,7 @@ import {
   type PrismJsonObject,
   type PrismCompanionCardV1,
   type PrismCompanionSurfaceReference,
+  type AutoFallbackModelRef,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -3256,6 +3260,8 @@ function debateAiRuntimeForUser(
   userId: string,
   requestedProvider: unknown,
   requestedModelOverride?: unknown,
+  requestedResponseMode?: unknown,
+  requestedFrozenChain?: unknown,
 ): DebateAiRuntime {
   const user = getUserRow(userId);
   const hardLocal = userBlocksOnlineCapabilities(user);
@@ -3292,30 +3298,74 @@ function debateAiRuntimeForUser(
     user.prism_default_llm_model,
     dualOllamaWorkloadOptions(user),
   );
-  if (preferredProvider === "local") {
-    return { local, auxiliary, preferredProvider };
-  }
-  const userKey = decryptUserKey(userId);
-  const onlineProvider =
-    preferredProvider === "anthropic" ? "anthropic" : "openai";
-  const onlineApiKey =
-    onlineProvider === "anthropic"
-      ? getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey
-      : getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-  const online: NonNullable<DebateAiRuntime["online"]> = {
-    provider: providerFactoryOverride(
-      onlineProvider,
-      onlineApiKey,
-      user.secondary_ollama_host,
-      undefined,
-    ),
-    providerName: onlineProvider,
-    model:
-      modelOverride ||
-      user.preferred_online_model?.trim() ||
-      defaultModelIdForProvider(onlineProvider),
+  const userKey = hardLocal ? null : decryptUserKey(userId);
+  const onlineLane = (
+    providerName: "openai" | "anthropic",
+    model: string,
+  ): NonNullable<DebateAiRuntime["online"]> => {
+    const apiKey =
+      providerName === "anthropic"
+        ? getAnthropicApiKeyForUser(userId, userKey!) ?? config.anthropicApiKey
+        : getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey;
+    return {
+      provider: providerFactoryOverride(
+        providerName,
+        apiKey,
+        user.secondary_ollama_host,
+        providerName === "anthropic" ? apiKey : undefined,
+      ),
+      providerName,
+      model,
+      available: providerFactoryOverride !== selectProvider || Boolean(apiKey),
+    };
   };
-  return { local, online, auxiliary, preferredProvider };
+  const primary =
+    preferredProvider === "local"
+      ? local
+      : onlineLane(
+          preferredProvider === "anthropic" ? "anthropic" : "openai",
+          modelOverride ||
+            user.preferred_online_model?.trim() ||
+            defaultModelIdForProvider(preferredProvider),
+        );
+  const binaryMode = preferredProvider === "local" ? "local" : "online";
+  const requestedMode = normalizeResponseMode(requestedResponseMode, binaryMode);
+  const frozenChain = Array.isArray(requestedFrozenChain)
+    ? requestedFrozenChain
+        .map(normalizeAutoFallbackModelRef)
+        .filter((entry): entry is AutoFallbackModelRef => entry !== null)
+    : [];
+  const configuredChain = parseStoredAutoFallbackChain(user.auto_fallback_chain);
+  const resolvedAutoChain =
+    requestedMode === "auto" && !hardLocal
+      ? frozenChain.length > 1
+        ? frozenChain
+        : user.auto_switch_model === 1
+          ? autoFallbackResolvedChain(
+              { provider: primary.providerName, model: primary.model },
+              configuredChain,
+            ) ?? []
+          : []
+      : [];
+  const lanes =
+    resolvedAutoChain.length > 1
+      ? resolvedAutoChain.map((entry) =>
+          entry.provider === "local"
+            ? { ...local, model: entry.model }
+            : onlineLane(entry.provider, entry.model),
+        )
+      : [primary];
+  return {
+    local,
+    ...(primary.providerName !== "local" ? { online: primary } : {}),
+    auxiliary,
+    preferredProvider,
+    responseMode:
+      requestedMode === "auto" && lanes.length > 1
+        ? "auto"
+        : binaryMode,
+    lanes,
+  };
 }
 
 function readResolvedPowerTheme(value: unknown): "light" | "dark" | undefined {
@@ -10179,11 +10229,8 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         body.preferredProvider,
         body.modelOverride,
+        body.responseMode,
       );
-      const lane =
-        runtime.preferredProvider !== "local" && runtime.online
-          ? runtime.online
-          : runtime.local;
       const slates = await runWithUsageSession(
         {
           db,
@@ -10192,7 +10239,7 @@ function buildRoutes(): RouteDefinition[] {
           mode: "debate",
           surface: "debate",
         },
-        () => synthesizeDebateSlates(body.topic, lane),
+        () => synthesizeDebateSlates(body.topic, runtime),
       );
       json(ctx.res, 200, { ok: true, slates });
     }),
@@ -10201,7 +10248,10 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       if (
-        body.preferredProvider === "local" ||
+        normalizeResponseMode(
+          body.responseMode,
+          body.preferredProvider === "local" ? "local" : "online",
+        ) === "local" ||
         userBlocksOnlineCapabilities(user)
       ) {
         throw new HttpError(
@@ -10247,6 +10297,7 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         body.preferredProvider,
         body.modelOverride,
+        body.responseMode,
       );
       const checks = await runWithUsageSession(
         {
@@ -10261,6 +10312,7 @@ function buildRoutes(): RouteDefinition[] {
             db,
             userId,
             {
+              format: body.format,
               motion: body.motion,
               forAdvocateBotId: body.forAdvocateBotId,
               againstAdvocateBotId: body.againstAdvocateBotId,
@@ -10277,6 +10329,7 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         body.preferredProvider,
         body.modelOverride,
+        body.responseMode,
       );
       const session = createDebateSession(
         db,
@@ -10308,6 +10361,8 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         frozen.provider,
         frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
       );
       const session = await runWithUsageSession(
         {
@@ -10335,6 +10390,8 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         frozen.provider,
         frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
       );
       const session = await runWithUsageSession(
         {
@@ -10350,6 +10407,35 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             ctx.params.id,
             ctx.body as Parameters<typeof submitDebateInterjection>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/turnabout-action", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          submitDebateTurnaboutAction(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof submitDebateTurnaboutAction>[3],
             runtime,
           ),
       );

@@ -130,9 +130,15 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Enter the Debate Studio",
-        body: "A Debate is a saved 8–12 minute Duel with one moderator and two advocates. The Studio keeps Motion, Cast, Evidence, the launch circuit, and your archive inside one non-gated console. New Duel clears the active workbench without touching archived proceedings.",
+        body: "A Debate is a saved proceeding with one moderator and two advocates. The Studio keeps Format, Motion, Cast, Evidence, the launch circuit, and your archive inside one non-gated console. New Duel clears the active workbench without touching archived proceedings.",
         clickLabel: "New Duel",
         targetSelector: '[data-tutorial-target="debate-new"]',
+      },
+      {
+        heading: "Choose the rules of the room",
+        body: "Forum is the backward-compatible default: openings, challenges, rebuttals, closings, and a verdict. Turnabout is a different format, not a theme: advocates enter pressable statements, the Judge or Participant can Press, Object, and Present Evidence, and the neutral moderator rules immediately. Every objection is bound to one statement and one evidence item frozen before Start. Spectators receive a moderator-led examination. Changing format clears advocacy consent so no bot’s accepted role is silently broadened.",
+        clickLabel: "Forum or Turnabout",
+        targetSelector: '[data-tutorial-target="debate-format"]',
       },
       {
         heading: "Shape a balanced motion",
@@ -154,7 +160,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Freeze one shared record",
-        body: "Open Evidence, add player notes and, only while ONLINE, explicitly run Brave Search. The resulting titles, links, snippets, dates, and source IDs form one immutable prep packet. Start performs no more research, and Debate never reads or writes relationship memory.",
+        body: "Open Evidence and add player notes. While AUTO or ONLINE, search Brave directly or choose Generate evidence to vary a real-source query from the current motion; Prism never fabricates sources. The resulting titles, links, snippets, dates, and source IDs form one immutable prep packet. Start performs no more research. In Turnabout, only these pre-Start evidence items can be presented; an objection without a grounded statement excerpt and frozen-evidence excerpt is overruled. Debate never reads or writes relationship memory.",
         clickLabel: "Evidence",
         targetSelector: '[data-tutorial-target="debate-evidence"]',
       },
@@ -165,14 +171,14 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         targetSelector: '[data-tutorial-target="debate-readiness"]',
       },
       {
-        heading: "Open the Forum",
-        body: "Choose one Debate model in the navbar before setup work: it handles motion synthesis, private role consent, every moderator and advocate turn, and every bot ballot. Account default uses the model saved in Settings for the selected LOCAL or ONLINE mode. Start freezes that complete contract—the cast, motion, consent, evidence, model, and resolved Powers—so neither bot settings nor later navbar changes can alter the live Duel. Live controls can pause and resume the exact next action; Judge and Participant input waits indefinitely until you speak or pass.",
-        clickLabel: "Start Duel",
+        heading: "Open the proceeding",
+        body: "Choose LOCAL, AUTO, or ONLINE and a primary Debate model in the navbar before setup work. AUTO quietly retries a failed or malformed generation through the fallback chain saved in Settings. Start freezes that ordered chain and the format version with the cast, motion, consent, evidence, and resolved Powers; every generated statement and ballot records the model that actually handled it. If the whole chain fails, the proceeding pauses on the exact action and offers Retry or Skip without dialogue. LOCAL remains a hard offline guarantee. Live controls can pause and resume the exact next action; Judge and Participant input waits indefinitely until you act or pass.",
+        clickLabel: "Start Forum or Start Turnabout",
         targetSelector: '[data-tutorial-target="debate-start"]',
       },
       {
         heading: "Read the living case",
-        body: "The Forum stages each advocate's actual animated bot behind an authored side podium, with the moderator elevated between them. Each podium carries its bot's glyph; the bot that owns the current turn glows even when the turn is silent, so the cue follows floor ownership rather than speech or prose. Their frozen faces, ink, frame finishes, visibility, thinking, listening, and speaking states remain live throughout the proceeding. Public prose arrives with the live voice, the scoreless case board tracks only heard speech, and the seven generic Prisms react without becoming ballots, personas, or relationship memory. When you own the floor, a full-width command deck rises from the chamber. In Participant mode, Interject now can cut the audible opponent floor; only the heard fragment remains public before the moderator rules.",
+        body: "Both formats stage each advocate's actual animated bot behind an authored side podium, with the moderator elevated between them. Each podium carries its bot's glyph; the bot that owns the current turn glows even when the turn is silent, so the cue follows floor ownership rather than speech or prose while stable bot ID remains canonical. Their frozen faces, ink, frame finishes, visibility, thinking, listening, and speaking states remain live throughout the proceeding. Public prose arrives with the live voice. When you own the floor, a full-width command deck rises from the chamber. Forum keeps the scoreless case board and Participant interjections; only the heard fragment remains public before the moderator rules. Turnabout replaces that sequence with a public statement record: Press asks for clarification; Object opens the frozen evidence vault; Present Evidence sends one statement-and-evidence pair for grounded validation and an immediate ruling. Sustained contradictions create explicit reversals without inventing evidence. The seven generic Prisms react without becoming ballots, personas, or relationship memory.",
         clickLabel: "the living case board",
         targetSelector: '[data-tutorial-target="debate-case-board"]',
       },

@@ -469,6 +469,141 @@ describe("Debate API", () => {
         role === "judge" ? "against" : "for",
       );
     }
+
+    const turnaboutRoleChecks = await owner.request(
+      "/api/debates/role-checks",
+      jsonInit({
+        format: "turnabout",
+        motion,
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
+      }),
+    );
+    assert.equal(turnaboutRoleChecks.status, 200);
+    const turnaboutCreated = await owner.request(
+      "/api/debates",
+      jsonInit({
+        format: "turnabout",
+        motion,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Frozen Turnabout route check.",
+          sources: [
+            {
+              id: "note-1",
+              title: "Player note",
+              url: null,
+              snippet: "Frozen supporting context.",
+              publishedAt: null,
+            },
+          ],
+          frozenAt: null,
+        },
+        moderatorBotId: "moderator",
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        playerRole: "judge",
+        playerSideId: null,
+        advocacyConsent: (await payload(turnaboutRoleChecks)).checks,
+        preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
+        theme: "dark",
+        idempotencyKey: "api:create:turnabout",
+      }),
+    );
+    assert.equal(turnaboutCreated.status, 201);
+    let turnaboutSession = (await payload(turnaboutCreated))
+      .session as DebateSessionV1;
+    assert.equal(turnaboutSession.format, "turnabout");
+    for (const label of ["intro", "for-testimony", "against-testimony"]) {
+      const advanced = await owner.request(
+        `/api/debates/${turnaboutSession.id}/advance`,
+        jsonInit({
+          expectedRevision: turnaboutSession.revision,
+          idempotencyKey: `api:turnabout:${label}`,
+        }),
+      );
+      assert.equal(advanced.status, 200);
+      turnaboutSession = (await payload(advanced)).session as DebateSessionV1;
+    }
+    assert.equal(turnaboutSession.stepKey, "turnabout_action");
+    assert.equal(turnaboutSession.status, "waiting_for_player");
+    assert.equal(turnaboutSession.formatState.format, "turnabout");
+    if (turnaboutSession.formatState.format !== "turnabout") {
+      assert.fail("Turnabout format state should remain discriminated.");
+    }
+    const activeStatementId = turnaboutSession.formatState.activeStatementId;
+    assert.ok(activeStatementId);
+    const pressed = await owner.request(
+      `/api/debates/${turnaboutSession.id}/turnabout-action`,
+      jsonInit({
+        expectedRevision: turnaboutSession.revision,
+        idempotencyKey: "api:turnabout:press",
+        action: "press",
+        statementId: activeStatementId,
+      }),
+    );
+    assert.equal(pressed.status, 200);
+    turnaboutSession = (await payload(pressed)).session as DebateSessionV1;
+    assert.equal(turnaboutSession.status, "waiting_for_player");
+    assert.ok(
+      turnaboutSession.events.some(
+        (event) =>
+          event.kind === "moderator_ruling" &&
+          event.statementId === activeStatementId &&
+          event.speakerBotId === "moderator",
+      ),
+    );
+    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'local',
+              auto_switch_model = 1,
+              auto_fallback_chain = ?
+        WHERE id = ?`,
+    ).run(
+      JSON.stringify({
+        v: 1,
+        fallbacks: [
+          { provider: "openai", model: "debate-online-fallback" },
+        ],
+      }),
+      userId,
+    );
+    const autoCreatedResponse = await owner.request(
+      "/api/debates",
+      jsonInit({
+        motion,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Frozen Auto routing check.",
+          sources: [],
+          frozenAt: null,
+        },
+        moderatorBotId: "moderator",
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        playerRole: "spectator",
+        advocacyConsent: checks,
+        preferredProvider: "local",
+        modelOverride: "debate-auto-primary",
+        responseMode: "auto",
+        theme: "dark",
+        idempotencyKey: "api:auto:create:0001",
+      }),
+    );
+    assert.equal(autoCreatedResponse.status, 201);
+    const autoSession = (await payload(autoCreatedResponse))
+      .session as DebateSessionV1;
+    assert.equal(autoSession.responseMode, "auto");
+    assert.deepEqual(autoSession.generationChain, [
+      { provider: "local", model: "debate-auto-primary" },
+      { provider: "openai", model: "debate-online-fallback" },
+    ]);
+
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 
     const stranger = createClient();

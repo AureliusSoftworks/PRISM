@@ -10,6 +10,7 @@ const coffeeSeatPlateEmojiPath = join(
   "CoffeeSeatPlateEmoji.tsx"
 );
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
+const layoutPath = join(dirname(fileURLToPath(import.meta.url)), "layout.tsx");
 const settingsPanelPath = join(dirname(fileURLToPath(import.meta.url)), "SettingsPanel.tsx");
 const css = readFileSync(cssPath, "utf8")
   .replace(/\s+/gu, " ")
@@ -17,6 +18,7 @@ const css = readFileSync(cssPath, "utf8")
   .replace(/\s+\)/gu, ")");
 const coffeeSeatPlateEmojiSource = readFileSync(coffeeSeatPlateEmojiPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
+const layoutSource = readFileSync(layoutPath, "utf8").replace(/\s+/gu, " ");
 const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
 
 function ruleForSeatVector(
@@ -230,27 +232,39 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("uses the Doto matrix font for the concise face slot", () => {
-    assert.match(css, /--prism-doto-face-font:\s*var\(--font-doto-display\)/);
+  it("uses Noto Sans Mono with native IPA mouth glyph coverage for the concise face slot", () => {
+    assert.match(
+      layoutSource,
+      /Noto_Sans_Mono\(\{[^}]*subsets:\s*\["latin",\s*"latin-ext"\][^}]*\}\)/,
+    );
+    assert.match(
+      css,
+      /--prism-mono-face-font:\s*var\(--font-technical-mono\)/,
+    );
 
     const conciseVoiceRule = ruleForSelectorNeedles(
       ".coffeeSeatPlateEmoji",
       'data-voice-preset="concise"'
     );
-    assert.match(conciseVoiceRule, /font-family:\s*var\(--prism-doto-face-font\)\s*;/);
-    assert.match(conciseVoiceRule, /"ROND"\s*55/);
+    assert.match(
+      conciseVoiceRule,
+      /font-family:\s*var\(--prism-mono-face-font\)\s*;/,
+    );
 
     const concisePartRule = ruleForSelectorNeedlesWithBody(
       ['data-face-font="concise"'],
-      "font-family: var(--prism-doto-face-font)"
+      "font-family: var(--prism-mono-face-font)"
     );
-    assert.match(concisePartRule, /"ROND"\s*55/);
+    assert.doesNotMatch(concisePartRule, /"ROND"/);
 
     const customizerSampleRule = ruleForSelectorNeedles(
       ".botAvatarFontOptionSample",
       'data-face-font="concise"'
     );
-    assert.match(customizerSampleRule, /font-family:\s*var\(--prism-doto-face-font\)\s*;/);
+    assert.match(
+      customizerSampleRule,
+      /font-family:\s*var\(--prism-mono-face-font\)\s*;/,
+    );
   });
 
   it("keeps the rest cup hidden until the sip cup returns to the table", () => {

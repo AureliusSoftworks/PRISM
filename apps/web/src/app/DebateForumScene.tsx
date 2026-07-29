@@ -72,7 +72,7 @@ class DebateForumController {
       const sprite = new this.pixi.Sprite({
         texture: this.glowTexture,
         anchor: 0.5,
-        blendMode: this.state.theme === "dark" ? "screen" : "overlay",
+        blendMode: "screen",
         alpha: 0.22,
       });
       sprite.mask = mask;
@@ -102,7 +102,6 @@ class DebateForumController {
     };
     for (const light of this.lights) {
       light.sprite.tint = colors[light.role];
-      light.sprite.blendMode = state.theme === "dark" ? "screen" : "overlay";
       light.targetAlpha =
         state.activeRole === light.role ? 0.58 : state.live ? 0.24 : 0.16;
     }

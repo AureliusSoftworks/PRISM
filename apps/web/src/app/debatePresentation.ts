@@ -11,7 +11,19 @@ const SOURCE_MARKER =
 export function debateRevealDurationMs(spokenText: string): number {
   const normalized = spokenText.replace(/\s+/gu, " ").trim();
   if (!normalized) return 0;
-  return Math.min(7_200, Math.max(1_100, Math.round(normalized.length * 34)));
+  const wordCount = normalized.split(" ").length;
+  const pauseCount = normalized.match(/[,.!?;:—]/gu)?.length ?? 0;
+  return Math.min(
+    60_000,
+    Math.max(1_400, Math.round(wordCount * 330 + pauseCount * 75)),
+  );
+}
+
+export function debateAudioEnabled(args: {
+  voiceMode: string;
+  voiceVolume: number;
+}): boolean {
+  return args.voiceMode !== "mute" && args.voiceVolume > 0;
 }
 
 export function debateVisibleContentAtProgress(

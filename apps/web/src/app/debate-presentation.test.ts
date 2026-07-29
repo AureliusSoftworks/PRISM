@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEBATE_SOURCE_LINK_PREFIX,
+  debateAudioEnabled,
   debateMarkdownSource,
   debateGalleryReactingIndices,
   debateGalleryReaction,
@@ -30,8 +31,38 @@ const evidence = {
 describe("Debate live presentation", () => {
   it("uses a calmer bounded reveal cadence", () => {
     assert.equal(debateRevealDurationMs(""), 0);
-    assert.equal(debateRevealDurationMs("Short."), 1_100);
-    assert.equal(debateRevealDurationMs("x".repeat(1_000)), 7_200);
+    assert.equal(debateRevealDurationMs("Short."), 1_400);
+    assert.equal(
+      debateRevealDurationMs(
+        Array.from({ length: 100 }, (_, index) => `word${index}`).join(" "),
+      ),
+      33_000,
+    );
+    assert.equal(
+      debateRevealDurationMs(
+        Array.from({ length: 1_000 }, (_, index) => `word${index}`).join(" "),
+      ),
+      60_000,
+    );
+  });
+
+  it("keeps Debate audio independent from optional voice effects", () => {
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "english", voiceVolume: 0.8 }),
+      true,
+    );
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "bottish", voiceVolume: 0.8 }),
+      true,
+    );
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "mute", voiceVolume: 0.8 }),
+      false,
+    );
+    assert.equal(
+      debateAudioEnabled({ voiceMode: "english", voiceVolume: 0 }),
+      false,
+    );
   });
 
   it("reveals a safe public prefix without splitting source markers", () => {

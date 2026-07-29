@@ -542,6 +542,18 @@ describe("Avatar Details shared mannequin rendering", () => {
       pageSource,
       /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y[\s\S]*\["--zen-live-bot-face-layer-scale-x" as string\]:\s*showQuestionMark\s*\? "1"\s*:\s*"var\(--avatar-details-facing-scale-x, 1\)"/,
     );
+    assert.match(pageSource, /faceScaleY:\s*string \| number/);
+    assert.match(
+      pageSource,
+      /const presenceBodyStyle = \{[\s\S]{0,160}\.\.\.botAvatarFaceFacingStyle\(faceScaleY\)/,
+    );
+    const mannequinCalls = [
+      ...pageSource.matchAll(/<ZenLiveBotMannequin\b[\s\S]*?\/>/gu),
+    ];
+    assert.ok(mannequinCalls.length > 0);
+    for (const [mannequinCall] of mannequinCalls) {
+      assert.match(mannequinCall, /\bfaceScaleY=\{/);
+    }
     assert.doesNotMatch(maskCss, /--coffee-plate-emoji-face-scale-y/);
     assert.match(
       pageSource,
@@ -633,7 +645,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipMouthTreatmentActive \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
+      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipPresentation\.active \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
     );
     assert.match(
       pageSource,

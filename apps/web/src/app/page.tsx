@@ -149,6 +149,7 @@ import {
   DebateExperience,
   type DebateUtterance,
 } from "./DebateExperience";
+import { debateAudioEnabled } from "./debatePresentation";
 import { BotPickerGrid, BotPickerTile } from "./BotPicker";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
 import {
@@ -172,6 +173,7 @@ import {
   BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+  botAvatarFaceFacingStyle,
   botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
 } from "./bot-avatar-render-geometry";
@@ -29220,6 +29222,7 @@ function ZenActionAmbientCue({
 interface ZenLiveBotMannequinProps {
   glyph: BotGlyphName;
   faceStyle: BotFaceStyle;
+  faceScaleY: string | number;
   voicePreset: BotVoicePreset;
   isTalking: boolean;
   avatarSfx?: BotAvatarSfxPlayback | null;
@@ -29313,6 +29316,7 @@ function BotAmbientPresenceRig({
 function ZenLiveBotMannequin({
   glyph,
   faceStyle,
+  faceScaleY,
   voicePreset,
   isTalking,
   avatarSfx = null,
@@ -29453,15 +29457,13 @@ function ZenLiveBotMannequin({
   const avatarDetailsFaceRegistrationStyle = hasAvatarDetailsVisuals
     ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
     : null;
-  const presenceBodyStyle =
-    avatarDetailsFaceRegistrationStyle || inkOffsetY
-      ? ({
-          ...(avatarDetailsFaceRegistrationStyle ?? {}),
-          ...(inkOffsetY
-            ? { ["--zen-live-bot-ink-offset-y" as string]: inkOffsetY }
-            : {}),
-        } as CSSProperties)
-      : undefined;
+  const presenceBodyStyle = {
+    ...botAvatarFaceFacingStyle(faceScaleY),
+    ...(avatarDetailsFaceRegistrationStyle ?? {}),
+    ...(inkOffsetY
+      ? { ["--zen-live-bot-ink-offset-y" as string]: inkOffsetY }
+      : {}),
+  } as CSSProperties;
   return (
     <span
       className={styles.zenLiveBotPresenceBody}
@@ -30560,6 +30562,7 @@ function ZenLiveBotPresencePlate({
         <ZenLiveBotMannequin
           glyph={liveBotGlyphName}
           faceStyle={faceStyle}
+          faceScaleY={faceScaleY}
           voicePreset={voicePreset}
           isTalking={faceTalking}
           avatarSfx={botAvatarSfxForBot(bot)}
@@ -35966,8 +35969,8 @@ const BOT_AVATAR_FACE_PRESETS = [
     thinkingFrames: DEFAULT_BOT_FACE_STYLE.thinkingFrames,
   },
   {
-    id: "doto",
-    label: "Doto",
+    id: "mono",
+    label: "Mono",
     eyesFont: "concise",
     mouthFont: "concise",
     weight: 600,
@@ -36333,6 +36336,7 @@ function BotAvatarPreviewPanel({
             <ZenLiveBotMannequin
               glyph={glyph}
               faceStyle={previewFaceStyle}
+              faceScaleY={BOT_AVATAR_CANONICAL_FACE_SCALE_Y}
               voicePreset="warm"
               isTalking={previewTalking}
               avatarSfx={avatarSfx}
@@ -61505,6 +61509,7 @@ function HomeContent(): React.JSX.Element {
       signalOnlineVoiceEnabled: boolean,
       selectedEngine: EnglishVoiceEngine,
       signal?: AbortSignal,
+      playbackSurface: "signal" | "debate" = "signal",
     ): Promise<EnglishVoiceSynthesisClip> => {
       const ephemeralSoundcheck =
         signalStageSoundcheckMessageIsEphemeral(message);
@@ -61523,7 +61528,9 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({
             text: voiceSpokenText(message.content),
             speakerBotId: message.botId,
-            ...(!ephemeralSoundcheck && !ephemeralInterruptionBridge
+            ...(!ephemeralSoundcheck &&
+            !ephemeralInterruptionBridge &&
+            playbackSurface === "signal"
               ? { signalMessageId: message.id }
               : {}),
             ...(ephemeralInterruptionBridge
@@ -61572,6 +61579,7 @@ function HomeContent(): React.JSX.Element {
       signalOnlineVoiceEnabled: boolean,
       selectedEngine: EnglishVoiceEngine,
       signal?: AbortSignal,
+      playbackSurface: "signal" | "debate" = "signal",
     ): Promise<EnglishVoiceSynthesisClip> => {
       if (
         !signalOnlineVoiceEnabled ||
@@ -61583,6 +61591,7 @@ function HomeContent(): React.JSX.Element {
           signalOnlineVoiceEnabled,
           selectedEngine,
           signal,
+          playbackSurface,
         );
       }
       return requestSignalVoiceWithFallback({
@@ -61597,6 +61606,7 @@ function HomeContent(): React.JSX.Element {
             true,
             selectedEngine,
             preferredSignal,
+            playbackSurface,
           ),
         requestBuiltin: (fallbackSignal) =>
           requestBotcastEnglishClip(
@@ -61605,6 +61615,7 @@ function HomeContent(): React.JSX.Element {
             false,
             "builtin",
             fallbackSignal,
+            playbackSurface,
           ),
       });
     },
@@ -61973,6 +61984,7 @@ function HomeContent(): React.JSX.Element {
             botSummary.online_enabled !== 0,
             voiceSelection.englishVoiceEngine,
             controller.signal,
+            playbackSurface,
           );
         }
         if (!clip || controller.signal.aborted) return false;
@@ -86055,6 +86067,7 @@ function HomeContent(): React.JSX.Element {
                           <ZenLiveBotMannequin
                             glyph={glyph}
                             faceStyle={resolveBotFaceStyleForBot(bot)}
+                            faceScaleY={faceScaleY}
                             voicePreset={coffeeSeatVoicePreset(bot)}
                             isTalking={ambientTalking}
                             avatarSfx={
@@ -94102,10 +94115,11 @@ function HomeContent(): React.JSX.Element {
               <div className={styles.firstRunReadyStep}>
                 <PrismTriangleMark />
                 <p>
-                  Auto is available in Zen, Coffee, and Signal. Its model picker
-                  shows every local and online model; your selection is Primary,
-                  then Prism tries your ordered chain of one to five fallbacks if
-                  a turn times out, refuses, or returns invalid output.
+                  Auto is available in Zen, Coffee, Signal, and Debate. Its
+                  model picker shows every local and online model; your
+                  selection is Primary, then Prism tries your ordered chain of
+                  one to five fallbacks if a turn times out, refuses, or
+                  returns invalid output.
                 </p>
                 <p>
                   Auto stays off until you choose at least one fallback in
@@ -94119,6 +94133,12 @@ function HomeContent(): React.JSX.Element {
                 <p>
                   You can wander straight in. Prism will introduce each room as
                   you reach it, and Settings keeps every choice available later.
+                </p>
+                <p>
+                  Debate begins in Forum and can become Turnabout when you want
+                  pressable testimony, frozen-evidence objections, and immediate
+                  public-record rulings. Its room walkthrough teaches the
+                  difference before Start.
                 </p>
                 <div>
                   <span>
@@ -102801,6 +102821,7 @@ function HomeContent(): React.JSX.Element {
                   : DEFAULT_PRISM_BOT_GLYPH
               }
               faceStyle={faceStyle}
+              faceScaleY={zenLiveBotFaceScaleYForCanvasSide("left")}
               voicePreset={bot ? coffeeSeatVoicePreset(bot) : "warm"}
               isTalking={previewTalking}
               avatarSfx={botAvatarSfxForBot(bot)}
@@ -110387,6 +110408,7 @@ function HomeContent(): React.JSX.Element {
                         <ZenLiveBotMannequin
                           glyph={DEFAULT_PRISM_BOT_GLYPH}
                           faceStyle={zenDefaultPrismFaceStyle}
+                          faceScaleY={zenLiveBotFaceScaleYForCanvasSide("left")}
                           voicePreset="warm"
                           isTalking={false}
                           avatarSfx={botAvatarSfxForProfile(
@@ -124748,6 +124770,7 @@ function HomeContent(): React.JSX.Element {
                           <ZenLiveBotMannequin
                             glyph={seatGlyphName}
                             faceStyle={seatRenderedFaceStyle}
+                            faceScaleY={coffeePlateFaceScaleY}
                             voicePreset={seatVoicePreset}
                             isTalking={seatMouthActive}
                             avatarSfx={
@@ -124764,7 +124787,7 @@ function HomeContent(): React.JSX.Element {
                             }
                             inkTalking={
                               seatMouthActive ||
-                              seatSipMouthTreatmentActive ||
+                              seatSipPresentation.active ||
                               emptyCupAttemptFrowning
                             }
                             blinkWhileTalking
@@ -128333,9 +128356,9 @@ function HomeContent(): React.JSX.Element {
   // defensive fallback for stale in-memory navigation state only.
   if (view === "debate") {
     const debateProvider = settings?.preferredProvider ?? "local";
-    const debateResponseMode = responseModeForProvider(debateProvider);
+    const debateBinaryResponseMode = responseModeForProvider(debateProvider);
     const debateResolvedChoice = resolveModelChoiceForResponseMode({
-      responseMode: debateResponseMode,
+      responseMode: debateBinaryResponseMode,
       providerPreference: debateProvider,
       choices: visibleModelChoicesByProvider(
         modelCatalog,
@@ -128346,8 +128369,43 @@ function HomeContent(): React.JSX.Element {
     });
     const debateModelProvider = debateResolvedChoice.provider;
     const debateModelChoice = debateResolvedChoice.modelChoice;
+    const debatePrimaryForAuto = resolvedAutoPrimaryForComposer(
+      modelCatalog,
+      settings,
+      debateModelProvider,
+      debateModelChoice,
+    );
+    const debateRunnableAutoModels = settings
+      ? [
+          ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
+          ...onlineChatModelOptions,
+        ]
+          .filter(
+            (model) =>
+              !model.disabledReason && !isDisabledModelChoice(model.id),
+          )
+          .map((model) => ({ provider: model.provider, model: model.id }))
+      : [];
+    const debateResponseMode =
+      settings && debatePrimaryForAuto
+        ? autoFallbackResponseModeForSend({
+            autoEnabled: settings.autoModeEnabled,
+            primary: debatePrimaryForAuto,
+            chain: settings.autoFallbackChain,
+            runnable: debateRunnableAutoModels,
+          })
+        : debateBinaryResponseMode;
+    const debateAutoConfigured = Boolean(
+      settings &&
+      debatePrimaryForAuto &&
+      autoFallbackAvailableForPrimary({
+        primary: debatePrimaryForAuto,
+        chain: settings.autoFallbackChain,
+        runnable: debateRunnableAutoModels,
+      }),
+    );
     const debateAccountDefaultModel = settings
-      ? debateResponseMode === "local"
+      ? debateModelProvider === "local"
         ? visibleConcreteModelChoiceForProvider(
             modelCatalog,
             settings,
@@ -128361,7 +128419,7 @@ function HomeContent(): React.JSX.Element {
           )
       : AUTO_MODEL_CHOICE;
     const debateAccountDefaultProvider =
-      debateResponseMode === "local"
+      debateModelProvider === "local"
         ? "local"
         : (onlineChatModelOptions.find(
             (model) => model.id === debateAccountDefaultModel,
@@ -128478,12 +128536,61 @@ function HomeContent(): React.JSX.Element {
             ),
             modelControls: (
               <>
-                {renderProviderModeToggle(
-                  styles.chatHeaderModeToggle,
-                  false,
-                  debateLiveChromePolicy?.lockMessage ?? null,
-                  false,
-                )}
+                <div
+                  className={`${styles.modeControl} ${styles.autoModeControl} ${styles.chatHeaderModeToggle}`}
+                  data-tutorial-target="auto-response-mode"
+                  data-response-mode={debateResponseMode}
+                >
+                  {(["local", "auto", "online"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      className={`${styles.autoModeOption} ${
+                        debateResponseMode === mode
+                          ? styles.autoModeOptionActive
+                          : ""
+                      }`}
+                      disabled={
+                        Boolean(debateLiveChromePolicy?.lockMessage) ||
+                        (mode === "auto" && !debateAutoConfigured)
+                      }
+                      onClick={() => {
+                        if (
+                          debateLiveChromePolicy?.lockMessage ||
+                          (mode === "auto" && !debateAutoConfigured)
+                        ) {
+                          return;
+                        }
+                        void persistAutoModeEnabled(mode === "auto");
+                        if (mode === "local") {
+                          void switchProvider("local");
+                        } else if (mode === "online") {
+                          const nextProvider =
+                            resolveModelChoiceForResponseMode({
+                              responseMode: "online",
+                              providerPreference: debateProvider,
+                              choices: visibleModelChoicesByProvider(
+                                modelCatalog,
+                                settings,
+                                debateModelChoiceByProvider,
+                              ),
+                              onlineOptions: onlineChatModelOptions,
+                            }).provider;
+                          void switchProvider(nextProvider);
+                        }
+                      }}
+                      aria-pressed={debateResponseMode === mode}
+                      title={
+                        debateLiveChromePolicy?.lockMessage ??
+                        (mode === "auto" && !debateAutoConfigured
+                          ? "Choose 1–5 distinct runnable fallback models in Settings; at least one must differ from Primary."
+                          : `${responseModeDisplayLabel(mode)} Debate responses`)
+                      }
+                    >
+                      {responseModeShortLabel(mode)}
+                    </button>
+                  ))}
+                </div>
                 <ComposerModelPicker
                   value={debateModelChoice}
                   onChange={(nextChoice) => {
@@ -128512,7 +128619,7 @@ function HomeContent(): React.JSX.Element {
                   }}
                   options={debateModelOptions}
                   provider={
-                    debateResponseMode === "local" ? "local" : "online"
+                    debateModelProvider === "local" ? "local" : "online"
                   }
                   loading={modelCatalogLoading}
                   disabled={!settings || debateLiveSessionActive}
@@ -128528,7 +128635,7 @@ function HomeContent(): React.JSX.Element {
                   autoOptionMetaOverride="Uses the account model for the entire Debate."
                   settingsDefaultModelId={chatSettingsSavedDefaultModelId(
                     settings,
-                    debateResponseMode === "local" ? "local" : "online",
+                    debateModelProvider === "local" ? "local" : "online",
                   )}
                   dismissPopoversSignal={composerPopoverDismissSignal}
                 />
@@ -128549,6 +128656,7 @@ function HomeContent(): React.JSX.Element {
               initialBotIds={initialDebateBotIds}
               storageScopeId={user?.id ?? "signed-out"}
               preferredProvider={debateEffectiveProvider}
+              responseMode={debateResponseMode}
               modelOverride={
                 debateModelChoice === AUTO_MODEL_CHOICE ||
                 debateModelChoice === DISABLED_MODEL_CHOICE
@@ -128562,9 +128670,10 @@ function HomeContent(): React.JSX.Element {
               theme={resolvedTheme}
               audioEnabled={Boolean(
                 settings &&
-                voicePlaybackSelectionRef.current.voiceMode !== "mute" &&
-                settings.voiceEffectsEnabled !== false &&
-                settings.voiceVolume > 0,
+                debateAudioEnabled({
+                  voiceMode: voicePlaybackSelectionRef.current.voiceMode,
+                  voiceVolume: settings.voiceVolume,
+                }),
               )}
               audioVolume={settings?.voiceVolume ?? 0}
               request={api}
@@ -128651,6 +128760,8 @@ function HomeContent(): React.JSX.Element {
                         faceScaleY,
                       ["--avatar-details-facing-scale-x" as string]:
                         botAvatarDetailsFacingScaleX(faceScaleY),
+                      ["--avatar-details-facing-offset-y" as string]:
+                        botAvatarDetailsFacingOffsetY(faceScaleY),
                     }}
                     aria-hidden="true"
                   >
@@ -128669,6 +128780,7 @@ function HomeContent(): React.JSX.Element {
                       <ZenLiveBotMannequin
                         glyph={glyph}
                         faceStyle={faceStyle}
+                        faceScaleY={faceScaleY}
                         voicePreset={coffeeSeatVoicePreset(
                           liveBot ?? {
                             systemPrompt: botSnapshot.systemPrompt,
@@ -129028,6 +129140,8 @@ function HomeContent(): React.JSX.Element {
                       faceScaleY,
                     ["--avatar-details-facing-scale-x" as string]:
                       botAvatarDetailsFacingScaleX(faceScaleY),
+                    ["--avatar-details-facing-offset-y" as string]:
+                      botAvatarDetailsFacingOffsetY(faceScaleY),
                     ["--coffee-seat-sip-mouth-offset-x" as string]:
                       sipPresentation.mouthOffsetX,
                     ["--coffee-seat-sip-mouth-offset-y" as string]:
@@ -129051,6 +129165,7 @@ function HomeContent(): React.JSX.Element {
                     <ZenLiveBotMannequin
                       glyph={zenDefaultPrismGlyph}
                       faceStyle={renderedPrismFaceStyle}
+                      faceScaleY={faceScaleY}
                       voicePreset="warm"
                       isTalking={avatarState.talking}
                       avatarSfx={
@@ -129173,6 +129288,8 @@ function HomeContent(): React.JSX.Element {
                   ["--coffee-plate-emoji-face-scale-y" as string]: faceScaleY,
                   ["--avatar-details-facing-scale-x" as string]:
                     botAvatarDetailsFacingScaleX(faceScaleY),
+                  ["--avatar-details-facing-offset-y" as string]:
+                    botAvatarDetailsFacingOffsetY(faceScaleY),
                   ["--coffee-seat-sip-mouth-offset-x" as string]:
                     sipPresentation.mouthOffsetX,
                   ["--coffee-seat-sip-mouth-offset-y" as string]:
@@ -129195,6 +129312,7 @@ function HomeContent(): React.JSX.Element {
                   <ZenLiveBotMannequin
                     glyph={glyph}
                     faceStyle={renderedFaceStyle}
+                    faceScaleY={faceScaleY}
                     voicePreset={coffeeSeatVoicePreset(bot)}
                     isTalking={avatarState.talking}
                     avatarSfx={

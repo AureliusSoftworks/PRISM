@@ -16,6 +16,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  DEBATE_FORMATS,
   DEBATE_SCHEMA_VERSION,
   debateSpokenText,
   type DebateAdvocacyConsent,
@@ -23,25 +24,30 @@ import {
   type DebateEventV1,
   type DebateEvidencePacketV1,
   type DebateEvidenceSourceV1,
+  type DebateFormatId,
   type DebateMotionSlateV1,
   type DebateBotSnapshotV1,
   type DebatePlayerRole,
   type DebateSessionListItemV1,
   type DebateSessionV1,
   type DebateSideId,
+  type DebateTurnaboutFormatStateV1,
+  type DebateTurnaboutStatementV1,
   type GraphicsQuality,
+  type ResponseMode,
 } from "@localai/shared";
 import {
   PrismRefractTarget,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import styles from "./DebateExperience.module.css";
-import { DebateForumScene, type DebateForumRole } from "./DebateForumScene";
+import type { DebateForumRole } from "./DebateForumScene";
 import {
   copyDebateMotionSlate,
   debateAlignmentPreviewCast,
   debatePrefilledCast,
 } from "./debateExperienceState";
+import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
   debateMarkdownSource,
   debateGalleryReactingIndices,
@@ -58,6 +64,7 @@ import {
   DEBATE_STAGE_ALIGNMENT_ITEMS,
   DEBATE_STAGE_ALIGNMENT_ROLES,
   DEBATE_STAGE_ALIGNMENT_STEP,
+  DEBATE_STAGE_LIGHT_BLEND_MODES,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
   copyDebateStageAlignment,
   debateStageAlignmentOffset,
@@ -67,6 +74,7 @@ import {
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
+  updateDebateStageLightBlendMode,
   writeDebateStageAlignment,
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
@@ -146,6 +154,7 @@ export interface DebateExperienceProps {
   initialBotIds?: string[];
   storageScopeId: string;
   preferredProvider: "local" | "openai" | "anthropic";
+  responseMode: ResponseMode;
   modelOverride?: {
     provider: "local" | "openai" | "anthropic";
     model: string;
@@ -251,6 +260,43 @@ const DEBATE_STAGE_ALIGNMENT_ITEM_LABELS: Record<
   glyph: "Glyph plate",
 };
 
+function DebateForumLightMasks(): React.JSX.Element {
+  return (
+    <>
+      <div
+        className={styles.lightMaskFor}
+        data-light-depth="backdrop"
+        aria-hidden="true"
+      />
+      <div
+        className={styles.lightMaskAgainst}
+        data-light-depth="backdrop"
+        aria-hidden="true"
+      />
+      <div
+        className={styles.lightMaskModerator}
+        data-light-depth="backdrop"
+        aria-hidden="true"
+      />
+      <div
+        className={`${styles.lightMaskFor} ${styles.lightMaskForeground}`}
+        data-light-depth="foreground"
+        aria-hidden="true"
+      />
+      <div
+        className={`${styles.lightMaskAgainst} ${styles.lightMaskForeground}`}
+        data-light-depth="foreground"
+        aria-hidden="true"
+      />
+      <div
+        className={`${styles.lightMaskModerator} ${styles.lightMaskForeground}`}
+        data-light-depth="foreground"
+        aria-hidden="true"
+      />
+    </>
+  );
+}
+
 function debateAlignmentPreviewSnapshot(
   bot: DebateBotSummary,
   role: DebateBotSnapshotV1["role"],
@@ -279,6 +325,11 @@ const DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS = new Set([
   "phase",
   "speech",
   "silence",
+  "testimony",
+  "press",
+  "objection",
+  "evidence",
+  "revelation",
   "player_turn",
   "reaction",
   "interjection",
@@ -319,6 +370,9 @@ function debateExpectedBotId(session: DebateSessionV1): string | null {
   const step = session.stepKey;
   if (
     step === "intro" ||
+    step === "turnabout_intro" ||
+    step === "turnabout_spectator_press" ||
+    step === "turnabout_ballot_moderator" ||
     step === "moderator_to_rebuttal" ||
     step === "moderator_to_closing" ||
     step.endsWith("_prompt") ||
@@ -360,6 +414,11 @@ function debatePresentationEvents(
       (event.kind === "speech" ||
         event.kind === "phase" ||
         event.kind === "silence" ||
+        event.kind === "testimony" ||
+        event.kind === "press" ||
+        event.kind === "objection" ||
+        event.kind === "evidence" ||
+        event.kind === "revelation" ||
         event.kind === "player_turn" ||
         event.kind === "reaction" ||
         event.kind === "interjection" ||
@@ -409,10 +468,26 @@ function sessionStatusLabel(session: DebateSessionListItemV1): string {
 }
 
 function phaseLabel(session: DebateSessionV1): string {
+  if (session.formatState.format === "turnabout") {
+    const phase = session.formatState.phase;
+    return `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;
+  }
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
 }
 
-function roleDescription(role: DebatePlayerRole): string {
+function roleDescription(
+  role: DebatePlayerRole,
+  format: DebateFormatId,
+): string {
+  if (format === "turnabout") {
+    if (role === "judge") {
+      return "Press or test any statement against frozen evidence, then issue the final record ruling.";
+    }
+    if (role === "participant") {
+      return "Examine the opposing testimony while your advocate keeps your side’s formal identity.";
+    }
+    return "Watch the moderator press every statement before the three-bot public-record resolution.";
+  }
   if (role === "judge") {
     return "Ask one challenge and make the final ruling. Bot ballots become an agreement and dissent epilogue.";
   }
@@ -422,7 +497,17 @@ function roleDescription(role: DebatePlayerRole): string {
   return "Watch the moderator challenge both advocates. The three-bot majority decides the verdict.";
 }
 
-function roleSummary(role: DebatePlayerRole): string {
+function roleSummary(
+  role: DebatePlayerRole,
+  format: DebateFormatId = "forum",
+): string {
+  if (format === "turnabout") {
+    if (role === "judge") return "Examine the record, then issue the ruling.";
+    if (role === "participant") {
+      return "Examine the opposing testimony for your side.";
+    }
+    return "Observe a neutral examination of every statement.";
+  }
   if (role === "judge") return "Challenge once, then issue the final ruling.";
   if (role === "participant") {
     return "Share the floor with your advocate partner.";
@@ -451,7 +536,7 @@ function visibleEventName(
   if (event.speakerBotId === session.againstAdvocate.id) {
     return session.againstAdvocate.name;
   }
-  return "Forum";
+  return session.format === "turnabout" ? "Public record" : "Forum";
 }
 
 function debateSideLabel(
@@ -477,6 +562,7 @@ export function formatDebateVerboseTranscript(
     `- Session: ${session.id}`,
     `- Status: ${session.status}`,
     `- Revision: ${session.revision}`,
+    `- Format: ${session.format} v${session.formatVersion}`,
     `- Player role: ${session.playerRole}${session.playerSideId ? ` — ${debateSideLabel(session, session.playerSideId)}` : ""}`,
     `- Created: ${session.createdAt}`,
     `- Updated: ${session.updatedAt}`,
@@ -491,6 +577,8 @@ export function formatDebateVerboseTranscript(
     "",
     "## Cast and frozen runtime",
     "",
+    `- Response mode: ${session.responseMode.toUpperCase()}`,
+    `- Frozen generation chain: ${session.generationChain.map((entry) => `${entry.provider}/${entry.model}`).join(" → ")}`,
     ...cast.map(
       ([role, bot]) =>
         `- ${role}: ${bot.name} (${bot.provider}/${bot.model}; bot ${bot.id}; revision ${bot.revision})`,
@@ -503,7 +591,7 @@ export function formatDebateVerboseTranscript(
         `- ${visibleEventName(session, {
           speakerKind: "advocate",
           speakerBotId: check.botId,
-        } as DebateEventV1)} — ${debateSideLabel(session, check.sideId)}: ${check.status}${check.reason ? ` — ${check.reason}` : ""} (motion ${check.motionHash}; bot revision ${check.botRevision})`,
+        } as DebateEventV1)} — ${debateSideLabel(session, check.sideId)}: ${check.status}${check.reason ? ` — ${check.reason}` : ""} (motion ${check.motionHash}; bot revision ${check.botRevision}${check.provider && check.model ? `; ${check.provider}/${check.model}` : ""}${check.autoRecovery ? `; recovered after ${check.autoRecovery.attempts.length} attempts` : ""})`,
     ),
     "",
     "## Frozen evidence",
@@ -540,8 +628,12 @@ export function formatDebateVerboseTranscript(
       `- Speaker: ${visibleEventName(session, event)} (${event.speakerKind})`,
       `- Side: ${debateSideLabel(session, event.sideId)}`,
       `- Step: ${event.stepKey}`,
+      `- Statement: ${event.statementId ?? "None"}`,
+      `- Evidence item: ${event.evidenceSourceId ?? "None"}`,
+      `- Ruling: ${event.ruling ?? "None"}`,
       `- At: ${event.createdAt}`,
       `- Sources: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
+      `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
       `- Delivery: ${
         event.interrupted
           ? `Interrupted by ${event.interruptedBy ?? "unknown"}`
@@ -551,6 +643,23 @@ export function formatDebateVerboseTranscript(
       event.content,
       "",
     ]),
+    ...(session.formatState.format === "turnabout"
+      ? [
+          "## Turnabout public record",
+          "",
+          `- Format phase: ${session.formatState.phase}`,
+          `- Reversal count: ${Math.max(0, session.formatState.round - 1)}`,
+          ...session.formatState.statements.map(
+            (statement, index) =>
+              `- Statement ${index + 1} · ${debateSideLabel(session, statement.sideId)} · ${statement.status} · bot ${statement.speakerBotId}: ${debateSpokenText(statement.content)}`,
+          ),
+          ...session.formatState.contradictions.map(
+            (contradiction) =>
+              `- ${contradiction.ruling} · statement ${contradiction.statementId} · evidence ${contradiction.evidenceSourceId} · grounded ${contradiction.grounded ? "yes" : "no"}`,
+          ),
+          "",
+        ]
+      : []),
     "## Final case board",
     "",
     ...(session.caseBoard.length > 0
@@ -569,7 +678,7 @@ export function formatDebateVerboseTranscript(
           : ballot.voterBotId === session.forAdvocate.id
             ? session.forAdvocate
             : session.againstAdvocate;
-      return `- ${voter.name}: ${debateSideLabel(session, ballot.sideId)} — ${ballot.reason ?? "Private ballot; no public reason."}`;
+      return `- ${voter.name}: ${debateSideLabel(session, ballot.sideId)} — ${ballot.reason ?? "Private ballot; no public reason."}${ballot.provider && ballot.model ? ` (${ballot.provider}/${ballot.model}${ballot.autoRecovery ? ` after ${ballot.autoRecovery.attempts.length} attempts` : ""})` : ""}`;
     }),
     `- Player verdict: ${session.playerVerdict ? debateSideLabel(session, session.playerVerdict) : "None"}`,
     `- Winner: ${session.winnerSideId ? debateSideLabel(session, session.winnerSideId) : "Not decided"}`,
@@ -784,6 +893,7 @@ export function DebateExperience(
     null,
   );
   const [topic, setTopic] = useState("");
+  const [format, setFormat] = useState<DebateFormatId>("forum");
   const [slates, setSlates] = useState<DebateMotionSlateV1[]>([]);
   const [motion, setMotion] = useState<DebateMotionSlateV1>(EMPTY_SLATE);
   const [cast, setCast] = useState(() =>
@@ -799,7 +909,11 @@ export function DebateExperience(
   const [evidence, setEvidence] =
     useState<DebateEvidencePacketV1>(EMPTY_EVIDENCE);
   const [researchQuery, setResearchQuery] = useState("");
+  const [evidenceGenerating, setEvidenceGenerating] = useState(false);
   const [playerDraft, setPlayerDraft] = useState("");
+  const [turnaboutObjecting, setTurnaboutObjecting] = useState(false);
+  const [turnaboutEvidenceSourceId, setTurnaboutEvidenceSourceId] =
+    useState("");
   const [judgeTarget, setJudgeTarget] = useState<DebateSideId>("for");
   const [sourceDrawerId, setSourceDrawerId] = useState<string | null>(null);
   const [transcriptCopyState, setTranscriptCopyState] =
@@ -844,6 +958,9 @@ export function DebateExperience(
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoRecoveryNotice, setAutoRecoveryNotice] = useState<string | null>(
+    null,
+  );
   const {
     active: debateAmbientBotVocalization,
     start: startDebateAmbientBotVocalization,
@@ -861,6 +978,12 @@ export function DebateExperience(
   const stageAlignmentCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+
+  useEffect(() => {
+    if (!autoRecoveryNotice) return;
+    const timeout = window.setTimeout(() => setAutoRecoveryNotice(null), 5_200);
+    return () => window.clearTimeout(timeout);
+  }, [autoRecoveryNotice]);
   const deleteUndoResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1212,6 +1335,7 @@ export function DebateExperience(
     setStudioPanel("motion");
     setActiveSession(null);
     setTopic("");
+    setFormat("forum");
     setSlates([]);
     setMotion(EMPTY_SLATE);
     setCast(debatePrefilledCast(props.initialBotIds));
@@ -1224,6 +1348,8 @@ export function DebateExperience(
     setEvidence(EMPTY_EVIDENCE);
     setResearchQuery("");
     setPlayerDraft("");
+    setTurnaboutObjecting(false);
+    setTurnaboutEvidenceSourceId("");
     setError(null);
   };
 
@@ -1433,6 +1559,7 @@ export function DebateExperience(
           topic,
           preferredProvider: props.modelOverride?.provider ?? preferredProvider,
           modelOverride: props.modelOverride?.model,
+          responseMode: props.responseMode,
         }),
       );
       setSlates(result.slates);
@@ -1449,6 +1576,7 @@ export function DebateExperience(
     preferredProvider,
     props.modelOverride?.model,
     props.modelOverride?.provider,
+    props.responseMode,
     request,
     topic,
   ]);
@@ -1477,12 +1605,14 @@ export function DebateExperience(
       const result = await props.request<{ checks: DebateAdvocacyConsent[] }>(
         "/api/debates/role-checks",
         requestBody({
+          format,
           motion,
           forAdvocateBotId: cast.forAdvocate,
           againstAdvocateBotId: cast.againstAdvocate,
           preferredProvider:
             props.modelOverride?.provider ?? props.preferredProvider,
           modelOverride: props.modelOverride?.model,
+          responseMode: props.responseMode,
         }),
       );
       setRoleChecks(result.checks);
@@ -1508,9 +1638,14 @@ export function DebateExperience(
     setRoleChecks([]);
   };
 
-  const research = async (): Promise<void> => {
-    if (!researchQuery.trim() || props.preferredProvider === "local") return;
+  const research = async (
+    queryOverride?: string,
+    generated = false,
+  ): Promise<void> => {
+    const query = (queryOverride ?? researchQuery).trim();
+    if (!query || props.responseMode === "local") return;
     setBusy(true);
+    setEvidenceGenerating(generated);
     setError(null);
     try {
       const result = await props.request<{
@@ -1518,8 +1653,9 @@ export function DebateExperience(
       }>(
         "/api/debates/research",
         requestBody({
-          query: researchQuery,
+          query,
           preferredProvider: props.preferredProvider,
+          responseMode: props.responseMode,
         }),
       );
       setEvidence((current) => ({
@@ -1531,8 +1667,19 @@ export function DebateExperience(
         caught instanceof Error ? caught.message : "Research was unavailable.",
       );
     } finally {
+      setEvidenceGenerating(false);
       setBusy(false);
     }
+  };
+
+  const generateEvidence = async (): Promise<void> => {
+    const query = randomDebateEvidenceQuery(motion.motion, topic);
+    if (!query) {
+      setError("Shape the motion before generating evidence.");
+      return;
+    }
+    setResearchQuery(query);
+    await research(query, true);
   };
 
   const revealEventSilently = useCallback(
@@ -1618,6 +1765,16 @@ export function DebateExperience(
       runId: number,
     ): Promise<void> => {
       const fresh = debatePresentationEvents(previous, next);
+      const recovery = [...fresh]
+        .reverse()
+        .find((event) => event.autoRecovery)?.autoRecovery;
+      if (recovery) {
+        setAutoRecoveryNotice(
+          recovery.crossedOnline
+            ? `Local stalled — recovered online with ${recovery.finalModel}.`
+            : `Recovered with ${recovery.finalModel}.`,
+        );
+      }
       for (const event of fresh) {
         if (presentationRunRef.current !== runId) return;
         setTranscriptVisibleThroughSequence(event.sequence);
@@ -1764,6 +1921,8 @@ export function DebateExperience(
         setLiveReveal(null);
       }
       setPresenting(fresh.length > 0);
+      setTurnaboutObjecting(false);
+      setTurnaboutEvidenceSourceId("");
       setActiveSession(next);
       try {
         await consumeNewEvents(previous, next, runId);
@@ -1785,6 +1944,8 @@ export function DebateExperience(
         `/api/debates/${encodeURIComponent(id)}`,
       );
       setCameraMode("auto");
+      setTurnaboutObjecting(false);
+      setTurnaboutEvidenceSourceId("");
       setActiveSession(result.session);
       setView("live");
     } catch (caught) {
@@ -1802,6 +1963,7 @@ export function DebateExperience(
       const result = await props.request<{ session: DebateSessionV1 }>(
         "/api/debates",
         requestBody({
+          format,
           motion,
           evidence,
           moderatorBotId: cast.moderator,
@@ -1813,6 +1975,7 @@ export function DebateExperience(
           preferredProvider:
             props.modelOverride?.provider ?? props.preferredProvider,
           modelOverride: props.modelOverride?.model,
+          responseMode: props.responseMode,
           theme: props.theme,
           idempotencyKey: nextMutationKey("create"),
         }),
@@ -1944,6 +2107,41 @@ export function DebateExperience(
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Pass was unavailable.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+
+  const submitTurnaboutAction = async (
+    action: "press" | "present_evidence" | "pass",
+    statementId: string,
+  ): Promise<void> => {
+    const previous = activeSession;
+    if (!previous || previous.format !== "turnabout" || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(previous.id)}/turnabout-action`,
+        requestBody({
+          expectedRevision: previous.revision,
+          idempotencyKey: nextMutationKey(`turnabout-${action}`),
+          action,
+          statementId,
+          evidenceSourceId:
+            action === "present_evidence"
+              ? turnaboutEvidenceSourceId
+              : undefined,
+        }),
+      );
+      if (mountedRef.current) setBusy(false);
+      await adoptSession(previous, result.session);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The record action was unavailable.",
       );
     } finally {
       if (mountedRef.current) setBusy(false);
@@ -2183,10 +2381,10 @@ export function DebateExperience(
       <div className={styles.sectionHeading}>
         <div>
           <p className={styles.eyebrow}>Proceeding archive</p>
-          <h2>Return to the Forum</h2>
+          <h2>Return to a proceeding</h2>
           <p>
-            Resume a live Duel or revisit the final record without disturbing
-            the workbench.
+            Resume a live proceeding or revisit the final record without
+            disturbing the workbench.
           </p>
         </div>
         <button
@@ -2218,6 +2416,7 @@ export function DebateExperience(
               >
                 <strong>{session.motion}</strong>
                 <span>
+                  {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
                   {sessionStatusLabel(session)} · {session.playerRole}
                 </span>
               </button>
@@ -2261,11 +2460,16 @@ export function DebateExperience(
     return (
       <section
         className={styles.forumReadout}
-        aria-label="Forum schematic"
+        aria-label={
+          format === "turnabout" ? "Record schematic" : "Forum schematic"
+        }
+        data-format={format}
         data-ready={debateCanStart ? "true" : undefined}
       >
         <header>
-          <span>Forum schematic</span>
+          <span>
+            {format === "turnabout" ? "Record schematic" : "Forum schematic"}
+          </span>
           <strong>{readinessCount}/4 locked</strong>
         </header>
         <div className={styles.forumCircuit}>
@@ -2297,6 +2501,11 @@ export function DebateExperience(
           </span>
         </div>
         <p>{motion.motion || "The motion has not entered the chamber."}</p>
+        <small className={styles.formatReadout}>
+          {format === "turnabout"
+            ? "Two pressable statements per side · frozen evidence only"
+            : "Openings · challenges · rebuttals · closings"}
+        </small>
       </section>
     );
   };
@@ -2305,6 +2514,7 @@ export function DebateExperience(
     <main
       className={`${styles.lobby} ${styles.dashboard}`}
       data-debate-surface="dashboard"
+      data-debate-format={format}
       data-theme={props.theme}
     >
       <header className={styles.lobbyHeader}>
@@ -2317,8 +2527,12 @@ export function DebateExperience(
         </button>
         <div className={styles.studioIdentity}>
           <p className={styles.eyebrow}>PRISM / Debate</p>
-          <h1>Prismatic Forum</h1>
-          <span>Construct · Cast · Convene</span>
+          <h1>Debate Studio</h1>
+          <span>
+            {format === "turnabout"
+              ? "Turnabout · Testimony · Evidence"
+              : "Forum · Construct · Cast · Convene"}
+          </span>
         </div>
         <div className={styles.lobbyActions}>
           <button
@@ -2344,7 +2558,7 @@ export function DebateExperience(
       </header>
       {props.bots.length < 3 ? (
         <p className={styles.notice} role="status">
-          Create at least three Library bots to enter the Forum.
+          Create at least three Library bots to enter Debate.
         </p>
       ) : null}
       {error ? (
@@ -2373,7 +2587,7 @@ export function DebateExperience(
                   ? "Consent secured"
                   : castComplete
                     ? "Check consent"
-                    : "Seat the Forum",
+                    : "Seat the proceeding",
                 complete: castComplete && !moderatorMuted && roleChecksComplete,
                 tutorial: "debate-cast",
               },
@@ -2431,7 +2645,7 @@ export function DebateExperience(
             title={
               dashboardAlignmentPreviewCast
                 ? "Advanced stage geometry for this account and device."
-                : "Create at least three Library bots to calibrate the Forum."
+                : "Create at least three Library bots to calibrate the Debate stage."
             }
             data-tutorial-target="debate-align-stage"
           >
@@ -2440,7 +2654,13 @@ export function DebateExperience(
           </button>
           <div className={styles.studioNavStatus}>
             <span>Launch circuit</span>
-            <strong>{debateCanStart ? "Forum ready" : "Stand by"}</strong>
+            <strong>
+              {debateCanStart
+                ? format === "turnabout"
+                  ? "Record ready"
+                  : "Forum ready"
+                : "Stand by"}
+            </strong>
             <div aria-hidden="true">
               <i
                 style={
@@ -2556,10 +2776,40 @@ export function DebateExperience(
         <p className={styles.eyebrow}>01 / Motion chamber</p>
         <h2>Shape the fault line</h2>
         <p>
-          Give Prism the territory, choose a balanced fracture, then tune both
+          Choose the rules of the room, give Prism the territory, then tune both
           sides until the argument feels genuinely live.
         </p>
       </div>
+      <fieldset
+        className={styles.formatPicker}
+        data-tutorial-target="debate-format"
+      >
+        <legend>Debate format</legend>
+        {DEBATE_FORMATS.map((option) => (
+          <label
+            key={option.id}
+            data-selected={format === option.id ? "true" : undefined}
+          >
+            <input
+              type="radio"
+              name="debate-format"
+              value={option.id}
+              checked={format === option.id}
+              onChange={() => {
+                setFormat(option.id);
+                setRoleChecks([]);
+              }}
+            />
+            <strong>{option.name}</strong>
+            <span>{option.summary}</span>
+            <small>
+              {option.id === "turnabout"
+                ? "Press · Object · Present Evidence"
+                : "Opening · Challenge · Rebuttal · Closing"}
+            </small>
+          </label>
+        ))}
+      </fieldset>
       <div className={styles.motionSeed}>
         <label className={styles.field}>
           <span>Territory</span>
@@ -2677,7 +2927,7 @@ export function DebateExperience(
           onClick={() => setStudioPanel("cast")}
           disabled={!motionComplete}
         >
-          Cast the Forum <span aria-hidden="true">→</span>
+          Cast the proceeding <span aria-hidden="true">→</span>
         </button>
       </div>
     </section>
@@ -2689,7 +2939,9 @@ export function DebateExperience(
       data-debate-dashboard-section="cast"
     >
       <div className={styles.setupCopy}>
-        <p className={styles.eyebrow}>02 / Forum cast</p>
+        <p className={styles.eyebrow}>
+          02 / {format === "turnabout" ? "Turnabout cast" : "Forum cast"}
+        </p>
         <h2>Seat every voice</h2>
         <p>
           Select a seat, cast directly from your Library, then set your place in
@@ -2699,7 +2951,10 @@ export function DebateExperience(
       <div className={styles.castSlotGrid}>
         {(
           [
-            ["moderator", "Moderator"],
+            [
+              "moderator",
+              format === "turnabout" ? "Moderator / Judge" : "Moderator",
+            ],
             ["forAdvocate", motion.forSide.label || "For advocate"],
             ["againstAdvocate", motion.againstSide.label || "Against advocate"],
           ] as const
@@ -2849,7 +3104,7 @@ export function DebateExperience(
               onChange={() => setPlayerRole(role)}
             />
             <strong>{role.charAt(0).toUpperCase() + role.slice(1)}</strong>
-            <span>{roleDescription(role)}</span>
+            <span>{roleDescription(role, format)}</span>
           </label>
         ))}
       </fieldset>
@@ -2957,8 +3212,9 @@ export function DebateExperience(
         <p className={styles.eyebrow}>03 / Evidence vault</p>
         <h2>Choose what enters the room</h2>
         <p>
-          Every participant receives this same immutable packet. When the Forum
-          opens, outside research stops.
+          {format === "turnabout"
+            ? "Every participant receives this same immutable packet. When the record opens, only these frozen sources may be presented."
+            : "Every participant receives this same immutable packet. When the Forum opens, outside research stops."}
         </p>
       </div>
       <label className={styles.fieldWide}>
@@ -2983,25 +3239,43 @@ export function DebateExperience(
             value={researchQuery}
             onChange={(event) => setResearchQuery(event.currentTarget.value)}
             placeholder="Search for frozen public evidence"
-            disabled={props.preferredProvider === "local"}
+            disabled={props.responseMode === "local"}
           />
         </label>
-        <button
-          type="button"
-          onClick={() => void research()}
-          disabled={
-            props.preferredProvider === "local" || !researchQuery.trim() || busy
-          }
-        >
-          Search once
-        </button>
-        {props.preferredProvider === "local" ? (
+        <div className={styles.researchActions}>
+          <button
+            type="button"
+            onClick={() => void research()}
+            disabled={
+              props.responseMode === "local" || !researchQuery.trim() || busy
+            }
+          >
+            Search once
+          </button>
+          <button
+            type="button"
+            className={styles.generateEvidenceButton}
+            onClick={() => void generateEvidence()}
+            disabled={
+              props.responseMode === "local" || !motion.motion.trim() || busy
+            }
+            aria-label="Generate randomized evidence from the current motion"
+          >
+            <span aria-hidden="true">◇</span>
+            {evidenceGenerating ? "Generating…" : "Generate evidence"}
+          </button>
+        </div>
+        {props.responseMode === "local" ? (
           <p>
-            LOCAL blocks Brave before network access. Player notes and local
-            motion synthesis remain available.
+            LOCAL blocks Brave before network access. Manual and generated
+            research stay unavailable; player notes remain local.
           </p>
         ) : (
-          <p>Search is explicit and ends permanently when the Duel starts.</p>
+          <p>
+            Search manually, or let Prism vary a real-source query from the
+            current motion. Nothing is fabricated; research ends permanently
+            when the Duel starts.
+          </p>
         )}
       </div>
       {evidence.sources.length > 0 ? (
@@ -3063,11 +3337,15 @@ export function DebateExperience(
       <div className={styles.setupCopy}>
         <p className={styles.eyebrow}>Launch circuit</p>
         <h2>
-          {debateCanStart ? "The Forum is ready" : "Complete the circuit"}
+          {debateCanStart
+            ? format === "turnabout"
+              ? "The record is ready"
+              : "The Forum is ready"
+            : "Complete the circuit"}
         </h2>
         <p>
-          Start locks the motion, cast, consent, model, Powers, and evidence
-          into one proceeding.
+          Start locks the format, motion, cast, consent, model, Powers, and
+          evidence into one proceeding.
         </p>
       </div>
       <ul className={styles.readinessList}>
@@ -3087,7 +3365,7 @@ export function DebateExperience(
             {castComplete && !moderatorMuted ? "✓" : "2"}
           </span>
           <div>
-            <strong>Forum cast</strong>
+            <strong>Proceeding cast</strong>
             <small>
               {castComplete && !moderatorMuted
                 ? "Three unique seats are filled."
@@ -3124,6 +3402,15 @@ export function DebateExperience(
       </ul>
       <div className={styles.reviewGrid}>
         <article>
+          <span>Format</span>
+          <strong>{format === "turnabout" ? "Turnabout" : "Forum"}</strong>
+          <p>
+            {format === "turnabout"
+              ? "Pressable testimony and frozen-evidence objections"
+              : "Structured civic speech and rebuttal"}
+          </p>
+        </article>
+        <article>
           <span>Motion</span>
           <strong>{motion.motion}</strong>
           <p>
@@ -3150,7 +3437,7 @@ export function DebateExperience(
                     ? motion.forSide.label
                     : motion.againstSide.label
                 }`
-              : roleSummary(playerRole)}
+              : roleSummary(playerRole, format)}
           </p>
         </article>
         <article>
@@ -3189,11 +3476,90 @@ export function DebateExperience(
           onClick={() => void startDebate()}
           data-tutorial-target="debate-start"
         >
-          {busy ? "Opening the Forum…" : "Start Duel"}
+          {busy
+            ? format === "turnabout"
+              ? "Opening the record…"
+              : "Opening the Forum…"
+            : format === "turnabout"
+              ? "Start Turnabout"
+              : "Start Forum"}
         </button>
       </div>
     </section>
   );
+
+  const renderTurnaboutRecord = (
+    session: DebateSessionV1,
+  ): React.JSX.Element => {
+    const state =
+      session.formatState.format === "turnabout" ? session.formatState : null;
+    return (
+      <aside
+        className={`${styles.caseBoard} ${styles.turnaboutRecord}`}
+        aria-label="Turnabout public record"
+        data-tutorial-target="debate-case-board"
+      >
+        <header>
+          <div>
+            <p className={styles.eyebrow}>Public record</p>
+            <span>Statement-bound · frozen evidence only</span>
+          </div>
+          <strong>Reversal {state ? Math.max(0, state.round - 1) : 0}</strong>
+        </header>
+        <div className={styles.caseColumns}>
+          {(["for", "against"] as const).map((sideId) => (
+            <section key={sideId} data-side={sideId}>
+              <h2>
+                {sideId === "for"
+                  ? session.motion.forSide.label
+                  : session.motion.againstSide.label}
+              </h2>
+              <ol>
+                {(state?.statements ?? [])
+                  .filter((statement) => statement.sideId === sideId)
+                  .map((statement, index) => (
+                    <li
+                      key={statement.id}
+                      data-status={statement.status}
+                      data-active={
+                        state?.activeStatementId === statement.id
+                          ? "true"
+                          : undefined
+                      }
+                    >
+                      <span>Statement {index + 1}</span>
+                      <p>{debateSpokenText(statement.content)}</p>
+                      <div>
+                        <small>{statement.status}</small>
+                        {statement.sourceIds.map((id) => (
+                          <button
+                            type="button"
+                            key={id}
+                            className={styles.sourceChip}
+                            onClick={() => setSourceDrawerId(id)}
+                          >
+                            {id}
+                          </button>
+                        ))}
+                      </div>
+                    </li>
+                  ))}
+              </ol>
+            </section>
+          ))}
+        </div>
+        {state && state.contradictions.length > 0 ? (
+          <footer>
+            {state.contradictions.map((contradiction) => (
+              <span key={contradiction.id} data-ruling={contradiction.ruling}>
+                {contradiction.ruling} · {contradiction.evidenceSourceId}
+              </span>
+            ))}
+          </footer>
+        ) : null}
+      </aside>
+    );
+  };
 
   const renderCaseBoard = (session: DebateSessionV1): React.JSX.Element => {
     const visibleBoard = debateCaseBoardAtSequence(
@@ -3251,7 +3617,10 @@ export function DebateExperience(
     session: DebateSessionV1,
   ): React.JSX.Element | null => {
     if (session.status !== "waiting_for_player") return null;
-    if (session.stepKey === "verdict_player") {
+    if (
+      session.stepKey === "verdict_player" ||
+      session.stepKey === "turnabout_verdict_player"
+    ) {
       return (
         <div className={styles.playerWindow} data-kind="verdict">
           <p className={styles.eyebrow}>Your ruling is final</p>
@@ -3281,6 +3650,103 @@ export function DebateExperience(
             </button>
           </div>
         </div>
+      );
+    }
+    if (
+      session.stepKey === "turnabout_action" &&
+      session.formatState.format === "turnabout"
+    ) {
+      const state: DebateTurnaboutFormatStateV1 = session.formatState;
+      const statement: DebateTurnaboutStatementV1 | null =
+        state.statements.find(
+          (candidate) => candidate.id === state.activeStatementId,
+        ) ?? null;
+      if (!statement) return null;
+      const speaker =
+        statement.speakerBotId === session.forAdvocate.id
+          ? session.forAdvocate
+          : session.againstAdvocate;
+      return (
+        <section
+          className={`${styles.playerWindow} ${styles.turnaboutActions}`}
+          data-kind="turnabout"
+          data-tutorial-target="debate-turnabout-actions"
+        >
+          <div>
+            <p className={styles.eyebrow}>Statement on the record</p>
+            <h2>Examine {speaker.name}</h2>
+            <blockquote>{debateSpokenText(statement.content)}</blockquote>
+          </div>
+          {turnaboutObjecting ? (
+            <fieldset className={styles.turnaboutEvidencePicker}>
+              <legend>Object with frozen evidence</legend>
+              {session.evidence.sources.length > 0 ? (
+                session.evidence.sources.map((source) => (
+                  <label
+                    key={source.id}
+                    data-selected={
+                      turnaboutEvidenceSourceId === source.id
+                        ? "true"
+                        : undefined
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="turnabout-evidence"
+                      value={source.id}
+                      checked={turnaboutEvidenceSourceId === source.id}
+                      onChange={() => setTurnaboutEvidenceSourceId(source.id)}
+                    />
+                    <strong>{source.title}</strong>
+                    <span>{source.snippet}</span>
+                    <small>{source.id}</small>
+                  </label>
+                ))
+              ) : (
+                <p>
+                  No evidence item was frozen before Start. You can still Press
+                  or Pass.
+                </p>
+              )}
+            </fieldset>
+          ) : null}
+          <div className={styles.turnaboutActionRow}>
+            <button
+              type="button"
+              onClick={() => void submitTurnaboutAction("press", statement.id)}
+              disabled={busy || statement.status !== "ready"}
+            >
+              Press
+            </button>
+            <button
+              type="button"
+              aria-pressed={turnaboutObjecting}
+              onClick={() => setTurnaboutObjecting((current) => !current)}
+              disabled={busy || session.evidence.sources.length === 0}
+            >
+              Object
+            </button>
+            {turnaboutObjecting ? (
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={() =>
+                  void submitTurnaboutAction("present_evidence", statement.id)
+                }
+                disabled={busy || !turnaboutEvidenceSourceId}
+              >
+                Present Evidence
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void submitTurnaboutAction("pass", statement.id)}
+              disabled={busy}
+            >
+              Pass
+            </button>
+          </div>
+        </section>
       );
     }
     return (
@@ -3457,7 +3923,9 @@ export function DebateExperience(
               <span />
               <span />
               <span />
-              The Forum is preparing the next turn
+              {session.format === "turnabout"
+                ? "The record is preparing the next action"
+                : "The Forum is preparing the next turn"}
             </div>
           ) : null}
         </div>
@@ -3580,7 +4048,8 @@ export function DebateExperience(
       {
         role: "moderator" as const,
         bot: moderatorBot,
-        roleLabel: "Moderator",
+        roleLabel:
+          session?.format === "turnabout" ? "Moderator / Judge" : "Moderator",
       },
       {
         role: "against" as const,
@@ -3619,6 +4088,11 @@ export function DebateExperience(
       const offset = debateStageAlignmentOffset(stageAlignmentDraft, target);
       return offset.x === 0 && offset.y === 0;
     });
+    const lightBlendModesAreDefault = (["dark", "light"] as const).every(
+      (theme) =>
+        stageAlignmentDraft.lightBlendModes[theme] ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes[theme],
+    );
     return (
       <div
         className={styles.alignmentModalBackdrop}
@@ -3768,25 +4242,7 @@ export function DebateExperience(
                     style={debateStageAlignmentStyle(stageAlignmentDraft)}
                   >
                     <div className={styles.receiverMatte} aria-hidden="true" />
-                    <DebateForumScene
-                      activeRole={null}
-                      cameraView={stageAlignmentPreviewCamera}
-                      forColor={forBot.color}
-                      againstColor={againstBot.color}
-                      moderatorColor={moderatorBot.color}
-                      graphicsQuality={props.graphicsQuality}
-                      live={false}
-                      theme={stageAlignmentPreviewTheme}
-                    />
-                    <div className={styles.lightMaskFor} aria-hidden="true" />
-                    <div
-                      className={styles.lightMaskAgainst}
-                      aria-hidden="true"
-                    />
-                    <div
-                      className={styles.lightMaskModerator}
-                      aria-hidden="true"
-                    />
+                    <DebateForumLightMasks />
                     {interactiveAlignmentCast.map(
                       ({ role, bot, presentation }) => {
                         const appearanceBot = session
@@ -3971,6 +4427,82 @@ export function DebateExperience(
                 </div>
               </div>
               <section
+                className={styles.alignmentLightingTuner}
+                aria-label="Debate light color blend modes"
+              >
+                <header>
+                  <div>
+                    <span className={styles.eyebrow}>Color blend</span>
+                    <strong>Architectural bounce</strong>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={lightBlendModesAreDefault}
+                    onClick={() =>
+                      setStageAlignmentDraft((current) =>
+                        normalizeDebateStageAlignment({
+                          ...current,
+                          lightBlendModes:
+                            DEFAULT_DEBATE_STAGE_ALIGNMENT.lightBlendModes,
+                        }),
+                      )
+                    }
+                  >
+                    Reset
+                  </button>
+                </header>
+                <div className={styles.alignmentLightingTunerRows}>
+                  {(["dark", "light"] as const).map((theme) => {
+                    const label = theme === "dark" ? "Dark" : "Light";
+                    return (
+                      <div
+                        className={styles.alignmentLightingTunerRow}
+                        data-active={
+                          stageAlignmentPreviewTheme === theme
+                            ? "true"
+                            : undefined
+                        }
+                        key={theme}
+                      >
+                        <strong>{label}</strong>
+                        <div
+                          className={styles.alignmentLightingBlendToggle}
+                          role="group"
+                          aria-label={`${label} Debate light blend mode`}
+                        >
+                          {DEBATE_STAGE_LIGHT_BLEND_MODES.map((blendMode) => (
+                            <button
+                              type="button"
+                              aria-pressed={
+                                stageAlignmentDraft.lightBlendModes[theme] ===
+                                blendMode
+                              }
+                              onClick={() => {
+                                setStageAlignmentPreviewTheme(theme);
+                                setStageAlignmentDraft((current) =>
+                                  updateDebateStageLightBlendMode(
+                                    current,
+                                    theme,
+                                    blendMode,
+                                  ),
+                                );
+                              }}
+                              key={blendMode}
+                            >
+                              {blendMode === "screen" ? "Screen" : "Overlay"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <small>
+                  Saved separately for Light and Dark on this account and
+                  device.
+                </small>
+              </section>
+              <section
                 className={styles.alignmentTuner}
                 aria-label="Debate stage position controls"
                 data-camera-view={stageAlignmentPreviewCamera}
@@ -4077,6 +4609,11 @@ export function DebateExperience(
               "phase",
               "speech",
               "silence",
+              "testimony",
+              "press",
+              "objection",
+              "evidence",
+              "revelation",
               "player_turn",
               "reaction",
               "interjection",
@@ -4106,6 +4643,7 @@ export function DebateExperience(
     const cameraView =
       cameraMode === "auto" ? debateAutoCameraView(activeRole) : cameraMode;
     const canInterject =
+      session.format === "forum" &&
       session.playerRole === "participant" &&
       session.status === "live" &&
       presenting &&
@@ -4123,15 +4661,25 @@ export function DebateExperience(
     const floorLabel =
       activeEvent?.kind === "moderator_ruling"
         ? "Moderator ruling"
-        : activeEvent?.kind === "interjection"
-          ? "Floor interrupted"
-          : activeEvent?.kind === "phase"
-            ? "Moderator transition"
-            : activeEvent?.kind === "ballot"
-              ? "Ballot"
-              : activeEvent
-                ? "On the floor"
-                : "Awaiting the floor";
+        : activeEvent?.kind === "testimony"
+          ? "Statement entered"
+          : activeEvent?.kind === "press"
+            ? "Statement pressed"
+            : activeEvent?.kind === "objection"
+              ? "Objection"
+              : activeEvent?.kind === "evidence"
+                ? "Frozen evidence"
+                : activeEvent?.kind === "revelation"
+                  ? "Reversal"
+                  : activeEvent?.kind === "interjection"
+                    ? "Floor interrupted"
+                    : activeEvent?.kind === "phase"
+                      ? "Moderator transition"
+                      : activeEvent?.kind === "ballot"
+                        ? "Ballot"
+                        : activeEvent
+                          ? "On the floor"
+                          : "Awaiting the floor";
     const forPresentation = debateBotPresentation(session, session.forAdvocate);
     const againstPresentation = debateBotPresentation(
       session,
@@ -4145,11 +4693,19 @@ export function DebateExperience(
       busy && !presenting && session.status === "live"
         ? debateExpectedBotId(session)
         : null;
-    const turnOwnerBotId = debateTurnOwnerBotId({
-      thinkingBotId,
-      presenting,
-      presentationSpeakerBotId: activeSpeakerId,
-    });
+    const turnaboutFloorOwnerBotId =
+      session.formatState.format === "turnabout"
+        ? session.formatState.floorOwnerBotId
+        : null;
+    const turnOwnerBotId =
+      presenting && activeSpeakerId
+        ? activeSpeakerId
+        : (turnaboutFloorOwnerBotId ??
+          debateTurnOwnerBotId({
+            thinkingBotId,
+            presenting,
+            presentationSpeakerBotId: activeSpeakerId,
+          }));
     const turnOwnerRole: DebateForumRole | null =
       turnOwnerBotId === session.moderator.id
         ? "moderator"
@@ -4173,7 +4729,8 @@ export function DebateExperience(
         role: "moderator" as const,
         bot: session.moderator,
         presentation: moderatorPresentation,
-        roleLabel: "Moderator",
+        roleLabel:
+          session.format === "turnabout" ? "Moderator / Judge" : "Moderator",
         listenerReaction: null,
       },
       {
@@ -4241,6 +4798,7 @@ export function DebateExperience(
         <main
           className={styles.live}
           data-debate-surface="live"
+          data-debate-format={session.format}
           data-theme={props.theme}
           data-session-status={session.status}
           data-session-phase={session.phase}
@@ -4270,6 +4828,7 @@ export function DebateExperience(
             <div className={styles.liveIdentity}>
               <p className={styles.eyebrow}>
                 <span className={styles.liveStateBeacon} aria-hidden="true" />
+                {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
                 {phaseLabel(session)} · {session.playerRole}
               </p>
               <h1>{session.motion.motion}</h1>
@@ -4295,25 +4854,11 @@ export function DebateExperience(
                   className={styles.forumCamera}
                   data-camera-view={cameraView}
                   data-camera-mode={cameraMode}
+                  data-active-role={activeRole ?? undefined}
                   style={debateStageAlignmentStyle(stageAlignment)}
                 >
                   <div className={styles.receiverMatte} aria-hidden="true" />
-                  <DebateForumScene
-                    activeRole={activeRole}
-                    cameraView={cameraView}
-                    forColor={session.forAdvocate.color}
-                    againstColor={session.againstAdvocate.color}
-                    moderatorColor={session.moderator.color}
-                    graphicsQuality={props.graphicsQuality}
-                    live={session.status === "live"}
-                    theme={props.theme}
-                  />
-                  <div className={styles.lightMaskFor} aria-hidden="true" />
-                  <div className={styles.lightMaskAgainst} aria-hidden="true" />
-                  <div
-                    className={styles.lightMaskModerator}
-                    aria-hidden="true"
-                  />
+                  <DebateForumLightMasks />
                   {stageCast.map(
                     ({
                       role,
@@ -4465,8 +5010,12 @@ export function DebateExperience(
                 {session.status === "paused" ? (
                   <div className={styles.stageStateOverlay} data-kind="paused">
                     <span aria-hidden="true">Ⅱ</span>
-                    <strong>Forum suspended</strong>
-                    <small>The exact next floor is preserved.</small>
+                    <strong>
+                      {session.format === "turnabout"
+                        ? "Record suspended"
+                        : "Forum suspended"}
+                    </strong>
+                    <small>The exact next action is preserved.</small>
                   </div>
                 ) : session.status === "waiting_for_player" ? (
                   <div
@@ -4504,7 +5053,9 @@ export function DebateExperience(
                   <strong>
                     {activeEvent
                       ? visibleEventName(session, activeEvent)
-                      : "The Forum"}
+                      : session.format === "turnabout"
+                        ? "The record"
+                        : "The Forum"}
                   </strong>
                 </div>
                 <div
@@ -4553,7 +5104,9 @@ export function DebateExperience(
                 </div>
               </div>
               <div className={styles.stageSupport}>
-                {renderCaseBoard(session)}
+                {session.format === "turnabout"
+                  ? renderTurnaboutRecord(session)
+                  : renderCaseBoard(session)}
                 {renderGallery(session)}
               </div>
             </div>
@@ -4566,6 +5119,11 @@ export function DebateExperience(
                 session.status === "waiting_for_player" ? "true" : undefined
               }
             >
+              {autoRecoveryNotice ? (
+                <p className={styles.autoRecoveryNotice} role="status">
+                  {autoRecoveryNotice}
+                </p>
+              ) : null}
               {session.error ? (
                 <div className={styles.turnUnavailable} role="alert">
                   <strong>Turn unavailable</strong>
@@ -4600,8 +5158,12 @@ export function DebateExperience(
                   <h2>{verdictLabel(session)}</h2>
                   <p>
                     {session.playerRole === "judge"
-                      ? "Your ruling is final. The bot ballots below show agreement and dissent."
-                      : "The three-bot majority decided the Duel."}
+                      ? session.format === "turnabout"
+                        ? "Your public-record ruling is final. The bot ballots below show agreement and dissent."
+                        : "Your ruling is final. The bot ballots below show agreement and dissent."
+                      : session.format === "turnabout"
+                        ? "The three-bot majority resolved the public record."
+                        : "The three-bot majority decided the Duel."}
                   </p>
                   <ul>
                     {session.ballots.map((ballot) => {

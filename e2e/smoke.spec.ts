@@ -5061,7 +5061,7 @@ test.describe("PRISM desktop smoke", () => {
       sideId,
       color: testBots[index]!.color,
       glyph,
-      avatarDetails: testBots[index]!.avatarDetails,
+      avatarDetails: testBots[0]!.avatarDetails,
       voiceProfile: null,
       powers: [],
       provider: "local",
@@ -5088,6 +5088,11 @@ test.describe("PRISM desktop smoke", () => {
       stepKey: "opening_for",
       provider: "local",
       model: "llama3.2",
+      responseMode: "local",
+      generationChain: [{ provider: "local", model: "llama3.2" }],
+      format: "forum",
+      formatVersion: 1,
+      formatState: { version: 1, format: "forum" },
       playerRole: "spectator",
       playerSideId: null,
       motion: {
@@ -5166,6 +5171,7 @@ test.describe("PRISM desktop smoke", () => {
           sideId: index === 0 ? "for" : "against",
           reason:
             "The prevailing side connected its claims to the motion more directly, answered the strongest objection, and made the more persuasive comparative case without relying on unsupported assumptions.",
+          privateReason: false,
           createdAt: timestamp,
         }),
       ),
@@ -5266,6 +5272,9 @@ test.describe("PRISM desktop smoke", () => {
     const alignmentCameraToggle = dashboardAlignment.getByRole("group", {
       name: "Debate alignment preview camera",
     });
+    const alignmentThemeToggle = dashboardAlignment.getByRole("group", {
+      name: "Debate alignment preview theme",
+    });
     await expect(
       alignmentCameraToggle.getByRole("button", {
         name: "Wide",
@@ -5326,6 +5335,67 @@ test.describe("PRISM desktop smoke", () => {
       path: ".codex/output/debate-align-stage-moderator.png",
       animations: "disabled",
     });
+    await page.evaluate(async () => {
+      await Promise.all(
+        [
+          "/debate/forum-light.webp",
+          "/debate/forum-light-foreground.png",
+          "/debate/moderator-light.png",
+          "/debate/moderator-light-foreground.png",
+        ].map(async (source) => {
+          const image = new Image();
+          image.src = source;
+          await image.decode();
+        }),
+      );
+    });
+    await alignmentThemeToggle
+      .getByRole("button", { name: "Light", exact: true })
+      .click();
+    const alignmentReceiver = dashboardAlignment.locator(
+      '[class*="receiverMatte"]',
+    );
+    await expect(
+      dashboardAlignment.locator(
+        '[class*="alignmentPreviewThemeScope"][data-theme="light"]',
+      ),
+    ).toBeVisible();
+    await expect(alignmentReceiver).toHaveCSS(
+      "background-image",
+      /moderator-light\.png/u,
+    );
+    await expect(
+      dashboardAlignment.locator('[data-light-depth="backdrop"]'),
+    ).toHaveCount(3);
+    await expect(
+      dashboardAlignment.locator('[data-light-depth="foreground"]'),
+    ).toHaveCount(3);
+    await page.screenshot({
+      path: ".codex/output/debate-light-masks-moderator-light.png",
+      animations: "disabled",
+    });
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Wide", exact: true })
+      .click();
+    await expect(alignmentReceiver).toHaveCSS(
+      "background-image",
+      /forum-light\.webp/u,
+    );
+    await page.screenshot({
+      path: ".codex/output/debate-light-masks-wide-light.png",
+      animations: "disabled",
+    });
+    await alignmentCameraToggle
+      .getByRole("button", { name: "Moderator", exact: true })
+      .click();
+    await alignmentThemeToggle
+      .getByRole("button", { name: "Dark", exact: true })
+      .click();
+    await expect(
+      dashboardAlignment.locator(
+        '[class*="alignmentPreviewThemeScope"][data-theme="dark"]',
+      ),
+    ).toBeVisible();
     await dashboardAlignment
       .getByRole("button", { name: "Reset moderator", exact: true })
       .click();
@@ -5357,8 +5427,10 @@ test.describe("PRISM desktop smoke", () => {
     });
     await page
       .getByRole("button", {
-        name: `${initialSession.motion.motion} Opening · spectator`,
-        exact: true,
+        name: new RegExp(
+          `^${initialSession.motion.motion}.*Opening.*spectator$`,
+          "u",
+        ),
       })
       .click();
     const live = page.locator('[data-debate-surface="live"]');
@@ -5385,6 +5457,9 @@ test.describe("PRISM desktop smoke", () => {
     await page.getByRole("button", { name: "Wide", exact: true }).click();
     const forumCamera = live.locator('[class*="forumCamera"]');
     await expect(forumCamera).toHaveAttribute("data-camera-view", "wide");
+    await forumCamera.evaluate((element) => {
+      for (const animation of element.getAnimations()) animation.finish();
+    });
     await expect(forumCamera).toHaveCSS(
       "transform",
       "matrix(1, 0, 0, 1, 0, 0)",
@@ -5402,7 +5477,7 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
     await expect(
       moderatorAvatar.locator('[class*="botFaceFrame"]').first(),
-    ).toBeHidden();
+    ).toBeVisible();
     const normalizedModeratorInkGeometry = async () =>
       moderatorAvatar.evaluate((avatar) => {
         const mask = avatar.querySelector<HTMLElement>(
@@ -5432,8 +5507,38 @@ test.describe("PRISM desktop smoke", () => {
       .boundingBox();
     expect(moderatorAvatarBox).not.toBeNull();
     expect(compactModeratorScreenBox).not.toBeNull();
-    expect(compactModeratorScreenBox!.width).toBeLessThan(
-      moderatorAvatarBox!.width * 0.8,
+    expect(compactModeratorScreenBox!.width).toBeGreaterThan(
+      moderatorAvatarBox!.width * 0.85,
+    );
+    const forAvatarBody = page.locator(
+      '[data-debate-bot-avatar="true"][data-debate-role="for"] [data-zen-live-bot-body-layer="true"]',
+    );
+    const againstAvatarBody = page.locator(
+      '[data-debate-bot-avatar="true"][data-debate-role="against"] [data-zen-live-bot-body-layer="true"]',
+    );
+    await expect(forAvatarBody).toHaveCSS(
+      "--coffee-plate-emoji-face-scale-y",
+      "-1",
+    );
+    await expect(forAvatarBody).toHaveCSS(
+      "--avatar-details-facing-scale-x",
+      "1",
+    );
+    await expect(forAvatarBody).toHaveCSS(
+      "--avatar-details-facing-offset-y",
+      "0%",
+    );
+    await expect(againstAvatarBody).toHaveCSS(
+      "--coffee-plate-emoji-face-scale-y",
+      "1",
+    );
+    await expect(againstAvatarBody).toHaveCSS(
+      "--avatar-details-facing-scale-x",
+      "-1",
+    );
+    await expect(againstAvatarBody).toHaveCSS(
+      "--avatar-details-facing-offset-y",
+      "-2.34375%",
     );
     const activeGlyphScreen = activeGlyph.locator(
       '[class*="podiumGlyphScreen"]',
@@ -5448,22 +5553,6 @@ test.describe("PRISM desktop smoke", () => {
       path: ".codex/output/debate-podium-glyphs-wide.png",
       animations: "disabled",
     });
-    await themeButton.click();
-    await expect(live).toHaveAttribute("data-theme", "light");
-    await page.screenshot({
-      path: ".codex/output/debate-light-masks-wide-light.png",
-      animations: "disabled",
-    });
-    await page.getByRole("button", { name: "Moderator", exact: true }).click();
-    await expect(forumCamera).toHaveAttribute("data-camera-view", "moderator");
-    await page.screenshot({
-      path: ".codex/output/debate-light-masks-moderator-light.png",
-      animations: "disabled",
-    });
-    await themeButton.click();
-    await expect(live).toHaveAttribute("data-theme", "dark");
-    await page.getByRole("button", { name: "Wide", exact: true }).click();
-    await expect(forumCamera).toHaveAttribute("data-camera-view", "wide");
 
     for (const camera of ["Left", "Right"] as const) {
       await page.getByRole("button", { name: camera, exact: true }).click();
@@ -5498,18 +5587,20 @@ test.describe("PRISM desktop smoke", () => {
     const fullModeratorInkGeometry = await normalizedModeratorInkGeometry();
     expect(
       compactModeratorInkGeometry.width / fullModeratorInkGeometry.width,
-    ).toBeCloseTo(0.88, 2);
+    ).toBeCloseTo(1, 2);
     expect(
       compactModeratorInkGeometry.height / fullModeratorInkGeometry.height,
-    ).toBeCloseTo(0.88, 2);
+    ).toBeCloseTo(1, 2);
     expect(
       Math.abs(
         compactModeratorInkGeometry.centerX - fullModeratorInkGeometry.centerX,
       ),
     ).toBeLessThan(0.002);
     expect(
-      compactModeratorInkGeometry.centerY - fullModeratorInkGeometry.centerY,
-    ).toBeCloseTo(0.025, 2);
+      Math.abs(
+        compactModeratorInkGeometry.centerY - fullModeratorInkGeometry.centerY,
+      ),
+    ).toBeLessThan(0.002);
     const closeModeratorGlyphBox = await moderatorGlyphScreen.boundingBox();
     expect(closeModeratorGlyphBox).not.toBeNull();
     expect(closeModeratorGlyphBox!.width).toBeGreaterThanOrEqual(

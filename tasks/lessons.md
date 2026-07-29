@@ -96,7 +96,7 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ### 2026-07-11 · [design]
 **Trigger**: A request to replace the Sharp face font was initially interpreted as changing the preset's glyph structure and geometry.
-**Lesson**: Avatar Studio's Core/Soft/Sharp/Bounce/Serif choices are font personalities first. When one lacks distinction, choose a replacement typeface based on how its punctuation and symbols render at face scale, then name the style after the resulting visual character; do not change facial glyph structure unless explicitly requested. Doto was preferred over DotGothic16 and Bungee because its dotted matrix reads distinctly while preserving variable weight; self-host the licensed font so it works offline.
+**Lesson**: Avatar Studio's Core/Soft/Mono/Bounce/Serif choices are font personalities first. When one lacks distinction, choose a replacement typeface based on how its punctuation and symbols render at face scale, then name the style after the resulting visual character; do not change facial glyph structure unless explicitly requested. The Mono slot uses Noto Sans Mono with both `latin` and `latin-ext` subsets because the animated mouth vocabulary requires native `ɵ` and `ʘ` glyphs; preserve the stored `concise` ID for saved-bot compatibility.
 **Applies to**: `packages/shared/src/botAvatar.ts`, `apps/web/src/app/layout.tsx`, and face-font rules in `apps/web/src/app/page.module.css`.
 
 ### 2026-07-11 · [UX]

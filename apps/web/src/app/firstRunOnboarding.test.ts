@@ -62,9 +62,22 @@ describe("first-run onboarding", () => {
   });
 
   it("introduces the customizable mixed-provider Auto chain", () => {
-    assert.match(pageSource, /ordered chain of one to five fallbacks/u);
+    assert.match(pageSource, /Zen, Coffee, Signal, and Debate/u);
+    assert.match(pageSource, /ordered chain of\s*one to five fallbacks/u);
     assert.match(pageSource, /every local and online model/u);
     assert.match(pageSource, /at least one fallback in\s*Settings/u);
+  });
+
+  it("introduces Debate formats without turning setup into a gate", () => {
+    assert.match(
+      pageSource,
+      /Debate begins in Forum and can become Turnabout when you want\s*pressable testimony/u,
+    );
+    assert.match(pageSource, /frozen-evidence objections/u);
+    assert.match(
+      pageSource,
+      /room walkthrough teaches the\s*difference before Start/u,
+    );
   });
 
   it("names chat routing separately from image and voice routing", () => {

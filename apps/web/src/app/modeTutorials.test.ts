@@ -20,6 +20,7 @@ describe("mode tutorials", () => {
       tutorial.steps.map((step) => step.targetSelector),
       [
         '[data-tutorial-target="debate-new"]',
+        '[data-tutorial-target="debate-format"]',
         '[data-tutorial-target="debate-synthesize"]',
         '[data-tutorial-target="debate-cast"]',
         '[data-tutorial-target="debate-consent"]',
@@ -34,16 +35,32 @@ describe("mode tutorials", () => {
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
     assert.match(copy, /one non-gated console/u);
+    assert.match(copy, /Forum is the backward-compatible default/u);
+    assert.match(copy, /different format, not a theme/u);
+    assert.match(copy, /Press, Object, and Present Evidence/u);
+    assert.match(
+      copy,
+      /one statement and one evidence item frozen before Start/u,
+    );
+    assert.match(copy, /Spectators receive a moderator-led examination/u);
     assert.match(copy, /without turning setup into a wizard/u);
     assert.match(copy, /Devil’s Advocate/u);
     assert.match(copy, /immutable prep packet/u);
+    assert.match(copy, /Generate evidence/u);
+    assert.match(copy, /real-source query/u);
+    assert.match(copy, /never fabricates sources/u);
+    assert.match(
+      copy,
+      /grounded statement excerpt and frozen-evidence excerpt/u,
+    );
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(copy, /pause and resume the exact next action/u);
-    assert.match(copy, /Choose one Debate model in the navbar/u);
-    assert.match(copy, /Account default uses the model saved in Settings/u);
-    assert.match(copy, /every moderator and advocate turn/u);
-    assert.match(copy, /every bot ballot/u);
-    assert.match(copy, /Start freezes that complete contract/u);
+    assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
+    assert.match(copy, /fallback chain saved in Settings/u);
+    assert.match(copy, /every generated statement and ballot records/u);
+    assert.match(copy, /whole chain fails/u);
+    assert.match(copy, /LOCAL remains a hard offline guarantee/u);
+    assert.match(copy, /Start freezes that ordered chain/u);
     assert.match(copy, /three-bot majority/u);
     assert.match(copy, /Public prose arrives with the live voice/u);
     assert.match(copy, /actual animated bot behind an authored side podium/u);

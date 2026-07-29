@@ -5,6 +5,7 @@ import {
   BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
   BOT_AVATAR_DETAILS_FACE_PLACEMENT,
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+  botAvatarFaceFacingStyle,
   botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
   botAvatarDetailsSignalFacingOffsetY,
@@ -48,6 +49,28 @@ describe("botAvatarDetailsFacingOffsetY", () => {
     assert.equal(botAvatarDetailsFacingOffsetY(-1), "0%");
     assert.equal(botAvatarDetailsFacingOffsetY("1"), "-2.34375%");
     assert.equal(botAvatarDetailsFacingOffsetY(1), "-2.34375%");
+  });
+});
+
+describe("botAvatarFaceFacingStyle", () => {
+  it("keeps canonical face and authored ink on one registration contract", () => {
+    assert.deepEqual(
+      botAvatarFaceFacingStyle(BOT_AVATAR_CANONICAL_FACE_SCALE_Y),
+      {
+        "--coffee-plate-emoji-face-scale-y":
+          BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+        "--avatar-details-facing-scale-x": "1",
+        "--avatar-details-facing-offset-y": "0%",
+      },
+    );
+  });
+
+  it("mirrors and optically registers face ink as one operation", () => {
+    assert.deepEqual(botAvatarFaceFacingStyle(1), {
+      "--coffee-plate-emoji-face-scale-y": "1",
+      "--avatar-details-facing-scale-x": "-1",
+      "--avatar-details-facing-offset-y": "-2.34375%",
+    });
   });
 });
 

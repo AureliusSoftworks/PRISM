@@ -6,9 +6,9 @@ import {
   Geist_Mono,
   Instrument_Sans,
   Lora,
+  Noto_Sans_Mono,
   Raleway,
 } from "next/font/google";
-import localFont from "next/font/local";
 import { BlockBrowserInspection } from "./BlockBrowserInspection";
 import { ClientInstallCoach } from "./ClientInstallCoach";
 import { DisableNativeTooltips } from "./DisableNativeTooltips";
@@ -55,10 +55,11 @@ const conciseRounded = Fredoka({
   weight: ["600", "700"],
 });
 
-const dotoDisplay = localFont({
-  src: "./fonts/Doto-Variable.ttf",
-  variable: "--font-doto-display",
-  weight: "100 900",
+const technicalMono = Noto_Sans_Mono({
+  variable: "--font-technical-mono",
+  // The animated face vocabulary requires native ɵ and ʘ glyphs.
+  subsets: ["latin", "latin-ext"],
+  weight: "variable",
   display: "swap",
 });
 
@@ -100,7 +101,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${dotoDisplay.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${technicalMono.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>
