@@ -91,6 +91,23 @@ class DebateProviderStub implements LlmProvider {
   }
 }
 
+class PersonaVoicePromptProvider extends DebateProviderStub {
+  public speechPrompt = "";
+  public ballotPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Vote independently")) this.ballotPrompt = text;
+    else if (!text.includes("private advocacy consent check")) {
+      this.speechPrompt = text;
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class TurnaboutProvider extends DebateProviderStub {
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -596,6 +613,32 @@ describe("Debate engine", () => {
       debateSource,
       /\b(?:FROM|INTO|UPDATE)\s+(?:memories|memory_summaries|conversations|messages)\b/iu,
     );
+  });
+
+  it("makes saved persona diction binding for Debate speech and ballot reasons", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new PersonaVoicePromptProvider();
+      let session = await createJudgeDebate(db, runtimeWith(provider));
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:persona-voice:0001",
+        },
+        runtimeWith(provider),
+      );
+      assert.match(provider.speechPrompt, /Persona voice is binding/);
+      assert.match(provider.speechPrompt, /generic polished-debater, corporate, academic, or assistant language/);
+      assert.match(provider.speechPrompt, /formal Debate role changes the structure of a turn, not the persona's vocabulary or fluency/);
+      // A neutral ballot is generated only at normal completion; direct coverage
+      // of the shared prompt text is pinned by its exported source contract below.
+      assert.match(debateSource, /personaVoicePrompt\(voter\)/);
+    } finally {
+      db.close();
+    }
   });
 
   it("freezes one runtime model for the session instead of bot model fields", async () => {

@@ -1285,6 +1285,14 @@ function evidencePrompt(evidence: DebateEvidencePacketV1): string {
   return `${notes}\nFrozen sources:\n${sources}`;
 }
 
+function personaVoicePrompt(snapshot: DebateBotSnapshotV1): string {
+  return [
+    `Persona voice is binding: speak as ${snapshot.name}, using only diction, idioms, cadence, confidence, and rhetorical habits that their saved persona would plausibly use.`,
+    "Do not smooth their voice into generic polished-debater, corporate, academic, or assistant language. A formal Debate role changes the structure of a turn, not the persona's vocabulary or fluency.",
+    "Let the persona be imperfect when appropriate: simple wording, bluntness, enthusiasm, uncertainty, eccentric phrasing, or limited rhetorical polish are all preferable to out-of-character eloquence.",
+  ].join("\n");
+}
+
 function publicTranscript(
   session: DebateSessionV1,
   observerBotId?: string,
@@ -1416,6 +1424,7 @@ async function generateSpeech(
           "Use only the frozen prep packet below. Never claim live research.",
           "Cite a frozen source only as [[source:id]]. Never invent a source ID.",
           "Concede fair points when warranted. Stay in your assigned formal role.",
+          personaVoicePrompt(snapshot),
           powerPrompt(session, snapshot.id),
           "",
           evidencePrompt(session.evidence),
@@ -2351,6 +2360,7 @@ function botBallotPrompt(session: DebateSessionV1, voter: DebateBotSnapshotV1): 
       ? "Treat sustained and overruled objections exactly as the public moderator recorded them. Do not invent a contradiction or use an unpresented evidence item."
       : "",
     "Do not use private intent, hidden speech, relationship memory, or numeric scoring.",
+    personaVoicePrompt(voter),
     `Motion: ${session.motion.motion}`,
     `For label: ${session.motion.forSide.label}`,
     `Against label: ${session.motion.againstSide.label}`,
