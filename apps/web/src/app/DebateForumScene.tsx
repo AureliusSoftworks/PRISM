@@ -13,9 +13,11 @@ import type { PrismSceneQualityConfig } from "./prismSceneRuntime";
 import styles from "./DebateExperience.module.css";
 
 export type DebateForumRole = "for" | "against" | "moderator";
+export type DebateForumCameraView = "wide" | "left" | "moderator" | "right";
 
 export interface DebateForumSceneProps {
   activeRole: DebateForumRole | null;
+  cameraView: DebateForumCameraView;
   forColor: string | null;
   againstColor: string | null;
   moderatorColor: string | null;
@@ -24,16 +26,9 @@ export interface DebateForumSceneProps {
   theme: "light" | "dark";
 }
 
-type DebateForumSemanticState = Omit<
-  DebateForumSceneProps,
-  "graphicsQuality"
->;
+type DebateForumSemanticState = Omit<DebateForumSceneProps, "graphicsQuality">;
 
-type RendererStatus =
-  | "initializing"
-  | "webgl"
-  | "context-lost"
-  | "fallback";
+type RendererStatus = "initializing" | "webgl" | "context-lost" | "fallback";
 
 interface ForumLight {
   role: DebateForumRole;
@@ -97,11 +92,9 @@ class DebateForumController {
     if (!quality.continuousMotion) this.applyTargetsImmediately();
   }
 
-  setSemanticState(
-    state: DebateForumSemanticState,
-    immediate = false,
-  ): void {
+  setSemanticState(state: DebateForumSemanticState, immediate = false): void {
     this.state = state;
+    this.applyLayout();
     const colors: Record<DebateForumRole, number> = {
       for: colorNumber(state.forColor, 0x42d9ff),
       against: colorNumber(state.againstColor, 0xff5f8f),
@@ -109,8 +102,7 @@ class DebateForumController {
     };
     for (const light of this.lights) {
       light.sprite.tint = colors[light.role];
-      light.sprite.blendMode =
-        state.theme === "dark" ? "screen" : "overlay";
+      light.sprite.blendMode = state.theme === "dark" ? "screen" : "overlay";
       light.targetAlpha =
         state.activeRole === light.role ? 0.58 : state.live ? 0.24 : 0.16;
     }
@@ -129,8 +121,7 @@ class DebateForumController {
     if (!this.quality.continuousMotion) return;
     const easing = 1 - Math.exp(-Math.max(0, deltaMs) / 260);
     for (const light of this.lights) {
-      light.sprite.alpha +=
-        (light.targetAlpha - light.sprite.alpha) * easing;
+      light.sprite.alpha += (light.targetAlpha - light.sprite.alpha) * easing;
     }
   }
 
@@ -169,52 +160,105 @@ class DebateForumController {
     const moderatorLight = byRole.get("moderator");
     if (!forLight || !againstLight || !moderatorLight) return;
 
-    forLight.sprite.position.set(this.width * 0.2, this.height * 0.58);
-    againstLight.sprite.position.set(this.width * 0.8, this.height * 0.58);
-    moderatorLight.sprite.position.set(this.width * 0.5, this.height * 0.22);
-    forLight.sprite.width = againstLight.sprite.width = this.width * 0.82;
-    forLight.sprite.height = againstLight.sprite.height = this.height * 1.05;
-    moderatorLight.sprite.width = this.width * 0.66;
-    moderatorLight.sprite.height = this.height * 0.72;
+    const moderatorCamera = this.state.cameraView === "moderator";
+
+    forLight.sprite.position.set(
+      this.width * (moderatorCamera ? 0.16 : 0.17),
+      this.height * (moderatorCamera ? 0.54 : 0.58),
+    );
+    againstLight.sprite.position.set(
+      this.width * (moderatorCamera ? 0.84 : 0.83),
+      this.height * (moderatorCamera ? 0.54 : 0.58),
+    );
+    moderatorLight.sprite.position.set(
+      this.width * 0.5,
+      this.height * (moderatorCamera ? 0.4 : 0.34),
+    );
+    forLight.sprite.width = againstLight.sprite.width =
+      this.width * (moderatorCamera ? 0.55 : 0.62);
+    forLight.sprite.height = againstLight.sprite.height =
+      this.height * (moderatorCamera ? 1.08 : 1.05);
+    moderatorLight.sprite.width = this.width * (moderatorCamera ? 0.56 : 0.5);
+    moderatorLight.sprite.height =
+      this.height * (moderatorCamera ? 0.88 : 0.74);
 
     forLight.mask
       .clear()
-      .poly([
-        0,
-        this.height * 0.06,
-        this.width * 0.53,
-        0,
-        this.width * 0.58,
-        this.height * 0.92,
-        this.width * 0.04,
-        this.height,
-      ])
+      .poly(
+        moderatorCamera
+          ? [
+              0,
+              this.height * 0.02,
+              this.width * 0.32,
+              0,
+              this.width * 0.29,
+              this.height * 0.96,
+              0,
+              this.height,
+            ]
+          : [
+              0,
+              this.height * 0.06,
+              this.width * 0.405,
+              0,
+              this.width * 0.36,
+              this.height * 0.92,
+              this.width * 0.04,
+              this.height,
+            ],
+      )
       .fill(0xffffff);
     againstLight.mask
       .clear()
-      .poly([
-        this.width * 0.47,
-        0,
-        this.width,
-        this.height * 0.06,
-        this.width * 0.96,
-        this.height,
-        this.width * 0.42,
-        this.height * 0.92,
-      ])
+      .poly(
+        moderatorCamera
+          ? [
+              this.width * 0.68,
+              0,
+              this.width,
+              this.height * 0.02,
+              this.width,
+              this.height,
+              this.width * 0.71,
+              this.height * 0.96,
+            ]
+          : [
+              this.width * 0.595,
+              0,
+              this.width,
+              this.height * 0.06,
+              this.width * 0.96,
+              this.height,
+              this.width * 0.64,
+              this.height * 0.92,
+            ],
+      )
       .fill(0xffffff);
     moderatorLight.mask
       .clear()
-      .poly([
-        this.width * 0.31,
-        0,
-        this.width * 0.69,
-        0,
-        this.width * 0.63,
-        this.height * 0.66,
-        this.width * 0.37,
-        this.height * 0.66,
-      ])
+      .poly(
+        moderatorCamera
+          ? [
+              this.width * 0.305,
+              0,
+              this.width * 0.695,
+              0,
+              this.width * 0.66,
+              this.height * 0.82,
+              this.width * 0.34,
+              this.height * 0.82,
+            ]
+          : [
+              this.width * 0.34,
+              0,
+              this.width * 0.66,
+              0,
+              this.width * 0.6,
+              this.height * 0.68,
+              this.width * 0.4,
+              this.height * 0.68,
+            ],
+      )
       .fill(0xffffff);
   }
 }
@@ -225,6 +269,7 @@ export function DebateForumScene(
   const semanticState = useMemo<DebateForumSemanticState>(
     () => ({
       activeRole: props.activeRole,
+      cameraView: props.cameraView,
       forColor: props.forColor,
       againstColor: props.againstColor,
       moderatorColor: props.moderatorColor,
@@ -234,6 +279,7 @@ export function DebateForumScene(
     [
       props.activeRole,
       props.againstColor,
+      props.cameraView,
       props.forColor,
       props.live,
       props.moderatorColor,
@@ -293,10 +339,8 @@ export function DebateForumScene(
         controllerRef.current = createController(context);
       },
       onTick: ({ deltaMs }) => controllerRef.current?.tick(deltaMs),
-      onResize: (width, height) =>
-        controllerRef.current?.resize(width, height),
-      onQualityChange: (quality) =>
-        controllerRef.current?.setQuality(quality),
+      onResize: (width, height) => controllerRef.current?.resize(width, height),
+      onQualityChange: (quality) => controllerRef.current?.setQuality(quality),
       onContextLost: () => updateStatus("context-lost"),
       onContextRestored: () => {
         const context = readyContextRef.current;

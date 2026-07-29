@@ -1,6 +1,7 @@
 import type { VoiceDeliveryMood } from "@localai/shared";
 
-export type PreSpeechBreathSurface = "chat" | "coffee" | "signal" | "story";
+export type PreSpeechBreathSurface =
+  "chat" | "coffee" | "debate" | "signal" | "story";
 export type PreSpeechBreathIntensity = "micro" | "natural" | "deliberate";
 
 export interface PreSpeechBreathPlan {
@@ -30,6 +31,7 @@ export const PRE_SPEECH_BREATH_URLS = {
 const SURFACE_CHANCE: Readonly<Record<PreSpeechBreathSurface, number>> = {
   chat: 0.2,
   coffee: 0.2,
+  debate: 0.28,
   signal: 0.34,
   story: 0.16,
 };
@@ -58,7 +60,9 @@ function stableUnit(value: string): number {
   return stableHash(value) / 0xffffffff;
 }
 
-function normalizedMood(value: VoiceDeliveryMood | null | undefined): VoiceDeliveryMood {
+function normalizedMood(
+  value: VoiceDeliveryMood | null | undefined,
+): VoiceDeliveryMood {
   return value === "joyful" ||
     value === "warm" ||
     value === "guarded" ||
@@ -70,6 +74,7 @@ function normalizedMood(value: VoiceDeliveryMood | null | undefined): VoiceDeliv
 function intensityFor(args: {
   seed: string;
   mood: VoiceDeliveryMood;
+  surface: PreSpeechBreathSurface;
 }): PreSpeechBreathIntensity {
   const roll = stableUnit(`${args.seed}:pre-speech-breath:intensity`);
   if (args.mood === "strained") return roll < 0.58 ? "deliberate" : "natural";
@@ -80,12 +85,18 @@ function intensityFor(args: {
   if (args.mood === "joyful" || args.mood === "warm") {
     return roll < 0.56 ? "micro" : "natural";
   }
+  if (args.surface === "debate") {
+    if (roll < 0.12) return "micro";
+    return roll < 0.84 ? "natural" : "deliberate";
+  }
   if (roll < 0.28) return "micro";
   if (roll < 0.9) return "natural";
   return "deliberate";
 }
 
-export function hasAuthoredBreathDirection(value: string | null | undefined): boolean {
+export function hasAuthoredBreathDirection(
+  value: string | null | undefined,
+): boolean {
   return typeof value === "string" && BREATH_DIRECTION_RE.test(value);
 }
 
@@ -114,17 +125,26 @@ export function resolvePreSpeechBreathPlan(args: {
   }
 
   const mood = normalizedMood(args.mood);
-  const lengthMultiplier = text.length >= 160 ? 1.08 : text.length < 64 ? 0.82 : 1;
+  const lengthMultiplier =
+    text.length >= 160 ? 1.08 : text.length < 64 ? 0.82 : 1;
   const chance = Math.min(
     0.44,
-    SURFACE_CHANCE[args.surface] * MOOD_CHANCE_MULTIPLIER[mood] * lengthMultiplier,
+    SURFACE_CHANCE[args.surface] *
+      MOOD_CHANCE_MULTIPLIER[mood] *
+      lengthMultiplier,
   );
   if (stableUnit(`${args.seed}:pre-speech-breath:gate`) >= chance) return null;
 
-  const intensity = intensityFor({ seed: args.seed, mood });
+  const intensity = intensityFor({
+    seed: args.seed,
+    mood,
+    surface: args.surface,
+  });
   const urls = PRE_SPEECH_BREATH_URLS[intensity];
-  const url = urls[stableHash(`${args.seed}:pre-speech-breath:variant`) % urls.length]!;
-  const gain = intensity === "micro" ? 0.58 : intensity === "natural" ? 0.66 : 0.72;
+  const url =
+    urls[stableHash(`${args.seed}:pre-speech-breath:variant`) % urls.length]!;
+  const gain =
+    intensity === "micro" ? 0.58 : intensity === "natural" ? 0.66 : 0.72;
   const voiceOverlapMs =
     intensity === "micro" ? 90 : intensity === "natural" ? 140 : 180;
   return { url, intensity, gain, voiceOverlapMs };

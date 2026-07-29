@@ -1,12 +1,29 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEBATE_FORUM_FOLEY_ROOM_SEND,
+  DEBATE_FORUM_ROOM_PROFILE,
+  DEBATE_FORUM_VOICE_ROOM_SEND,
   SIGNAL_STUDIO_FOLEY_ROOM_SEND,
   SIGNAL_STUDIO_ROOM_PROFILE,
   SIGNAL_STUDIO_VOICE_ROOM_SEND,
   buildRoomImpulseChannels,
   connectRoomAcoustics,
 } from "./roomAcoustics.ts";
+
+describe("Debate forum room acoustics", () => {
+  it("gives the forum a broader restrained tail with Foley above speech", () => {
+    assert.ok(
+      DEBATE_FORUM_ROOM_PROFILE.durationSeconds >
+        SIGNAL_STUDIO_ROOM_PROFILE.durationSeconds,
+    );
+    assert.ok(DEBATE_FORUM_ROOM_PROFILE.durationSeconds < 0.9);
+    assert.ok(DEBATE_FORUM_VOICE_ROOM_SEND.wet <= 0.06);
+    assert.ok(
+      DEBATE_FORUM_FOLEY_ROOM_SEND.wet > DEBATE_FORUM_VOICE_ROOM_SEND.wet,
+    );
+  });
+});
 
 describe("Signal studio room acoustics", () => {
   it("builds a deterministic stereo room response with a fading tail", () => {

@@ -27,6 +27,23 @@ test("normalizes motion slates and applies stable side-label fallbacks", () => {
   assert.equal(slate.againstSide.label, "Preserve");
 });
 
+test("shortens overlong side labels at whole-word boundaries", () => {
+  const slate = normalizeDebateMotionSlateV1({
+    motion: "The motion.",
+    forSide: {
+      label: "Pro-Existence – Rationalist Tradition",
+      brief: "Argue for the motion.",
+    },
+    againstSide: {
+      label: "Anti-Existence – Scientific & Empirical",
+      brief: "Argue against the motion.",
+    },
+  });
+
+  assert.equal(slate.forSide.label, "Pro-Existence – Rationalist");
+  assert.equal(slate.againstSide.label, "Anti-Existence – Scientific");
+});
+
 test("freezes only validated, unique evidence sources within the source limit", () => {
   const packet = normalizeDebateEvidencePacketV1({
     notes: "  player notes  ",

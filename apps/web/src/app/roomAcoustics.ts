@@ -47,6 +47,33 @@ export const SIGNAL_STUDIO_FOLEY_ROOM_SEND = {
   wet: 0.11,
 } as const satisfies RoomAcousticsSend;
 
+export const DEBATE_FORUM_ROOM_PROFILE = {
+  id: "debate-prismatic-forum-v1",
+  durationSeconds: 0.72,
+  preDelaySeconds: 0.018,
+  lowCutHz: 150,
+  highCutHz: 3_700,
+  decayExponent: 2.9,
+  diffusionGain: 0.032,
+  earlyReflections: [
+    { delaySeconds: 0.019, gain: 0.68, stereoOffsetSeconds: 0.0012 },
+    { delaySeconds: 0.031, gain: 0.46, stereoOffsetSeconds: -0.001 },
+    { delaySeconds: 0.049, gain: 0.31, stereoOffsetSeconds: 0.0014 },
+    { delaySeconds: 0.078, gain: 0.2, stereoOffsetSeconds: -0.0012 },
+    { delaySeconds: 0.112, gain: 0.12, stereoOffsetSeconds: 0.0008 },
+  ],
+} as const satisfies RoomAcousticsProfile;
+
+export const DEBATE_FORUM_VOICE_ROOM_SEND = {
+  profile: DEBATE_FORUM_ROOM_PROFILE,
+  wet: 0.055,
+} as const satisfies RoomAcousticsSend;
+
+export const DEBATE_FORUM_FOLEY_ROOM_SEND = {
+  profile: DEBATE_FORUM_ROOM_PROFILE,
+  wet: 0.095,
+} as const satisfies RoomAcousticsSend;
+
 export interface RoomAcousticsConnection {
   /** Stop immediately, such as when playback is cancelled. */
   disconnect(): void;

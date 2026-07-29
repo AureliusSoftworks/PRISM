@@ -30,7 +30,7 @@ export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
   "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,
   "--zen-live-bot-face-y": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct}%`,
   "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
-  "--zen-live-bot-avatar-face-glyph-size": `calc(var(--zen-live-bot-body-frame-size) * ${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO})`,
+  "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
 } as const;
 
 /** Authored punctuation faces read normally with this post-rotation flip. */

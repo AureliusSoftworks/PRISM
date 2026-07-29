@@ -2084,7 +2084,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       liveQuestionRule,
-      /font-size:\s*var\(\s*--zen-live-bot-avatar-question-glyph-size,\s*clamp\(2\.35rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.275\),\s*5\.25rem\)\s*\)\s*;/
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-question-glyph-size,\s*27\.5cqw\s*\)\s*;/
     );
   });
 });

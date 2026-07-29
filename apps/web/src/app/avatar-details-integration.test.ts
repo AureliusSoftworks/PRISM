@@ -428,6 +428,22 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /image-rendering: pixelated/);
     assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
     assert.match(maskCss, /\.aboveFace\s*\{[\s\S]*z-index:\s*7/);
+    assert.match(
+      maskSource,
+      /detailLevel === "full" \? \([\s\S]*data-avatar-details-emission="halo"/,
+    );
+    assert.match(
+      maskSource,
+      /detailLevel === "full" &&[\s\S]*talking &&[\s\S]*speechMotionActive/,
+    );
+    assert.match(
+      maskCss,
+      /\.layer\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*animation:\s*none !important/u,
+    );
+    assert.match(
+      maskCss,
+      /\.bloom\[data-avatar-details-render-detail="reduced"\]\s*\{[^}]*opacity:[^}]*0\.28/u,
+    );
     assert.match(maskSource, /"data-avatar-details-depth": depth/);
     assert.doesNotMatch(maskSource, /className=\{styles\.group\}/);
     assert.match(
@@ -546,11 +562,19 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
     assert.match(
       pageSource,
-      /avatarDetailsHasVisuals\(\s*avatarDetails,\s*\)[\s\S]*BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
+      /const hasAvatarDetailsVisuals = avatarDetailsHasVisuals\(avatarDetails\);[\s\S]*hasAvatarDetailsVisuals[\s\S]*BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
     );
     assert.match(
       pageSource,
       /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,220}style=\{presenceBodyStyle\}/,
+    );
+    assert.match(
+      pageSource,
+      /data-avatar-details-visuals=\{[\s\S]{0,100}hasAvatarDetailsVisuals \? "true" : undefined/,
+    );
+    assert.match(
+      pageSource,
+      /<AvatarDetailsMask[\s\S]{0,180}detailLevel=\{detailLevel\}/,
     );
     assert.match(
       pageSource,
@@ -585,7 +609,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
     assert.match(
       maskSource,
-      /talking && speechMotionActive && normalizedMouthAnimation !== "none"/,
+      /detailLevel === "full" &&[\s\S]*talking &&[\s\S]*speechMotionActive &&[\s\S]*normalizedMouthAnimation !== "none"/,
     );
     assert.match(
       maskSource,

@@ -1,10 +1,5 @@
 export type TutorialMode =
-  | "zen"
-  | "chat"
-  | "coffee"
-  | "debate"
-  | "botcast"
-  | "slate";
+  "zen" | "chat" | "coffee" | "debate" | "botcast" | "slate";
 
 export interface ModeTutorialStep {
   heading: string;
@@ -134,40 +129,70 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     title: "Debate walkthrough",
     steps: [
       {
-        heading: "Enter the Forum",
-        body: "A Debate is a saved 8–12 minute Duel with one moderator and two advocates. You can return to an unfinished proceeding or reopen a completed result from this lobby.",
-        clickLabel: "New Debate",
+        heading: "Enter the Debate Studio",
+        body: "A Debate is a saved 8–12 minute Duel with one moderator and two advocates. The Studio keeps Motion, Cast, Evidence, the launch circuit, and your archive inside one non-gated console. New Duel clears the active workbench without touching archived proceedings.",
+        clickLabel: "New Duel",
         targetSelector: '[data-tutorial-target="debate-new"]',
       },
       {
         heading: "Shape a balanced motion",
-        body: "Write a topic, then use Synthesize options—or Wield Prism on the same action—to create three complete balanced slates. Choosing one replaces the motion, For brief, Against brief, and both side labels together; every field remains yours to edit.",
-        clickLabel: "Synthesize options",
+        body: "Write the territory, then choose Refract into motions to create three complete balanced slates. Choosing one replaces the motion, For brief, Against brief, and both side labels together; every field remains yours to edit.",
+        clickLabel: "Refract into motions",
         targetSelector: '[data-tutorial-target="debate-synthesize"]',
       },
       {
-        heading: "Invite willing advocates",
-        body: "Choose exactly one moderator and two advocates, then choose whether you will Judge, participate on one side, or watch. Each advocate privately checks the exact motion and side brief. A genuine boundary can decline and cannot be overridden; a willing Devil’s Advocate keeps their identity and receives visible framing.",
-        clickLabel: "Check roles & continue",
+        heading: "Cast the three seats",
+        body: "Open Cast, choose Moderator, For, or Against, then pick from the shared color-grid Library. A bot already in another seat is unavailable, and a hard-muted bot cannot moderate. Choose whether you will Judge, participate on one side, or watch.",
+        clickLabel: "Cast",
+        targetSelector: '[data-tutorial-target="debate-cast"]',
+      },
+      {
+        heading: "Secure advocacy consent",
+        body: "Run the private advocacy check after the exact motion and cast are set. A genuine boundary can decline and cannot be overridden; a willing Devil’s Advocate keeps their identity and receives visible framing. Any later motion or cast change clears the old check.",
+        clickLabel: "Check advocacy consent",
         targetSelector: '[data-tutorial-target="debate-consent"]',
       },
       {
         heading: "Freeze one shared record",
-        body: "Add player notes and, only while ONLINE, explicitly run Brave Search. The resulting titles, links, snippets, dates, and source IDs form one immutable prep packet. Start performs no more research, and Debate never reads or writes relationship memory.",
-        clickLabel: "Review frozen Duel",
+        body: "Open Evidence, add player notes and, only while ONLINE, explicitly run Brave Search. The resulting titles, links, snippets, dates, and source IDs form one immutable prep packet. Start performs no more research, and Debate never reads or writes relationship memory.",
+        clickLabel: "Evidence",
         targetSelector: '[data-tutorial-target="debate-evidence"]',
       },
       {
-        heading: "Begin the proceeding",
-        body: "Review the cast, motion, consent, evidence, provider choices, and resolved Powers. Start freezes that complete contract. Live controls can pause and resume the exact next action; Judge and Participant input waits indefinitely until you speak or pass.",
+        heading: "Read the launch circuit",
+        body: "The launch circuit stays visible beside every Studio tool. It names each remaining lock and keeps Start Duel directly available without turning setup into a wizard.",
+        clickLabel: "the launch circuit",
+        targetSelector: '[data-tutorial-target="debate-readiness"]',
+      },
+      {
+        heading: "Open the Forum",
+        body: "Choose one Debate model in the navbar before setup work: it handles motion synthesis, private role consent, every moderator and advocate turn, and every bot ballot. Account default uses the model saved in Settings for the selected LOCAL or ONLINE mode. Start freezes that complete contract—the cast, motion, consent, evidence, model, and resolved Powers—so neither bot settings nor later navbar changes can alter the live Duel. Live controls can pause and resume the exact next action; Judge and Participant input waits indefinitely until you speak or pass.",
         clickLabel: "Start Duel",
         targetSelector: '[data-tutorial-target="debate-start"]',
       },
       {
         heading: "Read the living case",
-        body: "The scoreless case board keeps at most four public claims per side and marks them active, challenged, conceded, or unanswered. Hidden, muted, and obfuscated content cannot enter it. After closing, every bot votes independently: a Judge’s ruling is final, while Participant and Spectator Duels use the three-bot majority.",
+        body: "The Forum stages each advocate's actual animated bot behind an authored side podium, with the moderator elevated between them. Each podium carries its bot's glyph; the bot that owns the current turn glows even when the turn is silent, so the cue follows floor ownership rather than speech or prose. Their frozen faces, ink, frame finishes, visibility, thinking, listening, and speaking states remain live throughout the proceeding. Public prose arrives with the live voice, the scoreless case board tracks only heard speech, and the seven generic Prisms react without becoming ballots, personas, or relationship memory. When you own the floor, a full-width command deck rises from the chamber. In Participant mode, Interject now can cut the audible opponent floor; only the heard fragment remains public before the moderator rules.",
         clickLabel: "the living case board",
         targetSelector: '[data-tutorial-target="debate-case-board"]',
+      },
+      {
+        heading: "Frame the floor",
+        body: "Auto is the quiet default camera: it cuts instantly to Left for the For advocate, Moderator for the moderator, Right for the Against advocate, and Wide whenever no bot owns the floor. Choose a manual view to hold the shot. Camera choice changes presentation only—it never changes the saved transcript, case board, ballots, or speaking order.",
+        clickLabel: "a Debate camera",
+        targetSelector: '[data-tutorial-target="debate-camera"]',
+      },
+      {
+        heading: "Follow and keep the record",
+        body: "Proceedings render safe Markdown and source chips in the chamber's tonal transcript rail. It follows every growing live turn until you deliberately scroll back; choose Live to return to the newest phrase. A Judge's ruling is final; Participant and Spectator Duels use the three-bot majority. Ballots and the verdict remain in the sealed result instead of repeating inside the live transcript. Copy verbose transcript creates one review-ready record with frozen setup, runtime snapshots, evidence, event metadata, interruptions, moderator rulings, case-board state, and public ballot reasons.",
+        clickLabel: "Copy verbose transcript",
+        targetSelector: '[data-tutorial-target="debate-copy-transcript"]',
+      },
+      {
+        heading: "Calibrate advanced stage geometry",
+        body: "Stage geometry is an advanced production control in the Studio and behind the live camera bar’s overflow. It previews the current cast and fills empty roles with temporary unique Library stand-ins. Use Wide and Moderator to calibrate independent Bot, Nameplate, and Glyph plate placement for this account and device. Drag the visible item or use its exact controls, check Light and Dark, then save. Copy alignment data produces paste-ready JSON, including unsaved adjustments. Calibration changes presentation only—not the proceeding.",
+        clickLabel: "More stage controls",
+        targetSelector: '[data-tutorial-target="debate-align-stage"]',
       },
     ],
   },
@@ -371,10 +396,7 @@ function currentSignalPowerTutorialBody(step: ModeTutorialStep): string {
     );
 }
 
-function currentSignalRefractTutorialBody(
-  body: string,
-  index: number,
-): string {
+function currentSignalRefractTutorialBody(body: string, index: number): string {
   const current = body
     .replace("Randomize booking", "Book for me")
     .replace(
@@ -394,35 +416,48 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
   zen: {
     ...BASE_MODE_TUTORIALS.zen,
-    steps: BASE_MODE_TUTORIALS.zen.steps.map((step, index) => index === 0
-      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
-      : step),
+    steps: BASE_MODE_TUTORIALS.zen.steps.map((step, index) =>
+      index === 0
+        ? {
+            ...step,
+            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+          }
+        : step,
+    ),
   },
   chat: {
     ...BASE_MODE_TUTORIALS.chat,
-    steps: BASE_MODE_TUTORIALS.chat.steps.map((step, index) => index === 0
-      ? { ...step, body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
-      : step),
+    steps: BASE_MODE_TUTORIALS.chat.steps.map((step, index) =>
+      index === 0
+        ? {
+            ...step,
+            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+          }
+        : step,
+    ),
   },
   coffee: {
     ...BASE_MODE_TUTORIALS.coffee,
     steps: BASE_MODE_TUTORIALS.coffee.steps.map((step, index) => {
       const body = currentInterruptionRetortTutorialBody(step.body);
       return index === 0
-        ? { ...step, body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}` }
+        ? {
+            ...step,
+            body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+          }
         : step.heading === "Join the conversation"
           ? {
               ...step,
               body: `${body} ${COFFEE_CROSSTALK_SOCIAL_SILENCE_TUTORIAL_SUFFIX}`,
             }
-        : index === 5
-          ? {
-              ...step,
-              body: `${body} ${COFFEE_PRISM_PRESENCE_TUTORIAL_SUFFIX}`,
-            }
-        : body === step.body
-          ? step
-          : { ...step, body };
+          : index === 5
+            ? {
+                ...step,
+                body: `${body} ${COFFEE_PRISM_PRESENCE_TUTORIAL_SUFFIX}`,
+              }
+            : body === step.body
+              ? step
+              : { ...step, body };
     }),
   },
   botcast: {
@@ -442,9 +477,9 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
               ...step,
               body: `${body} ${SIGNAL_CROSSTALK_SOCIAL_SILENCE_TUTORIAL_SUFFIX}`,
             }
-        : body === step.body
-          ? step
-          : { ...step, body };
+          : body === step.body
+            ? step
+            : { ...step, body };
     }),
   },
 };

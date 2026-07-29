@@ -19,7 +19,7 @@ describe("Avatar Details face registration", () => {
         `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct}%`,
       "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
       "--zen-live-bot-avatar-face-glyph-size":
-        `calc(var(--zen-live-bot-body-frame-size) * ${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO})`,
+        `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
     });
   });
 });

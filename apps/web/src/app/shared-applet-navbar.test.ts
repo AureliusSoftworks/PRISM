@@ -39,14 +39,17 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(sidebarHelper, /data-shared-app-sidebar-brand=\{appletId\}/);
   assert.match(navbarHelper, /styles\.chatHeader/);
   assert.match(navbarHelper, /styles\.sharedAppletHeader/);
-  assert.match(navbarHelper, /liveSessionChromePolicy\("Signal"\)/);
+  assert.match(
+    navbarHelper,
+    /liveSessionChromePolicy\(options\.liveSessionName \?\? "Signal"\)/,
+  );
   assert.match(
     navbarHelper,
     /options\.liveSessionActive && options\.liveSessionExit[\s\S]{0,120}coffeeExitSessionButton[\s\S]{0,400}renderAppSwitcher/u,
   );
   assert.match(
     navbarHelper,
-    /const voiceSelectorOptions = \{[\s\S]*disabled:[\s\S]*disabledNavbarActions\.voice[\s\S]*tutorialTarget: "botcast-voice-mode"[\s\S]*options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(voiceSelectorOptions\)/,
+    /const voiceSelectorOptions = \{[\s\S]*disabled:[\s\S]*disabledNavbarActions\.voice[\s\S]*options\.voiceTutorialTarget \?\? "botcast-voice-mode"[\s\S]*options\.showVoiceSelector[\s\S]*renderVoiceModeSelector\(voiceSelectorOptions\)/,
   );
   assert.match(pageSource, /data-tutorial-target=\{options\.tutorialTarget\}/);
   assert.match(
@@ -66,7 +69,7 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   }
   assert.match(
     pageSource,
-    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*showLiveExit,[\s\S]*cuttingShow,[\s\S]*onCutShow,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,[\s\S]*liveSessionExit: showLiveExit/u,
+    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*showLiveExit,[\s\S]*cuttingShow,[\s\S]*onCutShow,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: !replayActive,[\s\S]*liveSessionActive,[\s\S]*liveSessionExit: showLiveExit/u,
   );
   assert.match(
     pageSource,

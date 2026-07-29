@@ -425,6 +425,7 @@ describe("Zen live presence CSS", () => {
     assert.match(emissionMaskRule, /--bot-face-screen-mask-size:\s*100%\s*100%\s*;/);
     assert.match(emissionMaskRule, /--bot-face-screen-mask-repeat:\s*no-repeat\s*;/);
     assert.match(emissionMaskRule, /contain:\s*paint\s*;/);
+    assert.match(emissionMaskRule, /container-type:\s*inline-size\s*;/);
     assert.match(emissionMaskRule, /--crt-strength:\s*1\s*;/);
     assert.match(emissionMaskRule, /--crt-core-opacity:\s*0\.82\s*;/);
     assert.match(emissionMaskRule, /--crt-beam-softness:\s*0\.45px\s*;/);
@@ -647,6 +648,10 @@ describe("Zen live presence CSS", () => {
 
     const zenFaceGlyphRule = ruleForExactSelector(".coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph");
     assert.match(zenFaceGlyphRule, /--crt-glyph-core-paint-bleed:\s*0\.14em\s*;/);
+    assert.match(
+      zenFaceGlyphRule,
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-face-glyph-size,\s*21\.7cqw\s*\)/,
+    );
 
     const glyphCloneBaseRule = ruleForExactSelector(
       '.coffeeSeatPlateEmoji [data-crt-glyph-layer="true"]::before'
@@ -962,7 +967,7 @@ describe("Zen live presence CSS", () => {
     const faceGlyphRule = ruleForExactSelector(".coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph");
     assert.match(
       faceGlyphRule,
-      /clamp\(1\.74rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.217\),\s*4\.08rem\)/
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-face-glyph-size,\s*21\.7cqw\s*\)/
     );
 
     const movingFaceRule = ruleForExactSelector(
@@ -2332,7 +2337,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       zenSpinnerGlyphRule,
-      /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*clamp\(2\.35rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.275\),\s*5\.25rem\)\s*\)/
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-thinking-glyph-size,\s*27\.5cqw\s*\)/
     );
     assert.doesNotMatch(zenSpinnerGlyphRule, /#55ffe0|#0aa996/);
     assert.match(
@@ -2390,7 +2395,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       liveQuestionRule,
-      /font-size:\s*var\(\s*--zen-live-bot-avatar-question-glyph-size,\s*clamp\(2\.35rem,\s*calc\(var\(--zen-live-bot-body-frame-size,\s*190px\) \* 0\.275\),\s*5\.25rem\)\s*\)\s*;/
+      /font-size:\s*var\(\s*--zen-live-bot-avatar-question-glyph-size,\s*27\.5cqw\s*\)\s*;/
     );
   });
 

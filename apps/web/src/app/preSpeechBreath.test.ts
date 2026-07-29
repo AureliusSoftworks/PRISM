@@ -39,7 +39,9 @@ describe("pre-speech breath planning", () => {
   });
 
   it("stays sparse while favoring Signal's close-micro studio", () => {
-    const countFor = (surface: "chat" | "coffee" | "signal" | "story") =>
+    const countFor = (
+      surface: "chat" | "coffee" | "debate" | "signal" | "story",
+    ) =>
       Array.from({ length: 1_000 }, (_, index) =>
         resolvePreSpeechBreathPlan({
           seed: `sample-${index}`,
@@ -49,6 +51,7 @@ describe("pre-speech breath planning", () => {
         }),
       ).filter(Boolean).length;
     const chatCount = countFor("chat");
+    const debateCount = countFor("debate");
     const signalCount = countFor("signal");
     const storyCount = countFor("story");
     assert.ok(chatCount >= 150 && chatCount <= 250, `chat=${chatCount}`);
@@ -56,8 +59,13 @@ describe("pre-speech breath planning", () => {
       signalCount >= 290 && signalCount <= 390,
       `signal=${signalCount}`,
     );
+    assert.ok(
+      debateCount >= 230 && debateCount <= 330,
+      `debate=${debateCount}`,
+    );
     assert.ok(storyCount >= 110 && storyCount <= 210, `story=${storyCount}`);
     assert.ok(signalCount > chatCount && chatCount > storyCount);
+    assert.ok(signalCount > debateCount && debateCount > chatCount);
   });
 
   it("skips short lines, authored breath directions, and disabled effects", () => {
@@ -101,22 +109,46 @@ describe("pre-speech breath planning", () => {
 
 describe("pre-speech breath integration", () => {
   it("routes every immersive bot surface through the shared planner", () => {
-    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const pageSource = readFileSync(
+      new URL("./page.tsx", import.meta.url),
+      "utf8",
+    );
     for (const surface of ["chat", "coffee", "signal", "story"] as const) {
       assert.match(pageSource, new RegExp(`surface: ["']${surface}["']`, "u"));
     }
     assert.match(
       pageSource,
-      /surface: "signal"[\s\S]{0,120}authoredPerformanceText: message\.voicePerformanceText/u,
+      /surface: playbackSurface[\s\S]{0,120}authoredPerformanceText: message\.voicePerformanceText/u,
     );
-    assert.match(pageSource, /!signalStageSoundcheckMessageIsEphemeral\(message\)/u);
-    assert.match(pageSource, /const preSpeechBreath = playerMessage\s*\? null/u);
+    assert.match(
+      pageSource,
+      /!signalStageSoundcheckMessageIsEphemeral\(message\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const preSpeechBreath = playerMessage\s*\? null/u,
+    );
+    assert.match(
+      pageSource,
+      /playbackSurface: "signal" \| "debate" = "signal"/u,
+    );
+    assert.match(pageSource, /surface: playbackSurface/u);
+    assert.match(pageSource, /"debate",\s*\);/u);
   });
 
   it("plays presence before speech and lets missing assets fail silently", () => {
-    const effectsSource = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
-    const englishSource = readFileSync(new URL("./englishVoice.ts", import.meta.url), "utf8");
-    const bottishSource = readFileSync(new URL("./bottishVoice.ts", import.meta.url), "utf8");
+    const effectsSource = readFileSync(
+      new URL("./voiceEffects.ts", import.meta.url),
+      "utf8",
+    );
+    const englishSource = readFileSync(
+      new URL("./englishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    const bottishSource = readFileSync(
+      new URL("./bottishVoice.ts", import.meta.url),
+      "utf8",
+    );
     assert.match(effectsSource, /fetch\(url, \{ cache: "force-cache" \}\)/u);
     assert.match(effectsSource, /\.catch\(\(\) => null\)/u);
     assert.match(effectsSource, /activeVoiceChannels\.presence/u);

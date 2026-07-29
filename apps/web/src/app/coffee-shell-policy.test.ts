@@ -65,6 +65,15 @@ describe("Coffee shell policy", () => {
     );
   });
 
+  it("locks Debate chrome until the player returns to the lobby", () => {
+    const policy = liveSessionChromePolicy("Debate");
+    assert.match(policy.lockMessage, /Return to the Debate lobby/u);
+    assert.match(
+      policy.disabledNavbarActionTooltips.voice ?? "",
+      /frozen for this Duel/u,
+    );
+  });
+
   it("treats a loaded finished conversation as review before replay starts", () => {
     const policy = coffeeShellPolicy({
       conversationActive: true,

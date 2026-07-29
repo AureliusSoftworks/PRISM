@@ -27,6 +27,7 @@ import styles from "./avatar-details-mask.module.css";
 export interface AvatarDetailsMaskProps {
   details: AvatarDetailsV1 | null | undefined;
   color: string | null | undefined;
+  detailLevel?: "full" | "reduced";
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null;
   blinkPhase?: "open" | "closed";
   talking?: boolean;
@@ -41,6 +42,7 @@ type AvatarDetailsSpeechMotion = Exclude<BotFaceGlyphAnimation, "none">;
 interface AvatarDetailsEmissionPlanesProps {
   pixels: Uint8ClampedArray;
   normalizedColor: string;
+  detailLevel: "full" | "reduced";
   depth: Exclude<AvatarDetailsFaceDepth, "all">;
   inkRole: "visible" | "speech";
   motion?: AvatarDetailsSpeechMotion | null;
@@ -50,6 +52,7 @@ interface AvatarDetailsEmissionPlanesProps {
 function AvatarDetailsEmissionPlanes({
   pixels,
   normalizedColor,
+  detailLevel,
   depth,
   inkRole,
   motion = null,
@@ -66,13 +69,18 @@ function AvatarDetailsEmissionPlanes({
     const haloCanvas = haloCanvasRef.current;
     const bloomCanvas = bloomCanvasRef.current;
     const coreCanvas = coreCanvasRef.current;
-    if (!hasPixels || !haloCanvas || !bloomCanvas || !coreCanvas) {
+    if (
+      !hasPixels ||
+      !bloomCanvas ||
+      !coreCanvas ||
+      (detailLevel === "full" && !haloCanvas)
+    ) {
       return;
     }
-    const haloContext = haloCanvas.getContext("2d", { alpha: true });
+    const haloContext = haloCanvas?.getContext("2d", { alpha: true }) ?? null;
     const bloomContext = bloomCanvas.getContext("2d", { alpha: true });
     const coreContext = coreCanvas.getContext("2d", { alpha: true });
-    if (!haloContext || !bloomContext || !coreContext) {
+    if (!bloomContext || !coreContext) {
       return;
     }
     const glowImageData = coreContext.createImageData(
@@ -86,12 +94,13 @@ function AvatarDetailsEmissionPlanes({
     );
     coreImageData.data.set(avatarDetailsPhosphorCoreRgba(pixels));
     for (const context of [haloContext, bloomContext]) {
+      if (!context) continue;
       context.imageSmoothingEnabled = false;
       context.putImageData(glowImageData, 0, 0);
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
-  }, [hasPixels, pixels]);
+  }, [detailLevel, hasPixels, pixels]);
 
   if (!hasPixels) return null;
 
@@ -112,17 +121,20 @@ function AvatarDetailsEmissionPlanes({
     "data-avatar-details-ink-role": inkRole,
     "data-avatar-details-ink-motion": motion ?? undefined,
     "data-avatar-details-mouth-shape": motion ? mouthShape : undefined,
+    "data-avatar-details-render-detail": detailLevel,
     "aria-hidden": true,
   } as const;
 
   return (
     <>
-      <canvas
-        ref={haloCanvasRef}
-        className={`${styles.layer} ${depthClassName} ${styles.halo}${motionClassName}`}
-        data-avatar-details-emission="halo"
-        {...sharedProps}
-      />
+      {detailLevel === "full" ? (
+        <canvas
+          ref={haloCanvasRef}
+          className={`${styles.layer} ${depthClassName} ${styles.halo}${motionClassName}`}
+          data-avatar-details-emission="halo"
+          {...sharedProps}
+        />
+      ) : null}
       <canvas
         ref={bloomCanvasRef}
         className={`${styles.layer} ${depthClassName} ${styles.bloom}${motionClassName}`}
@@ -151,6 +163,7 @@ function AvatarDetailsEmissionPlanes({
 export function AvatarDetailsMask({
   details,
   color,
+  detailLevel = "full",
   faceGeometry,
   blinkPhase = "open",
   talking = false,
@@ -174,7 +187,10 @@ export function AvatarDetailsMask({
   const normalizedMouthAnimation =
     normalizeBotFaceGlyphAnimation(mouthAnimation) ?? "none";
   const speechMotion: AvatarDetailsSpeechMotion | null =
-    talking && speechMotionActive && normalizedMouthAnimation !== "none"
+    detailLevel === "full" &&
+    talking &&
+    speechMotionActive &&
+    normalizedMouthAnimation !== "none"
       ? normalizedMouthAnimation
       : null;
   const visiblePixels = useMemo(
@@ -224,6 +240,7 @@ export function AvatarDetailsMask({
       <AvatarDetailsEmissionPlanes
         pixels={visiblePixels}
         normalizedColor={normalizedColor}
+        detailLevel={detailLevel}
         depth={depth}
         inkRole="visible"
       />
@@ -231,6 +248,7 @@ export function AvatarDetailsMask({
         <AvatarDetailsEmissionPlanes
           pixels={speechPixels}
           normalizedColor={normalizedColor}
+          detailLevel={detailLevel}
           depth={depth}
           inkRole="speech"
           motion={speechMotion}

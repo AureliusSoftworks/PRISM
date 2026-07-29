@@ -20,6 +20,8 @@ import {
   parseStoredBotPowersV1,
   sanitizeDebateStatementSources,
   strongestBotPowerResponseBudgetEffectV1,
+  type AutoFallbackModelRef,
+  type AutoRecoveryTraceV1,
   type DebateAdvocacyConsent,
   type DebateAdvanceRequest,
   type DebateBallotV1,
@@ -29,6 +31,7 @@ import {
   type DebateEventKind,
   type DebateEventV1,
   type DebateEvidencePacketV1,
+  type DebateInterjectionRequest,
   type DebateMotionSlateV1,
   type DebatePlayerTurnRequest,
   type DebatePowerEffectPlanV1,
@@ -39,7 +42,13 @@ import {
   type DebateSideId,
   type DebateSpeakerKind,
   type DebateVerdictRequest,
+  type ResponseMode,
 } from "@localai/shared";
+import {
+  AutoFallbackExhaustedError,
+  runAutoFallbackChain,
+  type AutoFallbackValidationResult,
+} from "./auto-fallback.ts";
 import { resolveSocialPowersForBots } from "./coffee-powers.ts";
 import {
   botPowerTextRequestsRepeat,
@@ -95,11 +104,15 @@ export interface DebateGenerationLane {
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
+  available?: boolean;
 }
 
 export interface DebateAiRuntime {
   local: DebateGenerationLane;
   online?: DebateGenerationLane;
+  responseMode?: ResponseMode;
+  /** Ordered primary + fallback lanes for AUTO; otherwise the selected lane. */
+  lanes?: DebateGenerationLane[];
   /** Always local; used only for asynchronous, non-blocking case-board distillation. */
   auxiliary?: LlmProvider;
   preferredProvider: ProviderName;
@@ -201,22 +214,21 @@ function botRows(
   });
 }
 
-function laneForBot(runtime: DebateAiRuntime, bot: DebateBotRow): DebateGenerationLane {
-  return runtime.preferredProvider !== "local" &&
-    bot.online_enabled !== 0 &&
-    runtime.online
+function selectedLane(runtime: DebateAiRuntime): DebateGenerationLane {
+  return runtime.lanes?.[0] ??
+    (runtime.preferredProvider !== "local" && runtime.online
     ? runtime.online
-    : runtime.local;
+    : runtime.local);
 }
 
-function modelForBot(row: DebateBotRow, lane: DebateGenerationLane): string {
-  if (lane.providerName === "local") {
-    return row.local_model?.trim() || row.model?.trim() || lane.model;
-  }
-  return row.online_model?.trim() || row.model?.trim() || lane.model;
+interface DebateJsonGeneration {
+  value: Record<string, unknown>;
+  provider: ProviderName;
+  model: string;
+  autoRecovery?: AutoRecoveryTraceV1;
 }
 
-async function generateJson(
+async function generateJsonOnLane(
   lane: DebateGenerationLane,
   messages: ProviderMessage[],
   options: {
@@ -227,6 +239,7 @@ async function generateJson(
     topK?: number;
     repetitionPenalty?: number;
   } = {},
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -240,6 +253,7 @@ async function generateJson(
         repetitionPenalty: options.repetitionPenalty,
         usagePurpose: "system_unlabeled",
         jsonMode: true,
+        signal,
       });
       return parsedJsonRecord(response);
     } catch (error) {
@@ -259,6 +273,66 @@ async function generateJson(
     : new Error("The model did not return usable output.");
 }
 
+function validateDebateJson(
+  raw: string,
+): AutoFallbackValidationResult<Record<string, unknown>> {
+  if (!raw.trim()) return { ok: false, reason: "empty" };
+  try {
+    return { ok: true, value: parsedJsonRecord(raw) };
+  } catch {
+    return { ok: false, reason: "invalid_output" };
+  }
+}
+
+async function generateJson(
+  lanes: DebateGenerationLane | readonly DebateGenerationLane[],
+  messages: ProviderMessage[],
+  options: {
+    model?: string;
+    maxTokens?: number;
+    temperature?: number;
+    topP?: number;
+    topK?: number;
+    repetitionPenalty?: number;
+  } = {},
+): Promise<DebateJsonGeneration> {
+  const ordered = Array.isArray(lanes) ? [...lanes] : [lanes];
+  const primary = ordered[0];
+  if (!primary) throw new Error("No Debate generation model is available.");
+  if (ordered.length === 1) {
+    return {
+      value: await generateJsonOnLane(primary, messages, options),
+      provider: primary.providerName,
+      model: options.model ?? primary.model,
+    };
+  }
+  const result = await runAutoFallbackChain({
+    attempts: ordered.map((lane) => ({
+      provider: lane.providerName,
+      model: lane.model,
+      available: lane.available,
+      run: async (signal) =>
+        JSON.stringify(
+          await generateJsonOnLane(
+            lane,
+            messages,
+            { ...options, model: lane.model },
+            signal,
+          ),
+        ),
+    })),
+    perAttemptTimeoutMs: 60_000,
+    totalTimeoutMs: ordered.length * 60_000,
+    validate: validateDebateJson,
+  });
+  return {
+    value: result.value,
+    provider: result.provider,
+    model: result.model,
+    ...(result.recovery ? { autoRecovery: result.recovery } : {}),
+  };
+}
+
 function completeMotion(slate: DebateMotionSlateV1): boolean {
   return Boolean(
     slate.motion &&
@@ -271,12 +345,12 @@ function completeMotion(slate: DebateMotionSlateV1): boolean {
 
 export async function synthesizeDebateSlates(
   topicRaw: unknown,
-  lane: DebateGenerationLane,
+  runtime: DebateAiRuntime,
 ): Promise<DebateMotionSlateV1[]> {
   const topic = compactText(topicRaw, 1_000);
   if (!topic) throw new HttpError(400, "Enter a topic to synthesize.");
-  const parsed = await generateJson(
-    lane,
+  const generation = await generateJson(
+    runtime.lanes ?? selectedLane(runtime),
     [
       {
         role: "system",
@@ -289,6 +363,7 @@ export async function synthesizeDebateSlates(
           `Topic: ${topic}`,
           "Create exactly three genuinely distinct, balanced debate slates.",
           "Each slate needs: id, motion, forSide {label, brief}, againstSide {label, brief}.",
+          "Each side label must be a clean 1–3 word public name, no more than 24 characters.",
           "The motion must be editable, specific, and arguable by reasonable people.",
           "Each brief should give that advocate a fair 2-4 sentence mandate without pretending evidence exists.",
           'JSON shape: {"slates":[...]}',
@@ -297,6 +372,7 @@ export async function synthesizeDebateSlates(
     ],
     { maxTokens: 1_800, temperature: 0.65 },
   );
+  const parsed = generation.value;
   const rawSlates = Array.isArray(parsed.slates) ? parsed.slates : [];
   const slates = rawSlates
     .map((value, index) =>
@@ -316,11 +392,10 @@ async function roleCheck(
   motion: DebateMotionSlateV1,
   runtime: DebateAiRuntime,
 ): Promise<DebateAdvocacyConsent> {
-  const lane = laneForBot(runtime, bot);
   const side = sideId === "for" ? motion.forSide : motion.againstSide;
   const opposite = sideId === "for" ? motion.againstSide : motion.forSide;
-  const parsed = await generateJson(
-    lane,
+  const generation = await generateJson(
+    runtime.lanes ?? selectedLane(runtime),
     [
       {
         role: "system",
@@ -345,11 +420,11 @@ async function roleCheck(
       },
     ],
     {
-      model: modelForBot(bot, lane),
       maxTokens: 220,
       temperature: 0.1,
     },
   );
+  const parsed = generation.value;
   const rawStatus = parsed.status;
   const status =
     rawStatus === "decline" || rawStatus === "devils_advocate"
@@ -365,6 +440,11 @@ async function roleCheck(
     motionHash: debateMotionHash(motion),
     botRevision: botRevision(bot),
     checkedAt: new Date().toISOString(),
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery
+      ? { autoRecovery: generation.autoRecovery }
+      : {}),
   };
 }
 
@@ -458,9 +538,8 @@ function snapshotBot(
   row: DebateBotRow,
   role: DebateBotSnapshotV1["role"],
   sideId: DebateSideId | null,
-  runtime: DebateAiRuntime,
+  lane: DebateGenerationLane,
 ): DebateBotSnapshotV1 {
-  const lane = laneForBot(runtime, row);
   return {
     version: DEBATE_SCHEMA_VERSION,
     id: row.id,
@@ -476,7 +555,7 @@ function snapshotBot(
       parseStoredBotAudioVoiceProfileV1(row.authored_audio_voice_profile),
     powers: parseStoredBotPowersV1(row.powers_json),
     provider: lane.providerName,
-    model: modelForBot(row, lane),
+    model: lane.model,
     revision: botRevision(row),
   };
 }
@@ -521,6 +600,20 @@ function parseSessionRow(
   const parsed = JSON.parse(row.session_json) as DebateSessionV1;
   return {
     ...parsed,
+    provider: parsed.provider ?? parsed.moderator.provider,
+    model: parsed.model ?? parsed.moderator.model,
+    responseMode: parsed.responseMode ?? (
+      (parsed.provider ?? parsed.moderator.provider) === "local"
+        ? "local"
+        : "online"
+    ),
+    generationChain:
+      Array.isArray(parsed.generationChain) && parsed.generationChain.length > 0
+        ? parsed.generationChain
+        : [{
+            provider: parsed.provider ?? parsed.moderator.provider,
+            model: parsed.model ?? parsed.moderator.model,
+          }],
     revision: row.revision,
     status: row.status,
     phase: row.phase,
@@ -688,6 +781,13 @@ export function createDebateSession(
       `${moderatorRow.name} is hard-muted by a Power and cannot moderate.`,
     );
   }
+  const lane = selectedLane(runtime);
+  const generationChain: AutoFallbackModelRef[] = (
+    runtime.lanes?.length ? runtime.lanes : [lane]
+  ).map((candidate) => ({
+    provider: candidate.providerName,
+    model: candidate.model,
+  }));
   const session: DebateSessionV1 = {
     version: DEBATE_SCHEMA_VERSION,
     id: randomUUID(),
@@ -695,13 +795,22 @@ export function createDebateSession(
     status: "live",
     phase: "opening",
     stepKey: "intro",
+    provider: lane.providerName,
+    model: lane.model,
+    responseMode:
+      runtime.responseMode === "auto" && generationChain.length > 1
+        ? "auto"
+        : lane.providerName === "local"
+          ? "local"
+          : "online",
+    generationChain,
     playerRole: request.playerRole,
     playerSideId,
     motion,
     evidence: freezeEvidence(request.evidence, now),
-    moderator: snapshotBot(moderatorRow, "moderator", null, runtime),
-    forAdvocate: snapshotBot(forRow, "advocate", "for", runtime),
-    againstAdvocate: snapshotBot(againstRow, "advocate", "against", runtime),
+    moderator: snapshotBot(moderatorRow, "moderator", null, lane),
+    forAdvocate: snapshotBot(forRow, "advocate", "for", lane),
+    againstAdvocate: snapshotBot(againstRow, "advocate", "against", lane),
     advocacyConsent,
     powerPlan,
     caseBoard: [],
@@ -888,6 +997,105 @@ function commitMutation(
   }
 }
 
+function commitRevisedEventMutation(
+  db: DatabaseSync,
+  userId: string,
+  previous: DebateSessionV1,
+  nextInput: DebateSessionV1,
+  idempotencyKey: string,
+  revisedEvent: DebateEventV1,
+  newEvents: readonly DebateEventV1[],
+): DebateSessionV1 {
+  const now = new Date().toISOString();
+  const priorEvents = previous.events.map((event) =>
+    event.id === revisedEvent.id ? revisedEvent : event,
+  );
+  const next: DebateSessionV1 = {
+    ...nextInput,
+    revision: previous.revision + 1,
+    updatedAt: now,
+    events: [...priorEvents, ...newEvents],
+  };
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
+  try {
+    const current = db
+      .prepare(
+        "SELECT revision FROM debate_sessions WHERE id = ? AND user_id = ?",
+      )
+      .get(previous.id, userId) as { revision?: number } | undefined;
+    if (current?.revision !== previous.revision) {
+      throw new HttpError(
+        409,
+        "Debate changed while this interjection was being prepared. Refresh and retry.",
+      );
+    }
+    const result = db
+      .prepare(
+        `UPDATE debate_sessions
+            SET revision = ?, status = ?, phase = ?, step_key = ?,
+                winner_side_id = ?, session_json = ?, error = ?,
+                updated_at = ?, completed_at = ?
+          WHERE id = ? AND user_id = ? AND revision = ?`,
+      )
+      .run(
+        next.revision,
+        next.status,
+        next.phase,
+        next.stepKey,
+        next.winnerSideId,
+        serializeSessionState(next),
+        next.error,
+        now,
+        next.completedAt,
+        next.id,
+        userId,
+        previous.revision,
+      );
+    if (Number(result.changes) !== 1) {
+      throw new HttpError(
+        409,
+        "Debate changed while this interjection was being prepared. Refresh and retry.",
+      );
+    }
+    const eventUpdate = db
+      .prepare(
+        `UPDATE debate_events
+            SET event_json = ?
+          WHERE id = ? AND user_id = ? AND session_id = ?`,
+      )
+      .run(
+        JSON.stringify(revisedEvent),
+        revisedEvent.id,
+        userId,
+        previous.id,
+      );
+    if (Number(eventUpdate.changes) !== 1) {
+      throw new HttpError(409, "The interrupted floor event is no longer current.");
+    }
+    insertEvents(db, userId, next.id, newEvents);
+    db.prepare(
+      `INSERT INTO debate_mutations
+         (user_id, session_id, idempotency_key, expected_revision,
+          result_revision, response_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      userId,
+      next.id,
+      idempotencyKey,
+      previous.revision,
+      next.revision,
+      JSON.stringify(next),
+      now,
+    );
+    if (ownsTransaction) db.exec("COMMIT");
+    return next;
+  } catch (error) {
+    if (ownsTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function makeEvent(
   session: DebateSessionV1,
   args: {
@@ -898,6 +1106,12 @@ function makeEvent(
     content: string;
     sourceIds?: string[];
     stepKey?: string;
+    parentEventId?: string | null;
+    interrupted?: boolean;
+    interruptedBy?: "player" | "bot" | null;
+    provider?: ProviderName;
+    model?: string;
+    autoRecovery?: AutoRecoveryTraceV1;
   },
 ): DebateEventV1 {
   return {
@@ -912,6 +1126,18 @@ function makeEvent(
     sideId: args.sideId ?? null,
     content: args.content,
     sourceIds: args.sourceIds ?? [],
+    ...(args.parentEventId !== undefined
+      ? { parentEventId: args.parentEventId }
+      : {}),
+    ...(args.interrupted !== undefined
+      ? { interrupted: args.interrupted }
+      : {}),
+    ...(args.interruptedBy !== undefined
+      ? { interruptedBy: args.interruptedBy }
+      : {}),
+    ...(args.provider ? { provider: args.provider } : {}),
+    ...(args.model ? { model: args.model } : {}),
+    ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
     createdAt: new Date().toISOString(),
   };
 }
@@ -930,16 +1156,33 @@ function sideLabel(session: DebateSessionV1, sideId: DebateSideId): string {
     : session.motion.againstSide.label;
 }
 
-function laneForSnapshot(
+function lanesForSession(
   runtime: DebateAiRuntime,
-  snapshot: DebateBotSnapshotV1,
-): DebateGenerationLane {
-  return snapshot.provider === "openai" && runtime.online
-    ? runtime.online
-    : snapshot.provider === "anthropic" &&
-        runtime.online?.providerName === "anthropic"
-      ? runtime.online
-      : runtime.local;
+  session: DebateSessionV1,
+): DebateGenerationLane[] {
+  const runtimeLanes = runtime.lanes?.length
+    ? runtime.lanes
+    : [runtime.local, ...(runtime.online ? [runtime.online] : [])];
+  const byKey = new Map(
+    runtimeLanes.map((lane) => [
+      `${lane.providerName}:${lane.model.trim().toLowerCase()}`,
+      lane,
+    ]),
+  );
+  const frozen = session.generationChain?.length
+    ? session.generationChain
+    : [{ provider: session.provider, model: session.model }];
+  const resolved = frozen.flatMap((entry) => {
+    const exact = byKey.get(
+      `${entry.provider}:${entry.model.trim().toLowerCase()}`,
+    );
+    if (exact) return [exact];
+    const providerMatch = runtimeLanes.find(
+      (lane) => lane.providerName === entry.provider,
+    );
+    return providerMatch ? [{ ...providerMatch, model: entry.model }] : [];
+  });
+  return resolved.length > 0 ? resolved : [runtime.local];
 }
 
 function evidencePrompt(evidence: DebateEvidencePacketV1): string {
@@ -1022,7 +1265,14 @@ async function generateSpeech(
   snapshot: DebateBotSnapshotV1,
   instruction: string,
   runtime: DebateAiRuntime,
-): Promise<{ content: string; sourceIds: string[]; silent: boolean }> {
+): Promise<{
+  content: string;
+  sourceIds: string[];
+  silent: boolean;
+  provider?: ProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+}> {
   const powerBot = session.powerPlan.bots[snapshot.id];
   const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
   if (
@@ -1038,9 +1288,8 @@ async function generateSpeech(
       silent: true,
     };
   }
-  const lane = laneForSnapshot(runtime, snapshot);
-  const result = await generateJson(
-    lane,
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
     [
       {
         role: "system",
@@ -1075,11 +1324,11 @@ async function generateSpeech(
       },
     ],
     {
-      model: snapshot.model,
       maxTokens: 520,
       temperature: 0.55,
     },
   );
+  const result = generation.value;
   let intended = multilineText(result.content, 6_000);
   if (!intended) throw new Error("The bot returned an empty debate turn.");
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
@@ -1106,6 +1355,11 @@ async function generateSpeech(
     content: sanitized.content,
     sourceIds: sanitized.sourceIds,
     silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery
+      ? { autoRecovery: generation.autoRecovery }
+      : {}),
   };
 }
 
@@ -1115,7 +1369,163 @@ function claimSummary(content: string): string {
     .replace(/\*[^*]{1,160}\*/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
-  return (plain.match(/^.+?[.!?](?:\s|$)/u)?.[0] ?? plain).trim().slice(0, 220);
+  const sentences = plain.match(/[^.!?]+(?:[.!?]+|$)/gu) ?? [];
+  const survivingClaim = sentences
+    .map((sentence) => sentence.trim())
+    .find(
+      (sentence) =>
+        sentence &&
+        !/^(?:(?:i|we)\s+(?:concede|grant|agree|acknowledge|accept)\b|.+?\b(?:point|argument|case)\s+is\s+(?:fair|correct|right)\b)/iu.test(
+          sentence,
+        ),
+    );
+  return (survivingClaim ?? sentences[0] ?? plain).trim().slice(0, 220);
+}
+
+const CASE_BOARD_QUOTE_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "again",
+  "against",
+  "because",
+  "before",
+  "being",
+  "between",
+  "could",
+  "does",
+  "from",
+  "have",
+  "into",
+  "just",
+  "more",
+  "most",
+  "other",
+  "should",
+  "than",
+  "that",
+  "their",
+  "there",
+  "these",
+  "they",
+  "this",
+  "those",
+  "through",
+  "under",
+  "very",
+  "what",
+  "when",
+  "where",
+  "which",
+  "while",
+  "with",
+  "would",
+  "your",
+]);
+
+function normalizedCaseBoardQuote(value: string): string {
+  return value.replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+}
+
+function groundedCaseBoardQuote(
+  publicStatement: string,
+  value: unknown,
+): string {
+  const quote = compactText(value, 600);
+  if (quote.length < 12) return "";
+  return normalizedCaseBoardQuote(publicStatement).includes(
+    normalizedCaseBoardQuote(quote),
+  )
+    ? quote
+    : "";
+}
+
+function materialCaseBoardTokens(value: string): Set<string> {
+  return new Set(
+    (value.toLocaleLowerCase().match(/[\p{L}\p{N}’'-]+/gu) ?? []).filter(
+      (token) => token.length >= 4 && !CASE_BOARD_QUOTE_STOP_WORDS.has(token),
+    ),
+  );
+}
+
+function caseBoardTextsOverlap(left: string, right: string): boolean {
+  const rightTokens = materialCaseBoardTokens(right);
+  return [...materialCaseBoardTokens(left)].some((token) =>
+    rightTokens.has(token),
+  );
+}
+
+function caseBoardStatusQuoteIsValid(
+  status: DebateCaseCardV1["status"],
+  quote: string,
+): boolean {
+  if (status === "conceded") {
+    return /\b(?:conced(?:e|ed|ing)|grant(?:ed|ing)?|agree(?:d|ing)?|acknowledg(?:e|ed|ing)|accept(?:ed|ing)?)\b/iu.test(
+      quote,
+    );
+  }
+  if (status === "unanswered") {
+    return /\b(?:unanswered|did not answer|does not answer|has not answered|fails? to answer|avoids? (?:the|this) question)\b/iu.test(
+      quote,
+    );
+  }
+  return status === "challenged";
+}
+
+function caseBoardStatusTransitionIsValid(
+  current: DebateCaseCardV1["status"],
+  next: DebateCaseCardV1["status"],
+): boolean {
+  if (current === "conceded" || current === "unanswered") return false;
+  if (next === "challenged") return current === "active";
+  return next === "conceded" || next === "unanswered";
+}
+
+function interruptedStatementPrefix(
+  content: string,
+  requestedCharacterCount: number,
+): string {
+  const count = Math.max(
+    1,
+    Math.min(content.length - 1, Math.floor(requestedCharacterCount)),
+  );
+  let prefix = content.slice(0, count);
+  const markerStart = prefix.lastIndexOf("[[source:");
+  const markerEnd = prefix.lastIndexOf("]]");
+  if (markerStart > markerEnd) prefix = prefix.slice(0, markerStart);
+  const boundary = Math.max(
+    prefix.lastIndexOf(" "),
+    prefix.lastIndexOf("\n"),
+    prefix.lastIndexOf("."),
+    prefix.lastIndexOf(","),
+    prefix.lastIndexOf(";"),
+    prefix.lastIndexOf(":"),
+    prefix.lastIndexOf("!"),
+    prefix.lastIndexOf("?"),
+  );
+  if (boundary >= Math.max(0, prefix.length - 28)) {
+    prefix = prefix.slice(0, boundary + 1);
+  }
+  prefix = prefix.trimEnd().replace(/[,:;–—-]+$/gu, "").trimEnd();
+  return prefix ? `${prefix}…` : "";
+}
+
+function caseBoardAfterInterruptedSpeech(
+  session: DebateSessionV1,
+  speech: DebateEventV1,
+): DebateCaseCardV1[] {
+  const summary = claimSummary(speech.content);
+  return session.caseBoard.flatMap((card) => {
+    if (card.createdEventId !== speech.id) return [card];
+    if (!summary) return [];
+    return [
+      {
+        ...card,
+        summary,
+        sourceIds: speech.sourceIds,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+  });
 }
 
 function updateCaseBoard(
@@ -1181,6 +1591,7 @@ function caseBoardEvent(
     sideId: sourceEvent.sideId,
     content: JSON.stringify(board),
     sourceIds: sourceEvent.sourceIds,
+    parentEventId: sourceEvent.id,
   });
 }
 
@@ -1196,7 +1607,7 @@ export async function refineDebateCaseBoard(
     (card) => card.createdEventId === sourceEvent.id,
   );
   if (!target) return;
-  const result = await generateJson(
+  const generation = await generateJson(
     {
       provider,
       providerName: "local",
@@ -1213,31 +1624,63 @@ export async function refineDebateCaseBoard(
         content: [
           `Newest public statement: ${sourceEvent.content}`,
           `Current board: ${JSON.stringify(initial.caseBoard)}`,
-          "Return a compact claim summary of at most 220 characters.",
+          `The newest statement belongs to the ${sideLabel(initial, target.sideId)} side.`,
+          "Return the speaker's surviving advocated proposition, not an opponent's position, a quoted premise, or a concession preamble.",
+          "Return a compact claim summary of at most 220 characters plus summaryQuote: one exact supporting quote copied from the newest public statement.",
           "You may update existing card states only when the public statement clearly challenges, concedes, or leaves a directly posed claim unanswered.",
-          'JSON shape: {"summary":"...","statusUpdates":[{"id":"existing-card-id","status":"active|challenged|conceded|unanswered"}]}',
+          "Every status update needs evidenceQuote: one exact supporting quote copied from the newest public statement and materially related to that card.",
+          'JSON shape: {"summary":"...","summaryQuote":"exact quote","statusUpdates":[{"id":"existing-card-id","status":"challenged|conceded|unanswered","evidenceQuote":"exact quote"}]}',
         ].join("\n"),
       },
     ],
     { maxTokens: 420, temperature: 0.1 },
   );
+  const result = generation.value;
   const summary = compactText(result.summary, 220);
-  if (!summary) return;
+  const summaryQuote = groundedCaseBoardQuote(
+    sourceEvent.content,
+    result.summaryQuote,
+  );
+  if (
+    !summary ||
+    !summaryQuote ||
+    !caseBoardTextsOverlap(summary, summaryQuote)
+  ) {
+    return;
+  }
   const validStatuses = new Set([
-    "active",
     "challenged",
     "conceded",
     "unanswered",
   ]);
+  const initialCardsById = new Map(
+    initial.caseBoard.map((card) => [card.id, card]),
+  );
   const statusUpdates = new Map<string, DebateCaseCardV1["status"]>();
   if (Array.isArray(result.statusUpdates)) {
     for (const rawUpdate of result.statusUpdates) {
       const update = jsonRecord(rawUpdate);
       const id = compactText(update.id, 200);
+      const card = initialCardsById.get(id);
+      const evidenceQuote = groundedCaseBoardQuote(
+        sourceEvent.content,
+        update.evidenceQuote,
+      );
       if (
-        id &&
+        card &&
+        card.createdEventId !== sourceEvent.id &&
         typeof update.status === "string" &&
-        validStatuses.has(update.status)
+        validStatuses.has(update.status) &&
+        caseBoardStatusTransitionIsValid(
+          card.status,
+          update.status as DebateCaseCardV1["status"],
+        ) &&
+        evidenceQuote &&
+        caseBoardTextsOverlap(card.summary, evidenceQuote) &&
+        caseBoardStatusQuoteIsValid(
+          update.status as DebateCaseCardV1["status"],
+          evidenceQuote,
+        )
       ) {
         statusUpdates.set(id, update.status as DebateCaseCardV1["status"]);
       }
@@ -1280,6 +1723,7 @@ export async function refineDebateCaseBoard(
           sideId: sourceEvent.sideId,
           content: JSON.stringify(caseBoard),
           sourceIds: sourceEvent.sourceIds,
+          parentEventId: sourceEvent.id,
           stepKey: sourceEvent.stepKey,
         },
       ),
@@ -1346,6 +1790,17 @@ function enterRebuttal(
   };
 }
 
+function enterModeratedRebuttal(
+  session: DebateSessionV1,
+): DebateSessionV1 {
+  return {
+    ...session,
+    phase: "rebuttal",
+    stepKey: "moderator_to_rebuttal",
+    status: "live",
+  };
+}
+
 function nextAfterRebuttal(
   session: DebateSessionV1,
   sideId: DebateSideId,
@@ -1354,7 +1809,7 @@ function nextAfterRebuttal(
   return {
     ...session,
     phase: "closing",
-    stepKey: "closing_against",
+    stepKey: "moderator_to_closing",
     status: "live",
   };
 }
@@ -1456,7 +1911,9 @@ function interruptionCandidate(
 ): DebateBotSnapshotV1 | null {
   const strengthRank = { small: 1, medium: 2, large: 3 } as const;
   return debateBots(session)
-    .filter((candidate) => candidate.id !== speaker.id)
+    .filter(
+      (candidate) => candidate.id !== speaker.id && candidate.sideId !== null,
+    )
     .flatMap((candidate) => {
       const plan = session.powerPlan.bots[candidate.id];
       if (plan?.hardMuted || !botHeardEvent(
@@ -1512,32 +1969,94 @@ function interruptionCandidate(
     ?.bot ?? null;
 }
 
-async function interruptionReaction(
+interface DebateBotFloorBreak {
+  speechEvent: DebateEventV1;
+  interjectionEvent: DebateEventV1;
+  rulingEvent: DebateEventV1 | null;
+}
+
+async function botFloorBreak(
   session: DebateSessionV1,
   speaker: DebateBotSnapshotV1,
   speechEvent: DebateEventV1,
   runtime: DebateAiRuntime,
-): Promise<DebateEventV1 | null> {
+): Promise<DebateBotFloorBreak | null> {
   if (session.stepKey === "intro" || speechEvent.kind !== "speech") return null;
   const interrupter = interruptionCandidate(session, speaker);
   if (!interrupter) return null;
+  const cutoffRatio =
+    0.54 +
+    stablePowerChance(
+      `${session.id}:${session.stepKey}:${interrupter.id}:cutoff`,
+    ) *
+      0.18;
+  const cutoff = interruptedStatementPrefix(
+    speechEvent.content,
+    Math.floor(speechEvent.content.length * cutoffRatio),
+  );
+  if (cutoff.length < 36 || cutoff.length >= speechEvent.content.length - 8) {
+    return null;
+  }
+  const interruptedEvent: DebateEventV1 = {
+    ...speechEvent,
+    content: cutoff,
+    sourceIds: debateSourceIdsFromText(cutoff, session.evidence),
+    interrupted: true,
+    interruptedBy: "bot",
+  };
+  const interruptedSession = {
+    ...session,
+    events: [...session.events, interruptedEvent],
+  };
   try {
-    const reactionSession = session;
-    const speech = await generateSpeech(
-      reactionSession,
+    const interjection = await generateSpeech(
+      interruptedSession,
       interrupter,
-      `Give one brief between-turn reaction to ${speaker.name}'s latest line. Do not take the scheduled floor, start a new argument, or exceed one sentence.`,
+      `Break the floor now and cut off ${speaker.name}. Respond only to the heard public fragment below in one forceful sentence. Do not introduce an unrelated argument.\n\nHeard fragment:\n${cutoff}`,
       runtime,
     );
-    if (speech.silent) return null;
-    return makeEvent(reactionSession, {
-      kind: "reaction",
+    if (interjection.silent) return null;
+    const interjectionEvent = makeEvent(interruptedSession, {
+      kind: "interjection",
       speakerKind: interrupter.role,
       speakerBotId: interrupter.id,
       sideId: interrupter.sideId,
-      content: speech.content,
-      sourceIds: speech.sourceIds,
+      content: interjection.content,
+      sourceIds: interjection.sourceIds,
+      parentEventId: interruptedEvent.id,
+      provider: interjection.provider,
+      model: interjection.model,
+      autoRecovery: interjection.autoRecovery,
     });
+    const rulingSession = {
+      ...interruptedSession,
+      events: [...interruptedSession.events, interjectionEvent],
+    };
+    const ruling = await generateSpeech(
+      rulingSession,
+      session.moderator,
+      `${interrupter.name} broke the floor and cut off ${speaker.name}. Give a brief procedural ruling in one or two sentences. Acknowledge that only the heard fragment is public, enforce the scheduled order, and do not argue either side.`,
+      runtime,
+    );
+    const rulingEvent = ruling.silent
+      ? null
+      : makeEvent(rulingSession, {
+          kind: "moderator_ruling",
+          speakerKind: "moderator",
+          speakerBotId: session.moderator.id,
+          sideId: null,
+          content: ruling.content,
+          sourceIds: [],
+          parentEventId: interjectionEvent.id,
+          provider: ruling.provider,
+          model: ruling.model,
+          autoRecovery: ruling.autoRecovery,
+        });
+    return {
+      speechEvent: interruptedEvent,
+      interjectionEvent,
+      rulingEvent,
+    };
   } catch {
     return null;
   }
@@ -1552,14 +2071,30 @@ async function speechTransition(
   next: (session: DebateSessionV1) => DebateSessionV1,
 ): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
   const speech = await generateSpeech(session, snapshot, instruction, runtime);
-  const event = makeEvent(session, {
+  let event = makeEvent(session, {
     kind: speech.silent ? "silence" : "speech",
     speakerKind: snapshot.role,
     speakerBotId: snapshot.id,
     sideId,
     content: speech.content,
     sourceIds: speech.sourceIds,
+    provider: speech.provider,
+    model: speech.model,
+    autoRecovery: speech.autoRecovery,
+    provider: speech.provider,
+    model: speech.model,
+    autoRecovery: speech.autoRecovery,
   });
+  const repeatSession = {
+    ...session,
+    events: [...session.events, event],
+  };
+  const repeat = hearingRepeatReaction(repeatSession, snapshot, event);
+  const floorBreak =
+    repeat || event.kind !== "speech"
+      ? null
+      : await botFloorBreak(session, snapshot, event, runtime);
+  if (floorBreak) event = floorBreak.speechEvent;
   const withBoard = {
     ...session,
     caseBoard: updateCaseBoard(session, event),
@@ -1570,13 +2105,17 @@ async function speechTransition(
     ? caseBoardEvent(withBoard, withBoard.caseBoard, event)
     : null;
   if (boardEvent) withBoard.events.push(boardEvent);
-  const repeat = hearingRepeatReaction(withBoard, snapshot, event);
-  const reaction =
-    repeat ??
-    (await interruptionReaction(withBoard, snapshot, event, runtime));
-  if (reaction) {
-    reaction.sequence = withBoard.events.length + 1;
-    withBoard.events.push(reaction);
+  if (repeat) {
+    repeat.sequence = withBoard.events.length + 1;
+    withBoard.events.push(repeat);
+  }
+  if (floorBreak) {
+    floorBreak.interjectionEvent.sequence = withBoard.events.length + 1;
+    withBoard.events.push(floorBreak.interjectionEvent);
+    if (floorBreak.rulingEvent) {
+      floorBreak.rulingEvent.sequence = withBoard.events.length + 1;
+      withBoard.events.push(floorBreak.rulingEvent);
+    }
   }
   const transitioned = next(withBoard);
   return {
@@ -1584,8 +2123,38 @@ async function speechTransition(
     events: [
       event,
       ...(boardEvent ? [boardEvent] : []),
-      ...(reaction ? [reaction] : []),
+      ...(repeat ? [repeat] : []),
+      ...(floorBreak ? [floorBreak.interjectionEvent] : []),
+      ...(floorBreak?.rulingEvent ? [floorBreak.rulingEvent] : []),
     ],
+  };
+}
+
+async function moderatorPhaseTransition(
+  session: DebateSessionV1,
+  instruction: string,
+  runtime: DebateAiRuntime,
+  next: (session: DebateSessionV1) => DebateSessionV1,
+): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
+  const speech = await generateSpeech(
+    session,
+    session.moderator,
+    instruction,
+    runtime,
+  );
+  const event = makeEvent(session, {
+    kind: speech.silent ? "silence" : "phase",
+    speakerKind: "moderator",
+    speakerBotId: session.moderator.id,
+    content: speech.content,
+    sourceIds: speech.sourceIds,
+    provider: speech.provider,
+    model: speech.model,
+    autoRecovery: speech.autoRecovery,
+  });
+  return {
+    session: next(session),
+    events: [event],
   };
 }
 
@@ -1609,9 +2178,8 @@ async function generateBallot(
   voter: DebateBotSnapshotV1,
   runtime: DebateAiRuntime,
 ): Promise<DebateBallotV1> {
-  const lane = laneForSnapshot(runtime, voter);
-  const parsed = await generateJson(
-    lane,
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
     [
       {
         role: "system",
@@ -1622,8 +2190,9 @@ async function generateBallot(
       },
       { role: "user", content: botBallotPrompt(session, voter) },
     ],
-    { model: voter.model, maxTokens: 220, temperature: 0.2 },
+    { maxTokens: 220, temperature: 0.2 },
   );
+  const parsed = generation.value;
   const sideId: DebateSideId = parsed.sideId === "against" ? "against" : "for";
   const muted = session.powerPlan.bots[voter.id]?.hardMuted === true;
   return {
@@ -1632,6 +2201,11 @@ async function generateBallot(
     sideId,
     reason: muted ? null : compactText(parsed.reason, 600) || "That side made the clearer case.",
     privateReason: muted,
+    provider: generation.provider,
+    model: generation.model,
+    ...(generation.autoRecovery
+      ? { autoRecovery: generation.autoRecovery }
+      : {}),
     createdAt: new Date().toISOString(),
   };
 }
@@ -1659,14 +2233,20 @@ function skippedTransition(session: DebateSessionV1): DebateSessionV1 {
       step === "challenge_moderator_other_answer" ||
       step === "challenge_judge_pass_against_answer"
     ) {
-      return enterRebuttal(session, "against");
+      return enterModeratedRebuttal(session);
     }
     if (step === "challenge_judge_pass_for_answer") {
       return { ...session, stepKey: "challenge_judge_pass_against_prompt" };
     }
   }
+  if (step === "moderator_to_rebuttal") {
+    return enterRebuttal(session, "against");
+  }
   if (step.startsWith("rebuttal_against")) return nextAfterRebuttal(session, "against");
   if (step.startsWith("rebuttal_for")) return nextAfterRebuttal(session, "for");
+  if (step === "moderator_to_closing") {
+    return { ...session, stepKey: "closing_against", status: "live" };
+  }
   if (step === "closing_against") return { ...session, stepKey: "closing_for" };
   if (step === "closing_for") {
     const nextStep = session.playerRole === "judge" ? "verdict_player" : "ballot_moderator";
@@ -1784,7 +2364,7 @@ async function advanceStep(
         sideId,
         "Answer the moderator's latest challenge directly. Acknowledge any fair premise before defending or narrowing your claim.",
         runtime,
-        (next) => enterRebuttal(next, "against"),
+        (next) => enterModeratedRebuttal(next),
       );
     }
     case "challenge_for_prompt":
@@ -1828,7 +2408,7 @@ async function advanceStep(
                   : "challenge_judge_pass_against_prompt",
             };
           }
-          return enterRebuttal(next, "against");
+          return enterModeratedRebuttal(next);
         },
       );
     }
@@ -1883,9 +2463,20 @@ async function advanceStep(
         sideId,
         "Answer the moderator's latest challenge directly.",
         runtime,
-        (next) => enterRebuttal(next, "against"),
+        (next) => enterModeratedRebuttal(next),
       );
     }
+    case "moderator_to_rebuttal":
+      return moderatorPhaseTransition(
+        session,
+        [
+          "Move the Duel into rebuttal in one or two concise sentences.",
+          "Name the central unresolved clash using only what was publicly said, then give the Against side the first rebuttal.",
+          "Do not judge either side, add evidence, or make an argument yourself.",
+        ].join(" "),
+        runtime,
+        (next) => enterRebuttal(next, "against"),
+      );
     case "rebuttal_against":
     case "rebuttal_against_partner":
       return speechTransition(
@@ -1909,6 +2500,22 @@ async function advanceStep(
           : "Deliver the For rebuttal. Answer the strongest Against response and sharpen the remaining disagreement.",
         runtime,
         (next) => nextAfterRebuttal(next, "for"),
+      );
+    case "moderator_to_closing":
+      return moderatorPhaseTransition(
+        session,
+        [
+          "Move the Duel into closing statements in one or two concise sentences.",
+          "Identify the single question still left for the verdict, call the Against closing first, and reserve the final reply for For.",
+          "Do not judge either side, introduce new material, or make an argument yourself.",
+        ].join(" "),
+        runtime,
+        (next) => ({
+          ...next,
+          phase: "closing",
+          stepKey: "closing_against",
+          status: "live",
+        }),
       );
     case "closing_against":
       return speechTransition(
@@ -1962,6 +2569,9 @@ async function advanceStep(
         content:
           ballot.reason ??
           `${voter.name} cast a private ballot without a spoken reason.`,
+        provider: ballot.provider,
+        model: ballot.model,
+        autoRecovery: ballot.autoRecovery,
       });
       const ballots = [...session.ballots, ballot];
       if (session.stepKey !== "ballot_against") {
@@ -2081,7 +2691,9 @@ export async function advanceDebateSession(
         ...session,
         status: "paused",
         error:
-          error instanceof Error
+          error instanceof AutoFallbackExhaustedError
+            ? "All configured Auto models failed. Retry this turn when a model is available."
+            : error instanceof Error
             ? `Turn unavailable: ${compactText(error.message, 300)}`
             : "Turn unavailable.",
       },
@@ -2175,6 +2787,153 @@ export function submitDebatePlayerTurn(
     committed,
     boardEvent ? [event, boardEvent] : [event],
     auxiliaryProvider,
+  );
+  return committed;
+}
+
+export async function submitDebateInterjection(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateInterjectionRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (
+    session.playerRole !== "participant" ||
+    !session.playerSideId ||
+    session.status !== "live"
+  ) {
+    throw new HttpError(
+      409,
+      "Only an active Participant may interject from the floor.",
+    );
+  }
+  const target = session.events.find((event) => event.id === request.eventId);
+  if (
+    !target ||
+    target.kind !== "speech" ||
+    target.speakerKind !== "advocate" ||
+    !target.sideId ||
+    target.sideId === session.playerSideId ||
+    target.interrupted
+  ) {
+    throw new HttpError(409, "That opposing floor is no longer interruptible.");
+  }
+  const laterPublicEvent = session.events.some(
+    (event) =>
+      event.sequence > target.sequence &&
+      event.kind !== "case_board",
+  );
+  if (laterPublicEvent) {
+    throw new HttpError(409, "The Forum has already moved beyond that floor.");
+  }
+  if (
+    !Number.isInteger(request.heardCharacterCount) ||
+    request.heardCharacterCount < 24 ||
+    request.heardCharacterCount >= target.content.length
+  ) {
+    throw new HttpError(400, "Wait for a complete phrase before interjecting.");
+  }
+  const rawInterjection = multilineText(request.content, 600);
+  if (!rawInterjection) {
+    throw new HttpError(400, "Enter the point you want to interject.");
+  }
+  const publicInterjection = sanitizeDebateStatementSources(
+    rawInterjection,
+    session.evidence,
+  );
+  if (!publicInterjection.content) {
+    throw new HttpError(400, "Enter the point you want to interject.");
+  }
+  const prefix = interruptedStatementPrefix(
+    target.content,
+    request.heardCharacterCount,
+  );
+  if (!prefix) throw new HttpError(409, "The speaker has not completed a phrase.");
+  const publicPrefix = sanitizeDebateStatementSources(prefix, session.evidence);
+  const revisedSpeech: DebateEventV1 = {
+    ...target,
+    content: publicPrefix.content,
+    sourceIds: publicPrefix.sourceIds,
+    interrupted: true,
+    interruptedBy: "player",
+  };
+  const revisedEvents = session.events.map((event) =>
+    event.id === target.id ? revisedSpeech : event,
+  );
+  const caseBoard = caseBoardAfterInterruptedSpeech(session, revisedSpeech);
+  const interjection = makeEvent(
+    { ...session, events: revisedEvents },
+    {
+      kind: "interjection",
+      speakerKind: "player",
+      sideId: session.playerSideId,
+      content: publicInterjection.content,
+      sourceIds: publicInterjection.sourceIds,
+      parentEventId: target.id,
+    },
+  );
+  const withInterjection: DebateSessionV1 = {
+    ...session,
+    caseBoard,
+    events: [...revisedEvents, interjection],
+  };
+  const interruptedSpeaker =
+    target.speakerBotId === session.forAdvocate.id
+      ? session.forAdvocate
+      : session.againstAdvocate;
+  const ruling = await generateSpeech(
+    withInterjection,
+    session.moderator,
+    [
+      `${interruptedSpeaker.name} was cut off before completing the scheduled floor.`,
+      `The participant interjected: ${publicInterjection.content}`,
+      "Give a concise one- or two-sentence procedural ruling.",
+      "Acknowledge the breach, warn or recognize the point as appropriate, and clearly restore the scheduled phase.",
+      "Do not add a substantive argument, judge the motion, or invent evidence.",
+    ].join(" "),
+    runtime,
+  );
+  if (ruling.silent) {
+    throw new Error("The moderator could not deliver a public ruling.");
+  }
+  const rulingEvent = makeEvent(withInterjection, {
+    kind: "moderator_ruling",
+    speakerKind: "moderator",
+    speakerBotId: session.moderator.id,
+      content: ruling.content,
+      sourceIds: ruling.sourceIds,
+      parentEventId: interjection.id,
+      provider: ruling.provider,
+      model: ruling.model,
+      autoRecovery: ruling.autoRecovery,
+  });
+  const boardEvent = caseBoardEvent(
+    {
+      ...withInterjection,
+      events: [...withInterjection.events, rulingEvent],
+    },
+    caseBoard,
+    revisedSpeech,
+  );
+  const committed = commitRevisedEventMutation(
+    db,
+    userId,
+    session,
+    { ...session, caseBoard, events: session.events },
+    checked.idempotencyKey,
+    revisedSpeech,
+    [interjection, rulingEvent, boardEvent],
+  );
+  queueCaseBoardRefinement(
+    db,
+    userId,
+    committed,
+    [revisedSpeech],
+    runtime.auxiliary,
   );
   return committed;
 }

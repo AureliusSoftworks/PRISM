@@ -1,4 +1,9 @@
 import type { BotAudioVoiceProfileV1 } from "./audioVoice.js";
+import type {
+  AutoFallbackModelRef,
+  AutoRecoveryTraceV1,
+  ResponseMode,
+} from "./autoFallback.js";
 import type { BotAvatarDetailsV1 } from "./botAvatarDetails.js";
 import type {
   BotPowerEffectV1,
@@ -79,6 +84,9 @@ export interface DebateAdvocacyConsent {
   motionHash: string;
   botRevision: string;
   checkedAt: string;
+  provider?: LlmProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
 }
 
 export interface DebateBotSnapshotV1 {
@@ -140,6 +148,8 @@ export type DebateEventKind =
   | "silence"
   | "player_turn"
   | "reaction"
+  | "interjection"
+  | "moderator_ruling"
   | "case_board"
   | "ballot"
   | "verdict"
@@ -159,6 +169,12 @@ export interface DebateEventV1 {
   sideId: DebateSideId | null;
   content: string;
   sourceIds: string[];
+  parentEventId?: string | null;
+  interrupted?: boolean;
+  interruptedBy?: "player" | "bot" | null;
+  provider?: LlmProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
   createdAt: string;
 }
 
@@ -168,6 +184,9 @@ export interface DebateBallotV1 {
   sideId: DebateSideId;
   reason: string | null;
   privateReason: boolean;
+  provider?: LlmProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
   createdAt: string;
 }
 
@@ -178,6 +197,12 @@ export interface DebateSessionV1 {
   status: DebateStatus;
   phase: DebatePhase;
   stepKey: string;
+  /** Primary generation lane, frozen when Start succeeds. */
+  provider: LlmProviderName;
+  model: string;
+  responseMode: ResponseMode;
+  /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
+  generationChain: AutoFallbackModelRef[];
   playerRole: DebatePlayerRole;
   playerSideId: DebateSideId | null;
   motion: DebateMotionSlateV1;
@@ -201,6 +226,8 @@ export interface DebateSessionV1 {
 export interface DebateSynthesizeRequest {
   topic: string;
   preferredProvider?: LlmProviderName;
+  modelOverride?: string | null;
+  responseMode?: ResponseMode;
 }
 
 export interface DebateSynthesizeResponse {
@@ -210,6 +237,7 @@ export interface DebateSynthesizeResponse {
 export interface DebateResearchRequest {
   query: string;
   preferredProvider?: LlmProviderName;
+  responseMode?: ResponseMode;
 }
 
 export interface DebateResearchResponse {
@@ -221,6 +249,8 @@ export interface DebateRoleChecksRequest {
   forAdvocateBotId: string;
   againstAdvocateBotId: string;
   preferredProvider?: LlmProviderName;
+  modelOverride?: string | null;
+  responseMode?: ResponseMode;
 }
 
 export interface DebateRoleChecksResponse {
@@ -237,6 +267,8 @@ export interface DebateSessionCreateRequest {
   playerSideId?: DebateSideId | null;
   advocacyConsent: DebateAdvocacyConsent[];
   preferredProvider?: LlmProviderName;
+  modelOverride?: string | null;
+  responseMode?: ResponseMode;
   theme?: BotPowerResolvedThemeV1;
   idempotencyKey: string;
 }
@@ -259,6 +291,12 @@ export interface DebatePlayerTurnRequest extends DebateMutationRequest {
 export interface DebateVerdictRequest extends DebateMutationRequest {
   sideId: DebateSideId;
   reason?: string;
+}
+
+export interface DebateInterjectionRequest extends DebateMutationRequest {
+  eventId: string;
+  heardCharacterCount: number;
+  content: string;
 }
 
 export interface DebateSessionListItemV1 {
@@ -285,7 +323,18 @@ function normalizedMultilineText(value: unknown, maxLength: number): string {
 }
 
 export function normalizeDebateSideLabel(value: unknown, fallback: string): string {
-  return normalizedText(value, DEBATE_SIDE_LABEL_MAX_LENGTH) || fallback;
+  if (typeof value !== "string") return fallback;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (!normalized) return fallback;
+  if (normalized.length <= DEBATE_SIDE_LABEL_MAX_LENGTH) return normalized;
+
+  const clipped = normalized.slice(0, DEBATE_SIDE_LABEL_MAX_LENGTH);
+  const lastBoundary = clipped.lastIndexOf(" ");
+  const shortened =
+    lastBoundary >= Math.floor(DEBATE_SIDE_LABEL_MAX_LENGTH / 2)
+      ? clipped.slice(0, lastBoundary)
+      : clipped;
+  return shortened.replace(/[\s&,:;–—-]+$/gu, "").trim() || fallback;
 }
 
 export function normalizeDebateMotionSlateV1(

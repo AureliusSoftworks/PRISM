@@ -451,6 +451,20 @@
 .stageStudioGlowTuner > small { color: var(--botcast-muted); font-size: .54rem; line-height: 1.35; }
 .setupGrid { display: grid; grid-template-columns: .8fr 1.2fr; gap: 16px; margin-top: 22px; }
 .setupGrid label, .setupField { display: grid; gap: 8px; color: var(--botcast-muted); font-size: .75rem; }
+.signalBotPickerBinding { display: grid; min-width: 0; gap: 9px; }
+.signalBotPicker { display: grid; min-width: 0; gap: 9px; color: var(--botcast-ink); }
+.signalBotPickerGrid { width: 100% !important; max-height: 238px; box-sizing: border-box; grid-template-columns: repeat(auto-fill, minmax(74px, 1fr)) !important; align-items: stretch; justify-content: stretch; overflow-x: hidden; overflow-y: auto; gap: 8px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-line)); border-radius: 14px; padding: 9px; background: color-mix(in srgb, var(--botcast-host-accent) 4%, var(--botcast-soft-panel)); scrollbar-width: thin; }
+.signalBotPicker[data-compact="true"] .signalBotPickerGrid { max-height: 214px; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+.signalBotPickerTile { width: 100% !important; min-width: 0; height: 78px !important; min-height: 78px; }
+.signalBotPickerTile:disabled { opacity: .36; cursor: not-allowed; transform: none; }
+.signalBotPickerEmpty { margin: 0; border: 1px dashed var(--botcast-line); border-radius: 12px; padding: 18px 12px; color: var(--botcast-muted); font-size: .7rem; text-align: center; }
+.signalGuestPickerField { display: grid; grid-column: 1 / -1; min-width: 0; gap: 8px; }
+.signalGuestPickerLabel { color: var(--botcast-muted); font-size: .75rem; }
+.producerGuestPickerOption { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line)); border-radius: 12px; padding: 11px 13px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 7%, var(--botcast-soft-panel)); text-align: left; cursor: pointer; }
+.producerGuestPickerOption strong { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 999px; color: #17131d; background: linear-gradient(135deg, var(--prism-p), var(--prism-s)); font-size: .72rem; }
+.producerGuestPickerOption span { color: var(--botcast-muted); font-size: .68rem; }
+.producerGuestPickerOption[data-selected="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 66%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-soft-panel)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--botcast-host-accent) 12%, transparent); }
+.producerGuestPickerOption:disabled { opacity: .42; cursor: not-allowed; }
 .producerBrief { grid-column: 1 / -1; }
 .producerBrief span { color: #74767c; }
 .producerGuestContext { grid-column: 1 / -1; }

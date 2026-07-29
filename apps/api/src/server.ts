@@ -191,6 +191,7 @@ import {
   listDebateSessions,
   pauseDebateSession,
   resumeDebateSession,
+  submitDebateInterjection,
   submitDebatePlayerTurn,
   submitDebateVerdict,
   synthesizeDebateSlates,
@@ -3254,6 +3255,7 @@ function readProvider(value: unknown): ProviderName | undefined {
 function debateAiRuntimeForUser(
   userId: string,
   requestedProvider: unknown,
+  requestedModelOverride?: unknown,
 ): DebateAiRuntime {
   const user = getUserRow(userId);
   const hardLocal = userBlocksOnlineCapabilities(user);
@@ -3266,8 +3268,16 @@ function debateAiRuntimeForUser(
         ? "local"
         : user.preferred_provider;
   const preferredProvider = hardLocal ? "local" : requested;
+  const requestedModel = readModelOverride(requestedModelOverride);
+  const modelOverride =
+    requestedModel &&
+    (!hardLocal || requested === "local")
+      ? requestedModel
+      : null;
   const localModel =
-    user.preferred_local_model?.trim() || defaultModelIdForProvider("local");
+    preferredProvider === "local" && modelOverride
+      ? modelOverride
+      : user.preferred_local_model?.trim() || defaultModelIdForProvider("local");
   const local = {
     provider: providerFactoryOverride(
       "local",
@@ -3301,6 +3311,7 @@ function debateAiRuntimeForUser(
     ),
     providerName: onlineProvider,
     model:
+      modelOverride ||
       user.preferred_online_model?.trim() ||
       defaultModelIdForProvider(onlineProvider),
   };
@@ -10164,7 +10175,11 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(userId, body.preferredProvider);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+      );
       const lane =
         runtime.preferredProvider !== "local" && runtime.online
           ? runtime.online
@@ -10228,7 +10243,11 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/role-checks", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(userId, body.preferredProvider);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+      );
       const checks = await runWithUsageSession(
         {
           db,
@@ -10254,7 +10273,11 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(userId, body.preferredProvider);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+      );
       const session = createDebateSession(
         db,
         userId,
@@ -10281,13 +10304,11 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const frozenProvider =
-        frozen.moderator.provider !== "local"
-          ? frozen.moderator.provider
-          : frozen.forAdvocate.provider !== "local"
-            ? frozen.forAdvocate.provider
-            : frozen.againstAdvocate.provider;
-      const runtime = debateAiRuntimeForUser(userId, frozenProvider);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+      );
       const session = await runWithUsageSession(
         {
           db,
@@ -10302,6 +10323,33 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             ctx.params.id,
             body as unknown as Parameters<typeof advanceDebateSession>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, session });
+    }),
+    route("POST", "/api/debates/:id/interject", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          submitDebateInterjection(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof submitDebateInterjection>[3],
             runtime,
           ),
       );

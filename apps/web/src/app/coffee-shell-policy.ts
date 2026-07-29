@@ -22,7 +22,7 @@ export type UniversalNavbarTooltipMap = Partial<
   Record<UniversalNavbarAction, string>
 >;
 
-export type LiveSessionChromeName = "Coffee" | "Signal";
+export type LiveSessionChromeName = "Coffee" | "Debate" | "Signal";
 
 export interface LiveSessionChromePolicy {
   lockMessage: string;
@@ -36,6 +36,8 @@ export function liveSessionChromePolicy(
   const exitInstruction =
     sessionName === "Coffee"
       ? "End the Coffee session"
+      : sessionName === "Debate"
+        ? "Return to the Debate lobby"
       : "Cut or finish the Signal session";
   return {
     lockMessage: `${exitInstruction} before changing session chrome.`,
@@ -54,7 +56,10 @@ export function liveSessionChromePolicy(
       promptCenter: `${exitInstruction} before opening Prompt Center.`,
       refresh: `${exitInstruction} before refreshing Prism.`,
       settings: `${exitInstruction} before opening Settings.`,
-      voice: `${exitInstruction} before changing Voice. The recorded speaking type is baked for the session.`,
+      voice:
+        sessionName === "Debate"
+          ? `${exitInstruction} before changing Voice. The speaking type is frozen for this Duel.`
+          : `${exitInstruction} before changing Voice. The recorded speaking type is baked for the session.`,
       usage: `${exitInstruction} before opening Usage.`,
       memories: `${exitInstruction} before opening Memories.`,
       images: `${exitInstruction} before opening Images.`,

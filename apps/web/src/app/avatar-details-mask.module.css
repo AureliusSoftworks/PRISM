@@ -18,6 +18,8 @@
     translateX(var(--avatar-details-offset-x, 0px))
     translateY(var(--zen-live-bot-ink-offset-y, 0%))
     translateY(var(--avatar-details-facing-offset-y, 0%))
+    translateY(var(--zen-live-bot-face-thumbnail-offset-y, 0%))
+    scale(var(--zen-live-bot-face-thumbnail-scale, 1))
     scaleX(var(--avatar-details-scale-x, 1))
     scaleX(var(--avatar-details-facing-scale-x, 1))
     rotate(
@@ -29,6 +31,10 @@
     scaleX(var(--avatar-details-speech-scale-x, 1))
     scaleY(var(--avatar-details-speech-scale-y, 1));
   transform-origin: center;
+}
+
+.layer[data-avatar-details-render-detail="reduced"] {
+  animation: none !important;
 }
 
 .speechMotion {
@@ -141,6 +147,27 @@
         )
     );
   filter: var(--zen-live-bot-crt-flicker-base-filter);
+}
+
+.bloom[data-avatar-details-render-detail="reduced"] {
+  opacity: calc(var(--avatar-details-speech-opacity, 1) * 0.28);
+  --zen-live-bot-crt-flicker-base-filter: blur(0.16px)
+    drop-shadow(
+      0 0 0.45px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 54%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 1.2px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 18%,
+          transparent
+        )
+    );
 }
 
 .core {

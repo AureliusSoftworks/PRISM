@@ -7,6 +7,10 @@ const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
 );
+const debateSource = readFileSync(
+  new URL("./DebateExperience.tsx", import.meta.url),
+  "utf8",
+);
 const englishVoiceSource = readFileSync(
   new URL("./englishVoice.ts", import.meta.url),
   "utf8",
@@ -38,6 +42,59 @@ describe("live avatar mouth synchronization", () => {
       /text: args\.activeMessage\.content,[\s\S]{0,180}alignment: speechReveal\?\.alignment/u,
     );
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
+  });
+
+  it("drives Debate visemes from the active utterance audio clock and provider alignment", () => {
+    assert.match(
+      debateSource,
+      /onStart\?: \([\s\S]{0,180}alignment\?: VoicePlaybackCharacterAlignment \| null/u,
+    );
+    assert.match(
+      debateSource,
+      /onStart: \(durationMs, alignment\)[\s\S]{0,500}playbackAlignment = alignment \?\? null/u,
+    );
+    assert.match(
+      debateSource,
+      /onProgress: \(elapsedMs, durationMs\)[\s\S]{0,900}speechTiming: \{[\s\S]{0,220}elapsedMs: Math\.min\(playbackDurationMs, elapsedMs\)[\s\S]{0,220}alignment: playbackAlignment/u,
+    );
+    assert.match(
+      debateSource,
+      /DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS = 50/u,
+    );
+
+    const debateAvatar = pageSource.slice(
+      pageSource.indexOf("const debateMouthShape ="),
+      pageSource.indexOf(
+        "moodHint=\"neutral\"",
+        pageSource.indexOf("const debateMouthShape ="),
+      ),
+    );
+    assert.match(debateAvatar, /avatarState\.speechTiming/u);
+    assert.match(debateAvatar, /avatarState\.foleyMouthShape/u);
+    assert.match(
+      debateAvatar,
+      /bottishMouthShapeAtAlignedElapsedMs\(\{/u,
+    );
+    assert.match(debateAvatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
+    assert.match(
+      debateAvatar,
+      /alignment: avatarState\.speechTiming\.alignment/u,
+    );
+    assert.match(debateAvatar, /mouthShape=\{debateMouthShape\}/u);
+    assert.doesNotMatch(
+      debateAvatar,
+      /avatarState\.talking \? "open-small" : "closed"/u,
+    );
+  });
+
+  it("keeps muted Debate reveal visemes on the deterministic reveal clock", () => {
+    const silentReveal = debateSource.slice(
+      debateSource.indexOf("const revealEventSilently ="),
+      debateSource.indexOf("const consumeNewEvents ="),
+    );
+    assert.match(silentReveal, /elapsedMs: progress \* durationMs/u);
+    assert.match(silentReveal, /durationMs,/u);
+    assert.match(silentReveal, /alignment: null/u);
   });
 
   it("uses the exact primary crosstalk playback message for Signal audio", () => {

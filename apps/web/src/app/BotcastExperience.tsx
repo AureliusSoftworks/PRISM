@@ -295,6 +295,14 @@ import {
 } from "./signalReplayVideoFrame";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import { ReplayMouthPresentationCapture } from "./ReplayMouthPresentationCapture";
+import {
+  BotPickerGrid,
+  BotPickerTile,
+  BotPickerToolbar,
+  filterBotPickerItems,
+  type BotPickerGroup,
+  type BotPickerGlyphRenderer,
+} from "./BotPicker";
 import styles from "./botcast.module.css";
 
 export interface BotcastBotSummary {
@@ -535,6 +543,7 @@ type SignalErrorToast = {
 
 export interface BotcastExperienceProps {
   bots: BotcastBotSummary[];
+  botGroups?: readonly BotPickerGroup[];
   initialCastBotIds?: string[];
   request: BotcastApiRequest;
   preferredProvider: "local" | "openai" | "anthropic";
@@ -544,6 +553,7 @@ export interface BotcastExperienceProps {
   accountDefaultModel: string | null;
   responseMode: BotcastEpisodeResponseMode;
   theme?: "light" | "dark";
+  renderBotGlyph: BotPickerGlyphRenderer;
   renderAvatar?: (
     bot: BotcastBotSummary,
     state: {
@@ -705,6 +715,38 @@ type SignalAssetSlot =
   | "night-studio"
   | "logo";
 type SignalArtworkKind = SignalAssetSlot;
+
+const SIGNAL_BOT_PICKER_TILE = {
+  tileSize: 78,
+  glyphSize: 27,
+  glyphStroke: 1.7,
+  namedFlatTile: true,
+} as const;
+
+function signalPickerGroupsForBots(
+  bots: readonly BotcastBotSummary[],
+  groups: readonly BotPickerGroup[],
+): BotPickerGroup[] {
+  const botIds = new Set(bots.map((bot) => bot.id));
+  return [
+    {
+      id: "all",
+      name: "All bots",
+      botIds: bots.map((bot) => bot.id),
+      count: bots.length,
+    },
+    ...groups
+      .map((group) => {
+        const groupBotIds = group.botIds.filter((botId) => botIds.has(botId));
+        return {
+          ...group,
+          botIds: groupBotIds,
+          count: groupBotIds.length,
+        };
+      })
+      .filter((group) => group.botIds.length > 0),
+  ];
+}
 
 const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
 const SIGNAL_ASSET_UPLOAD_MAX_BYTES = 16 * 1024 * 1024;
@@ -1444,6 +1486,7 @@ function SignalStudioSpotlight(): React.JSX.Element {
 
 export function BotcastExperience({
   bots,
+  botGroups = [],
   initialCastBotIds = [],
   request,
   preferredProvider,
@@ -1453,6 +1496,7 @@ export function BotcastExperience({
   accountDefaultModel,
   responseMode,
   theme = "dark",
+  renderBotGlyph,
   renderAvatar,
   renderMug,
   resolveCupRateMultiplier,
@@ -1542,9 +1586,13 @@ export function BotcastExperience({
   const selectedShowRef = useRef<BotcastShow | null>(null);
   const finalizedSignalRecordingIdsRef = useRef(new Set<string>());
   const [hostDraftId, setHostDraftId] = useState(initialHostBotId);
+  const [hostPickerSearch, setHostPickerSearch] = useState("");
+  const [hostPickerGroupId, setHostPickerGroupId] = useState("all");
   const [showPremiseInspirationDraft, setShowPremiseInspirationDraft] =
     useState("");
   const [guestDraftId, setGuestDraftId] = useState(initialCast[1] ?? "");
+  const [guestPickerSearch, setGuestPickerSearch] = useState("");
+  const [guestPickerGroupId, setGuestPickerGroupId] = useState("all");
   const [topicDraft, setTopicDraft] = useState("");
   const [producerBriefDraft, setProducerBriefDraft] = useState("");
   const [producerGuestContextDraft, setProducerGuestContextDraft] =
@@ -8691,6 +8739,111 @@ export function BotcastExperience({
     );
   };
 
+  const renderSignalBotPicker = ({
+    bots: pickerBots,
+    selectedId,
+    searchValue,
+    onSearchChange,
+    groupId,
+    onGroupChange,
+    onSelect,
+    ariaLabel,
+    compact = false,
+    disabled = false,
+  }: {
+    bots: readonly BotcastBotSummary[];
+    selectedId: string;
+    searchValue: string;
+    onSearchChange: (value: string) => void;
+    groupId: string;
+    onGroupChange: (value: string) => void;
+    onSelect: (botId: string) => void;
+    ariaLabel: string;
+    compact?: boolean;
+    disabled?: boolean;
+  }): React.JSX.Element => {
+    const groups = signalPickerGroupsForBots(pickerBots, botGroups);
+    const effectiveGroupId = groups.some((group) => group.id === groupId)
+      ? groupId
+      : "all";
+    const visibleBots = filterBotPickerItems(
+      pickerBots,
+      searchValue,
+      effectiveGroupId,
+      groups,
+    );
+    const resultLabel =
+      visibleBots.length === 0
+        ? "No bots match this view."
+        : `${visibleBots.length} bot${visibleBots.length === 1 ? "" : "s"}`;
+    return (
+      <div
+        className={styles.signalBotPicker}
+        data-compact={compact ? "true" : undefined}
+      >
+        <BotPickerToolbar
+          searchValue={searchValue}
+          onSearchChange={onSearchChange}
+          searchAriaLabel={`Search ${ariaLabel.toLocaleLowerCase()}`}
+          searchPlaceholder="Search bots…"
+          groups={groups}
+          groupValue={effectiveGroupId}
+          onGroupChange={onGroupChange}
+          resultLabel={resultLabel}
+          compact={compact}
+        />
+        {visibleBots.length > 0 ? (
+          <BotPickerGrid
+            className={styles.signalBotPickerGrid}
+            role="radiogroup"
+            ariaLabel={ariaLabel}
+            style={
+              {
+                "--tile-size": `${SIGNAL_BOT_PICKER_TILE.tileSize}px`,
+                "--tile-gap": "8px",
+                "--tile-hover-scale": "1.055",
+              } as CSSProperties
+            }
+          >
+            {visibleBots.map((bot) => {
+              const selected = bot.id === selectedId;
+              const accent = normalizeAccentForTheme(
+                bot.color ?? "#8d7cff",
+                theme,
+              );
+              return (
+                <BotPickerTile
+                  key={bot.id}
+                  item={{
+                    id: bot.id,
+                    name: bot.name,
+                    color: bot.color,
+                    glyph: bot.glyph,
+                  }}
+                  selected={selected}
+                  forceName
+                  accentColor={accent}
+                  geometry={SIGNAL_BOT_PICKER_TILE}
+                  renderGlyph={renderBotGlyph}
+                  className={styles.signalBotPickerTile}
+                  buttonProps={{
+                    role: "radio",
+                    "aria-checked": selected,
+                    "aria-label": `${bot.name}${selected ? ", selected" : ""}`,
+                    disabled,
+                    onClick: () => onSelect(bot.id),
+                  }}
+                />
+              );
+            })}
+          </BotPickerGrid>
+        ) : (
+          <p className={styles.signalBotPickerEmpty}>No bots found.</p>
+        )}
+      </div>
+    );
+  };
+
   const renderLibrary = (): React.JSX.Element => (
     <aside className={styles.library} aria-label="Signal shows">
       <div className={styles.libraryHeader}>
@@ -8739,7 +8892,7 @@ export function BotcastExperience({
         ) : null}
       </div>
       <div className={styles.createShowCard}>
-        <label htmlFor="botcast-host-picker">Create a show</label>
+        <label>Create a show</label>
         <PrismRefractTarget
           target={{
             id: "signal-create-host",
@@ -8763,25 +8916,28 @@ export function BotcastExperience({
           }}
         >
           {(binding) => (
-            <select
+            <div
               {...binding}
-              id="botcast-host-picker"
-              value={hostDraftId}
-              onChange={(event) => setHostDraftId(event.target.value)}
+              className={styles.signalBotPickerBinding}
+              tabIndex={-1}
               data-botcast-delete-focus-fallback="true"
             >
-              <option value="">Choose a host…</option>
-              {eligibleBots
-                .filter(
+              {renderSignalBotPicker({
+                bots: eligibleBots.filter(
                   (bot) =>
                     !shows.some((show) => show.hostBotId === bot.id),
-                )
-                .map((bot) => (
-                  <option key={bot.id} value={bot.id}>
-                    {bot.name}
-                  </option>
-                ))}
-            </select>
+                ),
+                selectedId: hostDraftId,
+                searchValue: hostPickerSearch,
+                onSearchChange: setHostPickerSearch,
+                groupId: hostPickerGroupId,
+                onGroupChange: setHostPickerGroupId,
+                onSelect: setHostDraftId,
+                ariaLabel: "Choose a Signal host",
+                compact: true,
+                disabled: busy,
+              })}
+            </div>
           )}
         </PrismRefractTarget>
         <label htmlFor="botcast-premise-inspiration">
@@ -9832,8 +9988,8 @@ export function BotcastExperience({
           )}
         </section>
         <div className={styles.setupGrid}>
-          <label>
-            Guest
+          <div className={styles.signalGuestPickerField}>
+            <span className={styles.signalGuestPickerLabel}>Guest</span>
             <PrismRefractTarget
               target={{
                 id: `signal-episode-guest-${selectedShow.id}`,
@@ -9854,30 +10010,52 @@ export function BotcastExperience({
               }}
             >
               {(binding) => (
-                <select
+                <div
                   {...binding}
-                  value={guestDraftId}
-                  onChange={(event) => setGuestDraftId(event.target.value)}
-                  disabled={busy || Boolean(bookingSuggestionBusy)}
+                  className={styles.signalBotPickerBinding}
+                  tabIndex={-1}
+                  aria-disabled={
+                    busy || Boolean(bookingSuggestionBusy) ? true : undefined
+                  }
                 >
-                  <option value="">Choose one guest…</option>
-                  <option
-                    value={BOTCAST_PRODUCER_GUEST_ID}
-                    disabled={producerGuestUnavailable}
+                  <button
+                    type="button"
+                    className={styles.producerGuestPickerOption}
+                    data-selected={
+                      producerGuestSelected ? "true" : undefined
+                    }
+                    aria-pressed={producerGuestSelected}
+                    disabled={
+                      producerGuestUnavailable ||
+                      busy ||
+                      Boolean(bookingSuggestionBusy)
+                    }
+                    onClick={() =>
+                      setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID)
+                    }
                   >
-                    {producerGuestUnavailable
-                      ? "Me — unavailable for this host"
-                      : "Me — go on as the guest"}
-                  </option>
-                  {guestOptions.map((bot) => (
-                    <option key={bot.id} value={bot.id}>
-                      {bot.name}
-                    </option>
-                  ))}
-                </select>
+                    <strong>Me</strong>
+                    <span>
+                      {producerGuestUnavailable
+                        ? "Unavailable for this host"
+                        : "Go on as the guest"}
+                    </span>
+                  </button>
+                  {renderSignalBotPicker({
+                    bots: guestOptions,
+                    selectedId: guestDraftId,
+                    searchValue: guestPickerSearch,
+                    onSearchChange: setGuestPickerSearch,
+                    groupId: guestPickerGroupId,
+                    onGroupChange: setGuestPickerGroupId,
+                    onSelect: setGuestDraftId,
+                    ariaLabel: "Choose a Signal guest",
+                    disabled: busy || Boolean(bookingSuggestionBusy),
+                  })}
+                </div>
               )}
             </PrismRefractTarget>
-          </label>
+          </div>
           {producerGuestSelected ? (
             <div
               className={`${styles.setupField} ${styles.producerGuestContext}`}

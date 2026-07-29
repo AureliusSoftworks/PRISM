@@ -24,6 +24,7 @@ import {
   pauseDebateSession,
   refineDebateCaseBoard,
   resumeDebateSession,
+  submitDebateInterjection,
   submitDebatePlayerTurn,
   submitDebateVerdict,
   type DebateAiRuntime,
@@ -158,7 +159,73 @@ class CaseBoardProvider extends DebateProviderStub {
     if (text.includes("Distill a scoreless public debate case board")) {
       return JSON.stringify({
         summary: "Transit zoning directly addresses scarce rail-adjacent land.",
+        summaryQuote: "this proposal addresses it directly",
         statusUpdates: [],
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ConcessionPreambleProvider extends DebateProviderStub {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Give the Build Near Rail opening")) {
+      return JSON.stringify({
+        content:
+          "I concede that local planning has value. But broad rail zoning still addresses the citywide shortage directly.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class UngroundedCaseBoardProvider extends DebateProviderStub {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Distill a scoreless public debate case board")) {
+      return JSON.stringify({
+        summary: "Coolness is social impact and presence.",
+        summaryQuote: "Coolness is social impact and presence.",
+        statusUpdates: [],
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class SpoofedCaseBoardStatusProvider extends DebateProviderStub {
+  private readonly targetCardId: string;
+
+  public constructor(targetCardId: string) {
+    super();
+    this.targetCardId = targetCardId;
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Distill a scoreless public debate case board")) {
+      return JSON.stringify({
+        summary:
+          "The house cannot rationally conclude that the affirmative carried the motion.",
+        summaryQuote:
+          "the house cannot rationally conclude that he is generally cooler",
+        statusUpdates: [
+          {
+            id: this.targetCardId,
+            status: "conceded",
+            evidenceQuote: "I concede both points.",
+          },
+        ],
       });
     }
     return super.generateResponse(messages, options);
@@ -276,8 +343,8 @@ function seedBot(
   db.prepare(
     `INSERT INTO bots
        (id, user_id, name, system_prompt, powers_json, color, glyph,
-        online_enabled, created_at, updated_at)
-     VALUES (?, 'user-1', ?, ?, ?, ?, ?, 1, ?, ?)`,
+        online_enabled, model, local_model, online_model, created_at, updated_at)
+     VALUES (?, 'user-1', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     name,
@@ -285,12 +352,18 @@ function seedBot(
     serializeBotPowersV1(powers),
     id === "moderator" ? "#d7d2ff" : id === "for" ? "#59d7ff" : "#ff6d9c",
     id === "moderator" ? "◇" : "◆",
+    `${id}-legacy-model`,
+    `${id}-legacy-local-model`,
+    `${id}-legacy-online-model`,
     NOW,
     NOW,
   );
 }
 
-async function createJudgeDebate(db: DatabaseSync) {
+async function createJudgeDebate(
+  db: DatabaseSync,
+  debateRuntime: DebateAiRuntime = runtime(),
+) {
   seedBot(db, "moderator", "Mira");
   seedBot(db, "for", "Avery");
   seedBot(db, "against", "Basil");
@@ -302,7 +375,7 @@ async function createJudgeDebate(db: DatabaseSync) {
       forAdvocateBotId: "for",
       againstAdvocateBotId: "against",
     },
-    runtime(),
+    debateRuntime,
   );
   return createDebateSession(
     db,
@@ -333,7 +406,7 @@ async function createJudgeDebate(db: DatabaseSync) {
       theme: "dark",
       idempotencyKey: "create:judge:0001",
     },
-    runtime(),
+    debateRuntime,
   );
 }
 
@@ -380,6 +453,32 @@ describe("Debate engine", () => {
       debateSource,
       /\b(?:FROM|INTO|UPDATE)\s+(?:memories|memory_summaries|conversations|messages)\b/iu,
     );
+  });
+
+  it("freezes one runtime model for the session instead of bot model fields", async () => {
+    const db = createTestDb();
+    try {
+      const session = await createJudgeDebate(db);
+      assert.equal(session.provider, "local");
+      assert.equal(session.model, "debate-test");
+      assert.deepEqual(
+        [
+          session.moderator.model,
+          session.forAdvocate.model,
+          session.againstAdvocate.model,
+        ],
+        ["debate-test", "debate-test", "debate-test"],
+      );
+      assert.ok(
+        [
+          session.moderator.provider,
+          session.forAdvocate.provider,
+          session.againstAdvocate.provider,
+        ].every((provider) => provider === session.provider),
+      );
+    } finally {
+      db.close();
+    }
   });
 
   it("runs a complete Judge Duel with a final player ruling and bot epilogue", async () => {
@@ -544,6 +643,106 @@ describe("Debate engine", () => {
       } finally {
         db.close();
       }
+    }
+  });
+
+  it("lets a Participant cut an opposing live floor and records the moderator ruling", async () => {
+    const db = createTestDb();
+    try {
+      let session = await createDebateForRole(db, "participant");
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "interject:intro:0001",
+        },
+        runtime(),
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "interject:opening:0001",
+        },
+        runtime(),
+      );
+      const target = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.sideId === "for" &&
+          event.stepKey === "opening_for",
+      );
+      assert.ok(target);
+      const request = {
+        expectedRevision: session.revision,
+        idempotencyKey: "interject:player:0001",
+        eventId: target.id,
+        heardCharacterCount: Math.max(
+          24,
+          Math.floor(target.content.length * 0.58),
+        ),
+        content: "Point of order: that conclusion does not follow from the premise.",
+      };
+      const interjected = await submitDebateInterjection(
+        db,
+        "user-1",
+        session.id,
+        request,
+        runtime(),
+      );
+      const revised = interjected.events.find(
+        (event) => event.id === target.id,
+      );
+      assert.equal(revised?.interrupted, true);
+      assert.equal(revised?.interruptedBy, "player");
+      assert.ok((revised?.content.length ?? 0) < target.content.length);
+      assert.match(revised?.content ?? "", /…$/u);
+      assert.equal(interjected.stepKey, "opening_against");
+      assert.ok(
+        interjected.events.some(
+          (event) =>
+            event.kind === "interjection" &&
+            event.parentEventId === target.id &&
+            event.speakerKind === "player",
+        ),
+      );
+      assert.ok(
+        interjected.events.some(
+          (event) =>
+            event.kind === "moderator_ruling" &&
+            event.speakerBotId === interjected.moderator.id,
+        ),
+      );
+      assert.deepEqual(
+        await submitDebateInterjection(
+          db,
+          "user-1",
+          session.id,
+          request,
+          runtime(),
+        ),
+        interjected,
+      );
+      assert.equal(
+        (
+          JSON.parse(
+            (
+              db
+                .prepare(
+                  "SELECT event_json FROM debate_events WHERE id = ? AND user_id = ?",
+                )
+                .get(target.id, "user-1") as { event_json: string }
+            ).event_json,
+          ) as { interrupted?: boolean }
+        ).interrupted,
+        true,
+      );
+    } finally {
+      db.close();
     }
   });
 
@@ -729,7 +928,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("bounds interruption Powers to one between-turn reaction without stealing the floor", async () => {
+  it("lets interruption Powers cut the heard speech, then gives the moderator the ruling", async () => {
     const db = createTestDb();
     try {
       seedBot(db, "moderator", "Mira");
@@ -795,12 +994,35 @@ describe("Debate engine", () => {
         },
         runtime(),
       );
-      const reactions = session.events.filter(
+      const interruptedSpeech = session.events.find(
         (event) =>
-          event.stepKey === "opening_for" && event.kind === "reaction",
+          event.stepKey === "opening_for" &&
+          event.kind === "speech" &&
+          event.speakerBotId === "for",
       );
-      assert.equal(reactions.length, 1);
-      assert.equal(reactions[0]?.speakerBotId, "against");
+      const interjections = session.events.filter(
+        (event) =>
+          event.stepKey === "opening_for" && event.kind === "interjection",
+      );
+      const ruling = session.events.find(
+        (event) =>
+          event.stepKey === "opening_for" &&
+          event.kind === "moderator_ruling",
+      );
+      assert.equal(interruptedSpeech?.interrupted, true);
+      assert.equal(interruptedSpeech?.interruptedBy, "bot");
+      assert.match(interruptedSpeech?.content ?? "", /…$/u);
+      assert.equal(interjections.length, 1);
+      assert.equal(interjections[0]?.speakerBotId, "against");
+      assert.equal(interjections[0]?.parentEventId, interruptedSpeech?.id);
+      assert.equal(ruling?.speakerBotId, "moderator");
+      assert.equal(ruling?.parentEventId, interjections[0]?.id);
+      assert.doesNotMatch(
+        session.caseBoard.find(
+          (card) => card.createdEventId === interruptedSpeech?.id,
+        )?.summary ?? "",
+        /addresses it directly/u,
+      );
       assert.equal(session.stepKey, "opening_against");
     } finally {
       db.close();
@@ -952,6 +1174,12 @@ describe("Debate engine", () => {
         )?.summary,
         "Transit zoning directly addresses scarce rail-adjacent land.",
       );
+      assert.equal(
+        refined.events
+          .filter((event) => event.kind === "case_board")
+          .at(-1)?.parentEventId,
+        sourceEvent.id,
+      );
       assert.ok(
         refined.events.some(
           (event) =>
@@ -960,6 +1188,145 @@ describe("Debate engine", () => {
               "Transit zoning directly addresses scarce rail-adjacent land.",
             ),
         ),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps concession preambles off the speaker's active case-board card", async () => {
+    const db = createTestDb();
+    const provider = new ConcessionPreambleProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      const created = await createJudgeDebate(db, debateRuntime);
+      const intro = await advanceDebateSession(
+        db,
+        "user-1",
+        created.id,
+        {
+          expectedRevision: created.revision,
+          idempotencyKey: "case:preamble:intro",
+        },
+        debateRuntime,
+      );
+      const opening = await advanceDebateSession(
+        db,
+        "user-1",
+        intro.id,
+        {
+          expectedRevision: intro.revision,
+          idempotencyKey: "case:preamble:opening",
+        },
+        debateRuntime,
+      );
+      const openingEvent = opening.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.stepKey === "opening_for" &&
+          event.sideId === "for",
+      );
+      assert.ok(openingEvent);
+      assert.equal(
+        opening.caseBoard.find(
+          (card) => card.createdEventId === openingEvent.id,
+        )?.summary,
+        "But broad rail zoning still addresses the citywide shortage directly.",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects ungrounded card rewrites and unrelated conceded statuses", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createJudgeDebate(db);
+      const intro = await advanceDebateSession(
+        db,
+        "user-1",
+        created.id,
+        {
+          expectedRevision: created.revision,
+          idempotencyKey: "case:grounding:intro",
+        },
+        runtime(),
+      );
+      const forOpening = await advanceDebateSession(
+        db,
+        "user-1",
+        intro.id,
+        {
+          expectedRevision: intro.revision,
+          idempotencyKey: "case:grounding:for",
+        },
+        runtime(),
+      );
+      const againstOpening = await advanceDebateSession(
+        db,
+        "user-1",
+        forOpening.id,
+        {
+          expectedRevision: forOpening.revision,
+          idempotencyKey: "case:grounding:against",
+        },
+        runtime(),
+      );
+      const sourceEvent = againstOpening.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.stepKey === "opening_against" &&
+          event.sideId === "against",
+      );
+      assert.ok(sourceEvent);
+      const originalTarget = againstOpening.caseBoard.find(
+        (card) => card.createdEventId === sourceEvent.id,
+      );
+      const opposingCard = againstOpening.caseBoard.find(
+        (card) => card.sideId === "for",
+      );
+      assert.ok(originalTarget);
+      assert.ok(opposingCard);
+
+      const observedSource = {
+        ...sourceEvent,
+        content:
+          "Trump's strongest point is fair: the Rubik's Cube proves a skill, not general coolness. I concede both points. But that symmetry does not rescue the affirmative; the house cannot rationally conclude that he is generally cooler.",
+      };
+      await refineDebateCaseBoard(
+        db,
+        "user-1",
+        againstOpening.id,
+        observedSource,
+        new UngroundedCaseBoardProvider(),
+      );
+      let stored = getDebateSession(db, "user-1", againstOpening.id);
+      assert.equal(
+        stored.caseBoard.find((card) => card.id === originalTarget.id)?.summary,
+        originalTarget.summary,
+      );
+
+      await refineDebateCaseBoard(
+        db,
+        "user-1",
+        againstOpening.id,
+        observedSource,
+        new SpoofedCaseBoardStatusProvider(opposingCard.id),
+      );
+      stored = getDebateSession(db, "user-1", againstOpening.id);
+      assert.equal(
+        stored.caseBoard.find((card) => card.id === originalTarget.id)?.summary,
+        "The house cannot rationally conclude that the affirmative carried the motion.",
+      );
+      assert.notEqual(
+        stored.caseBoard.find((card) => card.id === opposingCard.id)?.status,
+        "conceded",
+      );
+      assert.equal(
+        stored.events
+          .filter((event) => event.kind === "case_board")
+          .at(-1)?.parentEventId,
+        sourceEvent.id,
       );
     } finally {
       db.close();

@@ -23,12 +23,20 @@ process.env.ENCRYPTION_MASTER_KEY = "debate-api-test-master-key";
 class DebateApiProvider implements LlmProvider {
   public readonly name = "local" as const;
   public readonly diagnosticModel = "debate-api-model";
+  public readonly generationCalls: Array<{
+    model: string | null;
+    auxiliary: boolean;
+  }> = [];
 
   public async generateResponse(
     messages: ProviderMessage[],
-    _options?: GenerateOptions,
+    options?: GenerateOptions,
   ): Promise<string> {
     const text = messages.map((message) => message.content).join("\n");
+    this.generationCalls.push({
+      model: options?.model?.trim() || null,
+      auxiliary: text.includes("Distill a scoreless public debate case board"),
+    });
     if (text.includes("Create exactly three genuinely distinct")) {
       return JSON.stringify({
         slates: [1, 2, 3].map((index) => ({
@@ -140,9 +148,9 @@ function insertBot(userId: string, id: string, name: string): void {
   const now = "2026-07-28T00:00:00.000Z";
   db.prepare(
     `INSERT INTO bots
-       (id, user_id, name, system_prompt, color, glyph, online_enabled,
-        created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       (id, user_id, name, system_prompt, color, glyph, online_enabled, model,
+        local_model, online_model, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     userId,
@@ -150,6 +158,9 @@ function insertBot(userId: string, id: string, name: string): void {
     `${name} is candid, concise, and fair-minded.`,
     id === "moderator" ? "#d7d2ff" : id === "for" ? "#59d7ff" : "#ff6d9c",
     id === "moderator" ? "◇" : "◆",
+    `${id}-legacy-model`,
+    `${id}-legacy-local-model`,
+    `${id}-legacy-online-model`,
     now,
     now,
   );
@@ -176,7 +187,10 @@ describe("Debate API", () => {
     const userId = String((await payload(registration)).user.id);
     // Pin request-level LOCAL even when the account otherwise permits online work.
     db.prepare(
-      "UPDATE users SET preferred_provider = 'openai' WHERE id = ?",
+      `UPDATE users
+          SET preferred_provider = 'openai',
+              preferred_local_model = 'debate-account-default'
+        WHERE id = ?`,
     ).run(userId);
     for (const [id, name] of [
       ["moderator", "Mira"],
@@ -197,11 +211,26 @@ describe("Debate API", () => {
     assert.equal(blockedResearch.status, 409);
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 
+    const accountDefaultSynthesis = await owner.request(
+      "/api/debates/synthesize",
+      jsonInit({
+        topic: "account default routing",
+        preferredProvider: "local",
+      }),
+    );
+    assert.equal(accountDefaultSynthesis.status, 200);
+    assert.equal(
+      provider.generationCalls.at(-1)?.model,
+      "debate-account-default",
+    );
+    const explicitGenerationStart = provider.generationCalls.length;
+
     const synthesis = await owner.request(
       "/api/debates/synthesize",
       jsonInit({
         topic: "transit housing",
         preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
       }),
     );
     assert.equal(synthesis.status, 200);
@@ -213,6 +242,7 @@ describe("Debate API", () => {
         forAdvocateBotId: "for",
         againstAdvocateBotId: "against",
         preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
       }),
     );
     assert.equal(roleChecks.status, 200);
@@ -243,12 +273,27 @@ describe("Debate API", () => {
         playerSideId: null,
         advocacyConsent: checks,
         preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
         theme: "dark",
         idempotencyKey: "api:create:spectator",
       }),
     );
     assert.equal(createdResponse.status, 201);
     let session = (await payload(createdResponse)).session as DebateSessionV1;
+    assert.equal(session.provider, "local");
+    assert.equal(session.model, "debate-navbar-override");
+    assert.deepEqual(
+      [
+        session.moderator.model,
+        session.forAdvocate.model,
+        session.againstAdvocate.model,
+      ],
+      [
+        "debate-navbar-override",
+        "debate-navbar-override",
+        "debate-navbar-override",
+      ],
+    );
     let turn = 0;
     while (session.status !== "completed") {
       turn += 1;
@@ -267,6 +312,13 @@ describe("Debate API", () => {
     assert.equal(session.ballots.length, 3);
     assert.equal(session.winnerSideId, "for");
     assert.ok(session.events.some((event) => event.kind === "case_board"));
+    assert.ok(
+      provider.generationCalls
+        .slice(explicitGenerationStart)
+        .filter((call) => !call.auxiliary)
+        .every((call) => call.model === "debate-navbar-override"),
+      "Every setup, cast, and ballot generation should use the Debate-wide model.",
+    );
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 
     const deleted = await owner.request(
@@ -317,6 +369,7 @@ describe("Debate API", () => {
           playerSideId: role === "participant" ? "against" : null,
           advocacyConsent: checks,
           preferredProvider: "local",
+          modelOverride: "debate-navbar-override",
           theme: "light",
           idempotencyKey: `api:create:${role}`,
         }),
@@ -324,6 +377,49 @@ describe("Debate API", () => {
       assert.equal(created.status, 201);
       let roleSession = (await payload(created)).session as DebateSessionV1;
       let roleTurn = 0;
+      if (role === "participant") {
+        for (const [index, label] of ["intro", "opening"].entries()) {
+          const advanced = await owner.request(
+            `/api/debates/${roleSession.id}/advance`,
+            jsonInit({
+              expectedRevision: roleSession.revision,
+              idempotencyKey: `api:participant:pre-interject:${label}`,
+            }),
+          );
+          assert.equal(advanced.status, 200);
+          roleSession = (await payload(advanced)).session as DebateSessionV1;
+          roleTurn = index + 1;
+        }
+        const opposingOpening = roleSession.events.find(
+          (event) =>
+            event.kind === "speech" &&
+            event.sideId === "for" &&
+            event.stepKey === "opening_for",
+        );
+        assert.ok(opposingOpening);
+        const interjected = await owner.request(
+          `/api/debates/${roleSession.id}/interject`,
+          jsonInit({
+            expectedRevision: roleSession.revision,
+            idempotencyKey: "api:participant:interject",
+            eventId: opposingOpening.id,
+            heardCharacterCount: Math.max(
+              24,
+              Math.floor(opposingOpening.content.length * 0.58),
+            ),
+            content:
+              "Point of order: that conclusion outruns the stated premise.",
+          }),
+        );
+        assert.equal(interjected.status, 200);
+        roleSession = (await payload(interjected))
+          .session as DebateSessionV1;
+        assert.ok(
+          roleSession.events.some(
+            (event) => event.kind === "moderator_ruling",
+          ),
+        );
+      }
       while (roleSession.status !== "completed") {
         roleTurn += 1;
         assert.ok(roleTurn < 40);

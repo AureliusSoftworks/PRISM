@@ -37,6 +37,16 @@ const pageCss = readFileSync(
 );
 
 describe("Signal experience shell", () => {
+  it("uses the shared visual bot picker for hosts and guests", () => {
+    assert.match(source, /<BotPickerGrid/u);
+    assert.match(source, /<BotPickerTile/u);
+    assert.match(source, /<BotPickerToolbar/u);
+    assert.match(source, /ariaLabel: "Choose a Signal host"/u);
+    assert.match(source, /ariaLabel: "Choose a Signal guest"/u);
+    assert.doesNotMatch(source, /id="botcast-host-picker"/u);
+    assert.match(source, /className=\{styles\.producerGuestPickerOption\}/u);
+  });
+
   it("uses Signal throughout player-facing applet chrome", () => {
     assert.match(source, /<h1>Signal<\/h1>/u);
     assert.match(source, /aria-label="Signal shows"/u);
@@ -1464,8 +1474,11 @@ describe("Signal experience shell", () => {
       /topic: producerGuestWantsSurprise\s*\? current\.topic\s*: response\.episode\.topic/u,
     );
     assert.match(source, /hostBot\?\.muted \|\| hostBot\?\.echoesAddressedSpeech/u);
-    assert.match(source, /disabled=\{producerGuestUnavailable\}/u);
-    assert.match(source, /Me — unavailable for this host/u);
+    assert.match(
+      source,
+      /disabled=\{\s*producerGuestUnavailable \|\|\s*busy \|\|\s*Boolean\(bookingSuggestionBusy\)\s*\}/u,
+    );
+    assert.match(source, /Unavailable for this host/u);
     assert.match(pageSource, /echoesAddressedSpeech: botPowerEchoesAddressedSpeechV1/u);
     assert.match(source, /renderProducerGuestComposer\?\.\(\{/u);
     assert.match(source, /episode\.guestKind !== "producer" \? \(/u);

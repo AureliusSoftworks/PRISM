@@ -21,7 +21,6 @@ import {
   type HTMLAttributes,
   type CSSProperties,
   type ReactNode,
-  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   type UIEvent,
@@ -150,6 +149,7 @@ import {
   DebateExperience,
   type DebateUtterance,
 } from "./DebateExperience";
+import { BotPickerGrid, BotPickerTile } from "./BotPicker";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
 import {
   coffeeGroupAtmosphereImageUrl,
@@ -1144,6 +1144,7 @@ import type {
   VoicePlaybackLifecycle,
 } from "./voiceEffects";
 import {
+  DEBATE_FORUM_VOICE_ROOM_SEND,
   SIGNAL_STUDIO_VOICE_ROOM_SEND,
   type RoomAcousticsSend,
 } from "./roomAcoustics";
@@ -1196,6 +1197,7 @@ import {
 import {
   coffeeShellPolicy,
   liveSessionChromePolicy,
+  type LiveSessionChromeName,
   type UniversalNavbarAction,
   type UniversalNavbarDisabledMap,
   type UniversalNavbarTooltipMap,
@@ -5080,7 +5082,6 @@ const PICKER_FEW_BOT_TILE_SIZE_DESKTOP = 104;
 const PICKER_LOW_COUNT_TILE_SIZE_MOBILE = 72;
 const PICKER_LOW_COUNT_TILE_SIZE_DESKTOP = 76;
 const PICKER_TILE_NAME_MIN_SIZE = PICKER_LOW_COUNT_TILE_SIZE_MOBILE;
-const PICKER_TILE_COMPACT_NAME_MAX_SIZE = 92;
 const PICKER_LOW_COUNT_FRAME_VERTICAL_PAD = 24;
 const PICKER_THREE_STACK_TILE_SIZE_MOBILE = 128;
 const PICKER_DEFAULT_GLYPH_RATIO = 0.5;
@@ -29448,9 +29449,8 @@ function ZenLiveBotMannequin({
   const thinkingSpinnerActive =
     showThinkingSpinner &&
     !botFaceThinkingSpinnerDisabled(faceStyle.thinkingFrames);
-  const avatarDetailsFaceRegistrationStyle = avatarDetailsHasVisuals(
-    avatarDetails,
-  )
+  const hasAvatarDetailsVisuals = avatarDetailsHasVisuals(avatarDetails);
+  const avatarDetailsFaceRegistrationStyle = hasAvatarDetailsVisuals
     ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
     : null;
   const presenceBodyStyle =
@@ -29467,6 +29467,9 @@ function ZenLiveBotMannequin({
       className={styles.zenLiveBotPresenceBody}
       data-zen-live-bot-body-layer="true"
       data-render-detail={detailLevel}
+      data-avatar-details-visuals={
+        hasAvatarDetailsVisuals ? "true" : undefined
+      }
       style={presenceBodyStyle}
     >
       <audio
@@ -29522,6 +29525,7 @@ function ZenLiveBotMannequin({
           <AvatarDetailsMask
             details={avatarDetails}
             color={avatarDetailsColor}
+            detailLevel={detailLevel}
             faceGeometry={faceStyle}
             blinkPhase={avatarDetailsBlinkPhase}
             talking={inkTalking ?? isTalking}
@@ -29643,6 +29647,7 @@ function ZenLiveBotMannequin({
           <AvatarDetailsMask
             details={avatarDetails}
             color={avatarDetailsColor}
+            detailLevel={detailLevel}
             faceGeometry={faceStyle}
             blinkPhase={avatarDetailsBlinkPhase}
             talking={inkTalking ?? isTalking}
@@ -42041,6 +42046,11 @@ function HomeContent(): React.JSX.Element {
   const [signalInitialCastBotIds, setSignalInitialCastBotIds] = useState<
     string[]
   >([]);
+  const [debateLiveSessionActive, setDebateLiveSessionActive] = useState(false);
+  const [debateModelChoiceByProvider, setDebateModelChoiceByProvider] =
+    useState<Record<Provider, string>>(
+      createDefaultChatModelChoiceByProvider(),
+    );
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] = useState<
     "hidden" | "entering" | "visible" | "fading"
@@ -51186,12 +51196,14 @@ function HomeContent(): React.JSX.Element {
     extraClassName = "",
     forceAutoAllowed = false,
     disabledReason: string | null = null,
+    respectActiveBotLock = true,
   ): React.ReactNode => {
     // The toggle simply mirrors `effectivePreferredProvider`, which is
     // already pinned to "local" when the active chat bot is offline-only.
     // We keep the lock indicator + disabled flag tied to that same source
     // of truth so it can never disagree with the model pickers below it.
-    const lockedByActiveBot = activeBot?.online_enabled === 0;
+    const lockedByActiveBot =
+      respectActiveBotLock && activeBot?.online_enabled === 0;
     const autoAllowed =
       forceAutoAllowed ||
       (isZenSurfaceView(view) &&
@@ -61708,6 +61720,7 @@ function HomeContent(): React.JSX.Element {
       lifecycle: VoicePlaybackLifecycle,
       voiceLevel: number,
       stereoPan = 0,
+      playbackSurface: "signal" | "debate" = "signal",
     ): Promise<boolean> => {
       const voiceSelection = voicePlaybackSelectionRef.current;
       const playerVoice = botSummary.producerGuest === true;
@@ -61785,7 +61798,14 @@ function HomeContent(): React.JSX.Element {
       );
       const spokenText = voiceSpokenText(message.content);
       if (!playbackProfile.enabled || !spokenText) return false;
-      const breathSeed = `botcast:${message.episodeId}:${message.id}`;
+      const breathSeed =
+        playbackSurface === "signal"
+          ? `botcast:${message.episodeId}:${message.id}`
+          : `debate:${message.episodeId}:${message.id}`;
+      const voiceRoomAcoustics =
+        playbackSurface === "debate"
+          ? DEBATE_FORUM_VOICE_ROOM_SEND
+          : SIGNAL_STUDIO_VOICE_ROOM_SEND;
       const requestedEngine: EnglishVoiceEngine | null =
         voiceSelection.voiceMode === "english"
           ? botSummary.online_enabled !== 0
@@ -61831,7 +61851,7 @@ function HomeContent(): React.JSX.Element {
         : resolvePreSpeechBreathPlan({
             seed: breathSeed,
             text: spokenText,
-            surface: "signal",
+            surface: playbackSurface,
             mood: message.moodKey,
             authoredPerformanceText: message.voicePerformanceText,
             enabled:
@@ -61927,7 +61947,7 @@ function HomeContent(): React.JSX.Element {
             lifecycle: trackedLifecycle,
             includeAlignment: true,
             proceduralTiming: signalRobotVoiceCadenceTiming(spokenText),
-            roomAcoustics: SIGNAL_STUDIO_VOICE_ROOM_SEND,
+            roomAcoustics: voiceRoomAcoustics,
             preSpeechBreath,
             stereoPan,
           });
@@ -61982,7 +62002,7 @@ function HomeContent(): React.JSX.Element {
           },
           clip.engineUsed,
           message.moodKey,
-          SIGNAL_STUDIO_VOICE_ROOM_SEND,
+          voiceRoomAcoustics,
           preSpeechBreath,
           stereoPan,
           playbackIsCurrent,
@@ -61993,7 +62013,7 @@ function HomeContent(): React.JSX.Element {
           setVoicePlaybackNotice(
             voiceError instanceof Error
               ? voiceError.message
-              : "Signal voice playback failed.",
+              : `${playbackSurface === "debate" ? "Debate" : "Signal"} voice playback failed.`,
           );
         }
         return false;
@@ -70011,6 +70031,8 @@ function HomeContent(): React.JSX.Element {
     setChatReasoningEffort(DEFAULT_REASONING_EFFORT);
     setCoffeeModelChoiceByProvider(modelDefaults);
     setCoffeeReasoningEffort(DEFAULT_REASONING_EFFORT);
+    setDebateModelChoiceByProvider(modelDefaults);
+    setDebateLiveSessionActive(false);
     setImageGenModelChoiceByProvider(modelDefaults);
     setStoryModelChoiceByProvider(modelDefaults);
     setStoryReasoningEffort(DEFAULT_REASONING_EFFORT);
@@ -79769,6 +79791,7 @@ function HomeContent(): React.JSX.Element {
       });
       setChatModelChoiceByProvider(clearModelChoiceByProvider);
       setCoffeeModelChoiceByProvider(clearModelChoiceByProvider);
+      setDebateModelChoiceByProvider(clearModelChoiceByProvider);
       setStoryModelChoiceByProvider(clearModelChoiceByProvider);
       setImageGenModelChoiceByProvider((previous) => ({
         ...previous,
@@ -86507,10 +86530,10 @@ function HomeContent(): React.JSX.Element {
         }}
         onPointerCancel={handleTouchPickerCancel}
       >
-        <div
+        <BotPickerGrid
           className={pickerClassName}
           role="radiogroup"
-          aria-label="Bot for this chat"
+          ariaLabel="Bot for this chat"
           style={pickerStyle}
         >
           {pickerCells.map((b, cellIndex) => {
@@ -86550,37 +86573,10 @@ function HomeContent(): React.JSX.Element {
             const tileStyle = accent
               ? ({ "--bot-color": accent } as React.CSSProperties)
               : undefined;
-            let tileClassName = styles.chatBotTile;
-            if (isProtected) tileClassName += ` ${styles.chatBotTileProtected}`;
-            if (isSelected) tileClassName += ` ${styles.chatBotTileSelected}`;
-            if (isMarqueeSelected)
-              tileClassName += ` ${styles.chatBotTileMarqueeSelected}`;
-            if (geom.namedFlatTile || geom.flattenTile) {
-              tileClassName += ` ${styles.chatBotTileFlat}`;
-            }
-            if (geom.solidSwatch) {
-              tileClassName += ` ${styles.chatBotTileSolidSwatch}`;
-            } else if (geom.hideGlyphByDefault) {
-              tileClassName += ` ${styles.chatBotTileSwatchOnly}`;
-            }
             const showPixelGridGlyph = geom.compactPixelGrid;
-            const showSelectedDotGlyph = geom.selectedDotGlyph && isSelected;
-            const showTileGlyph =
-              !geom.hideGlyphByDefault || showPixelGridGlyph;
             const showFeaturedName =
               !geom.compactPixelGrid &&
               geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
-            const botTileTooltip = showFeaturedName ? undefined : b.name;
-            if (showFeaturedName) {
-              tileClassName += ` ${styles.chatBotTileWithName}`;
-              if (
-                geom.namedFlatTile ||
-                geom.flattenTile ||
-                geom.tileSize <= PICKER_TILE_COMPACT_NAME_MAX_SIZE
-              ) {
-                tileClassName += ` ${styles.chatBotTileNamedFlat}`;
-              }
-            }
             const tileGlyphSize = showPixelGridGlyph
               ? Math.max(
                   PICKER_PIXEL_GLYPH_MIN_SIZE,
@@ -86592,127 +86588,119 @@ function HomeContent(): React.JSX.Element {
               : geom.glyphStroke;
 
             return (
-              <button
+              <BotPickerTile
                 key={b.id}
-                type="button"
-                role="radio"
-                aria-checked={isSelected}
-                aria-label={
-                  tileTraits.length > 0
-                    ? `${b.name}, ${tileTraits.join(", ")}`
-                    : b.name
-                }
-                className={tileClassName}
-                data-bot-id={b.id}
-                data-living-shell-focus-id={`bot:${b.id}`}
-                data-relationship-depth-anchor="library"
-                data-relationship-depth-identity={`bot:${b.id}`}
-                data-canvas-bot-marquee-item="true"
-                data-marquee-selected={isMarqueeSelected ? "true" : undefined}
-                data-zen-live-bot-chrome-avoid="true"
-                data-glyph-tooltip={botTileTooltip}
-                data-favorite={isFavorite ? "true" : undefined}
-                data-delete-protected={isProtected ? "true" : undefined}
-                onPointerDown={(e) => {
-                  lastBotPickerPointerTypeRef.current = e.pointerType;
-                  startBotContextLongPress(e, b);
+                item={{
+                  id: b.id,
+                  name: b.name,
+                  color: b.color,
+                  glyph: b.glyph,
                 }}
-                onPointerUp={handleBotContextPointerEnd}
-                onPointerCancel={handleBotContextPointerEnd}
-                onPointerEnter={(e) => {
-                  if (canvasBotMarqueeDragRef.current?.active) return;
-                  if (e.pointerType !== "mouse" || geom.compactPixelGrid)
-                    return;
-                  updatePickerParallax(e);
+                selected={isSelected}
+                marqueeSelected={isMarqueeSelected}
+                favorite={isFavorite}
+                protected={isProtected}
+                accentColor={accent}
+                forceName={showFeaturedName}
+                geometry={{
+                  ...geom,
+                  glyphSize: tileGlyphSize,
+                  glyphStroke: tileGlyphStroke,
                 }}
-                onPointerMove={(e) => {
-                  handleBotContextPointerMove(e);
-                  if (canvasBotMarqueeDragRef.current?.active) return;
-                  if (geom.compactPixelGrid) return;
-                  updatePickerParallax(e);
-                }}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (event.ctrlKey) {
-                    toggleCanvasBotSelection(b.id);
-                    return;
-                  }
-                  const multiSelectionIds =
-                    canvasSelectedBotIds.size > 1 &&
-                    canvasSelectedBotIds.has(b.id)
-                      ? Array.from(canvasSelectedBotIds)
-                      : [];
-                  openCanvasBotContextMenu(
-                    b,
-                    event.clientX,
-                    event.clientY,
-                    multiSelectionIds,
-                  );
-                }}
-                onClick={(e) => {
-                  if (canvasBotMarqueeSuppressClickRef.current) {
-                    canvasBotMarqueeSuppressClickRef.current = false;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                  }
-                  if (botContextSuppressClickRef.current) {
-                    botContextSuppressClickRef.current = false;
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                  }
-                  if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    toggleCanvasBotSelection(b.id);
-                    return;
-                  }
-                  const isDesktopMousePixelClick =
-                    geom.compactPixelGrid &&
-                    e.detail > 0 &&
-                    lastBotPickerPointerTypeRef.current === "mouse";
-                  if (isDesktopMousePixelClick) {
-                    focusHueLensOnBot(b);
-                  }
-                  commitEmptyStateBotSelection(b.id, e.currentTarget);
-                }}
+                renderGlyph={(glyph, options) => (
+                  <BotGlyph
+                    name={glyph}
+                    size={options.size}
+                    strokeWidth={options.strokeWidth}
+                    className={options.className}
+                  />
+                )}
                 style={tileStyle}
-              >
-                {showTileGlyph && (
-                  <span className={styles.chatBotTileBotGlyph}>
-                    {showSelectedDotGlyph ? (
-                      <>
-                        <span
-                          className={styles.chatBotTileSelectedDotGlyph}
-                          aria-hidden="true"
-                        />
-                        <BotGlyph
-                          name={b.glyph}
-                          size={tileGlyphSize}
-                          strokeWidth={tileGlyphStroke}
-                          className={styles.chatBotTileSelectedHoverGlyph}
-                        />
-                      </>
-                    ) : (
-                      <BotGlyph
-                        name={b.glyph}
-                        size={tileGlyphSize}
-                        strokeWidth={tileGlyphStroke}
-                      />
-                    )}
-                  </span>
-                )}
-                {showFeaturedName && (
-                  <span className={styles.chatBotTileFeaturedName}>
-                    {b.name}
-                  </span>
-                )}
-              </button>
+                buttonProps={{
+                  role: "radio",
+                  "aria-checked": isSelected,
+                  "aria-label":
+                    tileTraits.length > 0
+                      ? `${b.name}, ${tileTraits.join(", ")}`
+                      : b.name,
+                  "data-living-shell-focus-id": `bot:${b.id}`,
+                  "data-relationship-depth-anchor": "library",
+                  "data-relationship-depth-identity": `bot:${b.id}`,
+                  "data-canvas-bot-marquee-item": "true",
+                  "data-marquee-selected": isMarqueeSelected
+                    ? "true"
+                    : undefined,
+                  "data-zen-live-bot-chrome-avoid": "true",
+                  onPointerDown: (e) => {
+                    lastBotPickerPointerTypeRef.current = e.pointerType;
+                    startBotContextLongPress(e, b);
+                  },
+                  onPointerUp: handleBotContextPointerEnd,
+                  onPointerCancel: handleBotContextPointerEnd,
+                  onPointerEnter: (e) => {
+                    if (canvasBotMarqueeDragRef.current?.active) return;
+                    if (e.pointerType !== "mouse" || geom.compactPixelGrid)
+                      return;
+                    updatePickerParallax(e);
+                  },
+                  onPointerMove: (e) => {
+                    handleBotContextPointerMove(e);
+                    if (canvasBotMarqueeDragRef.current?.active) return;
+                    if (geom.compactPixelGrid) return;
+                    updatePickerParallax(e);
+                  },
+                  onContextMenu: (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (event.ctrlKey) {
+                      toggleCanvasBotSelection(b.id);
+                      return;
+                    }
+                    const multiSelectionIds =
+                      canvasSelectedBotIds.size > 1 &&
+                      canvasSelectedBotIds.has(b.id)
+                        ? Array.from(canvasSelectedBotIds)
+                        : [];
+                    openCanvasBotContextMenu(
+                      b,
+                      event.clientX,
+                      event.clientY,
+                      multiSelectionIds,
+                    );
+                  },
+                  onClick: (e) => {
+                    if (canvasBotMarqueeSuppressClickRef.current) {
+                      canvasBotMarqueeSuppressClickRef.current = false;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      return;
+                    }
+                    if (botContextSuppressClickRef.current) {
+                      botContextSuppressClickRef.current = false;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      return;
+                    }
+                    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      toggleCanvasBotSelection(b.id);
+                      return;
+                    }
+                    const isDesktopMousePixelClick =
+                      geom.compactPixelGrid &&
+                      e.detail > 0 &&
+                      lastBotPickerPointerTypeRef.current === "mouse";
+                    if (isDesktopMousePixelClick) {
+                      focusHueLensOnBot(b);
+                    }
+                    commitEmptyStateBotSelection(b.id, e.currentTarget);
+                  },
+                }}
+              />
             );
           })}
-        </div>
+        </BotPickerGrid>
       </div>
     );
   };
@@ -98691,16 +98679,19 @@ function HomeContent(): React.JSX.Element {
       };
       modelControls?: React.ReactNode;
       voiceLocalPremiumFallback?: boolean;
+      liveSessionName?: LiveSessionChromeName;
+      voiceTutorialTarget?: string;
       recordedReplay?: boolean;
     } = {},
   ): React.JSX.Element => {
     const liveChromePolicy = options.liveSessionActive
-      ? liveSessionChromePolicy("Signal")
+      ? liveSessionChromePolicy(options.liveSessionName ?? "Signal")
       : null;
     const voiceSelectorOptions = {
       disabled: liveChromePolicy?.disabledNavbarActions.voice === true,
       disabledReason: liveChromePolicy?.disabledNavbarActionTooltips.voice,
-      tutorialTarget: "botcast-voice-mode",
+      tutorialTarget:
+        options.voiceTutorialTarget ?? "botcast-voice-mode",
       localPremiumFallback: options.voiceLocalPremiumFallback === true,
     };
     return (
@@ -120635,8 +120626,6 @@ function HomeContent(): React.JSX.Element {
       ? normalizeAccentForTheme(bot.color, resolvedTheme)
       : "#f5f5f5";
     const showPixelGridGlyph = geom?.compactPixelGrid === true;
-    const showSelectedDotGlyph = geom?.selectedDotGlyph === true && selected;
-    const showTileGlyph = !geom?.hideGlyphByDefault || showPixelGridGlyph;
     const showFeaturedName =
       !geom?.compactPixelGrid &&
       (geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP) >=
@@ -120653,27 +120642,6 @@ function HomeContent(): React.JSX.Element {
     const tileGlyphStroke = showPixelGridGlyph
       ? PICKER_PIXEL_GLYPH_STROKE
       : (geom?.glyphStroke ?? 1.8);
-    const tileClassNameParts = [
-      styles.chatBotTile,
-      styles.coffeeCanvasBotTile,
-      selected ? styles.chatBotTileSelected : null,
-      offlineProtected ? styles.chatBotTileProtected : null,
-      geom?.namedFlatTile || geom?.flattenTile ? styles.chatBotTileFlat : null,
-      geom?.solidSwatch ? styles.chatBotTileSolidSwatch : null,
-      !geom?.solidSwatch && geom?.hideGlyphByDefault
-        ? styles.chatBotTileSwatchOnly
-        : null,
-      showFeaturedName ? styles.chatBotTileWithName : null,
-      showFeaturedName &&
-      (geom?.namedFlatTile ||
-        geom?.flattenTile ||
-        (geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP) <=
-          PICKER_TILE_COMPACT_NAME_MAX_SIZE)
-        ? styles.chatBotTileNamedFlat
-        : null,
-    ];
-    const tileClassName = tileClassNameParts.filter(Boolean).join(" ");
-    const botTileTooltip = showFeaturedName ? undefined : bot.name;
     const showOfflineProtectedBadge =
       offlineProtected &&
       showFeaturedName &&
@@ -120685,53 +120653,40 @@ function HomeContent(): React.JSX.Element {
     } as React.CSSProperties;
     return (
       <li key={bot.id}>
-        <button
-          type="button"
-          role="option"
-          className={tileClassName}
-          data-bot-id={bot.id}
-          data-selected={selected ? "true" : undefined}
-          data-offline-protected={offlineProtected ? "true" : undefined}
-          disabled={disabled}
-          aria-selected={selected}
-          aria-label={
-            offlineProtected
-              ? `${bot.name} (offline-only, protected)`
-              : bot.name
-          }
-          data-glyph-tooltip={botTileTooltip}
-          title={botTileTooltip}
+        <BotPickerTile
+          item={{
+            id: bot.id,
+            name: bot.name,
+            color: bot.color,
+            glyph: bot.glyph,
+          }}
+          selected={selected}
+          protected={offlineProtected}
+          forceName={showFeaturedName}
+          accentColor={accent}
+          className={styles.coffeeCanvasBotTile}
+          geometry={{
+            tileSize:
+              geom?.tileSize ?? PICKER_LOW_COUNT_TILE_SIZE_DESKTOP,
+            glyphSize: tileGlyphSize,
+            glyphStroke: tileGlyphStroke,
+            compactPixelGrid: geom?.compactPixelGrid,
+            flattenTile: geom?.flattenTile,
+            namedFlatTile: geom?.namedFlatTile,
+            solidSwatch: geom?.solidSwatch,
+            hideGlyphByDefault: geom?.hideGlyphByDefault,
+            selectedDotGlyph: geom?.selectedDotGlyph,
+          }}
+          renderGlyph={(glyph, options) => (
+            <BotGlyph
+              name={glyph}
+              size={options.size}
+              strokeWidth={options.strokeWidth}
+              className={options.className}
+            />
+          )}
           style={tileStyle}
-          onClick={() => toggleCoffeeBot(bot.id)}
-        >
-          {showTileGlyph ? (
-            <span className={styles.chatBotTileBotGlyph} aria-hidden="true">
-              {showSelectedDotGlyph ? (
-                <>
-                  <span
-                    className={styles.chatBotTileSelectedDotGlyph}
-                    aria-hidden="true"
-                  />
-                  <BotGlyph
-                    name={bot.glyph}
-                    size={tileGlyphSize}
-                    strokeWidth={tileGlyphStroke}
-                    className={styles.chatBotTileSelectedHoverGlyph}
-                  />
-                </>
-              ) : (
-                <BotGlyph
-                  name={bot.glyph}
-                  size={tileGlyphSize}
-                  strokeWidth={tileGlyphStroke}
-                />
-              )}
-            </span>
-          ) : null}
-          {showFeaturedName ? (
-            <span className={styles.chatBotTileFeaturedName}>{bot.name}</span>
-          ) : null}
-          {showOfflineProtectedBadge ? (
+          badge={showOfflineProtectedBadge ? (
             <span
               className={styles.coffeeCanvasBotTileBadge}
               aria-hidden="true"
@@ -120740,7 +120695,18 @@ function HomeContent(): React.JSX.Element {
               Local
             </span>
           ) : null}
-        </button>
+          buttonProps={{
+            role: "option",
+            "data-selected": selected ? "true" : undefined,
+            "data-offline-protected": offlineProtected ? "true" : undefined,
+            disabled,
+            "aria-selected": selected,
+            "aria-label": offlineProtected
+              ? `${bot.name} (offline-only, protected)`
+              : bot.name,
+            onClick: () => toggleCoffeeBot(bot.id),
+          }}
+        />
       </li>
     );
   };
@@ -125564,14 +125530,15 @@ function HomeContent(): React.JSX.Element {
                 {coffeePickerFilteredEmptyText}
               </p>
             ) : (
-              <ul
+              <BotPickerGrid
+                as="ul"
                 className={coffeeCanvasBotGridClassName}
                 role="listbox"
-                aria-label="Bots available for Coffee"
+                ariaLabel="Bots available for Coffee"
                 style={coffeeCanvasBotGridStyle}
               >
                 {coffeeFilteredBots.map(renderCoffeeBotTile)}
-              </ul>
+              </BotPickerGrid>
             )}
           </section>
         ) : null}
@@ -128365,6 +128332,66 @@ function HomeContent(): React.JSX.Element {
   // Root/default routing now opens product Chat. This branch stays as a
   // defensive fallback for stale in-memory navigation state only.
   if (view === "debate") {
+    const debateProvider = settings?.preferredProvider ?? "local";
+    const debateResponseMode = responseModeForProvider(debateProvider);
+    const debateResolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode: debateResponseMode,
+      providerPreference: debateProvider,
+      choices: visibleModelChoicesByProvider(
+        modelCatalog,
+        settings,
+        debateModelChoiceByProvider,
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const debateModelProvider = debateResolvedChoice.provider;
+    const debateModelChoice = debateResolvedChoice.modelChoice;
+    const debateAccountDefaultModel = settings
+      ? debateResponseMode === "local"
+        ? visibleConcreteModelChoiceForProvider(
+            modelCatalog,
+            settings,
+            "local",
+            settings.preferredLocalModel,
+          )
+        : visibleConcreteOnlineModelChoice(
+            modelCatalog,
+            settings,
+            settings.preferredOnlineModel,
+          )
+      : AUTO_MODEL_CHOICE;
+    const debateAccountDefaultProvider =
+      debateResponseMode === "local"
+        ? "local"
+        : (onlineChatModelOptions.find(
+            (model) => model.id === debateAccountDefaultModel,
+          )?.provider ??
+          inferOnlineProviderForModelId(debateAccountDefaultModel));
+    const debateEffectiveProvider =
+      debateModelChoice === AUTO_MODEL_CHOICE
+        ? debateAccountDefaultProvider
+        : debateModelProvider;
+    const debateModelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
+      settings,
+      debateResponseMode,
+      modelOptionsForResponseMode(
+        modelCatalog,
+        settings,
+        debateResponseMode,
+      ),
+      debateModelChoice,
+      debateModelProvider,
+    );
+    const debateAccountDefaultModelLabel =
+      debateAccountDefaultModel === AUTO_MODEL_CHOICE
+        ? "Account default"
+        : (debateModelOptions.find(
+            (option) => option.id === debateAccountDefaultModel,
+          )?.label ?? modelLabelFromId(debateAccountDefaultModel));
+    const debateLiveChromePolicy = debateLiveSessionActive
+      ? liveSessionChromePolicy("Debate")
+      : null;
     const initialDebateBotIds =
       activeBotLibraryGroupFilter?.botIds.length
         ? activeBotLibraryGroupFilter.botIds
@@ -128376,6 +128403,7 @@ function HomeContent(): React.JSX.Element {
       name: bot.name,
       color: bot.color,
       glyph: bot.glyph,
+      avatarDetails: bot.avatarDetails ?? null,
       hardMuted: botPowerIsMutedV1(bot.powers),
     }));
     const playDebateUtterance = async (
@@ -128422,44 +128450,298 @@ function HomeContent(): React.JSX.Element {
           ),
           producerGuest: utterance.player,
         },
-        {},
+        utterance.lifecycle ?? {},
         1,
         utterance.event.sideId === "for"
           ? -0.36
           : utterance.event.sideId === "against"
             ? 0.36
             : 0,
+        "debate",
       );
     };
     return (
-      <div className={themeClass}>
-        <DebateExperience
-          bots={debateBots}
-          initialBotIds={initialDebateBotIds}
-          preferredProvider={settings?.preferredProvider ?? "local"}
-          graphicsQuality={graphicsQuality}
-          theme={resolvedTheme}
-          request={api}
-          onExit={() => {
-            stopBotcastUtterance();
-            const origin = debateOriginLocationRef.current;
-            debateOriginLocationRef.current = null;
-            if (origin) {
-              router.replace(origin);
-              return;
-            }
-            navigateToView("chat");
-          }}
-          onUtterance={playDebateUtterance}
-          onStopUtterance={stopBotcastUtterance}
-          onResetTutorial={() => resetSingleModeTutorial("debate")}
-        />
+      <main
+        className={`${styles.appLayout} ${themeClass} ${styles.debateShell}`}
+        data-chat-sidebar-hidden="true"
+        data-chrome-language="studio"
+        data-debate-shell="true"
+      >
+        <section className={styles.debateMain}>
+          {renderSharedAppletNavbar("Debate tools", {
+            showVoiceSelector: true,
+            liveSessionActive: debateLiveSessionActive,
+            liveSessionName: "Debate",
+            voiceTutorialTarget: "debate-voice-mode",
+            voiceLocalPremiumFallback: blocksOnlineCapabilities(
+              debateResponseMode,
+            ),
+            modelControls: (
+              <>
+                {renderProviderModeToggle(
+                  styles.chatHeaderModeToggle,
+                  false,
+                  debateLiveChromePolicy?.lockMessage ?? null,
+                  false,
+                )}
+                <ComposerModelPicker
+                  value={debateModelChoice}
+                  onChange={(nextChoice) => {
+                    const applied = applyModelChoiceForResponseMode({
+                      responseMode: debateResponseMode,
+                      currentChoices: debateModelChoiceByProvider,
+                      nextChoice,
+                      options: debateModelOptions,
+                      providerPreference: debateProvider,
+                    });
+                    setDebateModelChoiceByProvider((previous) =>
+                      applyModelChoiceForResponseMode({
+                        responseMode: debateResponseMode,
+                        currentChoices: previous,
+                        nextChoice,
+                        options: debateModelOptions,
+                        providerPreference: debateProvider,
+                      }).choices,
+                    );
+                    if (
+                      nextChoice !== AUTO_MODEL_CHOICE &&
+                      applied.provider !== debateProvider
+                    ) {
+                      void switchProvider(applied.provider);
+                    }
+                  }}
+                  options={debateModelOptions}
+                  provider={
+                    debateResponseMode === "local" ? "local" : "online"
+                  }
+                  loading={modelCatalogLoading}
+                  disabled={!settings || debateLiveSessionActive}
+                  title={
+                    debateLiveChromePolicy?.lockMessage ??
+                    "One model for motion synthesis, role consent, every speaker, and every ballot in the next Debate."
+                  }
+                  ariaLabel="Debate model"
+                  placement="down"
+                  minMenuWidthPx={180}
+                  autoOptionLabel="Account default"
+                  autoOptionTriggerLabel={debateAccountDefaultModelLabel}
+                  autoOptionMetaOverride="Uses the account model for the entire Debate."
+                  settingsDefaultModelId={chatSettingsSavedDefaultModelId(
+                    settings,
+                    debateResponseMode === "local" ? "local" : "online",
+                  )}
+                  dismissPopoversSignal={composerPopoverDismissSignal}
+                />
+              </>
+            ),
+          })}
+          <div
+            className={styles.debateScrollRegion}
+            data-debate-scroll-region="true"
+          >
+            <DebateExperience
+              bots={debateBots}
+              botGroups={botLibraryGroups.map((group) => ({
+                id: group.id,
+                name: group.name,
+                botIds: group.botIds,
+              }))}
+              initialBotIds={initialDebateBotIds}
+              storageScopeId={user?.id ?? "signed-out"}
+              preferredProvider={debateEffectiveProvider}
+              modelOverride={
+                debateModelChoice === AUTO_MODEL_CHOICE ||
+                debateModelChoice === DISABLED_MODEL_CHOICE
+                  ? null
+                  : {
+                      provider: debateModelProvider,
+                      model: debateModelChoice,
+                    }
+              }
+              graphicsQuality={graphicsQuality}
+              theme={resolvedTheme}
+              audioEnabled={Boolean(
+                settings &&
+                voicePlaybackSelectionRef.current.voiceMode !== "mute" &&
+                settings.voiceEffectsEnabled !== false &&
+                settings.voiceVolume > 0,
+              )}
+              audioVolume={settings?.voiceVolume ?? 0}
+              request={api}
+              renderBotGlyph={(glyph, options) => (
+                <BotGlyph
+                  name={glyph}
+                  size={options.size}
+                  strokeWidth={options.strokeWidth}
+                  className={options.className}
+                />
+              )}
+              renderBotAvatar={(botSnapshot, avatarState) => {
+                const liveBot =
+                  bots.find(
+                    (candidate) => candidate.id === botSnapshot.id,
+                  ) ?? null;
+                const glyph: BotGlyphName = isBotGlyphName(
+                  liveBot?.glyph ?? botSnapshot.glyph,
+                )
+                  ? (liveBot?.glyph ?? botSnapshot.glyph) as BotGlyphName
+                  : DEFAULT_BOT_GLYPH;
+                const faceStyle = resolveBotFaceStyleForBot(
+                  liveBot ?? {
+                    systemPrompt: botSnapshot.systemPrompt,
+                  },
+                );
+                const moderatorLookAtRole =
+                  avatarState.role === "moderator"
+                    ? avatarState.lookAtRole
+                    : null;
+                const faceScaleY =
+                  avatarState.role === "against"
+                    ? zenLiveBotFaceScaleYForCanvasSide("right")
+                    : avatarState.role === "for"
+                      ? zenLiveBotFaceScaleYForCanvasSide("left")
+                      : moderatorLookAtRole === "for"
+                        ? zenLiveBotFaceScaleYForCanvasSide("right")
+                        : moderatorLookAtRole === "against"
+                          ? zenLiveBotFaceScaleYForCanvasSide("left")
+                          : BOT_AVATAR_CANONICAL_FACE_SCALE_Y;
+                const debateMouthShape =
+                  avatarState.talking && avatarState.speechTiming
+                    ? voicePlaybackSelectionRef.current.voiceMode === "bottish"
+                      ? bottishMouthShapeAtAlignedElapsedMs({
+                          text: avatarState.speechTiming.text,
+                          elapsedMs: avatarState.speechTiming.elapsedMs,
+                          durationMs: avatarState.speechTiming.durationMs,
+                          alignment: avatarState.speechTiming.alignment,
+                        })
+                      : crtSpeechMouthShapeAtAlignedElapsedMs({
+                          text: avatarState.speechTiming.text,
+                          elapsedMs: avatarState.speechTiming.elapsedMs,
+                          durationMs: avatarState.speechTiming.durationMs,
+                          alignment: avatarState.speechTiming.alignment,
+                        })
+                    : (avatarState.foleyMouthShape ?? "closed");
+                const debateMouthActive =
+                  avatarState.talking || debateMouthShape !== "closed";
+                return (
+                  <span
+                    className={`${styles.zenLiveBotPresencePlate} ${styles.debateBotPresencePlate}`}
+                    data-debate-bot-avatar="true"
+                    data-debate-role={avatarState.role}
+                    data-debate-compact={
+                      avatarState.compact ? "true" : undefined
+                    }
+                    data-theme={resolvedTheme}
+                    data-mood="neutral"
+                    data-talking={
+                      avatarState.talking ? "true" : undefined
+                    }
+                    data-thinking={
+                      avatarState.thinking ? "true" : undefined
+                    }
+                    data-power-avatar-color-cycle={
+                      avatarState.colorCycle ? "spectrum" : undefined
+                    }
+                    style={{
+                      ...botAccentStyle(
+                        botSnapshot.color ?? PRISM_DEFAULT_ACCENT,
+                        resolvedTheme,
+                      ),
+                      ["--coffee-plate-emoji-face-scale-y" as string]:
+                        faceScaleY,
+                      ["--avatar-details-facing-scale-x" as string]:
+                        botAvatarDetailsFacingScaleX(faceScaleY),
+                    }}
+                    aria-hidden="true"
+                  >
+                    <BotAmbientPresenceRig
+                      theme={resolvedTheme}
+                      isTalking={debateMouthActive}
+                      motionActive={!debateMouthActive && !avatarState.thinking}
+                      phaseOffsetSeconds={
+                        avatarState.role === "moderator"
+                          ? 2.4
+                          : avatarState.role === "against"
+                            ? 4.8
+                            : 0
+                      }
+                    >
+                      <ZenLiveBotMannequin
+                        glyph={glyph}
+                        faceStyle={faceStyle}
+                        voicePreset={coffeeSeatVoicePreset(
+                          liveBot ?? {
+                            systemPrompt: botSnapshot.systemPrompt,
+                          },
+                        )}
+                        isTalking={debateMouthActive}
+                        blinkWhileTalking
+                        mouthShape={debateMouthShape}
+                        moodHint="neutral"
+                        scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}
+                        thinkingScheduleKey={`debate-${avatarState.role}-${botSnapshot.id}-thinking`}
+                        showThinkingSpinner={avatarState.thinking}
+                        detailLevel={avatarState.compact ? "reduced" : "full"}
+                        eyeAttentionState={
+                          avatarState.thinking
+                            ? "thinking"
+                            : avatarState.talking
+                              ? "speaking"
+                              : "listening"
+                        }
+                        eyeTargetDirection={
+                          avatarState.role === "for"
+                            ? 1
+                            : avatarState.role === "against"
+                              ? -1
+                              : moderatorLookAtRole === "for"
+                                ? -1
+                                : moderatorLookAtRole === "against"
+                                  ? 1
+                                  : 0
+                        }
+                        screenMaterialSeed={botScreenMaterialSeedForBot(
+                          liveBot,
+                          botSnapshot.id,
+                        )}
+                        frameMaterialSeed={botFrameMaterialSeedForBot(
+                          liveBot,
+                          botSnapshot.id,
+                        )}
+                        avatarDetails={botSnapshot.avatarDetails}
+                        avatarDetailsColor={normalizeAccentForTheme(
+                          botSnapshot.color ?? PRISM_DEFAULT_ACCENT,
+                          resolvedTheme,
+                        )}
+                      />
+                    </BotAmbientPresenceRig>
+                  </span>
+                );
+              }}
+              onExit={() => {
+                stopBotcastUtterance();
+                const origin = debateOriginLocationRef.current;
+                debateOriginLocationRef.current = null;
+                if (origin) {
+                  router.replace(origin);
+                  return;
+                }
+                navigateToView("chat");
+              }}
+              onUtterance={playDebateUtterance}
+              onStopUtterance={stopBotcastUtterance}
+              onLiveSessionActiveChange={setDebateLiveSessionActive}
+              onResetTutorial={() => resetSingleModeTutorial("debate")}
+            />
+          </div>
+        </section>
+        {renderSharedPanels()}
         {renderModeTutorialOverlay()}
         {renderViewSwitchOverlay()}
+        {renderDesktopFirstRunChecklist()}
         {renderBackendUnavailableNotice("banner")}
-        {renderGlobalPrismCompanion()}
         <GlyphTooltipLayer />
-      </div>
+      </main>
     );
   }
   if (view === "coffee") return renderCoffeeShell();
@@ -128555,6 +128837,11 @@ function HomeContent(): React.JSX.Element {
         <BotcastExperience
           key={`signal:${signalOrchestrationEpoch}`}
           bots={signalBots}
+          botGroups={botLibraryGroups.map((group) => ({
+            id: group.id,
+            name: group.name,
+            botIds: group.botIds,
+          }))}
           initialCastBotIds={signalInitialCastBotIds}
           request={api}
           preferredProvider={signalProvider}
@@ -128571,6 +128858,14 @@ function HomeContent(): React.JSX.Element {
               : signalAccountDefaultModel
           }
           theme={resolvedTheme}
+          renderBotGlyph={(glyph, options) => (
+            <BotGlyph
+              name={glyph}
+              size={options.size}
+              strokeWidth={options.strokeWidth}
+              className={options.className}
+            />
+          )}
           producerName={user?.displayName?.trim() || "You"}
           autoCorrectGuestAnswerEnabled={
             settings?.composerWritingAssist !== false
@@ -132316,10 +132611,10 @@ function HomeContent(): React.JSX.Element {
                               handleTouchPickerCancel(e);
                             }}
                           >
-                            <div
+                            <BotPickerGrid
                               className={pickerClassName}
                               role="radiogroup"
-                              aria-label="Bot for this chat"
+                              ariaLabel="Bot for this chat"
                               style={pickerStyle}
                             >
                               {pickerCells.map((b, cellIndex) => {
@@ -132363,51 +132658,11 @@ function HomeContent(): React.JSX.Element {
                                       "--bot-color": accent,
                                     } as React.CSSProperties)
                                   : undefined;
-                                // Six density levels: full card, flat card,
-                                // glyphless card, borderless square pixel, compact
-                                // gapless pixel grid, then selected-dot pixel grid.
-                                let tileClassName = styles.chatBotTile;
-                                if (isProtected) {
-                                  tileClassName += ` ${styles.chatBotTileProtected}`;
-                                }
-                                if (isSelected) {
-                                  tileClassName += ` ${styles.chatBotTileSelected}`;
-                                }
-                                if (isMarqueeSelected) {
-                                  tileClassName += ` ${styles.chatBotTileMarqueeSelected}`;
-                                }
-                                if (geom.namedFlatTile || geom.flattenTile) {
-                                  tileClassName += ` ${styles.chatBotTileFlat}`;
-                                }
-                                if (geom.solidSwatch) {
-                                  tileClassName += ` ${styles.chatBotTileSolidSwatch}`;
-                                } else if (geom.hideGlyphByDefault) {
-                                  tileClassName += ` ${styles.chatBotTileSwatchOnly}`;
-                                }
                                 const showPixelGridGlyph =
                                   geom.compactPixelGrid;
-                                const showSelectedDotGlyph =
-                                  geom.selectedDotGlyph && isSelected;
-                                const showTileGlyph =
-                                  !geom.hideGlyphByDefault ||
-                                  showPixelGridGlyph;
                                 const showFeaturedName =
                                   !geom.compactPixelGrid &&
                                   geom.tileSize >= PICKER_TILE_NAME_MIN_SIZE;
-                                const botTileTooltip = showFeaturedName
-                                  ? undefined
-                                  : b.name;
-                                if (showFeaturedName) {
-                                  tileClassName += ` ${styles.chatBotTileWithName}`;
-                                  if (
-                                    geom.namedFlatTile ||
-                                    geom.flattenTile ||
-                                    geom.tileSize <=
-                                      PICKER_TILE_COMPACT_NAME_MAX_SIZE
-                                  ) {
-                                    tileClassName += ` ${styles.chatBotTileNamedFlat}`;
-                                  }
-                                }
                                 const tileGlyphSize = showPixelGridGlyph
                                   ? Math.max(
                                       PICKER_PIXEL_GLYPH_MIN_SIZE,
@@ -132421,169 +132676,137 @@ function HomeContent(): React.JSX.Element {
                                   ? PICKER_PIXEL_GLYPH_STROKE
                                   : geom.glyphStroke;
                                 return (
-                                  <button
+                                  <BotPickerTile
                                     key={b.id}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={isSelected}
-                                    aria-label={
-                                      tileTraits.length > 0
-                                        ? `${b.name}, ${tileTraits.join(", ")}`
-                                        : b.name
-                                    }
-                                    className={tileClassName}
-                                    data-bot-id={b.id}
-                                    data-canvas-bot-marquee-item="true"
-                                    data-marquee-selected={
-                                      isMarqueeSelected ? "true" : undefined
-                                    }
-                                    data-zen-live-bot-chrome-avoid="true"
-                                    data-glyph-tooltip={botTileTooltip}
-                                    data-favorite={
-                                      isFavorite ? "true" : undefined
-                                    }
-                                    data-delete-protected={
-                                      isProtected ? "true" : undefined
-                                    }
-                                    onPointerDown={(e) => {
-                                      lastBotPickerPointerTypeRef.current =
-                                        e.pointerType;
-                                      startBotContextLongPress(e, b);
+                                    item={{
+                                      id: b.id,
+                                      name: b.name,
+                                      color: b.color,
+                                      glyph: b.glyph,
                                     }}
-                                    onPointerUp={handleBotContextPointerEnd}
-                                    onPointerCancel={handleBotContextPointerEnd}
-                                    onPointerEnter={(e) => {
-                                      if (
-                                        canvasBotMarqueeDragRef.current?.active
-                                      )
-                                        return;
-                                      if (
-                                        e.pointerType !== "mouse" ||
-                                        geom.compactPixelGrid
-                                      )
-                                        return;
-                                      updatePickerParallax(e);
+                                    selected={isSelected}
+                                    marqueeSelected={isMarqueeSelected}
+                                    favorite={isFavorite}
+                                    protected={isProtected}
+                                    accentColor={accent}
+                                    forceName={showFeaturedName}
+                                    geometry={{
+                                      ...geom,
+                                      glyphSize: tileGlyphSize,
+                                      glyphStroke: tileGlyphStroke,
                                     }}
-                                    onPointerMove={(e) => {
-                                      handleBotContextPointerMove(e);
-                                      if (
-                                        canvasBotMarqueeDragRef.current?.active
-                                      )
-                                        return;
-                                      if (geom.compactPixelGrid) return;
-                                      updatePickerParallax(e);
-                                    }}
-                                    onContextMenu={(event) => {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      if (event.ctrlKey) {
-                                        toggleCanvasBotSelection(b.id);
-                                        return;
-                                      }
-                                      const multiSelectionIds =
-                                        canvasSelectedBotIds.size > 1 &&
-                                        canvasSelectedBotIds.has(b.id)
-                                          ? Array.from(canvasSelectedBotIds)
-                                          : [];
-                                      openCanvasBotContextMenu(
-                                        b,
-                                        event.clientX,
-                                        event.clientY,
-                                        multiSelectionIds,
-                                      );
-                                    }}
-                                    onClick={(e) => {
-                                      if (
-                                        canvasBotMarqueeSuppressClickRef.current
-                                      ) {
-                                        canvasBotMarqueeSuppressClickRef.current = false;
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        return;
-                                      }
-                                      if (botContextSuppressClickRef.current) {
-                                        botContextSuppressClickRef.current = false;
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        return;
-                                      }
-                                      if (
-                                        e.shiftKey ||
-                                        e.ctrlKey ||
-                                        e.metaKey
-                                      ) {
-                                        e.preventDefault();
-                                        e.stopPropagation();
-                                        toggleCanvasBotSelection(b.id);
-                                        return;
-                                      }
-                                      // Setting selectedBotId also makes the
-                                      // compose dropdown auto-populate (both
-                                      // read from the same state).
-                                      // Dense color-map mode mirrors the Chat
-                                      // picker. Touch Stage 3+ snaps to a hue region
-                                      // before individual selection; mouse and
-                                      // keyboard activation select the bot card
-                                      // directly so visible cards always feel
-                                      // clickable.
-                                      // Grayscale bots fall through to direct
-                                      // selection because the lens cannot target
-                                      // them.
-                                      const isDesktopMousePixelClick =
-                                        geom.compactPixelGrid &&
-                                        e.detail > 0 &&
-                                        lastBotPickerPointerTypeRef.current ===
-                                          "mouse";
-                                      if (isDesktopMousePixelClick) {
-                                        focusHueLensOnBot(b);
-                                      }
-                                      commitEmptyStateBotSelection(b.id);
-                                    }}
+                                    renderGlyph={(glyph, options) => (
+                                      <BotGlyph
+                                        name={glyph}
+                                        size={options.size}
+                                        strokeWidth={options.strokeWidth}
+                                        className={options.className}
+                                      />
+                                    )}
                                     style={tileStyle}
-                                  >
-                                    {showTileGlyph && (
-                                      <span
-                                        className={styles.chatBotTileBotGlyph}
-                                      >
-                                        {showSelectedDotGlyph ? (
-                                          <>
-                                            <span
-                                              className={
-                                                styles.chatBotTileSelectedDotGlyph
-                                              }
-                                              aria-hidden="true"
-                                            />
-                                            <BotGlyph
-                                              name={b.glyph}
-                                              size={tileGlyphSize}
-                                              strokeWidth={tileGlyphStroke}
-                                              className={
-                                                styles.chatBotTileSelectedHoverGlyph
-                                              }
-                                            />
-                                          </>
-                                        ) : (
-                                          <BotGlyph
-                                            name={b.glyph}
-                                            size={tileGlyphSize}
-                                            strokeWidth={tileGlyphStroke}
-                                          />
-                                        )}
-                                      </span>
-                                    )}
-                                    {showFeaturedName && (
-                                      <span
-                                        className={
-                                          styles.chatBotTileFeaturedName
+                                    buttonProps={{
+                                      role: "radio",
+                                      "aria-checked": isSelected,
+                                      "aria-label":
+                                        tileTraits.length > 0
+                                          ? `${b.name}, ${tileTraits.join(", ")}`
+                                          : b.name,
+                                      "data-canvas-bot-marquee-item": "true",
+                                      "data-marquee-selected":
+                                        isMarqueeSelected ? "true" : undefined,
+                                      "data-zen-live-bot-chrome-avoid": "true",
+                                      onPointerDown: (e) => {
+                                        lastBotPickerPointerTypeRef.current =
+                                          e.pointerType;
+                                        startBotContextLongPress(e, b);
+                                      },
+                                      onPointerUp: handleBotContextPointerEnd,
+                                      onPointerCancel:
+                                        handleBotContextPointerEnd,
+                                      onPointerEnter: (e) => {
+                                        if (
+                                          canvasBotMarqueeDragRef.current
+                                            ?.active
+                                        )
+                                          return;
+                                        if (
+                                          e.pointerType !== "mouse" ||
+                                          geom.compactPixelGrid
+                                        )
+                                          return;
+                                        updatePickerParallax(e);
+                                      },
+                                      onPointerMove: (e) => {
+                                        handleBotContextPointerMove(e);
+                                        if (
+                                          canvasBotMarqueeDragRef.current
+                                            ?.active
+                                        )
+                                          return;
+                                        if (geom.compactPixelGrid) return;
+                                        updatePickerParallax(e);
+                                      },
+                                      onContextMenu: (event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        if (event.ctrlKey) {
+                                          toggleCanvasBotSelection(b.id);
+                                          return;
                                         }
-                                      >
-                                        {b.name}
-                                      </span>
-                                    )}
-                                  </button>
+                                        const multiSelectionIds =
+                                          canvasSelectedBotIds.size > 1 &&
+                                          canvasSelectedBotIds.has(b.id)
+                                            ? Array.from(canvasSelectedBotIds)
+                                            : [];
+                                        openCanvasBotContextMenu(
+                                          b,
+                                          event.clientX,
+                                          event.clientY,
+                                          multiSelectionIds,
+                                        );
+                                      },
+                                      onClick: (e) => {
+                                        if (
+                                          canvasBotMarqueeSuppressClickRef.current
+                                        ) {
+                                          canvasBotMarqueeSuppressClickRef.current = false;
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          return;
+                                        }
+                                        if (
+                                          botContextSuppressClickRef.current
+                                        ) {
+                                          botContextSuppressClickRef.current = false;
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          return;
+                                        }
+                                        if (
+                                          e.shiftKey ||
+                                          e.ctrlKey ||
+                                          e.metaKey
+                                        ) {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          toggleCanvasBotSelection(b.id);
+                                          return;
+                                        }
+                                        const isDesktopMousePixelClick =
+                                          geom.compactPixelGrid &&
+                                          e.detail > 0 &&
+                                          lastBotPickerPointerTypeRef.current ===
+                                            "mouse";
+                                        if (isDesktopMousePixelClick) {
+                                          focusHueLensOnBot(b);
+                                        }
+                                        commitEmptyStateBotSelection(b.id);
+                                      },
+                                    }}
+                                  />
                                 );
                               })}
-                            </div>
+                            </BotPickerGrid>
                           </div>
                         );
                       })()}
