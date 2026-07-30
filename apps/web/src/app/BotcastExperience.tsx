@@ -84,6 +84,7 @@ import {
   botIdentityShapeshiftTransitionActiveV1,
   createBotIdentityMirrorStateV1,
   buildSignalMusicProfile,
+  hexToHsl,
   normalizeAccentForTheme,
   normalizeBotcastStudioAtmosphereMix,
   normalizeBotcastCameraFraming,
@@ -748,6 +749,296 @@ function signalPickerGroupsForBots(
       })
       .filter((group) => group.botIds.length > 0),
   ];
+}
+
+function signalBotDropdownHue(bot: BotcastBotSummary): number | null {
+  const color = bot.color?.trim();
+  if (!color || !/^#[0-9a-f]{6}$/iu.test(color)) return null;
+  const { h, s } = hexToHsl(color);
+  return s > 0.06 ? h : null;
+}
+
+function signalCircularHueDistance(left: number, right: number): number {
+  const difference = Math.abs(left - right) % 360;
+  return Math.min(difference, 360 - difference);
+}
+
+function SignalBotDropdown({
+  bots,
+  selectedId,
+  searchValue,
+  onSearchChange,
+  onSelect,
+  ariaLabel,
+  listboxId,
+  theme,
+  renderBotGlyph,
+  disabled = false,
+}: {
+  bots: readonly BotcastBotSummary[];
+  selectedId: string;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  onSelect: (botId: string) => void;
+  ariaLabel: string;
+  listboxId: string;
+  theme: "light" | "dark";
+  renderBotGlyph: BotPickerGlyphRenderer;
+  disabled?: boolean;
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [hueLensCenter, setHueLensCenter] = useState<number | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  const normalizedSearch = searchValue.trim().toLocaleLowerCase();
+  const visibleBots = useMemo(
+    () =>
+      bots
+        .filter(
+          (bot) =>
+            normalizedSearch.length === 0 ||
+            bot.name.toLocaleLowerCase().includes(normalizedSearch),
+        )
+        .sort((left, right) => {
+          const leftHue = signalBotDropdownHue(left);
+          const rightHue = signalBotDropdownHue(right);
+          if (leftHue === null && rightHue !== null) return 1;
+          if (leftHue !== null && rightHue === null) return -1;
+          if (leftHue !== null && rightHue !== null && leftHue !== rightHue) {
+            return leftHue - rightHue;
+          }
+          return left.name.localeCompare(right.name);
+        }),
+    [bots, normalizedSearch],
+  );
+  const hueFocusBotId = useMemo(() => {
+    if (hueLensCenter === null) return null;
+    let closestBotId: string | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const bot of visibleBots) {
+      const hue = signalBotDropdownHue(bot);
+      if (hue === null) continue;
+      const distance = signalCircularHueDistance(hue, hueLensCenter);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestBotId = bot.id;
+      }
+    }
+    return closestBotId;
+  }, [hueLensCenter, visibleBots]);
+  const selectedBot = bots.find((bot) => bot.id === selectedId) ?? null;
+  const selectedAccent = normalizeAccentForTheme(
+    selectedBot?.color ?? "#8d7cff",
+    theme,
+  );
+  const menuOpen = open && !disabled;
+  const resultLabel =
+    visibleBots.length === 0
+      ? "No bots match this view."
+      : `${visibleBots.length} bot${visibleBots.length === 1 ? "" : "s"}`;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleOutsidePointer = (event: MouseEvent): void => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutsidePointer);
+    return () =>
+      document.removeEventListener("mousedown", handleOutsidePointer);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleEscape = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!disabled || !open) return;
+    const timeout = window.setTimeout(() => setOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [disabled, open]);
+
+  useEffect(() => {
+    if (!menuOpen || !hueFocusBotId) return;
+    const timeout = window.setTimeout(() => {
+      optionRefs.current.get(hueFocusBotId)?.scrollIntoView({
+        block: "center",
+      });
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, [hueFocusBotId, menuOpen]);
+
+  const pickBot = (botId: string): void => {
+    onSelect(botId);
+    onSearchChange("");
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+
+  return (
+    <div
+      className={styles.signalBotDropdown}
+      data-open={menuOpen ? "true" : undefined}
+      data-selected={selectedBot ? "true" : undefined}
+      style={
+        {
+          ["--signal-picker-accent" as string]: selectedAccent,
+        } as CSSProperties
+      }
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        className={styles.signalBotDropdownTrigger}
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
+        aria-controls={listboxId}
+        aria-label={`${ariaLabel}${selectedBot ? `: ${selectedBot.name}` : ""}`}
+        disabled={disabled || bots.length === 0}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span
+          className={styles.signalBotDropdownTriggerGlyph}
+          aria-hidden="true"
+        >
+          {renderBotGlyph(selectedBot?.glyph ?? null, {
+            size: 18,
+            strokeWidth: 2,
+          })}
+        </span>
+        <span className={styles.signalBotDropdownTriggerName}>
+          {selectedBot?.name ?? "Choose a host"}
+        </span>
+        <span
+          className={styles.signalBotDropdownTriggerChevron}
+          aria-hidden="true"
+        >
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 10 10"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M2 3.5 L5 6.5 L8 3.5" />
+          </svg>
+        </span>
+      </button>
+      {menuOpen ? (
+        <div ref={menuRef} className={styles.signalBotDropdownMenu}>
+          <BotPickerToolbar
+            className={styles.signalBotDropdownToolbar}
+            searchValue={searchValue}
+            onSearchChange={onSearchChange}
+            searchAriaLabel={`Search ${ariaLabel.toLocaleLowerCase()}`}
+            searchPlaceholder="Search bots…"
+            resultLabel={resultLabel}
+            compact
+          />
+          <div
+            className={styles.signalBotDropdownHueLens}
+            data-active={hueLensCenter !== null ? "true" : undefined}
+          >
+            <span>Hue</span>
+            <input
+              type="range"
+              min="0"
+              max="359"
+              step="1"
+              value={hueLensCenter ?? 180}
+              onChange={(event) =>
+                setHueLensCenter(Number(event.currentTarget.value))
+              }
+              aria-label="Browse Signal hosts by hue"
+            />
+            <button
+              type="button"
+              onClick={() => setHueLensCenter(null)}
+              disabled={hueLensCenter === null}
+              aria-label="Clear Signal host hue lens"
+            >
+              ×
+            </button>
+          </div>
+          <div
+            id={listboxId}
+            className={styles.signalBotDropdownListbox}
+            role="listbox"
+            aria-label={ariaLabel}
+          >
+            {visibleBots.map((bot) => {
+              const selected = bot.id === selectedId;
+              const accent = normalizeAccentForTheme(
+                bot.color ?? "#8d7cff",
+                theme,
+              );
+              return (
+                <button
+                  key={bot.id}
+                  ref={(node) => {
+                    if (node) {
+                      optionRefs.current.set(bot.id, node);
+                    } else {
+                      optionRefs.current.delete(bot.id);
+                    }
+                  }}
+                  type="button"
+                  className={styles.signalBotDropdownOption}
+                  role="option"
+                  aria-selected={selected}
+                  data-bot-id={bot.id}
+                  style={
+                    {
+                      ["--signal-picker-accent" as string]: accent,
+                    } as CSSProperties
+                  }
+                  onClick={() => pickBot(bot.id)}
+                >
+                  <span
+                    className={styles.signalBotDropdownOptionGlyph}
+                    aria-hidden="true"
+                  >
+                    {renderBotGlyph(bot.glyph, {
+                      size: 20,
+                      strokeWidth: 2,
+                    })}
+                  </span>
+                  <span className={styles.signalBotDropdownOptionName}>
+                    {bot.name}
+                  </span>
+                  {selected ? (
+                    <span
+                      className={styles.signalBotDropdownOptionSelected}
+                      aria-hidden="true"
+                    >
+                      ✓
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+            {visibleBots.length === 0 ? (
+              <p className={styles.signalBotPickerEmpty}>No bots found.</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 const SIGNAL_ASSET_ACCEPT = "image/png,image/jpeg,image/webp";
@@ -1589,7 +1880,6 @@ export function BotcastExperience({
   const finalizedSignalRecordingIdsRef = useRef(new Set<string>());
   const [hostDraftId, setHostDraftId] = useState(initialHostBotId);
   const [hostPickerSearch, setHostPickerSearch] = useState("");
-  const [hostPickerGroupId, setHostPickerGroupId] = useState("all");
   const [showPremiseInspirationDraft, setShowPremiseInspirationDraft] =
     useState("");
   const [guestDraftId, setGuestDraftId] = useState(initialCast[1] ?? "");
@@ -8894,7 +9184,10 @@ export function BotcastExperience({
           </p>
         ) : null}
       </div>
-      <div className={styles.createShowCard}>
+      <div
+        className={styles.createShowCard}
+        data-tutorial-target="botcast-create-show"
+      >
         <label>Create a show</label>
         <PrismRefractTarget
           target={{
@@ -8925,21 +9218,20 @@ export function BotcastExperience({
               tabIndex={-1}
               data-botcast-delete-focus-fallback="true"
             >
-              {renderSignalBotPicker({
-                bots: eligibleBots.filter(
-                  (bot) =>
-                    !shows.some((show) => show.hostBotId === bot.id),
-                ),
-                selectedId: hostDraftId,
-                searchValue: hostPickerSearch,
-                onSearchChange: setHostPickerSearch,
-                groupId: hostPickerGroupId,
-                onGroupChange: setHostPickerGroupId,
-                onSelect: setHostDraftId,
-                ariaLabel: "Choose a Signal host",
-                compact: true,
-                disabled: busy,
-              })}
+              <SignalBotDropdown
+                bots={eligibleBots.filter(
+                  (bot) => !shows.some((show) => show.hostBotId === bot.id),
+                )}
+                selectedId={hostDraftId}
+                searchValue={hostPickerSearch}
+                onSearchChange={setHostPickerSearch}
+                onSelect={setHostDraftId}
+                ariaLabel="Choose a Signal host"
+                listboxId="signal-create-host-options"
+                theme={theme}
+                renderBotGlyph={renderBotGlyph}
+                disabled={busy}
+              />
             </div>
           )}
         </PrismRefractTarget>

@@ -435,6 +435,14 @@ describe("mode tutorials", () => {
     assert.match(copy, /no waiter, barista, or service bot/u);
     assert.match(copy, /two or three table replies/u);
     assert.match(copy, /invisible visit clock/u);
+    assert.match(
+      copy,
+      /recognized asterisk cue such as \*yells\*[\s\S]*ElevenLabs performance direction/u,
+    );
+    assert.match(
+      copy,
+      /fart, burp, and cough actions play their bundled Foley/u,
+    );
     assert.doesNotMatch(
       copy,
       /Have something made|Make the rounds|I’ll take the…|Surprise me|Standard house blend/u,

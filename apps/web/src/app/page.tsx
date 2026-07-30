@@ -58265,6 +58265,8 @@ function HomeContent(): React.JSX.Element {
     lastPlayedAtMs: null,
     lastPlayedAtMsByKind: {},
   });
+  const coffeeLivePlayerActionMessageRef =
+    useRef<CoffeeConversationMessage | null>(null);
   const coffeeReplayPotEventRef = useRef<CoffeeReplayTopOffEventPayload | null>(
     null,
   );
@@ -63878,6 +63880,24 @@ function HomeContent(): React.JSX.Element {
     },
     [coffeeActionSfxEligibleForKind, settings?.voiceVolume],
   );
+  useEffect(() => {
+    if (coffeeTurnRhythmState !== "userTableTyping") return;
+    const message = coffeeLivePlayerActionMessageRef.current;
+    const conversationId =
+      coffeeConversationRef.current?.id ?? coffeeConversation?.id ?? null;
+    if (!message || !conversationId) return;
+    playCoffeeActionSfxOnce(
+      "live",
+      conversationId,
+      message,
+      coffeeTypewriterLength,
+    );
+  }, [
+    coffeeConversation?.id,
+    coffeeTurnRhythmState,
+    coffeeTypewriterLength,
+    playCoffeeActionSfxOnce,
+  ]);
   const presentCoffeeAuthoredActionReactionOnce = useCallback(
     (
       source: "live" | "replay",
@@ -70951,6 +70971,7 @@ function HomeContent(): React.JSX.Element {
     setCoffeeLiveAvatarSpeech(null);
     coffeeVoiceAlignmentByMessageIdRef.current.clear();
     coffeePlayerVoiceClockRef.current = null;
+    coffeeLivePlayerActionMessageRef.current = null;
     setCoffeeInterruptedSnippet(null);
     setCoffeeLiveInterruptionCue(null);
     clearCoffeeLiveInterruptionTableSegments();
@@ -115754,6 +115775,7 @@ function HomeContent(): React.JSX.Element {
     coffeeTableSpeedNudgePointerRef.current = null;
     coffeeVoiceAlignmentByMessageIdRef.current.clear();
     coffeePlayerVoiceClockRef.current = null;
+    coffeeLivePlayerActionMessageRef.current = null;
     setCoffeeInterruptedSnippet(null);
     if (coffeeInterruptionCueTimerRef.current) {
       clearTimeout(coffeeInterruptionCueTimerRef.current);
@@ -116176,6 +116198,7 @@ function HomeContent(): React.JSX.Element {
     );
     const spokenText = extractStageDirections(text).mainText.trim();
     if (!spokenText) return null;
+    const performanceText = voicePerformanceTextFromActionCues(text);
     const displaySpokenText = getBotMentionDisplayText(spokenText);
     const englishEngine = coffeePlayerEnglishEngine({
       accountProvider: settings.preferredProvider,
@@ -116354,6 +116377,9 @@ function HomeContent(): React.JSX.Element {
                 },
                 body: JSON.stringify({
                   text: spokenText,
+                  ...(englishEngine === "elevenlabs" && performanceText
+                    ? { elevenLabsText: performanceText }
+                    : {}),
                   mode: "english",
                   engine: englishEngine,
                   explicitOnlineContext: englishEngine === "elevenlabs",
@@ -120531,6 +120557,20 @@ function HomeContent(): React.JSX.Element {
     setCoffeeDraft("");
     setCoffeeError(null);
     setCoffeePendingSpeakerBotId(null);
+    const playerActionPlan = buildBundledActionSfxPlan(trimmed);
+    coffeeLivePlayerActionMessageRef.current = playerActionPlan
+      ? {
+          id: `player-action:${activeConversation.id}:${Date.now()}`,
+          role: "user",
+          content: trimmed,
+          createdAt: new Date().toISOString(),
+        }
+      : null;
+    if (coffeeLivePlayerActionMessageRef.current) {
+      prefetchCoffeeActionSfxForMessage(
+        coffeeLivePlayerActionMessageRef.current,
+      );
+    }
     const playerVoiceDurationMs =
       draftTableText.length > 0
         ? await startCoffeePlayerVoiceForReveal(trimmed)

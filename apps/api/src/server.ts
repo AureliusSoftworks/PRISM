@@ -413,9 +413,7 @@ import {
   listLibraryGroups,
   replaceLibraryGroups,
 } from "./library-groups.ts";
-import {
-  createPrismDomainCapabilityRegistry,
-} from "./prism-domain-capabilities.ts";
+import { createPrismDomainCapabilityRegistry } from "./prism-domain-capabilities.ts";
 import type { PrismCapabilityContext } from "./prism-capabilities.ts";
 import { prismSettingsPatchIsJournalable } from "./prism-settings-mutations.ts";
 import { prismBotPatchIsJournalable } from "./prism-bot-mutations.ts";
@@ -996,7 +994,10 @@ async function rebuildSignalStudioLighting(
       source.bot_id !== show.hostBotId ||
       !source.local_rel_path?.trim()
     ) {
-      throw new HttpError(404, `${label} studio source is not available locally.`);
+      throw new HttpError(
+        404,
+        `${label} studio source is not available locally.`,
+      );
     }
     try {
       return readGeneratedImageBytes(source.local_rel_path);
@@ -1050,17 +1051,12 @@ async function rebuildSignalStudioLighting(
         SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT,
         options.keywords,
       );
-      const result = await editImage(
-        receiverPrompt,
-        dayBytes,
-        apiKey,
-        {
-          model: imageModel,
-          size: "1536x1024",
-          quality: imageQuality,
-          signal,
-        },
-      );
+      const result = await editImage(receiverPrompt, dayBytes, apiKey, {
+        model: imageModel,
+        size: "1536x1024",
+        quality: imageQuality,
+        signal,
+      });
       const receiverBytes = await readOpenAiGeneratedImageBytes(result, signal);
       recordImageUsage({
         provider: "openai",
@@ -1157,8 +1153,7 @@ async function rebuildSignalStudioLighting(
             AND origin = 'botcast' AND purpose = 'signal_studio_lighting'`,
       )
       .get(previousImageId, userId, show.hostBotId) as
-      | { local_rel_path: string | null }
-      | undefined;
+      { local_rel_path: string | null } | undefined;
     if (previous) {
       db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
         previousImageId,
@@ -1297,10 +1292,7 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
     });
   },
   readElevenLabsBalance: async (context) => {
-    const apiKey = getElevenLabsApiKeyForUser(
-      context.userId,
-      context.userKey,
-    );
+    const apiKey = getElevenLabsApiKeyForUser(context.userId, context.userKey);
     if (!apiKey) {
       throw new HttpError(
         409,
@@ -1311,9 +1303,7 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
   },
   generateBotDraft: async (context, brief) => {
     const user = getUserRow(context.userId);
-    const model = resolveAuxiliaryOllamaModel(
-      user.prism_default_llm_model,
-    );
+    const model = resolveAuxiliaryOllamaModel(user.prism_default_llm_model);
     const generated = await runWithUsageSession(
       {
         db,
@@ -1369,9 +1359,7 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
     { botName, currentValue, direction, profile },
   ) => {
     const user = getUserRow(context.userId);
-    const model = resolveAuxiliaryOllamaModel(
-      user.prism_default_llm_model,
-    );
+    const model = resolveAuxiliaryOllamaModel(user.prism_default_llm_model);
     const generated = await runWithUsageSession(
       {
         db,
@@ -1411,9 +1399,7 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
   },
   generateCoffeeGroupIdentity: async (context, { brief, bots }) => {
     const user = getUserRow(context.userId);
-    const model = resolveAuxiliaryOllamaModel(
-      user.prism_default_llm_model,
-    );
+    const model = resolveAuxiliaryOllamaModel(user.prism_default_llm_model);
     const raw = await runWithUsageSession(
       {
         db,
@@ -1463,16 +1449,22 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     if (start < 0 || end <= start) {
-      throw new Error("The auxiliary model returned an invalid Coffee identity.");
+      throw new Error(
+        "The auxiliary model returned an invalid Coffee identity.",
+      );
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw.slice(start, end + 1));
     } catch {
-      throw new Error("The auxiliary model returned an invalid Coffee identity.");
+      throw new Error(
+        "The auxiliary model returned an invalid Coffee identity.",
+      );
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error("The auxiliary model returned an invalid Coffee identity.");
+      throw new Error(
+        "The auxiliary model returned an invalid Coffee identity.",
+      );
     }
     const record = parsed as Record<string, unknown>;
     const name =
@@ -1484,7 +1476,9 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
         ? record.premise.trim().replace(/\s+/gu, " ").slice(0, 1_000)
         : "";
     if (!name || !premise) {
-      throw new Error("The auxiliary model returned an incomplete Coffee identity.");
+      throw new Error(
+        "The auxiliary model returned an incomplete Coffee identity.",
+      );
     }
     return {
       name,
@@ -1493,14 +1487,9 @@ const prismCapabilityRegistry = createPrismDomainCapabilityRegistry({
       model,
     };
   },
-  generateSignalBooking: async (
-    context,
-    { showId, guestBotId, direction },
-  ) => {
+  generateSignalBooking: async (context, { showId, guestBotId, direction }) => {
     const user = getUserRow(context.userId);
-    const model = resolveAuxiliaryOllamaModel(
-      user.prism_default_llm_model,
-    );
+    const model = resolveAuxiliaryOllamaModel(user.prism_default_llm_model);
     let resolvedProvider = "local";
     let resolvedModel: string | null = model;
     const generated = await runWithUsageSession(
@@ -1803,7 +1792,8 @@ async function sendLocalVoiceWaveStream(args: {
   signal: AbortSignal;
 }): Promise<void> {
   const chunks = splitLocalVoiceStreamText(args.text);
-  if (chunks.length === 0) throw new Error("Speakable assistant text is required.");
+  if (chunks.length === 0)
+    throw new Error("Speakable assistant text is required.");
   const generate = (text: string) =>
     builtinVoiceWaveGeneratorOverride({
       text,
@@ -1818,7 +1808,10 @@ async function sendLocalVoiceWaveStream(args: {
 
   args.response.statusCode = 200;
   args.response.setHeader("cache-control", "no-store");
-  args.response.setHeader("content-type", "application/x-ndjson; charset=utf-8");
+  args.response.setHeader(
+    "content-type",
+    "application/x-ndjson; charset=utf-8",
+  );
   args.response.setHeader("x-prism-voice-stream", "wav-chunks-v1");
   args.response.setHeader("x-prism-voice-engine", args.engineUsed);
   args.response.setHeader("x-prism-voice-characters", String(args.text.length));
@@ -2262,7 +2255,10 @@ function streamReplayFile(
       return;
     }
     ctx.res.statusCode = 206;
-    ctx.res.setHeader("content-range", `bytes ${start}-${end}/${file.sizeBytes}`);
+    ctx.res.setHeader(
+      "content-range",
+      `bytes ${start}-${end}/${file.sizeBytes}`,
+    );
   } else {
     ctx.res.statusCode = 200;
   }
@@ -2446,26 +2442,19 @@ function prismSurfaceIsLive(
   if (surface.surfaceId === "coffee") {
     if (!surface.conversationId) return false;
     if (
-      coffeeConversationHasPlayerDeparture(
-        db,
-        userId,
-        surface.conversationId,
-      )
+      coffeeConversationHasPlayerDeparture(db, userId, surface.conversationId)
     ) {
       return false;
     }
     return Boolean(
-      getActiveCoffeeTurnJobForConversation(
-        userId,
-        surface.conversationId,
-      ) ||
-        db
-          .prepare(
-            `SELECT 1
+      getActiveCoffeeTurnJobForConversation(userId, surface.conversationId) ||
+      db
+        .prepare(
+          `SELECT 1
                FROM conversations
               WHERE id = ? AND user_id = ? AND conversation_mode = 'coffee'`,
-          )
-          .get(surface.conversationId, userId),
+        )
+        .get(surface.conversationId, userId),
     );
   }
   if (surface.surfaceId !== "signal" || !surface.signalEpisodeId) return false;
@@ -2701,9 +2690,7 @@ async function orchestratePrismCompanionRequest(args: {
     args.user.prism_default_llm_model,
     dualOllamaWorkloadOptions(args.user),
   );
-  const model = resolveAuxiliaryOllamaModel(
-    args.user.prism_default_llm_model,
-  );
+  const model = resolveAuxiliaryOllamaModel(args.user.prism_default_llm_model);
   const authoritativeContext = buildPrismCompanionAuthoritativeContext(
     db,
     args.userId,
@@ -2732,8 +2719,7 @@ async function orchestratePrismCompanionRequest(args: {
     const catalog = await buildModelCatalog(
       getOpenAiApiKeyForUser(args.userId, userKey) ?? config.openAiApiKey,
       args.user.secondary_ollama_host,
-      getAnthropicApiKeyForUser(args.userId, userKey) ??
-        config.anthropicApiKey,
+      getAnthropicApiKeyForUser(args.userId, userKey) ?? config.anthropicApiKey,
     );
     onlineModels = catalog.online;
   }
@@ -2782,8 +2768,7 @@ async function orchestratePrismCompanionRequest(args: {
   })();
   if (plan.kind === "clarification") {
     const question =
-      plan.clarification ||
-      "What specific item and change should I use?";
+      plan.clarification || "What specific item and change should I use?";
     return {
       content: question,
       cards: [
@@ -2916,8 +2901,8 @@ async function inferBotMemoriesIfNeeded(
     )
     .get(userId, botId) as
     | {
-    latest_direct_at?: string | null;
-    latest_inferred_at?: string | null;
+        latest_direct_at?: string | null;
+        latest_inferred_at?: string | null;
       }
     | undefined;
   const latestDirectAt = inferenceState?.latest_direct_at ?? null;
@@ -3100,10 +3085,12 @@ function slateAiForUser(
     preferredOnlineModel: user.preferred_online_model,
   });
   const projectSettings = projectId
-    ? (db.prepare(
-        `SELECT prose_mode, prose_model, prose_provider, deliberation_config_json
+    ? (db
+        .prepare(
+          `SELECT prose_mode, prose_model, prose_provider, deliberation_config_json
            FROM slate_projects WHERE id = ? AND user_id = ?`,
-      ).get(projectId, userId) as
+        )
+        .get(projectId, userId) as
         | {
             prose_mode: string;
             prose_model: string | null;
@@ -3112,7 +3099,8 @@ function slateAiForUser(
           }
         | undefined)
     : undefined;
-  if (projectId && !projectSettings) throw new Error("Slate project not found.");
+  if (projectId && !projectSettings)
+    throw new Error("Slate project not found.");
   const mode =
     projectSettings?.prose_mode === "offline" ||
     projectSettings?.prose_mode === "online"
@@ -3195,7 +3183,9 @@ function slateWritingAbortKey(
 
 function cleanSlateCockpitProse(value: string): string {
   let prose = value.trim();
-  const fenced = prose.match(/^```(?:text|markdown|md)?\s*\n([\s\S]*?)\n```$/iu);
+  const fenced = prose.match(
+    /^```(?:text|markdown|md)?\s*\n([\s\S]*?)\n```$/iu,
+  );
   if (fenced) prose = fenced[1]!.trim();
   if (!prose) throw new Error("Slate returned no proposal prose.");
   return prose;
@@ -3287,7 +3277,7 @@ async function compileSlateCustomVibe(
     : {
         direction: `Shape the continuation around this requested vibe: ${vibe}`,
         scope: operation.intent.scope,
-  };
+      };
 }
 
 interface SlateComposerMirrorBrief {
@@ -3354,9 +3344,8 @@ function slateComposerMirrorBrief(
       requestedPov &&
       (String((candidate as Record<string, unknown>).label ?? "") ===
         requestedPov ||
-        String(
-          (candidate as Record<string, unknown>).povCharacterId ?? "",
-        ) === requestedPov),
+        String((candidate as Record<string, unknown>).povCharacterId ?? "") ===
+          requestedPov),
   ) as Record<string, unknown> | undefined;
   const list = (key: string): string => {
     const value = voice[key];
@@ -3374,9 +3363,7 @@ function slateComposerMirrorBrief(
     list("diction") ? `Diction: ${list("diction")}` : "",
     list("rhythm") ? `Rhythm: ${list("rhythm")}` : "",
     list("imagery") ? `Imagery: ${list("imagery")}` : "",
-    list("dialogueHabits")
-      ? `Dialogue habits: ${list("dialogueHabits")}`
-      : "",
+    list("dialogueHabits") ? `Dialogue habits: ${list("dialogueHabits")}` : "",
     list("density") ? `Density: ${list("density")}` : "",
     list("preferences") ? `Preferences: ${list("preferences")}` : "",
     list("avoidances") ? `Avoid: ${list("avoidances")}` : "",
@@ -3384,8 +3371,7 @@ function slateComposerMirrorBrief(
     projectOverlay.direction.trim()
       ? `Project overlay: ${projectOverlay.direction.trim()}`
       : "",
-    typeof povOverlay?.direction === "string" &&
-    povOverlay.direction.trim()
+    typeof povOverlay?.direction === "string" && povOverlay.direction.trim()
       ? `POV overlay: ${povOverlay.direction.trim()}`
       : "",
   ].filter(Boolean);
@@ -3393,8 +3379,7 @@ function slateComposerMirrorBrief(
     profileVersionId: row.profile_version_id,
     projectOverlayId:
       typeof projectOverlay.id === "string" ? projectOverlay.id : null,
-    povOverlayId:
-      typeof povOverlay?.id === "string" ? povOverlay.id : null,
+    povOverlayId: typeof povOverlay?.id === "string" ? povOverlay.id : null,
     sourceFingerprint: slateSha256(
       [
         row.profile_version_id,
@@ -3514,12 +3499,7 @@ async function preflightSlateWritingDirection(
     );
   } catch (error) {
     if (signal?.aborted) {
-      return getSlateWritingOperation(
-        db,
-        userId,
-        projectId,
-        operation.id,
-      );
+      return getSlateWritingOperation(db, userId, projectId, operation.id);
     }
     recordSlateDeveloperEvent(db, {
       userId,
@@ -3534,16 +3514,11 @@ async function preflightSlateWritingDirection(
         outcome: "unavailable",
         failureCode: "semantic_preflight_unavailable",
       },
-      sourceIds: slateContinuityEvidenceSourceIds(
-        userId,
-        projectId,
-        evidence,
-      ),
+      sourceIds: slateContinuityEvidenceSourceIds(userId, projectId, evidence),
       operationId: operation.id,
       provider: ai.providerName,
       model: ai.model,
-      continuityGeneration:
-        operation.revisionFingerprint.continuityGeneration,
+      continuityGeneration: operation.revisionFingerprint.continuityGeneration,
     });
     return view;
   }
@@ -3570,16 +3545,14 @@ async function preflightSlateWritingDirection(
       operationId: operation.id,
       provider: ai.providerName,
       model: ai.model,
-      continuityGeneration:
-        operation.revisionFingerprint.continuityGeneration,
+      continuityGeneration: operation.revisionFingerprint.continuityGeneration,
     });
     return view;
   }
   const conflict = audit.conflicts[0]!;
   const anchors = audit.conflicts.map((item) => {
     const quoteOffset = item.evidence.quote.indexOf(item.acceptedQuote);
-    const start =
-      item.evidence.start + Math.max(0, quoteOffset);
+    const start = item.evidence.start + Math.max(0, quoteOffset);
     const source = db
       .prepare(
         `SELECT id, source_revision FROM slate_continuity_sources
@@ -3596,8 +3569,7 @@ async function preflightSlateWritingDirection(
     return {
       sourceId: source?.id ?? null,
       sectionId: item.evidence.sectionId,
-      sectionRevision:
-        source?.source_revision ?? item.evidence.sectionRevision,
+      sectionRevision: source?.source_revision ?? item.evidence.sectionRevision,
       start,
       end: start + item.acceptedQuote.length,
       quoteHash: slateSha256(item.acceptedQuote),
@@ -3750,10 +3722,7 @@ async function auditAndRepairSlateComposerProposal(args: {
           temperature: 0.45,
           maxTokens: Math.max(
             800,
-            Math.min(
-              8_000,
-              Math.ceil(args.operation.intent.wordTarget * 2.2),
-            ),
+            Math.min(8_000, Math.ceil(args.operation.intent.wordTarget * 2.2)),
           ),
           usagePurpose: "slate_revision",
           signal: args.signal,
@@ -3781,8 +3750,7 @@ async function auditAndRepairSlateComposerProposal(args: {
           sectionId: args.operation.sectionId,
           candidateText: repaired,
           direction: args.operation.intent.direction,
-          focusedReplacementRange:
-            args.operation.intent.target.selection,
+          focusedReplacementRange: args.operation.intent.target.selection,
         }),
         signal: args.signal,
       }),
@@ -3848,10 +3816,7 @@ async function fitSlateComposerProposalLength(args: {
     return args.prose;
   }
   const requestedMinimum = Math.max(25, Math.round(target * 0.9));
-  const requestedMaximum = Math.max(
-    requestedMinimum,
-    Math.round(target * 1.1),
-  );
+  const requestedMaximum = Math.max(requestedMinimum, Math.round(target * 1.1));
   const raw = await runWithUsageSession(
     {
       db,
@@ -3891,10 +3856,7 @@ async function fitSlateComposerProposalLength(args: {
         {
           model: args.ai.model,
           temperature: 0.4,
-          maxTokens: Math.max(
-            800,
-            Math.min(8_000, Math.ceil(target * 2.2)),
-          ),
+          maxTokens: Math.max(800, Math.min(8_000, Math.ceil(target * 2.2))),
           usagePurpose: "slate_revision",
           signal: args.signal,
         },
@@ -3902,10 +3864,7 @@ async function fitSlateComposerProposalLength(args: {
   );
   const fitted = cleanSlateCockpitProse(raw);
   const fittedWords = slateProseWordCount(fitted);
-  if (
-    fittedWords < target - tolerance ||
-    fittedWords > target + tolerance
-  ) {
+  if (fittedWords < target - tolerance || fittedWords > target + tolerance) {
     throw new Error(
       `Slate could not honor the explicit ${target}-word target within a ${tolerance}-word tolerance.`,
     );
@@ -4052,16 +4011,14 @@ function renderSlateStoryBibleComposerBrief(
     .filter(
       (concern) =>
         concern.status === "open" &&
-        (concern.severity === "critical" ||
-          concern.severity === "important"),
+        (concern.severity === "critical" || concern.severity === "important"),
     )
     .slice(0, 8);
   if (blockingConcerns.length > 0) {
     lines.push(
       "Open source-linked concerns:",
       ...blockingConcerns.map(
-        (concern) =>
-          `- [${concern.severity}] ${concern.summary}`,
+        (concern) => `- [${concern.severity}] ${concern.summary}`,
       ),
     );
   }
@@ -4135,9 +4092,7 @@ function compileSlateComposerInputs(args: {
     .join("\n");
   const sourceIds = [
     ...new Set(
-      projection.diagnostics.flatMap(
-        (diagnostic) => diagnostic.sourceIds,
-      ),
+      projection.diagnostics.flatMap((diagnostic) => diagnostic.sourceIds),
     ),
   ];
   const sourceFingerprint = slateSha256(
@@ -4152,8 +4107,7 @@ function compileSlateComposerInputs(args: {
     userId: args.userId,
     projectId: args.projectId,
     sectionId: args.operation.sectionId,
-    sectionRevision:
-      args.operation.revisionFingerprint.sectionRevision,
+    sectionRevision: args.operation.revisionFingerprint.sectionRevision,
     stage: "brief",
     kind: "composition_brief_compiled",
     summary:
@@ -4230,8 +4184,7 @@ async function generateSlateWritingOperation(
       operationId: operation.id,
       provider: ai.providerName,
       model: ai.model,
-      continuityGeneration:
-        operation.revisionFingerprint.continuityGeneration,
+      continuityGeneration: operation.revisionFingerprint.continuityGeneration,
     });
   }
   recordSlateDeveloperEvent(db, {
@@ -4253,8 +4206,7 @@ async function generateSlateWritingOperation(
     operationId: operation.id,
     provider: ai.providerName,
     model: ai.model,
-    continuityGeneration:
-      operation.revisionFingerprint.continuityGeneration,
+    continuityGeneration: operation.revisionFingerprint.continuityGeneration,
   });
   try {
     if (!section.prose && structureItemId) {
@@ -4315,8 +4267,7 @@ async function generateSlateWritingOperation(
             structureItemId: proposal.structureItemId,
             expectedSectionId: proposal.sectionId,
             expectedSectionRevision: proposal.expectedSectionRevision,
-            expectedSectionContentHash:
-              proposal.expectedSectionContentHash,
+            expectedSectionContentHash: proposal.expectedSectionContentHash,
             expectedStructureJson: proposal.expectedStructureJson,
           },
         },
@@ -4451,9 +4402,7 @@ async function generateSlateWritingOperation(
         validatedSnapshotPatch: {
           applicationKind: "revision",
           structureItemId: hasSelection ? null : structureItemId,
-          selectionStart: hasSelection
-            ? span.bodyStart + anchor.start
-            : null,
+          selectionStart: hasSelection ? span.bodyStart + anchor.start : null,
           selectionEnd: hasSelection ? span.bodyStart + anchor.end : null,
           originalText: targetText,
         },
@@ -4501,12 +4450,7 @@ function runSlateWritingOperationLifecycle(
   slateWritingAbortControllers.set(abortKey, controller);
 
   const run = (async () => {
-    let view = getSlateWritingOperation(
-      db,
-      userId,
-      projectId,
-      operationId,
-    );
+    let view = getSlateWritingOperation(db, userId, projectId, operationId);
     if (view.operation.status === "generating") {
       view = await preflightSlateWritingDirection(
         userId,
@@ -4519,19 +4463,9 @@ function runSlateWritingOperationLifecycle(
       controller.signal.aborted ||
       slateWritingAbortControllers.get(abortKey) !== controller
     ) {
-      return getSlateWritingOperation(
-        db,
-        userId,
-        projectId,
-        operationId,
-      );
+      return getSlateWritingOperation(db, userId, projectId, operationId);
     }
-    view = getSlateWritingOperation(
-      db,
-      userId,
-      projectId,
-      operationId,
-    );
+    view = getSlateWritingOperation(db, userId, projectId, operationId);
     if (view.operation.status === "generating") {
       view = await generateSlateWritingOperation(
         userId,
@@ -4547,12 +4481,7 @@ function runSlateWritingOperationLifecycle(
         controller.signal.aborted ||
         slateWritingAbortControllers.get(abortKey) !== controller
       ) {
-        return getSlateWritingOperation(
-          db,
-          userId,
-          projectId,
-          operationId,
-        );
+        return getSlateWritingOperation(db, userId, projectId, operationId);
       }
       const current = getSlateWritingOperation(
         db,
@@ -4608,35 +4537,32 @@ function respondWithSlateMirrorError(
   return true;
 }
 
-const SLATE_CHARACTER_PROFILE_FIELDS =
-  new Set<SlateCharacterProfileFieldName>([
-    "identity",
-    "aliases",
-    "roles",
-    "publicPersona",
-    "privatePressure",
-    "wants",
-    "needs",
-    "fears",
-    "wounds",
-    "beliefs",
-    "values",
-    "secrets",
-    "contradictions",
-    "dialogueMarkers",
-    "competencies",
-    "limitations",
-    "appearance",
-    "currentState",
-  ]);
+const SLATE_CHARACTER_PROFILE_FIELDS = new Set<SlateCharacterProfileFieldName>([
+  "identity",
+  "aliases",
+  "roles",
+  "publicPersona",
+  "privatePressure",
+  "wants",
+  "needs",
+  "fears",
+  "wounds",
+  "beliefs",
+  "values",
+  "secrets",
+  "contradictions",
+  "dialogueMarkers",
+  "competencies",
+  "limitations",
+  "appearance",
+  "currentState",
+]);
 
 function readSlateCharacterProfileField(
   value: string,
 ): SlateCharacterProfileFieldName {
   if (
-    SLATE_CHARACTER_PROFILE_FIELDS.has(
-      value as SlateCharacterProfileFieldName,
-    )
+    SLATE_CHARACTER_PROFILE_FIELDS.has(value as SlateCharacterProfileFieldName)
   ) {
     return value as SlateCharacterProfileFieldName;
   }
@@ -4679,10 +4605,7 @@ async function synthesizeSlateMirrorVoiceCard(
     .map((sample, index) => {
       const text = sample.text.slice(0, Math.max(0, remainingCharacters));
       remainingCharacters -= text.length;
-      return [
-        `SAMPLE ${index + 1} · ${sample.sourceKind}`,
-        text,
-      ].join("\n");
+      return [`SAMPLE ${index + 1} · ${sample.sourceKind}`, text].join("\n");
     })
     .filter((sample) => sample.length > 0)
     .join("\n\n---\n\n");
@@ -4742,9 +4665,7 @@ function recordSlateStoryBibleDiagnosticsForOperation(
       `SELECT revision FROM slate_sections
         WHERE id = ? AND project_id = ? AND user_id = ?`,
     )
-    .get(sectionId, projectId, userId) as
-    | { revision: number }
-    | undefined;
+    .get(sectionId, projectId, userId) as { revision: number } | undefined;
   if (!section) return;
   const projection = projectActiveSlateStoryBible(db, {
     userId,
@@ -4823,9 +4744,7 @@ async function checkPrismCreditMonitorForUser(
     readBalance: async () => {
       const apiKey = getElevenLabsApiKeyForUser(userId, userKey);
       if (!apiKey) {
-        throw new Error(
-          "Save an ElevenLabs API key before checking credits.",
-        );
+        throw new Error("Save an ElevenLabs API key before checking credits.");
       }
       return getElevenLabsCreditBalance(apiKey);
     },
@@ -4872,9 +4791,7 @@ function purgeExpiredPrismStateAndFiles(): void {
           AND archived_at <= ?`,
     )
     .all(
-      new Date(
-        Date.now() - PRISM_ACTION_UNDO_RETENTION_MS,
-      ).toISOString(),
+      new Date(Date.now() - PRISM_ACTION_UNDO_RETENTION_MS).toISOString(),
     ) as unknown as Array<{ id: string; user_id: string }>;
   for (const conversation of expiredConversations) {
     const replayIds = replayRecordingIdsForSource(
@@ -4893,21 +4810,16 @@ function purgeExpiredPrismStateAndFiles(): void {
     }
   }
   for (const expired of purgeExpiredPrismOrchestrationState(db)) {
-    removeReplayDirectories(
-      expired.userId,
-      expired.replayRecordingIds,
-    );
+    removeReplayDirectories(expired.userId, expired.replayRecordingIds);
   }
   const recoveryCutoff = Date.now() - PRISM_ACTION_UNDO_RETENTION_MS;
-  const userIds = db
-    .prepare("SELECT id FROM users")
-    .all() as unknown as Array<{ id: string }>;
+  const userIds = db.prepare("SELECT id FROM users").all() as unknown as Array<{
+    id: string;
+  }>;
   for (const { id: userId } of userIds) {
     reconcileAssetCleanupRecoveryForUser(db, userId);
     for (const recovery of listImageAssetCleanupRecoveries(db, userId)) {
-      if (
-        new Date(recovery.quarantinedAt).getTime() > recoveryCutoff
-      ) {
+      if (new Date(recovery.quarantinedAt).getTime() > recoveryCutoff) {
         continue;
       }
       try {
@@ -4971,14 +4883,14 @@ function debateAiRuntimeForUser(
   const preferredProvider = hardLocal ? "local" : requested;
   const requestedModel = readModelOverride(requestedModelOverride);
   const modelOverride =
-    requestedModel &&
-    (!hardLocal || requested === "local")
+    requestedModel && (!hardLocal || requested === "local")
       ? requestedModel
       : null;
   const localModel =
     preferredProvider === "local" && modelOverride
       ? modelOverride
-      : user.preferred_local_model?.trim() || defaultModelIdForProvider("local");
+      : user.preferred_local_model?.trim() ||
+        defaultModelIdForProvider("local");
   const local = {
     provider: providerFactoryOverride(
       "local",
@@ -5000,8 +4912,9 @@ function debateAiRuntimeForUser(
   ): NonNullable<DebateAiRuntime["online"]> => {
     const apiKey =
       providerName === "anthropic"
-        ? getAnthropicApiKeyForUser(userId, userKey!) ?? config.anthropicApiKey
-        : getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey;
+        ? (getAnthropicApiKeyForUser(userId, userKey!) ??
+          config.anthropicApiKey)
+        : (getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey);
     return {
       provider: providerFactoryOverride(
         providerName,
@@ -5024,22 +4937,27 @@ function debateAiRuntimeForUser(
             defaultModelIdForProvider(preferredProvider),
         );
   const binaryMode = preferredProvider === "local" ? "local" : "online";
-  const requestedMode = normalizeResponseMode(requestedResponseMode, binaryMode);
+  const requestedMode = normalizeResponseMode(
+    requestedResponseMode,
+    binaryMode,
+  );
   const frozenChain = Array.isArray(requestedFrozenChain)
     ? requestedFrozenChain
         .map(normalizeAutoFallbackModelRef)
         .filter((entry): entry is AutoFallbackModelRef => entry !== null)
     : [];
-  const configuredChain = parseStoredAutoFallbackChain(user.auto_fallback_chain);
+  const configuredChain = parseStoredAutoFallbackChain(
+    user.auto_fallback_chain,
+  );
   const resolvedAutoChain =
     requestedMode === "auto" && !hardLocal
       ? frozenChain.length > 1
         ? frozenChain
         : user.auto_switch_model === 1
-          ? autoFallbackResolvedChain(
+          ? (autoFallbackResolvedChain(
               { provider: primary.providerName, model: primary.model },
               configuredChain,
-            ) ?? []
+            ) ?? [])
           : []
       : [];
   const lanes =
@@ -5056,9 +4974,7 @@ function debateAiRuntimeForUser(
     auxiliary,
     preferredProvider,
     responseMode:
-      requestedMode === "auto" && lanes.length > 1
-        ? "auto"
-        : binaryMode,
+      requestedMode === "auto" && lanes.length > 1 ? "auto" : binaryMode,
     lanes,
   };
 }
@@ -5588,7 +5504,7 @@ function parseConversationCoffeeSeatBotIds(
       .slice(0, 5)
       .map((value) =>
         typeof value === "string" && value.length > 0 ? value : null,
-    );
+      );
     while (seats.length < 5) seats.push(null);
     return seats;
   } catch {
@@ -5636,12 +5552,16 @@ function replayRecordingIdsForSource(
     "SELECT id FROM replay_recordings WHERE user_id = ? AND surface = ? AND source_id = ?",
   );
   return sourceIds.flatMap((sourceId) => {
-    const row = find.get(userId, surface, sourceId) as { id: string } | undefined;
+    const row = find.get(userId, surface, sourceId) as
+      { id: string } | undefined;
     return row ? [row.id] : [];
   });
 }
 
-function removeReplayDirectories(userId: string, recordingIds: readonly string[]): void {
+function removeReplayDirectories(
+  userId: string,
+  recordingIds: readonly string[],
+): void {
   for (const recordingId of recordingIds) {
     try {
       removeReplayRecordingDirectory(userId, recordingId);
@@ -5815,10 +5735,8 @@ function readBotFaceEyeMovementForStorage(
 }
 
 function readBotFaceMouthCoffeePuckerForStorage(value: unknown): number {
-  return (
-    normalizeBotFaceMouthCoffeePucker(value) ??
-    DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER
-  )
+  return (normalizeBotFaceMouthCoffeePucker(value) ??
+    DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER)
     ? 1
     : 0;
 }
@@ -5968,9 +5886,8 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
       normalizeBotFaceEyeCharacter(user.prism_default_bot_face_eye_character) ??
       DEFAULT_BOT_FACE_EYE_CHARACTER,
     prismDefaultBotFaceEyeAnimation:
-      normalizeBotFaceEyeMovement(
-        user.prism_default_bot_face_eye_animation,
-      ) ?? DEFAULT_BOT_FACE_EYE_MOVEMENT,
+      normalizeBotFaceEyeMovement(user.prism_default_bot_face_eye_animation) ??
+      DEFAULT_BOT_FACE_EYE_MOVEMENT,
     prismDefaultBotFaceMouthFont:
       normalizeBotFaceFontId(user.prism_default_bot_face_mouth_font) ??
       DEFAULT_BOT_FACE_FONT_ID,
@@ -6069,11 +5986,11 @@ function resetZenWallpaperMetadataForEmptyConversation<
   const storedHistory = row.zen_wallpaper_history?.trim() ?? "";
   const hasWallpaperMetadata = Boolean(
     row.zen_wallpaper_image_id ||
-      row.zen_wallpaper_prompt_seed ||
-      (row.zen_wallpaper_message_count !== null &&
-        row.zen_wallpaper_message_count !== undefined) ||
-      row.zen_wallpaper_status === "ready" ||
-      row.zen_wallpaper_status === "generating" ||
+    row.zen_wallpaper_prompt_seed ||
+    (row.zen_wallpaper_message_count !== null &&
+      row.zen_wallpaper_message_count !== undefined) ||
+    row.zen_wallpaper_status === "ready" ||
+    row.zen_wallpaper_status === "generating" ||
     (storedHistory.length > 0 && storedHistory !== "[]"),
   );
   if (!hasWallpaperMetadata) return row;
@@ -6110,10 +6027,10 @@ function zenWallpaperResponseForConversation(
     .get(conversationId) as ZenWallpaperDbRow | undefined;
   const totalMessageCount =
     (
-    db
-      .prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
-      .get(conversationId) as { n?: number } | undefined
-  )?.n ?? 0;
+      db
+        .prepare("SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?")
+        .get(conversationId) as { n?: number } | undefined
+    )?.n ?? 0;
   const metadata = mapZenWallpaperMetadata(
     row
       ? resetZenWallpaperMetadataForEmptyConversation(
@@ -6179,8 +6096,7 @@ function promoteHubAtmosphereImage(
         WHERE id = ? AND user_id = ? AND purpose = ?`,
     )
     .get(previousImageId, userId, HUB_ATMOSPHERE_IMAGE_PURPOSE) as
-    | { local_rel_path: string | null }
-    | undefined;
+    { local_rel_path: string | null } | undefined;
   if (!previous) return;
   db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
     previousImageId,
@@ -6200,8 +6116,7 @@ function readableHubAtmosphereCache(user: UserDbRow): {
       "SELECT id FROM images WHERE id = ? AND user_id = ? AND purpose = ?",
     )
     .get(imageId, user.id, HUB_ATMOSPHERE_IMAGE_PURPOSE) as
-    | { id: string }
-    | undefined;
+    { id: string } | undefined;
   return image
     ? {
         imageId,
@@ -6302,9 +6217,9 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
           ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
           : args.purpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
             ? "image_generation"
-          : args.purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-            ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-            : "image_generation",
+            : args.purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+              ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+              : "image_generation",
       imageCount: 1,
       imageSize: args.size,
       imageQuality: args.quality,
@@ -6389,7 +6304,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
           bot_id: string | null;
           origin: string | null;
           local_rel_path: string | null;
-              }
+        }
       | undefined;
     if (
       !source ||
@@ -6917,7 +6832,10 @@ async function generateAndPersistStandaloneImageAsset(args: {
   }
 
   if (args.signal.aborted) {
-    throw new DOMException(`${args.featureLabel} generation cancelled.`, "AbortError");
+    throw new DOMException(
+      `${args.featureLabel} generation cancelled.`,
+      "AbortError",
+    );
   }
   const persistenceStartedAt = Date.now();
   try {
@@ -7053,11 +6971,7 @@ async function runCoffeeGroupSynthesisItem(
       item,
     );
     expectedRevision = running.synthesis.items[item].revision;
-    const profiles = loadCoffeeGroupProfiles(
-      db,
-      userId,
-      group.botGroupIds,
-    );
+    const profiles = loadCoffeeGroupProfiles(db, userId, group.botGroupIds);
     if (item === "name") {
       const generated = await inferCoffeeGroupNameDetailed({
         provider: coffeeGroupSynthesisProvider(userId),
@@ -7073,7 +6987,9 @@ async function runCoffeeGroupSynthesisItem(
         expectedRevision,
         ...(generated.generated
           ? {}
-          : { error: "The local helper could not craft a group-specific name." }),
+          : {
+              error: "The local helper could not craft a group-specific name.",
+            }),
       });
       return;
     }
@@ -7091,7 +7007,9 @@ async function runCoffeeGroupSynthesisItem(
         expectedRevision,
         ...(generated.generated
           ? {}
-          : { error: "The local helper could not craft a group-specific ethos." }),
+          : {
+              error: "The local helper could not craft a group-specific ethos.",
+            }),
       });
       await refreshCoffeeGroupStarterTopicsFromEthos(userId, groupId);
       return;
@@ -7136,8 +7054,7 @@ async function runCoffeeGroupSynthesisItem(
             WHERE id = ? AND user_id = ? AND purpose = 'group-room-wallpaper'`,
         )
         .get(asset.imageId, userId) as
-        | { local_rel_path: string | null }
-        | undefined;
+        { local_rel_path: string | null } | undefined;
       if (staleAsset) {
         db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
           asset.imageId,
@@ -7157,8 +7074,7 @@ async function runCoffeeGroupSynthesisItem(
             WHERE id = ? AND user_id = ? AND purpose = 'group-room-wallpaper'`,
         )
         .get(previousImageId, userId) as
-        | { local_rel_path: string | null }
-        | undefined;
+        { local_rel_path: string | null } | undefined;
       if (previous) {
         db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
           previousImageId,
@@ -7208,8 +7124,7 @@ function queueInitialCoffeeGroupSynthesis(
   items: readonly CoffeeGroupSynthesisItem[],
 ): void {
   const identityItems = items.filter(
-    (item): item is "name" | "ethos" =>
-      item === "name" || item === "ethos",
+    (item): item is "name" | "ethos" => item === "name" || item === "ethos",
   );
   const identity = Promise.all(
     identityItems.map((item) =>
@@ -7596,7 +7511,9 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error(run.error || "Story session could not be created.");
       }
       const result =
-        run.result && typeof run.result === "object" && !Array.isArray(run.result)
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
           ? run.result
           : {};
       const session =
@@ -7605,7 +7522,8 @@ function buildRoutes(): RouteDefinition[] {
         !Array.isArray(result.session)
           ? result.session
           : null;
-      if (!session) throw new Error("Story session creation returned no session.");
+      if (!session)
+        throw new Error("Story session creation returned no session.");
       json(ctx.res, 200, { ok: true, session, actionRun: run });
     }),
     route("GET", "/api/story/sessions/:id", async (ctx) => {
@@ -7774,7 +7692,9 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error(run.error || "Slate series could not be created.");
       }
       const result =
-        run.result && typeof run.result === "object" && !Array.isArray(run.result)
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
           ? run.result
           : {};
       const series =
@@ -7897,11 +7817,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/slate/projects/:id/mirror", async (ctx) => {
       const userId = requireAuth(ctx);
       try {
-        const detail = getSlateMirrorProjectBinding(
-          db,
-          userId,
-          ctx.params.id,
-        );
+        const detail = getSlateMirrorProjectBinding(db, userId, ctx.params.id);
         json(ctx.res, 200, {
           ok: true,
           ...(detail ?? { binding: null }),
@@ -7954,28 +7870,24 @@ function buildRoutes(): RouteDefinition[] {
         ),
       });
     }),
-    route(
-      "PATCH",
-      "/api/slate/projects/:id/sources/:sourceId",
-      async (ctx) => {
-        const userId = requireAuth(ctx);
-        json(ctx.res, 200, {
-          ok: true,
-          source: updateSlateSourceShelfItem(
-            db,
-            userId,
-            ctx.params.id,
-            ctx.params.sourceId,
-            ctx.body as {
-              title?: unknown;
-              kind?: unknown;
-              content?: unknown;
-              metadata?: unknown;
-            },
-          ),
-        });
-      },
-    ),
+    route("PATCH", "/api/slate/projects/:id/sources/:sourceId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        source: updateSlateSourceShelfItem(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.sourceId,
+          ctx.body as {
+            title?: unknown;
+            kind?: unknown;
+            content?: unknown;
+            metadata?: unknown;
+          },
+        ),
+      });
+    }),
     route(
       "DELETE",
       "/api/slate/projects/:id/sources/:sourceId",
@@ -8073,8 +7985,7 @@ function buildRoutes(): RouteDefinition[] {
               WHERE id = ? AND user_id = ?`,
           )
           .get(asset.imageId, userId) as
-          | { provider: string; model: string }
-          | undefined;
+          { provider: string; model: string } | undefined;
         if (!generated) {
           throw new Error("Visual Bible image provenance was not saved.");
         }
@@ -8175,7 +8086,9 @@ function buildRoutes(): RouteDefinition[] {
         (item): item is string => typeof item === "string",
       );
       const guest =
-        body.guest && typeof body.guest === "object" && !Array.isArray(body.guest)
+        body.guest &&
+        typeof body.guest === "object" &&
+        !Array.isArray(body.guest)
           ? (body.guest as { name: string; readerBrief: string })
           : null;
       const ai = slateAiForUser(userId, ctx.params.id);
@@ -8277,7 +8190,9 @@ function buildRoutes(): RouteDefinition[] {
         throw new Error(run.error || "Slate project could not be created.");
       }
       const result =
-        run.result && typeof run.result === "object" && !Array.isArray(run.result)
+        run.result &&
+        typeof run.result === "object" &&
+        !Array.isArray(run.result)
           ? run.result
           : {};
       const project =
@@ -8539,7 +8454,7 @@ function buildRoutes(): RouteDefinition[] {
             ctx.params.id,
             new Date(),
             {
-            maxReuseAgeMs: 12 * 60 * 60 * 1_000,
+              maxReuseAgeMs: 12 * 60 * 60 * 1_000,
             },
           ),
         });
@@ -8580,26 +8495,26 @@ function buildRoutes(): RouteDefinition[] {
       "GET",
       "/api/slate/projects/:id/return-sessions/:sessionId",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      try {
-        json(ctx.res, 200, {
-          ok: true,
-          session: getSlateReturnSession(
-            db,
-            userId,
-            ctx.params.id,
-            ctx.params.sessionId,
-          ),
-        });
-      } catch (error) {
+        const userId = requireAuth(ctx);
+        try {
+          json(ctx.res, 200, {
+            ok: true,
+            session: getSlateReturnSession(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.params.sessionId,
+            ),
+          });
+        } catch (error) {
           if (
             error instanceof Error &&
             /(?:project|session) not found/i.test(error.message)
           ) {
-          throw new HttpError(404, error.message);
+            throw new HttpError(404, error.message);
+          }
+          throw error;
         }
-        throw error;
-      }
       },
     ),
     route("GET", "/api/slate/projects/:id/sections", async (ctx) => {
@@ -8625,38 +8540,38 @@ function buildRoutes(): RouteDefinition[] {
       "PATCH",
       "/api/slate/projects/:id/sections/:sectionId",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      try {
-        const section = saveSlateProjectSection(
-          db,
-          userId,
-          ctx.params.id,
-          ctx.params.sectionId,
-          ctx.body as never,
-        );
-        json(ctx.res, 200, {
-          ok: true,
-          section: protectSlateMutation(
-            section,
+        const userId = requireAuth(ctx);
+        try {
+          const section = saveSlateProjectSection(
+            db,
             userId,
             ctx.params.id,
-            "Section saved",
-          ),
-        });
-      } catch (error) {
-        if (error instanceof SlateSectionRevisionConflictError) {
-          json(ctx.res, 409, {
-            ok: false,
-            code: error.code,
-            error: error.message,
-            sectionId: error.sectionId,
-            currentRevision: error.currentRevision,
-            currentContentHash: error.currentContentHash,
+            ctx.params.sectionId,
+            ctx.body as never,
+          );
+          json(ctx.res, 200, {
+            ok: true,
+            section: protectSlateMutation(
+              section,
+              userId,
+              ctx.params.id,
+              "Section saved",
+            ),
           });
-          return;
+        } catch (error) {
+          if (error instanceof SlateSectionRevisionConflictError) {
+            json(ctx.res, 409, {
+              ok: false,
+              code: error.code,
+              error: error.message,
+              sectionId: error.sectionId,
+              currentRevision: error.currentRevision,
+              currentContentHash: error.currentContentHash,
+            });
+            return;
+          }
+          throw error;
         }
-        throw error;
-      }
       },
     ),
     route(
@@ -8710,30 +8625,25 @@ function buildRoutes(): RouteDefinition[] {
         });
       },
     ),
-    route(
-      "POST",
-      "/api/slate/projects/:id/writing-operations",
-      async (ctx) => {
-        const userId = requireAuth(ctx);
-        try {
-          ensureSlateProjectSections(db, userId, ctx.params.id);
-          const view = createSlateWritingOperation(
-            db,
-            userId,
-            ctx.params.id,
-            ctx.body as Record<string, unknown>,
-          );
-          json(
-            ctx.res,
-            view.operation.status === "generating" ? 202 : 201,
-            { ok: true, ...view },
-          );
-        } catch (error) {
-          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
-          throw error;
-        }
-      },
-    ),
+    route("POST", "/api/slate/projects/:id/writing-operations", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        ensureSlateProjectSections(db, userId, ctx.params.id);
+        const view = createSlateWritingOperation(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Record<string, unknown>,
+        );
+        json(ctx.res, view.operation.status === "generating" ? 202 : 201, {
+          ok: true,
+          ...view,
+        });
+      } catch (error) {
+        if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+        throw error;
+      }
+    }),
     route(
       "GET",
       "/api/slate/projects/:id/writing-operations/:operationId",
@@ -8774,8 +8684,7 @@ function buildRoutes(): RouteDefinition[] {
             ctx.params.operationId,
           );
           if (
-            current.operation.revisionFingerprint.value !==
-            revisionFingerprint
+            current.operation.revisionFingerprint.value !== revisionFingerprint
           ) {
             throw new SlateWritingOperationError(
               "This run targets a different Slate writing snapshot.",
@@ -8871,11 +8780,10 @@ function buildRoutes(): RouteDefinition[] {
             body as unknown as SlateClarificationAnswerRequest,
             compiledPatch,
           );
-          json(
-            ctx.res,
-            view.operation.status === "generating" ? 202 : 200,
-            { ok: true, ...view },
-          );
+          json(ctx.res, view.operation.status === "generating" ? 202 : 200, {
+            ok: true,
+            ...view,
+          });
         } catch (error) {
           if (respondWithSlateWritingOperationError(ctx.res, error)) return;
           throw error;
@@ -8996,9 +8904,7 @@ function buildRoutes(): RouteDefinition[] {
                     provider: application.provider,
                     model: application.model,
                     expectedSectionId: application.sectionId,
-                    expectedRevision: Number(
-                      snapshot.expectedSectionRevision,
-                    ),
+                    expectedRevision: Number(snapshot.expectedSectionRevision),
                     expectedContentHash: String(
                       snapshot.expectedSectionContentHash,
                     ),
@@ -9053,12 +8959,11 @@ function buildRoutes(): RouteDefinition[] {
               } catch {
                 lockedRanges = [];
               }
-              const nextLockedRanges =
-                transformSlateLockedRangesForTextEdit(
-                  projectBefore.manuscript,
-                  nextManuscript,
-                  lockedRanges,
-                );
+              const nextLockedRanges = transformSlateLockedRangesForTextEdit(
+                projectBefore.manuscript,
+                nextManuscript,
+                lockedRanges,
+              );
               db.prepare(
                 `UPDATE slate_projects
                     SET manuscript = ?, locked_ranges_json = ?,
@@ -9132,83 +9037,73 @@ function buildRoutes(): RouteDefinition[] {
         }
       },
     ),
-    route(
-      "POST",
-      "/api/slate/projects/:id/review-export",
-      async (ctx) => {
-        const userId = requireAuth(ctx);
-        const body = ctx.body as Record<string, unknown>;
-        const sectionId = readString(body.sectionId, "sectionId");
-        const envelope = createSlateReviewExport(
-          db,
-          userId,
-          ctx.params.id,
-          sectionId,
-        );
-        const sectionName = envelope.sections[0]?.section.title || "slate-section";
-        const safeSectionName =
-          sectionName
-            .normalize("NFKD")
-            .replace(/[^a-zA-Z0-9._-]+/gu, "-")
-            .replace(/^-+|-+$/gu, "")
-            .slice(0, 120) || "slate-section";
-        if (body.format === "markdown") {
-          const markdown = slateReviewExportMarkdown(envelope);
-          ctx.res.statusCode = 200;
-          ctx.res.setHeader("Content-Type", "text/markdown; charset=utf-8");
-          ctx.res.setHeader(
-            "Content-Disposition",
-            `attachment; filename="${safeSectionName}-review.md"`,
-          );
-          ctx.res.setHeader(
-            "Content-Length",
-            String(Buffer.byteLength(markdown, "utf8")),
-          );
-          ctx.res.setHeader("Cache-Control", "private, no-store");
-          ctx.res.setHeader("X-Content-Type-Options", "nosniff");
-          ctx.res.end(markdown);
-          return;
-        }
-        const payload = JSON.stringify(envelope, null, 2);
+    route("POST", "/api/slate/projects/:id/review-export", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const sectionId = readString(body.sectionId, "sectionId");
+      const envelope = createSlateReviewExport(
+        db,
+        userId,
+        ctx.params.id,
+        sectionId,
+      );
+      const sectionName =
+        envelope.sections[0]?.section.title || "slate-section";
+      const safeSectionName =
+        sectionName
+          .normalize("NFKD")
+          .replace(/[^a-zA-Z0-9._-]+/gu, "-")
+          .replace(/^-+|-+$/gu, "")
+          .slice(0, 120) || "slate-section";
+      if (body.format === "markdown") {
+        const markdown = slateReviewExportMarkdown(envelope);
         ctx.res.statusCode = 200;
-        ctx.res.setHeader("Content-Type", "application/json; charset=utf-8");
+        ctx.res.setHeader("Content-Type", "text/markdown; charset=utf-8");
         ctx.res.setHeader(
           "Content-Disposition",
-          `attachment; filename="${safeSectionName}-review.json"`,
+          `attachment; filename="${safeSectionName}-review.md"`,
         );
         ctx.res.setHeader(
           "Content-Length",
-          String(Buffer.byteLength(payload, "utf8")),
+          String(Buffer.byteLength(markdown, "utf8")),
         );
         ctx.res.setHeader("Cache-Control", "private, no-store");
         ctx.res.setHeader("X-Content-Type-Options", "nosniff");
-        ctx.res.end(payload);
-      },
-    ),
-    route(
-      "GET",
-      "/api/slate/projects/:id/story-bible",
-      async (ctx) => {
-        const userId = requireAuth(ctx);
-        const sectionId = readString(
-          ctx.query.get("sectionId"),
-          "sectionId",
-        );
-        const projection = projectActiveSlateStoryBible(db, {
-          userId,
-          projectId: ctx.params.id,
-          sectionId,
-        });
-        json(ctx.res, 200, {
-          ok: true,
-          projectId: projection.projectId,
-          seriesId: projection.seriesId,
-          activeGeneration: projection.activeGeneration,
-          storyBible: projection.storyBible,
-          momentum: projection.momentum,
-        });
-      },
-    ),
+        ctx.res.end(markdown);
+        return;
+      }
+      const payload = JSON.stringify(envelope, null, 2);
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("Content-Type", "application/json; charset=utf-8");
+      ctx.res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${safeSectionName}-review.json"`,
+      );
+      ctx.res.setHeader(
+        "Content-Length",
+        String(Buffer.byteLength(payload, "utf8")),
+      );
+      ctx.res.setHeader("Cache-Control", "private, no-store");
+      ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+      ctx.res.end(payload);
+    }),
+    route("GET", "/api/slate/projects/:id/story-bible", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const sectionId = readString(ctx.query.get("sectionId"), "sectionId");
+      const projection = projectActiveSlateStoryBible(db, {
+        userId,
+        projectId: ctx.params.id,
+        sectionId,
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        projectId: projection.projectId,
+        seriesId: projection.seriesId,
+        activeGeneration: projection.activeGeneration,
+        storyBible: projection.storyBible,
+        momentum: projection.momentum,
+      });
+    }),
     route(
       "PATCH",
       "/api/slate/projects/:id/characters/:profileId/fields/:field",
@@ -9269,9 +9164,7 @@ function buildRoutes(): RouteDefinition[] {
           profileId: ctx.params.profileId,
           mutationId: readString(body.mutationId, "mutationId"),
           startState:
-            typeof body.startState === "string"
-              ? body.startState
-              : undefined,
+            typeof body.startState === "string" ? body.startState : undefined,
           destinationState:
             typeof body.destinationState === "string"
               ? body.destinationState
@@ -9291,9 +9184,9 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rawLimit = ctx.query.get("limit");
       const manuscriptPage = getSlateManuscriptPage(db, userId, ctx.params.id, {
-          cursor: ctx.query.get("cursor"),
-          limit: rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
-        });
+        cursor: ctx.query.get("cursor"),
+        limit: rawLimit ? Number.parseInt(rawLimit, 10) : undefined,
+      });
       json(ctx.res, 200, { ...manuscriptPage });
     }),
     route("GET", "/api/slate/projects/:id/exports", async (ctx) => {
@@ -9421,18 +9314,18 @@ function buildRoutes(): RouteDefinition[] {
       "GET",
       "/api/slate/projects/:id/continuity/concerns/next",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      try {
-        json(ctx.res, 200, {
-          ok: true,
-          concern: getNextSlateContinuityConcern(db, userId, ctx.params.id),
-        });
-      } catch (error) {
-        if (error instanceof SlateContinuityReconciliationError) {
-          throw new HttpError(error.status, error.message);
+        const userId = requireAuth(ctx);
+        try {
+          json(ctx.res, 200, {
+            ok: true,
+            concern: getNextSlateContinuityConcern(db, userId, ctx.params.id),
+          });
+        } catch (error) {
+          if (error instanceof SlateContinuityReconciliationError) {
+            throw new HttpError(error.status, error.message);
+          }
+          throw error;
         }
-        throw error;
-      }
       },
     ),
     route(
@@ -9485,9 +9378,9 @@ function buildRoutes(): RouteDefinition[] {
               },
               () =>
                 proposeSlateRevision(
-              db,
-              userId,
-              ctx.params.id,
+                  db,
+                  userId,
+                  ctx.params.id,
                   prepared.request,
                   ai,
                 ),
@@ -9754,60 +9647,60 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/slate/projects/:id/revisions/:revisionId/accept",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      protectSlateBeforeRisk(userId, ctx.params.id);
-      const project = acceptSlateRevision(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.revisionId,
-      );
-      settleSlateConcernRevision(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.revisionId,
-        "accepted",
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        project: protectSlateMutation(
-          project,
+        const userId = requireAuth(ctx);
+        protectSlateBeforeRisk(userId, ctx.params.id);
+        const project = acceptSlateRevision(
+          db,
           userId,
           ctx.params.id,
-          "Revision accepted",
-          true,
-        ),
-      });
+          ctx.params.revisionId,
+        );
+        settleSlateConcernRevision(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.revisionId,
+          "accepted",
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            project,
+            userId,
+            ctx.params.id,
+            "Revision accepted",
+            true,
+          ),
+        });
       },
     ),
     route(
       "POST",
       "/api/slate/projects/:id/revisions/:revisionId/reject",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const project = rejectSlateRevision(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.revisionId,
-      );
-      settleSlateConcernRevision(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.revisionId,
-        "rejected",
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        project: protectSlateMutation(
-          project,
+        const userId = requireAuth(ctx);
+        const project = rejectSlateRevision(
+          db,
           userId,
           ctx.params.id,
-          "Revision rejected",
-        ),
-      });
+          ctx.params.revisionId,
+        );
+        settleSlateConcernRevision(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.revisionId,
+          "rejected",
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          project: protectSlateMutation(
+            project,
+            userId,
+            ctx.params.id,
+            "Revision rejected",
+          ),
+        });
       },
     ),
     route("GET", "/api/conversations/sweep/state", async (ctx) => {
@@ -10010,8 +9903,8 @@ function buildRoutes(): RouteDefinition[] {
           : conversation.conversation_mode === "chat"
             ? "chat"
             : conversation.conversation_mode === "coffee"
-            ? "coffee"
-            : "sandbox";
+              ? "coffee"
+              : "sandbox";
       const messageRowsRaw = db
         .prepare(
           `SELECT m.id, m.role, m.content, m.provider, m.model, m.bot_id, m.tool_payload, m.created_at,
@@ -10085,7 +9978,7 @@ function buildRoutes(): RouteDefinition[] {
           );
           const promptShortcutWithResolvedPrompt =
             withPromptShortcutResolvedPrompt(
-            promptShortcut,
+              promptShortcut,
               promptShortcut?.resolvedPrompt ?? row.content,
             );
           const promptWildcards = parseStoredPromptWildcardPayload(
@@ -10093,7 +9986,7 @@ function buildRoutes(): RouteDefinition[] {
           );
           const promptWildcardsWithResolvedPrompt =
             withPromptWildcardResolvedPrompt(
-            promptWildcards,
+              promptWildcards,
               promptWildcards?.resolvedPrompt ?? row.content,
             );
           const manualAskQuestion = parseStoredManualAskQuestionPayload(
@@ -10213,8 +10106,8 @@ function buildRoutes(): RouteDefinition[] {
           : conversation.conversation_mode === "chat"
             ? "chat"
             : conversation.conversation_mode === "coffee"
-            ? "coffee"
-            : "sandbox";
+              ? "coffee"
+              : "sandbox";
       const botGroupIdsOut = parseConversationBotGroupIds(
         conversation.bot_group_ids,
       );
@@ -11258,8 +11151,8 @@ function buildRoutes(): RouteDefinition[] {
           )
           .get(conversationId, userId) as
           | {
-          bot_id: string | null;
-          incognito: number;
+              bot_id: string | null;
+              incognito: number;
             }
           | undefined;
         const conversationBotId =
@@ -11623,176 +11516,176 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/conversations/:id/prism-mood/interrupt",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const conversation = db
+        const userId = requireAuth(ctx);
+        const conversation = db
           .prepare(
             "SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?",
           )
-        .get(ctx.params.id, userId) as
+          .get(ctx.params.id, userId) as
           { id: string; conversation_mode: string | null } | undefined;
-      if (!conversation) {
-        throw new Error("Conversation not found.");
-      }
-      if (conversation.conversation_mode !== "zen") {
-        throw new Error("Only Zen conversations can be interrupted.");
-      }
-      const body = ctx.body as Record<string, unknown>;
-      const mode = readPrismMoodMode(conversation.conversation_mode);
-      const now = new Date().toISOString();
+        if (!conversation) {
+          throw new Error("Conversation not found.");
+        }
+        if (conversation.conversation_mode !== "zen") {
+          throw new Error("Only Zen conversations can be interrupted.");
+        }
+        const body = ctx.body as Record<string, unknown>;
+        const mode = readPrismMoodMode(conversation.conversation_mode);
+        const now = new Date().toISOString();
         const prismInterruption = readPrismInterruption(
           body.prismInterruption,
         ) ?? { kind: "pending_reply" };
         const currentMood =
           loadPrismMoodState(db, userId, conversation.id, mode) ??
-        createDefaultPrismMoodState(mode, now);
-      const user = getUserRow(userId);
-      const persisted = upsertPrismMoodState(
-        db,
-        userId,
-        conversation.id,
-        applyPrismMoodInterruption(
-          currentMood,
-          prismInterruption,
-          now,
+          createDefaultPrismMoodState(mode, now);
+        const user = getUserRow(userId);
+        const persisted = upsertPrismMoodState(
+          db,
+          userId,
+          conversation.id,
+          applyPrismMoodInterruption(
+            currentMood,
+            prismInterruption,
+            now,
             normalizeZenMoodSensitivity(user.zen_mood_sensitivity),
           ),
-      );
-      json(ctx.res, 200, { ok: true, prismMood: persisted });
+        );
+        json(ctx.res, 200, { ok: true, prismMood: persisted });
       },
     ),
     route(
       "POST",
       "/api/conversations/:id/prism-mood/ask-question-timeout",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const conversation = db
+        const userId = requireAuth(ctx);
+        const conversation = db
           .prepare(
             "SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?",
           )
-        .get(ctx.params.id, userId) as
+          .get(ctx.params.id, userId) as
           { id: string; conversation_mode: string | null } | undefined;
-      if (!conversation) {
-        throw new Error("Conversation not found.");
-      }
-      if (conversation.conversation_mode !== "zen") {
+        if (!conversation) {
+          throw new Error("Conversation not found.");
+        }
+        if (conversation.conversation_mode !== "zen") {
           throw new Error(
             "Only Zen conversations can record AskQuestion patience.",
           );
-      }
-      const body = ctx.body as Record<string, unknown>;
+        }
+        const body = ctx.body as Record<string, unknown>;
         const assistantMessageId = readString(
           body.assistantMessageId,
           "assistantMessageId",
         ).trim();
-      const message = db
-        .prepare(
-          `SELECT id, conversation_id, role, content, created_at, tool_payload
+        const message = db
+          .prepare(
+            `SELECT id, conversation_id, role, content, created_at, tool_payload
              FROM messages
             WHERE id = ? AND conversation_id = ? AND user_id = ?
             LIMIT 1`,
-        )
-        .get(assistantMessageId, conversation.id, userId) as
-        | {
-            id: string;
-            conversation_id: string;
-            role: string;
-            content: string;
-            created_at: string;
-            tool_payload: string | null;
-          }
-        | undefined;
-      const mode = readPrismMoodMode(conversation.conversation_mode);
-      const now = new Date().toISOString();
+          )
+          .get(assistantMessageId, conversation.id, userId) as
+          | {
+              id: string;
+              conversation_id: string;
+              role: string;
+              content: string;
+              created_at: string;
+              tool_payload: string | null;
+            }
+          | undefined;
+        const mode = readPrismMoodMode(conversation.conversation_mode);
+        const now = new Date().toISOString();
         const currentMood =
           loadPrismMoodState(db, userId, conversation.id, mode) ??
-        createDefaultPrismMoodState(mode, now);
-      if (!message) {
-        json(ctx.res, 200, {
-          ok: true,
-          applied: false,
-          reason: "missing_message",
-          prismMood: currentMood,
-        });
-        return;
-      }
-      const laterMessage = db
-        .prepare(
-          `SELECT id, role, created_at
+          createDefaultPrismMoodState(mode, now);
+        if (!message) {
+          json(ctx.res, 200, {
+            ok: true,
+            applied: false,
+            reason: "missing_message",
+            prismMood: currentMood,
+          });
+          return;
+        }
+        const laterMessage = db
+          .prepare(
+            `SELECT id, role, created_at
              FROM messages
             WHERE conversation_id = ? AND user_id = ? AND created_at > ?
             ORDER BY created_at ASC
             LIMIT 1`,
-        )
-        .get(conversation.id, userId, message.created_at) as
+          )
+          .get(conversation.id, userId, message.created_at) as
           { id: string; role: string; created_at: string } | undefined;
         const applicability = resolveAskQuestionTimeoutApplicability(
           message,
           laterMessage,
         );
-      if (!applicability.applies) {
-        json(ctx.res, 200, {
-          ok: true,
-          applied: false,
-          reason: applicability.reason,
-          prismMood: currentMood,
-        });
-        return;
-      }
-      const timeoutMessageId = applicability.messageId;
-      const penaltyLevel = classifyAskQuestionTimeoutPenalty(message);
+        if (!applicability.applies) {
+          json(ctx.res, 200, {
+            ok: true,
+            applied: false,
+            reason: applicability.reason,
+            prismMood: currentMood,
+          });
+          return;
+        }
+        const timeoutMessageId = applicability.messageId;
+        const penaltyLevel = classifyAskQuestionTimeoutPenalty(message);
 
-      const timeoutMs =
-        typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs)
-          ? Math.max(0, Math.round(body.timeoutMs))
-          : null;
-      const activeElapsedMs =
+        const timeoutMs =
+          typeof body.timeoutMs === "number" && Number.isFinite(body.timeoutMs)
+            ? Math.max(0, Math.round(body.timeoutMs))
+            : null;
+        const activeElapsedMs =
           typeof body.activeElapsedMs === "number" &&
           Number.isFinite(body.activeElapsedMs)
-          ? Math.max(0, Math.round(body.activeElapsedMs))
-          : null;
-      const user = getUserRow(userId);
-      let persistedMood = currentMood;
-      let applied = false;
-      db.exec("BEGIN IMMEDIATE TRANSACTION");
-      try {
-        applied = recordPrismMoodEventOnce(db, {
-          userId,
-          conversationId: conversation.id,
-          messageId: timeoutMessageId,
-          eventType: "ignored_question",
-          createdAt: now,
-          payload: {
-            ...(timeoutMs !== null ? { timeoutMs } : {}),
-            ...(activeElapsedMs !== null ? { activeElapsedMs } : {}),
-            penaltyLevel,
-          },
-        });
-        if (applied) {
-          persistedMood = upsertPrismMoodState(
-            db,
+            ? Math.max(0, Math.round(body.activeElapsedMs))
+            : null;
+        const user = getUserRow(userId);
+        let persistedMood = currentMood;
+        let applied = false;
+        db.exec("BEGIN IMMEDIATE TRANSACTION");
+        try {
+          applied = recordPrismMoodEventOnce(db, {
             userId,
-            conversation.id,
-            applyPrismMoodIgnoredQuestion(
-              currentMood,
-              now,
-              normalizeZenMoodSensitivity(user.zen_mood_sensitivity),
+            conversationId: conversation.id,
+            messageId: timeoutMessageId,
+            eventType: "ignored_question",
+            createdAt: now,
+            payload: {
+              ...(timeoutMs !== null ? { timeoutMs } : {}),
+              ...(activeElapsedMs !== null ? { activeElapsedMs } : {}),
+              penaltyLevel,
+            },
+          });
+          if (applied) {
+            persistedMood = upsertPrismMoodState(
+              db,
+              userId,
+              conversation.id,
+              applyPrismMoodIgnoredQuestion(
+                currentMood,
+                now,
+                normalizeZenMoodSensitivity(user.zen_mood_sensitivity),
                 penaltyLevel,
               ),
-          );
+            );
+          }
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
         }
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
 
-      json(ctx.res, 200, {
-        ok: true,
-        applied,
-        duplicate: !applied,
-        penaltyLevel,
-        prismMood: persistedMood,
-      });
+        json(ctx.res, 200, {
+          ok: true,
+          applied,
+          duplicate: !applied,
+          penaltyLevel,
+          prismMood: persistedMood,
+        });
       },
     ),
     route("POST", "/api/composer/wildcard-value", async (ctx) => {
@@ -11861,13 +11754,13 @@ function buildRoutes(): RouteDefinition[] {
               semantic_facets?: string | null;
               powers_json?: string | null;
               online_enabled?: number | null;
-	              flirt_enabled?: number | null;
-	              temperature?: number | null;
-	              max_tokens?: number | null;
-	              top_p?: number | null;
-	              top_k?: number | null;
-	              repetition_penalty?: number | null;
-	            }
+              flirt_enabled?: number | null;
+              temperature?: number | null;
+              max_tokens?: number | null;
+              top_p?: number | null;
+              top_k?: number | null;
+              repetition_penalty?: number | null;
+            }
           | undefined;
         if (!bot) {
           throw new HttpError(
@@ -11888,19 +11781,19 @@ function buildRoutes(): RouteDefinition[] {
             effectiveProvider = "local";
             botForcesLocalProvider = true;
           }
-	          if (typeof bot.temperature === "number") {
-	            generationOverrides.temperature = bot.temperature;
-	          }
-	          if (typeof bot.top_p === "number") {
-	            generationOverrides.topP = bot.top_p;
-	          }
-	          if (typeof bot.top_k === "number") {
-	            generationOverrides.topK = bot.top_k;
-	          }
-	          if (typeof bot.repetition_penalty === "number") {
-	            generationOverrides.repetitionPenalty = bot.repetition_penalty;
-	          }
-	        }
+          if (typeof bot.temperature === "number") {
+            generationOverrides.temperature = bot.temperature;
+          }
+          if (typeof bot.top_p === "number") {
+            generationOverrides.topP = bot.top_p;
+          }
+          if (typeof bot.top_k === "number") {
+            generationOverrides.topK = bot.top_k;
+          }
+          if (typeof bot.repetition_penalty === "number") {
+            generationOverrides.repetitionPenalty = bot.repetition_penalty;
+          }
+        }
       }
 
       const openAiApiKey =
@@ -11952,7 +11845,7 @@ function buildRoutes(): RouteDefinition[] {
       )
         .filter(
           (memory) => mode !== "chat" || memory.botId === effectiveMemoryBotId,
-      )
+        )
         .map((memory) => memory.text);
       const recentContextLines = recentMessages.map((message) => {
         const speaker =
@@ -12139,8 +12032,8 @@ function buildRoutes(): RouteDefinition[] {
       const psychicModeRequested = body.psychicModeEnabled === true;
       const requestedResponseMode =
         mode === "zen"
-        ? normalizeResponseMode(body.responseMode, undefined)
-        : undefined;
+          ? normalizeResponseMode(body.responseMode, undefined)
+          : undefined;
       const requestedPersonaTransition =
         mode === "zen"
           ? readZenPersonaTransition(
@@ -12177,14 +12070,14 @@ function buildRoutes(): RouteDefinition[] {
         !starterPrompt && commandCenterPrompt
           ? readOptionalString(body.resolvedCommandCenterPrompt)
           : null;
-	      const promptInputOverride =
-	        !starterPrompt && !commandCenterPrompt
-	          ? readOptionalString(body.promptInputOverride)
-	          : null;
+      const promptInputOverride =
+        !starterPrompt && !commandCenterPrompt
+          ? readOptionalString(body.promptInputOverride)
+          : null;
       const manualTool = !starterPrompt
         ? readManualChatTool(body.manualTool)
         : undefined;
-	      const conversationId =
+      const conversationId =
         typeof body.conversationId === "string"
           ? body.conversationId
           : undefined;
@@ -12247,8 +12140,7 @@ function buildRoutes(): RouteDefinition[] {
         !incognito &&
         body.progressiveZenVoice === true &&
         user.voice_mode === "english" &&
-        normalizeEnglishVoiceEngine(user.english_voice_engine) ===
-          "elevenlabs";
+        normalizeEnglishVoiceEngine(user.english_voice_engine) === "elevenlabs";
       let progressiveZenStreamStarted = false;
       const writeProgressiveZenEvent = (
         event: Record<string, unknown>,
@@ -12328,8 +12220,8 @@ function buildRoutes(): RouteDefinition[] {
         const auxiliaryProvider = getAuxiliaryProvider(
           user.prism_default_llm_model,
           {
-          secondaryOllamaHost: user.secondary_ollama_host,
-          experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            experimentalDualOllama: user.experimental_dual_ollama_enabled === 1,
           },
         );
         zenAutonomyDecision = await decideZenAutonomyTurn({
@@ -12394,13 +12286,13 @@ function buildRoutes(): RouteDefinition[] {
               system_prompt?: string;
               powers_json?: string | null;
               online_enabled?: number | null;
-	              flirt_enabled?: number | null;
-	              temperature?: number | null;
-	              max_tokens?: number | null;
-	              top_p?: number | null;
-	              top_k?: number | null;
-	              repetition_penalty?: number | null;
-	            }
+              flirt_enabled?: number | null;
+              temperature?: number | null;
+              max_tokens?: number | null;
+              top_p?: number | null;
+              top_k?: number | null;
+              repetition_penalty?: number | null;
+            }
           | undefined;
         if (bot) {
           runtimeBotPowers = bot.powers_json ?? null;
@@ -12417,9 +12309,11 @@ function buildRoutes(): RouteDefinition[] {
               ? (ephemeralMessages?.length ?? 0)
               : conversationId
                 ? (
-                    db.prepare(
-                      "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?",
-                    ).get(conversationId, userId) as { n: number }
+                    db
+                      .prepare(
+                        "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND user_id = ?",
+                      )
+                      .get(conversationId, userId) as { n: number }
                   ).n
                 : 0;
             runtimeBotQuietIgnored = botPowerIntermittentMuteTurnIsIgnoredV1(
@@ -12431,9 +12325,8 @@ function buildRoutes(): RouteDefinition[] {
             bot.powers_json,
           );
           runtimeBotMumbling = botPowerMumblesSpeechV1(bot.powers_json);
-          runtimeBotResponseBudget = strongestHardBotPowerResponseBudgetEffectV1(
-            bot.powers_json,
-          );
+          runtimeBotResponseBudget =
+            strongestHardBotPowerResponseBudgetEffectV1(bot.powers_json);
           starterPromptLabel = bot.name;
           // Name is folded into the system prompt by composeBotSystemPrompt so
           // the model actually knows who it's supposed to be, even when the
@@ -12459,18 +12352,18 @@ function buildRoutes(): RouteDefinition[] {
           if (typeof bot.temperature === "number") {
             generationOverrides.temperature = bot.temperature;
           }
-	          if (typeof bot.max_tokens === "number") {
-	            generationOverrides.maxTokens = bot.max_tokens;
-	          }
-	          if (typeof bot.top_p === "number") {
-	            generationOverrides.topP = bot.top_p;
-	          }
-	          if (typeof bot.top_k === "number") {
-	            generationOverrides.topK = bot.top_k;
-	          }
-	          if (typeof bot.repetition_penalty === "number") {
-	            generationOverrides.repetitionPenalty = bot.repetition_penalty;
-	          }
+          if (typeof bot.max_tokens === "number") {
+            generationOverrides.maxTokens = bot.max_tokens;
+          }
+          if (typeof bot.top_p === "number") {
+            generationOverrides.topP = bot.top_p;
+          }
+          if (typeof bot.top_k === "number") {
+            generationOverrides.topK = bot.top_k;
+          }
+          if (typeof bot.repetition_penalty === "number") {
+            generationOverrides.repetitionPenalty = bot.repetition_penalty;
+          }
         }
       }
       if (!starterPromptLabel && mode === "zen" && runtimeBotId == null) {
@@ -12718,14 +12611,13 @@ function buildRoutes(): RouteDefinition[] {
             ...(progressiveZenVoiceRequested
               ? {
                   onProgressiveZenSegment: (segment) => {
-                    const voiceSegment =
-                      registerZenProgressiveVoiceSegment({
-                        userId,
-                        text: segment.text,
-                        provider: segment.provider,
-                        botId: segment.botId,
-                        moodKey: segment.moodKey,
-                      });
+                    const voiceSegment = registerZenProgressiveVoiceSegment({
+                      userId,
+                      text: segment.text,
+                      provider: segment.provider,
+                      botId: segment.botId,
+                      moodKey: segment.moodKey,
+                    });
                     writeProgressiveZenEvent({
                       type: "segment",
                       ...segment,
@@ -12751,8 +12643,8 @@ function buildRoutes(): RouteDefinition[] {
             ...(promptWildcardsForChat
               ? { promptWildcards: promptWildcardsForChat }
               : {}),
-	            ...(manualTool ? { manualTool } : {}),
-	          },
+            ...(manualTool ? { manualTool } : {}),
+          },
           conversationId,
         );
       } catch (error) {
@@ -13381,23 +13273,19 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
-    route(
-      "POST",
-      "/api/debates/:id/jury/skip-deliberation",
-      async (ctx) => {
-        const userId = requireAuth(ctx);
-        const session = skipDebateJuryDeliberation(
-          db,
-          userId,
-          ctx.params.id,
-          ctx.body as Parameters<typeof skipDebateJuryDeliberation>[3],
-        );
-        json(ctx.res, 200, {
-          ok: true,
-          session: debateSessionForPlayer(session),
-        });
-      },
-    ),
+    route("POST", "/api/debates/:id/jury/skip-deliberation", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = skipDebateJuryDeliberation(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof skipDebateJuryDeliberation>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
     route("POST", "/api/debates/:id/resume", async (ctx) => {
       const userId = requireAuth(ctx);
       const session = resumeDebateSession(
@@ -13441,8 +13329,7 @@ function buildRoutes(): RouteDefinition[] {
         proposalId: proposal.id,
         confirmation: true,
         idempotencyKey:
-          typeof body.idempotencyKey === "string" &&
-          body.idempotencyKey.trim()
+          typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
             ? body.idempotencyKey.trim().slice(0, 240)
             : `ui:debate-delete:${ctx.params.id}:${randomId()}`,
       });
@@ -13691,12 +13578,10 @@ function buildRoutes(): RouteDefinition[] {
               preferredProvider: effectiveArtworkProvider,
               signal,
               keywords,
-            }).then(
-              (refreshedShow) => ({
-                imageId: refreshedShow.studioLighting.imageId!,
-                imageUrl: refreshedShow.studioLighting.imageUrl!,
-              }),
-            ),
+            }).then((refreshedShow) => ({
+              imageId: refreshedShow.studioLighting.imageId!,
+              imageUrl: refreshedShow.studioLighting.imageUrl!,
+            })),
         });
         console.info("[signal-artwork] background job started", {
           jobId: job.id,
@@ -14070,9 +13955,7 @@ function buildRoutes(): RouteDefinition[] {
               {
                 direction,
                 currentGuestBotId:
-                  typeof body.guestBotId === "string"
-                    ? body.guestBotId
-                    : null,
+                  typeof body.guestBotId === "string" ? body.guestBotId : null,
                 currentTopic:
                   typeof body.currentTopic === "string"
                     ? body.currentTopic
@@ -14091,9 +13974,7 @@ function buildRoutes(): RouteDefinition[] {
               ctx.params.id,
               {
                 guestBotId:
-                  typeof body.guestBotId === "string"
-                    ? body.guestBotId
-                    : "",
+                  typeof body.guestBotId === "string" ? body.guestBotId : "",
                 field,
                 currentTopic:
                   typeof body.currentTopic === "string"
@@ -14141,10 +14022,10 @@ function buildRoutes(): RouteDefinition[] {
       const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
       const assetLabel =
         slot === "day-studio"
-        ? "Light studio"
-        : slot === "night-studio"
-          ? "Dark studio"
-          : "logo";
+          ? "Light studio"
+          : slot === "night-studio"
+            ? "Dark studio"
+            : "logo";
       const prompt = `Uploaded Signal ${assetLabel} for ${show.name}`;
       const relatedBotIds = serializeImageRelatedBotIds(
         [show.hostBotId],
@@ -14226,294 +14107,309 @@ function buildRoutes(): RouteDefinition[] {
         }),
       });
     }),
-    route("POST", "/api/botcast/shows/:id/studio-lighting/refresh", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const show = getBotcastShow(db, userId, ctx.params.id);
-      const user = getUserRow(userId);
-      const body = ctx.body as Record<string, unknown>;
-      const keywords = normalizeSignalGenerationKeywords(body.keywords);
-      const preferredProvider: ImageProviderName =
-        body.preferredProvider === "local" ||
-        body.preferredProvider === "openai"
-          ? body.preferredProvider
-          : user.preferred_image_provider;
-      const effectiveProvider = resolveImageProviderName({
-        savedProvider: user.preferred_image_provider,
-        requestedProvider: preferredProvider,
-        offlineOnly: imageContextIncludesOfflineOnlyBot(db, userId, [
-          show.hostBotId,
-        ]),
-      });
-      if (signalArtworkJobs.hasActiveJobForUser(userId)) {
-        throw new HttpError(
-          409,
-          "Wait for the current Signal artwork job to finish before refreshing Studio lighting.",
-        );
-      }
-      const usesSharedImageSlot =
-        effectiveProvider === "openai" &&
-        !isDisabledModelChoice(user.preferred_openai_image_model?.trim() ?? "");
-      const controller = new AbortController();
-      let acquiredJobId: string | null = null;
-      const job = signalArtworkJobs.start({
-        userId,
-        showId: show.id,
-        showName: show.name,
-        studioLightingOnly: true,
-        controller,
-        ...(usesSharedImageSlot
-          ? {
-              acquireSlot: async (signal: AbortSignal) => {
-                const acquired = await waitForImageSlot({
-                  userId,
-                  conversationId: null,
-                  botId: show.hostBotId,
-                  mode: "sandbox",
-                  incognito: false,
-                  captionPrompt: `${show.name} Studio lighting refresh`,
-                  userMessage: `[Signal] Refresh ${show.name}'s Studio lighting`,
-                  source: "signal_artwork",
-                  requestedSize: "1536x1024",
-                  abortController: controller,
-                  signal,
-                });
-                acquiredJobId = acquired.id;
-              },
+    route(
+      "POST",
+      "/api/botcast/shows/:id/studio-lighting/refresh",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const show = getBotcastShow(db, userId, ctx.params.id);
+        const user = getUserRow(userId);
+        const body = ctx.body as Record<string, unknown>;
+        const keywords = normalizeSignalGenerationKeywords(body.keywords);
+        const preferredProvider: ImageProviderName =
+          body.preferredProvider === "local" ||
+          body.preferredProvider === "openai"
+            ? body.preferredProvider
+            : user.preferred_image_provider;
+        const effectiveProvider = resolveImageProviderName({
+          savedProvider: user.preferred_image_provider,
+          requestedProvider: preferredProvider,
+          offlineOnly: imageContextIncludesOfflineOnlyBot(db, userId, [
+            show.hostBotId,
+          ]),
+        });
+        if (signalArtworkJobs.hasActiveJobForUser(userId)) {
+          throw new HttpError(
+            409,
+            "Wait for the current Signal artwork job to finish before refreshing Studio lighting.",
+          );
+        }
+        const usesSharedImageSlot =
+          effectiveProvider === "openai" &&
+          !isDisabledModelChoice(
+            user.preferred_openai_image_model?.trim() ?? "",
+          );
+        const controller = new AbortController();
+        let acquiredJobId: string | null = null;
+        const job = signalArtworkJobs.start({
+          userId,
+          showId: show.id,
+          showName: show.name,
+          studioLightingOnly: true,
+          controller,
+          ...(usesSharedImageSlot
+            ? {
+                acquireSlot: async (signal: AbortSignal) => {
+                  const acquired = await waitForImageSlot({
+                    userId,
+                    conversationId: null,
+                    botId: show.hostBotId,
+                    mode: "sandbox",
+                    incognito: false,
+                    captionPrompt: `${show.name} Studio lighting refresh`,
+                    userMessage: `[Signal] Refresh ${show.name}'s Studio lighting`,
+                    source: "signal_artwork",
+                    requestedSize: "1536x1024",
+                    abortController: controller,
+                    signal,
+                  });
+                  acquiredJobId = acquired.id;
+                },
+              }
+            : {}),
+          releaseSlot: async () => {
+            if (acquiredJobId) {
+              await releaseImageSlotIfOwned(userId, acquiredJobId);
             }
-          : {}),
-        releaseSlot: async () => {
-          if (acquiredJobId) {
-            await releaseImageSlotIfOwned(userId, acquiredJobId);
-          }
-        },
-        refreshStudioLighting: (signal) =>
-          rebuildSignalStudioLighting(userId, show.id, {
-            preferredProvider: effectiveProvider,
-            signal,
-            keywords,
-          }).then((refreshedShow) => ({
-            imageId: refreshedShow.studioLighting.imageId!,
-            imageUrl: refreshedShow.studioLighting.imageUrl!,
-          })),
-      });
-      console.info("[signal-artwork] Studio lighting job accepted", {
-        jobId: job.id,
-        userId,
-        showId: show.id,
-        provider: effectiveProvider,
-        queuedForImageSlot: usesSharedImageSlot,
-      });
-      json(ctx.res, 202, { ok: true, job });
-    }),
-    route("POST", "/api/botcast/shows/:id/intro-audio/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      if (userBlocksOnlineCapabilities(user)) {
-        throw new HttpError(
-          409,
-          "Switch to AUTO or ONLINE before creating an ElevenLabs Signal audio package.",
-        );
-      }
-      const show = getBotcastShow(db, userId, ctx.params.id);
-      const body = ctx.body as Record<string, unknown>;
-      const keywords = normalizeSignalGenerationKeywords(body.keywords);
-      const userKey = decryptUserKey(userId);
-      const apiKey =
-        getElevenLabsApiKeyForUser(userId, userKey) ??
-        config.elevenLabsApiKey;
-      if (!apiKey) {
-        throw new HttpError(
-          409,
-          "Add an ElevenLabs API key in Settings first.",
-        );
-      }
-      const host = db
-        .prepare(
-          "SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?",
-        )
-        .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
-      if (!host) throw new HttpError(404, "Signal host bot not found.");
-      const musicSeed = `${show.hostBotId}:${show.id}:music:${show.musicIdentity.revision}`;
-      const musicProfile = buildSignalMusicProfile({
-        temperament: signalPersonaTemperamentFor(host.system_prompt),
-        seed: musicSeed,
-        identity: show.musicIdentity.profile,
-        premise: show.premise,
-        hostingStyle: show.hostingStyle,
-        studioIdentity: show.studioIdentity,
-      });
-      const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
-        profile: musicProfile,
-        seed: musicSeed,
-        keywords,
-      });
-      const outdentCompositionPlan =
-        buildSignalElevenLabsOutdentCompositionPlan({
+          },
+          refreshStudioLighting: (signal) =>
+            rebuildSignalStudioLighting(userId, show.id, {
+              preferredProvider: effectiveProvider,
+              signal,
+              keywords,
+            }).then((refreshedShow) => ({
+              imageId: refreshedShow.studioLighting.imageId!,
+              imageUrl: refreshedShow.studioLighting.imageUrl!,
+            })),
+        });
+        console.info("[signal-artwork] Studio lighting job accepted", {
+          jobId: job.id,
+          userId,
+          showId: show.id,
+          provider: effectiveProvider,
+          queuedForImageSlot: usesSharedImageSlot,
+        });
+        json(ctx.res, 202, { ok: true, job });
+      },
+    ),
+    route(
+      "POST",
+      "/api/botcast/shows/:id/intro-audio/generate",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const user = getUserRow(userId);
+        if (userBlocksOnlineCapabilities(user)) {
+          throw new HttpError(
+            409,
+            "Switch to AUTO or ONLINE before creating an ElevenLabs Signal audio package.",
+          );
+        }
+        const show = getBotcastShow(db, userId, ctx.params.id);
+        const body = ctx.body as Record<string, unknown>;
+        const keywords = normalizeSignalGenerationKeywords(body.keywords);
+        const userKey = decryptUserKey(userId);
+        const apiKey =
+          getElevenLabsApiKeyForUser(userId, userKey) ??
+          config.elevenLabsApiKey;
+        if (!apiKey) {
+          throw new HttpError(
+            409,
+            "Add an ElevenLabs API key in Settings first.",
+          );
+        }
+        const host = db
+          .prepare(
+            "SELECT system_prompt FROM bots WHERE id = ? AND user_id = ?",
+          )
+          .get(show.hostBotId, userId) as { system_prompt: string } | undefined;
+        if (!host) throw new HttpError(404, "Signal host bot not found.");
+        const musicSeed = `${show.hostBotId}:${show.id}:music:${show.musicIdentity.revision}`;
+        const musicProfile = buildSignalMusicProfile({
+          temperament: signalPersonaTemperamentFor(host.system_prompt),
+          seed: musicSeed,
+          identity: show.musicIdentity.profile,
+          premise: show.premise,
+          hostingStyle: show.hostingStyle,
+          studioIdentity: show.studioIdentity,
+        });
+        const compositionPlan = buildSignalElevenLabsMusicCompositionPlan({
           profile: musicProfile,
           seed: musicSeed,
           keywords,
         });
-      const controller = new AbortController();
-      const onClose = () => controller.abort();
-      ctx.req.once("close", onClose);
-      try {
+        const outdentCompositionPlan =
+          buildSignalElevenLabsOutdentCompositionPlan({
+            profile: musicProfile,
+            seed: musicSeed,
+            keywords,
+          });
+        const controller = new AbortController();
+        const onClose = () => controller.abort();
+        ctx.req.once("close", onClose);
+        try {
+          const atmospherePrompt = buildSignalAtmospherePrompt({
+            showName: show.name,
+            studioIdentity: show.studioIdentity,
+            keywords,
+          });
+          const [music, outdent, atmosphere] = await Promise.all([
+            requestSignalElevenLabsMusic({
+              apiKey,
+              compositionPlan,
+              signal: controller.signal,
+            }),
+            requestSignalElevenLabsMusic({
+              apiKey,
+              compositionPlan: outdentCompositionPlan,
+              signal: controller.signal,
+            }),
+            requestSignalElevenLabsAtmosphere({
+              apiKey,
+              prompt: atmospherePrompt,
+              signal: controller.signal,
+            }),
+          ]);
+          if (controller.signal.aborted) return;
+          db.exec("BEGIN IMMEDIATE");
+          let savedShow;
+          try {
+            storeBotcastShowIntroAudio(db, userId, show.id, {
+              model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
+              prompt: JSON.stringify(compositionPlan),
+              contentType: music.contentType,
+              audioBytes: music.audioBytes,
+              durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
+              outdent: {
+                prompt: JSON.stringify(outdentCompositionPlan),
+                contentType: outdent.contentType,
+                audioBytes: outdent.audioBytes,
+                durationMs: BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
+              },
+            });
+            savedShow = storeBotcastShowAtmosphereAudio(db, userId, show.id, {
+              model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
+              prompt: atmospherePrompt,
+              contentType: atmosphere.contentType,
+              audioBytes: atmosphere.audioBytes,
+              durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
+            });
+            db.exec("COMMIT");
+          } catch (storeError) {
+            db.exec("ROLLBACK");
+            throw storeError;
+          }
+          const requestIds = [
+            music.requestId,
+            outdent.requestId,
+            atmosphere.requestId,
+          ].filter(Boolean);
+          if (requestIds.length > 0) {
+            ctx.res.setHeader(
+              "x-prism-provider-request-id",
+              requestIds.join(","),
+            );
+          }
+          json(ctx.res, 201, { ok: true, show: savedShow });
+          void checkPrismCreditMonitorForUser(userId, true);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          if (
+            error instanceof ElevenLabsMusicError ||
+            error instanceof ElevenLabsSoundError
+          ) {
+            throw new HttpError(
+              error.status === 401 || error.status === 403
+                ? 401
+                : error.status === 429
+                  ? 429
+                  : 502,
+              error.message,
+            );
+          }
+          throw error;
+        } finally {
+          ctx.req.off("close", onClose);
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/botcast/shows/:id/atmosphere-audio/generate",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const user = getUserRow(userId);
+        if (userBlocksOnlineCapabilities(user)) {
+          throw new HttpError(
+            409,
+            "Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere.",
+          );
+        }
+        const show = getBotcastShow(db, userId, ctx.params.id);
+        const body = ctx.body as Record<string, unknown>;
+        const keywords = normalizeSignalGenerationKeywords(body.keywords);
+        const userKey = decryptUserKey(userId);
+        const apiKey =
+          getElevenLabsApiKeyForUser(userId, userKey) ??
+          config.elevenLabsApiKey;
+        if (!apiKey) {
+          throw new HttpError(
+            409,
+            "Add an ElevenLabs API key in Settings first.",
+          );
+        }
         const atmospherePrompt = buildSignalAtmospherePrompt({
           showName: show.name,
           studioIdentity: show.studioIdentity,
           keywords,
         });
-        const [music, outdent, atmosphere] = await Promise.all([
-          requestSignalElevenLabsMusic({
-            apiKey,
-            compositionPlan,
-            signal: controller.signal,
-          }),
-          requestSignalElevenLabsMusic({
-            apiKey,
-            compositionPlan: outdentCompositionPlan,
-            signal: controller.signal,
-          }),
-          requestSignalElevenLabsAtmosphere({
-            apiKey,
-            prompt: atmospherePrompt,
-            signal: controller.signal,
-          }),
-        ]);
-        if (controller.signal.aborted) return;
-        db.exec("BEGIN IMMEDIATE");
-        let savedShow;
+        const controller = new AbortController();
+        const onClose = () => controller.abort();
+        ctx.req.once("close", onClose);
         try {
-          storeBotcastShowIntroAudio(db, userId, show.id, {
-            model: SIGNAL_ELEVENLABS_MUSIC_MODEL,
-            prompt: JSON.stringify(compositionPlan),
-            contentType: music.contentType,
-            audioBytes: music.audioBytes,
-            durationMs: BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
-            outdent: {
-              prompt: JSON.stringify(outdentCompositionPlan),
-              contentType: outdent.contentType,
-              audioBytes: outdent.audioBytes,
-              durationMs: BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
+          const atmosphere = await requestSignalElevenLabsAtmosphere({
+            apiKey,
+            prompt: atmospherePrompt,
+            signal: controller.signal,
+          });
+          if (controller.signal.aborted) return;
+          const savedShow = storeBotcastShowAtmosphereAudio(
+            db,
+            userId,
+            show.id,
+            {
+              model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
+              prompt: atmospherePrompt,
+              contentType: atmosphere.contentType,
+              audioBytes: atmosphere.audioBytes,
+              durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
             },
-          });
-          savedShow = storeBotcastShowAtmosphereAudio(db, userId, show.id, {
-            model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
-            prompt: atmospherePrompt,
-            contentType: atmosphere.contentType,
-            audioBytes: atmosphere.audioBytes,
-            durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
-          });
-          db.exec("COMMIT");
-        } catch (storeError) {
-          db.exec("ROLLBACK");
-          throw storeError;
-        }
-        const requestIds = [
-          music.requestId,
-          outdent.requestId,
-          atmosphere.requestId,
-        ].filter(Boolean);
-        if (requestIds.length > 0) {
-          ctx.res.setHeader(
-            "x-prism-provider-request-id",
-            requestIds.join(","),
           );
+          if (atmosphere.requestId) {
+            ctx.res.setHeader(
+              "x-prism-provider-request-id",
+              atmosphere.requestId,
+            );
+          }
+          json(ctx.res, 201, { ok: true, show: savedShow });
+          void checkPrismCreditMonitorForUser(userId, true);
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          if (error instanceof ElevenLabsSoundError) {
+            throw new HttpError(
+              error.status === 401 || error.status === 403
+                ? 401
+                : error.status === 429
+                  ? 429
+                  : 502,
+              error.message,
+            );
+          }
+          throw error;
+        } finally {
+          ctx.req.off("close", onClose);
         }
-        json(ctx.res, 201, { ok: true, show: savedShow });
-        void checkPrismCreditMonitorForUser(userId, true);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        if (
-          error instanceof ElevenLabsMusicError ||
-          error instanceof ElevenLabsSoundError
-        ) {
-          throw new HttpError(
-            error.status === 401 || error.status === 403
-              ? 401
-              : error.status === 429
-                ? 429
-                : 502,
-            error.message,
-          );
-        }
-        throw error;
-      } finally {
-        ctx.req.off("close", onClose);
-      }
-    }),
-    route("POST", "/api/botcast/shows/:id/atmosphere-audio/generate", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const user = getUserRow(userId);
-      if (userBlocksOnlineCapabilities(user)) {
-        throw new HttpError(
-          409,
-          "Switch to AUTO or ONLINE before creating an ElevenLabs Signal atmosphere.",
-        );
-      }
-      const show = getBotcastShow(db, userId, ctx.params.id);
-      const body = ctx.body as Record<string, unknown>;
-      const keywords = normalizeSignalGenerationKeywords(body.keywords);
-      const userKey = decryptUserKey(userId);
-      const apiKey =
-        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
-      if (!apiKey) {
-        throw new HttpError(
-          409,
-          "Add an ElevenLabs API key in Settings first.",
-        );
-      }
-      const atmospherePrompt = buildSignalAtmospherePrompt({
-        showName: show.name,
-        studioIdentity: show.studioIdentity,
-        keywords,
-      });
-      const controller = new AbortController();
-      const onClose = () => controller.abort();
-      ctx.req.once("close", onClose);
-      try {
-        const atmosphere = await requestSignalElevenLabsAtmosphere({
-          apiKey,
-          prompt: atmospherePrompt,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        const savedShow = storeBotcastShowAtmosphereAudio(
-          db,
-          userId,
-          show.id,
-          {
-            model: SIGNAL_ELEVENLABS_ATMOSPHERE_MODEL,
-            prompt: atmospherePrompt,
-            contentType: atmosphere.contentType,
-            audioBytes: atmosphere.audioBytes,
-            durationMs: SIGNAL_ELEVENLABS_ATMOSPHERE_DURATION_MS,
-          },
-        );
-        if (atmosphere.requestId) {
-          ctx.res.setHeader(
-            "x-prism-provider-request-id",
-            atmosphere.requestId,
-          );
-        }
-        json(ctx.res, 201, { ok: true, show: savedShow });
-        void checkPrismCreditMonitorForUser(userId, true);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        if (error instanceof ElevenLabsSoundError) {
-          throw new HttpError(
-            error.status === 401 || error.status === 403
-              ? 401
-              : error.status === 429
-                ? 429
-                : 502,
-            error.message,
-          );
-        }
-        throw error;
-      } finally {
-        ctx.req.off("close", onClose);
-      }
-    }),
+      },
+    ),
     route("GET", "/api/botcast/shows/:id/intro-audio", async (ctx) => {
       const userId = requireAuth(ctx);
       const intro = readBotcastShowIntroAudio(db, userId, ctx.params.id);
@@ -14526,11 +14422,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/botcast/shows/:id/outdent-audio", async (ctx) => {
       const userId = requireAuth(ctx);
-      const outdent = readBotcastShowOutdentAudio(
-        db,
-        userId,
-        ctx.params.id,
-      );
+      const outdent = readBotcastShowOutdentAudio(db, userId, ctx.params.id);
       if (!outdent) throw new HttpError(404, "Signal outdent not found.");
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", outdent.contentType);
@@ -14610,9 +14502,7 @@ function buildRoutes(): RouteDefinition[] {
           input: {
             showId: ctx.params.id,
             patch: {
-              ...(typeof body.name === "string"
-                ? { name: body.name }
-                : {}),
+              ...(typeof body.name === "string" ? { name: body.name } : {}),
               ...(typeof body.premise === "string"
                 ? { premise: body.premise }
                 : {}),
@@ -14651,8 +14541,7 @@ function buildRoutes(): RouteDefinition[] {
         ...(body.hostInterruptionLines !== undefined
           ? {
               hostInterruptionLines:
-                body.hostInterruptionLines as
-                  BotcastShowPatchRequest["hostInterruptionLines"],
+                body.hostInterruptionLines as BotcastShowPatchRequest["hostInterruptionLines"],
             }
           : {}),
         ...(body.atmosphereImageUrl !== undefined
@@ -14684,7 +14573,8 @@ function buildRoutes(): RouteDefinition[] {
           : {}),
         ...(body.studioLayout !== undefined
           ? {
-              studioLayout: body.studioLayout as BotcastShowPatchRequest["studioLayout"],
+              studioLayout:
+                body.studioLayout as BotcastShowPatchRequest["studioLayout"],
             }
           : {}),
         ...(body.cameraFraming !== undefined
@@ -14742,10 +14632,16 @@ function buildRoutes(): RouteDefinition[] {
       }
       const episodeIds = (
         db
-          .prepare("SELECT id FROM botcast_episodes WHERE user_id = ? AND show_id = ?")
+          .prepare(
+            "SELECT id FROM botcast_episodes WHERE user_id = ? AND show_id = ?",
+          )
           .all(userId, ctx.params.id) as Array<{ id: string }>
       ).map((row) => row.id);
-      const replayIds = replayRecordingIdsForSource(userId, "signal", episodeIds);
+      const replayIds = replayRecordingIdsForSource(
+        userId,
+        "signal",
+        episodeIds,
+      );
       if (!deleteBotcastShow(db, userId, ctx.params.id)) {
         throw new HttpError(404, "Signal show not found.");
       }
@@ -14779,7 +14675,7 @@ function buildRoutes(): RouteDefinition[] {
       const localModeLocked =
         user.preferred_provider === "local" && !autoEnabled;
       const preferredProvider = localModeLocked
-          ? "local"
+        ? "local"
         : (requestedProvider ?? user.preferred_provider);
       const requestedModelOverride = readCoffeeSessionSpeakerModel(
         body.modelOverride,
@@ -14930,9 +14826,8 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
-      const perspective = ctx.query.get("perspective") === "replay"
-        ? "replay"
-        : "live";
+      const perspective =
+        ctx.query.get("perspective") === "replay" ? "replay" : "live";
       json(ctx.res, 200, {
         ok: true,
         episode: projectBotcastEpisodeForObserverV2(
@@ -14972,7 +14867,10 @@ function buildRoutes(): RouteDefinition[] {
         idempotencyKey: `ui:signal-episode-delete:${targetEpisode.id}`,
       });
       if (run.status !== "committed") {
-        throw new HttpError(409, run.error ?? "Signal episode was not deleted.");
+        throw new HttpError(
+          409,
+          run.error ?? "Signal episode was not deleted.",
+        );
       }
       json(ctx.res, 200, {
         ok: true,
@@ -14995,11 +14893,9 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           currentEpisode.id,
         );
-        const replayIds = replayRecordingIdsForSource(
-          userId,
-          "signal",
-          [currentEpisode.id],
-        );
+        const replayIds = replayRecordingIdsForSource(userId, "signal", [
+          currentEpisode.id,
+        ]);
         for (const recordingId of replayIds) {
           deleteReplayRecordingMedia(db, userId, recordingId);
         }
@@ -15034,10 +14930,7 @@ function buildRoutes(): RouteDefinition[] {
           });
           return;
         }
-        throw new HttpError(
-          409,
-          "This Signal episode has already ended.",
-        );
+        throw new HttpError(409, "This Signal episode has already ended.");
       }
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
@@ -15061,9 +14954,7 @@ function buildRoutes(): RouteDefinition[] {
           providerFactory: providerFactoryOverride,
         },
         {
-          ...(body.deterministicClose === true
-            ? { deterministic: true }
-            : {}),
+          ...(body.deterministicClose === true ? { deterministic: true } : {}),
         },
       );
       const cancelledEpisode = discardProducerCutEpisode();
@@ -15078,21 +14969,21 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/botcast/episodes/:id/model-warmup-hold",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      if (typeof body.active !== "boolean") {
-        throw new HttpError(400, "active (boolean) is required.");
-      }
-      const episode = setBotcastModelWarmupHold(
-        db,
-        userId,
-        ctx.params.id,
-        body.active,
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        episode: projectBotcastEpisodeForAudienceV1(episode),
-      });
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        if (typeof body.active !== "boolean") {
+          throw new HttpError(400, "active (boolean) is required.");
+        }
+        const episode = setBotcastModelWarmupHold(
+          db,
+          userId,
+          ctx.params.id,
+          body.active,
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          episode: projectBotcastEpisodeForAudienceV1(episode),
+        });
       },
     ),
     route("POST", "/api/botcast/episodes/:id/camera", async (ctx) => {
@@ -15294,7 +15185,7 @@ function buildRoutes(): RouteDefinition[] {
               ...(typeof cueRecord?.detail === "string"
                 ? { detail: cueRecord.detail }
                 : {}),
-              }
+            }
           : undefined;
       if (cueDelivery && !cue) {
         throw new HttpError(
@@ -15338,7 +15229,10 @@ function buildRoutes(): RouteDefinition[] {
           !Number.isFinite(body.guestThinkingMs) ||
           body.guestThinkingMs < 0)
       ) {
-        throw new HttpError(400, "Signal guestThinkingMs must be a positive duration.");
+        throw new HttpError(
+          400,
+          "Signal guestThinkingMs must be a positive duration.",
+        );
       }
       if (
         body.guestThinkingMs !== undefined &&
@@ -15377,13 +15271,13 @@ function buildRoutes(): RouteDefinition[] {
                   : {}),
               }
             : cue
-            ? {
-                cue,
-                ...(cueDelivery ? { cueDelivery } : {}),
-                ...(hostRedirect ? { hostRedirect } : {}),
-                ...(guestInterruption ? { guestInterruption } : {}),
-              }
-            : {},
+              ? {
+                  cue,
+                  ...(cueDelivery ? { cueDelivery } : {}),
+                  ...(hostRedirect ? { hostRedirect } : {}),
+                  ...(guestInterruption ? { guestInterruption } : {}),
+                }
+              : {},
           {
             preferredProvider,
             openAiApiKey:
@@ -15495,35 +15389,27 @@ function buildRoutes(): RouteDefinition[] {
         pendingSynthesisItems.push("ethos");
       }
       pendingSynthesisItems.push("atmosphere");
-      const group = createCoffeeGroup(
-        db,
-        userId,
-        {
-          name: body.name,
-          ethos: body.ethos,
-          groupBotIds,
-          coffeeSettings: body.coffeeSettings,
-          synthesisPending: pendingSynthesisItems,
-          ...(body.modelChoiceByProvider !== undefined
-            ? { modelChoiceByProvider: body.modelChoiceByProvider }
-            : {}),
-          ...(body.starterTopics !== undefined
-            ? { starterTopics: body.starterTopics }
-            : {}),
-          ...(body.starterTopicsByBotId !== undefined
-            ? { starterTopicsByBotId: body.starterTopicsByBotId }
-            : {}),
-        },
-      );
+      const group = createCoffeeGroup(db, userId, {
+        name: body.name,
+        ethos: body.ethos,
+        groupBotIds,
+        coffeeSettings: body.coffeeSettings,
+        synthesisPending: pendingSynthesisItems,
+        ...(body.modelChoiceByProvider !== undefined
+          ? { modelChoiceByProvider: body.modelChoiceByProvider }
+          : {}),
+        ...(body.starterTopics !== undefined
+          ? { starterTopics: body.starterTopics }
+          : {}),
+        ...(body.starterTopicsByBotId !== undefined
+          ? { starterTopicsByBotId: body.starterTopicsByBotId }
+          : {}),
+      });
       json(ctx.res, 201, {
         ok: true,
         group,
       });
-      queueInitialCoffeeGroupSynthesis(
-        userId,
-        group.id,
-        pendingSynthesisItems,
-      );
+      queueInitialCoffeeGroupSynthesis(userId, group.id, pendingSynthesisItems);
     }),
     route("PATCH", "/api/coffee/groups/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -15553,22 +15439,22 @@ function buildRoutes(): RouteDefinition[] {
           ...(body.topicSelectionMode !== undefined
             ? { topicSelectionMode: body.topicSelectionMode }
             : {}),
-        ...(body.modelChoiceByProvider !== undefined
-          ? { modelChoiceByProvider: body.modelChoiceByProvider }
-          : {}),
-        ...(body.starterTopics !== undefined
-          ? { starterTopics: body.starterTopics }
-          : {}),
-        ...(body.starterTopicsByBotId !== undefined
-          ? { starterTopicsByBotId: body.starterTopicsByBotId }
-          : {}),
+          ...(body.modelChoiceByProvider !== undefined
+            ? { modelChoiceByProvider: body.modelChoiceByProvider }
+            : {}),
+          ...(body.starterTopics !== undefined
+            ? { starterTopics: body.starterTopics }
+            : {}),
+          ...(body.starterTopicsByBotId !== undefined
+            ? { starterTopicsByBotId: body.starterTopicsByBotId }
+            : {}),
         },
         {
-        prismDefaultLlmModel: user.prism_default_llm_model,
-        secondaryOllamaHost: user.secondary_ollama_host,
+          prismDefaultLlmModel: user.prism_default_llm_model,
+          secondaryOllamaHost: user.secondary_ollama_host,
           experimentalDualOllamaEnabled:
             user.experimental_dual_ollama_enabled === 1,
-        auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+          auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
         },
       );
       json(ctx.res, 200, {
@@ -15760,13 +15646,17 @@ function buildRoutes(): RouteDefinition[] {
         "Coffee service is retired. Carry the pot to top off seated bots.",
       );
     }),
-    route("POST", "/api/coffee/sessions/:id/bar/waiter/respond", async (ctx) => {
-      requireAuth(ctx);
-      throw new HttpError(
-        410,
-        "Coffee service is retired. Carry the pot to top off seated bots.",
-      );
-    }),
+    route(
+      "POST",
+      "/api/coffee/sessions/:id/bar/waiter/respond",
+      async (ctx) => {
+        requireAuth(ctx);
+        throw new HttpError(
+          410,
+          "Coffee service is retired. Carry the pot to top off seated bots.",
+        );
+      },
+    ),
     route("POST", "/api/coffee/sessions/:id/restart", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -15936,7 +15826,7 @@ function buildRoutes(): RouteDefinition[] {
               const remainingBotIds = turn.conversation.botGroupIds ?? [];
               const latestReply =
                 [...turn.conversation.messages]
-                .reverse()
+                  .reverse()
                   .find((message) => message.role === "assistant")?.content ??
                 "";
               if (
@@ -16075,20 +15965,20 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/coffee/sessions/:id/bots/:botId/top-off",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const conversation = topOffCoffeeCupForBot(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.botId,
-        body.progress,
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const conversation = topOffCoffeeCupForBot(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.botId,
+          body.progress,
           body.progressAfter,
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        conversation,
-      });
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          conversation,
+        });
       },
     ),
     route("PATCH", "/api/coffee/sessions/:id/settings", async (ctx) => {
@@ -16109,19 +15999,19 @@ function buildRoutes(): RouteDefinition[] {
       "PATCH",
       "/api/coffee/sessions/:id/debug/bots/:botId/social",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const conversation = updateCoffeeBotSocialDebug(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.botId,
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const conversation = updateCoffeeBotSocialDebug(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.botId,
           body.social ?? body,
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        conversation,
-      });
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          conversation,
+        });
       },
     ),
     route("POST", "/api/coffee/sessions/:id/debug/undo", async (ctx) => {
@@ -16160,106 +16050,106 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/coffee/sessions/:id/polls/:pollId/collect",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const requestedProvider = readProvider(body.preferredProvider);
-      const sessionRemainingMs =
-        typeof body.sessionRemainingMs === "number" &&
-        Number.isFinite(body.sessionRemainingMs)
-          ? Math.max(0, body.sessionRemainingMs)
-          : null;
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const requestedProvider = readProvider(body.preferredProvider);
+        const sessionRemainingMs =
+          typeof body.sessionRemainingMs === "number" &&
+          Number.isFinite(body.sessionRemainingMs)
+            ? Math.max(0, body.sessionRemainingMs)
+            : null;
         if (
           typeof body.optionIndex === "number" &&
           Number.isFinite(body.optionIndex)
         ) {
-        setCoffeePollPlayerVote(
+          setCoffeePollPlayerVote(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.pollId,
+            body.optionIndex,
+            sessionRemainingMs,
+          );
+        }
+        const user = getUserRow(userId);
+        const userKey = decryptUserKey(userId);
+        const openAiApiKey =
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+        const anthropicApiKey =
+          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+        const effectiveProvider = requestedProvider ?? user.preferred_provider;
+        const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
+          body.modelOverride,
+        );
+        const result = await collectCoffeePollVotes(
           db,
           userId,
           ctx.params.id,
           ctx.params.pollId,
-          body.optionIndex,
-            sessionRemainingMs,
-        );
-      }
-      const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const effectiveProvider = requestedProvider ?? user.preferred_provider;
-        const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
-          body.modelOverride,
-        );
-      const result = await collectCoffeePollVotes(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.pollId,
-        {
-          preferredProvider: effectiveProvider,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
-          responseMode: normalizeResponseMode(
-            body.responseMode,
+          {
+            preferredProvider: effectiveProvider,
+            preferredLocalModel: user.preferred_local_model,
+            preferredOnlineModel: user.preferred_online_model,
+            responseMode: normalizeResponseMode(
+              body.responseMode,
               effectiveProvider === "local" ? "local" : "online",
             ),
             autoFallbackChain: parseStoredAutoFallbackChain(
               user.auto_fallback_chain,
-          ),
-          openAiApiKey,
-          anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
+            ),
+            openAiApiKey,
+            anthropicApiKey,
+            secondaryOllamaHost: user.secondary_ollama_host,
             experimentalDualOllamaEnabled:
               user.experimental_dual_ollama_enabled === 1,
-          userDisplayName: user.display_name,
-          userKey,
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          assistantImageUserPrefs: {
-            preferredLocalImageModel: user.preferred_local_image_model,
-            preferredOpenAiImageModel: user.preferred_openai_image_model,
+            userDisplayName: user.display_name,
+            userKey,
+            prismDefaultLlmModel: user.prism_default_llm_model,
+            assistantImageUserPrefs: {
+              preferredLocalImageModel: user.preferred_local_image_model,
+              preferredOpenAiImageModel: user.preferred_openai_image_model,
               lenientLocalImageFallbackModel:
                 user.lenient_local_image_fallback_model,
-            comfyuiHost: user.comfyui_host,
+              comfyuiHost: user.comfyui_host,
               comfyUiWorkflows: parseStoredComfyUiWorkflows(
                 user.comfyui_workflows,
               ),
-            secondaryOllamaHost: user.secondary_ollama_host,
+              secondaryOllamaHost: user.secondary_ollama_host,
+            },
+            sessionRemainingMs,
+            ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
           },
-          sessionRemainingMs,
-          ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-        },
           { structuredBallots: true },
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        ...result,
-      });
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          ...result,
+        });
       },
     ),
     route(
       "POST",
       "/api/coffee/sessions/:id/polls/:pollId/vote",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const sessionRemainingMs =
-        typeof body.sessionRemainingMs === "number" &&
-        Number.isFinite(body.sessionRemainingMs)
-          ? Math.max(0, body.sessionRemainingMs)
-          : null;
-      const poll = setCoffeePollPlayerVote(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.pollId,
-        body.optionIndex,
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const sessionRemainingMs =
+          typeof body.sessionRemainingMs === "number" &&
+          Number.isFinite(body.sessionRemainingMs)
+            ? Math.max(0, body.sessionRemainingMs)
+            : null;
+        const poll = setCoffeePollPlayerVote(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.pollId,
+          body.optionIndex,
           sessionRemainingMs,
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        poll,
-      });
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          poll,
+        });
       },
     ),
     route("POST", "/api/coffee/sessions/:id/user-action", async (ctx) => {
@@ -16404,20 +16294,20 @@ function buildRoutes(): RouteDefinition[] {
         },
         () =>
           generateCoffeeSessionSynopsis(db, userId, ctx.params.id, {
-              preferredProvider: effectiveProvider,
-              preferredLocalModel: user.preferred_local_model,
-              preferredOnlineModel: user.preferred_online_model,
-              openAiApiKey,
-              anthropicApiKey,
-              secondaryOllamaHost: user.secondary_ollama_host,
+            preferredProvider: effectiveProvider,
+            preferredLocalModel: user.preferred_local_model,
+            preferredOnlineModel: user.preferred_online_model,
+            openAiApiKey,
+            anthropicApiKey,
+            secondaryOllamaHost: user.secondary_ollama_host,
             experimentalDualOllamaEnabled:
               user.experimental_dual_ollama_enabled === 1,
-              experimentalAllModelEffortEnabled:
-                user.experimental_all_model_effort_enabled === 1,
-              userDisplayName: user.display_name,
-              userKey,
-              prismDefaultLlmModel: user.prism_default_llm_model,
-              providerFactory: providerFactoryOverride,
+            experimentalAllModelEffortEnabled:
+              user.experimental_all_model_effort_enabled === 1,
+            userDisplayName: user.display_name,
+            userKey,
+            prismDefaultLlmModel: user.prism_default_llm_model,
+            providerFactory: providerFactoryOverride,
             ...(requestedReasoningEffort
               ? { reasoningEffort: requestedReasoningEffort }
               : {}),
@@ -16758,36 +16648,36 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/coffee/sessions/:id/interruption-pause",
       async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
         if (
           typeof body.interruptedBotId !== "string" ||
           !body.interruptedBotId.trim()
         ) {
-        throw new Error("Interrupted bot id is required.");
-      }
-      const interruptionPause = recordCoffeeInterruptionPause({
-        db,
-        userId,
-        conversationId: ctx.params.id,
-        interruptedBotId: body.interruptedBotId,
-        ...(typeof body.interruptedMessageId === "string"
-          ? { interruptedMessageId: body.interruptedMessageId }
-          : {}),
-        ...(typeof body.visibleTokenCount === "number"
-          ? { visibleTokenCount: body.visibleTokenCount }
-          : {}),
-        ...(typeof body.interrupterBotId === "string"
-          ? { interrupterBotId: body.interrupterBotId }
-          : {}),
+          throw new Error("Interrupted bot id is required.");
+        }
+        const interruptionPause = recordCoffeeInterruptionPause({
+          db,
+          userId,
+          conversationId: ctx.params.id,
+          interruptedBotId: body.interruptedBotId,
+          ...(typeof body.interruptedMessageId === "string"
+            ? { interruptedMessageId: body.interruptedMessageId }
+            : {}),
+          ...(typeof body.visibleTokenCount === "number"
+            ? { visibleTokenCount: body.visibleTokenCount }
+            : {}),
+          ...(typeof body.interrupterBotId === "string"
+            ? { interrupterBotId: body.interrupterBotId }
+            : {}),
           ...(typeof body.activeTurnId === "string"
             ? { activeTurnId: body.activeTurnId }
             : {}),
-        ...(body.targetPhase === "thinking" || body.targetPhase === "speaking"
-          ? { targetPhase: body.targetPhase }
-          : {}),
-      });
-      json(ctx.res, 200, { ok: true, ...interruptionPause });
+          ...(body.targetPhase === "thinking" || body.targetPhase === "speaking"
+            ? { targetPhase: body.targetPhase }
+            : {}),
+        });
+        json(ctx.res, 200, { ok: true, ...interruptionPause });
       },
     ),
     route("DELETE", "/api/coffee/turn-jobs/:id", async (ctx) => {
@@ -16839,20 +16729,20 @@ function buildRoutes(): RouteDefinition[] {
             .all(userId, botId, limit) as MemoryRow[])
         : scope === "default"
           ? (db
-            .prepare(
+              .prepare(
                 "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT ?",
-            )
+              )
               .all(userId, limit) as MemoryRow[])
-        : conversationId
+          : conversationId
             ? (db
-            .prepare(
+                .prepare(
                   "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT ?",
-            )
+                )
                 .all(userId, conversationId, limit) as MemoryRow[])
             : (db
-            .prepare(
+                .prepare(
                   "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-            )
+                )
                 .all(userId, limit) as MemoryRow[]);
       const memoryCountRows = db
         .prepare(
@@ -16953,8 +16843,8 @@ function buildRoutes(): RouteDefinition[] {
         requestedSource === "inferred" ||
         requestedSource === "compiled" ||
         requestedSource === "about_you"
-        ? requestedSource
-        : "direct";
+          ? requestedSource
+          : "direct";
       const requestedCategory = readOptionalString(body.category);
       const category =
         requestedCategory === "user" || requestedCategory === "bot_relation"
@@ -16969,12 +16859,12 @@ function buildRoutes(): RouteDefinition[] {
           : undefined;
       const requestedCertainty =
         typeof body.certainty === "number" && Number.isFinite(body.certainty)
-        ? Math.max(0, Math.min(1, body.certainty))
-        : undefined;
+          ? Math.max(0, Math.min(1, body.certainty))
+          : undefined;
       const requestedDurability =
         typeof body.durability === "number" && Number.isFinite(body.durability)
-        ? Math.max(0, Math.min(1, body.durability))
-        : undefined;
+          ? Math.max(0, Math.min(1, body.durability))
+          : undefined;
       const botIds = requestedBotId
         ? (
             db
@@ -16998,12 +16888,12 @@ function buildRoutes(): RouteDefinition[] {
         count,
         botIds,
         {
-        randomizeAcrossBots: !requestedBotId,
-        source,
-        category,
-        tier,
-        durability: requestedDurability,
-        certainty: requestedCertainty,
+          randomizeAcrossBots: !requestedBotId,
+          source,
+          category,
+          tier,
+          durability: requestedDurability,
+          certainty: requestedCertainty,
         },
       );
       json(ctx.res, 200, { ok: true, created });
@@ -17098,7 +16988,7 @@ function buildRoutes(): RouteDefinition[] {
         const memoryResult = db
           .prepare(
             includeAboutYou
-            ? "DELETE FROM memories WHERE user_id = ?"
+              ? "DELETE FROM memories WHERE user_id = ?"
               : "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'",
           )
           .run(userId);
@@ -17151,17 +17041,31 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/dev/sound-fx-bench/generate", async (ctx) => {
       if (process.env.NODE_ENV === "production") {
-        throw new HttpError(404, "Sound FX Bench generation is only available in development.");
+        throw new HttpError(
+          404,
+          "Sound FX Bench generation is only available in development.",
+        );
       }
       requireLocalDeveloperRequest(ctx);
       const raw = (ctx.body ?? {}) as Record<string, unknown>;
-      const prompt = typeof raw.prompt === "string" ? raw.prompt.replace(/\s+/gu, " ").trim() : "";
-      if (!prompt) throw new HttpError(400, "Describe the sound effect to generate.");
+      const prompt =
+        typeof raw.prompt === "string"
+          ? raw.prompt.replace(/\s+/gu, " ").trim()
+          : "";
+      if (!prompt)
+        throw new HttpError(400, "Describe the sound effect to generate.");
       if (prompt.length > SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS) {
-        throw new HttpError(400, `Sound descriptions are limited to ${SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS} characters.`);
+        throw new HttpError(
+          400,
+          `Sound descriptions are limited to ${SOUND_FX_BENCH_PROMPT_MAX_CHARACTERS} characters.`,
+        );
       }
       const apiKey = config.elevenLabsApiKey;
-      if (!apiKey) throw new HttpError(409, "ELEVENLABS_API_KEY is not available to the local dev server.");
+      if (!apiKey)
+        throw new HttpError(
+          409,
+          "ELEVENLABS_API_KEY is not available to the local dev server.",
+        );
       const controller = new AbortController();
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
@@ -17169,7 +17073,10 @@ function buildRoutes(): RouteDefinition[] {
         const sound = await requestSoundFxBenchSfx({
           apiKey,
           prompt,
-          durationSeconds: typeof raw.durationSeconds === "number" ? raw.durationSeconds : undefined,
+          durationSeconds:
+            typeof raw.durationSeconds === "number"
+              ? raw.durationSeconds
+              : undefined,
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
@@ -17337,13 +17244,13 @@ function buildRoutes(): RouteDefinition[] {
         )
         .get(messageId, userId) as
         | {
-          id: string;
-          conversation_id: string;
-          role: string;
-          content: string;
-          created_at: string;
-          conversation_mode: string | null;
-        }
+            id: string;
+            conversation_id: string;
+            role: string;
+            content: string;
+            created_at: string;
+            conversation_mode: string | null;
+          }
         | undefined;
 
       if (!message) {
@@ -17391,12 +17298,12 @@ function buildRoutes(): RouteDefinition[] {
         )
         .get(messageId, userId) as
         | {
-          id: string;
-          conversation_id: string;
-          role: string;
-          created_at: string;
-          conversation_mode: string | null;
-        }
+            id: string;
+            conversation_id: string;
+            role: string;
+            created_at: string;
+            conversation_mode: string | null;
+          }
         | undefined;
 
       if (!message) {
@@ -17486,24 +17393,24 @@ function buildRoutes(): RouteDefinition[] {
       "POST",
       "/api/messages/:id/discard-latest-zen-assistant",
       async (ctx) => {
-      const userId = requireAuth(ctx);
+        const userId = requireAuth(ctx);
         const result = discardLatestZenAssistantMessage(
           db,
           userId,
           ctx.params.id,
         );
-      const mode = readPrismMoodMode(result.conversationMode);
+        const mode = readPrismMoodMode(result.conversationMode);
         const prismMood =
           loadPrismMoodState(db, userId, result.conversationId, mode) ??
-        createDefaultPrismMoodState(mode, new Date().toISOString());
+          createDefaultPrismMoodState(mode, new Date().toISOString());
 
-      const conversation = loadPersistedConversationForChatResponse({
-        db,
-        userId,
-        activeConversationId: result.conversationId,
-        prismMood,
-      });
-      json(ctx.res, 200, { ok: true, conversation, prismMood });
+        const conversation = loadPersistedConversationForChatResponse({
+          db,
+          userId,
+          activeConversationId: result.conversationId,
+          prismMood,
+        });
+        json(ctx.res, 200, { ok: true, conversation, prismMood });
       },
     ),
     route("POST", "/api/conversations/:id/undo", async (ctx) => {
@@ -17758,8 +17665,8 @@ function buildRoutes(): RouteDefinition[] {
           : "";
       const systemPrompt =
         typeof body.systemPrompt === "string"
-        ? body.systemPrompt.trim().slice(0, 16_000)
-        : "";
+          ? body.systemPrompt.trim().slice(0, 16_000)
+          : "";
       if (!botName)
         throw new HttpError(400, "Bot name is required for a voice preview.");
       const storedBot = botId
@@ -17789,8 +17696,8 @@ function buildRoutes(): RouteDefinition[] {
         },
         () =>
           inferVoicePreviewLine(
-          auxiliaryProviderFactoryOverride(
-            user.prism_default_llm_model,
+            auxiliaryProviderFactoryOverride(
+              user.prism_default_llm_model,
               dualOllamaWorkloadOptions(user),
             ),
             { botName, systemPrompt },
@@ -17813,9 +17720,10 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       const raw = ctx.body as Record<string, unknown>;
-      const prompt = typeof raw.prompt === "string"
-        ? raw.prompt.replace(/\s+/gu, " ").trim()
-        : "";
+      const prompt =
+        typeof raw.prompt === "string"
+          ? raw.prompt.replace(/\s+/gu, " ").trim()
+          : "";
       if (!prompt) {
         throw new HttpError(400, "Describe the avatar sound to generate.");
       }
@@ -17847,7 +17755,10 @@ function buildRoutes(): RouteDefinition[] {
         ctx.res.statusCode = 200;
         ctx.res.setHeader("content-type", sound.contentType);
         ctx.res.setHeader("cache-control", "no-store");
-        ctx.res.setHeader("x-prism-avatar-sfx-model", AVATAR_ELEVENLABS_SFX_MODEL);
+        ctx.res.setHeader(
+          "x-prism-avatar-sfx-model",
+          AVATAR_ELEVENLABS_SFX_MODEL,
+        );
         if (sound.requestId) {
           ctx.res.setHeader("x-prism-provider-request-id", sound.requestId);
         }
@@ -18040,8 +17951,11 @@ function buildRoutes(): RouteDefinition[] {
       const body = ctx.body as Record<string, unknown>;
       const surface = readReplaySurface(body.surface);
       const sourceId =
-        typeof body.sourceId === "string" ? body.sourceId.trim().slice(0, 180) : "";
-      if (!surface || !sourceId) throw new HttpError(400, "Replay source is invalid.");
+        typeof body.sourceId === "string"
+          ? body.sourceId.trim().slice(0, 180)
+          : "";
+      if (!surface || !sourceId)
+        throw new HttpError(400, "Replay source is invalid.");
       const take = upsertReplayVoiceTake(
         db,
         userId,
@@ -18096,7 +18010,10 @@ function buildRoutes(): RouteDefinition[] {
         .trim()
         .slice(0, 120);
       if (!contentType.startsWith("audio/")) {
-        throw new HttpError(400, "Replay voice take must use an audio content type.");
+        throw new HttpError(
+          400,
+          "Replay voice take must use an audio content type.",
+        );
       }
       const take = storeReplayVoiceTakeAudio(
         db,
@@ -18140,9 +18057,7 @@ function buildRoutes(): RouteDefinition[] {
           "Faithful replay audio must be WebM, Ogg, MP4, or WAV.",
         );
       }
-      const durationMs = Number(
-        ctx.req.headers["x-prism-audio-duration-ms"],
-      );
+      const durationMs = Number(ctx.req.headers["x-prism-audio-duration-ms"]);
       if (!Number.isFinite(durationMs) || durationMs <= 0) {
         throw new HttpError(400, "Faithful replay audio duration is required.");
       }
@@ -18182,7 +18097,8 @@ function buildRoutes(): RouteDefinition[] {
       } else {
         const userKey = decryptUserKey(userId);
         const apiKey =
-          getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+          getElevenLabsApiKeyForUser(userId, userKey) ??
+          config.elevenLabsApiKey;
         if (!apiKey) {
           eligibility.eligible = false;
           eligibility.blockedReason =
@@ -18258,9 +18174,7 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const detail = getReplayRecording(db, userId, ctx.params.id);
       if (!detail) throw new HttpError(404, "Replay recording not found.");
-      if (
-        detail.recording.studioCutProduction?.phase !== "mastering_voices"
-      ) {
+      if (detail.recording.studioCutProduction?.phase !== "mastering_voices") {
         json(ctx.res, 200, { ok: true, ...detail });
         return;
       }
@@ -18283,8 +18197,7 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           recordingId: ctx.params.id,
           apiKey,
-          intent:
-            detail.recording.voiceQuality?.recommendedAction ?? undefined,
+          intent: detail.recording.voiceQuality?.recommendedAction ?? undefined,
         })
           .then(() => undefined)
           .catch((error) => {
@@ -18302,34 +18215,36 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/replays/:id/studio-cut/mix/retry", async (ctx) => {
       const userId = requireAuth(ctx);
-      const recording = retryReplayPremiumProduction(
-        db,
-        userId,
-        ctx.params.id,
-      );
+      const recording = retryReplayPremiumProduction(db, userId, ctx.params.id);
       if (!recording) {
         throw new HttpError(409, "No saved Premium voice master is available.");
       }
       json(ctx.res, 200, { ok: true, recording });
     }),
-    route("POST", "/api/replays/:id/studio-cut/mix/audio-chunk", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const renderToken = readReplayRenderToken(ctx);
-      if (!(ctx.body instanceof Uint8Array)) {
-        throw new HttpError(400, "Premium audio chunk must be binary.");
-      }
-      const rawPosition = ctx.req.headers["x-prism-replay-position"];
-      const position = Number(Array.isArray(rawPosition) ? rawPosition[0] : rawPosition);
-      const sizeBytes = storeReplayRenderAudioChunk(
-        db,
-        userId,
-        ctx.params.id,
-        renderToken,
-        position,
-        ctx.body,
-      );
-      json(ctx.res, 201, { ok: true, sizeBytes });
-    }),
+    route(
+      "POST",
+      "/api/replays/:id/studio-cut/mix/audio-chunk",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const renderToken = readReplayRenderToken(ctx);
+        if (!(ctx.body instanceof Uint8Array)) {
+          throw new HttpError(400, "Premium audio chunk must be binary.");
+        }
+        const rawPosition = ctx.req.headers["x-prism-replay-position"];
+        const position = Number(
+          Array.isArray(rawPosition) ? rawPosition[0] : rawPosition,
+        );
+        const sizeBytes = storeReplayRenderAudioChunk(
+          db,
+          userId,
+          ctx.params.id,
+          renderToken,
+          position,
+          ctx.body,
+        );
+        json(ctx.res, 201, { ok: true, sizeBytes });
+      },
+    ),
     route("POST", "/api/replays/:id/studio-cut/mix/complete", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -18368,7 +18283,10 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/replays/:id/premium/retry", async (ctx) => {
       requireAuth(ctx);
-      throw new HttpError(410, "The retired replay enhancement endpoint is unavailable.");
+      throw new HttpError(
+        410,
+        "The retired replay enhancement endpoint is unavailable.",
+      );
     }),
     route("POST", "/api/replays/:id/premium/audio", async (ctx) => {
       requireAuth(ctx);
@@ -18378,17 +18296,21 @@ function buildRoutes(): RouteDefinition[] {
       requireAuth(ctx);
       throw new HttpError(410, "Replay enhancement is retired.");
     }),
-    route("GET", "/api/replays/:id/studio-cut/segments/:segmentId/audio", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const file = replayPremiumSegmentAudioFile(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.params.segmentId,
-      );
-      if (!file) throw new HttpError(404, "Premium voice segment not found.");
-      streamReplayFile(ctx, file);
-    }),
+    route(
+      "GET",
+      "/api/replays/:id/studio-cut/segments/:segmentId/audio",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const file = replayPremiumSegmentAudioFile(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.segmentId,
+        );
+        if (!file) throw new HttpError(404, "Premium voice segment not found.");
+        streamReplayFile(ctx, file);
+      },
+    ),
     route("GET", "/api/replays/:id/studio-cut/audio", async (ctx) => {
       const userId = requireAuth(ctx);
       const file = replayPremiumAudioFile(db, userId, ctx.params.id);
@@ -18446,7 +18368,10 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       if (body.confirm !== "delete-recording") {
-        throw new HttpError(400, "Replay deletion requires explicit confirmation.");
+        throw new HttpError(
+          400,
+          "Replay deletion requires explicit confirmation.",
+        );
       }
       const recording = deleteReplayRecordingMedia(db, userId, ctx.params.id);
       if (!recording) throw new HttpError(404, "Replay recording not found.");
@@ -18465,11 +18390,20 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("GET", "/api/replays/:id/transcript.md", async (ctx) => {
       const userId = requireAuth(ctx);
-      const transcript = replayTranscript(db, userId, ctx.params.id, "markdown");
-      if (transcript === null) throw new HttpError(404, "Replay transcript not found.");
+      const transcript = replayTranscript(
+        db,
+        userId,
+        ctx.params.id,
+        "markdown",
+      );
+      if (transcript === null)
+        throw new HttpError(404, "Replay transcript not found.");
       ctx.res.statusCode = 200;
       ctx.res.setHeader("content-type", "text/markdown; charset=utf-8");
-      ctx.res.setHeader("content-disposition", 'attachment; filename="replay-transcript.md"');
+      ctx.res.setHeader(
+        "content-disposition",
+        'attachment; filename="replay-transcript.md"',
+      );
       ctx.res.end(transcript);
     }),
     route("POST", "/api/voices/synthesize", async (ctx) => {
@@ -18485,10 +18419,8 @@ function buildRoutes(): RouteDefinition[] {
           ? raw.speakerBotId.trim().slice(0, 160)
           : null;
       let sourceBotId = requestedSpeakerBotId;
-      const listenerReactionTextRequested = Object.prototype.hasOwnProperty.call(
-        raw,
-        "listenerReactionText",
-      );
+      const listenerReactionTextRequested =
+        Object.prototype.hasOwnProperty.call(raw, "listenerReactionText");
       const listenerReactionFoleyRequested =
         Object.prototype.hasOwnProperty.call(raw, "listenerReactionFoley");
       const listenerReactionRequested =
@@ -18520,7 +18452,8 @@ function buildRoutes(): RouteDefinition[] {
           ? raw.replayTakeId.trim().slice(0, 180)
           : null;
       const replayRecordingId =
-        typeof raw.replayRecordingId === "string" && raw.replayRecordingId.trim()
+        typeof raw.replayRecordingId === "string" &&
+        raw.replayRecordingId.trim()
           ? raw.replayRecordingId.trim().slice(0, 180)
           : null;
       if (replayTakeId || replayRecordingId) {
@@ -18536,8 +18469,7 @@ function buildRoutes(): RouteDefinition[] {
           ordinaryMessageId,
           replayTakeId,
           zenProgressiveVoiceSegmentId,
-        ].filter(Boolean)
-          .length > 1
+        ].filter(Boolean).length > 1
       ) {
         throw new HttpError(400, "Choose one voice message source.");
       }
@@ -18547,10 +18479,7 @@ function buildRoutes(): RouteDefinition[] {
           zenProgressiveVoiceSegmentId,
         );
         if (!segment) {
-          throw new HttpError(
-            404,
-            "Progressive Zen voice segment not found.",
-          );
+          throw new HttpError(404, "Progressive Zen voice segment not found.");
         }
         sourceText = segment.text;
         sourceElevenLabsText = segment.text;
@@ -18564,14 +18493,16 @@ function buildRoutes(): RouteDefinition[] {
               "SELECT powers_json FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
             )
             .get(segment.botId, userId) as
-            | { powers_json?: string | null }
-            | undefined;
+            { powers_json?: string | null } | undefined;
           sourceBotMuted = botPowerIsMutedV1(bot?.powers_json);
         }
       }
       if (replayTakeId) {
         if (!replayRecordingId) {
-          throw new HttpError(400, "Replay recording is required for frozen-take synthesis.");
+          throw new HttpError(
+            400,
+            "Replay recording is required for frozen-take synthesis.",
+          );
         }
         const replayTake = db
           .prepare(
@@ -18583,13 +18514,15 @@ function buildRoutes(): RouteDefinition[] {
               WHERE take.id = ? AND take.recording_id = ? AND take.user_id = ?`,
           )
           .get(replayTakeId, replayRecordingId, userId) as
-          | { snapshot_json: string; manifest_json: string | null }
-          | undefined;
-        if (!replayTake) throw new HttpError(404, "Replay voice take not found.");
+          { snapshot_json: string; manifest_json: string | null } | undefined;
+        if (!replayTake)
+          throw new HttpError(404, "Replay voice take not found.");
         let replaySnapshot: ReplayVoiceTakeV1;
         let replayManifest: ReplayManifestV1 | null = null;
         try {
-          replaySnapshot = JSON.parse(replayTake.snapshot_json) as ReplayVoiceTakeV1;
+          replaySnapshot = JSON.parse(
+            replayTake.snapshot_json,
+          ) as ReplayVoiceTakeV1;
           replayManifest = replayTake.manifest_json
             ? (JSON.parse(replayTake.manifest_json) as ReplayManifestV1)
             : null;
@@ -18621,9 +18554,7 @@ function buildRoutes(): RouteDefinition[] {
           frozenReplayEngine === "elevenlabs" &&
           replayManifest?.privacyMode !== "local";
         persistedMessageProvider =
-          replayManifest?.privacyMode === "local"
-            ? "local"
-            : "replay-online";
+          replayManifest?.privacyMode === "local" ? "local" : "replay-online";
       }
       if (ordinaryMessageId) {
         const message = db
@@ -18635,11 +18566,11 @@ function buildRoutes(): RouteDefinition[] {
           )
           .get(ordinaryMessageId, userId) as
           | {
-          content?: string;
-          provider?: string | null;
-          role?: string;
-          bot_id?: string | null;
-          powers_json?: string | null;
+              content?: string;
+              provider?: string | null;
+              role?: string;
+              bot_id?: string | null;
+              powers_json?: string | null;
             }
           | undefined;
         const ephemeralAssistantMessage =
@@ -18734,9 +18665,10 @@ function buildRoutes(): RouteDefinition[] {
             ? "guest"
             : "host"
           : signalMessage.speaker_role;
-        sourceBotId = voiceRole === "host"
-          ? signalEpisode.hostBotId
-          : signalEpisode.guestBotId;
+        sourceBotId =
+          voiceRole === "host"
+            ? signalEpisode.hostBotId
+            : signalEpisode.guestBotId;
         sourceBotMuted = botPowerIsMutedV1(
           botcastEpisodePowerSnapshotForRole(signalEpisode, voiceRole) ??
             (listenerReactionRequested
@@ -18750,12 +18682,9 @@ function buildRoutes(): RouteDefinition[] {
         }
         const episode = getBotcastEpisode(db, userId, signalEpisodeId);
         const host = db
-          .prepare(
-            "SELECT powers_json FROM bots WHERE id = ? AND user_id = ?",
-          )
+          .prepare("SELECT powers_json FROM bots WHERE id = ? AND user_id = ?")
           .get(episode.hostBotId, userId) as
-          | { powers_json: string | null }
-          | undefined;
+          { powers_json: string | null } | undefined;
         sourceBotId = episode.hostBotId;
         persistedMessageProvider =
           episode.responseMode === "local"
@@ -18783,16 +18712,14 @@ function buildRoutes(): RouteDefinition[] {
         sourceElevenLabsText = bridgeLine;
       }
       if (
-        (sourceBotMuted && (!listenerReactionRequested || signalMessageId !== null)) ||
+        (sourceBotMuted &&
+          (!listenerReactionRequested || signalMessageId !== null)) ||
         (!listenerReactionRequested && botPowerResponseIsSilentV1(sourceText))
       ) {
         throw new HttpError(409, "This bot is muted by an active Power.");
       }
       if (listenerReactionRequested) {
-        if (
-          !signalMessageId &&
-          !ordinaryMessageId
-        ) {
+        if (!signalMessageId && !ordinaryMessageId) {
           throw new HttpError(
             400,
             "Listener reactions require a saved speaker message.",
@@ -18861,10 +18788,7 @@ function buildRoutes(): RouteDefinition[] {
             raw.interruptedSpeakerReactionText,
           );
         if (!interruptedSpeakerReaction) {
-          throw new HttpError(
-            400,
-            "Unsupported interrupted-speaker reaction.",
-          );
+          throw new HttpError(400, "Unsupported interrupted-speaker reaction.");
         }
         sourceText = interruptedSpeakerReaction;
         sourceElevenLabsText = interruptedSpeakerReaction;
@@ -18875,7 +18799,7 @@ function buildRoutes(): RouteDefinition[] {
         sourceElevenLabsText;
       const botNamePronunciations = db
         .prepare(
-        `SELECT id, name, name_pronunciation, self_referral
+          `SELECT id, name, name_pronunciation, self_referral
            FROM bots
           WHERE user_id = ? OR visibility = 'public'
           ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END, LENGTH(name) DESC`,
@@ -18926,10 +18850,9 @@ function buildRoutes(): RouteDefinition[] {
       // replace existing ElevenLabs or operating-system identities.
       const profile = normalizeBotAudioVoiceProfileV1({
         ...requestedProfile,
-        elevenLabsVoiceId:
-          resolveElevenLabsVoiceId(requestedProfile)
-            ? requestedProfile.elevenLabsVoiceId
-            : legacyElevenLabsVoiceId,
+        elevenLabsVoiceId: resolveElevenLabsVoiceId(requestedProfile)
+          ? requestedProfile.elevenLabsVoiceId
+          : legacyElevenLabsVoiceId,
         systemVoiceName:
           requestedProfile.systemVoiceName ?? user.default_system_voice_name,
       });
@@ -19022,8 +18945,8 @@ function buildRoutes(): RouteDefinition[] {
             code: "babble-system-unavailable",
             error:
               error instanceof Error
-              ? error.message
-              : "System Babble voice is unavailable.",
+                ? error.message
+                : "System Babble voice is unavailable.",
           });
         } finally {
           ctx.req.off("close", onClose);
@@ -19229,20 +19152,18 @@ function buildRoutes(): RouteDefinition[] {
           if (requiresSelectedProviderVoice) {
             if (error instanceof ElevenLabsVoiceError) {
               const quotaExceeded =
-                error.providerCode === "quota_exceeded" ||
-                error.status === 429;
-              const message =
-                quotaExceeded
-                  ? "ElevenLabs does not have enough voice credits for this preview. Add credits or shorten the preview line, then try again."
-                  : error.status === 401 || error.status === 403
+                error.providerCode === "quota_exceeded" || error.status === 429;
+              const message = quotaExceeded
+                ? "ElevenLabs does not have enough voice credits for this preview. Add credits or shorten the preview line, then try again."
+                : error.status === 401 || error.status === 403
                   ? "ElevenLabs rejected the key or access to this voice. Check Settings → Keys and the selected voice."
                   : "ElevenLabs could not generate this preview with the selected voice and delivery settings.";
               throw new HttpError(
                 quotaExceeded
                   ? 429
                   : error.status === 401 || error.status === 403
-                  ? 401
-                  : 502,
+                    ? 401
+                    : 502,
                 message,
               );
             }
@@ -19311,7 +19232,9 @@ function buildRoutes(): RouteDefinition[] {
       } catch (error) {
         throw new HttpError(
           400,
-          error instanceof Error ? error.message : "Prism needs a valid message.",
+          error instanceof Error
+            ? error.message
+            : "Prism needs a valid message.",
         );
       }
       const ephemeralMode = prismCompanionEphemeralMode(
@@ -19493,8 +19416,7 @@ function buildRoutes(): RouteDefinition[] {
         proposalId: proposal.id,
         confirmation: true,
         idempotencyKey:
-          typeof body.idempotencyKey === "string" &&
-          body.idempotencyKey.trim()
+          typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
             ? body.idempotencyKey.trim().slice(0, 240)
             : `ui:library-groups:${randomId()}`,
       });
@@ -19606,9 +19528,7 @@ function buildRoutes(): RouteDefinition[] {
         capabilityId: "notifications.elevenlabs-credit.monitor",
         input: {
           thresholdRatio:
-            typeof body.thresholdRatio === "number"
-              ? body.thresholdRatio
-              : 0.2,
+            typeof body.thresholdRatio === "number" ? body.thresholdRatio : 0.2,
           enabled: body.enabled !== false,
         },
       });
@@ -19617,8 +19537,7 @@ function buildRoutes(): RouteDefinition[] {
         proposalId: proposal.id,
         confirmation: true,
         idempotencyKey:
-          typeof body.idempotencyKey === "string" &&
-          body.idempotencyKey.trim()
+          typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
             ? body.idempotencyKey.trim().slice(0, 240)
             : `monitor-api:${randomId()}`,
       });
@@ -19634,13 +19553,12 @@ function buildRoutes(): RouteDefinition[] {
     route("PATCH", "/api/prism/notifications/:notificationId", async (ctx) => {
       const userId = requireAuth(ctx);
       const notificationId = ctx.params.notificationId?.trim() ?? "";
-      const read =
-        Boolean(
-          ctx.body &&
-            typeof ctx.body === "object" &&
-            !Array.isArray(ctx.body) &&
-            (ctx.body as Record<string, unknown>).read,
-        );
+      const read = Boolean(
+        ctx.body &&
+        typeof ctx.body === "object" &&
+        !Array.isArray(ctx.body) &&
+        (ctx.body as Record<string, unknown>).read,
+      );
       const now = new Date().toISOString();
       const result = db
         .prepare(
@@ -19668,9 +19586,7 @@ function buildRoutes(): RouteDefinition[] {
           displayName: user.display_name,
           theme: user.theme,
           graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
-          atmosphereStyle: normalizeHubAtmosphereStyle(
-            user.atmosphere_style,
-          ),
+          atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
           hubAtmosphereImageId: hubAtmosphereCache.imageId,
           hubAtmosphereImageStyle: hubAtmosphereCache.imageStyle,
           startupPreference: normalizePrismStartupPreference(
@@ -19721,8 +19637,8 @@ function buildRoutes(): RouteDefinition[] {
             user.voice_mode === "bottish" ||
             user.voice_mode === "babble" ||
             user.voice_mode === "english"
-            ? user.voice_mode
-            : "mute",
+              ? user.voice_mode
+              : "mute",
           voiceEffectsEnabled: user.voice_effects_enabled !== 0,
           voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
           operatingSystemVoicesEnabled:
@@ -19776,7 +19692,7 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperBlurredEdgesEnabled:
             normalizeZenWallpaperBlurredEdgesEnabled(
               user.zen_wallpaper_blurred_edges_enabled,
-          ),
+            ),
           zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
             user.zen_wallpaper_style_notes,
           ),
@@ -19794,7 +19710,7 @@ function buildRoutes(): RouteDefinition[] {
           zenWallpaperRegenMessageInterval:
             normalizeZenWallpaperRegenMessageInterval(
               user.zen_wallpaper_regen_message_interval,
-          ),
+            ),
           zenMoodSensitivity: normalizeZenMoodSensitivity(
             user.zen_mood_sensitivity,
           ),
@@ -20129,7 +20045,9 @@ function buildRoutes(): RouteDefinition[] {
         }
         const committedUser = getUserRow(userId);
         const result =
-          run.result && typeof run.result === "object" && !Array.isArray(run.result)
+          run.result &&
+          typeof run.result === "object" &&
+          !Array.isArray(run.result)
             ? run.result
             : {};
         const savedSettings =
@@ -20143,9 +20061,7 @@ function buildRoutes(): RouteDefinition[] {
           settings: {
             ...savedSettings,
             hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
-            hasAnthropicApiKey: Boolean(
-              committedUser.anthropic_key_ciphertext,
-            ),
+            hasAnthropicApiKey: Boolean(committedUser.anthropic_key_ciphertext),
             hasElevenLabsApiKey: Boolean(
               committedUser.elevenlabs_key_ciphertext,
             ),
@@ -20535,7 +20451,7 @@ function buildRoutes(): RouteDefinition[] {
               dualOllamaWorkloadOptions(user),
             ),
             { botName: row.name, systemPrompt: row.system_prompt },
-            ),
+          ),
       );
       json(ctx.res, 200, { ok: true, suggestions });
     }),
@@ -20589,488 +20505,408 @@ function buildRoutes(): RouteDefinition[] {
       const onImageGenClientClose = () => imageGenAbort.abort();
       ctx.req.once("close", onImageGenClientClose);
       try {
-      const body = ctx.body as Record<string, unknown>;
-      const rawImagePurpose = body.purpose ?? body.imagePurpose;
-      const imagePurpose =
-        rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          : rawImagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
-            ? HUB_ATMOSPHERE_IMAGE_PURPOSE
-          : rawImagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-            ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-            : "gallery";
+        const body = ctx.body as Record<string, unknown>;
+        const rawImagePurpose = body.purpose ?? body.imagePurpose;
+        const imagePurpose =
+          rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+            ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+            : rawImagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+              ? HUB_ATMOSPHERE_IMAGE_PURPOSE
+              : rawImagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+                ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+                : "gallery";
         let prompt =
           imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE ||
           imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
             ? typeof body.prompt === "string"
               ? body.prompt.trim()
               : ""
-        : readString(body.prompt, "prompt");
-      const requestedSize =
+            : readString(body.prompt, "prompt");
+        const requestedSize =
           typeof body.size === "string"
             ? body.size.trim()
             : IMAGE_GENERATION_DEFAULT_SIZE;
         const size =
           imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE ||
           imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
-        ? ZEN_WALLPAPER_SIZE
-        : IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
-          ? requestedSize
-          : inferImageGenerationSizeFromPrompt(prompt);
-      const requestedQuality = (body.quality as string) ?? "standard";
-      const bodyModelRaw =
-        typeof body.model === "string" && body.model.trim().length > 0
-          ? body.model.trim()
-          : "";
-      const bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
+            ? ZEN_WALLPAPER_SIZE
+            : IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
+              ? requestedSize
+              : inferImageGenerationSizeFromPrompt(prompt);
+        const requestedQuality = (body.quality as string) ?? "standard";
+        const bodyModelRaw =
+          typeof body.model === "string" && body.model.trim().length > 0
+            ? body.model.trim()
+            : "";
+        const bodyModelDisabled = isDisabledModelChoice(bodyModelRaw);
         const bodyModel =
           bodyModelRaw && !bodyModelDisabled ? bodyModelRaw : undefined;
-      const conversationIdRaw =
+        const conversationIdRaw =
           typeof body.conversationId === "string"
             ? body.conversationId.trim()
             : "";
-      const bodyBotId =
-        typeof body.botId === "string" && body.botId.trim().length > 0
-          ? body.botId.trim()
-          : undefined;
-      if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && !bodyBotId) {
-        throw new Error("Profile picture generation requires a bot.");
-      }
-      if (
-        imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE &&
-        (bodyBotId || conversationIdRaw)
-      ) {
-        throw new Error(
+        const bodyBotId =
+          typeof body.botId === "string" && body.botId.trim().length > 0
+            ? body.botId.trim()
+            : undefined;
+        if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && !bodyBotId) {
+          throw new Error("Profile picture generation requires a bot.");
+        }
+        if (
+          imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE &&
+          (bodyBotId || conversationIdRaw)
+        ) {
+          throw new Error(
             "Group-room wallpaper generation cannot be attributed to a bot or conversation.",
-        );
-      }
-      if (
-        imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE &&
-        (bodyBotId || conversationIdRaw)
-      ) {
-        throw new Error(
-          "Home Atmosphere generation cannot be attributed to a bot or conversation.",
-        );
-      }
-      const groupRoomWallpaperContext =
-        imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-          ? readGroupRoomWallpaperRequestContext(body)
-          : null;
+          );
+        }
+        if (
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE &&
+          (bodyBotId || conversationIdRaw)
+        ) {
+          throw new Error(
+            "Home Atmosphere generation cannot be attributed to a bot or conversation.",
+          );
+        }
+        const groupRoomWallpaperContext =
+          imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+            ? readGroupRoomWallpaperRequestContext(body)
+            : null;
 
-      const user = getUserRow(userId);
-      const hubAtmosphereStyle = normalizeHubAtmosphereStyle(
-        imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
-          ? body.atmosphereStyle ?? user.atmosphere_style
-          : user.atmosphere_style,
-      );
-      if (imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
-        prompt = composeHubAtmospherePrompt(hubAtmosphereStyle, randomId());
-      }
-      const requestedProvider =
+        const user = getUserRow(userId);
+        const hubAtmosphereStyle = normalizeHubAtmosphereStyle(
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+            ? (body.atmosphereStyle ?? user.atmosphere_style)
+            : user.atmosphere_style,
+        );
+        if (imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
+          prompt = composeHubAtmospherePrompt(hubAtmosphereStyle, randomId());
+        }
+        const requestedProvider =
           body.preferredProvider === "openai" ||
           body.preferredProvider === "local"
-          ? body.preferredProvider
-          : undefined;
+            ? body.preferredProvider
+            : undefined;
 
-      const persistence = resolveImageGeneratePersistence({
-        db,
-        userId,
-        conversationIdRaw,
-        bodyBotId,
-      });
-      if (!persistence.ok) {
-        throw new Error(persistence.message);
-      }
-      const imageOrigin = imageOriginForGenerate({
-        purpose: imagePurpose,
-        requestedOrigin: body.origin,
-      });
-      if (imageOrigin === "botcast" && !persistence.persistedBotId) {
-        throw new Error("Signal artwork requires a host bot.");
-      }
-      // The standalone Images panel is PRISM's own library, even while a bot
-      // is being used as prompt/persona context. Applet and chat surfaces keep
-      // their explicit owner attribution.
-      const persistedOwnerBotId =
-        imageOrigin === "images_panel" && imagePurpose === "gallery"
-          ? null
-          : persistence.persistedBotId;
-      const sourceImageId =
+        const persistence = resolveImageGeneratePersistence({
+          db,
+          userId,
+          conversationIdRaw,
+          bodyBotId,
+        });
+        if (!persistence.ok) {
+          throw new Error(persistence.message);
+        }
+        const imageOrigin = imageOriginForGenerate({
+          purpose: imagePurpose,
+          requestedOrigin: body.origin,
+        });
+        if (imageOrigin === "botcast" && !persistence.persistedBotId) {
+          throw new Error("Signal artwork requires a host bot.");
+        }
+        // The standalone Images panel is PRISM's own library, even while a bot
+        // is being used as prompt/persona context. Applet and chat surfaces keep
+        // their explicit owner attribution.
+        const persistedOwnerBotId =
+          imageOrigin === "images_panel" && imagePurpose === "gallery"
+            ? null
+            : persistence.persistedBotId;
+        const sourceImageId =
           typeof body.sourceImageId === "string"
             ? body.sourceImageId.trim()
             : "";
-      let sourceEditPrompt = "";
-      let sourceImageBytes: Buffer | undefined;
-      if (sourceImageId) {
-        if (imageOrigin !== "botcast" || !persistedOwnerBotId) {
+        let sourceEditPrompt = "";
+        let sourceImageBytes: Buffer | undefined;
+        if (sourceImageId) {
+          if (imageOrigin !== "botcast" || !persistedOwnerBotId) {
             throw new HttpError(
               400,
               "Source-image editing is only available for Signal artwork.",
             );
-        }
-        if (body.sourceEditKind !== "daylight-relight") {
-          throw new HttpError(
-            400,
-            'Signal source-image edits require sourceEditKind "daylight-relight".',
-          );
-        }
-        sourceEditPrompt = BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT;
-        const sourceImage = db
-          .prepare(
-            `SELECT bot_id, origin, local_rel_path
+          }
+          if (body.sourceEditKind !== "daylight-relight") {
+            throw new HttpError(
+              400,
+              'Signal source-image edits require sourceEditKind "daylight-relight".',
+            );
+          }
+          sourceEditPrompt = BOTCAST_DAYLIGHT_RELIGHT_EDIT_PROMPT;
+          const sourceImage = db
+            .prepare(
+              `SELECT bot_id, origin, local_rel_path
                FROM images
               WHERE id = ? AND user_id = ?`,
-          )
-          .get(sourceImageId, userId) as
-          | {
-              bot_id: string | null;
-              origin: string | null;
-              local_rel_path: string | null;
-            }
-          | undefined;
-        if (
-          !sourceImage ||
-          sourceImage.origin !== "botcast" ||
-          sourceImage.bot_id !== persistedOwnerBotId
-        ) {
-          throw new HttpError(404, "Signal source image not found.");
-        }
-        const sourcePath = sourceImage.local_rel_path?.trim();
-        if (!sourcePath) {
+            )
+            .get(sourceImageId, userId) as
+            | {
+                bot_id: string | null;
+                origin: string | null;
+                local_rel_path: string | null;
+              }
+            | undefined;
+          if (
+            !sourceImage ||
+            sourceImage.origin !== "botcast" ||
+            sourceImage.bot_id !== persistedOwnerBotId
+          ) {
+            throw new HttpError(404, "Signal source image not found.");
+          }
+          const sourcePath = sourceImage.local_rel_path?.trim();
+          if (!sourcePath) {
             throw new HttpError(
               400,
               "Signal source image is not available locally.",
             );
+          }
+          try {
+            sourceImageBytes = readGeneratedImageBytes(sourcePath);
+          } catch {
+            throw new HttpError(404, "Signal source image file not found.");
+          }
         }
-        try {
-          sourceImageBytes = readGeneratedImageBytes(sourcePath);
-        } catch {
-          throw new HttpError(404, "Signal source image file not found.");
-        }
-      }
-      let relatedBotIdsForInsert = persistedOwnerBotId
-        ? [persistedOwnerBotId]
-        : [];
-      // Image routing is independent from chat routing. The only hard ceiling
-      // is protected bot context: no request can send an offline-only persona,
-      // conversation, or group member to an online image provider.
-      const imageContextBotIds = groupRoomWallpaperContext
-        ? groupRoomWallpaperContext.memberBotIds
-        : persistence.personaBotId
-          ? [persistence.personaBotId]
+        let relatedBotIdsForInsert = persistedOwnerBotId
+          ? [persistedOwnerBotId]
           : [];
-      const effectiveProvider = resolveImageProviderName({
-        savedProvider: user.preferred_image_provider,
-        requestedProvider,
-        offlineOnly: imageContextIncludesOfflineOnlyBot(
-          db,
-          userId,
+        // Image routing is independent from chat routing. The only hard ceiling
+        // is protected bot context: no request can send an offline-only persona,
+        // conversation, or group member to an online image provider.
+        const imageContextBotIds = groupRoomWallpaperContext
+          ? groupRoomWallpaperContext.memberBotIds
+          : persistence.personaBotId
+            ? [persistence.personaBotId]
+            : [];
+        const effectiveProvider = resolveImageProviderName({
+          savedProvider: user.preferred_image_provider,
+          requestedProvider,
+          offlineOnly: imageContextIncludesOfflineOnlyBot(
+            db,
+            userId,
             imageContextBotIds,
-        ),
-      });
-      if (
-        imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE &&
-        (!persistedOwnerBotId || persistedOwnerBotId !== bodyBotId)
-      ) {
+          ),
+        });
+        if (
+          imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE &&
+          (!persistedOwnerBotId || persistedOwnerBotId !== bodyBotId)
+        ) {
           throw new Error(
             "Profile picture generation requires a bot-owned image.",
           );
-      }
-      const previousProfilePictureImageId =
-        imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && bodyBotId
+        }
+        const previousProfilePictureImageId =
+          imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && bodyBotId
             ? ((
-              db
-                .prepare(
+                db
+                  .prepare(
                     "SELECT profile_picture_image_id FROM bots WHERE id = ? AND user_id = ?",
-                )
-                .get(bodyBotId, userId) as
+                  )
+                  .get(bodyBotId, userId) as
                   { profile_picture_image_id: string | null } | undefined
               )?.profile_picture_image_id ?? null)
-          : null;
-      enterUsageSession({
-        db,
-        userId,
-        privacyScope: "normal",
-        mode: "sandbox",
-        surface: "images",
-        conversationId: persistence.conversationIdForInsert,
-        botId: persistedOwnerBotId,
-      });
-
-      let promptForModel = prompt;
-      let promptForPersistence = prompt;
-      let localPromptForModel = prompt;
-      let onlinePromptForModel = prompt;
-      let composedPrompt: string | undefined =
-        imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE ? prompt : undefined;
-      if (groupRoomWallpaperContext) {
-        const members = loadOwnedGroupRoomWallpaperMembers(
+            : null;
+        enterUsageSession({
           db,
           userId,
+          privacyScope: "normal",
+          mode: "sandbox",
+          surface: "images",
+          conversationId: persistence.conversationIdForInsert,
+          botId: persistedOwnerBotId,
+        });
+
+        let promptForModel = prompt;
+        let promptForPersistence = prompt;
+        let localPromptForModel = prompt;
+        let onlinePromptForModel = prompt;
+        let composedPrompt: string | undefined =
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE ? prompt : undefined;
+        if (groupRoomWallpaperContext) {
+          const members = loadOwnedGroupRoomWallpaperMembers(
+            db,
+            userId,
             groupRoomWallpaperContext.memberBotIds,
-        );
-        relatedBotIdsForInsert = members.map((member) => member.id);
-        composedPrompt = composeGroupRoomWallpaperPrompt({
-          userPrompt: prompt,
-          groupName: groupRoomWallpaperContext.groupName,
-          groupDescription: groupRoomWallpaperContext.groupDescription,
-          members,
-          zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
+          );
+          relatedBotIdsForInsert = members.map((member) => member.id);
+          composedPrompt = composeGroupRoomWallpaperPrompt({
+            userPrompt: prompt,
+            groupName: groupRoomWallpaperContext.groupName,
+            groupDescription: groupRoomWallpaperContext.groupDescription,
+            members,
+            zenWallpaperStyleNotes: normalizeZenWallpaperStyleNotes(
               user.zen_wallpaper_style_notes,
-          ),
-          variationSeed: groupRoomWallpaperContext.variationSeed || randomId(),
-        })
-          .replace(/\s+/gu, " ")
-          .trim();
-        promptForModel = composedPrompt;
-        promptForPersistence = composedPrompt;
-        localPromptForModel = composedPrompt;
-        onlinePromptForModel = composedPrompt;
-      }
-      const personaBotId = persistence.personaBotId;
-      type BotPersonaImageRow = {
-        name: string;
-        system_prompt: string;
-      };
-      let botPersona: BotPersonaImageRow | undefined;
-      if (personaBotId && !groupRoomWallpaperContext) {
-        botPersona = db
-          .prepare(
+            ),
+            variationSeed:
+              groupRoomWallpaperContext.variationSeed || randomId(),
+          })
+            .replace(/\s+/gu, " ")
+            .trim();
+          promptForModel = composedPrompt;
+          promptForPersistence = composedPrompt;
+          localPromptForModel = composedPrompt;
+          onlinePromptForModel = composedPrompt;
+        }
+        const personaBotId = persistence.personaBotId;
+        type BotPersonaImageRow = {
+          name: string;
+          system_prompt: string;
+        };
+        let botPersona: BotPersonaImageRow | undefined;
+        if (personaBotId && !groupRoomWallpaperContext) {
+          botPersona = db
+            .prepare(
               "SELECT name, system_prompt FROM bots WHERE id = ? AND user_id = ?",
-          )
-          .get(personaBotId, userId) as BotPersonaImageRow | undefined;
-      }
+            )
+            .get(personaBotId, userId) as BotPersonaImageRow | undefined;
+        }
 
-      if (!groupRoomWallpaperContext) {
-        localPromptForModel = resolveImagePromptForGeneration({
-          prompt,
-          origin: imageOrigin,
-          sourceEditPrompt,
-          useSourceEdit: false,
-          botName: botPersona?.name,
-          botSystemPrompt: botPersona?.system_prompt,
-        });
-        onlinePromptForModel = resolveImagePromptForGeneration({
-          prompt,
-          origin: imageOrigin,
-          sourceEditPrompt,
-          useSourceEdit: Boolean(sourceImageBytes),
-          botName: botPersona?.name,
-          botSystemPrompt: botPersona?.system_prompt,
-        });
-      }
+        if (!groupRoomWallpaperContext) {
+          localPromptForModel = resolveImagePromptForGeneration({
+            prompt,
+            origin: imageOrigin,
+            sourceEditPrompt,
+            useSourceEdit: false,
+            botName: botPersona?.name,
+            botSystemPrompt: botPersona?.system_prompt,
+          });
+          onlinePromptForModel = resolveImagePromptForGeneration({
+            prompt,
+            origin: imageOrigin,
+            sourceEditPrompt,
+            useSourceEdit: Boolean(sourceImageBytes),
+            botName: botPersona?.name,
+            botSystemPrompt: botPersona?.system_prompt,
+          });
+        }
 
-      const { preferredLocalImageModel, preferredOpenAiImageModel } =
-        resolveImageGenerateModelPreferences(imagePurpose, {
-          preferredLocalImageModel: user.preferred_local_image_model,
-          preferredOpenAiImageModel: user.preferred_openai_image_model,
-          preferredZenWallpaperLocalImageModel:
-            user.preferred_zen_wallpaper_local_image_model,
-          preferredZenWallpaperOpenAiImageModel:
-            user.preferred_zen_wallpaper_openai_image_model,
-        });
-      const localImageDisabled =
-        (effectiveProvider === "local" && bodyModelDisabled) ||
-        isDisabledModelChoice(preferredLocalImageModel);
-      const openAiImageDisabled =
-        (effectiveProvider !== "local" && bodyModelDisabled) ||
-        isDisabledModelChoice(preferredOpenAiImageModel);
-      const resolvedLocalImageModel = localImageDisabled
-        ? ""
+        const { preferredLocalImageModel, preferredOpenAiImageModel } =
+          resolveImageGenerateModelPreferences(imagePurpose, {
+            preferredLocalImageModel: user.preferred_local_image_model,
+            preferredOpenAiImageModel: user.preferred_openai_image_model,
+            preferredZenWallpaperLocalImageModel:
+              user.preferred_zen_wallpaper_local_image_model,
+            preferredZenWallpaperOpenAiImageModel:
+              user.preferred_zen_wallpaper_openai_image_model,
+          });
+        const localImageDisabled =
+          (effectiveProvider === "local" && bodyModelDisabled) ||
+          isDisabledModelChoice(preferredLocalImageModel);
+        const openAiImageDisabled =
+          (effectiveProvider !== "local" && bodyModelDisabled) ||
+          isDisabledModelChoice(preferredOpenAiImageModel);
+        const resolvedLocalImageModel = localImageDisabled
+          ? ""
           : (bodyModel && effectiveProvider === "local"
               ? bodyModel.trim()
               : "") || preferredLocalImageModel;
 
-      const resolvedOpenAiImageModel = openAiImageDisabled
-        ? ""
-        : imageOrigin === "botcast" && effectiveProvider !== "local"
-          ? DEFAULT_OPENAI_IMAGE_MODEL_ID
+        const resolvedOpenAiImageModel = openAiImageDisabled
+          ? ""
+          : imageOrigin === "botcast" && effectiveProvider !== "local"
+            ? DEFAULT_OPENAI_IMAGE_MODEL_ID
             : (bodyModel && effectiveProvider !== "local"
                 ? bodyModel.trim()
                 : "") || preferredOpenAiImageModel;
-      const shouldRunLocal =
-        effectiveProvider === "local" ||
-        (openAiImageDisabled && Boolean(resolvedLocalImageModel));
-      if (effectiveProvider === "local" && localImageDisabled) {
-        throw new HttpError(
-          400,
+        const shouldRunLocal =
+          effectiveProvider === "local" ||
+          (openAiImageDisabled && Boolean(resolvedLocalImageModel));
+        if (effectiveProvider === "local" && localImageDisabled) {
+          throw new HttpError(
+            400,
             "Local image generation is disabled. Choose a local image model before generating.",
-        );
-      }
-      if (!shouldRunLocal && openAiImageDisabled) {
-        throw new HttpError(
-          400,
+          );
+        }
+        if (!shouldRunLocal && openAiImageDisabled) {
+          throw new HttpError(
+            400,
             "Online image generation is disabled. Choose an online image model before generating.",
-        );
-      }
-      if (shouldRunLocal && !resolvedLocalImageModel) {
-        throw new Error(
+          );
+        }
+        if (shouldRunLocal && !resolvedLocalImageModel) {
+          throw new Error(
             "Pick a local image model in the Images panel header, then try again.",
-        );
-      }
-      const quality = imageOrigin === "botcast" && !shouldRunLocal
-        ? "high"
-        : requestedQuality;
-        promptForModel = shouldRunLocal ? localPromptForModel : onlinePromptForModel;
-      if (imageOrigin === "botcast") {
-        promptForPersistence = promptForModel;
-      }
+          );
+        }
+        const quality =
+          imageOrigin === "botcast" && !shouldRunLocal
+            ? "high"
+            : requestedQuality;
+        promptForModel = shouldRunLocal
+          ? localPromptForModel
+          : onlinePromptForModel;
+        if (imageOrigin === "botcast") {
+          promptForPersistence = promptForModel;
+        }
 
-      const acqPanel = await waitForImageSlot({
-        userId,
+        const acqPanel = await waitForImageSlot({
+          userId,
           conversationId:
             conversationIdRaw.length > 0 ? conversationIdRaw : null,
-        botId: bodyBotId ?? null,
-        mode: "sandbox",
-        incognito: false,
+          botId: bodyBotId ?? null,
+          mode: "sandbox",
+          incognito: false,
           captionPrompt:
             prompt ||
             groupRoomWallpaperContext?.groupName ||
             "Group room atmosphere",
-        userMessage: `[Images panel] ${(
+          userMessage: `[Images panel] ${(
             prompt ||
             groupRoomWallpaperContext?.groupName ||
             "Group room atmosphere"
-        ).slice(0, 500)}`,
-        source: "images_panel",
-        abortController: imageGenAbort,
-        signal: imageGenAbort.signal,
-      });
-      ownedImageSlotJobId = acqPanel.id;
+          ).slice(0, 500)}`,
+          source: "images_panel",
+          abortController: imageGenAbort,
+          signal: imageGenAbort.signal,
+        });
+        ownedImageSlotJobId = acqPanel.id;
 
-      const imageId = randomId(12);
-      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+        const imageId = randomId(12);
+        const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
 
-      if (shouldRunLocal) {
+        if (shouldRunLocal) {
           const lenientImageFb =
             user.lenient_local_image_fallback_model?.trim() ?? "";
-        const localPromptAttempts = buildImagePromptAttempts({
-          prompt: localPromptForModel,
-        });
-        const runLocalBytes = (modelId: string, attemptPrompt: string) =>
-          generateLocalImageBytesByModelId({
-            modelId,
-            promptForModel: attemptPrompt,
-            size,
-            signal: imageGenAbort.signal,
-            comfyUiHost: user.comfyui_host,
+          const localPromptAttempts = buildImagePromptAttempts({
+            prompt: localPromptForModel,
+          });
+          const runLocalBytes = (modelId: string, attemptPrompt: string) =>
+            generateLocalImageBytesByModelId({
+              modelId,
+              promptForModel: attemptPrompt,
+              size,
+              signal: imageGenAbort.signal,
+              comfyUiHost: user.comfyui_host,
               comfyUiWorkflows: parseStoredComfyUiWorkflows(
                 user.comfyui_workflows,
               ),
-            secondaryOllamaHost: user.secondary_ollama_host,
-            primaryOllamaHost: config.ollamaHost,
-          });
+              secondaryOllamaHost: user.secondary_ollama_host,
+              primaryOllamaHost: config.ollamaHost,
+            });
 
           let localOut: Awaited<
             ReturnType<typeof generateLocalImageBytesByModelId>
           >;
-        let revisedPrompt: string;
-        try {
-          const attempted = await runImagePromptAttempts({
-            attempts: localPromptAttempts,
-            generate: (attempt) =>
-              runLocalBytes(resolvedLocalImageModel, attempt.prompt),
-          });
-          localOut = attempted.value;
-          revisedPrompt = attempted.prompt;
-        } catch (primaryError) {
-          if (
-            lenientImageFb &&
-            lenientImageFb !== resolvedLocalImageModel.trim() &&
-            shouldAttemptLenientLocalImageFallback(primaryError)
-          ) {
-            revisedPrompt =
-              localPromptAttempts.at(-1)?.prompt ?? localPromptForModel;
-            localOut = await runLocalBytes(lenientImageFb, revisedPrompt);
-          } else {
-            throw primaryError;
+          let revisedPrompt: string;
+          try {
+            const attempted = await runImagePromptAttempts({
+              attempts: localPromptAttempts,
+              generate: (attempt) =>
+                runLocalBytes(resolvedLocalImageModel, attempt.prompt),
+            });
+            localOut = attempted.value;
+            revisedPrompt = attempted.prompt;
+          } catch (primaryError) {
+            if (
+              lenientImageFb &&
+              lenientImageFb !== resolvedLocalImageModel.trim() &&
+              shouldAttemptLenientLocalImageFallback(primaryError)
+            ) {
+              revisedPrompt =
+                localPromptAttempts.at(-1)?.prompt ?? localPromptForModel;
+              localOut = await runLocalBytes(lenientImageFb, revisedPrompt);
+            } else {
+              throw primaryError;
+            }
           }
-        }
 
-        await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
-          imageId,
-          userId,
-          persistence: {
-            conversationIdForInsert: persistence.conversationIdForInsert,
-            persistedBotId: persistedOwnerBotId,
-            relatedBotIds: relatedBotIdsForInsert,
-            origin: imageOrigin,
-          },
-          prompt: promptForPersistence,
-          revisedPrompt,
-          localRelPath,
-          size,
-          quality,
-          imageBytes: localOut.imageBytes,
-          modelUsed: localOut.modelUsed,
-          provider: localOut.provider,
-          purpose: imagePurpose,
-          hubAtmosphereStyle:
-            imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
-              ? hubAtmosphereStyle
-              : undefined,
-          composedPrompt,
-          profilePictureBotId:
-              imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-                ? bodyBotId
-                : null,
-          previousProfilePictureImageId,
-        });
-        return;
-      }
-
-      const userKey = decryptUserKey(userId);
-        const apiKey =
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-        const lenientImageFbOnline =
-          user.lenient_local_image_fallback_model?.trim() ?? "";
-        const onlinePromptAttempts = buildImagePromptAttempts({
-          prompt: onlinePromptForModel,
-          useSourceImage: Boolean(sourceImageBytes),
-          promptOnlyFallback: localPromptForModel,
-        });
-
-        let openAiResult: Awaited<ReturnType<typeof generateImage>> | null =
-          null;
-      try {
-        const attempted = await runImagePromptAttempts({
-          attempts: onlinePromptAttempts,
-          generate: (attempt) =>
-            attempt.useSourceImage && sourceImageBytes
-              ? editImage(attempt.prompt, sourceImageBytes, apiKey, {
-                  model: resolvedOpenAiImageModel || undefined,
-                  size,
-                  quality,
-                  signal: imageGenAbort.signal,
-                })
-              : generateImage(attempt.prompt, apiKey, {
-                  model: resolvedOpenAiImageModel || undefined,
-                  size,
-                  quality,
-                  signal: imageGenAbort.signal,
-                }),
-        });
-        openAiResult = attempted.value;
-      } catch (primaryError) {
-        if (
-          lenientImageFbOnline &&
-          shouldAttemptLenientLocalImageFallback(primaryError)
-        ) {
-          const localFallbackPrompt =
-            buildImagePromptAttempts({ prompt: localPromptForModel }).at(-1)
-              ?.prompt ?? localPromptForModel;
-          const localOut = await generateLocalImageBytesByModelId({
-            modelId: lenientImageFbOnline,
-            promptForModel: localFallbackPrompt,
-            size,
-            signal: imageGenAbort.signal,
-            comfyUiHost: user.comfyui_host,
-              comfyUiWorkflows: parseStoredComfyUiWorkflows(
-                user.comfyui_workflows,
-              ),
-            secondaryOllamaHost: user.secondary_ollama_host,
-            primaryOllamaHost: config.ollamaHost,
-          });
           await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
             imageId,
             userId,
@@ -21080,11 +20916,8 @@ function buildRoutes(): RouteDefinition[] {
               relatedBotIds: relatedBotIdsForInsert,
               origin: imageOrigin,
             },
-              prompt:
-                imageOrigin === "botcast"
-              ? localPromptForModel
-              : promptForPersistence,
-            revisedPrompt: localFallbackPrompt,
+            prompt: promptForPersistence,
+            revisedPrompt,
             localRelPath,
             size,
             quality,
@@ -21098,126 +20931,209 @@ function buildRoutes(): RouteDefinition[] {
                 : undefined,
             composedPrompt,
             profilePictureBotId:
-                imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-                  ? bodyBotId
-                  : null,
+              imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+                ? bodyBotId
+                : null,
             previousProfilePictureImageId,
           });
           return;
         }
-        throw primaryError;
-      }
 
-      const result = openAiResult;
-      if (!result) {
-        throw new Error("OpenAI image generation did not return a result.");
-      }
+        const userKey = decryptUserKey(userId);
+        const apiKey =
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+        const lenientImageFbOnline =
+          user.lenient_local_image_fallback_model?.trim() ?? "";
+        const onlinePromptAttempts = buildImagePromptAttempts({
+          prompt: onlinePromptForModel,
+          useSourceImage: Boolean(sourceImageBytes),
+          promptOnlyFallback: localPromptForModel,
+        });
 
-      let imageBytes: Buffer;
-      try {
+        let openAiResult: Awaited<ReturnType<typeof generateImage>> | null =
+          null;
+        try {
+          const attempted = await runImagePromptAttempts({
+            attempts: onlinePromptAttempts,
+            generate: (attempt) =>
+              attempt.useSourceImage && sourceImageBytes
+                ? editImage(attempt.prompt, sourceImageBytes, apiKey, {
+                    model: resolvedOpenAiImageModel || undefined,
+                    size,
+                    quality,
+                    signal: imageGenAbort.signal,
+                  })
+                : generateImage(attempt.prompt, apiKey, {
+                    model: resolvedOpenAiImageModel || undefined,
+                    size,
+                    quality,
+                    signal: imageGenAbort.signal,
+                  }),
+          });
+          openAiResult = attempted.value;
+        } catch (primaryError) {
+          if (
+            lenientImageFbOnline &&
+            shouldAttemptLenientLocalImageFallback(primaryError)
+          ) {
+            const localFallbackPrompt =
+              buildImagePromptAttempts({ prompt: localPromptForModel }).at(-1)
+                ?.prompt ?? localPromptForModel;
+            const localOut = await generateLocalImageBytesByModelId({
+              modelId: lenientImageFbOnline,
+              promptForModel: localFallbackPrompt,
+              size,
+              signal: imageGenAbort.signal,
+              comfyUiHost: user.comfyui_host,
+              comfyUiWorkflows: parseStoredComfyUiWorkflows(
+                user.comfyui_workflows,
+              ),
+              secondaryOllamaHost: user.secondary_ollama_host,
+              primaryOllamaHost: config.ollamaHost,
+            });
+            await finalizeComfyOrOllamaGeneratedImageResponse(ctx, {
+              imageId,
+              userId,
+              persistence: {
+                conversationIdForInsert: persistence.conversationIdForInsert,
+                persistedBotId: persistedOwnerBotId,
+                relatedBotIds: relatedBotIdsForInsert,
+                origin: imageOrigin,
+              },
+              prompt:
+                imageOrigin === "botcast"
+                  ? localPromptForModel
+                  : promptForPersistence,
+              revisedPrompt: localFallbackPrompt,
+              localRelPath,
+              size,
+              quality,
+              imageBytes: localOut.imageBytes,
+              modelUsed: localOut.modelUsed,
+              provider: localOut.provider,
+              purpose: imagePurpose,
+              hubAtmosphereStyle:
+                imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+                  ? hubAtmosphereStyle
+                  : undefined,
+              composedPrompt,
+              profilePictureBotId:
+                imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
+                  ? bodyBotId
+                  : null,
+              previousProfilePictureImageId,
+            });
+            return;
+          }
+          throw primaryError;
+        }
+
+        const result = openAiResult;
+        if (!result) {
+          throw new Error("OpenAI image generation did not return a result.");
+        }
+
+        let imageBytes: Buffer;
+        try {
           imageBytes = await readOpenAiGeneratedImageBytes(
             result,
             imageGenAbort.signal,
           );
-      } catch (error) {
+        } catch (error) {
           const detail =
             error instanceof Error ? error.message : "download failed";
           throw new Error(
             `Could not download image for local storage (${detail}).`,
           );
-      }
+        }
 
-      try {
-        writeGeneratedImageBytes(localRelPath, imageBytes);
-      } catch (error) {
+        try {
+          writeGeneratedImageBytes(localRelPath, imageBytes);
+        } catch (error) {
           const detail =
             error instanceof Error ? error.message : "write failed";
-        throw new Error(`Could not save generated image (${detail}).`);
-      }
+          throw new Error(`Could not save generated image (${detail}).`);
+        }
 
-      await tryGenerateThumbAfterPngWrite(localRelPath);
-      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
-      const storedUrl = result.url || displayUrl;
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+        const storedUrl = result.url || displayUrl;
 
-      const createdAt = new Date().toISOString();
-      try {
-        db.prepare(
-            "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)",
-        ).run(
-          imageId,
-          userId,
-          persistence.conversationIdForInsert,
-          persistedOwnerBotId,
-          serializeImageRelatedBotIds(
-            relatedBotIdsForInsert,
-            persistedOwnerBotId,
-          ),
-          imageOrigin,
-          promptForPersistence,
-          result.revisedPrompt,
-          storedUrl,
-          size,
-          quality,
-          result.model,
-          localRelPath,
-          imagePurpose,
-            createdAt,
-        );
-        if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && bodyBotId) {
+        const createdAt = new Date().toISOString();
+        try {
           db.prepare(
-              "UPDATE bots SET profile_picture_image_id = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-          ).run(imageId, createdAt, bodyBotId, userId);
-          deleteBotProfilePictureImageIfOwned(
-            db,
-            userId,
-            bodyBotId,
-              previousProfilePictureImageId,
-          );
-        }
-        if (imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
-          promoteHubAtmosphereImage(
-            userId,
+            "INSERT INTO images (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url, size, quality, provider, model, local_rel_path, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'openai', ?, ?, ?, ?)",
+          ).run(
             imageId,
-            hubAtmosphereStyle,
-          );
-        }
-        recordImageUsage({
-          provider: "openai",
-          model: result.model,
-          purpose:
-            imagePurpose === "gallery" ||
-            imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
-              ? "image_generation"
-              : imagePurpose,
-          imageCount: 1,
-          imageSize: size,
-          imageQuality: quality,
-          createdAt,
-        });
-      } catch (error) {
-        tryUnlinkGeneratedImageFile(localRelPath);
-        throw error;
-      }
-
-      json(ctx.res, 200, {
-        ok: true,
-        image: {
-          id: imageId,
-          botId: persistedOwnerBotId,
-          botIds: normalizeImageRelatedBotIds(
-            relatedBotIdsForInsert,
+            userId,
+            persistence.conversationIdForInsert,
             persistedOwnerBotId,
-          ),
-          origin: imageOrigin,
-          url: storedUrl,
-          revisedPrompt: result.revisedPrompt,
-          displayUrl,
-          hasLocalFile: true,
-          model: result.model,
-          purpose: imagePurpose,
-        },
-        ...(composedPrompt ? { composedPrompt } : {}),
-      });
+            serializeImageRelatedBotIds(
+              relatedBotIdsForInsert,
+              persistedOwnerBotId,
+            ),
+            imageOrigin,
+            promptForPersistence,
+            result.revisedPrompt,
+            storedUrl,
+            size,
+            quality,
+            result.model,
+            localRelPath,
+            imagePurpose,
+            createdAt,
+          );
+          if (imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE && bodyBotId) {
+            db.prepare(
+              "UPDATE bots SET profile_picture_image_id = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            ).run(imageId, createdAt, bodyBotId, userId);
+            deleteBotProfilePictureImageIfOwned(
+              db,
+              userId,
+              bodyBotId,
+              previousProfilePictureImageId,
+            );
+          }
+          if (imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
+            promoteHubAtmosphereImage(userId, imageId, hubAtmosphereStyle);
+          }
+          recordImageUsage({
+            provider: "openai",
+            model: result.model,
+            purpose:
+              imagePurpose === "gallery" ||
+              imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+                ? "image_generation"
+                : imagePurpose,
+            imageCount: 1,
+            imageSize: size,
+            imageQuality: quality,
+            createdAt,
+          });
+        } catch (error) {
+          tryUnlinkGeneratedImageFile(localRelPath);
+          throw error;
+        }
+
+        json(ctx.res, 200, {
+          ok: true,
+          image: {
+            id: imageId,
+            botId: persistedOwnerBotId,
+            botIds: normalizeImageRelatedBotIds(
+              relatedBotIdsForInsert,
+              persistedOwnerBotId,
+            ),
+            origin: imageOrigin,
+            url: storedUrl,
+            revisedPrompt: result.revisedPrompt,
+            displayUrl,
+            hasLocalFile: true,
+            model: result.model,
+            purpose: imagePurpose,
+          },
+          ...(composedPrompt ? { composedPrompt } : {}),
+        });
       } finally {
         ctx.req.off("close", onImageGenClientClose);
         if (ownedImageSlotJobId) {
@@ -21388,20 +21304,20 @@ function buildRoutes(): RouteDefinition[] {
               .all(userId, limit);
       const images = (
         rows as Array<{
-        id: string;
-        prompt: string;
-        revised_prompt: string | null;
-        url: string;
-        size: string;
-        quality: string;
-        provider: string;
-        bot_id: string | null;
-        related_bot_ids: string | null;
-        origin: string | null;
-        created_at: string;
-        local_rel_path: string | null;
-        model: string | null;
-        purpose: string | null;
+          id: string;
+          prompt: string;
+          revised_prompt: string | null;
+          url: string;
+          size: string;
+          quality: string;
+          provider: string;
+          bot_id: string | null;
+          related_bot_ids: string | null;
+          origin: string | null;
+          created_at: string;
+          local_rel_path: string | null;
+          model: string | null;
+          purpose: string | null;
         }>
       ).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
@@ -21494,11 +21410,7 @@ function buildRoutes(): RouteDefinition[] {
       reconcileAssetCleanupRecoveryForUser(db, userId);
       try {
         if (
-          !permanentlyDeleteImageAssetCleanupRecovery(
-            db,
-            userId,
-            ctx.params.id,
-          )
+          !permanentlyDeleteImageAssetCleanupRecovery(db, userId, ctx.params.id)
         ) {
           throw new HttpError(404, "Recovery batch not found.");
         }
@@ -21732,17 +21644,19 @@ function buildRoutes(): RouteDefinition[] {
         },
         () =>
           compileBotPowers({
-          provider: auxiliaryProviderFactoryOverride(
-            user.prism_default_llm_model ?? undefined,
+            provider: auxiliaryProviderFactoryOverride(
+              user.prism_default_llm_model ?? undefined,
               dualOllamaWorkloadOptions(user),
-          ),
-          botName: typeof body.botName === "string" ? body.botName : "",
-          systemPrompt:
+            ),
+            botName: typeof body.botName === "string" ? body.botName : "",
+            systemPrompt:
               typeof body.systemPrompt === "string" ? body.systemPrompt : "",
-          powers: body.powers,
-          targetBots: db
-            .prepare("SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id")
-            .all(userId) as Array<{ id: string; name: string }>,
+            powers: body.powers,
+            targetBots: db
+              .prepare(
+                "SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id",
+              )
+              .all(userId) as Array<{ id: string; name: string }>,
           }),
       );
       json(ctx.res, 200, { ok: true, ...result });
@@ -21751,16 +21665,22 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
-      const storedAutoFallbackChain = parseStoredAutoFallbackChain(user.auto_fallback_chain);
+      const storedAutoFallbackChain = parseStoredAutoFallbackChain(
+        user.auto_fallback_chain,
+      );
       const requestedResponseMode = normalizeResponseMode(
         body.responseMode,
         user.preferred_provider === "local" ? "local" : "online",
       );
       const responseMode =
-        requestedResponseMode === "auto" && user.auto_switch_model === 1 && storedAutoFallbackChain
+        requestedResponseMode === "auto" &&
+        user.auto_switch_model === 1 &&
+        storedAutoFallbackChain
           ? "auto"
           : requestedResponseMode === "auto"
-            ? user.preferred_provider === "local" ? "local" : "online"
+            ? user.preferred_provider === "local"
+              ? "local"
+              : "online"
             : requestedResponseMode;
       const requestedProvider = readProvider(body.preferredProvider);
       const primaryProvider: ProviderName =
@@ -21770,21 +21690,31 @@ function buildRoutes(): RouteDefinition[] {
             ? (requestedProvider ?? user.preferred_provider)
             : requestedProvider && requestedProvider !== "local"
               ? requestedProvider
-              : user.preferred_provider === "anthropic" ? "anthropic" : "openai";
+              : user.preferred_provider === "anthropic"
+                ? "anthropic"
+                : "openai";
       const userKey = decryptUserKey(userId);
       const onlineAllowed = responseMode !== "local";
       const openAiApiKey = onlineAllowed
-        ? getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey
+        ? (getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)
         : undefined;
       const anthropicApiKey = onlineAllowed
-        ? getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey
+        ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
         : undefined;
-      const catalog = await buildModelCatalog(openAiApiKey, user.secondary_ollama_host, anthropicApiKey);
-      const preferredModel = primaryProvider === "local"
-        ? readOptionalString(user.preferred_local_model)
-        : readOptionalString(user.preferred_online_model);
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+      const preferredModel =
+        primaryProvider === "local"
+          ? readOptionalString(user.preferred_local_model)
+          : readOptionalString(user.preferred_online_model);
       if (isDisabledModelChoice(preferredModel)) {
-        throw new HttpError(400, `${primaryProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before rerolling this field.`);
+        throw new HttpError(
+          400,
+          `${primaryProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before rerolling this field.`,
+        );
       }
       const resolved = resolveAutoModel({
         provider: primaryProvider,
@@ -21804,30 +21734,44 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onClose);
       try {
         const result = await runWithUsageSession(
-          { db, userId, privacyScope: "normal", mode: "system", surface: "bots" },
-          () => generateBotField({
-            fieldKey: body.fieldKey,
-            currentValue: body.currentValue,
-            context: body.context,
-            provider,
-            providerName: resolved.provider,
-            model: resolved.model,
-            responseMode,
-            autoFallbackChain: responseMode === "auto" ? storedAutoFallbackChain : null,
-            providerFactory: providerFactoryOverride,
-            openAiApiKey,
-            anthropicApiKey,
-            secondaryOllamaHost: user.secondary_ollama_host,
-            signal: controller.signal,
-          }),
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "system",
+            surface: "bots",
+          },
+          () =>
+            generateBotField({
+              fieldKey: body.fieldKey,
+              currentValue: body.currentValue,
+              context: body.context,
+              provider,
+              providerName: resolved.provider,
+              model: resolved.model,
+              responseMode,
+              autoFallbackChain:
+                responseMode === "auto" ? storedAutoFallbackChain : null,
+              providerFactory: providerFactoryOverride,
+              openAiApiKey,
+              anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              signal: controller.signal,
+            }),
         );
         json(ctx.res, 200, { ok: true, ...result });
       } catch (error) {
         if (error instanceof BotGenerationError) {
-          throw new HttpError(error.kind === "invalid_prompt" ? 400 : 502, error.message);
+          throw new HttpError(
+            error.kind === "invalid_prompt" ? 400 : 502,
+            error.message,
+          );
         }
         if (controller.signal.aborted) throw error;
-        throw new HttpError(502, "PRISM could not reach the selected model. The field is unchanged.");
+        throw new HttpError(
+          502,
+          "PRISM could not reach the selected model. The field is unchanged.",
+        );
       } finally {
         ctx.req.off("close", onClose);
       }
@@ -21875,10 +21819,10 @@ function buildRoutes(): RouteDefinition[] {
       // catalogs. AUTO and ONLINE explicitly permit an online boundary.
       const onlineAllowed = responseMode !== "local";
       const openAiApiKey = onlineAllowed
-        ? getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey
+        ? (getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)
         : undefined;
       const anthropicApiKey = onlineAllowed
-        ? getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey
+        ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
         : undefined;
       const catalog = await buildModelCatalog(
         openAiApiKey,
@@ -21963,30 +21907,33 @@ function buildRoutes(): RouteDefinition[] {
               signal: controller.signal,
             }),
         );
-        const compiledPowers = result.draft.powers.length > 0
-          ? await runWithUsageSession(
-              {
-                db,
-                userId,
-                privacyScope: "normal",
-                mode: "system",
-                surface: "bots",
-              },
-              () =>
-                compileBotPowers({
-                  provider: auxiliaryProviderFactoryOverride(
-                    user.prism_default_llm_model ?? undefined,
-                    dualOllamaWorkloadOptions(user),
-                  ),
-                  botName: result.draft.name,
-                  systemPrompt: JSON.stringify(result.draft.profile),
-                  powers: result.draft.powers,
-                  targetBots: db
-                    .prepare("SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id")
-                    .all(userId) as Array<{ id: string; name: string }>,
-                }),
-            )
-          : null;
+        const compiledPowers =
+          result.draft.powers.length > 0
+            ? await runWithUsageSession(
+                {
+                  db,
+                  userId,
+                  privacyScope: "normal",
+                  mode: "system",
+                  surface: "bots",
+                },
+                () =>
+                  compileBotPowers({
+                    provider: auxiliaryProviderFactoryOverride(
+                      user.prism_default_llm_model ?? undefined,
+                      dualOllamaWorkloadOptions(user),
+                    ),
+                    botName: result.draft.name,
+                    systemPrompt: JSON.stringify(result.draft.profile),
+                    powers: result.draft.powers,
+                    targetBots: db
+                      .prepare(
+                        "SELECT id, name FROM bots WHERE user_id = ? ORDER BY name, id",
+                      )
+                      .all(userId) as Array<{ id: string; name: string }>,
+                  }),
+              )
+            : null;
         json(ctx.res, 200, {
           ok: true,
           ...result,
@@ -22029,8 +21976,7 @@ function buildRoutes(): RouteDefinition[] {
             "SELECT id, clone_family_id FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
           )
           .get(body.cloneSourceBotId.trim(), userId) as
-          | { id: string; clone_family_id: string | null }
-          | undefined;
+          { id: string; clone_family_id: string | null } | undefined;
         if (!source) {
           throw new HttpError(404, "Clone source bot not found.");
         }
@@ -22074,8 +22020,9 @@ function buildRoutes(): RouteDefinition[] {
       const faceMouthAnimation =
         readBotFaceGlyphAnimationForStorage(body.faceMouthAnimation) ??
         DEFAULT_BOT_FACE_GLYPH_ANIMATION;
-      const faceMouthCoffeePucker =
-        readBotFaceMouthCoffeePuckerForStorage(body.faceMouthCoffeePucker);
+      const faceMouthCoffeePucker = readBotFaceMouthCoffeePuckerForStorage(
+        body.faceMouthCoffeePucker,
+      );
       const faceFontWeight = readBotFaceWeightForStorage(body.faceFontWeight);
       const faceEyeScale = readBotFaceEyeScaleForStorage(body.faceEyeScale);
       const faceEyeOffsetX = readBotFaceEyeOffsetXForStorage(
@@ -22465,11 +22412,11 @@ function buildRoutes(): RouteDefinition[] {
       const updatedBots =
         result.ids.length > 0
           ? (db
-            .prepare(
+              .prepare(
                 `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
-            )
+              )
               .all(userId, ...result.ids) as Record<string, unknown>[])
-        : [];
+          : [];
       json(ctx.res, 200, {
         ok: true,
         updated: result.updated,
@@ -23041,9 +22988,7 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const botId = ctx.params.id;
       const existing = db
-        .prepare(
-          "SELECT updated_at FROM bots WHERE id = ? AND user_id = ?",
-        )
+        .prepare("SELECT updated_at FROM bots WHERE id = ? AND user_id = ?")
         .get(botId, userId) as { updated_at: string } | undefined;
       if (!existing) throw new Error("Bot not found.");
       const capabilityContext = prismCapabilityContext(
@@ -23103,18 +23048,18 @@ function buildRoutes(): RouteDefinition[] {
         )
         .get(conversationId, userId) as
         | {
-        id: string;
-        title: string;
-        conversation_mode: string | null;
-        bot_id: string | null;
-        bot_group_ids: string | null;
-        coffee_settings: string | null;
-        coffee_group_id: string | null;
-        coffee_duration_minutes: number | null;
-        coffee_preset_id: string | null;
-        coffee_topic: string | null;
-        created_at: string;
-        updated_at: string;
+            id: string;
+            title: string;
+            conversation_mode: string | null;
+            bot_id: string | null;
+            bot_group_ids: string | null;
+            coffee_settings: string | null;
+            coffee_group_id: string | null;
+            coffee_duration_minutes: number | null;
+            coffee_preset_id: string | null;
+            coffee_topic: string | null;
+            created_at: string;
+            updated_at: string;
           }
         | undefined;
       if (!conversation) {
@@ -23131,7 +23076,7 @@ function buildRoutes(): RouteDefinition[] {
       if (developerTranscript) {
         const diagnosticMessages = db
           .prepare(
-          `SELECT id, role, content, provider, model, bot_id,
+            `SELECT id, role, content, provider, model, bot_id,
                   coffee_audience_bot_ids, tool_payload, created_at
              FROM messages
             WHERE conversation_id = ? AND user_id = ?
@@ -23150,7 +23095,7 @@ function buildRoutes(): RouteDefinition[] {
         }>;
         const diagnosticEvents = db
           .prepare(
-          `SELECT id, request_id, request_sequence, message_id, event_kind, purpose,
+            `SELECT id, request_id, request_sequence, message_id, event_kind, purpose,
                   provider, model, payload_json, created_at
              FROM developer_transcript_events
             WHERE conversation_id = ? AND user_id = ?
@@ -23170,7 +23115,7 @@ function buildRoutes(): RouteDefinition[] {
         }>;
         const usageRows = db
           .prepare(
-          `SELECT id, request_id, message_id, event_type, purpose, provider, model,
+            `SELECT id, request_id, message_id, event_type, purpose, provider, model,
                   input_tokens, output_tokens, total_tokens, cached_input_tokens,
                   token_count_source, duration_ms, created_at
              FROM usage_events
@@ -23323,7 +23268,7 @@ function buildRoutes(): RouteDefinition[] {
         const placeholders = coffeeBotIds.map(() => "?").join(", ");
         const botRows = db
           .prepare(
-          `SELECT id, name
+            `SELECT id, name
              FROM bots
             WHERE (user_id = ? OR visibility = 'public') AND id IN (${placeholders})`,
           )
@@ -23358,7 +23303,7 @@ function buildRoutes(): RouteDefinition[] {
             )
           : (db
               .prepare(
-              `SELECT m.id, m.role, m.content, m.bot_id, m.created_at,
+                `SELECT m.id, m.role, m.content, m.bot_id, m.created_at,
                       b.name AS bot_name, b.color AS bot_color
                  FROM messages m
                  LEFT JOIN bots b ON b.id = m.bot_id
@@ -23383,19 +23328,17 @@ function buildRoutes(): RouteDefinition[] {
               });
               return [
                 message,
-                ...segments.map(
-                  (segment): TranscriptExportMessage => ({
-                    id: segment.id,
-                    role: "assistant",
-                    content: segment.text,
-                    created_at: message.created_at,
-                    bot_id: segment.speakerBotId,
-                    bot_name:
-                      coffeeBotNamesById.get(segment.speakerBotId) ??
-                      segment.speakerBotId,
-                    bot_color: null,
-                  }),
-                ),
+                ...segments.map((segment): TranscriptExportMessage => ({
+                  id: segment.id,
+                  role: "assistant",
+                  content: segment.text,
+                  created_at: message.created_at,
+                  bot_id: segment.speakerBotId,
+                  bot_name:
+                    coffeeBotNamesById.get(segment.speakerBotId) ??
+                    segment.speakerBotId,
+                  bot_color: null,
+                })),
               ];
             })
           : storedMessages;
@@ -23649,12 +23592,12 @@ function buildRoutes(): RouteDefinition[] {
         parent.conversation_mode === "zen" && forceZenFork
           ? "zen"
           : parent.conversation_mode === "zen"
-          ? forkBotId
-            ? "chat"
-            : "zen"
-          : parent.conversation_mode === "chat"
-            ? "chat"
-            : "sandbox";
+            ? forkBotId
+              ? "chat"
+              : "zen"
+            : parent.conversation_mode === "chat"
+              ? "chat"
+              : "sandbox";
       const forkWallpaperEnabled: number = 0;
       const forkWallpaperHistory =
         forkWallpaperEnabled === 1
@@ -23803,8 +23746,7 @@ async function dispatchRequest(
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/takes\/[^/]+\/audio$/u.test(pathname);
     const replayFaithfulAudioUpload =
-      method === "POST" &&
-      /^\/api\/replays\/[^/]+\/audio$/u.test(pathname);
+      method === "POST" && /^\/api\/replays\/[^/]+\/audio$/u.test(pathname);
     const replayStudioCutAudioChunkUpload =
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/studio-cut\/mix\/audio-chunk$/u.test(pathname);
@@ -23822,10 +23764,10 @@ async function dispatchRequest(
                 : accountBackupArchiveUpload
                   ? ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES
                   : replayFaithfulAudioUpload
-                      ? REPLAY_FAITHFUL_AUDIO_MAX_BYTES
-                      : replayStudioCutAudioChunkUpload
-                        ? REPLAY_RENDER_CHUNK_MAX_BYTES
-                        : 24 * 1024 * 1024,
+                    ? REPLAY_FAITHFUL_AUDIO_MAX_BYTES
+                    : replayStudioCutAudioChunkUpload
+                      ? REPLAY_RENDER_CHUNK_MAX_BYTES
+                      : 24 * 1024 * 1024,
             )
           : await readJsonBody(req)
         : {};
@@ -23998,9 +23940,12 @@ if (process.env.PRISM_API_DISABLE_AUTOSTART !== "1") {
   setInterval(() => {
     void checkDuePrismCreditMonitors();
   }, PRISM_MONITOR_INTERVAL_MS);
-  setInterval(() => {
-    purgeExpiredPrismStateAndFiles();
-  }, 24 * 60 * 60 * 1_000);
+  setInterval(
+    () => {
+      purgeExpiredPrismStateAndFiles();
+    },
+    24 * 60 * 60 * 1_000,
+  );
 
   process.on("SIGINT", () => {
     void shutdown("SIGINT").then(() => process.exit(0));

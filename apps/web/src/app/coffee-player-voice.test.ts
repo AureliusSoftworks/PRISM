@@ -107,6 +107,14 @@ describe("Coffee player voice", () => {
       /const voiceSelection = voicePlaybackSelectionRef\.current/,
     );
     assert.match(livePlayerVoice, /voiceSelection\.voiceMode === "mute"/);
+    assert.match(
+      livePlayerVoice,
+      /const performanceText = voicePerformanceTextFromActionCues\(text\)/,
+    );
+    assert.match(
+      livePlayerVoice,
+      /englishEngine === "elevenlabs" && performanceText[\s\S]*?elevenLabsText: performanceText/,
+    );
     assert.match(livePlayerVoice, /const seed = `coffee-player:\$\{spokenText\}`/);
     assert.match(livePlayerVoice, /enqueueRobotVoiceMode\(\{[\s\S]*?source: \{ text: spokenText \}[\s\S]*?sourceText: spokenText/);
     assert.match(livePlayerVoice, /mode: voiceSelection\.voiceMode/);
@@ -207,6 +215,22 @@ describe("Coffee player voice", () => {
     );
     assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
     assert.doesNotMatch(source, /playerAudioVoiceProfile|playerNamePronunciation/);
+  });
+
+  it("times the player's bundled bodily Foley to the visible action cue", () => {
+    const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /const playerActionPlan = buildBundledActionSfxPlan\(trimmed\)/,
+    );
+    assert.match(
+      source,
+      /coffeeLivePlayerActionMessageRef\.current = playerActionPlan[\s\S]*?prefetchCoffeeActionSfxForMessage/,
+    );
+    assert.match(
+      source,
+      /coffeeTurnRhythmState !== "userTableTyping"[\s\S]*?playCoffeeActionSfxOnce\([\s\S]*?coffeeTypewriterLength/,
+    );
   });
 
   it("keeps replay player voice and pot actions off camera", () => {

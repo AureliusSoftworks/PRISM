@@ -57,14 +57,45 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("uses the shared visual bot picker for hosts and guests", () => {
+  it("uses the designed bot dropdown for hosts and the shared visual picker for guests", () => {
+    assert.match(source, /function SignalBotDropdown/u);
+    assert.match(
+      source,
+      /className=\{styles\.signalBotDropdownTrigger\}[\s\S]{0,180}aria-haspopup="listbox"[\s\S]{0,120}aria-expanded=\{menuOpen\}/u,
+    );
+    assert.match(
+      source,
+      /className=\{styles\.signalBotDropdownListbox\}[\s\S]{0,80}role="listbox"/u,
+    );
+    assert.match(
+      source,
+      /className=\{styles\.signalBotDropdownOption\}[\s\S]{0,80}role="option"/u,
+    );
+    assert.match(source, /aria-label="Browse Signal hosts by hue"/u);
+    assert.match(source, /signalCircularHueDistance/u);
+    assert.match(source, /scrollIntoView\(\{[\s\S]{0,60}block: "center"/u);
+    assert.match(
+      css,
+      /\.signalBotDropdownListbox\s*\{[^}]*flex-direction:\s*column;[^}]*overflow-y:\s*auto;/u,
+    );
+    assert.match(
+      css,
+      /\.signalBotDropdownHueLens input::-[^{]+\{[^}]*linear-gradient\([^}]*var\(--prism-p\)[^}]*var\(--prism-m\)/u,
+    );
+    assert.match(
+      css,
+      /\.signalBotDropdownOption\s*\{[^}]*display:\s*flex;[^}]*--signal-picker-accent/u,
+    );
+    assert.match(css, /\.createShowCard > button, \.goLiveButton/u);
+    assert.doesNotMatch(css, /\.createShowCard button, \.goLiveButton/u);
     assert.match(source, /<BotPickerGrid/u);
     assert.match(source, /<BotPickerTile/u);
     assert.match(source, /<BotPickerToolbar/u);
-    assert.match(source, /ariaLabel: "Choose a Signal host"/u);
+    assert.match(source, /ariaLabel="Choose a Signal host"/u);
     assert.match(source, /ariaLabel: "Choose a Signal guest"/u);
     assert.doesNotMatch(source, /id="botcast-host-picker"/u);
     assert.match(source, /className=\{styles\.producerGuestPickerOption\}/u);
+    assert.match(source, /data-tutorial-target="botcast-create-show"/u);
   });
 
   it("uses Signal throughout player-facing applet chrome", () => {

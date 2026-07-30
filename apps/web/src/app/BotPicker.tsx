@@ -19,6 +19,12 @@ export interface BotPickerItem {
   glyph: string | null;
 }
 
+/**
+ * Adaptive bot-picker contract for new surfaces:
+ * one available column uses a dropdown with horizontal rows; two columns use
+ * side-by-side horizontal chips; three or more use the tile grid. Every
+ * variant keeps name search and the hue lens.
+ */
 export interface BotPickerGroupOption {
   id: string;
   name: string;

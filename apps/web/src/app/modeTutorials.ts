@@ -221,9 +221,9 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Give a bot a show",
-        body: "Choose a host and optionally add a premise inspiration—the spark, tension, or reason this show should exist. Each host still starts immediately with an editable fallback name and a camera-ready PRISM set, so creating the show never waits on synthesis. Right-click a host or guest anywhere in Signal to open that bot’s actions and Avatar Studio.",
-        clickLabel: "a show or the Create show producer card",
-        targetSelector: '[data-tutorial-target="botcast-shows"]',
+        body: "Open the designed bot dropdown, then choose a host from its vertically scrolling, color-coded list. You can search by name or use the hue lens to move through bot colors without leaving the Create show card, and optionally add a premise inspiration—the spark, tension, or reason this show should exist. Each host still starts immediately with an editable fallback name and a camera-ready PRISM set, so creating the show never waits on synthesis. Right-click a host or guest anywhere in Signal to open that bot’s actions and Avatar Studio.",
+        clickLabel: "the Create show producer card",
+        targetSelector: '[data-tutorial-target="botcast-create-show"]',
       },
       {
         heading: "Shape the show’s identity",
