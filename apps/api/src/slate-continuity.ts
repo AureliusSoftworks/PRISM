@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   CONTINUITY_FRAMEWORK,
   currentContinuityProducerVersions,
+  splitSlateImportedManuscript,
   transformSlateLockedRangesForTextEdit,
   type SlateBookSummary,
   type SlateContinuityClaim,
@@ -272,6 +273,53 @@ function storedLockedRanges(row: SectionRow): SlateLockedRange[] {
   } catch {
     return [];
   }
+}
+
+function importedManuscriptSectionSeeds(project: ProjectRow): Array<{
+  title: string;
+  prose: string;
+  lockedRangesJson: string;
+}> {
+  const unsplit = [
+    {
+      title: "Imported manuscript",
+      prose: project.manuscript,
+      lockedRangesJson: project.locked_ranges_json,
+    },
+  ];
+  const segments = splitSlateImportedManuscript(project.manuscript);
+  if (segments.length < 2) return unsplit;
+
+  let lockedRanges: SlateLockedRange[];
+  try {
+    lockedRanges = normalizeLockedRanges(
+      parseJson(project.locked_ranges_json, []),
+      project.manuscript.length,
+    );
+  } catch {
+    return unsplit;
+  }
+  const owners = lockedRanges.map((range) =>
+    segments.findIndex(
+      (segment) =>
+        range.start >= segment.start && range.end <= segment.end,
+    ),
+  );
+  if (owners.some((owner) => owner < 0)) return unsplit;
+
+  return segments.map((segment, segmentIndex) => ({
+    title: segment.title,
+    prose: segment.prose,
+    lockedRangesJson: JSON.stringify(
+      lockedRanges
+        .filter((_, rangeIndex) => owners[rangeIndex] === segmentIndex)
+        .map((range) => ({
+          ...range,
+          start: range.start - segment.start,
+          end: range.end - segment.start,
+        })),
+    ),
+  }));
 }
 
 type SlateSectionDetailWithDocument = SlateSectionDetail & {
@@ -781,46 +829,53 @@ export function ensureSlateProjectSections(
       );
 
       if (project.manuscript.length > 0) {
-        const sectionId = randomId();
-        db.prepare(
+        const importedSections = importedManuscriptSectionSeeds(project);
+        const insertSection = db.prepare(
           `INSERT INTO slate_sections
             (id, project_id, series_id, user_id, parent_section_id,
              structure_item_id, kind, ordinal, title, summary, direction, prose,
              locked_ranges_json, locked, status, revision, content_hash,
              created_at, updated_at)
-           VALUES (?, ?, ?, ?, NULL, NULL, 'imported', 0,
-                   'Imported manuscript', '', '', ?, ?, 0, 'drafted', 0, ?, ?, ?)`,
-        ).run(
-          sectionId,
-          projectId,
-          project.series_id,
-          userId,
-          project.manuscript,
-          project.locked_ranges_json,
-          originalHash,
-          now,
-          now,
+           VALUES (?, ?, ?, ?, NULL, NULL, 'imported', ?,
+                   ?, '', '', ?, ?, 0, 'drafted', 0, ?, ?, ?)`,
         );
-        const source = insertSourceWithinTransaction(db, {
-          userId,
-          seriesId: project.series_id,
-          projectId,
-          sectionId,
-          scopeKind: "section",
-          kind: "import",
-          sourceRevision: 0,
-          content: project.manuscript,
-          authority: "human",
-        });
-        queueContinuityExtraction(db, {
-          userId,
-          seriesId: project.series_id,
-          projectId,
-          sectionId,
-          sourceId: source.id,
-          sourceRevision: 0,
-          contentHash: originalHash,
-          now,
+        importedSections.forEach((section, ordinal) => {
+          const sectionId = randomId();
+          const contentHash = sha256(section.prose);
+          insertSection.run(
+            sectionId,
+            projectId,
+            project.series_id,
+            userId,
+            ordinal,
+            section.title,
+            section.prose,
+            section.lockedRangesJson,
+            contentHash,
+            now,
+            now,
+          );
+          const source = insertSourceWithinTransaction(db, {
+            userId,
+            seriesId: project.series_id,
+            projectId,
+            sectionId,
+            scopeKind: "section",
+            kind: "import",
+            sourceRevision: 0,
+            content: section.prose,
+            authority: "human",
+          });
+          queueContinuityExtraction(db, {
+            userId,
+            seriesId: project.series_id,
+            projectId,
+            sectionId,
+            sourceId: source.id,
+            sourceRevision: 0,
+            contentHash,
+            now,
+          });
         });
       } else {
         const structure = structureItems(project);
@@ -943,14 +998,22 @@ function legacyProjection(db: DatabaseSync, userId: string, projectId: string): 
       title: string;
       prose: string;
     }>;
-  return rows
-    .filter((row) => row.prose.trim().length > 0)
-    .map((row) =>
+  const projected = rows.filter((row) => row.prose.trim().length > 0);
+  let manuscript = "";
+  projected.forEach((row, index) => {
+    const previous = projected[index - 1];
+    if (
+      previous &&
+      !(previous.kind === "imported" && row.kind === "imported")
+    ) {
+      manuscript += "\n\n\n";
+    }
+    manuscript +=
       row.kind === "imported"
         ? row.prose
-        : `${row.title}\n\n${row.prose}`,
-    )
-    .join("\n\n\n");
+        : `${row.title}\n\n${row.prose}`;
+  });
+  return manuscript;
 }
 
 export interface SlateSectionProjectionSpan {
@@ -979,9 +1042,16 @@ export function slateSectionProjectionSpans(
     .all(projectId, userId) as unknown as SectionRow[];
   const spans: SlateSectionProjectionSpan[] = [];
   let cursor = 0;
+  let previousKind: SlateSectionKind | null = null;
   for (const row of rows) {
     if (!row.prose.trim()) continue;
-    if (spans.length > 0) cursor += 3;
+    const currentKind = sectionKind(row.kind);
+    if (
+      spans.length > 0 &&
+      !(previousKind === "imported" && currentKind === "imported")
+    ) {
+      cursor += 3;
+    }
     const representationStart = cursor;
     const titlePrefixLength = row.kind === "imported" ? 0 : row.title.length + 2;
     const bodyStart = representationStart + titlePrefixLength;
@@ -990,7 +1060,7 @@ export function slateSectionProjectionSpans(
     spans.push({
       sectionId: row.id,
       structureItemId: row.structure_item_id,
-      kind: sectionKind(row.kind),
+      kind: currentKind,
       title: row.title,
       representationStart,
       bodyStart,
@@ -998,6 +1068,7 @@ export function slateSectionProjectionSpans(
       representationEnd,
     });
     cursor = representationEnd;
+    previousKind = currentKind;
   }
   return spans;
 }

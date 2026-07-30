@@ -373,6 +373,7 @@ describe("Prism account-settings capability", () => {
           patch: {
             theme: "dark",
             atmosphereStyle: "sanctuary",
+            hubAtmosphereEnabled: false,
           },
         },
       });
@@ -387,11 +388,16 @@ describe("Prism account-settings capability", () => {
       assert.equal(run.status, "committed", run.error ?? "");
       const saved = db
         .prepare(
-          "SELECT theme, atmosphere_style FROM users WHERE id = 'u1'",
+          "SELECT theme, atmosphere_style, hub_atmosphere_enabled FROM users WHERE id = 'u1'",
         )
-        .get() as { theme: string; atmosphere_style: string };
+        .get() as {
+        theme: string;
+        atmosphere_style: string;
+        hub_atmosphere_enabled: number;
+      };
       assert.equal(saved.theme, "dark");
       assert.equal(saved.atmosphere_style, "sanctuary");
+      assert.equal(saved.hub_atmosphere_enabled, 0);
 
       const undone = registry.undo({
         context: {
@@ -403,11 +409,16 @@ describe("Prism account-settings capability", () => {
       assert.equal(undone.status, "undone", undone.error ?? "");
       const restored = db
         .prepare(
-          "SELECT theme, atmosphere_style FROM users WHERE id = 'u1'",
+          "SELECT theme, atmosphere_style, hub_atmosphere_enabled FROM users WHERE id = 'u1'",
         )
-        .get() as { theme: string; atmosphere_style: string };
+        .get() as {
+        theme: string;
+        atmosphere_style: string;
+        hub_atmosphere_enabled: number;
+      };
       assert.equal(restored.theme, "system");
       assert.equal(restored.atmosphere_style, "prismatic");
+      assert.equal(restored.hub_atmosphere_enabled, 1);
     } finally {
       closeTestDatabase(db);
     }

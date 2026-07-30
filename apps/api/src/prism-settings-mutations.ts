@@ -25,6 +25,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "theme",
   "graphicsQuality",
   "atmosphereStyle",
+  "hubAtmosphereEnabled",
   "startupPreference",
   "preferredProvider",
   "ephemeralChatProviderPreferences",
@@ -86,6 +87,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "theme",
   "graphics_quality",
   "atmosphere_style",
+  "hub_atmosphere_enabled",
   "startup_preference",
   "preferred_provider",
   "ephemeral_chat_provider_preferences",
@@ -186,6 +188,7 @@ function currentSettings(
         : "system",
     graphicsQuality: nullableString(row.graphics_quality),
     atmosphereStyle: nullableString(row.atmosphere_style),
+    hubAtmosphereEnabled: Number(row.hub_atmosphere_enabled),
     startupPreference: nullableString(row.startup_preference),
     preferredProvider:
       row.preferred_provider === "openai" ||
@@ -332,6 +335,7 @@ function persistedValues(
     theme: next.theme,
     graphics_quality: next.graphicsQuality,
     atmosphere_style: next.atmosphereStyle,
+    hub_atmosphere_enabled: next.hubAtmosphereEnabled,
     startup_preference: next.startupPreference,
     preferred_provider: next.preferredProvider,
     ephemeral_chat_provider_preferences: stringifyJson(

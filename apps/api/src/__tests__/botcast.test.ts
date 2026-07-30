@@ -8737,6 +8737,12 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.match(
       serverSource,
+      /route\("POST", "\/api\/botcast\/shows\/:id\/assets\/:slot\/reuse"/u,
+    );
+    assert.match(serverSource, /signalArtworkImagePurpose\(args\.kind\)/u);
+    assert.match(serverSource, /provider <> 'upload'/u);
+    assert.match(
+      serverSource,
       /route\("POST", "\/api\/botcast\/shows\/:id\/studio-lighting\/refresh"/u,
     );
     const studioLightingRoute = serverSource.slice(

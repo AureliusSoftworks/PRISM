@@ -3,6 +3,7 @@ import {
   SLATE_CLARIFICATION_CUSTOM_VIBE_LABEL,
   normalizeSlateDirectionScope,
   resolveSlateWordTarget,
+  slateImportedSectionRequiresPassageScope,
   slateSha256,
   type SlateClarificationAnswerRequest,
   type SlateClarificationChoice,
@@ -38,6 +39,8 @@ interface ProjectSnapshotRow {
 interface SectionSnapshotRow {
   id: string;
   structure_item_id: string | null;
+  kind: string;
+  title: string;
   revision: number;
   prose: string;
   content_hash: string;
@@ -205,8 +208,8 @@ function sectionSnapshot(
 ): SectionSnapshotRow {
   const row = db
     .prepare(
-      `SELECT id, structure_item_id, revision, prose, content_hash, locked,
-              locked_ranges_json
+      `SELECT id, structure_item_id, kind, title, revision, prose,
+              content_hash, locked, locked_ranges_json
          FROM slate_sections
         WHERE id = ? AND project_id = ? AND user_id = ?`,
     )
@@ -219,6 +222,43 @@ function sectionSnapshot(
     );
   }
   return row;
+}
+
+function intentHasValidSelection(
+  intent: SlateDirectionIntent,
+  section: SectionSnapshotRow,
+): boolean {
+  const selection = intent.target.selection;
+  return Boolean(
+    selection &&
+      selection.sectionId === section.id &&
+      Number.isInteger(selection.start) &&
+      Number.isInteger(selection.end) &&
+      selection.start >= 0 &&
+      selection.end > selection.start &&
+      selection.end <= section.prose.length,
+  );
+}
+
+function assertImportedManuscriptScope(
+  section: SectionSnapshotRow,
+  intent: SlateDirectionIntent,
+): void {
+  if (
+    !slateImportedSectionRequiresPassageScope({
+      kind: section.kind,
+      title: section.title,
+      prose: section.prose,
+      hasSelection: intentHasValidSelection(intent, section),
+    })
+  ) {
+    return;
+  }
+  throw new SlateWritingOperationError(
+    "This direction would replace the entire imported manuscript. Select the passage you want Slate to revise, then try again.",
+    409,
+    "slate_writing_import_scope_too_broad",
+  );
 }
 
 function mirrorVersionId(
@@ -846,6 +886,7 @@ export function createSlateWritingOperation(
     sectionId,
     input,
   );
+  assertImportedManuscriptScope(section, intent);
   const operationId = randomId();
   const now = new Date().toISOString();
   const snapshot = {
@@ -1652,6 +1693,7 @@ function forkOperation(
     row.project_id,
     row.section_id,
   );
+  assertImportedManuscriptScope(section, nextIntent);
   const project = projectSnapshot(db, row.user_id, row.project_id);
   db.prepare(
     `INSERT INTO slate_writing_operations
@@ -1940,6 +1982,14 @@ export function applySlateWritingOperationProposal(
         "slate_writing_proposal_resolved",
       );
     }
+    const intent = parseJson<SlateDirectionIntent>(
+      row.direction_intent_json,
+      null as unknown as SlateDirectionIntent,
+    );
+    assertImportedManuscriptScope(
+      sectionSnapshot(db, userId, projectId, row.section_id),
+      intent,
+    );
     const current = getSlateWritingRevisionFingerprint(
       db,
       userId,

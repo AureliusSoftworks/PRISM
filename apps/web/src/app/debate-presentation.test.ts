@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  DEBATE_EVIDENCE_LINK_PREFIX,
   DEBATE_SOURCE_LINK_PREFIX,
   debateAudioEnabled,
+  debateEvidenceFromMarkdownHref,
   debateMarkdownSource,
   debateGalleryReactingIndices,
   debateGalleryReaction,
@@ -25,6 +27,19 @@ const evidence = {
       url: "https://example.com/source",
       snippet: "Evidence.",
       publishedAt: null,
+    },
+  ],
+  exhibits: [
+    {
+      id: "exhibit-1",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "The handle is bent.",
+      emoji: "🥄",
+      visualKind: "emoji" as const,
+      imageId: null,
+      createdBy: "player" as const,
     },
   ],
 };
@@ -89,7 +104,10 @@ describe("Debate live presentation", () => {
       })?.status,
       "overtime",
     );
-    assert.equal(debateTurnClockState({ ...event, timing: undefined }, null), null);
+    assert.equal(
+      debateTurnClockState({ ...event, timing: undefined }, null),
+      null,
+    );
   });
 
   it("keeps Debate audio independent from optional voice effects", () => {
@@ -167,14 +185,14 @@ describe("Debate live presentation", () => {
     );
   });
 
-  it("turns validated source markers into custom Markdown links", () => {
+  it("turns validated source and exhibit markers into custom Markdown links", () => {
     const markdown = debateMarkdownSource(
-      "**Claim.** [[source:frozen-1]] [[source:invented]]",
+      "**Claim.** [[source:frozen-1]] [[exhibit:exhibit-1]] [[source:invented]]",
       evidence,
     );
     assert.equal(
       markdown,
-      `**Claim.** [frozen-1](${DEBATE_SOURCE_LINK_PREFIX}frozen-1) `,
+      `**Claim.** [frozen-1](${DEBATE_EVIDENCE_LINK_PREFIX}frozen-1) [exhibit-1](${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1) `,
     );
     assert.equal(
       debateSourceFromMarkdownHref(
@@ -185,10 +203,17 @@ describe("Debate live presentation", () => {
     );
     assert.equal(
       debateSourceFromMarkdownHref(
-        `${DEBATE_SOURCE_LINK_PREFIX}invented`,
+        `${DEBATE_EVIDENCE_LINK_PREFIX}invented`,
         evidence,
       ),
       null,
+    );
+    assert.equal(
+      debateEvidenceFromMarkdownHref(
+        `${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1`,
+        evidence,
+      )?.kind,
+      "exhibit",
     );
   });
 
@@ -197,8 +222,14 @@ describe("Debate live presentation", () => {
       debateGalleryReaction("That point is supported. [[source:frozen-1]]"),
       "evidence",
     );
-    assert.equal(debateGalleryReaction("I concede that premise."), "concession");
-    assert.equal(debateGalleryReaction("But does that answer the harm?"), "question");
+    assert.equal(
+      debateGalleryReaction("I concede that premise."),
+      "concession",
+    );
+    assert.equal(
+      debateGalleryReaction("But does that answer the harm?"),
+      "question",
+    );
     const seats = debateGalleryReactingIndices("One clause.", 3);
     assert.ok(seats.length >= 1 && seats.length <= 2);
     assert.ok(seats.every((index) => index >= 0 && index < 7));

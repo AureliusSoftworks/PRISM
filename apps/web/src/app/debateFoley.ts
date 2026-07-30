@@ -44,6 +44,10 @@ export interface DebateModeratorGavelCue {
 
 export const DEBATE_AUDIENCE_MURMUR_URL =
   "/audio/debate/courtroom-audience-murmur-loop.mp3";
+export const DEBATE_AUDIENCE_CROSSTALK_URL =
+  "/audio/debate/courtroom-audience-crosstalk-loop.mp3";
+export const DEBATE_AUDIENCE_AGITATION_URL =
+  "/audio/debate/courtroom-audience-agitation-swell.mp3";
 
 export const DEBATE_AUDIENCE_FOLEY_URLS = [
   "/audio/debate/courtroom-chair-shift.mp3",
@@ -204,7 +208,9 @@ export function debateModeratorGavelCue(args: {
     return {
       eventId: event.id,
       kind:
-        event.gavelReason === "intervention" || event.gavelReason === "resume"
+        event.gavelReason === "intervention" ||
+        event.gavelReason === "resume" ||
+        event.gavelReason === "audience_order"
           ? "order"
           : "attention",
       audienceReaction: "order",

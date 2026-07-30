@@ -26,6 +26,11 @@ export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
 export const DEBATE_SIDE_BRIEF_MAX_LENGTH = 1_200;
 export const DEBATE_EVIDENCE_NOTES_MAX_LENGTH = 8_000;
 export const DEBATE_EVIDENCE_SOURCE_MAX_COUNT = 12;
+/** Sources and exhibits share one bounded frozen packet. */
+export const DEBATE_EVIDENCE_ITEM_MAX_COUNT = 12;
+export const DEBATE_EVIDENCE_EXHIBIT_ADJECTIVE_MAX_LENGTH = 48;
+export const DEBATE_EVIDENCE_EXHIBIT_OBJECT_MAX_LENGTH = 96;
+export const DEBATE_EVIDENCE_EXHIBIT_OBSERVATION_MAX_LENGTH = 800;
 export const DEBATE_PLAYER_TURN_MAX_LENGTH = 4_000;
 export const DEBATE_CASE_CARDS_PER_SIDE = 4;
 export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
@@ -375,10 +380,36 @@ export interface DebateEvidenceSourceV1 {
   publishedAt: string | null;
 }
 
+export type DebateEvidenceExhibitVisualKind =
+  "emoji" | "upload" | "synthesized";
+
+/**
+ * A player-approved physical or fictional object in the frozen record.
+ * The image is presentation only; title and observation are the canonical
+ * text anchors used for model grounding and Turnabout validation.
+ */
+export interface DebateEvidenceExhibitV1 {
+  id: string;
+  adjective: string;
+  object: string;
+  title: string;
+  observation: string;
+  emoji: string;
+  visualKind: DebateEvidenceExhibitVisualKind;
+  imageId: string | null;
+  createdBy: "player" | "prism";
+}
+
+export type DebateEvidenceItemV1 =
+  | Readonly<{ kind: "source"; value: DebateEvidenceSourceV1 }>
+  | Readonly<{ kind: "exhibit"; value: DebateEvidenceExhibitV1 }>;
+
 export interface DebateEvidencePacketV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   notes: string;
   sources: DebateEvidenceSourceV1[];
+  /** Optional on legacy source-only sessions; normalization always supplies it. */
+  exhibits?: DebateEvidenceExhibitV1[];
   frozenAt: string | null;
 }
 
@@ -390,6 +421,7 @@ export interface DebateAdvocacyConsent {
   botId: string;
   sideId: DebateSideId;
   status: DebateAdvocacyConsentStatus;
+  /** Persona comment on the assignment. Nullable only for legacy saved consent. */
   reason: string | null;
   motionHash: string;
   botRevision: string;
@@ -483,7 +515,11 @@ export type DebateSpeakerKind =
   "moderator" | "advocate" | "juror" | "player" | "system";
 
 export type DebateTurnTimingStatus = "within_limit" | "overtime";
-export type DebateJudgeGavelReason = "intervention" | "overtime" | "resume";
+export type DebateJudgeGavelReason =
+  | "audience_order"
+  | "intervention"
+  | "overtime"
+  | "resume";
 export type DebateJudgeGavelDemeanor = "measured" | "firm" | "aggravated";
 
 export interface DebateTurnTimingV1 {
@@ -517,6 +553,8 @@ export interface DebateEventV1 {
   gavelReason?: DebateJudgeGavelReason;
   gavelStrikeCount?: number;
   gavelDemeanor?: DebateJudgeGavelDemeanor;
+  /** Public-content offset for a non-interrupting saved audience-order cue. */
+  gavelHeardCharacterCount?: number;
   timing?: DebateTurnTimingV1;
   createdAt: string;
 }
@@ -524,7 +562,11 @@ export interface DebateEventV1 {
 export function debateEventIsTranscriptHousekeeping(
   event: Pick<DebateEventV1, "stepKey">,
 ): boolean {
-  return event.stepKey === "pause" || event.stepKey === "resume";
+  return (
+    event.stepKey === "audience_order" ||
+    event.stepKey === "pause" ||
+    event.stepKey === "resume"
+  );
 }
 
 export interface DebateJudgeGavelStateV1 {
@@ -767,6 +809,12 @@ export interface DebateJudgeGavelRequest extends DebateMutationRequest {
   strikeCount?: number;
 }
 
+export interface DebateJudgeAudienceOrderRequest
+  extends DebateMutationRequest {
+  eventId?: string | null;
+  heardCharacterCount?: number;
+}
+
 export interface DebateJudgeGavelMessageRequest extends DebateMutationRequest {
   content?: string;
   pass?: boolean;
@@ -879,6 +927,40 @@ export function isValidDebateSourceId(value: unknown): value is string {
   );
 }
 
+export function normalizeDebateEvidenceExhibitAdjective(
+  value: unknown,
+): string {
+  return (
+    normalizedText(value, DEBATE_EVIDENCE_EXHIBIT_ADJECTIVE_MAX_LENGTH)
+      .replace(/[^\p{L}\p{N}'’-]+/gu, " ")
+      .trim()
+      .split(/\s+/u)[0]
+      ?.slice(0, DEBATE_EVIDENCE_EXHIBIT_ADJECTIVE_MAX_LENGTH) ?? ""
+  );
+}
+
+export function normalizeDebateEvidenceExhibitObject(value: unknown): string {
+  return normalizedText(value, DEBATE_EVIDENCE_EXHIBIT_OBJECT_MAX_LENGTH)
+    .replace(/[^\p{L}\p{N}'’()&+.,/-]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+export function debateEvidenceExhibitTitle(args: {
+  adjective: unknown;
+  object: unknown;
+}): string {
+  const adjective = normalizeDebateEvidenceExhibitAdjective(args.adjective);
+  const object = normalizeDebateEvidenceExhibitObject(args.object);
+  if (!adjective || !object) return "";
+  return `${adjective[0]!.toLocaleUpperCase()}${adjective.slice(1)} ${object}`;
+}
+
+function normalizeDebateEvidenceEmoji(value: unknown): string {
+  const emoji = normalizedText(value, 16);
+  return emoji || "📦";
+}
+
 export function normalizeDebateEvidencePacketV1(
   value: unknown,
 ): DebateEvidencePacketV1 {
@@ -918,7 +1000,61 @@ export function normalizeDebateEvidencePacketV1(
           };
         })
         .filter((item): item is DebateEvidenceSourceV1 => item !== null)
-        .slice(0, DEBATE_EVIDENCE_SOURCE_MAX_COUNT)
+        .slice(0, DEBATE_EVIDENCE_ITEM_MAX_COUNT)
+    : [];
+  const exhibitCapacity = Math.max(
+    0,
+    DEBATE_EVIDENCE_ITEM_MAX_COUNT - sources.length,
+  );
+  const exhibits = Array.isArray(source.exhibits)
+    ? source.exhibits
+        .map((item): DebateEvidenceExhibitV1 | null => {
+          const row =
+            item && typeof item === "object"
+              ? (item as Record<string, unknown>)
+              : {};
+          const id = normalizedText(row.id, 48).toLowerCase();
+          const adjective = normalizeDebateEvidenceExhibitAdjective(
+            row.adjective,
+          );
+          const object = normalizeDebateEvidenceExhibitObject(row.object);
+          const title = debateEvidenceExhibitTitle({ adjective, object });
+          if (
+            !isValidDebateSourceId(id) ||
+            seen.has(id) ||
+            !adjective ||
+            !object ||
+            !title
+          ) {
+            return null;
+          }
+          seen.add(id);
+          const requestedVisualKind = row.visualKind;
+          const imageId = normalizedText(row.imageId, 160) || null;
+          const visualKind: DebateEvidenceExhibitVisualKind =
+            (requestedVisualKind === "upload" ||
+              requestedVisualKind === "synthesized") &&
+            imageId
+              ? requestedVisualKind
+              : "emoji";
+          return {
+            id,
+            adjective,
+            object,
+            title,
+            observation:
+              normalizedMultilineText(
+                row.observation,
+                DEBATE_EVIDENCE_EXHIBIT_OBSERVATION_MAX_LENGTH,
+              ) || `${title}.`,
+            emoji: normalizeDebateEvidenceEmoji(row.emoji),
+            visualKind,
+            imageId: visualKind === "emoji" ? null : imageId,
+            createdBy: row.createdBy === "prism" ? "prism" : "player",
+          };
+        })
+        .filter((item): item is DebateEvidenceExhibitV1 => item !== null)
+        .slice(0, exhibitCapacity)
     : [];
   return {
     version: DEBATE_SCHEMA_VERSION,
@@ -927,11 +1063,51 @@ export function normalizeDebateEvidencePacketV1(
       DEBATE_EVIDENCE_NOTES_MAX_LENGTH,
     ),
     sources,
+    exhibits,
     frozenAt:
       typeof source.frozenAt === "string" && source.frozenAt.trim()
         ? source.frozenAt.trim().slice(0, 64)
         : null,
   };
+}
+
+export function debateEvidenceItems(
+  evidence: DebateEvidencePacketV1,
+): DebateEvidenceItemV1[] {
+  return [
+    ...evidence.sources.map((value): DebateEvidenceItemV1 => ({
+      kind: "source",
+      value,
+    })),
+    ...(evidence.exhibits ?? []).map((value): DebateEvidenceItemV1 => ({
+      kind: "exhibit",
+      value,
+    })),
+  ];
+}
+
+export function debateEvidenceItemById(
+  evidence: DebateEvidencePacketV1,
+  id: string,
+): DebateEvidenceItemV1 | null {
+  const normalizedId = id.trim().toLowerCase();
+  return (
+    debateEvidenceItems(evidence).find(
+      (item) => item.value.id === normalizedId,
+    ) ?? null
+  );
+}
+
+export function debateEvidenceItemRecord(item: DebateEvidenceItemV1): string {
+  return item.kind === "source"
+    ? `${item.value.title}. ${item.value.snippet}`.trim()
+    : `${item.value.title}. ${item.value.observation}`.trim();
+}
+
+export function debateEvidenceItemCount(
+  evidence: DebateEvidencePacketV1,
+): number {
+  return evidence.sources.length + (evidence.exhibits?.length ?? 0);
 }
 
 function parsedHost(url: string): string {
@@ -946,11 +1122,13 @@ export function debateSourceIdsFromText(
   content: string,
   evidence: DebateEvidencePacketV1,
 ): string[] {
-  const allowed = new Set(evidence.sources.map((source) => source.id));
+  const allowed = new Set(
+    debateEvidenceItems(evidence).map((item) => item.value.id),
+  );
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const match of content.matchAll(
-    /\[\[source:([a-z0-9][a-z0-9_-]{0,47})\]\]/giu,
+    /\[\[(?:source|exhibit):([a-z0-9][a-z0-9_-]{0,47})\]\]/giu,
   )) {
     const id = match[1]?.toLowerCase();
     if (!id || !allowed.has(id) || seen.has(id)) continue;
@@ -964,19 +1142,22 @@ export function sanitizeDebateStatementSources(
   content: string,
   evidence: DebateEvidencePacketV1,
 ): { content: string; sourceIds: string[] } {
-  const allowed = new Set(evidence.sources.map((source) => source.id));
+  const allowed = new Map(
+    debateEvidenceItems(evidence).map((item) => [item.value.id, item.kind]),
+  );
   const sourceIds: string[] = [];
   const seen = new Set<string>();
   const sanitized = content.replace(
-    /\s*\[\[source:([^\]]+)\]\]/giu,
+    /\s*\[\[(?:source|exhibit):([^\]]+)\]\]/giu,
     (_marker, rawId: string) => {
       const id = rawId.trim().toLowerCase();
-      if (!isValidDebateSourceId(id) || !allowed.has(id)) return "";
+      const kind = allowed.get(id);
+      if (!isValidDebateSourceId(id) || !kind) return "";
       if (!seen.has(id)) {
         seen.add(id);
         sourceIds.push(id);
       }
-      return ` [[source:${id}]]`;
+      return ` [[${kind}:${id}]]`;
     },
   );
   return {
@@ -987,7 +1168,7 @@ export function sanitizeDebateStatementSources(
 
 export function debateSpokenText(content: string): string {
   return content
-    .replace(/\s*\[\[source:[^\]]+\]\]/giu, "")
+    .replace(/\s*\[\[(?:source|exhibit):[^\]]+\]\]/giu, "")
     .replace(/\s+/gu, " ")
     .trim();
 }

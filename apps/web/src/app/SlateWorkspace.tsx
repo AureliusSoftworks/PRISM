@@ -48,7 +48,10 @@ import type {
   SlateStructureItem,
   SlateTitleSuggestionResponse,
 } from "@localai/shared";
-import { transformSlateLockedRangesForTextEdit } from "@localai/shared";
+import {
+  slateImportedSectionRequiresPassageScope,
+  transformSlateLockedRangesForTextEdit,
+} from "@localai/shared";
 import { FolderOpen, ImageIcon, Trash2 } from "lucide-react";
 import {
   usePrismMenu,
@@ -112,6 +115,7 @@ import {
   slateWritingOperationCanStop,
   slateWritingOperationStatusLabel,
   slateWritingOperationStorageKey,
+  slateWritingProposalPreview,
   type SlateClarificationRequest,
   type SlateWritingOperation,
   type SlateWritingOperationResponse,
@@ -3116,6 +3120,30 @@ export default function SlateWorkspace({
     writingOperation?.status === "proposed"
       ? writingOperation.proposal
       : null;
+  const writingProposalCurrentText = writingProposal
+    ? writingProposal.replacementAnchor
+      ? (activeSection?.prose.slice(
+          writingProposal.replacementAnchor.start,
+          writingProposal.replacementAnchor.end,
+        ) ?? "")
+      : (activeSection?.prose ?? "")
+    : "";
+  const writingProposalCurrentPreview = slateWritingProposalPreview(
+    writingProposalCurrentText,
+  );
+  const writingProposalProposedPreview = slateWritingProposalPreview(
+    writingProposal?.prose ?? "",
+  );
+  const writingProposalNeedsPassageScope = Boolean(
+    writingProposal &&
+      activeSection &&
+      slateImportedSectionRequiresPassageScope({
+        kind: activeSection.kind,
+        title: activeSection.title,
+        prose: activeSection.prose,
+        hasSelection: Boolean(writingProposal.replacementAnchor),
+      }),
+  );
   const writingOperationBlocksNew =
     writingOperation?.status === "compiling" ||
     writingOperation?.status === "awaiting_clarification" ||
@@ -3361,39 +3389,61 @@ export default function SlateWorkspace({
             aria-labelledby="slate-return-title"
             data-tutorial-target="slate-create-project"
           >
-            <p className={styles.eyebrow}>Slate return session</p>
-            <h1 id="slate-return-title">Welcome back to {returnSession.synopsis.title}</h1>
-            <p className={styles.returnPremise}>
-              {returnSession.synopsis.premise || project.spark}
-            </p>
-            <div className={styles.returnSynopsis}>
-              <section>
-                <span>Story so far</span>
-                <p>{returnSession.synopsis.storySoFar}</p>
+            <div className={styles.returnSessionBody}>
+              <p className={styles.eyebrow}>Welcome back</p>
+              <h1 id="slate-return-title">{returnSession.synopsis.title}</h1>
+              <div className={styles.returnSynopsis}>
+                <section>
+                  <span>Story so far</span>
+                  <p>{returnSession.synopsis.storySoFar}</p>
+                </section>
+                <section>
+                  <span>Where it is going</span>
+                  <p>{returnSession.synopsis.trajectory}</p>
+                </section>
+              </div>
+              <p className={styles.returnProgress}>
+                {returnSession.synopsis.draftedProgress}
+                {returnSession.synopsis.threads.due.length > 0
+                  ? ` · ${returnSession.synopsis.threads.due.length} thread${returnSession.synopsis.threads.due.length === 1 ? "" : "s"} asking for attention`
+                  : ""}
+              </p>
+              <section className={styles.returnNext}>
+                <span>Continuity’s one recommendation</span>
+                <h2>{returnSession.synopsis.nextCard.title}</h2>
+                <p>{returnSession.synopsis.nextCard.body}</p>
               </section>
-              <section>
-                <span>Where it is going</span>
-                <p>{returnSession.synopsis.trajectory}</p>
-              </section>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={enterReturnSession}
+              >
+                Open the desk · {returnSession.synopsis.nextCard.actionLabel}
+              </button>
             </div>
-            <p className={styles.returnProgress}>
-              {returnSession.synopsis.draftedProgress}
-              {returnSession.synopsis.threads.due.length > 0
-                ? ` · ${returnSession.synopsis.threads.due.length} thread${returnSession.synopsis.threads.due.length === 1 ? "" : "s"} asking for attention`
-                : ""}
-            </p>
-            <section className={styles.returnNext}>
-              <span>Continuity’s one recommendation</span>
-              <h2>{returnSession.synopsis.nextCard.title}</h2>
-              <p>{returnSession.synopsis.nextCard.body}</p>
-            </section>
-            <button
-              type="button"
-              className={styles.primaryButton}
-              onClick={enterReturnSession}
+            <aside
+              className={styles.returnCover}
+              style={slateProjectBookStyle(project.cover.seed || project.id)}
+              data-cover-ready={project.cover.imageUrl ? "true" : undefined}
+              aria-hidden="true"
             >
-              Open the desk · {returnSession.synopsis.nextCard.actionLabel}
-            </button>
+              <span className={`${styles.bookCover} ${styles.returnBookCover}`}>
+                {project.cover.imageUrl ? (
+                  <Image
+                    src={project.cover.imageUrl}
+                    alt=""
+                    fill
+                    sizes="190px"
+                    unoptimized
+                  />
+                ) : null}
+                <span className={styles.bookPrismMark} />
+                <span className={styles.bookCoverCopy}>
+                  <strong>{project.title}</strong>
+                  <small>{project.phase}</small>
+                </span>
+              </span>
+            </aside>
           </section>
         </div>
       ) : null}
@@ -4452,21 +4502,34 @@ export default function SlateWorkspace({
                     ? ` · ${writingOperation.provider} / ${writingOperation.model ?? "automatic model"}`
                     : ""}
                 </p>
+                {writingProposalNeedsPassageScope ? (
+                  <p className={styles.proposalScopeWarning} role="alert">
+                    This proposal targets the entire imported manuscript. Reject
+                    it, select the passage you want to change, then direct Slate
+                    again. Your manuscript has not been altered.
+                  </p>
+                ) : null}
                 <div>
                   <section>
-                    <span>Current</span>
-                    <pre>
-                      {writingProposal.replacementAnchor
-                        ? activeSection?.prose.slice(
-                            writingProposal.replacementAnchor.start,
-                            writingProposal.replacementAnchor.end,
-                          )
-                        : (activeSection?.prose ?? "")}
-                    </pre>
+                    <span>
+                      Current
+                      {writingProposalCurrentPreview.truncated
+                        ? ` · excerpt of ${writingProposalCurrentPreview.wordCount.toLocaleString("en-US")} words`
+                        : ""}
+                    </span>
+                    <pre>{writingProposalCurrentPreview.text}</pre>
                   </section>
                   <section>
-                    <span>Proposed</span>
-                    <pre>{writingProposal.prose || "Cut this passage."}</pre>
+                    <span>
+                      Proposed
+                      {writingProposalProposedPreview.truncated
+                        ? ` · excerpt of ${writingProposalProposedPreview.wordCount.toLocaleString("en-US")} words`
+                        : ""}
+                    </span>
+                    <pre>
+                      {writingProposalProposedPreview.text ||
+                        "Cut this passage."}
+                    </pre>
                   </section>
                 </div>
                 <footer>
@@ -4478,7 +4541,8 @@ export default function SlateWorkspace({
                   >
                     Reject
                   </button>
-                  {slateWritingOperationCanContinue(writingOperation) ? (
+                  {slateWritingOperationCanContinue(writingOperation) &&
+                  !writingProposalNeedsPassageScope ? (
                     <button
                       type="button"
                       className={styles.quietButton}
@@ -4488,7 +4552,8 @@ export default function SlateWorkspace({
                       Continue
                     </button>
                   ) : null}
-                  {slateWritingOperationCanRedirect(writingOperation) ? (
+                  {slateWritingOperationCanRedirect(writingOperation) &&
+                  !writingProposalNeedsPassageScope ? (
                     <button
                       type="button"
                       className={styles.quietButton}
@@ -4510,7 +4575,15 @@ export default function SlateWorkspace({
                   <button
                     type="button"
                     className={styles.primaryButton}
-                    disabled={writingOperationBusy}
+                    disabled={
+                      writingOperationBusy ||
+                      writingProposalNeedsPassageScope
+                    }
+                    title={
+                      writingProposalNeedsPassageScope
+                        ? "Reject this whole-manuscript proposal and select a passage first"
+                        : undefined
+                    }
                     onClick={() => mutateWritingOperation("accept")}
                   >
                     Accept proposal

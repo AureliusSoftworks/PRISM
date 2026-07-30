@@ -42,7 +42,8 @@ describe("first-run onboarding", () => {
         FIRST_RUN_SETUP_STEPS.findIndex((step) => step.id === "openai"),
     );
     assert.match(pageSource, /Your first Home scene starts rendering quietly/u);
-    assert.match(pageSource, /Reveal it from the Atmosphere symbol/u);
+    assert.match(pageSource, /appears automatically when you enter/u);
+    assert.match(pageSource, /disable it later in Appearance settings/u);
   });
 
   it("marks credentials and model choices as skippable", () => {
@@ -72,6 +73,10 @@ describe("first-run onboarding", () => {
     assert.match(
       pageSource,
       /Debate begins in Basic setup: name the idea, choose two\s*debaters/u,
+    );
+    assert.match(
+      pageSource,
+      /tune Rowdiness from University Union to Daytime\s*Showdown/u,
     );
     assert.match(pageSource, /optionally title the presiding voice/u);
     assert.match(

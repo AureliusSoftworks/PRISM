@@ -49,7 +49,7 @@ describe("player Judge gavel keyboard control", () => {
     );
   });
 
-  it("starts one deliberation, then treats every Space inside two seconds as showmanship", () => {
+  it("restores audience order, then treats every Space inside two seconds as showmanship", () => {
     const startedAt = 10_000;
     const smashUntilMs = startedAt + DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS;
     assert.equal(
@@ -59,11 +59,11 @@ describe("player Judge gavel keyboard control", () => {
         editableTarget: false,
         ceremonialAvailable: false,
         liveJudge: true,
-        semanticAvailable: true,
+        orderAvailable: true,
         nowMs: startedAt,
         smashUntilMs: 0,
       }),
-      "deliberate",
+      "order",
     );
     for (const nowMs of [startedAt + 1, startedAt + 400, smashUntilMs - 1]) {
       assert.equal(
@@ -73,7 +73,7 @@ describe("player Judge gavel keyboard control", () => {
           editableTarget: false,
           ceremonialAvailable: false,
           liveJudge: true,
-          semanticAvailable: false,
+          orderAvailable: false,
           nowMs,
           smashUntilMs,
         }),
@@ -87,7 +87,7 @@ describe("player Judge gavel keyboard control", () => {
         editableTarget: false,
         ceremonialAvailable: false,
         liveJudge: true,
-        semanticAvailable: false,
+        orderAvailable: false,
         nowMs: smashUntilMs,
         smashUntilMs,
       }),
@@ -105,7 +105,7 @@ describe("player Judge gavel keyboard control", () => {
         editableTarget: false,
         ceremonialAvailable: true,
         liveJudge: false,
-        semanticAvailable: false,
+        orderAvailable: false,
         nowMs: 10_000,
         smashUntilMs: 0,
       }),
@@ -120,7 +120,7 @@ describe("player Judge gavel keyboard control", () => {
       editableTarget: false,
       ceremonialAvailable: false,
       liveJudge: true,
-      semanticAvailable: true,
+      orderAvailable: true,
       nowMs: 1,
       smashUntilMs: 0,
     };

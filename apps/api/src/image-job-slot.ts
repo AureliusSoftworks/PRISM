@@ -40,9 +40,11 @@ class PerUserMutex {
       release = res;
     });
     this.tail = prev.then(() => gate);
-    return prev.then(() => fn()).finally(() => {
-      release();
-    });
+    return prev
+      .then(() => fn())
+      .finally(() => {
+        release();
+      });
   }
 }
 
@@ -64,6 +66,7 @@ export type ImageJobSource =
   | "signal_artwork"
   | "slate_cover"
   | "slate_visual_bible"
+  | "debate_exhibit"
   | "coffee_drink";
 
 export type RunningImageJob = {
@@ -170,16 +173,22 @@ function releaseRunningImageJob(userId: string, jobId?: string): boolean {
 }
 
 /** Stale read OK — used only for LLM prompt hints. */
-export function peekActiveImageJobForUser(userId: string): RunningImageJob | undefined {
+export function peekActiveImageJobForUser(
+  userId: string,
+): RunningImageJob | undefined {
   return runningByUser.get(userId);
 }
 
 export function cancelActiveImageJobForConversation(
   userId: string,
-  conversationId: string
+  conversationId: string,
 ): string | null {
   const job = runningByUser.get(userId);
-  if (!job || job.conversationId !== conversationId || job.source !== "chat_tool") {
+  if (
+    !job ||
+    job.conversationId !== conversationId ||
+    job.source !== "chat_tool"
+  ) {
     return null;
   }
   job.abortController.abort();
@@ -194,7 +203,9 @@ export function cancelActiveImageJobForConversation(
 
 export async function tryAcquireImageSlot(
   args: ImageSlotRequest,
-): Promise<{ ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }> {
+): Promise<
+  { ok: true; job: RunningImageJob } | { ok: false; busyJob: RunningImageJob }
+> {
   return mutexFor(args.userId).runExclusive(() => {
     const existing = runningByUser.get(args.userId);
     if (existing) {
@@ -273,7 +284,11 @@ export async function releaseImageSlotIfOwned(
   });
 }
 
-export async function finishImageJob(jobId: string, userId: string, result: CompletedImageJobPoll): Promise<void> {
+export async function finishImageJob(
+  jobId: string,
+  userId: string,
+  result: CompletedImageJobPoll,
+): Promise<void> {
   return mutexFor(userId).runExclusive(() => {
     const live = runningByUser.get(userId);
     if (!live || live.id !== jobId) return;
@@ -288,7 +303,10 @@ export type ImageJobPollResponse =
   | { ok: true; status: "failed"; error: string }
   | { ok: false; error: "not_found" | "forbidden" };
 
-export function pollImageJobForUser(userId: string, jobId: string): ImageJobPollResponse {
+export function pollImageJobForUser(
+  userId: string,
+  jobId: string,
+): ImageJobPollResponse {
   const running = runningByJobId.get(jobId);
   if (running) {
     if (running.userId !== userId) return { ok: false, error: "forbidden" };
@@ -306,7 +324,7 @@ export function pollImageJobForUser(userId: string, jobId: string): ImageJobPoll
 }
 
 export function conversationIdForImageGeneration(
-  job: Pick<RunningImageJob, "conversationId" | "incognito">
+  job: Pick<RunningImageJob, "conversationId" | "incognito">,
 ): string | null {
   return job.incognito ? null : job.conversationId;
 }
@@ -331,7 +349,9 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
     content: row.content,
     createdAt: row.created_at,
     provider:
-      row.provider === "local" || row.provider === "openai" ? row.provider : undefined,
+      row.provider === "local" || row.provider === "openai"
+        ? row.provider
+        : undefined,
     model: row.model ?? undefined,
     botName: row.bot_name ?? undefined,
     botColor: row.bot_color ?? undefined,
@@ -346,9 +366,13 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
     ...base,
     content: assembled.content,
     ...(assembled.moodKey ? { moodKey: assembled.moodKey } : {}),
-    ...(assembled.moodConfidence !== undefined ? { moodConfidence: assembled.moodConfidence } : {}),
+    ...(assembled.moodConfidence !== undefined
+      ? { moodConfidence: assembled.moodConfidence }
+      : {}),
     ...(assembled.askQuestion ? { askQuestion: assembled.askQuestion } : {}),
-    ...(assembled.sentGeneratedImage ? { sentGeneratedImage: assembled.sentGeneratedImage } : {}),
+    ...(assembled.sentGeneratedImage
+      ? { sentGeneratedImage: assembled.sentGeneratedImage }
+      : {}),
     ...(assembled.coffeeAmbientAction
       ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
       : {}),
@@ -358,7 +382,7 @@ function rowToChatMessage(row: MessageRow): ChatMessage {
 function fetchHydratedMessagesByIds(
   db: DatabaseSync,
   userId: string,
-  ids: readonly string[]
+  ids: readonly string[],
 ): ChatMessage[] {
   if (ids.length === 0) return [];
   const placeholders = ids.map(() => "?").join(", ");
@@ -369,7 +393,7 @@ function fetchHydratedMessagesByIds(
          FROM messages m
          LEFT JOIN bots b ON b.id = m.bot_id
         WHERE m.user_id = ? AND m.id IN (${placeholders})
-        ORDER BY m.created_at ASC`
+        ORDER BY m.created_at ASC`,
     )
     .all(userId, ...ids) as MessageRow[];
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -420,7 +444,7 @@ async function inferImageReadyFollowUpText(args: {
         temperature: FOLLOW_UP_TEMPERATURE,
         maxTokens: FOLLOW_UP_MAX_TOKENS,
         usagePurpose: "image_prompt",
-      }
+      },
     );
     const line = raw.trim().replace(/\s+/g, " ");
     if (line.length > 0 && line.length < 1200) return line;
@@ -439,7 +463,10 @@ async function failJobWithDbNote(args: {
 }): Promise<void> {
   const { db, job, chatProviderName, chatModelUsed, errorUserLine } = args;
   if (!job.conversationId || job.incognito) {
-    await finishImageJob(job.id, job.userId, { status: "failed", error: errorUserLine });
+    await finishImageJob(job.id, job.userId, {
+      status: "failed",
+      error: errorUserLine,
+    });
     return;
   }
   const failId = randomId(12);
@@ -449,22 +476,35 @@ async function failJobWithDbNote(args: {
     try {
       db.prepare(
         `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
-      ).run(failId, job.conversationId, job.userId, errorUserLine, chatProviderName, chatModelUsed, job.botId, ts);
-      db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
-        ts,
+         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`,
+      ).run(
+        failId,
         job.conversationId,
-        job.userId
+        job.userId,
+        errorUserLine,
+        chatProviderName,
+        chatModelUsed,
+        job.botId,
+        ts,
       );
+      db.prepare(
+        "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+      ).run(ts, job.conversationId, job.userId);
       db.exec("COMMIT");
     } catch {
       db.exec("ROLLBACK");
       throw new Error("tx");
     }
     const hydrated = fetchHydratedMessagesByIds(db, job.userId, [failId]);
-    await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
+    await finishImageJob(job.id, job.userId, {
+      status: "succeeded",
+      messages: hydrated,
+    });
   } catch {
-    await finishImageJob(job.id, job.userId, { status: "failed", error: errorUserLine });
+    await finishImageJob(job.id, job.userId, {
+      status: "failed",
+      error: errorUserLine,
+    });
   }
 }
 
@@ -478,7 +518,9 @@ async function finishJobWithAssistantNote(args: {
   const { db, job, chatProviderName, chatModelUsed, content } = args;
   const ts = new Date().toISOString();
   const prov =
-    chatProviderName === "local" || chatProviderName === "openai" ? chatProviderName : undefined;
+    chatProviderName === "local" || chatProviderName === "openai"
+      ? chatProviderName
+      : undefined;
   if (!job.conversationId || job.incognito) {
     await finishImageJob(job.id, job.userId, {
       status: "succeeded",
@@ -502,7 +544,7 @@ async function finishJobWithAssistantNote(args: {
     try {
       db.prepare(
         `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
+         VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`,
       ).run(
         noteId,
         job.conversationId,
@@ -511,20 +553,21 @@ async function finishJobWithAssistantNote(args: {
         chatProviderName,
         chatModelUsed,
         job.botId,
-        ts
-      );
-      db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
         ts,
-        job.conversationId,
-        job.userId
       );
+      db.prepare(
+        "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+      ).run(ts, job.conversationId, job.userId);
       db.exec("COMMIT");
     } catch {
       db.exec("ROLLBACK");
       throw new Error("tx");
     }
     const hydrated = fetchHydratedMessagesByIds(db, job.userId, [noteId]);
-    await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
+    await finishImageJob(job.id, job.userId, {
+      status: "succeeded",
+      messages: hydrated,
+    });
   } catch {
     await finishImageJob(job.id, job.userId, {
       status: "succeeded",
@@ -574,161 +617,177 @@ export function startChatImageBackgroundJob(args: {
     job.abortController.abort();
   }, IMAGE_JOB_WALL_MS);
 
-  void Promise.resolve(runWithUsageSession({
-    db,
-    userId: job.userId,
-    privacyScope: job.incognito ? "private" : "normal",
-    mode: job.mode,
-    surface: "chat_image",
-    conversationId: job.conversationId,
-    botId: job.botId,
-  }, async () => {
-    const auxiliaryProvider = getAuxiliaryProvider(prismDefaultLlmModel);
-    try {
-      const result = await runAssistantSentImageGeneration({
+  void Promise.resolve(
+    runWithUsageSession(
+      {
         db,
         userId: job.userId,
+        privacyScope: job.incognito ? "private" : "normal",
         mode: job.mode,
-        conversationId: conversationIdForImageGeneration(job),
-        botIdTriState: job.botId,
-        userMessage: job.userMessage,
-        captionPrompt: job.captionPrompt,
-        requestedSize: job.requestedSize,
-        preferredProvider,
-        openAiApiKey,
-        prefs,
-        promptRepairProvider: auxiliaryProvider,
-        signal: job.abortController.signal,
-      });
+        surface: "chat_image",
+        conversationId: job.conversationId,
+        botId: job.botId,
+      },
+      async () => {
+        const auxiliaryProvider = getAuxiliaryProvider(prismDefaultLlmModel);
+        try {
+          const result = await runAssistantSentImageGeneration({
+            db,
+            userId: job.userId,
+            mode: job.mode,
+            conversationId: conversationIdForImageGeneration(job),
+            botIdTriState: job.botId,
+            userMessage: job.userMessage,
+            captionPrompt: job.captionPrompt,
+            requestedSize: job.requestedSize,
+            preferredProvider,
+            openAiApiKey,
+            prefs,
+            promptRepairProvider: auxiliaryProvider,
+            signal: job.abortController.signal,
+          });
 
-      if (result.status === "denied") {
-        await finishJobWithAssistantNote({
-          db,
-          job,
-          chatProviderName,
-          chatModelUsed,
-          content: result.message,
-        });
-        return;
-      }
+          if (result.status === "denied") {
+            await finishJobWithAssistantNote({
+              db,
+              job,
+              chatProviderName,
+              chatModelUsed,
+              content: result.message,
+            });
+            return;
+          }
 
-      if (result.status !== "succeeded") {
-        await failJobWithDbNote({
-          db,
-          job,
-          chatProviderName,
-          chatModelUsed,
-          errorUserLine:
-            "I couldn't finish that image — something went wrong with generation or settings. You can try again in a bit.",
-        });
-        return;
-      }
+          if (result.status !== "succeeded") {
+            await failJobWithDbNote({
+              db,
+              job,
+              chatProviderName,
+              chatModelUsed,
+              errorUserLine:
+                "I couldn't finish that image — something went wrong with generation or settings. You can try again in a bit.",
+            });
+            return;
+          }
 
-      const payload = result.payload;
+          const payload = result.payload;
 
-      const followUp = await inferImageReadyFollowUpText({
-        auxiliaryProvider,
-        botName,
-        botSystemPrompt,
-        userMessage: job.userMessage,
-        captionPrompt: job.captionPrompt,
-      });
+          const followUp = await inferImageReadyFollowUpText({
+            auxiliaryProvider,
+            botName,
+            botSystemPrompt,
+            userMessage: job.userMessage,
+            captionPrompt: job.captionPrompt,
+          });
 
-      const imageModelTag = payload.imageModel?.trim() || chatModelUsed;
-      const toolPayloadImage = serializeAssistantToolPayload({ sentGeneratedImage: payload });
-
-      if (job.incognito || !job.conversationId) {
-        const tFollow = new Date().toISOString();
-        const tImg = new Date(Date.now() + 2).toISOString();
-        const followId = randomId(12);
-        const imageRowId = randomId(12);
-        const prov =
-          chatProviderName === "local" || chatProviderName === "openai" ? chatProviderName : undefined;
-        const messages: ChatMessage[] = [
-          {
-            id: followId,
-            role: "assistant",
-            content: followUp,
-            createdAt: tFollow,
-            provider: prov,
-            model: chatModelUsed,
-          },
-          {
-            id: imageRowId,
-            role: "assistant",
-            content: "",
-            createdAt: tImg,
-            provider: prov,
-            model: imageModelTag,
+          const imageModelTag = payload.imageModel?.trim() || chatModelUsed;
+          const toolPayloadImage = serializeAssistantToolPayload({
             sentGeneratedImage: payload,
-          },
-        ];
-        await finishImageJob(job.id, job.userId, { status: "succeeded", messages });
-        return;
-      }
+          });
 
-      const followUpId = randomId(12);
-      const imageMsgId = randomId(12);
-      const tFollow = new Date().toISOString();
-      const tImg = new Date(Date.now() + 2).toISOString();
+          if (job.incognito || !job.conversationId) {
+            const tFollow = new Date().toISOString();
+            const tImg = new Date(Date.now() + 2).toISOString();
+            const followId = randomId(12);
+            const imageRowId = randomId(12);
+            const prov =
+              chatProviderName === "local" || chatProviderName === "openai"
+                ? chatProviderName
+                : undefined;
+            const messages: ChatMessage[] = [
+              {
+                id: followId,
+                role: "assistant",
+                content: followUp,
+                createdAt: tFollow,
+                provider: prov,
+                model: chatModelUsed,
+              },
+              {
+                id: imageRowId,
+                role: "assistant",
+                content: "",
+                createdAt: tImg,
+                provider: prov,
+                model: imageModelTag,
+                sentGeneratedImage: payload,
+              },
+            ];
+            await finishImageJob(job.id, job.userId, {
+              status: "succeeded",
+              messages,
+            });
+            return;
+          }
 
-      db.exec("BEGIN IMMEDIATE TRANSACTION");
-      try {
-        db.prepare(
-          `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-           VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`
-        ).run(
-          followUpId,
-          job.conversationId,
-          job.userId,
-          followUp,
-          chatProviderName,
-          chatModelUsed,
-          job.botId,
-          tFollow
-        );
-        db.prepare(
-          `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-           VALUES (?, ?, ?, 'assistant', '', ?, ?, ?, ?, ?)`
-        ).run(
-          imageMsgId,
-          job.conversationId,
-          job.userId,
-          chatProviderName,
-          imageModelTag,
-          job.botId,
-          toolPayloadImage,
-          tImg
-        );
-        db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
-          tImg,
-          job.conversationId,
-          job.userId
-        );
-        db.exec("COMMIT");
-      } catch (e) {
-        db.exec("ROLLBACK");
-        throw e;
-      }
+          const followUpId = randomId(12);
+          const imageMsgId = randomId(12);
+          const tFollow = new Date().toISOString();
+          const tImg = new Date(Date.now() + 2).toISOString();
 
-      const hydrated = fetchHydratedMessagesByIds(db, job.userId, [followUpId, imageMsgId]);
-      await finishImageJob(job.id, job.userId, { status: "succeeded", messages: hydrated });
-    } catch (err) {
-      const aborted = job.abortController.signal.aborted;
-      const msg = err instanceof Error ? err.message : String(err);
-      await failJobWithDbNote({
-        db,
-        job,
-        chatProviderName,
-        chatModelUsed,
-        errorUserLine: aborted
-          ? "That image took too long and was stopped. Try again with a simpler prompt or check ComfyUI."
-          : `I couldn't finish that image (${msg.slice(0, 200)}).`,
-      });
-    } finally {
-      clearTimeout(wallTimer);
-    }
-  })).catch((err) => {
+          db.exec("BEGIN IMMEDIATE TRANSACTION");
+          try {
+            db.prepare(
+              `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+           VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, NULL, ?)`,
+            ).run(
+              followUpId,
+              job.conversationId,
+              job.userId,
+              followUp,
+              chatProviderName,
+              chatModelUsed,
+              job.botId,
+              tFollow,
+            );
+            db.prepare(
+              `INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
+           VALUES (?, ?, ?, 'assistant', '', ?, ?, ?, ?, ?)`,
+            ).run(
+              imageMsgId,
+              job.conversationId,
+              job.userId,
+              chatProviderName,
+              imageModelTag,
+              job.botId,
+              toolPayloadImage,
+              tImg,
+            );
+            db.prepare(
+              "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?",
+            ).run(tImg, job.conversationId, job.userId);
+            db.exec("COMMIT");
+          } catch (e) {
+            db.exec("ROLLBACK");
+            throw e;
+          }
+
+          const hydrated = fetchHydratedMessagesByIds(db, job.userId, [
+            followUpId,
+            imageMsgId,
+          ]);
+          await finishImageJob(job.id, job.userId, {
+            status: "succeeded",
+            messages: hydrated,
+          });
+        } catch (err) {
+          const aborted = job.abortController.signal.aborted;
+          const msg = err instanceof Error ? err.message : String(err);
+          await failJobWithDbNote({
+            db,
+            job,
+            chatProviderName,
+            chatModelUsed,
+            errorUserLine: aborted
+              ? "That image took too long and was stopped. Try again with a simpler prompt or check ComfyUI."
+              : `I couldn't finish that image (${msg.slice(0, 200)}).`,
+          });
+        } finally {
+          clearTimeout(wallTimer);
+        }
+      },
+    ),
+  ).catch((err) => {
     console.warn("[image-job-slot] background job crashed:", err);
     void finishImageJob(job.id, job.userId, {
       status: "failed",

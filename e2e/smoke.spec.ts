@@ -96,6 +96,9 @@ interface AuthenticatedApiOptions {
   conversation?: TestConversation;
   images?: TestImageRecord[];
   theme?: "dark" | "light";
+  hubAtmosphereEnabled?: boolean;
+  hubAtmosphereImageId?: string | null;
+  hubAtmosphereStyle?: "prismatic" | "minimal" | "dreamscape" | "sanctuary";
   tutorialProgress?: unknown;
   zenWallpaperLocalImageModel?: string;
   preserveBotLibraryGroupsOnReload?: boolean;
@@ -245,6 +248,9 @@ async function installAuthenticatedApi(
   const fixtureBots = options.bots ?? testBots;
   const fixtureConversation = options.conversation ?? testConversation;
   const fixtureImages = options.images ?? [];
+  let fixtureHubAtmosphereEnabled = options.hubAtmosphereEnabled !== false;
+  let fixtureHubAtmosphereStyle =
+    options.hubAtmosphereStyle ?? "prismatic";
   await page.addInitScript(
     ({ userId, botLibraryGroups, preserveBotLibraryGroupsOnReload }) => {
       window.localStorage.setItem("prism_first_run_welcome_v1", "done");
@@ -292,13 +298,28 @@ async function installAuthenticatedApi(
     }
     if (pathname === "/api/settings") {
       if (route.request().method() === "PATCH") {
-        const body = route.request().postDataJSON() as { theme?: unknown };
+        const body = route.request().postDataJSON() as {
+          theme?: unknown;
+          atmosphereStyle?: unknown;
+          hubAtmosphereEnabled?: unknown;
+        };
         if (
           body.theme === "dark" ||
           body.theme === "light" ||
           body.theme === "system"
         ) {
           fixtureUser.theme = body.theme;
+        }
+        if (typeof body.hubAtmosphereEnabled === "boolean") {
+          fixtureHubAtmosphereEnabled = body.hubAtmosphereEnabled;
+        }
+        if (
+          body.atmosphereStyle === "prismatic" ||
+          body.atmosphereStyle === "minimal" ||
+          body.atmosphereStyle === "dreamscape" ||
+          body.atmosphereStyle === "sanctuary"
+        ) {
+          fixtureHubAtmosphereStyle = body.atmosphereStyle;
         }
       }
       return json({
@@ -311,6 +332,12 @@ async function installAuthenticatedApi(
             setupStep: 0,
           },
           tutorialProgress: options.tutorialProgress,
+          atmosphereStyle: fixtureHubAtmosphereStyle,
+          hubAtmosphereEnabled: fixtureHubAtmosphereEnabled,
+          hubAtmosphereImageId: options.hubAtmosphereImageId ?? null,
+          hubAtmosphereImageStyle: options.hubAtmosphereImageId
+            ? (options.hubAtmosphereStyle ?? "prismatic")
+            : null,
           providerLocked: false,
           autoMemory: true,
           composerWritingAssist: true,
@@ -732,6 +759,118 @@ test.describe("PRISM desktop smoke", () => {
     await expect(page.locator('[data-mode="picker"]')).toBeVisible();
     await expect(page.getByText("Select bots to begin")).toBeVisible();
   });
+
+  for (const theme of ["dark", "light"] as const) {
+    test(`Home Atmosphere is automatic in ${theme} theme @visual`, async ({
+      page,
+    }) => {
+      test.setTimeout(smokeTestTimeout(60_000));
+      let generationRequestCount = 0;
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          new URL(request.url()).pathname === "/api/images/generate"
+        ) {
+          generationRequestCount += 1;
+        }
+      });
+      const homeAtmosphereImage: TestImageRecord = {
+        id: `e2e-home-atmosphere-${theme}`,
+        prompt: "A quiet prismatic room rendered for Home.",
+        url: `/api/images/e2e-home-atmosphere-${theme}/file`,
+        displayUrl: `/api/images/e2e-home-atmosphere-${theme}/file`,
+        createdAt: "2026-07-30T12:00:00.000Z",
+        botId: null,
+        hasLocalFile: true,
+        purpose: "hub_atmosphere",
+        provider: "local",
+      };
+      await installAuthenticatedApi(page, {
+        theme,
+        images: [homeAtmosphereImage],
+        hubAtmosphereEnabled: true,
+        hubAtmosphereImageId: homeAtmosphereImage.id,
+      });
+
+      await page.goto("/?view=chat");
+      const shell = page.locator('[data-hub-atmosphere-active="true"]');
+      await expect(shell).toBeVisible();
+      await expect(
+        page.locator('[data-visible="true"][data-atmosphere-style="prismatic"]'),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: /Home Atmosphere/u }),
+      ).toHaveCount(0);
+      await expect(page).toHaveScreenshot(
+        `home-atmosphere-${theme}-automatic.png`,
+        {
+          animations: "disabled",
+          caret: "hide",
+          scale: "css",
+        },
+      );
+
+      if (theme === "dark") {
+        await page.getByRole("button", { name: "Open settings" }).click();
+        await page.getByRole("button", { name: "Appearance" }).click();
+        const wallpaperToggle = page.getByRole("checkbox", {
+          name: "Home Atmosphere wallpaper",
+        });
+        await expect(wallpaperToggle).toBeChecked();
+        await expect(
+          page.getByRole("button", { name: "Regenerate wallpaper" }),
+        ).toBeVisible();
+
+        await wallpaperToggle.uncheck();
+        await expect(
+          page.locator('[data-hub-atmosphere-active="true"]'),
+        ).toHaveCount(0);
+        const firstSaveResponse = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PATCH" &&
+            new URL(response.url()).pathname === "/api/settings",
+        );
+        await activateNavigationControl(
+          page.getByRole("button", { name: "Save settings" }),
+        );
+        await firstSaveResponse;
+        await expect(
+          page.getByRole("button", { name: "Save settings" }),
+        ).toBeEnabled();
+        await expect(page.getByText("Settings saved.")).toBeVisible();
+        await page.getByRole("button", { name: "Close panel" }).click();
+        await page.reload();
+        await activateNavigationControl(
+          page.getByRole("button", { name: "Open All Bots Home" }),
+        );
+        await expect(
+          page.locator('[data-hub-atmosphere-active="true"]'),
+        ).toHaveCount(0);
+
+        await page.getByRole("button", { name: "Open settings" }).click();
+        await page.getByRole("button", { name: "Appearance" }).click();
+        await wallpaperToggle.check();
+        const secondSaveResponse = page.waitForResponse(
+          (response) =>
+            response.request().method() === "PATCH" &&
+            new URL(response.url()).pathname === "/api/settings",
+        );
+        await activateNavigationControl(
+          page.getByRole("button", { name: "Save settings" }),
+        );
+        await secondSaveResponse;
+        await expect(
+          page.getByRole("button", { name: "Save settings" }),
+        ).toBeEnabled();
+        await expect(page.getByText("Settings saved.")).toBeVisible();
+        await page.getByRole("button", { name: "Close panel" }).click();
+        await expect(
+          page.locator('[data-hub-atmosphere-active="true"]'),
+        ).toBeVisible();
+        expect(generationRequestCount).toBe(0);
+      }
+    });
+  }
 
   test("Coffee GPU atmosphere becomes ready, preserves controls, and cleans up across mode switches", async ({
     page,
@@ -4993,6 +5132,324 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeChecked();
   });
 
+  test("Basic Debate turns formality into a live Rowdiness instrument @visual", async ({
+    page,
+  }) => {
+    await installAuthenticatedApi(page, {
+      tutorialProgress: { debate: true },
+    });
+    await page.route("**/api/debates**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ sessions: [] }),
+      });
+    });
+
+    await page.goto("/?view=debate");
+    const dashboard = page.locator('[data-debate-surface="dashboard"]');
+    const rowdinessControl = dashboard.locator(
+      '[data-tutorial-target="debate-rowdiness"]',
+    );
+    const rowdinessSlider = dashboard.getByRole("slider", {
+      name: "Debate rowdiness",
+    });
+
+    await expect(rowdinessControl).toBeVisible();
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "plainspoken",
+    );
+    await expect(rowdinessSlider).toHaveValue("2");
+    await expect(rowdinessSlider).toHaveAttribute(
+      "aria-valuetext",
+      /Plainspoken/u,
+    );
+    await expect(rowdinessControl).toContainText("University Union");
+    await expect(rowdinessControl).toContainText("Daytime Showdown");
+
+    await rowdinessSlider.fill("4");
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "free_for_all",
+    );
+    await expect(rowdinessSlider).toHaveAttribute(
+      "aria-valuetext",
+      /Free-for-all/u,
+    );
+    await expect(dashboard).toContainText(
+      "Free-for-all Forum · you make the final call",
+    );
+    await page.screenshot({
+      path: ".codex/output/debate-rowdiness-daytime-showdown.png",
+      animations: "disabled",
+    });
+
+    const setupModeControl = dashboard.getByRole("group", {
+      name: "Debate setup detail",
+    });
+    await setupModeControl
+      .getByRole("button", { name: "Advanced", exact: true })
+      .click();
+    await expect(
+      dashboard.getByRole("slider", { name: "Debate formality" }),
+    ).toHaveValue("0");
+    await setupModeControl
+      .getByRole("button", { name: "Basic", exact: true })
+      .click();
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "free_for_all",
+    );
+    await expect(rowdinessSlider).toHaveValue("4");
+
+    await rowdinessSlider.fill("0");
+    await expect(rowdinessControl).toHaveAttribute(
+      "data-rowdiness",
+      "parliamentary",
+    );
+    await expect(rowdinessSlider).toHaveAttribute(
+      "aria-valuetext",
+      /Parliamentary/u,
+    );
+  });
+
+  test("Debate presents long speech as paged broadcast captions @visual", async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    await installAuthenticatedApi(page, {
+      tutorialProgress: { debate: true },
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    const timestamp = "2026-07-30T18:00:00.000Z";
+    const snapshotFor = (
+      index: number,
+      role: "moderator" | "advocate",
+      sideId: "for" | "against" | null,
+      glyph: string,
+    ) => ({
+      version: 1,
+      id: testBots[index]!.id,
+      name: testBots[index]!.name,
+      systemPrompt: testBots[index]!.system_prompt,
+      role,
+      sideId,
+      color: testBots[index]!.color,
+      glyph,
+      avatarDetails: testBots[0]!.avatarDetails,
+      voiceProfile: null,
+      powers: [],
+      provider: "local",
+      model: "llama3.2",
+      revision: `caption-${role}-${sideId ?? "neutral"}`,
+    });
+    const moderator = snapshotFor(0, "moderator", null, "triangle");
+    const forAdvocate = snapshotFor(1, "advocate", "for", "circle");
+    const againstAdvocate = snapshotFor(2, "advocate", "against", "square");
+    const powerBot = (id: string) => ({
+      botId: id,
+      effects: [],
+      hardMuted: false,
+      visibleToBotIds: null,
+      speechAudienceBotIds: null,
+      warnings: [],
+    });
+    const initialSession = {
+      version: 1,
+      id: "e2e-debate-captions",
+      revision: 1,
+      status: "live",
+      phase: "opening",
+      stepKey: "opening_for",
+      provider: "local",
+      model: "llama3.2",
+      responseMode: "local",
+      generationChain: [{ provider: "local", model: "llama3.2" }],
+      format: "forum",
+      formatVersion: 1,
+      formatState: { version: 1, format: "forum" },
+      playerRole: "spectator",
+      playerSideId: null,
+      motion: {
+        version: 1,
+        id: "caption-motion",
+        motion: "This house would regulate risky public behavior.",
+        forSide: {
+          label: "For",
+          brief: "Public health requires enforceable standards.",
+        },
+        againstSide: {
+          label: "Against",
+          brief: "Education and consent should lead.",
+        },
+      },
+      evidence: {
+        version: 1,
+        notes: "",
+        sources: [],
+        frozenAt: timestamp,
+      },
+      moderator,
+      forAdvocate,
+      againstAdvocate,
+      advocacyConsent: [],
+      powerPlan: {
+        version: 1,
+        resolvedAt: timestamp,
+        theme: "dark",
+        bots: {
+          [moderator.id]: powerBot(moderator.id),
+          [forAdvocate.id]: powerBot(forAdvocate.id),
+          [againstAdvocate.id]: powerBot(againstAdvocate.id),
+        },
+      },
+      caseBoard: [],
+      ballots: [],
+      jury: {
+        version: 1,
+        enabled: false,
+        cadence: "natural-five",
+        phase: "disabled",
+        jurors: [],
+        forepersonBotId: null,
+        initialBallots: [],
+        finalBallots: [],
+        discussionTurnTarget: 0,
+        discussionTurnCount: 0,
+        speakerCounts: {},
+        majoritySideId: null,
+        forVotes: 0,
+        againstVotes: 0,
+        calledVoteAt: null,
+        completedAt: null,
+      },
+      playerVerdict: null,
+      winnerSideId: null,
+      events: [],
+      error: null,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      completedAt: null,
+    };
+    const speechEvent = {
+      version: 1,
+      id: "e2e-debate-caption-speech",
+      sequence: 1,
+      phase: "opening",
+      stepKey: "opening_for",
+      kind: "speech",
+      speakerKind: "advocate",
+      speakerBotId: forAdvocate.id,
+      sideId: "for",
+      content:
+        "People are not following the rules, and calling that a failure is a strong word. But yes, it is a failure to protect the public. Disease transmission does not wait for a better pamphlet. You think education alone will work? It *failed*. People do not just need another lecture about the problem. They need a policy that protects the public while treating them like adults, and that is the standard this side is defending.",
+      sourceIds: [],
+      createdAt: timestamp,
+    };
+    const advancedSession = {
+      ...initialSession,
+      revision: 2,
+      stepKey: "opening_against",
+      events: [speechEvent],
+      updatedAt: "2026-07-30T18:00:01.000Z",
+    };
+
+    await page.route("**/api/debates**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      const json = (payload: unknown) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(payload),
+        });
+      if (pathname === "/api/debates") {
+        return json({
+          sessions: [
+            {
+              id: initialSession.id,
+              status: initialSession.status,
+              phase: initialSession.phase,
+              motion: initialSession.motion.motion,
+              playerRole: initialSession.playerRole,
+              winnerSideId: null,
+              updatedAt: initialSession.updatedAt,
+              completedAt: null,
+            },
+          ],
+        });
+      }
+      if (pathname.endsWith("/advance")) {
+        return json({ session: advancedSession });
+      }
+      return json({ session: initialSession });
+    });
+
+    await page.goto("/?view=debate");
+    const dashboard = page.locator('[data-debate-surface="dashboard"]');
+    await dashboard
+      .getByRole("button", {
+        name: "Open proceeding archive",
+        exact: true,
+      })
+      .click();
+    await page
+      .getByRole("button", {
+        name: new RegExp(
+          `^${initialSession.motion.motion}.*Opening.*spectator$`,
+          "u",
+        ),
+      })
+      .click();
+
+    const live = page.locator('[data-debate-surface="live"]');
+    const caption = live.locator('[data-debate-live-caption="true"]');
+    await expect(caption).toBeVisible({ timeout: 15_000 });
+    await expect(caption).toHaveAttribute("data-caption-pages", /[2-9]/u, {
+      timeout: 25_000,
+    });
+    await expect(
+      caption.locator('[data-caption-rows="adaptive"]'),
+    ).not.toContainText("*");
+
+    const captionBox = await caption.boundingBox();
+    const stageBox = await live
+      .locator('[data-debate-stage-viewport="live"]')
+      .boundingBox();
+    expect(captionBox).not.toBeNull();
+    expect(stageBox).not.toBeNull();
+    expect(captionBox!.width).toBeLessThan(stageBox!.width * 0.72);
+    expect(captionBox!.height).toBeLessThan(130);
+    expect(
+      await caption
+        .locator('[data-caption-rows="adaptive"]')
+        .evaluate(
+          (element) => element.scrollHeight <= element.clientHeight + 1,
+        ),
+    ).toBe(true);
+
+    await page.screenshot({
+      path: ".codex/output/debate-captions-broadcast-dark.png",
+      animations: "disabled",
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(caption).toBeVisible();
+    const compactCaptionBox = await caption.boundingBox();
+    const compactStageBox = await live
+      .locator('[data-debate-stage-viewport="live"]')
+      .boundingBox();
+    expect(compactCaptionBox).not.toBeNull();
+    expect(compactStageBox).not.toBeNull();
+    expect(compactCaptionBox!.width).toBeLessThan(compactStageBox!.width * 0.9);
+    expect(compactCaptionBox!.height).toBeLessThan(150);
+    await page.screenshot({
+      path: ".codex/output/debate-captions-broadcast-compact.png",
+      animations: "disabled",
+    });
+  });
+
   test("Debate renders turn-owned podium glyphs and moderator camera bodies @visual", async ({
     page,
   }) => {
@@ -5079,6 +5536,32 @@ test.describe("PRISM desktop smoke", () => {
       speechAudienceBotIds: null,
       warnings: [],
     });
+    const stageExhibit = {
+      id: "e2e-exhibit-rusty-spoon",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "Its bowl is dented and its handle is stained.",
+      emoji: "🥄",
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "manual",
+    };
+    const stageExhibitEvent = {
+      version: 1,
+      id: "e2e-debate-rusty-spoon",
+      sequence: 1,
+      phase: "opening",
+      stepKey: "opening_for",
+      kind: "speech",
+      speakerKind: "advocate",
+      speakerBotId: forAdvocate.id,
+      sideId: "for",
+      content:
+        "Consider the physical condition of this object. Its bowl is visibly dented, its handle is stained, and corrosion marks the metal. Those observable details remain the only facts this exhibit adds to the record; the visual simply gives the room a shared focal point. [[exhibit:e2e-exhibit-rusty-spoon]]",
+      sourceIds: [stageExhibit.id],
+      createdAt: timestamp,
+    };
     const initialSession = {
       version: 1,
       id: "e2e-debate-stage",
@@ -5109,6 +5592,7 @@ test.describe("PRISM desktop smoke", () => {
         version: 1,
         notes: "",
         sources: [],
+        exhibits: [stageExhibit],
         frozenAt: timestamp,
       },
       moderator,
@@ -5172,7 +5656,7 @@ test.describe("PRISM desktop smoke", () => {
       ...initialSession,
       revision: 2,
       stepKey: "opening_against",
-      events: [speechEvent],
+      events: [stageExhibitEvent],
       updatedAt: "2026-07-28T22:00:01.000Z",
     };
     const completedSession = {
@@ -5250,7 +5734,7 @@ test.describe("PRISM desktop smoke", () => {
       path: ".codex/output/debate-studio-cast.png",
       animations: "disabled",
     });
-    await studioNavigation.getByRole("button", { name: /Sources/u }).click();
+    await studioNavigation.getByRole("button", { name: /Evidence/u }).click();
     await expect(
       dashboard.getByRole("heading", {
         name: "Want to give them anything else?",
@@ -5258,6 +5742,48 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
     await page.screenshot({
       path: ".codex/output/debate-studio-evidence.png",
+      animations: "disabled",
+    });
+    await dashboard
+      .getByRole("button", { name: "+ Add object", exact: true })
+      .click();
+    const exhibitEditor = dashboard.locator(
+      '[aria-label="Create an object exhibit"]',
+    );
+    await exhibitEditor
+      .getByRole("textbox", { name: "Adjective", exact: true })
+      .fill("Rusty");
+    await exhibitEditor
+      .getByRole("textbox", { name: "Object", exact: true })
+      .fill("spoon");
+    await exhibitEditor
+      .getByLabel("Observable fact")
+      .fill("Its bowl is dented and its handle is stained.");
+    const exhibitEmoji = exhibitEditor.getByRole("textbox", {
+      name: "Exhibit emoji",
+      exact: true,
+    });
+    await exhibitEmoji.fill("🧑🏽‍🚀");
+    await expect(exhibitEmoji).toHaveValue("🧑🏽‍🚀");
+    await expect(
+      exhibitEditor.getByRole("button", {
+        name: /Choose any emoji/u,
+      }),
+    ).toBeVisible();
+    await expect(
+      exhibitEditor.getByRole("button", {
+        name: "Upload image",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await expect(
+      exhibitEditor.getByRole("button", {
+        name: "Synthesize exhibit",
+        exact: true,
+      }),
+    ).toBeEnabled();
+    await exhibitEditor.screenshot({
+      path: ".codex/output/debate-object-exhibit-editor-dark.png",
       animations: "disabled",
     });
     const themeButton = page.locator('button[aria-label*="Theme:"]').first();
@@ -5270,6 +5796,9 @@ test.describe("PRISM desktop smoke", () => {
     });
     await themeButton.click();
     await expect(dashboard).toHaveAttribute("data-theme", "dark");
+    await exhibitEditor
+      .getByRole("button", { name: "Cancel", exact: true })
+      .click();
     await studioNavigation.getByRole("button", { name: /Topic/u }).click();
     await dashboard
       .getByRole("button", { name: "Align stage", exact: true })
@@ -5479,6 +6008,18 @@ test.describe("PRISM desktop smoke", () => {
     await page.getByRole("button", { name: "Wide", exact: true }).click();
     const forumCamera = live.locator('[class*="forumCamera"]');
     await expect(forumCamera).toHaveAttribute("data-camera-view", "wide");
+    const evidencePedestal = live.locator(
+      'section[aria-label="Presented evidence: Rusty spoon"]',
+    );
+    await expect(evidencePedestal).toBeVisible({ timeout: 10_000 });
+    await evidencePedestal.screenshot({
+      path: ".codex/output/debate-evidence-pedestal-rusty-spoon.png",
+      animations: "disabled",
+    });
+    await page.screenshot({
+      path: ".codex/output/debate-evidence-pedestal-wide.png",
+      animations: "disabled",
+    });
     const audienceRow = live.locator('[data-debate-audience="true"]');
     await expect(audienceRow).toBeVisible();
     await expect(audienceRow).toHaveAttribute(
@@ -5487,7 +6028,7 @@ test.describe("PRISM desktop smoke", () => {
     );
     await expect(audienceRow).toHaveAttribute("data-audience-count", "8");
     await expect(audienceRow).toHaveAttribute(
-      "data-audience-murmuring",
+      "data-audience-chattering",
       "false",
     );
     await expect(

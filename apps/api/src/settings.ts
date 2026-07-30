@@ -167,6 +167,7 @@ export interface CurrentSettings {
   theme: Theme;
   graphicsQuality: GraphicsQuality | string | null;
   atmosphereStyle: string | null;
+  hubAtmosphereEnabled: number | null;
   startupPreference: string | null;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: string | null;
@@ -236,6 +237,7 @@ export interface NextSettings {
   theme: Theme;
   graphicsQuality: GraphicsQuality;
   atmosphereStyle: HubAtmosphereStyle;
+  hubAtmosphereEnabled: number;
   startupPreference: PrismStartupPreference;
   preferredProvider: Provider;
   ephemeralChatProviderPreferences: EphemeralChatProviderPreferences;
@@ -871,6 +873,12 @@ export function resolveNextSettings(
     body.atmosphereStyle,
     normalizeHubAtmosphereStyle(current.atmosphereStyle),
   );
+  const hubAtmosphereEnabled =
+    typeof body.hubAtmosphereEnabled === "boolean"
+      ? Number(body.hubAtmosphereEnabled)
+      : current.hubAtmosphereEnabled === 0
+        ? 0
+        : 1;
   const startupPreference = normalizePrismStartupPreference(
     body.startupPreference,
     normalizePrismStartupPreference(current.startupPreference),
@@ -1267,6 +1275,7 @@ export function resolveNextSettings(
     theme,
     graphicsQuality,
     atmosphereStyle,
+    hubAtmosphereEnabled,
     startupPreference,
     preferredProvider,
     ephemeralChatProviderPreferences,

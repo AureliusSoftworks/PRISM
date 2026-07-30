@@ -28,6 +28,45 @@ test("normalizes only identifier-based surface context", () => {
   );
 });
 
+test("keeps only bounded unsaved Debate setup context on the Debate surface", () => {
+  const draft = {
+    setupMode: "advanced",
+    studioPanel: "evidence",
+    format: "turnabout",
+    formality: "heated",
+    playerRole: "participant",
+    playerSideId: "against",
+    juryEnabled: true,
+    moderatorTitle: " The Court ",
+    topic: "  Transit policy  ",
+    motion: "A".repeat(400),
+    forLabel: "For",
+    forBrief: "Build it.",
+    againstLabel: "Against",
+    againstBrief: "Limit it.",
+    exhibitAdjective: "Rusty",
+    exhibitObject: "spoon",
+    exhibitObservation: "Its bowl is visibly dented.",
+    evidenceItemCount: 99,
+  };
+  const normalized = normalizePrismCompanionSurfaceReference({
+    surfaceId: "debate",
+    debateDraft: draft,
+  });
+  assert.equal(normalized.debateDraft?.setupMode, "advanced");
+  assert.equal(normalized.debateDraft?.topic, "Transit policy");
+  assert.equal(normalized.debateDraft?.motion.length, 320);
+  assert.equal(normalized.debateDraft?.evidenceItemCount, 12);
+  assert.equal(normalized.debateDraft?.exhibitObject, "spoon");
+  assert.equal(
+    normalizePrismCompanionSurfaceReference({
+      surfaceId: "settings",
+      debateDraft: draft,
+    }).debateDraft,
+    undefined,
+  );
+});
+
 test("keeps only the latest three valid recovery messages", () => {
   const request = normalizePrismCompanionRequest({
     surface: { surfaceId: "coffee" },

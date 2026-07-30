@@ -1279,19 +1279,26 @@ describe("API request integration", () => {
     const initial = await client.request("/api/settings");
     const initialSettings = (await json(initial)).settings;
     assert.equal(initialSettings.atmosphereStyle, "prismatic");
+    assert.equal(initialSettings.hubAtmosphereEnabled, true);
     assert.equal(initialSettings.hubAtmosphereImageId, null);
 
     const saved = await client.request("/api/settings", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ atmosphereStyle: "sanctuary" }),
+      body: JSON.stringify({
+        atmosphereStyle: "sanctuary",
+        hubAtmosphereEnabled: false,
+      }),
     });
     assert.equal(saved.status, 200);
-    assert.equal((await json(saved)).settings.atmosphereStyle, "sanctuary");
+    const savedSettings = (await json(saved)).settings;
+    assert.equal(savedSettings.atmosphereStyle, "sanctuary");
+    assert.equal(savedSettings.hubAtmosphereEnabled, false);
 
     const loaded = await client.request("/api/settings");
     const loadedSettings = (await json(loaded)).settings;
     assert.equal(loadedSettings.atmosphereStyle, "sanctuary");
+    assert.equal(loadedSettings.hubAtmosphereEnabled, false);
     assert.equal(loadedSettings.hubAtmosphereImageId, null);
   });
 
@@ -2139,6 +2146,33 @@ describe("API request integration", () => {
       ).get(ownerId) as { count: number }).count,
       3,
     );
+    const reusableLogoId = uploadedImageIds.at(-1)!;
+    db.prepare(
+      `UPDATE images
+          SET provider = 'openai',
+              model = 'test-generated-logo',
+              purpose = 'signal_logo'
+        WHERE id = ? AND user_id = ?`,
+    ).run(reusableLogoId, ownerId);
+    const replacementLogoResponse = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/assets/logo/upload`,
+      jsonInit({ dataUrl: uploadedLogoDataUrl }),
+    );
+    const replacementLogoPayload = await json(replacementLogoResponse);
+    assert.equal(
+      replacementLogoResponse.status,
+      201,
+      JSON.stringify(replacementLogoPayload),
+    );
+    uploadedImageIds.push(String(replacementLogoPayload.image.id));
+    const reuseLogoResponse = await owner.request(
+      `/api/botcast/shows/${encodeURIComponent(showId)}/assets/logo/reuse`,
+      jsonInit({ imageId: reusableLogoId }),
+    );
+    const reuseLogoPayload = await json(reuseLogoResponse);
+    assert.equal(reuseLogoResponse.status, 200, JSON.stringify(reuseLogoPayload));
+    assert.equal(reuseLogoPayload.show.logo.imageId, reusableLogoId);
+    assert.equal(reuseLogoPayload.image.purpose, "signal_logo");
     const foreignAssetUpload = await stranger.request(
       `/api/botcast/shows/${encodeURIComponent(showId)}/assets/logo/upload`,
       jsonInit({ dataUrl: uploadedAssetDataUrl }),
@@ -2208,14 +2242,163 @@ describe("API request integration", () => {
         `SELECT COUNT(*) AS count FROM images
           WHERE user_id = ? AND id IN (${uploadedImageIds.map(() => "?").join(", ")})`,
       ).get(ownerId, ...uploadedImageIds) as { count: number }).count,
-      3,
-      "replacing or deleting a show keeps prior uploaded artwork available in Images",
+      uploadedImageIds.length,
+      "replacing or deleting a show keeps its prior artwork available",
     );
     assert.equal(
       (db.prepare("SELECT COUNT(*) AS count FROM botcast_episodes WHERE user_id = ?")
         .get(ownerId) as { count: number }).count,
       0
     );
+  });
+
+  it("keeps reusable tool assets account- and function-scoped", async () => {
+    const owner = createClient();
+    const stranger = createClient();
+    const ownerRegistration = await owner.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "tool-assets-owner@example.com",
+        password: "tool-assets-owner-password",
+      }),
+    );
+    const strangerRegistration = await stranger.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "tool-assets-stranger@example.com",
+        password: "tool-assets-stranger-password",
+      }),
+    );
+    assert.equal(ownerRegistration.status, 201);
+    assert.equal(strangerRegistration.status, 201);
+    const ownerId = String((await json(ownerRegistration)).user.id);
+    const strangerId = String((await json(strangerRegistration)).user.id);
+    const ownerBotId = "tool-assets-owner-bot";
+    const strangerBotId = "tool-assets-stranger-bot";
+    const createdAt = "2026-07-30T18:00:00.000Z";
+    const insertBot = db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    insertBot.run(
+      ownerBotId,
+      ownerId,
+      "Tool Assets Host",
+      "A careful host.",
+      createdAt,
+      createdAt,
+    );
+    insertBot.run(
+      strangerBotId,
+      strangerId,
+      "Other Tool Assets Host",
+      "Another careful host.",
+      createdAt,
+      createdAt,
+    );
+    const insertImage = db.prepare(
+      `INSERT INTO images
+         (id, user_id, bot_id, related_bot_ids, origin, prompt, url, size,
+          quality, provider, model, local_rel_path, purpose, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, '', '1024x1024', 'standard', ?, 'test',
+               ?, ?, ?)`,
+    );
+    insertImage.run(
+      "debate-generated",
+      ownerId,
+      null,
+      "[]",
+      "debate",
+      "Generated Debate exhibit",
+      "openai",
+      `generated-images/${ownerId}/debate-generated.png`,
+      "debate_exhibit",
+      createdAt,
+    );
+    insertImage.run(
+      "debate-upload",
+      ownerId,
+      null,
+      "[]",
+      "debate",
+      "Uploaded Debate exhibit",
+      "upload",
+      `generated-images/${ownerId}/debate-upload.png`,
+      "debate_exhibit",
+      createdAt,
+    );
+    insertImage.run(
+      "signal-day-generated",
+      ownerId,
+      ownerBotId,
+      JSON.stringify([ownerBotId]),
+      "botcast",
+      "Generated Signal Light studio",
+      "openai",
+      `generated-images/${ownerId}/signal-day-generated.png`,
+      "signal_studio_day",
+      createdAt,
+    );
+    insertImage.run(
+      "signal-day-stranger",
+      strangerId,
+      strangerBotId,
+      JSON.stringify([strangerBotId]),
+      "botcast",
+      "Other account Signal Light studio",
+      "openai",
+      `generated-images/${strangerId}/signal-day-stranger.png`,
+      "signal_studio_day",
+      createdAt,
+    );
+    insertImage.run(
+      "general-owner-image",
+      ownerId,
+      null,
+      "[]",
+      "images_panel",
+      "General image",
+      "openai",
+      `generated-images/${ownerId}/general-owner-image.png`,
+      "gallery",
+      createdAt,
+    );
+
+    const debateResponse = await owner.request(
+      "/api/images/tool-assets?scope=debate_exhibit",
+    );
+    assert.equal(debateResponse.status, 200);
+    assert.deepEqual(
+      (await json(debateResponse)).images.map(
+        (image: { id: string }) => image.id,
+      ),
+      ["debate-generated"],
+    );
+
+    const missingBot = await owner.request(
+      "/api/images/tool-assets?scope=signal_studio_day",
+    );
+    assert.equal(missingBot.status, 400);
+    const signalResponse = await owner.request(
+      `/api/images/tool-assets?scope=signal_studio_day&botId=${ownerBotId}`,
+    );
+    assert.equal(signalResponse.status, 200);
+    assert.deepEqual(
+      (await json(signalResponse)).images.map(
+        (image: { id: string }) => image.id,
+      ),
+      ["signal-day-generated"],
+    );
+
+    const galleryResponse = await owner.request("/api/images");
+    assert.equal(galleryResponse.status, 200);
+    const galleryIds = (await json(galleryResponse)).images.map(
+      (image: { id: string }) => image.id,
+    );
+    assert.ok(galleryIds.includes("general-owner-image"));
+    assert.equal(galleryIds.includes("debate-generated"), false);
+    assert.equal(galleryIds.includes("signal-day-generated"), false);
   });
 
   it("registers, authenticates, scopes conversations, gates local image generation, and logs out", async () => {

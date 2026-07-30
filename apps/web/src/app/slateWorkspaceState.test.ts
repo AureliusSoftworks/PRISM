@@ -366,6 +366,31 @@ describe("Slate workspace state", () => {
       slateProjectOffsetsForSectionSelection(sections, "two", 2, 8),
       { start: 21, end: 27 },
     );
+
+    const importedSections = [
+      {
+        ...section("import-one", "Chapter One\n\nFirst.\n\n"),
+        kind: "imported" as const,
+      },
+      {
+        ...section("import-two", "Chapter Two\n\nSecond."),
+        kind: "imported" as const,
+      },
+    ];
+    assert.deepEqual(
+      slateProjectOffsetsForSectionSelection(
+        importedSections,
+        "import-two",
+        0,
+        "Chapter Two".length,
+      ),
+      {
+        start: importedSections[0]!.prose.length,
+        end:
+          importedSections[0]!.prose.length +
+          "Chapter Two".length,
+      },
+    );
   });
 
   it("shows each current return session once for its selected project", () => {

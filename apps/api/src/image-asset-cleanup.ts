@@ -76,17 +76,12 @@ export interface ImageAssetCleanupResult {
 }
 
 export type ImageAssetCleanupErrorCode =
-  | "invalid_request"
-  | "stale_preview"
-  | "unsafe_selection";
+  "invalid_request" | "stale_preview" | "unsafe_selection";
 
 export class ImageAssetCleanupError extends Error {
   readonly code: ImageAssetCleanupErrorCode;
 
-  constructor(
-    code: ImageAssetCleanupErrorCode,
-    message: string,
-  ) {
+  constructor(code: ImageAssetCleanupErrorCode, message: string) {
     super(message);
     this.name = "ImageAssetCleanupError";
     this.code = code;
@@ -139,18 +134,17 @@ export interface ImageAssetCleanupFileOperations {
     recoveryManifest?: string,
   ) => GeneratedImageQuarantineResult;
   restore?: (quarantine: GeneratedImageQuarantineResult) => void;
-  purge?: (
-    userId: string,
-    quarantine: GeneratedImageQuarantineResult,
-  ) => void;
+  purge?: (userId: string, quarantine: GeneratedImageQuarantineResult) => void;
 }
 
-const IMAGE_FILE_URL_PATTERN = /\/api\/images\/([^/\s?#]+)\/(?:file|thumb)\b/giu;
+const IMAGE_FILE_URL_PATTERN =
+  /\/api\/images\/([^/\s?#]+)\/(?:file|thumb)\b/giu;
 const SYSTEM_MANAGED_IMAGE_ORIGINS = new Set([
   "botcast",
   "coffee_bar",
   "hub_atmosphere",
   "slate_cover",
+  "debate",
   "zen_wallpaper",
   "bot_profile_picture",
 ]);
@@ -178,8 +172,12 @@ function parseStringArray(raw: string | null | undefined): string[] {
   }
 }
 
-function uniqueStrings(values: readonly (string | null | undefined)[]): string[] {
-  return [...new Set(values.map((value) => value?.trim() ?? "").filter(Boolean))];
+function uniqueStrings(
+  values: readonly (string | null | undefined)[],
+): string[] {
+  return [
+    ...new Set(values.map((value) => value?.trim() ?? "").filter(Boolean)),
+  ];
 }
 
 function decodedImageId(value: string): string | null {
@@ -249,12 +247,7 @@ function collectImageReferencesFromText(
       label,
     );
   } catch {
-    collectImageReferencesFromValue(
-      raw,
-      knownImageIds,
-      references,
-      label,
-    );
+    collectImageReferencesFromValue(raw, knownImageIds, references, label);
   }
 }
 
@@ -269,10 +262,14 @@ function modeLabelForImage(row: ImageAssetRow): string {
   if (origin === "bot_profile_picture" || purpose === "bot_profile_picture") {
     return "Bot profile";
   }
-  if (origin.startsWith("bot_group_room") || purpose === "group-room-wallpaper") {
+  if (
+    origin.startsWith("bot_group_room") ||
+    purpose === "group-room-wallpaper"
+  ) {
     return "Group room";
   }
   if (origin.startsWith("slate")) return "Slate";
+  if (origin === "debate" || purpose === "debate_exhibit") return "Debate";
   if (origin.includes("chat")) return "Chat";
   return "Image Library";
 }
@@ -429,6 +426,18 @@ function buildImageAssetCleanupGraph(
       "Slate cover",
     );
   }
+  for (const row of readRows<{ session_json: string }>(
+    db,
+    "SELECT session_json FROM debate_sessions WHERE user_id = ?",
+    userId,
+  )) {
+    collectImageReferencesFromText(
+      row.session_json,
+      knownImageIds,
+      references,
+      "Debate evidence exhibit",
+    );
+  }
   for (const row of readRows<{ markdown: string }>(
     db,
     "SELECT markdown FROM conversation_exports WHERE user_id = ?",
@@ -450,7 +459,11 @@ function buildImageAssetCleanupGraph(
     "SELECT episode_json, progress_json, transcript_json FROM story_sessions WHERE user_id = ?",
     userId,
   )) {
-    for (const value of [row.episode_json, row.progress_json, row.transcript_json]) {
+    for (const value of [
+      row.episode_json,
+      row.progress_json,
+      row.transcript_json,
+    ]) {
       collectImageReferencesFromText(
         value,
         knownImageIds,
@@ -589,6 +602,7 @@ function buildImageAssetCleanupGraph(
       "Conversation image messages and saved exports",
       "Signal show artwork",
       "Slate covers",
+      "Debate evidence exhibits",
       "Story sessions",
       "Intentional Image Library and chat generations",
       "Player uploads and imports",
@@ -654,9 +668,21 @@ function existingRecoveryImageState(
     const existing = statement.get(row.id, userId) as ImageAssetRow | undefined;
     if (!existing) continue;
     const fields: Array<keyof ImageAssetRow> = [
-      "id", "conversation_id", "bot_id", "related_bot_ids", "origin",
-      "prompt", "revised_prompt", "url", "size", "quality", "provider",
-      "model", "local_rel_path", "purpose", "created_at",
+      "id",
+      "conversation_id",
+      "bot_id",
+      "related_bot_ids",
+      "origin",
+      "prompt",
+      "revised_prompt",
+      "url",
+      "size",
+      "quality",
+      "provider",
+      "model",
+      "local_rel_path",
+      "purpose",
+      "created_at",
     ];
     if (fields.every((field) => existing[field] === row[field])) {
       matchingIds.add(row.id);
@@ -725,14 +751,16 @@ export function listImageAssetCleanupRecoveries(
     if (!rows || batch.journal.state === "restoring") return [];
     const existing = existingRecoveryImageState(db, userId, rows);
     if (existing.collision || existing.matchingIds.size !== 0) return [];
-    return [{
-      recoveryId: batch.journal.recoveryId,
-      quarantinedAt: batch.journal.quarantinedAt,
-      imageCount: rows.length,
-      fileCount: batch.fileCount,
-      sizeBytes: batch.sizeBytes,
-      recoveryRelativePath: batch.quarantine.recoveryRelativePath,
-    }];
+    return [
+      {
+        recoveryId: batch.journal.recoveryId,
+        quarantinedAt: batch.journal.quarantinedAt,
+        imageCount: rows.length,
+        fileCount: batch.fileCount,
+        sizeBytes: batch.sizeBytes,
+        recoveryRelativePath: batch.quarantine.recoveryRelativePath,
+      },
+    ];
   });
 }
 
@@ -756,10 +784,13 @@ export function restoreImageAssetCleanupRecovery(
   const batch = recoveryBatchById(userId, recoveryId);
   if (!batch) return null;
   const rows = recoveryRows(batch, userId);
-  const existing = rows
-    ? existingRecoveryImageState(db, userId, rows)
-    : null;
-  if (!rows || !existing || existing.collision || existing.matchingIds.size !== 0) {
+  const existing = rows ? existingRecoveryImageState(db, userId, rows) : null;
+  if (
+    !rows ||
+    !existing ||
+    existing.collision ||
+    existing.matchingIds.size !== 0
+  ) {
     throw new ImageAssetCleanupError(
       "unsafe_selection",
       "This recovery batch conflicts with images already in the library.",
@@ -845,10 +876,13 @@ export function permanentlyDeleteImageAssetCleanupRecovery(
   const batch = recoveryBatchById(userId, recoveryId);
   if (!batch) return false;
   const rows = recoveryRows(batch, userId);
-  const existing = rows
-    ? existingRecoveryImageState(db, userId, rows)
-    : null;
-  if (!rows || !existing || existing.collision || existing.matchingIds.size !== 0) {
+  const existing = rows ? existingRecoveryImageState(db, userId, rows) : null;
+  if (
+    !rows ||
+    !existing ||
+    existing.collision ||
+    existing.matchingIds.size !== 0
+  ) {
     throw new ImageAssetCleanupError(
       "unsafe_selection",
       "This batch is not safe to permanently delete.",
@@ -858,9 +892,11 @@ export function permanentlyDeleteImageAssetCleanupRecovery(
   return true;
 }
 
-function validateCleanupRequest(
-  request: ImageAssetCleanupRequest,
-): { snapshot: string; imageIds: string[]; permanent: true } {
+function validateCleanupRequest(request: ImageAssetCleanupRequest): {
+  snapshot: string;
+  imageIds: string[];
+  permanent: true;
+} {
   const snapshot = request.snapshot?.trim() ?? "";
   if (!/^[a-f0-9]{20}$/u.test(snapshot)) {
     throw new ImageAssetCleanupError(
@@ -913,8 +949,7 @@ export function cleanupUnreferencedImageAssets(
   const makeRecoveryId =
     fileOperations.recoveryId ??
     (() => `${Date.now().toString(36)}-${randomUUID().replaceAll("-", "")}`);
-  const quarantine =
-    fileOperations.quarantine ?? quarantineGeneratedImageFiles;
+  const quarantine = fileOperations.quarantine ?? quarantineGeneratedImageFiles;
   const restore =
     fileOperations.restore ?? restoreQuarantinedGeneratedImageFiles;
   const purge = fileOperations.purge ?? purgeGeneratedImageQuarantine;
@@ -935,7 +970,9 @@ export function cleanupUnreferencedImageAssets(
       );
     }
     const selectedRows = validated.imageIds.map((imageId) => {
-      if (!graph.preview.candidates.some((candidate) => candidate.id === imageId)) {
+      if (
+        !graph.preview.candidates.some((candidate) => candidate.id === imageId)
+      ) {
         throw new ImageAssetCleanupError(
           "unsafe_selection",
           "Select assets from the visible cleanup preview only. Run another cleanup after this batch if more candidates remain.",
@@ -1023,8 +1060,7 @@ export function cleanupUnreferencedImageAssets(
       validated.imageIds.length -
       quarantineResult.missingPrimaryRelativePaths.length,
     quarantinedFileCount: quarantineResult.movedFiles.length,
-    missingAssetFileCount:
-      quarantineResult.missingPrimaryRelativePaths.length,
+    missingAssetFileCount: quarantineResult.missingPrimaryRelativePaths.length,
     selectedStorageBytes,
     reclaimedBytes: permanentDeleteCompleted ? selectedStorageBytes : 0,
     permanentDeleteCompleted,

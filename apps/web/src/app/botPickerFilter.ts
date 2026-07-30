@@ -8,6 +8,29 @@ export interface BotPickerFilterGroup {
   botIds: readonly string[];
 }
 
+export function compareBotPickerItemsByName(
+  left: FilterableBotPickerItem,
+  right: FilterableBotPickerItem,
+): number {
+  return (
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) ||
+    left.name.localeCompare(right.name) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+export function sortBotPickerItems<T extends FilterableBotPickerItem>(
+  items: readonly T[],
+  hueLensActive: boolean,
+  compareByColor?: (left: T, right: T) => number,
+): T[] {
+  return [...items].sort(
+    hueLensActive && compareByColor
+      ? compareByColor
+      : compareBotPickerItemsByName,
+  );
+}
+
 export function filterBotPickerItems<T extends FilterableBotPickerItem>(
   items: readonly T[],
   searchValue: string,

@@ -31,13 +31,51 @@ test("normalizes a bounded registered Signal text target", () => {
   assert.equal(request.preferredProvider, "local");
 });
 
+test("normalizes a contextual Debate setup target without trusting extra fields", () => {
+  const request = normalizePrismRefractRequest({
+    target: {
+      kind: "debate.setup.exhibitObject",
+      botIds: [" bot-1 ", "bot-1", "bot-2"],
+      context: {
+        setupMode: "advanced",
+        studioPanel: "evidence",
+        format: "turnabout",
+        formality: "heated",
+        playerRole: "judge",
+        playerSideId: "for",
+        juryEnabled: false,
+        moderatorTitle: "Moderator",
+        topic: "Museum ethics",
+        motion: "Museums should return contested artifacts.",
+        forLabel: "Return",
+        forBrief: "Defend return.",
+        againstLabel: "Retain",
+        againstBrief: "Defend stewardship.",
+        exhibitAdjective: "Old",
+        exhibitObject: "",
+        exhibitObservation: "",
+        evidenceItemCount: 2,
+        secret: "discard me",
+      },
+    },
+    currentValue: "freight train",
+    rejectedValues: [],
+  });
+  assert.equal(request.target.kind, "debate.setup.exhibitObject");
+  if (request.target.kind === "debate.setup.exhibitObject") {
+    assert.deepEqual(request.target.botIds, ["bot-1", "bot-2"]);
+    assert.equal(request.target.context.evidenceItemCount, 2);
+    assert.equal("secret" in request.target.context, false);
+  }
+});
+
 test("rejects arbitrary and incomplete targets", () => {
   assert.throws(
     () =>
       normalizePrismRefractRequest({
         target: { kind: "signal.live.composer", showId: "show-1" },
       }),
-    /registered Signal Refract target/u,
+    /registered Prism Refract target/u,
   );
   assert.throws(
     () =>

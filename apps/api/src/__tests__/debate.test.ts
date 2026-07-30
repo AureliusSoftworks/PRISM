@@ -27,8 +27,10 @@ import {
   debateMotionHash,
   debateSessionForPlayer,
   endDebateSessionEarly,
+  generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
+  orderDebateAudience,
   pauseDebateSession,
   raiseDebateParticipantObjection,
   refineDebateCaseBoard,
@@ -83,7 +85,10 @@ class DebateProviderStub implements LlmProvider {
   ): Promise<string> {
     const text = messages.map((message) => message.content).join("\n");
     if (text.includes("private advocacy consent check")) {
-      return JSON.stringify({ status: "accept", reason: null });
+      return JSON.stringify({
+        status: "accept",
+        reason: "I can make a clear case from the assigned brief.",
+      });
     }
     if (text.includes("Vote independently")) {
       return JSON.stringify({
@@ -104,6 +109,19 @@ class DebateProviderStub implements LlmProvider {
 
   public async embedText(): Promise<number[]> {
     return [0.1, 0.2];
+  }
+}
+
+class CommentlessAcceptanceProvider extends DebateProviderStub {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("private advocacy consent check")) {
+      return JSON.stringify({ status: "accept", reason: null });
+    }
+    return super.generateResponse(messages, options);
   }
 }
 
@@ -426,6 +444,27 @@ class TurnaboutProvider extends DebateProviderStub {
         evidenceQuote: "A frozen housing source",
         reason:
           "The frozen source conflicts with the statement's central constraint.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ExhibitTurnaboutProvider extends DebateProviderStub {
+  public validationPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("validate one PRISM Turnabout contradiction")) {
+      this.validationPrompt = text;
+      return JSON.stringify({
+        contradicts: true,
+        statementQuote: "central constraint is real",
+        evidenceQuote: "The handle is bent.",
+        reason: "The physical exhibit conflicts with the stated constraint.",
       });
     }
     return super.generateResponse(messages, options);
@@ -1184,6 +1223,19 @@ async function createTurnaboutForRole(
             publishedAt: "2026-01-01",
           },
         ],
+        exhibits: [
+          {
+            id: "exhibit-1",
+            adjective: "Rusty",
+            object: "spoon",
+            title: "Rusty spoon",
+            observation: "The handle is bent.",
+            emoji: "🥄",
+            visualKind: "emoji",
+            imageId: null,
+            createdBy: "player",
+          },
+        ],
         frozenAt: null,
       },
       moderatorBotId: "moderator",
@@ -1201,11 +1253,126 @@ async function createTurnaboutForRole(
 }
 
 describe("Debate engine", () => {
+  it("refracts a contextual setup field as a draft without persisting it", async () => {
+    const db = createTestDb();
+    try {
+      seedBot(
+        db,
+        "for",
+        "Avery",
+        [],
+        "Avery favors concrete institutional accountability.",
+      );
+      let prompt = "";
+      const provider: LlmProvider = {
+        name: "local",
+        async generateResponse(messages): Promise<string> {
+          prompt = messages.map((message) => message.content).join("\n");
+          return JSON.stringify({ value: "weathered ledger" });
+        },
+        async embedText(): Promise<number[]> {
+          return [];
+        },
+      };
+      const result = await generateDebateRefractDraft(
+        db,
+        "user-1",
+        {
+          kind: "debate.setup.exhibitObject",
+          botIds: ["for", "missing"],
+          context: {
+            setupMode: "advanced",
+            studioPanel: "evidence",
+            format: "turnabout",
+            formality: "heated",
+            playerRole: "judge",
+            playerSideId: "for",
+            juryEnabled: false,
+            moderatorTitle: "The Forum",
+            topic: "Museum ethics",
+            motion: "Museums should return contested artifacts.",
+            forLabel: "Return",
+            forBrief: "Defend return.",
+            againstLabel: "Retain",
+            againstBrief: "Defend stewardship.",
+            exhibitAdjective: "Dusty",
+            exhibitObject: "",
+            exhibitObservation: "",
+            evidenceItemCount: 2,
+          },
+        },
+        "",
+        ["old potato"],
+        runtimeWith(provider),
+      );
+      assert.equal(result.value, "weathered ledger");
+      assert.equal(result.generated, true);
+      assert.match(prompt, /Museum ethics/u);
+      assert.match(prompt, /Avery favors concrete institutional accountability/u);
+      assert.match(prompt, /editable candidate only/u);
+      const stored = db
+        .prepare("SELECT COUNT(*) AS count FROM debate_sessions")
+        .get() as { count: number };
+      assert.equal(stored.count, 0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("has no relationship-memory or conversation-continuity data path", () => {
     assert.doesNotMatch(
       debateSource,
       /\b(?:FROM|INTO|UPDATE)\s+(?:memories|memory_summaries|conversations|messages)\b/iu,
     );
+  });
+
+  it("keeps a Persona comment on every advocacy willingness result", async () => {
+    const db = createTestDb();
+    try {
+      seedBot(db, "for", "Avery");
+      seedBot(db, "against", "Basil");
+      const commented = await checkDebateAdvocacyRoles(
+        db,
+        "user-1",
+        {
+          motion: MOTION,
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+        },
+        runtime(),
+      );
+      assert.deepEqual(
+        commented.map((check) => check.reason),
+        [
+          "I can make a clear case from the assigned brief.",
+          "I can make a clear case from the assigned brief.",
+        ],
+      );
+
+      const fallback = await checkDebateAdvocacyRoles(
+        db,
+        "user-1",
+        {
+          motion: MOTION,
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+        },
+        runtimeWith(new CommentlessAcceptanceProvider()),
+      );
+      assert.deepEqual(
+        fallback.map((check) => check.reason),
+        [
+          "I’m willing to argue Build Near Rail.",
+          "I’m willing to argue Plan With Limits.",
+        ],
+      );
+      assert.match(
+        debateSource,
+        /Always include reason as one short, first-person, in-character comment on the assigned side/u,
+      );
+    } finally {
+      db.close();
+    }
   });
 
   it("freezes five unique cast-excluded jurors and fills missing seats with generic PRISM archetypes", async () => {
@@ -1977,7 +2144,7 @@ describe("Debate engine", () => {
         playerJudgeUsesPrism: true,
       });
       assert.equal(session.moderator.id, DEBATE_PLAYER_JUDGE_BOT_ID);
-      assert.equal(session.moderator.name, "Prism");
+      assert.equal(session.moderator.name, "Debater");
       assert.equal(session.moderator.role, "moderator");
       assert.equal(session.moderator.sideId, null);
       assert.deepEqual(session.moderator.powers, []);
@@ -2419,6 +2586,144 @@ describe("Debate engine", () => {
       );
       assert.equal(provider.correctionPrompt, "");
       assert.equal(session.stepKey, "opening_against");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("saves a non-interrupting audience-order gavel at the heard floor position", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtimeWith(new JudgeGavelProvider());
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        playerJudgeUsesPrism: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "audience-order:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "audience-order:opening",
+        },
+        debateRuntime,
+      );
+      const opening = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.stepKey === "opening_for" &&
+          event.speakerBotId === session.forAdvocate.id,
+      );
+      assert.ok(opening);
+      const heardCharacterCount = Math.max(
+        1,
+        Math.floor(opening.content.length / 2),
+      );
+      const previousStepKey = session.stepKey;
+      const previousStatus = session.status;
+      const previousCooldown = session.judgeGavelCooldownUntil;
+
+      assert.throws(
+        () =>
+          orderDebateAudience(db, "user-1", session.id, {
+            expectedRevision: session.revision,
+            idempotencyKey: "audience-order:invalid-offset",
+            eventId: opening.id,
+            heardCharacterCount: opening.content.length + 1,
+          }),
+        /heard floor position is invalid/u,
+      );
+
+      const ordered = orderDebateAudience(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "audience-order:strike",
+        eventId: opening.id,
+        heardCharacterCount,
+      });
+      assert.equal(ordered.status, previousStatus);
+      assert.equal(ordered.stepKey, previousStepKey);
+      assert.equal(ordered.judgeGavel, null);
+      assert.equal(ordered.judgeGavelCooldownUntil, previousCooldown);
+      assert.equal(
+        ordered.events.find((event) => event.id === opening.id)?.content,
+        opening.content,
+      );
+      assert.notEqual(
+        ordered.events.find((event) => event.id === opening.id)?.interrupted,
+        true,
+      );
+      const orderEvent = ordered.events.at(-1);
+      assert.partialDeepStrictEqual(orderEvent, {
+        kind: "judge_gavel",
+        speakerKind: "player",
+        speakerBotId: DEBATE_PLAYER_JUDGE_BOT_ID,
+        parentEventId: opening.id,
+        stepKey: "audience_order",
+        gavelReason: "audience_order",
+        gavelStrikeCount: 1,
+        gavelHeardCharacterCount: heardCharacterCount,
+        content: "The Judge restores order.",
+      });
+
+      const replay = orderDebateAudience(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "audience-order:strike",
+        eventId: opening.id,
+        heardCharacterCount,
+      });
+      assert.equal(replay.revision, ordered.revision);
+      assert.equal(
+        replay.events.filter(
+          (event) => event.gavelReason === "audience_order",
+        ).length,
+        1,
+      );
+
+      const advanced = await advanceDebateSession(
+        db,
+        "user-1",
+        replay.id,
+        {
+          expectedRevision: replay.revision,
+          idempotencyKey: "audience-order:advance",
+        },
+        debateRuntime,
+      );
+      assert.throws(
+        () =>
+          orderDebateAudience(db, "user-1", advanced.id, {
+            expectedRevision: advanced.revision,
+            idempotencyKey: "audience-order:stale-target",
+            eventId: opening.id,
+            heardCharacterCount,
+          }),
+        /already moved beyond that live floor/u,
+      );
+
+      const paused = pauseDebateSession(db, "user-1", advanced.id, {
+        expectedRevision: advanced.revision,
+        idempotencyKey: "audience-order:pause",
+      });
+      assert.throws(
+        () =>
+          orderDebateAudience(db, "user-1", paused.id, {
+            expectedRevision: paused.revision,
+            idempotencyKey: "audience-order:paused",
+            eventId: null,
+            heardCharacterCount: 0,
+          }),
+        /gavel is unavailable/u,
+      );
     } finally {
       db.close();
     }
@@ -4059,6 +4364,71 @@ describe("Debate engine", () => {
     }
   });
 
+  it("grounds Turnabout objections in an object exhibit without treating its visual as fact", async () => {
+    const db = createTestDb();
+    const provider = new ExhibitTurnaboutProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createTurnaboutForRole(db, "judge", debateRuntime);
+      let mutation = 0;
+      while (session.stepKey !== "turnabout_action") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `turnabout-exhibit-setup:${mutation}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.formatState.format, "turnabout");
+      if (session.formatState.format !== "turnabout") {
+        assert.fail("Turnabout state should stay discriminated.");
+      }
+      const statementId = session.formatState.activeStatementId;
+      assert.ok(statementId);
+      session = await submitDebateTurnaboutAction(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "turnabout-exhibit-evidence:0001",
+          action: "present_evidence",
+          statementId,
+          evidenceSourceId: "exhibit-1",
+        },
+        debateRuntime,
+      );
+
+      assert.match(provider.validationPrompt, /Frozen evidence exhibit-1/u);
+      assert.match(provider.validationPrompt, /Rusty spoon/u);
+      assert.match(provider.validationPrompt, /The handle is bent\./u);
+      assert.doesNotMatch(provider.validationPrompt, /🥄|imageId|visualKind/u);
+      assert.equal(session.formatState.format, "turnabout");
+      assert.equal(
+        session.formatState.format === "turnabout"
+          ? session.formatState.contradictions.at(-1)?.grounded
+          : false,
+        true,
+      );
+      assert.ok(
+        session.events.some(
+          (event) =>
+            event.kind === "evidence" &&
+            event.evidenceSourceId === "exhibit-1" &&
+            event.sourceIds.includes("exhibit-1") &&
+            event.content.includes("[[exhibit:exhibit-1]]"),
+        ),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("overrules ungrounded contradiction output without publishing fabricated markers", async () => {
     const db = createTestDb();
     const debateRuntime = runtimeWith(new UngroundedTurnaboutProvider());
@@ -4609,7 +4979,7 @@ describe("Debate engine", () => {
             ? session.forAdvocate
             : session.againstAdvocate;
         assert.equal(playerSeat.id, DEBATE_PLAYER_PARTICIPANT_BOT_ID);
-        assert.equal(playerSeat.name, "Prism");
+        assert.equal(playerSeat.name, "Debater");
         assert.equal(playerSeat.role, "advocate");
         assert.equal(playerSeat.sideId, playerSideId);
         assert.deepEqual(playerSeat.powers, []);
@@ -6312,6 +6682,13 @@ describe("Debate engine", () => {
         devilRuntime,
       );
       assert.ok(checks.every((check) => check.status === "devils_advocate"));
+      assert.ok(
+        checks.every(
+          (check) =>
+            check.reason ===
+            "This position conflicts with my ordinary convictions.",
+        ),
+      );
       const created = createDebateSession(
         db,
         "user-1",
@@ -6427,6 +6804,13 @@ describe("Debate engine", () => {
         decliningRuntime,
       );
       assert.ok(checks.every((check) => check.status === "decline"));
+      assert.ok(
+        checks.every(
+          (check) =>
+            check.reason ===
+            "This assignment crosses a defining authored boundary.",
+        ),
+      );
       assert.throws(
         () =>
           createDebateSession(

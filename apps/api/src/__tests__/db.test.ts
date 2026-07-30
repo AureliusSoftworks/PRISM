@@ -245,6 +245,7 @@ describe("createDatabase bot export hash migration", () => {
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
       db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
       db.exec("ALTER TABLE users DROP COLUMN atmosphere_style;");
+      db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_enabled;");
       db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_id;");
       db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_style;");
       db.exec(
@@ -305,6 +306,18 @@ describe("createDatabase bot export hash migration", () => {
         userColumns.find((column) => column.name === "atmosphere_style")
           ?.dflt_value,
         "'prismatic'",
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "hub_atmosphere_enabled")
+          ?.dflt_value,
+        "1",
+      );
+      assert.equal(
+        (reopened
+          .prepare("SELECT hub_atmosphere_enabled FROM users WHERE id = ?")
+          .get("user-1") as { hub_atmosphere_enabled: number })
+          .hub_atmosphere_enabled,
+        1,
       );
       assert.ok(
         userColumns.some((column) => column.name === "hub_atmosphere_image_id"),

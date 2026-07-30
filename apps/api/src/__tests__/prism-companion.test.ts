@@ -97,6 +97,46 @@ test("explains the current screen controls without needing pixels or DOM", () =>
   assert.match(prompt, /not a screenshot or DOM capture/u);
 });
 
+test("grounds Debate setup help in a bounded unsaved draft and authorized cast", () => {
+  const db = fixture();
+  const context = buildPrismCompanionAuthoritativeContext(
+    db,
+    "u1",
+    "Jared",
+    {
+      surfaceId: "debate",
+      botIds: ["owned", "secret"],
+      debateDraft: {
+        setupMode: "advanced",
+        studioPanel: "evidence",
+        format: "turnabout",
+        formality: "heated",
+        playerRole: "judge",
+        playerSideId: "for",
+        juryEnabled: false,
+        moderatorTitle: "The Forum",
+        topic: "Museum ethics",
+        motion: "Museums should return contested artifacts.",
+        forLabel: "Return",
+        forBrief: "Defend return.",
+        againstLabel: "Retain",
+        againstBrief: "Defend stewardship.",
+        exhibitAdjective: "Dusty",
+        exhibitObject: "ledger",
+        exhibitObservation: "Several pages are visibly torn.",
+        evidenceItemCount: 1,
+      },
+    },
+  );
+  assert.deepEqual(context.bots.map((bot) => bot.name), ["Lux"]);
+  const prompt = prismCompanionSystemPrompt(context);
+  assert.match(prompt, /player is in the pre-proceeding Studio/u);
+  assert.match(prompt, /unsaved, editable workbench draft/u);
+  assert.match(prompt, /Draft motion: "Museums should return/u);
+  assert.match(prompt, /Current object exhibit draft: "Dusty ledger"/u);
+  assert.match(prompt, /without claiming any candidate was accepted, saved, or frozen/u);
+});
+
 test("keeps ordinary requests answer-first instead of trapping them in the current surface", () => {
   const db = fixture();
   const prompt = prismCompanionSystemPrompt(

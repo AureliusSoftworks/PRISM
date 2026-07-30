@@ -502,30 +502,56 @@ describe("backup atmosphere style", () => {
       db.prepare(
         `UPDATE users
             SET atmosphere_style = 'dreamscape',
+                hub_atmosphere_enabled = 0,
                 hub_atmosphere_image_id = 'old-atmosphere',
                 hub_atmosphere_image_style = 'minimal'
           WHERE id = ?`,
       ).run("user-1");
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.equal(snapshot.settings?.atmosphereStyle, "dreamscape");
+      assert.equal(snapshot.settings?.hubAtmosphereEnabled, false);
 
-      db.prepare("UPDATE users SET atmosphere_style = 'minimal' WHERE id = ?").run(
-        "user-1",
-      );
+      db.prepare(
+        "UPDATE users SET atmosphere_style = 'minimal', hub_atmosphere_enabled = 1 WHERE id = ?",
+      ).run("user-1");
       importUserSnapshot(db, "user-1", snapshot, userKey);
       const restored = db
         .prepare(
-          `SELECT atmosphere_style, hub_atmosphere_image_id, hub_atmosphere_image_style
+          `SELECT atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style
              FROM users WHERE id = ?`,
         )
         .get("user-1") as {
         atmosphere_style: string;
+        hub_atmosphere_enabled: number;
         hub_atmosphere_image_id: string | null;
         hub_atmosphere_image_style: string | null;
       };
       assert.equal(restored.atmosphere_style, "dreamscape");
+      assert.equal(restored.hub_atmosphere_enabled, 0);
       assert.equal(restored.hub_atmosphere_image_id, null);
       assert.equal(restored.hub_atmosphere_image_style, null);
+
+      const legacySettings = { ...snapshot.settings };
+      delete legacySettings.hubAtmosphereEnabled;
+      db.prepare(
+        "UPDATE users SET hub_atmosphere_enabled = 0 WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT hub_atmosphere_enabled FROM users WHERE id = ?",
+            )
+            .get("user-1") as { hub_atmosphere_enabled: number }
+        ).hub_atmosphere_enabled,
+        1,
+      );
     });
   });
 });

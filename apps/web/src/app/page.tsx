@@ -145,7 +145,11 @@ import {
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { CoffeeAtmosphereScene } from "./CoffeeAtmosphereScene";
-import { DebateExperience, type DebateUtterance } from "./DebateExperience";
+import {
+  DebateExperience,
+  type DebateCompanionContext,
+  type DebateUtterance,
+} from "./DebateExperience";
 import {
   DEFAULT_DEBATE_JURY_SETTINGS,
   DEBATE_JURY_DECISION_TIMEOUT_MAX_MS,
@@ -157,7 +161,11 @@ import {
 } from "./debateJurySettings";
 import { debateJudgeGavelVoiceMood } from "./debateJudgeGavel";
 import { debateAudioEnabled } from "./debatePresentation";
-import { BotPickerGrid, BotPickerTile } from "./BotPicker";
+import {
+  BotPickerGrid,
+  BotPickerTile,
+  sortBotPickerItems,
+} from "./BotPicker";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
 import {
   coffeeGroupAtmosphereImageUrl,
@@ -10630,6 +10638,7 @@ interface UserSettings {
   theme: Theme;
   graphicsQuality: GraphicsQuality;
   atmosphereStyle: HubAtmosphereStyle;
+  hubAtmosphereEnabled: boolean;
   hubAtmosphereImageId: string | null;
   hubAtmosphereImageStyle: HubAtmosphereStyle | null;
   startupPreference: PrismStartupPreference;
@@ -22394,24 +22403,24 @@ function ComposerBotPicker({
     ? ({ "--bot-color": selectedAccent } as React.CSSProperties)
     : undefined;
   const filtersEnabled = enableFilters && !disabled;
-  const colorSortedBots = useMemo(
+  const orderedBots = useMemo(
     () =>
-      filtersEnabled
-        ? [...bots].sort((a, b) =>
-            compareBotsByColor(a, b, resolvedTheme, false),
-          )
-        : bots,
-    [bots, filtersEnabled, resolvedTheme],
+      sortBotPickerItems(
+        bots,
+        filtersEnabled && hueFilterCenter !== null,
+        (a, b) => compareBotsByColor(a, b, resolvedTheme, false),
+      ),
+    [bots, filtersEnabled, hueFilterCenter, resolvedTheme],
   );
   const normalizedBotNameFilter = botNameFilter.trim().toLocaleLowerCase();
   const visibleBots = useMemo(() => {
     if (!filtersEnabled || normalizedBotNameFilter.length === 0) {
-      return colorSortedBots;
+      return orderedBots;
     }
-    return colorSortedBots.filter((bot) =>
+    return orderedBots.filter((bot) =>
       bot.name.toLocaleLowerCase().includes(normalizedBotNameFilter),
     );
-  }, [colorSortedBots, filtersEnabled, normalizedBotNameFilter]);
+  }, [filtersEnabled, normalizedBotNameFilter, orderedBots]);
   const showFilterControls = filtersEnabled && bots.length > 0;
   const showHueLensInMenu =
     showFilterControls && !!onHueChange && hueLensAvailable;
@@ -22441,25 +22450,8 @@ function ComposerBotPicker({
     placement,
   );
 
-  const randomizeHueOnOpen = useCallback(() => {
-    if (!filtersEnabled || !onHueChange || !hueLensAvailable) {
-      return;
-    }
-    const populatedBuckets = computeHueBuckets(bots).filter(
-      (bucket) => bucket.count > 0,
-    );
-    if (populatedBuckets.length === 0) return;
-    const nextBucket =
-      populatedBuckets[Math.floor(Math.random() * populatedBuckets.length)];
-    onHueChange(hueLensPositionForHue(nextBucket.center));
-  }, [bots, filtersEnabled, hueLensAvailable, onHueChange]);
-
   const toggleMenu = (): void => {
-    const opening = !open;
-    if (opening) {
-      randomizeHueOnOpen();
-    }
-    setOpen(opening);
+    setOpen((current) => !current);
   };
 
   // Outside-click closes. Using mousedown (not click) so a click that
@@ -29289,6 +29281,7 @@ interface ZenLiveBotMannequinProps {
   avatarSfx?: BotAvatarSfxPlayback | null;
   avatarSfxState?: BotAvatarSfxState;
   inkTalking?: boolean;
+  blinkEnabled?: boolean;
   blinkWhileTalking?: boolean;
   mouthShape: ZenLiveBotMouthShape;
   moodHint: NonNullable<ZenLiveBotActionState["moodHint"]>;
@@ -29383,6 +29376,7 @@ function ZenLiveBotMannequin({
   avatarSfx = null,
   avatarSfxState,
   inkTalking,
+  blinkEnabled = false,
   blinkWhileTalking = false,
   mouthShape,
   moodHint,
@@ -29599,7 +29593,7 @@ function ZenLiveBotMannequin({
         {thinkingSpinnerActive ? (
           <span className={styles.zenLiveBotPresenceThinkingGlyphAnchor}>
             <CoffeeSeatPlateEmoji
-              enabled={detailLevel === "full"}
+              enabled={detailLevel === "full" || blinkEnabled}
               isTalking={false}
               scheduleKey={thinkingScheduleKey ?? `${scheduleKey}-thinking`}
               showThinkingSpinner
@@ -29656,7 +29650,7 @@ function ZenLiveBotMannequin({
             }
           >
             <CoffeeSeatPlateEmoji
-              enabled={detailLevel === "full"}
+              enabled={detailLevel === "full" || blinkEnabled}
               isTalking={isTalking}
               mouthShape={displayedMouthShape}
               scheduleKey={scheduleKey}
@@ -42627,6 +42621,8 @@ function HomeContent(): React.JSX.Element {
     string[]
   >([]);
   const [debateLiveSessionActive, setDebateLiveSessionActive] = useState(false);
+  const [debateCompanionContext, setDebateCompanionContext] =
+    useState<DebateCompanionContext | null>(null);
   const [debateModelChoiceByProvider, setDebateModelChoiceByProvider] =
     useState<Record<Provider, string>>(
       createDefaultChatModelChoiceByProvider(),
@@ -43094,9 +43090,7 @@ function HomeContent(): React.JSX.Element {
     useState<DebateJurySettings>(DEFAULT_DEBATE_JURY_SETTINGS);
   const debateJurySettingsScopeId = user?.id ?? "signed-out";
   useEffect(() => {
-    setDebateJurySettings(
-      readDebateJurySettings(debateJurySettingsScopeId),
-    );
+    setDebateJurySettings(readDebateJurySettings(debateJurySettingsScopeId));
   }, [debateJurySettingsScopeId]);
   const updateDebateJurySettings = useCallback(
     (patch: Partial<DebateJurySettings>): void => {
@@ -43464,7 +43458,6 @@ function HomeContent(): React.JSX.Element {
   const [desktopFirstRunAutoSetupSteps, setDesktopFirstRunAutoSetupSteps] =
     useState<string[]>([]);
   const desktopFirstRunAutoSetupAttemptedRef = useRef(false);
-  const [hubAtmosphereVisible, setHubAtmosphereVisible] = useState(false);
   const [hubAtmosphereGenerationState, setHubAtmosphereGenerationState] =
     useState<"idle" | "generating" | "error">("idle");
   const hubAtmosphereGenerationInFlightRef = useRef(false);
@@ -48892,7 +48885,12 @@ function HomeContent(): React.JSX.Element {
       requestedStyle: HubAtmosphereStyle,
       options: { force?: boolean } = {},
     ): Promise<void> => {
-      if (!user || !settings || hubAtmosphereGenerationInFlightRef.current) {
+      if (
+        !user ||
+        !settings ||
+        !settings.hubAtmosphereEnabled ||
+        hubAtmosphereGenerationInFlightRef.current
+      ) {
         return;
       }
       const atmosphereStyle = normalizeHubAtmosphereStyle(requestedStyle);
@@ -48939,7 +48937,6 @@ function HomeContent(): React.JSX.Element {
               }
             : previous,
         );
-        setHubAtmosphereVisible(false);
         setHubAtmosphereGenerationState("idle");
       } catch (error) {
         setHubAtmosphereGenerationState("error");
@@ -49125,6 +49122,7 @@ function HomeContent(): React.JSX.Element {
     if (
       !user ||
       !settings ||
+      !settings.hubAtmosphereEnabled ||
       livingShellProgressHydratedUserRef.current !== user.id ||
       onboardingState.stage !== "complete" ||
       panel === "settings" ||
@@ -52605,7 +52603,9 @@ function HomeContent(): React.JSX.Element {
           aria-disabled={disabled ? "true" : undefined}
           aria-haspopup="menu"
           aria-expanded={!disabled && voiceModeSelectorOpen}
-          aria-controls={!disabled && voiceModeSelectorOpen ? menuId : undefined}
+          aria-controls={
+            !disabled && voiceModeSelectorOpen ? menuId : undefined
+          }
           title={disabled ? disabledReason : undefined}
           disabled={disabled}
           onClick={() => setVoiceModeSelectorOpen((open) => !open)}
@@ -62352,23 +62352,46 @@ function HomeContent(): React.JSX.Element {
     [botcastVoiceTimeoutText, requestBotcastEnglishClip],
   );
   const prefetchBotcastUtterance = useCallback(
-    (message: BotcastMessage, botSummary: BotcastBotSummary): void => {
+    (
+      message: BotcastMessage,
+      botSummary: BotcastBotSummary,
+      playbackSurface: "signal" | "debate" = "signal",
+    ): Promise<EnglishVoiceSynthesisClip | null> | null => {
       const voiceSelection = voicePlaybackSelectionRef.current;
       if (
         !settings ||
         voiceSelection.voiceMode !== "english" ||
-        settings.voiceVolume <= 0 ||
-        signalVoiceClipCacheRef.current.has(message.id)
+        settings.voiceVolume <= 0
       )
-        return;
+        return null;
+      const cached = signalVoiceClipCacheRef.current.get(message.id);
+      if (cached) return cached;
       const bot = bots.find((candidate) => candidate.id === botSummary.id);
-      if (!bot) return;
-      const profile = resolveBotIdentityMirrorVoiceV1(
-        botSummary.identityMirrorState,
-        bot.authored_audio_voice_profile,
-        bot.audio_voice_profile_override,
-      );
-      if (!profile.enabled || !voiceSpokenText(message.content)) return;
+      const frozenVoiceProfile =
+        (
+          botSummary as BotcastBotSummary & {
+            frozenVoiceProfile?: BotAudioVoiceProfileV1 | null;
+          }
+        ).frozenVoiceProfile ?? null;
+      const profile =
+        frozenVoiceProfile ??
+        (botSummary.producerGuest
+          ? coffeePlayerPlaybackProfile(
+              settings.prismDefaultBotAudioVoiceProfile,
+            )
+          : bot
+            ? resolveBotIdentityMirrorVoiceV1(
+                botSummary.identityMirrorState,
+                bot.authored_audio_voice_profile,
+                bot.audio_voice_profile_override,
+              )
+            : null);
+      const normalizedProfile = profile
+        ? normalizeBotAudioVoiceProfileV1(profile)
+        : null;
+      if (!normalizedProfile?.enabled || !voiceSpokenText(message.content)) {
+        return null;
+      }
       // Prefetch only the preferred pack. Caching a builtin timeout fallback
       // would force the closing line onto the wrong voice with no retry.
       const preferredController = new AbortController();
@@ -62378,10 +62401,11 @@ function HomeContent(): React.JSX.Element {
       );
       const clip = requestBotcastEnglishClip(
         message,
-        profile,
-        bot.online_enabled !== 0,
+        normalizedProfile,
+        botSummary.online_enabled !== 0,
         voiceSelection.englishVoiceEngine,
         preferredController.signal,
+        playbackSurface,
       )
         .then((resolved) => {
           if (
@@ -62403,11 +62427,13 @@ function HomeContent(): React.JSX.Element {
           window.clearTimeout(timeout);
         });
       signalVoiceClipCacheRef.current.set(message.id, clip);
+      return clip;
     },
     [
       bots,
       botcastVoiceTimeoutText,
       requestBotcastEnglishClip,
+      settings?.prismDefaultBotAudioVoiceProfile,
       settings?.voiceVolume,
     ],
   );
@@ -80489,8 +80515,9 @@ function HomeContent(): React.JSX.Element {
       await refreshSecondaryOllamaStatus();
       await refreshComfyUiStatus();
       if (
-        !settings.hubAtmosphereImageId ||
-        settings.hubAtmosphereImageStyle !== settings.atmosphereStyle
+        settings.hubAtmosphereEnabled &&
+        (!settings.hubAtmosphereImageId ||
+          settings.hubAtmosphereImageStyle !== settings.atmosphereStyle)
       ) {
         void requestHubAtmosphereGeneration(settings.atmosphereStyle, {
           force: true,
@@ -80714,7 +80741,7 @@ function HomeContent(): React.JSX.Element {
     const selectedOption =
       nextChoice === AUTO_MODEL_CHOICE
         ? null
-        : options.find((option) => option.id === nextChoice) ?? null;
+        : (options.find((option) => option.id === nextChoice) ?? null);
     const targetProvider: Provider =
       selectedOption?.provider ??
       (responseMode === "local"
@@ -94835,9 +94862,10 @@ function HomeContent(): React.JSX.Element {
                 </div>
                 <p>
                   Your first Home scene starts rendering quietly while you
-                  finish setup. Reveal it from the Atmosphere symbol when you
-                  enter PRISM. If generation is unavailable, setup continues and
-                  the symbol can try again later.
+                  finish setup, then appears automatically when you enter
+                  PRISM. You can disable it later in Appearance settings. If
+                  generation is unavailable, setup continues and Appearance
+                  can try again later.
                 </p>
               </div>
             ) : null}
@@ -94952,7 +94980,8 @@ function HomeContent(): React.JSX.Element {
                 </p>
                 <p>
                   Debate begins in Basic setup: name the idea, choose two
-                  debaters, optionally title the presiding voice, and let Prism
+                  debaters, tune Rowdiness from University Union to Daytime
+                  Showdown, optionally title the presiding voice, and let Prism
                   prepare the balanced motion and side briefs. Advanced keeps
                   Forum, Turnabout, formality, roles, and Jury controls
                   available whenever you want them.
@@ -96826,7 +96855,10 @@ function HomeContent(): React.JSX.Element {
       (targetGroup?.botIds ?? []).filter((botId) => existingBotIds.has(botId)),
     );
     const eligibleBots = pickBotMode
-      ? sortedPanelBots.filter((bot) => !targetGroupBotIds.has(bot.id))
+      ? sortBotPickerItems(
+          sortedPanelBots.filter((bot) => !targetGroupBotIds.has(bot.id)),
+          false,
+        )
       : [];
     const selectedBotId = pickBotMode
       ? eligibleBots.some((bot) => bot.id === dialog.botId)
@@ -97989,9 +98021,13 @@ function HomeContent(): React.JSX.Element {
       return {
         surfaceId: "debate",
         botIds: (
+          debateCompanionContext?.botIds ??
           activeBotLibraryGroupFilter?.botIds ??
           (activeBot?.id ? [activeBot.id] : [])
         ).slice(0, 5),
+        ...(debateCompanionContext
+          ? { debateDraft: debateCompanionContext.draft }
+          : {}),
       };
     }
     if (activeBotLibraryGroupFilter) {
@@ -99216,7 +99252,7 @@ function HomeContent(): React.JSX.Element {
           ? "botcast"
           : view === "debate"
             ? "debate"
-          : "connections";
+            : "connections";
     const actionDisabled = (action: UniversalNavbarAction): boolean =>
       disabled || disabledActions[action] === true;
     const actionTooltip = (
@@ -99267,10 +99303,6 @@ function HomeContent(): React.JSX.Element {
       !zenPersonaBot &&
       !activeBotLibraryGroupFilter,
     );
-    const hubAtmosphereImageReady = Boolean(
-      settings?.hubAtmosphereImageId &&
-      settings.hubAtmosphereImageStyle === settings.atmosphereStyle,
-    );
     const zenAtmosphereHasConversation = Boolean(
       detail && detail.mode === "zen" && selectedId,
     );
@@ -99284,56 +99316,25 @@ function HomeContent(): React.JSX.Element {
       zenWallpaper?.status === "error" && zenWallpaperError
         ? zenWallpaperError
         : null;
-    const zenAtmosphereDisabled = hubAtmosphereSurface
-      ? actionDisabled("atmosphere") ||
-        hubAtmosphereGenerationState === "generating"
-      : actionDisabled("atmosphere") ||
-        zenAtmosphereBusy ||
-        !zenAtmosphereHasConversation;
-    const zenAtmosphereTooltip = hubAtmosphereSurface
-      ? hubAtmosphereGenerationState === "generating"
-        ? "Preparing your Home Atmosphere"
-        : hubAtmosphereImageReady
-          ? hubAtmosphereVisible
-            ? "Hide Home Atmosphere"
-            : "Reveal Home Atmosphere"
-          : hubAtmosphereGenerationState === "error"
-            ? "Try Home Atmosphere again"
-            : "Prepare Home Atmosphere"
-      : !zenAtmosphereHasConversation
-        ? "Send a Zen message before enabling Atmosphere"
-        : zenAtmosphereBusy
-          ? "Generating Zen Atmosphere"
-          : zenAtmosphereError
-            ? `Atmosphere failed: ${zenAtmosphereError}`
-            : zenAtmosphereEnabled
-              ? "Turn off Zen Atmosphere"
-              : "Turn on Zen Atmosphere";
-    const zenAtmosphereState = hubAtmosphereSurface
-      ? hubAtmosphereGenerationState === "generating"
-        ? "generating"
-        : hubAtmosphereVisible && hubAtmosphereImageReady
-          ? "on"
-          : hubAtmosphereGenerationState === "error"
-            ? "unavailable"
-            : "off"
+    const zenAtmosphereDisabled =
+      actionDisabled("atmosphere") ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation;
+    const zenAtmosphereTooltip = !zenAtmosphereHasConversation
+      ? "Send a Zen message before enabling Atmosphere"
       : zenAtmosphereBusy
-        ? "generating"
-        : zenAtmosphereEnabled
-          ? "on"
-          : "off";
+        ? "Generating Zen Atmosphere"
+        : zenAtmosphereError
+          ? `Atmosphere failed: ${zenAtmosphereError}`
+          : zenAtmosphereEnabled
+            ? "Turn off Zen Atmosphere"
+            : "Turn on Zen Atmosphere";
+    const zenAtmosphereState = zenAtmosphereBusy
+      ? "generating"
+      : zenAtmosphereEnabled
+        ? "on"
+        : "off";
     const toggleZenAtmosphere = (): void => {
-      if (hubAtmosphereSurface) {
-        if (hubAtmosphereImageReady) {
-          setHubAtmosphereVisible((visible) => !visible);
-        } else {
-          void requestHubAtmosphereGeneration(
-            normalizeHubAtmosphereStyle(settings?.atmosphereStyle),
-            { force: true },
-          );
-        }
-        return;
-      }
       if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
       const nextEnabled = !zenAtmosphereEnabled;
       if (nextEnabled) {
@@ -99432,18 +99433,14 @@ function HomeContent(): React.JSX.Element {
         >
           <BookmarkGlyph />
         </button>
-        {showAtmosphere ? (
+        {showAtmosphere && !hubAtmosphereSurface ? (
           <button
             type="button"
             className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
             data-tutorial-target="zen-atmosphere"
             onClick={() => runAction(toggleZenAtmosphere)}
             aria-label={zenAtmosphereTooltip}
-            aria-pressed={
-              hubAtmosphereSurface
-                ? hubAtmosphereVisible && hubAtmosphereImageReady
-                : zenAtmosphereEnabled
-            }
+            aria-pressed={zenAtmosphereEnabled}
             data-glyph-tooltip={zenAtmosphereTooltip}
             data-atmosphere-state={zenAtmosphereState}
             disabled={zenAtmosphereDisabled}
@@ -99727,10 +99724,6 @@ function HomeContent(): React.JSX.Element {
       !zenPersonaBot &&
       !activeBotLibraryGroupFilter,
     );
-    const hubAtmosphereImageReady = Boolean(
-      settings?.hubAtmosphereImageId &&
-      settings.hubAtmosphereImageStyle === settings.atmosphereStyle,
-    );
     const zenAtmosphereHasConversation = Boolean(
       detail && detail.mode === "zen" && selectedId,
     );
@@ -99744,42 +99737,20 @@ function HomeContent(): React.JSX.Element {
       zenWallpaper?.status === "error" && zenWallpaperError
         ? zenWallpaperError
         : null;
-    const zenAtmosphereDisabled = hubAtmosphereSurface
-      ? headerActionsDisabled || hubAtmosphereGenerationState === "generating"
-      : headerActionsDisabled ||
-        zenAtmosphereBusy ||
-        !zenAtmosphereHasConversation;
-    const zenAtmosphereTooltip = hubAtmosphereSurface
-      ? hubAtmosphereGenerationState === "generating"
-        ? "Preparing your Home Atmosphere"
-        : hubAtmosphereImageReady
-          ? hubAtmosphereVisible
-            ? "Hide Home Atmosphere"
-            : "Reveal Home Atmosphere"
-          : hubAtmosphereGenerationState === "error"
-            ? "Try Home Atmosphere again"
-            : "Prepare Home Atmosphere"
-      : !zenAtmosphereHasConversation
-        ? "Send a Zen message before enabling Atmosphere"
-        : zenAtmosphereBusy
-          ? "Generating Zen Atmosphere"
-          : zenAtmosphereError
-            ? `Atmosphere failed: ${zenAtmosphereError}`
-            : zenAtmosphereEnabled
-              ? "Turn off Zen Atmosphere"
-              : "Turn on Zen Atmosphere";
+    const zenAtmosphereDisabled =
+      headerActionsDisabled ||
+      zenAtmosphereBusy ||
+      !zenAtmosphereHasConversation;
+    const zenAtmosphereTooltip = !zenAtmosphereHasConversation
+      ? "Send a Zen message before enabling Atmosphere"
+      : zenAtmosphereBusy
+        ? "Generating Zen Atmosphere"
+        : zenAtmosphereError
+          ? `Atmosphere failed: ${zenAtmosphereError}`
+          : zenAtmosphereEnabled
+            ? "Turn off Zen Atmosphere"
+            : "Turn on Zen Atmosphere";
     const toggleZenAtmosphere = () => {
-      if (hubAtmosphereSurface) {
-        if (hubAtmosphereImageReady) {
-          setHubAtmosphereVisible((visible) => !visible);
-        } else {
-          void requestHubAtmosphereGeneration(
-            normalizeHubAtmosphereStyle(settings?.atmosphereStyle),
-            { force: true },
-          );
-        }
-        return;
-      }
       if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
       const nextEnabled = !zenAtmosphereEnabled;
       if (nextEnabled) {
@@ -99985,20 +99956,13 @@ function HomeContent(): React.JSX.Element {
         onSelect: handleRefreshPage,
       },
     );
-    if (showZenAtmosphereButton) {
+    if (showZenAtmosphereButton && !hubAtmosphereSurface) {
       overflowEntries.push({
         id: "atmosphere",
         kind: "toggle",
         icon: <Waves />,
-        label:
-          hubAtmosphereSurface && hubAtmosphereGenerationState === "generating"
-            ? "Preparing Home Atmosphere"
-            : zenAtmosphereBusy
-              ? "Generating Atmosphere"
-              : "Atmosphere",
-        checked: hubAtmosphereSurface
-          ? hubAtmosphereVisible && hubAtmosphereImageReady
-          : zenAtmosphereEnabled,
+        label: zenAtmosphereBusy ? "Generating Atmosphere" : "Atmosphere",
+        checked: zenAtmosphereEnabled,
         disabled: zenAtmosphereDisabled,
         disabledReason: zenAtmosphereDisabled
           ? zenAtmosphereTooltip
@@ -108340,9 +108304,7 @@ function HomeContent(): React.JSX.Element {
                       >
                         <header className={styles.settingsSectionHeader}>
                           <div>
-                            <span className={styles.settingsEyebrow}>
-                              Jury
-                            </span>
+                            <span className={styles.settingsEyebrow}>Jury</span>
                             <h4 id="debate-jury-settings-title">
                               Deliberation handoff
                             </h4>
@@ -108355,9 +108317,9 @@ function HomeContent(): React.JSX.Element {
                             >
                               When formal deliberation begins, Debate pauses for
                               a short choice. Auto keeps the current camera and
-                              lets the Jury work quickly off-camera;
-                              Participate opens the Jury chamber when your role
-                              allows it; Skip moves directly to final ballots.
+                              lets the Jury work quickly off-camera; Participate
+                              opens the Jury chamber when your role allows it;
+                              Skip moves directly to final ballots.
                             </PanelSectionInfo>
                           </div>
                         </header>
@@ -108428,16 +108390,14 @@ function HomeContent(): React.JSX.Element {
                       <div className={styles.settingsDockRow}>
                         <span>
                           Saved for this account on this device. Jury camera
-                          cuts remain manual; Judge / Moderator sessions stay
-                          on Auto.
+                          cuts remain manual; Judge / Moderator sessions stay on
+                          Auto.
                         </span>
                         <div className={styles.settingsDockActions}>
                           <button
                             type="button"
                             className={styles.linkButton}
-                            onClick={() =>
-                              resetSingleModeTutorial("debate")
-                            }
+                            onClick={() => resetSingleModeTutorial("debate")}
                           >
                             Reset Debate tutorial
                           </button>
@@ -108562,6 +108522,70 @@ function HomeContent(): React.JSX.Element {
                               </div>
                             </header>
                             <div className={styles.settingsSubsectionHeading}>
+                              <strong>Home wallpaper</strong>
+                              <small>
+                                Enabled by default for your whole account.
+                              </small>
+                            </div>
+                            <div
+                              className={styles.settingsAtmosphereControl}
+                              data-home-atmosphere-settings="true"
+                            >
+                              <label
+                                className={`${styles.checkbox} ${styles.settingsInlineToggle}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={settings.hubAtmosphereEnabled}
+                                  onChange={(event) =>
+                                    setSettings((previous) =>
+                                      previous
+                                        ? {
+                                            ...previous,
+                                            hubAtmosphereEnabled:
+                                              event.target.checked,
+                                          }
+                                        : previous,
+                                    )
+                                  }
+                                />
+                                <span>
+                                  <strong>Home Atmosphere wallpaper</strong>
+                                  <small>
+                                    Turn this off to hide the wallpaper and
+                                    pause automatic generation. Your cached
+                                    scene is kept.
+                                  </small>
+                                </span>
+                              </label>
+                              <button
+                                type="button"
+                                className={styles.linkButton}
+                                data-home-atmosphere-action="regenerate"
+                                disabled={
+                                  busy ||
+                                  !settings.hubAtmosphereEnabled ||
+                                  hubAtmosphereGenerationState === "generating"
+                                }
+                                onClick={() =>
+                                  void requestHubAtmosphereGeneration(
+                                    settings.atmosphereStyle,
+                                    { force: true },
+                                  )
+                                }
+                              >
+                                {hubAtmosphereGenerationState === "generating"
+                                  ? "Preparing wallpaper…"
+                                  : hubAtmosphereGenerationState === "error"
+                                    ? "Retry generation"
+                                    : settings.hubAtmosphereImageId &&
+                                        settings.hubAtmosphereImageStyle ===
+                                          settings.atmosphereStyle
+                                      ? "Regenerate wallpaper"
+                                      : "Generate wallpaper"}
+                              </button>
+                            </div>
+                            <div className={styles.settingsSubsectionHeading}>
                               <strong>Atmosphere style</strong>
                               <small>
                                 Changing this quietly prepares a new Home scene
@@ -108588,7 +108612,6 @@ function HomeContent(): React.JSX.Element {
                                       settings.atmosphereStyle === option.id
                                     }
                                     onChange={() => {
-                                      setHubAtmosphereVisible(false);
                                       setSettings((previous) =>
                                         previous
                                           ? {
@@ -124817,10 +124840,12 @@ function HomeContent(): React.JSX.Element {
                   : layoutIndex > (coffeeSeatLayoutCount - 1) / 2
                     ? "right"
                     : coffeeSeatStableHash(
-                        `${coffeeConversation?.id ?? "coffee"}:${bot.id}:size-edge`,
-                      ) % 2 === 0
-                       ? "left"
-                       : "right";
+                          `${coffeeConversation?.id ?? "coffee"}:${bot.id}:size-edge`,
+                        ) %
+                          2 ===
+                        0
+                      ? "left"
+                      : "right";
               const seatDeadAirAsideTalking =
                 activeCoffeeDeadAirAside?.commentatorBotId === bot.id &&
                 !seatPowerMuted;
@@ -129437,6 +129462,71 @@ function HomeContent(): React.JSX.Element {
       systemPrompt: bot.system_prompt,
       hardMuted: botPowerIsMutedV1(bot.powers),
     }));
+    const prepareDebateUtterance = async (
+      utterance: DebateUtterance,
+    ): Promise<void> => {
+      if (voicePlaybackSelectionRef.current.voiceMode !== "english") return;
+      const usePlayerVoice = utterance.player || utterance.playerVoice;
+      const speakerBot = utterance.speaker
+        ? bots.find((candidate) => candidate.id === utterance.speaker?.id)
+        : null;
+      const voiceBot = utterance.voiceSourceBotId
+        ? bots.find((candidate) => candidate.id === utterance.voiceSourceBotId)
+        : speakerBot;
+      const speakerPowers =
+        utterance.speaker?.powers ?? speakerBot?.powers ?? [];
+      const speakerId =
+        voiceBot?.id ??
+        (usePlayerVoice ? "__debate_player__" : "__debate_prism_juror__");
+      const usePrismDefaultVoice =
+        usePlayerVoice || (!speakerBot && utterance.speaker !== null);
+      const clip = prefetchBotcastUtterance(
+        {
+          id: utterance.event.id,
+          episodeId: utterance.sessionId,
+          speakerRole: utterance.player ? "guest" : "host",
+          botId: speakerId,
+          content: utterance.spokenText,
+          stageActionText: null,
+          voicePerformanceText:
+            utterance.voicePerformanceText ??
+            (usePlayerVoice
+              ? voicePerformanceTextFromActionCues(utterance.spokenText)
+              : null),
+          moodKey: debateJudgeGavelVoiceMood(utterance.event),
+          createdAt: utterance.event.createdAt,
+        },
+        {
+          id: speakerId,
+          name:
+            speakerBot?.name ??
+            utterance.speaker?.name ??
+            user?.displayName?.trim() ??
+            "You",
+          color:
+            speakerBot?.color ?? utterance.speaker?.color ?? PRISM_COLORS.i,
+          glyph: speakerBot?.glyph ?? utterance.speaker?.glyph ?? "◇",
+          online_enabled: voiceBot?.online_enabled ?? 1,
+          muted: botPowerIsMutedV1(speakerPowers),
+          voiceGainMultiplier:
+            botPowerVoiceGainMultiplierV1(speakerPowers) *
+            (utterance.event.kind === "objection" ? 1.14 : 1),
+          voicePresence: botPowerVoicePresenceModeV1(speakerPowers),
+          personaTemperament: signalPersonaTemperamentFor(
+            utterance.speaker?.systemPrompt ?? speakerBot?.system_prompt ?? "",
+          ),
+          producerGuest: usePrismDefaultVoice,
+          frozenVoiceProfile: usePlayerVoice
+            ? null
+            : (utterance.speaker?.voiceProfile ?? null),
+        } as BotcastBotSummary & {
+          frozenVoiceProfile?: BotAudioVoiceProfileV1 | null;
+        },
+        "debate",
+      );
+      if (!clip) return;
+      await Promise.all([clip, prepareEnglishVoice()]);
+    };
     const playDebateUtterance = async (
       utterance: DebateUtterance,
     ): Promise<boolean> => {
@@ -129692,8 +129782,12 @@ function HomeContent(): React.JSX.Element {
                 botIds: group.botIds,
               }))}
               initialBotIds={initialDebateBotIds}
+              playerName={user?.displayName?.trim() || "You"}
               storageScopeId={user?.id ?? "signed-out"}
               preferredProvider={debateEffectiveProvider}
+              preferredImageProvider={
+                settings?.preferredImageProvider ?? "local"
+              }
               responseMode={debateResponseMode}
               modelOverride={
                 debateModelChoice === AUTO_MODEL_CHOICE ||
@@ -129869,6 +129963,7 @@ function HomeContent(): React.JSX.Element {
                               ? "thinking"
                               : "idle"
                         }
+                        blinkEnabled={avatarState.role === "audience"}
                         blinkWhileTalking
                         mouthShape={debateMouthShape}
                         moodHint={debateMoodHint}
@@ -130025,13 +130120,19 @@ function HomeContent(): React.JSX.Element {
                 }
                 navigateToView("chat");
               }}
+              onPrepareUtterance={prepareDebateUtterance}
               onUtterance={playDebateUtterance}
               onStopUtterance={stopBotcastUtterance}
               onLiveSessionActiveChange={setDebateLiveSessionActive}
+              onCompanionContextChange={setDebateCompanionContext}
               onResetTutorial={() => resetSingleModeTutorial("debate")}
             />
           </div>
         </section>
+        {debateLiveSessionActive || debateCompanionContext === null ? (
+          <PrismCompanionPresenceBoundary reason="debate-live-session" />
+        ) : null}
+        {renderGlobalPrismCompanion()}
         {renderSharedPanels()}
         {renderModeTutorialOverlay()}
         {renderViewSwitchOverlay()}
@@ -130993,7 +131094,9 @@ function HomeContent(): React.JSX.Element {
       settings?.hubAtmosphereImageStyle === settings?.atmosphereStyle
         ? settings?.hubAtmosphereImageId
         : null;
-    const hubAtmosphereMounted = Boolean(hubAtmosphereImageId);
+    const hubAtmosphereMounted = Boolean(
+      settings?.hubAtmosphereEnabled && hubAtmosphereImageId,
+    );
     const zenFirstReplyPending =
       pendingReplyVisible &&
       pendingReplyStartMessageCount === 0 &&
@@ -131036,7 +131139,7 @@ function HomeContent(): React.JSX.Element {
           botGroupRoomAtmosphereVisible ? "true" : undefined
         }
         data-hub-atmosphere-active={
-          hubAtmosphereMounted && hubAtmosphereVisible ? "true" : undefined
+          hubAtmosphereMounted ? "true" : undefined
         }
         data-chat-overflow-menu-open={chatOverflowMenuOpen ? "true" : undefined}
         data-zen-header-hidden={
@@ -131431,7 +131534,7 @@ function HomeContent(): React.JSX.Element {
             {hubAtmosphereMounted && hubAtmosphereImageId ? (
               <div
                 className={styles.hubAtmosphereBackdrop}
-                data-visible={hubAtmosphereVisible ? "true" : undefined}
+                data-visible="true"
                 data-atmosphere-style={settings?.atmosphereStyle}
                 aria-hidden="true"
               >
@@ -131442,7 +131545,6 @@ function HomeContent(): React.JSX.Element {
                   fetchPriority="high"
                   decoding="async"
                   onError={() => {
-                    setHubAtmosphereVisible(false);
                     setHubAtmosphereGenerationState("error");
                     setSettings((previous) =>
                       previous

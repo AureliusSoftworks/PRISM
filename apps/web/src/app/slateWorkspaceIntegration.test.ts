@@ -42,6 +42,9 @@ describe("Slate workspace integration", () => {
     assert.match(source, /\/accept`/);
     assert.match(source, /\/reject`/);
     assert.match(source, /Lock selection/);
+    assert.match(source, /This proposal targets the entire imported manuscript/);
+    assert.match(source, /slateWritingProposalPreview/);
+    assert.match(source, /writingProposalNeedsPassageScope/);
   });
 
   it("flushes manuscript autosave before leaving or switching projects", () => {
@@ -317,9 +320,20 @@ describe("Slate workspace integration", () => {
     assert.match(source, /Story so far/);
     assert.match(source, /Where it is going/);
     assert.match(source, /Continuity’s one recommendation/);
+    assert.match(
+      source,
+      /className=\{styles\.returnCover\}[\s\S]*?project\.cover\.imageUrl/,
+    );
     assert.match(source, /slateReturnSplashShouldShow/);
     assert.match(source, /slateReturnNextCardSectionId/);
     assert.match(workspaceCss, /\.returnSession::before[\s\S]*var\(--slate-p\)[\s\S]*var\(--slate-m\)/);
+    assert.match(workspaceCss, /\.returnSession[\s\S]*?grid-template-columns:[^;]+190px/);
+    assert.match(workspaceCss, /\.returnSynopsis p[\s\S]*?-webkit-line-clamp: 3/);
+    assert.match(workspaceCss, /\.returnCover\[data-cover-ready="true"\][\s\S]*?mix-blend-mode: screen/);
+    assert.match(
+      workspaceCss,
+      /@media \(max-width: 680px\)[\s\S]*?\.returnCover\s*\{[\s\S]*?display: none/,
+    );
   });
 
   it("uses the shared PRISM app header and keeps its utility panels mounted", () => {

@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "@localai/shared";
 import {
+  DEBATE_AUDIENCE_AGITATION_URL,
+  DEBATE_AUDIENCE_CROSSTALK_URL,
   DEBATE_AUDIENCE_FOLEY_URLS,
   DEBATE_AUDIENCE_MURMUR_URL,
   DEBATE_AUDIENCE_REACTIONS,
@@ -418,6 +420,22 @@ describe("Debate moderator gavel", () => {
         audienceReaction: "order",
       },
     );
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "turnabout",
+        event: debateEvent("judge_gavel", {
+          speakerKind: "player",
+          speakerBotId: "prism:player-judge",
+          gavelReason: "audience_order",
+        }),
+        moderatorBotId: "prism:player-judge",
+      }),
+      {
+        eventId: "event:judge_gavel",
+        kind: "order",
+        audienceReaction: "order",
+      },
+    );
   });
 
   it("keeps the extra Turnabout strike for revelations, after objections are heard", () => {
@@ -526,6 +544,14 @@ describe("Debate moderator gavel", () => {
       DEBATE_AUDIENCE_MURMUR_URL,
       "/audio/debate/courtroom-audience-murmur-loop.mp3",
     );
+    assert.equal(
+      DEBATE_AUDIENCE_CROSSTALK_URL,
+      "/audio/debate/courtroom-audience-crosstalk-loop.mp3",
+    );
+    assert.equal(
+      DEBATE_AUDIENCE_AGITATION_URL,
+      "/audio/debate/courtroom-audience-agitation-swell.mp3",
+    );
     assert.deepEqual(DEBATE_AUDIENCE_REACTIONS, {
       session: {
         url: "/audio/debate/courtroom-audience-session-settle.mp3",
@@ -566,6 +592,8 @@ describe("Debate moderator gavel", () => {
 
     const urls = [
       DEBATE_AUDIENCE_MURMUR_URL,
+      DEBATE_AUDIENCE_CROSSTALK_URL,
+      DEBATE_AUDIENCE_AGITATION_URL,
       ...DEBATE_AUDIENCE_FOLEY_URLS,
       ...Object.values(DEBATE_AUDIENCE_REACTIONS).map(
         (reaction) => reaction.url,

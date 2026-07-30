@@ -338,6 +338,70 @@ describe("Slate long-form persistence and Continuity", () => {
     );
   });
 
+  it("splits a pasted draft at unambiguous chapter headings without changing a byte", () => {
+    const original = [
+      "Chapter One: The Door",
+      "",
+      "The first secret stayed behind the door.",
+      "",
+      "Chapter Two — The Road",
+      "",
+      "The second secret followed Mara onto the road.\n",
+    ].join("\n");
+    const lockStart = original.indexOf("second secret");
+    const project = createSlateProject(db, "author-a", {
+      title: "The Chaptered Import",
+      spark: "An existing draft arrives already chaptered.",
+    });
+    updateSlateProject(db, "author-a", project.id, {
+      manuscript: original,
+      lockedRanges: [
+        {
+          id: "second-secret",
+          start: lockStart,
+          end: lockStart + "second secret".length,
+          label: "Keep this secret",
+        },
+      ],
+    });
+
+    const migrated = listSlateProjectSections(db, "author-a", project.id);
+    assert.deepEqual(
+      migrated.map((section) => [section.kind, section.title]),
+      [
+        ["imported", "Chapter One: The Door"],
+        ["imported", "Chapter Two — The Road"],
+      ],
+    );
+    const sections = migrated.map((section) =>
+      getSlateProjectSection(db, "author-a", project.id, section.id),
+    );
+    assert.equal(sections.map((section) => section.prose).join(""), original);
+    assert.equal(getSlateProject(db, "author-a", project.id).manuscript, original);
+    assert.deepEqual(sections[0]?.lockedRanges, []);
+    assert.deepEqual(sections[1]?.lockedRanges, [
+      {
+        id: "second-secret",
+        start: sections[1]!.prose.indexOf("second secret"),
+        end:
+          sections[1]!.prose.indexOf("second secret") +
+          "second secret".length,
+        label: "Keep this secret",
+      },
+    ]);
+    assert.equal(
+      (
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM slate_continuity_sources
+              WHERE project_id = ? AND kind = 'import'`,
+          )
+          .get(project.id) as { count: number }
+      ).count,
+      2,
+    );
+  });
+
   it("migrates an existing flat plan with persisted hierarchy and stable order", () => {
     const project = createSlateProject(db, "author-a", {
       title: "The Flat Plan",

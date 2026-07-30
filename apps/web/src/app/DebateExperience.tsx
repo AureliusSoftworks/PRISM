@@ -17,7 +17,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
+  DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMALITY_SPECTRUM,
   DEBATE_JURY_SIZE,
@@ -31,6 +31,10 @@ import {
   DEBATE_SETUP_PRESETS,
   botPowerObserverProjectionFromEffectsV1,
   debateEventIsTranscriptHousekeeping,
+  debateEvidenceExhibitTitle,
+  debateEvidenceItemById,
+  debateEvidenceItemCount,
+  debateEvidenceItems,
   debateFormalityDescriptor,
   debateSpokenText,
   normalizeDebateModeratorTitle,
@@ -38,6 +42,8 @@ import {
   type DebateCaseCardV1,
   type DebateEventV1,
   type DebateEvidencePacketV1,
+  type DebateEvidenceExhibitV1,
+  type DebateEvidenceItemV1,
   type DebateEvidenceSourceV1,
   type DebateFormalityId,
   type DebateFormatId,
@@ -52,13 +58,18 @@ import {
   type DebateTurnaboutStatementV1,
   type BotPowerAvatarScaleMode,
   type GraphicsQuality,
+  type PrismCompanionDebateDraft,
+  type PrismRefractDebateTextTargetKind,
+  type PrismRefractResponse,
   type ResponseMode,
 } from "@localai/shared";
 import {
   PrismRefractTarget,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
+import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import styles from "./DebateExperience.module.css";
+import { debateLiveCaptionPage } from "./debateLiveCaption";
 import type { DebateForumRole } from "./DebateForumScene";
 import {
   copyDebateMotionSlate,
@@ -77,8 +88,16 @@ import {
   debateAudienceBotIsGenerated,
   debateAudienceBotsForSession,
   debateAudienceConversationFacing,
+  debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
 } from "./debateAudience";
+import {
+  debateAudiencePressureBand,
+  debateAudiencePressureMix,
+  debateAudiencePressureScore,
+  debateAudienceTalkerIndices,
+  type DebateAudiencePressureBand,
+} from "./debateAudiencePressure";
 import {
   debateArchivedJuryRecordIsCopyable,
   debateEventIsJuryComment,
@@ -92,6 +111,14 @@ import {
 } from "./debateJuryRecord";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
+  debateEvidenceEmojiForObject,
+  nextDebateEvidenceExhibitId,
+  normalizeDebateEvidenceEmojiChoice,
+  randomDebateEvidenceObject,
+  type DebateEvidenceObjectDraft,
+} from "./debateEvidenceExhibits";
+import { openDesktopEmojiPicker } from "./desktopShell";
+import {
   debateJudgeGuidedStepKind,
   debateJudgeObjectionRulingShortcut,
   debateJudgeQuickChoices,
@@ -101,10 +128,10 @@ import {
 import { randomDebateTerritory } from "./debateTerritoryRandomizer";
 import {
   debateMarkdownSource,
+  debateEvidenceFromMarkdownHref,
   debateGalleryReactingIndices,
   debateGalleryReaction,
   debateRevealDurationMs,
-  debateSourceFromMarkdownHref,
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
@@ -168,6 +195,8 @@ import {
   type SessionAtmosphereMix,
 } from "./session-atmosphere-audio";
 import {
+  DEBATE_AUDIENCE_AGITATION_URL,
+  DEBATE_AUDIENCE_CROSSTALK_URL,
   DEBATE_AUDIENCE_FOLEY_URLS,
   DEBATE_AUDIENCE_MURMUR_URL,
   DEBATE_AUDIENCE_REACTIONS,
@@ -181,6 +210,7 @@ import {
   type DebateModeratorGavelCue,
 } from "./debateFoley";
 import {
+  DEBATE_IDENT_AUDIO,
   DEBATE_IDENT_OUTRO_LEAD_MS,
   playDebateIdentAudio,
   setDebateIdentAudioVolume,
@@ -260,8 +290,10 @@ export interface DebateExperienceProps {
   bots: DebateBotSummary[];
   botGroups?: readonly BotPickerGroup[];
   initialBotIds?: string[];
+  playerName: string;
   storageScopeId: string;
   preferredProvider: "local" | "openai" | "anthropic";
+  preferredImageProvider: "local" | "openai";
   responseMode: ResponseMode;
   modelOverride?: {
     provider: "local" | "openai" | "anthropic";
@@ -282,11 +314,20 @@ export interface DebateExperienceProps {
   ) => ReactNode;
   onExit: () => void;
   onResetTutorial?: () => void;
+  onPrepareUtterance?: (utterance: DebateUtterance) => Promise<void>;
   onUtterance?: (utterance: DebateUtterance) => Promise<boolean>;
   onStopUtterance?: () => void;
   onLiveSessionActiveChange?: (active: boolean) => void;
+  onCompanionContextChange?: (
+    context: DebateCompanionContext | null,
+  ) => void;
   renderJudgeComposer?: (composer: DebateJudgeComposerRenderProps) => ReactNode;
   onJudgeComposerReveal?: () => void;
+}
+
+export interface DebateCompanionContext {
+  draft: PrismCompanionDebateDraft;
+  botIds: string[];
 }
 
 export interface DebateJudgeComposerRenderProps {
@@ -305,6 +346,7 @@ export interface DebateJudgeComposerRenderProps {
 type DebateView = "dashboard" | "live";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
 type DebateSetupMode = "basic" | "advanced";
+const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
 type DebateCameraView = "wide" | "left" | "moderator" | "right" | "jury";
 type DebateCameraMode = "auto" | DebateCameraView;
@@ -333,6 +375,13 @@ type DebateJudgeGavelCeremonyGate = {
   settleTimer: number | null;
   resolve: (struck: boolean) => void;
 };
+type DebateAudienceOrderResponse = {
+  id: number;
+  kind: "awkward" | "hush";
+  resetAfterSequence: number;
+  returningRoomTone: boolean;
+  sessionId: string;
+};
 type DebateJuryDeliberationDecision = {
   key: string;
   deadlineMs: number;
@@ -345,6 +394,12 @@ type DebateDeleteUndo = {
   runId: string;
   sessionId: string;
   motion: string;
+};
+type DebateExhibitAsset = {
+  id: string;
+  prompt: string;
+  displayUrl: string;
+  createdAt: string;
 };
 type DebateStageAlignmentDrag = {
   pointerId: number;
@@ -360,7 +415,7 @@ type DebateStageAlignmentDrag = {
 
 const DEBATE_PLAYER_JUDGE_PRISM: DebateBotSummary = {
   id: DEBATE_PLAYER_JUDGE_BOT_ID,
-  name: "Prism",
+  name: "You",
   color: "#2fd3e3",
   glyph: "triangle",
   avatarDetails: null,
@@ -373,7 +428,7 @@ const DEBATE_PLAYER_JUDGE_PRISM: DebateBotSummary = {
 
 const DEBATE_PLAYER_PARTICIPANT_PRISM: DebateBotSummary = {
   id: DEBATE_PLAYER_PARTICIPANT_BOT_ID,
-  name: "PRISM",
+  name: "You",
   color: "#2fd3e3",
   glyph: "triangle",
   avatarDetails: null,
@@ -462,6 +517,7 @@ function debateParticipantFloorRole(
 
 function debateParticipantPrismAvatar(
   session: DebateSessionV1,
+  playerName: string,
 ): DebateBotSnapshotV1 {
   const sideId = session.playerSideId === "against" ? "against" : "for";
   return {
@@ -469,7 +525,7 @@ function debateParticipantPrismAvatar(
     // The page renderer recognizes the Judge proxy as PRISM's canonical
     // appearance. The stage identity remains the Participant proxy snapshot.
     id: DEBATE_PLAYER_JUDGE_BOT_ID,
-    name: "PRISM",
+    name: playerName,
     systemPrompt:
       "PRISM is the player-controlled visual proxy for the human Participant in this Debate.",
     role: "advocate",
@@ -520,6 +576,7 @@ const DEBATE_GAVEL_FOLEY_PRELOAD_URLS = Object.values(DEBATE_GAVEL_FOLEY_URLS);
 const DEBATE_LIVE_FOLEY_PRELOAD_URLS = [
   ...DEBATE_GAVEL_FOLEY_PRELOAD_URLS,
   ...DEBATE_AUDIENCE_FOLEY_URLS,
+  DEBATE_AUDIENCE_AGITATION_URL,
   ...Object.values(DEBATE_AUDIENCE_REACTIONS).map((reaction) => reaction.url),
 ];
 
@@ -579,13 +636,10 @@ function DebateLiveCaption(props: {
   speakerName: string;
   text: string;
 }): React.JSX.Element {
-  const textRef = useRef<HTMLSpanElement | null>(null);
-
-  useLayoutEffect(() => {
-    const caption = textRef.current;
-    if (!caption) return;
-    caption.scrollTop = caption.scrollHeight;
-  }, [props.eventId, props.text]);
+  const caption = useMemo(
+    () => debateLiveCaptionPage(props.text),
+    [props.text],
+  );
 
   return (
     <div
@@ -593,12 +647,21 @@ function DebateLiveCaption(props: {
       data-debate-live-caption="true"
       data-event-id={props.eventId}
       data-speaker-kind={props.speakerKind}
+      data-caption-page={caption.pageIndex + 1}
+      data-caption-pages={caption.pageCount}
       aria-live="off"
+      aria-label={`Live caption from ${props.speakerName}`}
     >
-      <strong>{props.speakerName}</strong>
-      <span ref={textRef} data-caption-rows="2">
-        {props.text}
-      </span>
+      <i aria-hidden="true" />
+      <div>
+        <strong>{props.speakerName}</strong>
+        <span
+          key={`${props.eventId}:${caption.pageIndex}`}
+          data-caption-rows="adaptive"
+        >
+          {caption.text}
+        </span>
+      </div>
     </div>
   );
 }
@@ -935,11 +998,38 @@ const EMPTY_EVIDENCE: DebateEvidencePacketV1 = {
   version: DEBATE_SCHEMA_VERSION,
   notes: "",
   sources: [],
+  exhibits: [],
   frozenAt: null,
 };
 
 function requestBody(value: unknown): RequestInit {
   return { method: "POST", body: JSON.stringify(value) };
+}
+
+function readDebateEvidenceImageFile(file: File): Promise<string> {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    return Promise.reject(
+      new Error("Choose a PNG, JPEG, or WebP image for this exhibit."),
+    );
+  }
+  if (file.size > 16 * 1024 * 1024) {
+    return Promise.reject(
+      new Error("Evidence exhibit images must be 16 MB or smaller."),
+    );
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error("Prism could not read that exhibit image."));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Prism could not read that exhibit image."));
+        return;
+      }
+      resolve(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 function mutationKey(label: string, counter: number): string {
@@ -1011,7 +1101,7 @@ function roleDescription(
     return "Stay silent or ask one challenge, then make the final ruling. The Judge acts only when you do.";
   }
   if (role === "participant") {
-    return "Replace one advocate with PRISM. You own every turn on that side; cast only the Judge and opponent.";
+    return "Replace one advocate with your account avatar. You own every turn on that side; cast only the Judge and opponent.";
   }
   return "Watch the moderator challenge both advocates. The three-bot majority decides the verdict.";
 }
@@ -1050,7 +1140,7 @@ function roleSummary(
   }
   if (role === "judge") return "Challenge once, then issue the final ruling.";
   if (role === "participant") {
-    return "PRISM replaces your side’s advocate; every turn is yours.";
+    return "Your account avatar replaces your side’s advocate; every turn is yours.";
   }
   return "Observe the Duel without taking the floor.";
 }
@@ -1073,12 +1163,80 @@ function verdictLabel(session: DebateSessionV1): string {
   return "No prevailing side";
 }
 
+function DebateIdentOverlay({
+  kind,
+  session,
+}: {
+  kind: DebateIdentKind;
+  session: DebateSessionV1;
+}): React.JSX.Element {
+  const intro = kind === "intro";
+  const outcome = verdictLabel(session);
+  return (
+    <section
+      className={styles.identOverlay}
+      data-kind={kind}
+      data-debate-ident-overlay="true"
+      style={
+        {
+          "--debate-ident-duration": `${DEBATE_IDENT_AUDIO[kind].durationMs}ms`,
+          "--debate-ident-for-color": session.forAdvocate.color ?? "#42d9ff",
+          "--debate-ident-against-color":
+            session.againstAdvocate.color ?? "#ff5f8f",
+        } as CSSProperties
+      }
+      role="status"
+      aria-live="polite"
+      aria-label={
+        intro
+          ? `The Prismatic Forum. ${session.motion.motion}`
+          : `The Forum is adjourned. ${outcome}.`
+      }
+    >
+      <div className={styles.identSpectralField} aria-hidden="true">
+        <i />
+        <i />
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className={styles.identComposition}>
+        <p className={styles.identKicker}>
+          {intro ? "PRISM presents" : "The Forum is adjourned"}
+        </p>
+        <div className={styles.identPrismMark} aria-hidden="true">
+          <span />
+          <i />
+        </div>
+        <p className={styles.identProduction}>
+          {debateProductionName(session.format, session.formality)}
+        </p>
+        <h2>{intro ? "The Prismatic Forum" : outcome}</h2>
+        <blockquote>{session.motion.motion}</blockquote>
+        <div className={styles.identSides} aria-hidden="true">
+          <span data-side="for">{session.motion.forSide.label}</span>
+          <i>versus</i>
+          <span data-side="against">{session.motion.againstSide.label}</span>
+        </div>
+        <small>
+          {intro
+            ? `${session.format === "turnabout" ? "Turnabout" : "Forum"} · ${debateFormalityDescriptor(session.formality).title}`
+            : session.winnerSideId
+              ? "Prevailing side"
+              : "No side prevailed"}
+        </small>
+      </div>
+    </section>
+  );
+}
+
 function visibleEventName(
   session: DebateSessionV1,
   event: DebateEventV1,
+  playerName = "You",
 ): string {
   if (event.speakerKind === "player") {
-    return session.playerRole === "participant" ? "PRISM · You" : "You";
+    return playerName;
   }
   if (event.speakerKind === "system") {
     if (session.format !== "turnabout") return "Forum";
@@ -1086,13 +1244,20 @@ function visibleEventName(
     if (session.formality === "structured") return "Documented exchange";
     return "Debate floor";
   }
-  if (event.speakerBotId === session.moderator.id)
-    return session.moderator.name;
+  if (event.speakerBotId === session.moderator.id) {
+    return session.moderator.id === DEBATE_PLAYER_JUDGE_BOT_ID
+      ? playerName
+      : session.moderator.name;
+  }
   if (event.speakerBotId === session.forAdvocate.id) {
-    return session.forAdvocate.name;
+    return session.forAdvocate.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID
+      ? playerName
+      : session.forAdvocate.name;
   }
   if (event.speakerBotId === session.againstAdvocate.id) {
-    return session.againstAdvocate.name;
+    return session.againstAdvocate.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID
+      ? playerName
+      : session.againstAdvocate.name;
   }
   const juror = session.jury.jurors.find(
     (candidate) => candidate.id === event.speakerBotId,
@@ -1115,6 +1280,7 @@ function debateSideLabel(
 
 export function formatDebateVerboseTranscript(
   session: DebateSessionV1,
+  playerName = "You",
 ): string {
   const cast = [
     [normalizeDebateModeratorTitle(session.moderatorTitle), session.moderator],
@@ -1150,17 +1316,26 @@ export function formatDebateVerboseTranscript(
     `- Frozen generation chain: ${session.generationChain.map((entry) => `${entry.provider}/${entry.model}`).join(" → ")}`,
     ...cast.map(
       ([role, bot]) =>
-        `- ${role}: ${bot.name} (${bot.provider}/${bot.model}; bot ${bot.id}; revision ${bot.revision})`,
+        `- ${role}: ${
+          bot.id === DEBATE_PLAYER_JUDGE_BOT_ID ||
+          bot.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID
+            ? playerName
+            : bot.name
+        } (${bot.provider}/${bot.model}; bot ${bot.id}; revision ${bot.revision})`,
     ),
     "",
     "## Advocacy consent",
     "",
     ...session.advocacyConsent.map(
       (check) =>
-        `- ${visibleEventName(session, {
-          speakerKind: "advocate",
-          speakerBotId: check.botId,
-        } as DebateEventV1)} — ${debateSideLabel(session, check.sideId)}: ${check.status}${check.reason ? ` — ${check.reason}` : ""} (motion ${check.motionHash}; bot revision ${check.botRevision}${check.provider && check.model ? `; ${check.provider}/${check.model}` : ""}${check.autoRecovery ? `; recovered after ${check.autoRecovery.attempts.length} attempts` : ""})`,
+        `- ${visibleEventName(
+          session,
+          {
+            speakerKind: "advocate",
+            speakerBotId: check.botId,
+          } as DebateEventV1,
+          playerName,
+        )} — ${debateSideLabel(session, check.sideId)}: ${check.status}${check.reason ? ` — ${check.reason}` : ""} (motion ${check.motionHash}; bot revision ${check.botRevision}${check.provider && check.model ? `; ${check.provider}/${check.model}` : ""}${check.autoRecovery ? `; recovered after ${check.autoRecovery.attempts.length} attempts` : ""})`,
     ),
     "",
     "## Frozen evidence",
@@ -1177,6 +1352,14 @@ export function formatDebateVerboseTranscript(
           `  - Snippet: ${source.snippet}`,
         ])
       : ["No frozen sources."]),
+    ...((session.evidence.exhibits?.length ?? 0) > 0
+      ? (session.evidence.exhibits ?? []).flatMap((exhibit) => [
+          `- [${exhibit.id}] ${exhibit.title}`,
+          `  - Observation: ${exhibit.observation}`,
+          `  - Visual: ${exhibit.visualKind}${exhibit.imageId ? ` (${exhibit.imageId})` : ` (${exhibit.emoji})`}`,
+          `  - Authorship: ${exhibit.createdBy}`,
+        ])
+      : ["No frozen object exhibits."]),
     "",
     "## Resolved Powers",
     "",
@@ -1200,14 +1383,14 @@ export function formatDebateVerboseTranscript(
       .flatMap((event) => [
         `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
         "",
-        `- Speaker: ${visibleEventName(session, event)} (${event.speakerKind})`,
+        `- Speaker: ${visibleEventName(session, event, playerName)} (${event.speakerKind})`,
         `- Side: ${debateSideLabel(session, event.sideId)}`,
         `- Step: ${event.stepKey}`,
         `- Statement: ${event.statementId ?? "None"}`,
         `- Evidence item: ${event.evidenceSourceId ?? "None"}`,
         `- Ruling: ${event.ruling ?? "None"}`,
         `- At: ${event.createdAt}`,
-        `- Sources: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
+        `- Evidence IDs: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
         `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
         `- Delivery: ${
           event.interrupted
@@ -1325,14 +1508,15 @@ function DebateMarkdownBody({
         skipHtml
         components={{
           a: ({ href, children }) => {
-            const source = debateSourceFromMarkdownHref(href, evidence);
-            if (source) {
+            const item = debateEvidenceFromMarkdownHref(href, evidence);
+            if (item) {
               return (
                 <button
                   type="button"
                   className={styles.sourceChip}
-                  onClick={() => onSource(source.id)}
-                  aria-label={`Open source ${source.title}`}
+                  data-kind={item.kind}
+                  onClick={() => onSource(item.value.id)}
+                  aria-label={`Open ${item.kind === "source" ? "source" : "exhibit"} ${item.value.title}`}
                 >
                   {children}
                 </button>
@@ -1350,6 +1534,129 @@ function DebateMarkdownBody({
         {debateMarkdownSource(content, evidence)}
       </ReactMarkdown>
     </div>
+  );
+}
+
+function debateEvidenceExhibitImageUrl(
+  exhibit: DebateEvidenceExhibitV1,
+): string | null {
+  return exhibit.imageId
+    ? `/api/images/${encodeURIComponent(exhibit.imageId)}/file`
+    : null;
+}
+
+function DebateEvidenceExhibitVisual({
+  exhibit,
+  className,
+}: {
+  exhibit: DebateEvidenceExhibitV1;
+  className?: string;
+}): React.JSX.Element {
+  const imageUrl =
+    exhibit.visualKind === "emoji"
+      ? null
+      : debateEvidenceExhibitImageUrl(exhibit);
+  return (
+    <span
+      className={`${styles.evidenceExhibitVisual} ${className ?? ""}`}
+      data-visual-kind={exhibit.visualKind}
+      aria-label={`${exhibit.title} evidence exhibit`}
+    >
+      <span aria-hidden="true">{exhibit.emoji}</span>
+      {imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={exhibit.title}
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      ) : null}
+    </span>
+  );
+}
+
+function DebateEvidencePedestal({
+  exhibit,
+  onOpen,
+}: {
+  exhibit: DebateEvidenceExhibitV1;
+  onOpen: () => void;
+}): React.JSX.Element {
+  return (
+    <section
+      className={styles.evidencePedestal}
+      data-visual-kind={exhibit.visualKind}
+      aria-label={`Presented evidence: ${exhibit.title}`}
+    >
+      <button type="button" onClick={onOpen}>
+        <span className={styles.evidencePedestalGlow} aria-hidden="true" />
+        <DebateEvidenceExhibitVisual
+          exhibit={exhibit}
+          className={styles.evidencePedestalSprite}
+        />
+        <span className={styles.evidencePedestalPlinth} aria-hidden="true">
+          <i />
+          <i />
+        </span>
+        <span className={styles.evidencePedestalLabel}>
+          <small>Exhibit</small>
+          <strong>{exhibit.title}</strong>
+        </span>
+      </button>
+    </section>
+  );
+}
+
+function DebateEvidenceDrawer({
+  item,
+  closeButtonRef,
+  onClose,
+}: {
+  item: DebateEvidenceItemV1;
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+}): React.JSX.Element {
+  const source = item.kind === "source" ? item.value : null;
+  const exhibit = item.kind === "exhibit" ? item.value : null;
+  return (
+    <aside
+      className={styles.sourceDrawer}
+      data-kind={item.kind}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="debate-evidence-title"
+    >
+      <button ref={closeButtonRef} type="button" onClick={onClose}>
+        Close
+      </button>
+      <span>
+        {item.kind === "source" ? "Public source" : "Object exhibit"} ·{" "}
+        {item.value.id}
+      </span>
+      {exhibit ? (
+        <DebateEvidenceExhibitVisual
+          exhibit={exhibit}
+          className={styles.evidenceDrawerVisual}
+        />
+      ) : null}
+      <h2 id="debate-evidence-title">{item.value.title}</h2>
+      <p>{source ? source.snippet : exhibit?.observation}</p>
+      {source?.publishedAt ? <small>{source.publishedAt}</small> : null}
+      {exhibit ? (
+        <small>
+          {exhibit.createdBy === "prism"
+            ? "PRISM suggested the object; you approved its record."
+            : "Player-authored exhibit record."}{" "}
+          The visual is presentation only.
+        </small>
+      ) : null}
+      {source ? (
+        <a href={source.url} target="_blank" rel="noreferrer">
+          Open original source
+        </a>
+      ) : null}
+    </aside>
   );
 }
 
@@ -1481,12 +1788,15 @@ export function DebateExperience(
   const {
     bots,
     botGroups = [],
+    onCompanionContextChange,
     onLiveSessionActiveChange,
+    onPrepareUtterance,
     onStopUtterance,
     onUtterance,
     preferredProvider,
     request,
   } = props;
+  const playerName = props.playerName.trim() || "You";
   const [view, setView] = useState<DebateView>("dashboard");
   const [observerPerspective, setObserverPerspective] = useState<
     "live" | "replay"
@@ -1520,8 +1830,25 @@ export function DebateExperience(
     useState<DebateEvidencePacketV1>(EMPTY_EVIDENCE);
   const [researchQuery, setResearchQuery] = useState("");
   const [evidenceGenerating, setEvidenceGenerating] = useState(false);
-  const evidenceSourceLimitReached =
-    evidence.sources.length >= DEBATE_EVIDENCE_SOURCE_MAX_COUNT;
+  const [evidenceObjectDraft, setEvidenceObjectDraft] =
+    useState<DebateEvidenceObjectDraft | null>(null);
+  const [evidenceObjectVisualBusy, setEvidenceObjectVisualBusy] = useState<
+    "upload" | "synthesize" | null
+  >(null);
+  const [evidenceExhibitAssets, setEvidenceExhibitAssets] = useState<
+    DebateExhibitAsset[]
+  >([]);
+  const [evidenceExhibitAssetsLoading, setEvidenceExhibitAssetsLoading] =
+    useState(false);
+  const [evidenceExhibitAssetsUnavailable, setEvidenceExhibitAssetsUnavailable] =
+    useState(false);
+  const evidenceExhibitAssetsRequestRef = useRef(0);
+  const evidenceExhibitEmojiRef = useRef<HTMLInputElement | null>(null);
+  const evidenceExhibitUploadRef = useRef<HTMLInputElement | null>(null);
+  const evidenceItemTotal = debateEvidenceItemCount(evidence);
+  const evidenceItemLimitReached =
+    evidenceItemTotal >= DEBATE_EVIDENCE_ITEM_MAX_COUNT;
+  const evidenceObjectEditorOpen = evidenceObjectDraft !== null;
   const [playerDraft, setPlayerDraft] = useState("");
   const [turnaboutObjecting, setTurnaboutObjecting] = useState(false);
   const [turnaboutEvidenceSourceId, setTurnaboutEvidenceSourceId] =
@@ -1549,12 +1876,21 @@ export function DebateExperience(
     setTranscriptVisibleThroughSequence,
   ] = useState<number | null>(null);
   const [presenting, setPresenting] = useState(false);
+  const [voicePreparationSpeakerBotId, setVoicePreparationSpeakerBotId] =
+    useState<string | null>(null);
   const [liveGavelCue, setLiveGavelCue] =
     useState<DebateModeratorGavelCue | null>(null);
   const [debateIdentPlaying, setDebateIdentPlaying] =
     useState<DebateIdentKind | null>(null);
   const [judgeGavelSmashCue, setJudgeGavelSmashCue] =
     useState<DebateModeratorGavelCue | null>(null);
+  const [audienceOrderResponse, setAudienceOrderResponse] =
+    useState<DebateAudienceOrderResponse | null>(null);
+  const [audiencePressureReset, setAudiencePressureReset] = useState<{
+    resetAfterSequence: number;
+    sessionId: string;
+  } | null>(null);
+  const [audienceOrderSaving, setAudienceOrderSaving] = useState(false);
   const [judgeGavelCeremony, setJudgeGavelCeremony] =
     useState<DebateJudgeGavelCeremony | null>(null);
   const [judgeGavelMissedCameraView, setJudgeGavelMissedCameraView] = useState<
@@ -1614,6 +1950,8 @@ export function DebateExperience(
   const [presentationEventId, setPresentationEventId] = useState<string | null>(
     null,
   );
+  const [audiencePressurePresentationEventId, setAudiencePressurePresentationEventId] =
+    useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRecoveryNotice, setAutoRecoveryNotice] = useState<string | null>(
@@ -1656,7 +1994,18 @@ export function DebateExperience(
   > | null>(null);
   const judgeGavelSmashCounterRef = useRef(0);
   const judgeGavelSmashUntilRef = useRef(0);
+  const judgeGavelSmashShowmanshipKindRef =
+    useRef<DebateModeratorGavelCue["kind"]>("order");
   const judgeGavelSmashClearTimerRef = useRef<number | null>(null);
+  const audienceOrderResponseCounterRef = useRef(0);
+  const audienceOrderResponseClearTimerRef = useRef<number | null>(null);
+  const audienceRoomToneReturnTimerRef = useRef<number | null>(null);
+  const audienceOrderSavingRef = useRef(false);
+  const playedAudienceOrderCueIdsRef = useRef<ReadonlySet<string>>(new Set());
+  const previousAudiencePressureBandRef = useRef<{
+    band: DebateAudiencePressureBand;
+    sessionId: string;
+  } | null>(null);
   const judgeGavelCeremonyGateRef = useRef<DebateJudgeGavelCeremonyGate | null>(
     null,
   );
@@ -1671,13 +2020,22 @@ export function DebateExperience(
   const judgeGavelKeyboardContextRef = useRef({
     ceremonialAvailable: false,
     liveJudge: false,
-    semanticEligible: false,
-    canCallTime: false,
-    cooldownUntilMs: Number.NaN,
+    orderAvailable: false,
   });
   const judgeGavelSmashRef = useRef<
     ((kind: DebateModeratorGavelCue["kind"]) => void) | null
   >(null);
+  const triggerAudienceOrderResponseRef = useRef<
+    | ((args: {
+        eventId: string;
+        kind: "awkward" | "hush";
+        performGavel?: boolean;
+        resetAfterSequence: number;
+        sessionId: string;
+      }) => void)
+    | null
+  >(null);
+  const orderDebateAudienceRef = useRef<(() => Promise<void>) | null>(null);
   const swingJudgeGavelRef = useRef<(() => Promise<void>) | null>(null);
   const objectionRulingDockRef = useRef<HTMLElement | null>(null);
   const participantInterjectionDraftRef = useRef<HTMLTextAreaElement | null>(
@@ -1711,6 +2069,37 @@ export function DebateExperience(
   const judgeCanCallTimeNow =
     judgeGavelActiveTarget?.speakerKind === "advocate" &&
     judgeGavelActiveTargetClock?.status === "overtime";
+  const currentAudiencePressureScore = activeSession
+    ? debateAudiencePressureScore({
+        events: activeSession.events,
+        formality: activeSession.formality,
+        playerRole: activeSession.playerRole,
+        visibleThroughSequence: presenting
+          ? (judgeGavelActiveTarget?.sequence ??
+            transcriptVisibleThroughSequence)
+          : transcriptVisibleThroughSequence,
+        activeEventId:
+          audiencePressurePresentationEventId ?? liveReveal?.eventId ?? null,
+        visibleCharacterCount:
+          audiencePressurePresentationEventId &&
+          liveReveal?.eventId !== audiencePressurePresentationEventId
+            ? 0
+            : liveReveal?.visibleContent.length ?? 0,
+        resetAfterSequence:
+          audiencePressureReset?.sessionId === activeSession.id
+            ? audiencePressureReset.resetAfterSequence
+            : null,
+        reactionForEvent: (event) =>
+          debateAudienceBeatForEvent({
+            event,
+            publicContent: event.content,
+            seatCount: debateAudienceBotCount(props.graphicsQuality),
+          })?.listenerReaction ?? null,
+      })
+    : 0;
+  const currentAudiencePressureBand = debateAudiencePressureBand(
+    currentAudiencePressureScore,
+  );
   const participantOpponentSpeechActive =
     view === "live" &&
     activeSession?.format === "forum" &&
@@ -1754,12 +2143,11 @@ export function DebateExperience(
       activeSession?.objectionRuling?.status !== "awaiting_ruling" &&
       judgeGavelCeremony?.status === "ready",
     liveJudge: judgeGavelKeyboardLive,
-    semanticEligible:
+    orderAvailable:
       judgeGavelKeyboardLive &&
       !busy &&
+      !audienceOrderSavingRef.current &&
       activeSession?.judgeGavel?.status !== "awaiting_message",
-    canCallTime: judgeCanCallTimeNow,
-    cooldownUntilMs: Date.parse(activeSession?.judgeGavelCooldownUntil ?? ""),
   };
 
   useEffect(() => {
@@ -1801,15 +2189,6 @@ export function DebateExperience(
           'input, textarea, select, button, a[href], [contenteditable="true"], [role="button"], [role="textbox"]',
         ),
       );
-      const cooldownRemainingMs = Number.isFinite(context.cooldownUntilMs)
-        ? Math.max(0, context.cooldownUntilMs - nowMs)
-        : 0;
-      const semanticAvailable =
-        context.semanticEligible &&
-        !debateJudgeGavelCooldownBlocks({
-          overtime: context.canCallTime,
-          cooldownRemainingMs,
-        });
       const action = debateJudgeGavelSpaceAction({
         code: event.code,
         hasModifier:
@@ -1817,7 +2196,7 @@ export function DebateExperience(
         editableTarget,
         ceremonialAvailable: context.ceremonialAvailable,
         liveJudge: context.liveJudge,
-        semanticAvailable,
+        orderAvailable: context.orderAvailable,
         nowMs,
         smashUntilMs: judgeGavelSmashUntilRef.current,
       });
@@ -1829,10 +2208,12 @@ export function DebateExperience(
         return;
       }
       if (action === "smash") {
-        judgeGavelSmashRef.current?.("attention");
+        judgeGavelSmashRef.current?.(
+          judgeGavelSmashShowmanshipKindRef.current,
+        );
         return;
       }
-      void swingJudgeGavelRef.current?.();
+      void orderDebateAudienceRef.current?.();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -1870,6 +2251,64 @@ export function DebateExperience(
     setJudgeComposerOpen(false);
     setJudgeComposerGenerating(false);
   }, [activeSession?.id, activeSession?.stepKey]);
+  useEffect(() => {
+    playedAudienceOrderCueIdsRef.current = new Set();
+    previousAudiencePressureBandRef.current = null;
+    setAudienceOrderResponse(null);
+    setAudiencePressureReset(null);
+    if (audienceOrderResponseClearTimerRef.current !== null) {
+      window.clearTimeout(audienceOrderResponseClearTimerRef.current);
+      audienceOrderResponseClearTimerRef.current = null;
+    }
+    if (audienceRoomToneReturnTimerRef.current !== null) {
+      window.clearTimeout(audienceRoomToneReturnTimerRef.current);
+      audienceRoomToneReturnTimerRef.current = null;
+    }
+  }, [activeSession?.id]);
+  useEffect(() => {
+    const session = activeSession;
+    if (
+      !session ||
+      session.playerRole !== "judge" ||
+      session.status === "completed" ||
+      session.status === "cancelled" ||
+      session.status === "failed" ||
+      session.status === "paused" ||
+      debateJudgeGavelLockedForJury(session)
+    ) {
+      previousAudiencePressureBandRef.current = null;
+      return;
+    }
+    const previous = previousAudiencePressureBandRef.current;
+    previousAudiencePressureBandRef.current = {
+      band: currentAudiencePressureBand,
+      sessionId: session.id,
+    };
+    if (
+      previous?.sessionId !== session.id ||
+      previous.band === "disruptive" ||
+      currentAudiencePressureBand !== "disruptive" ||
+      !props.audioEnabled ||
+      props.audioVolume <= 0
+    ) {
+      return;
+    }
+    debateAtmosphereControllerRef.current?.playFoley(
+      DEBATE_AUDIENCE_AGITATION_URL,
+      {
+        trim: 0.48,
+        lowCutHz: 90,
+        highCutHz: 8_200,
+        stereoPan: 0.04,
+        tag: `debate-audience-agitation:${session.id}:${session.revision}`,
+      },
+    );
+  }, [
+    activeSession,
+    currentAudiencePressureBand,
+    props.audioEnabled,
+    props.audioVolume,
+  ]);
   useEffect(() => {
     setParticipantInterjectionOpen(false);
   }, [activeSession?.id, presentationEventId]);
@@ -1968,6 +2407,14 @@ export function DebateExperience(
       if (judgeGavelSmashClearTimerRef.current) {
         clearTimeout(judgeGavelSmashClearTimerRef.current);
         judgeGavelSmashClearTimerRef.current = null;
+      }
+      if (audienceOrderResponseClearTimerRef.current !== null) {
+        clearTimeout(audienceOrderResponseClearTimerRef.current);
+        audienceOrderResponseClearTimerRef.current = null;
+      }
+      if (audienceRoomToneReturnTimerRef.current !== null) {
+        clearTimeout(audienceRoomToneReturnTimerRef.current);
+        audienceRoomToneReturnTimerRef.current = null;
       }
       const ceremonyGate = judgeGavelCeremonyGateRef.current;
       if (ceremonyGate) {
@@ -2080,12 +2527,10 @@ export function DebateExperience(
     if (!moderator || !forAdvocate || !againstAdvocate) return null;
     return { moderator, forAdvocate, againstAdvocate };
   }, [botById, stageAlignmentPreviewCastIds]);
-  const selectedSource = sourceDrawerId
-    ? (activeSession?.evidence.sources.find(
-        (source) => source.id === sourceDrawerId,
-      ) ??
-      evidence.sources.find((source) => source.id === sourceDrawerId) ??
-      null)
+  const selectedEvidence = sourceDrawerId
+    ? ((activeSession
+        ? debateEvidenceItemById(activeSession.evidence, sourceDrawerId)
+        : null) ?? debateEvidenceItemById(evidence, sourceDrawerId))
     : null;
   useEffect(() => {
     if (!sourceDrawerId) return;
@@ -2240,7 +2685,7 @@ export function DebateExperience(
     setTranscriptCopyState("copying");
     try {
       await writeDebateClipboardText(
-        formatDebateVerboseTranscript(activeSession),
+        formatDebateVerboseTranscript(activeSession, playerName),
       );
       setTranscriptCopyState("copied");
     } catch {
@@ -2250,7 +2695,7 @@ export function DebateExperience(
       setTranscriptCopyState("idle");
       transcriptCopyResetTimerRef.current = null;
     }, 1_800);
-  }, [activeSession, transcriptCopyState]);
+  }, [activeSession, playerName, transcriptCopyState]);
 
   const copyJuryRecordForTarget = useCallback(
     async (
@@ -2310,9 +2755,17 @@ export function DebateExperience(
     return "Copy Jury transcript";
   };
 
+  const playerJudgeBot: DebateBotSummary = {
+    ...DEBATE_PLAYER_JUDGE_PRISM,
+    name: playerName,
+  };
+  const playerParticipantBot: DebateBotSummary = {
+    ...DEBATE_PLAYER_PARTICIPANT_PRISM,
+    name: playerName,
+  };
   const moderatorBot =
     playerRole === "judge"
-      ? DEBATE_PLAYER_JUDGE_PRISM
+      ? playerJudgeBot
       : (botById.get(cast.moderator) ?? null);
   const effectiveModeratorTitle = normalizeDebateModeratorTitle(moderatorTitle);
   const visibleModeratorTitle =
@@ -2373,6 +2826,13 @@ export function DebateExperience(
   const formalityIndex = DEBATE_FORMALITY_SPECTRUM.findIndex(
     (level) => level.id === formality,
   );
+  const rowdinessIndex = DEBATE_ROWDINESS_SPECTRUM.findIndex(
+    (level) => level.id === formality,
+  );
+  const rowdinessProgress =
+    (Math.max(0, rowdinessIndex) /
+      Math.max(1, DEBATE_ROWDINESS_SPECTRUM.length - 1)) *
+    100;
   const effectivePresetId = derivedDebateSetupPresetId({
     selectedPresetId,
     format,
@@ -2386,6 +2846,87 @@ export function DebateExperience(
     roleChecksComplete,
     true,
   ].filter(Boolean).length;
+  const debateCompanionBotIds = useMemo(
+    () =>
+      (
+        playerRole === "participant"
+          ? [effectiveModeratorBotId, cast[participantOpponentCastSlot]]
+          : [
+              effectiveModeratorBotId,
+              cast.forAdvocate,
+              cast.againstAdvocate,
+            ]
+      ).filter(
+        (botId): botId is string =>
+          Boolean(
+            botId &&
+              botId !== DEBATE_PLAYER_JUDGE_BOT_ID &&
+              botId !== DEBATE_PLAYER_PARTICIPANT_BOT_ID,
+          ),
+      ),
+    [cast, effectiveModeratorBotId, participantOpponentCastSlot, playerRole],
+  );
+  const debateCompanionDraft = useMemo<PrismCompanionDebateDraft>(
+    () => ({
+      setupMode,
+      studioPanel,
+      format,
+      formality,
+      playerRole,
+      playerSideId,
+      juryEnabled,
+      moderatorTitle: effectiveModeratorTitle,
+      topic,
+      motion: motion.motion,
+      forLabel: motion.forSide.label,
+      forBrief: motion.forSide.brief,
+      againstLabel: motion.againstSide.label,
+      againstBrief: motion.againstSide.brief,
+      exhibitAdjective: evidenceObjectDraft?.adjective ?? "",
+      exhibitObject: evidenceObjectDraft?.object ?? "",
+      exhibitObservation: evidenceObjectDraft?.observation ?? "",
+      evidenceItemCount: debateEvidenceItemCount(evidence),
+    }),
+    [
+      effectiveModeratorTitle,
+      evidence,
+      evidenceObjectDraft?.adjective,
+      evidenceObjectDraft?.object,
+      evidenceObjectDraft?.observation,
+      formality,
+      format,
+      juryEnabled,
+      motion.againstSide.brief,
+      motion.againstSide.label,
+      motion.forSide.brief,
+      motion.forSide.label,
+      motion.motion,
+      playerRole,
+      playerSideId,
+      setupMode,
+      studioPanel,
+      topic,
+    ],
+  );
+  useEffect(() => {
+    if (view !== "dashboard") {
+      onCompanionContextChange?.(null);
+      return;
+    }
+    onCompanionContextChange?.({
+      draft: debateCompanionDraft,
+      botIds: debateCompanionBotIds,
+    });
+  }, [
+    debateCompanionBotIds,
+    debateCompanionDraft,
+    onCompanionContextChange,
+    view,
+  ]);
+  useEffect(
+    () => () => onCompanionContextChange?.(null),
+    [onCompanionContextChange],
+  );
   const debatePickerGroups = useMemo<BotPickerGroup[]>(() => {
     const availableIds = new Set(bots.map((bot) => bot.id));
     return [
@@ -2459,11 +3000,16 @@ export function DebateExperience(
     setSetupMode(nextMode);
     if (nextMode === "advanced") return;
     setFormat("forum");
-    setFormality("plainspoken");
     setSelectedPresetId("public-forum");
     setPlayerRole("judge");
     setActiveCastSlot("forAdvocate");
     setJuryEnabled(false);
+    setRoleChecks([]);
+  };
+
+  const chooseFormality = (nextFormality: DebateFormalityId): void => {
+    if (nextFormality === formality) return;
+    setFormality(nextFormality);
     setRoleChecks([]);
   };
 
@@ -2908,7 +3454,47 @@ export function DebateExperience(
     });
   };
 
-  const synthesize = useCallback(async (): Promise<void> => {
+  const generateDebateRefractField = useCallback(
+    async (
+      kind: PrismRefractDebateTextTargetKind,
+      currentValue: string,
+      rejectedValues: readonly string[],
+      signal: AbortSignal,
+    ): Promise<string> => {
+      const response = await request<PrismRefractResponse>(
+        "/api/prism/refract",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            target: {
+              kind,
+              context: debateCompanionDraft,
+              botIds: debateCompanionBotIds,
+            },
+            currentValue,
+            rejectedValues,
+            preferredProvider:
+              props.modelOverride?.provider ?? preferredProvider,
+            modelOverride: props.modelOverride?.model,
+            responseMode: props.responseMode,
+          }),
+          signal,
+        },
+      );
+      return response.value;
+    },
+    [
+      debateCompanionBotIds,
+      debateCompanionDraft,
+      preferredProvider,
+      props.modelOverride?.model,
+      props.modelOverride?.provider,
+      props.responseMode,
+      request,
+    ],
+  );
+
+  const synthesize = useCallback(async (direction = ""): Promise<void> => {
     if (!topic.trim() || busy) return;
     setBusy(true);
     setError(null);
@@ -2921,6 +3507,7 @@ export function DebateExperience(
           preferredProvider: props.modelOverride?.provider ?? preferredProvider,
           modelOverride: props.modelOverride?.model,
           responseMode: props.responseMode,
+          direction,
         }),
       );
       setSlates(result.slates);
@@ -2949,7 +3536,7 @@ export function DebateExperience(
       label: "Synthesize debate options",
       kind: "magic",
       disabled: () => !topic.trim() || busy,
-      run: () => synthesize(),
+      run: (direction) => synthesize(direction),
     }),
     [busy, synthesize, topic],
   );
@@ -2959,8 +3546,8 @@ export function DebateExperience(
     setRoleChecks([]);
   };
 
-  const checkRoles = async (): Promise<boolean> => {
-    if (!castComplete) return false;
+  const checkRoles = async (): Promise<void> => {
+    if (!castComplete) return;
     setBusy(true);
     setError(null);
     try {
@@ -2987,14 +3574,12 @@ export function DebateExperience(
         }),
       );
       setRoleChecks(result.checks);
-      return result.checks.every((check) => check.status !== "decline");
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
           : "The private role check was unavailable.",
       );
-      return false;
     } finally {
       setBusy(false);
     }
@@ -3054,11 +3639,7 @@ export function DebateExperience(
     generated = false,
   ): Promise<void> => {
     const query = (queryOverride ?? researchQuery).trim();
-    if (
-      !query ||
-      props.responseMode === "local" ||
-      evidenceSourceLimitReached
-    ) {
+    if (!query || props.responseMode === "local" || evidenceItemLimitReached) {
       return;
     }
     setBusy(true);
@@ -3077,7 +3658,16 @@ export function DebateExperience(
       );
       setEvidence((current) => ({
         ...current,
-        sources: mergeDebateEvidenceSources(current.sources, result.sources),
+        sources: mergeDebateEvidenceSources(
+          current.sources,
+          result.sources,
+        ).slice(
+          0,
+          Math.max(
+            0,
+            DEBATE_EVIDENCE_ITEM_MAX_COUNT - (current.exhibits?.length ?? 0),
+          ),
+        ),
       }));
     } catch (caught) {
       setError(
@@ -3099,10 +3689,214 @@ export function DebateExperience(
     await research(query, true);
   };
 
+  const loadEvidenceExhibitAssets = useCallback(async (): Promise<void> => {
+    const requestId = evidenceExhibitAssetsRequestRef.current + 1;
+    evidenceExhibitAssetsRequestRef.current = requestId;
+    setEvidenceExhibitAssetsLoading(true);
+    setEvidenceExhibitAssetsUnavailable(false);
+    try {
+      const result = await request<{ images: DebateExhibitAsset[] }>(
+        "/api/images/tool-assets?scope=debate_exhibit&limit=24",
+      );
+      if (evidenceExhibitAssetsRequestRef.current !== requestId) return;
+      setEvidenceExhibitAssets(result.images);
+    } catch {
+      if (evidenceExhibitAssetsRequestRef.current !== requestId) return;
+      setEvidenceExhibitAssetsUnavailable(true);
+    } finally {
+      if (evidenceExhibitAssetsRequestRef.current === requestId) {
+        setEvidenceExhibitAssetsLoading(false);
+      }
+    }
+  }, [request]);
+
+  useEffect(() => {
+    if (!evidenceObjectEditorOpen) return;
+    void loadEvidenceExhibitAssets();
+    return () => {
+      evidenceExhibitAssetsRequestRef.current += 1;
+    };
+  }, [evidenceObjectEditorOpen, loadEvidenceExhibitAssets]);
+
+  const beginEvidenceObject = (): void => {
+    if (evidenceItemLimitReached || evidenceObjectVisualBusy) return;
+    setError(null);
+    setEvidenceObjectDraft(randomDebateEvidenceObject());
+  };
+
+  const selectEvidenceExhibitAsset = (asset: DebateExhibitAsset): void => {
+    if (evidenceObjectVisualBusy) return;
+    setEvidenceObjectDraft((current) =>
+      current
+        ? {
+            ...current,
+            visualKind: "synthesized",
+            imageId: asset.id,
+          }
+        : current,
+    );
+    setError(null);
+  };
+
+  const updateEvidenceObjectName = (
+    field: "adjective" | "object",
+    value: string,
+  ): void => {
+    setEvidenceObjectDraft((current) => {
+      if (!current) return current;
+      const previousTitle = debateEvidenceExhibitTitle(current);
+      const next = { ...current, [field]: value };
+      const nextTitle = debateEvidenceExhibitTitle(next);
+      return {
+        ...next,
+        observation:
+          !current.observation.trim() ||
+          current.observation.trim() === `${previousTitle}.`
+            ? nextTitle
+              ? `${nextTitle}.`
+              : ""
+            : current.observation,
+        emoji: current.emojiCustomized
+          ? current.emoji
+          : debateEvidenceEmojiForObject(next.object, next.adjective),
+        visualKind: "emoji",
+        imageId: null,
+      };
+    });
+  };
+
+  const openEvidenceObjectEmojiPicker = (): void => {
+    const input = evidenceExhibitEmojiRef.current;
+    if (!input || evidenceObjectVisualBusy) return;
+    input.focus({ preventScroll: true });
+    input.select();
+    void openDesktopEmojiPicker();
+  };
+
+  const uploadEvidenceObjectImage = async (file: File): Promise<void> => {
+    const draft = evidenceObjectDraft;
+    const title = draft ? debateEvidenceExhibitTitle(draft) : "";
+    if (!draft || !title || evidenceObjectVisualBusy) {
+      setError("Name the evidence object before uploading its image.");
+      return;
+    }
+    setEvidenceObjectVisualBusy("upload");
+    setError(null);
+    try {
+      const dataUrl = await readDebateEvidenceImageFile(file);
+      const result = await props.request<{
+        image: { id: string; displayUrl: string };
+      }>(
+        "/api/debates/exhibits/upload",
+        requestBody({
+          adjective: draft.adjective,
+          object: draft.object,
+          dataUrl,
+        }),
+      );
+      setEvidenceObjectDraft((current) =>
+        current
+          ? {
+              ...current,
+              visualKind: "upload",
+              imageId: result.image.id,
+            }
+          : current,
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The exhibit image could not be uploaded.",
+      );
+    } finally {
+      setEvidenceObjectVisualBusy(null);
+      if (evidenceExhibitUploadRef.current) {
+        evidenceExhibitUploadRef.current.value = "";
+      }
+    }
+  };
+
+  const synthesizeEvidenceObjectImage = async (): Promise<void> => {
+    const draft = evidenceObjectDraft;
+    const title = draft ? debateEvidenceExhibitTitle(draft) : "";
+    if (!draft || !title || evidenceObjectVisualBusy) {
+      if (!title) setError("Name the evidence object before synthesizing it.");
+      return;
+    }
+    setEvidenceObjectVisualBusy("synthesize");
+    setError(null);
+    try {
+      const result = await props.request<{
+        image: { id: string; displayUrl: string };
+      }>(
+        "/api/debates/exhibits/synthesize",
+        requestBody({
+          adjective: draft.adjective,
+          object: draft.object,
+          preferredProvider: props.preferredImageProvider,
+          responseMode: props.responseMode,
+        }),
+      );
+      setEvidenceObjectDraft((current) =>
+        current
+          ? {
+              ...current,
+              visualKind: "synthesized",
+              imageId: result.image.id,
+            }
+          : current,
+      );
+      await loadEvidenceExhibitAssets();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The evidence object could not be synthesized.",
+      );
+    } finally {
+      setEvidenceObjectVisualBusy(null);
+    }
+  };
+
+  const addEvidenceObject = (): void => {
+    if (!evidenceObjectDraft || evidenceItemLimitReached) return;
+    const title = debateEvidenceExhibitTitle(evidenceObjectDraft);
+    if (!title) {
+      setError("Use one adjective and one object, such as Rusty spoon.");
+      return;
+    }
+    const draft = evidenceObjectDraft;
+    setEvidence((current) => ({
+      ...current,
+      exhibits: [
+        ...(current.exhibits ?? []),
+        {
+          id: nextDebateEvidenceExhibitId(current),
+          adjective: draft.adjective,
+          object: draft.object,
+          title,
+          observation: draft.observation.trim() || `${title}.`,
+          emoji: draft.emoji,
+          visualKind: draft.imageId ? draft.visualKind : "emoji",
+          imageId: draft.imageId,
+          createdBy: draft.createdBy,
+        },
+      ],
+    }));
+    setEvidenceObjectDraft(null);
+    setError(null);
+  };
+
   const revealEventSilently = useCallback(
-    (event: DebateEventV1, spokenText: string): Promise<void> =>
+    (
+      event: DebateEventV1,
+      spokenText: string,
+      onVisibleCharacterCount?: (visibleCharacterCount: number) => void,
+    ): Promise<void> =>
       new Promise((resolve) => {
         if (!event.content) {
+          onVisibleCharacterCount?.(0);
           resolve();
           return;
         }
@@ -3114,6 +3908,7 @@ export function DebateExperience(
             visibleContent: event.content,
             speechTiming: null,
           });
+          onVisibleCharacterCount?.(event.content.length);
           resolve();
           return;
         }
@@ -3133,6 +3928,7 @@ export function DebateExperience(
                 alignment: null,
               },
             });
+            onVisibleCharacterCount?.(event.content.length);
           }
           if (speechRevealRunRef.current?.cancel === cancel) {
             speechRevealRunRef.current = null;
@@ -3147,12 +3943,13 @@ export function DebateExperience(
             return;
           }
           const progress = Math.min(1, (now - startedAt) / durationMs);
+          const visibleContent = debateVisibleContentAtProgress(
+            event.content,
+            progress,
+          );
           setLiveReveal({
             eventId: event.id,
-            visibleContent: debateVisibleContentAtProgress(
-              event.content,
-              progress,
-            ),
+            visibleContent,
             speechTiming: {
               text: speechText,
               elapsedMs: progress * durationMs,
@@ -3160,6 +3957,7 @@ export function DebateExperience(
               alignment: null,
             },
           });
+          onVisibleCharacterCount?.(visibleContent.length);
           if (progress >= 1) {
             finish();
             return;
@@ -3201,6 +3999,68 @@ export function DebateExperience(
     [props.audioEnabled, props.audioVolume],
   );
 
+  const debateUtteranceForEvent = useCallback(
+    (
+      session: DebateSessionV1,
+      event: DebateEventV1,
+    ): DebateUtterance | null => {
+      if (
+        event.speakerKind === "system" ||
+        event.kind === "silence" ||
+        (event.kind === "judge_gavel" &&
+          event.gavelReason === "intervention") ||
+        (event.kind === "ballot" &&
+          event.speakerKind !== "juror" &&
+          session.ballots.find(
+            (ballot) => ballot.voterBotId === event.speakerBotId,
+          )?.privateReason)
+      ) {
+        return null;
+      }
+      const spokenText = debateSpokenText(event.content);
+      const snapshot = debateBotSnapshot(session, event.speakerBotId);
+      const presentation = snapshot
+        ? debateBotPresentation(session, snapshot, event.sequence)
+        : null;
+      const voiceSnapshot = presentation
+        ? (debateBotSnapshot(session, presentation.voiceSourceBotId) ??
+          snapshot)
+        : snapshot;
+      const speaker = snapshot
+        ? {
+            id: snapshot.id,
+            name: snapshot.name,
+            color: snapshot.color,
+            glyph: snapshot.glyph,
+            avatarDetails: snapshot.avatarDetails,
+            voiceProfile: voiceSnapshot?.voiceProfile ?? null,
+            powers: snapshot.powers,
+            systemPrompt: snapshot.systemPrompt,
+            hardMuted: session.powerPlan.bots[snapshot.id]?.hardMuted === true,
+          }
+        : event.speakerBotId
+          ? (bots.find((bot) => bot.id === event.speakerBotId) ?? null)
+          : null;
+      return {
+        event,
+        format: session.format,
+        sessionId: session.id,
+        speaker,
+        player: event.speakerKind === "player",
+        playerVoice:
+          session.playerRole === "judge" &&
+          session.moderator.id === DEBATE_PLAYER_JUDGE_BOT_ID &&
+          (event.speakerKind === "player" ||
+            event.speakerBotId === session.moderator.id),
+        spokenText,
+        voicePerformanceText:
+          event.kind === "objection" ? `[shouts] ${spokenText}` : null,
+        voiceSourceBotId: presentation?.voiceSourceBotId ?? null,
+      };
+    },
+    [bots],
+  );
+
   const consumeNewEvents = useCallback(
     async (
       previous: DebateSessionV1 | null,
@@ -3208,13 +4068,36 @@ export function DebateExperience(
       runId: number,
       options: { automaticJudgeGavel?: boolean } = {},
     ): Promise<void> => {
-      const fresh = debatePresentationEvents(
+      const freshWithAudienceOrder = debatePresentationEvents(
         previous,
         next,
         debateJuryCameraIsActive(
           debateCameraModeForSession(cameraModeRef.current, next),
           next,
         ),
+      );
+      const linkedAudienceOrderCues = new Map<string, DebateEventV1[]>();
+      for (const event of freshWithAudienceOrder) {
+        if (
+          event.kind !== "judge_gavel" ||
+          event.gavelReason !== "audience_order" ||
+          !event.parentEventId ||
+          event.gavelHeardCharacterCount === undefined
+        ) {
+          continue;
+        }
+        const cues = linkedAudienceOrderCues.get(event.parentEventId) ?? [];
+        cues.push(event);
+        linkedAudienceOrderCues.set(event.parentEventId, cues);
+      }
+      const fresh = freshWithAudienceOrder.filter(
+        (event) =>
+          !(
+            event.kind === "judge_gavel" &&
+            event.gavelReason === "audience_order" &&
+            event.parentEventId &&
+            event.gavelHeardCharacterCount !== undefined
+          ),
       );
       const recovery = [...fresh]
         .reverse()
@@ -3228,6 +4111,7 @@ export function DebateExperience(
       }
       for (const event of fresh) {
         if (presentationRunRef.current !== runId) return;
+        setAudiencePressurePresentationEventId(event.id);
         if (debateEventIsJurySidebarComment(event)) {
           markJuryCommentPlayed(event.id);
         }
@@ -3254,9 +4138,62 @@ export function DebateExperience(
           semanticAudienceReaction === null
             ? (gavelCue?.audienceReaction ?? null)
             : null;
+        const utterance = debateUtteranceForEvent(next, event);
+        const voiceReady = utterance
+          ? onPrepareUtterance?.(utterance).catch(() => undefined)
+          : null;
+        if (voiceReady) {
+          setVoicePreparationSpeakerBotId(
+            utterance?.speaker?.id ?? event.speakerBotId,
+          );
+        }
         const lifecycleControlGavel =
           next.playerRole === "judge" &&
-          (event.stepKey === "pause" || event.stepKey === "resume");
+          (event.stepKey === "pause" ||
+            event.stepKey === "resume" ||
+            event.gavelReason === "audience_order");
+        const audienceOrderCuesForEvent = (
+          linkedAudienceOrderCues.get(event.id) ?? []
+        ).sort(
+          (left, right) =>
+            (left.gavelHeardCharacterCount ?? 0) -
+            (right.gavelHeardCharacterCount ?? 0),
+        );
+        const performLinkedAudienceOrderCues = (
+          visibleCharacterCount: number,
+        ): void => {
+          for (const cue of audienceOrderCuesForEvent) {
+            if (
+              playedAudienceOrderCueIdsRef.current.has(cue.id) ||
+              visibleCharacterCount < (cue.gavelHeardCharacterCount ?? 0)
+            ) {
+              continue;
+            }
+            const played = new Set(playedAudienceOrderCueIdsRef.current);
+            played.add(cue.id);
+            playedAudienceOrderCueIdsRef.current = played;
+            const pressureAtCue = debateAudiencePressureScore({
+              events: next.events,
+              formality: next.formality,
+              playerRole: next.playerRole,
+              visibleThroughSequence: event.sequence,
+              activeEventId: event.id,
+              visibleCharacterCount: cue.gavelHeardCharacterCount ?? 0,
+              reactionForEvent: (candidate) =>
+                debateAudienceBeatForEvent({
+                  event: candidate,
+                  publicContent: candidate.content,
+                  seatCount: debateAudienceBotCount(props.graphicsQuality),
+                })?.listenerReaction ?? null,
+            });
+            triggerAudienceOrderResponseRef.current?.({
+              eventId: cue.id,
+              kind: pressureAtCue >= 45 ? "hush" : "awkward",
+              resetAfterSequence: event.sequence,
+              sessionId: next.id,
+            });
+          }
+        };
         if (
           gavelCue &&
           next.playerRole === "judge" &&
@@ -3278,6 +4215,9 @@ export function DebateExperience(
           );
           if (presentationRunRef.current !== runId) return;
         }
+        await voiceReady;
+        if (presentationRunRef.current !== runId) return;
+        setVoicePreparationSpeakerBotId(null);
         setPresentationEventId(event.id);
         if (gavelCue) {
           const remainingSpeechLeadMs = Math.max(
@@ -3298,6 +4238,40 @@ export function DebateExperience(
             visibleContent: event.content,
           });
           await new Promise((resolve) => window.setTimeout(resolve, 900));
+          continue;
+        }
+        if (
+          event.kind === "judge_gavel" &&
+          event.gavelReason === "audience_order"
+        ) {
+          const played = new Set(playedAudienceOrderCueIdsRef.current);
+          played.add(event.id);
+          playedAudienceOrderCueIdsRef.current = played;
+          const pressureBeforeOrder = debateAudiencePressureScore({
+            events: next.events,
+            formality: next.formality,
+            playerRole: next.playerRole,
+            visibleThroughSequence: event.sequence - 1,
+            reactionForEvent: (candidate) =>
+              debateAudienceBeatForEvent({
+                event: candidate,
+                publicContent: candidate.content,
+                seatCount: debateAudienceBotCount(props.graphicsQuality),
+              })?.listenerReaction ?? null,
+          });
+          triggerAudienceOrderResponseRef.current?.({
+            eventId: event.id,
+            kind: pressureBeforeOrder >= 45 ? "hush" : "awkward",
+            performGavel: false,
+            resetAfterSequence: event.sequence,
+            sessionId: next.id,
+          });
+          setLiveReveal({
+            eventId: event.id,
+            visibleContent: "",
+            speechTiming: null,
+          });
+          await new Promise((resolve) => window.setTimeout(resolve, 260));
           continue;
         }
         if (
@@ -3339,29 +4313,8 @@ export function DebateExperience(
         // follow the same caption, mouth, and voice path as deliberation.
         // Participant projections omit these events, and hard-muted jurors
         // still resolve through canonical silence.
-        const spokenText = debateSpokenText(event.content);
-        const snapshot = debateBotSnapshot(next, event.speakerBotId);
-        const presentation = snapshot
-          ? debateBotPresentation(next, snapshot, event.sequence)
-          : null;
-        const voiceSnapshot = presentation
-          ? (debateBotSnapshot(next, presentation.voiceSourceBotId) ?? snapshot)
-          : snapshot;
-        const speaker = snapshot
-          ? {
-              id: snapshot.id,
-              name: snapshot.name,
-              color: snapshot.color,
-              glyph: snapshot.glyph,
-              avatarDetails: snapshot.avatarDetails,
-              voiceProfile: voiceSnapshot?.voiceProfile ?? null,
-              powers: snapshot.powers,
-              systemPrompt: snapshot.systemPrompt,
-              hardMuted: next.powerPlan.bots[snapshot.id]?.hardMuted === true,
-            }
-          : event.speakerBotId
-            ? (bots.find((bot) => bot.id === event.speakerBotId) ?? null)
-            : null;
+        if (!utterance) continue;
+        const { spokenText } = utterance;
         setLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
         let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
@@ -3371,20 +4324,7 @@ export function DebateExperience(
         );
         let lastSpeechRenderAt = 0;
         const played = await onUtterance?.({
-          event,
-          format: next.format,
-          sessionId: next.id,
-          speaker,
-          player: event.speakerKind === "player",
-          playerVoice:
-            next.playerRole === "judge" &&
-            next.moderator.id === DEBATE_PLAYER_JUDGE_BOT_ID &&
-            (event.speakerKind === "player" ||
-              event.speakerBotId === next.moderator.id),
-          spokenText,
-          voicePerformanceText:
-            event.kind === "objection" ? `[shouts] ${spokenText}` : null,
-          voiceSourceBotId: presentation?.voiceSourceBotId ?? null,
+          ...utterance,
           lifecycle: {
             onStart: (durationMs, alignment) => {
               if (presentationRunRef.current !== runId) return;
@@ -3394,6 +4334,7 @@ export function DebateExperience(
                 durationMs ?? playbackDurationMs,
               );
               lastSpeechRenderAt = performance.now();
+              performLinkedAudienceOrderCues(0);
               setLiveReveal((current) =>
                 current?.eventId === event.id
                   ? {
@@ -3420,12 +4361,13 @@ export function DebateExperience(
                 return;
               }
               lastSpeechRenderAt = now;
+              const visibleContent = debateVisibleContentAtProgress(
+                event.content,
+                elapsedMs / playbackDurationMs,
+              );
               setLiveReveal({
                 eventId: event.id,
-                visibleContent: debateVisibleContentAtProgress(
-                  event.content,
-                  elapsedMs / playbackDurationMs,
-                ),
+                visibleContent,
                 speechTiming: {
                   text: spokenText,
                   elapsedMs: Math.min(playbackDurationMs, elapsedMs),
@@ -3433,9 +4375,11 @@ export function DebateExperience(
                   alignment: playbackAlignment,
                 },
               });
+              performLinkedAudienceOrderCues(visibleContent.length);
             },
             onEnd: () => {
               if (presentationRunRef.current !== runId) return;
+              performLinkedAudienceOrderCues(event.content.length);
               setLiveReveal({
                 eventId: event.id,
                 visibleContent: event.content,
@@ -3451,7 +4395,11 @@ export function DebateExperience(
         });
         if (presentationRunRef.current !== runId) return;
         if (!played || !playbackProgressSeen) {
-          await revealEventSilently(event, spokenText);
+          await revealEventSilently(
+            event,
+            spokenText,
+            performLinkedAudienceOrderCues,
+          );
           if (presentationRunRef.current !== runId) return;
         } else {
           setLiveReveal((current) =>
@@ -3471,10 +4419,12 @@ export function DebateExperience(
       setLiveGavelCue(null);
       setLiveReveal(null);
       setTranscriptVisibleThroughSequence(null);
+      setVoicePreparationSpeakerBotId(null);
     },
     [
-      bots,
+      debateUtteranceForEvent,
       markJuryCommentPlayed,
+      onPrepareUtterance,
       onUtterance,
       playDebateAudienceReaction,
       props.graphicsQuality,
@@ -3554,6 +4504,7 @@ export function DebateExperience(
     ): Promise<void> => {
       const runId = presentationRunRef.current + 1;
       presentationRunRef.current = runId;
+      setVoicePreparationSpeakerBotId(null);
       const fresh = debatePresentationEvents(
         previous,
         next,
@@ -3580,9 +4531,16 @@ export function DebateExperience(
             ? (previous?.events.at(-1)?.sequence ?? 0)
             : first.sequence,
         );
-        if (!firstWaitsForJudgeGavel && firstGavelCue?.kind !== "order") {
+        if (
+          !onPrepareUtterance &&
+          !firstWaitsForJudgeGavel &&
+          firstGavelCue?.kind !== "order"
+        ) {
           setPresentationEventId(first.id);
           setLiveReveal({ eventId: first.id, visibleContent: "" });
+        } else {
+          setPresentationEventId(null);
+          setLiveReveal(null);
         }
       } else {
         setTranscriptVisibleThroughSequence(null);
@@ -3617,12 +4575,14 @@ export function DebateExperience(
         }
       } finally {
         if (presentationRunRef.current === runId) {
+          setVoicePreparationSpeakerBotId(null);
+          setAudiencePressurePresentationEventId(null);
           setPresenting(false);
         }
       }
       void loadSessions();
     },
-    [consumeNewEvents, loadSessions, playDebateIdent],
+    [consumeNewEvents, loadSessions, onPrepareUtterance, playDebateIdent],
   );
 
   const openSession = async (
@@ -3796,6 +4756,7 @@ export function DebateExperience(
       !activeSession ||
       activeSession.status !== "live" ||
       busy ||
+      audienceOrderSaving ||
       presenting ||
       earlyEndOpen ||
       debateAwaitsJuryDeliberationChoice(activeSession)
@@ -3804,7 +4765,15 @@ export function DebateExperience(
     }
     const timer = window.setTimeout(() => void advance(false), 520);
     return () => window.clearTimeout(timer);
-  }, [activeSession, advance, busy, earlyEndOpen, presenting, view]);
+  }, [
+    activeSession,
+    advance,
+    audienceOrderSaving,
+    busy,
+    earlyEndOpen,
+    presenting,
+    view,
+  ]);
 
   useEffect(() => {
     const awaitingChoice =
@@ -4237,12 +5206,14 @@ export function DebateExperience(
       speechRevealRunRef.current = null;
     }
     setLiveGavelCue(null);
+    setAudiencePressurePresentationEventId(null);
     setPresenting(false);
   };
 
   const triggerJudgeGavelSmash = (
     kind: DebateModeratorGavelCue["kind"],
   ): void => {
+    judgeGavelSmashShowmanshipKindRef.current = kind;
     if (judgeGavelOvertimeBurstActiveRef.current) {
       judgeGavelOvertimeStrikeCountRef.current += 1;
     }
@@ -4265,6 +5236,53 @@ export function DebateExperience(
       debateModeratorGavelSpeechLeadMs(kind) + 220,
     );
   };
+
+  const triggerAudienceOrderResponse = (args: {
+    eventId: string;
+    kind: "awkward" | "hush";
+    performGavel?: boolean;
+    resetAfterSequence: number;
+    sessionId: string;
+  }): void => {
+    audienceOrderResponseCounterRef.current += 1;
+    const response: DebateAudienceOrderResponse = {
+      id: audienceOrderResponseCounterRef.current,
+      kind: args.kind,
+      resetAfterSequence: args.resetAfterSequence,
+      returningRoomTone: false,
+      sessionId: args.sessionId,
+    };
+    if (args.performGavel !== false) {
+      triggerJudgeGavelSmash("order");
+    }
+    setAudiencePressureReset({
+      resetAfterSequence: args.resetAfterSequence,
+      sessionId: args.sessionId,
+    });
+    setAudienceOrderResponse(response);
+    playDebateAudienceReaction("order", args.eventId);
+    if (audienceOrderResponseClearTimerRef.current !== null) {
+      window.clearTimeout(audienceOrderResponseClearTimerRef.current);
+    }
+    if (audienceRoomToneReturnTimerRef.current !== null) {
+      window.clearTimeout(audienceRoomToneReturnTimerRef.current);
+    }
+    audienceRoomToneReturnTimerRef.current = window.setTimeout(() => {
+      setAudienceOrderResponse((current) =>
+        current?.id === response.id
+          ? { ...current, returningRoomTone: true }
+          : current,
+      );
+      audienceRoomToneReturnTimerRef.current = null;
+    }, 100);
+    audienceOrderResponseClearTimerRef.current = window.setTimeout(() => {
+      setAudienceOrderResponse((current) =>
+        current?.id === response.id ? null : current,
+      );
+      audienceOrderResponseClearTimerRef.current = null;
+    }, 4_100);
+  };
+  triggerAudienceOrderResponseRef.current = triggerAudienceOrderResponse;
 
   const finishJudgeGavelCeremony = (
     gate: DebateJudgeGavelCeremonyGate,
@@ -4355,6 +5373,84 @@ export function DebateExperience(
   strikeJudgeGavelCeremonyRef.current = strikeJudgeGavelCeremony;
   cancelJudgeGavelCeremonyRef.current = cancelJudgeGavelCeremony;
 
+  const orderDebateAudience = async (): Promise<void> => {
+    const previous = activeSession;
+    if (
+      !previous ||
+      previous.playerRole !== "judge" ||
+      debateJudgeGavelLockedForJury(previous) ||
+      previous.objectionRuling?.status === "awaiting_ruling" ||
+      previous.judgeGavel?.status === "awaiting_message" ||
+      previous.playerVerdict !== null ||
+      previous.status === "completed" ||
+      previous.status === "cancelled" ||
+      previous.status === "failed" ||
+      previous.status === "paused"
+    ) {
+      return;
+    }
+    if (Date.now() < judgeGavelSmashUntilRef.current) {
+      triggerJudgeGavelSmash("order");
+      return;
+    }
+    if (
+      busy ||
+      audienceOrderSavingRef.current ||
+      debateFloorMutationInFlightRef.current
+    ) {
+      return;
+    }
+
+    const target = judgeGavelActiveTarget;
+    const heardCharacterCount =
+      target && liveReveal?.eventId === target.id
+        ? liveReveal.visibleContent.length
+        : (target?.content.length ?? 0);
+    const resetAfterSequence =
+      target?.sequence ?? previous.events.at(-1)?.sequence ?? 0;
+    const responseEventId = `audience-order:${previous.id}:${previous.revision}`;
+    judgeGavelSmashUntilRef.current =
+      Date.now() + DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS;
+    triggerAudienceOrderResponse({
+      eventId: responseEventId,
+      kind: currentAudiencePressureScore >= 45 ? "hush" : "awkward",
+      resetAfterSequence,
+      sessionId: previous.id,
+    });
+
+    audienceOrderSavingRef.current = true;
+    debateFloorMutationInFlightRef.current = true;
+    setAudienceOrderSaving(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(previous.id)}/judge-gavel/order`,
+        requestBody({
+          expectedRevision: previous.revision,
+          idempotencyKey: nextMutationKey("judge-gavel-order"),
+          eventId: target?.id ?? null,
+          heardCharacterCount,
+        }),
+      );
+      if (mountedRef.current) {
+        setActiveSession((current) =>
+          current?.id === previous.id ? result.session : current,
+        );
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The order strike could not be saved.",
+      );
+    } finally {
+      audienceOrderSavingRef.current = false;
+      debateFloorMutationInFlightRef.current = false;
+      if (mountedRef.current) setAudienceOrderSaving(false);
+    }
+  };
+  orderDebateAudienceRef.current = orderDebateAudience;
+
   const swingJudgeGavel = async (overtimeOverride?: boolean): Promise<void> => {
     const previous = activeSession;
     if (
@@ -4386,6 +5482,14 @@ export function DebateExperience(
     judgeGavelOvertimeBurstActiveRef.current = overtime;
     judgeGavelOvertimeStrikeCountRef.current = 0;
     triggerJudgeGavelSmash(overtime ? "attention" : "order");
+    triggerAudienceOrderResponse({
+      eventId: `semantic-gavel:${previous.id}:${previous.revision}`,
+      kind: "hush",
+      performGavel: false,
+      resetAfterSequence:
+        target?.sequence ?? previous.events.at(-1)?.sequence ?? 0,
+      sessionId: previous.id,
+    });
     setBusy(true);
     setError(null);
     try {
@@ -5005,7 +6109,7 @@ export function DebateExperience(
         label: motion.forSide.label || "For",
         bot:
           playerRole === "participant" && playerSideId === "for"
-            ? DEBATE_PLAYER_PARTICIPANT_PRISM
+            ? playerParticipantBot
             : (botById.get(cast.forAdvocate) ?? null),
         fallback: "#42d9ff",
       },
@@ -5020,7 +6124,7 @@ export function DebateExperience(
         label: motion.againstSide.label || "Against",
         bot:
           playerRole === "participant" && playerSideId === "against"
-            ? DEBATE_PLAYER_PARTICIPANT_PRISM
+            ? playerParticipantBot
             : (botById.get(cast.againstAdvocate) ?? null),
         fallback: "#ff5f8f",
       },
@@ -5077,7 +6181,7 @@ export function DebateExperience(
           </small>
         ) : (
           <small className={styles.formatReadout}>
-            Plainspoken Forum · you make the final call
+            {formalityDescriptor.title} Forum · you make the final call
           </small>
         )}
       </section>
@@ -5201,9 +6305,9 @@ export function DebateExperience(
               {
                 id: "evidence",
                 index: "03",
-                label: setupMode === "basic" ? "Sources" : "Evidence",
+                label: "Evidence",
                 detail:
-                  evidence.sources.length > 0 || evidence.notes.trim()
+                  debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
                     ? setupMode === "basic"
                       ? "Context added"
                       : "Packet prepared"
@@ -5295,30 +6399,12 @@ export function DebateExperience(
           {renderReviewStep()}
         </aside>
       </div>
-      {selectedSource ? (
-        <aside
-          className={styles.sourceDrawer}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="debate-source-title"
-        >
-          <button
-            ref={sourceDrawerCloseButtonRef}
-            type="button"
-            onClick={() => setSourceDrawerId(null)}
-          >
-            Close
-          </button>
-          <span>{selectedSource.id}</span>
-          <h2 id="debate-source-title">{selectedSource.title}</h2>
-          <p>{selectedSource.snippet}</p>
-          {selectedSource.publishedAt ? (
-            <small>{selectedSource.publishedAt}</small>
-          ) : null}
-          <a href={selectedSource.url} target="_blank" rel="noreferrer">
-            Open original source
-          </a>
-        </aside>
+      {selectedEvidence ? (
+        <DebateEvidenceDrawer
+          item={selectedEvidence}
+          closeButtonRef={sourceDrawerCloseButtonRef}
+          onClose={() => setSourceDrawerId(null)}
+        />
       ) : null}
       {pendingDeleteSession ? (
         <div
@@ -5455,10 +6541,7 @@ export function DebateExperience(
               onChange={(event) => {
                 const next =
                   DEBATE_FORMALITY_SPECTRUM[Number(event.currentTarget.value)];
-                if (next && next.id !== formality) {
-                  setFormality(next.id);
-                  setRoleChecks([]);
-                }
+                if (next) chooseFormality(next.id);
               }}
             />
             <div className={styles.formalityStops} aria-hidden="true">
@@ -5536,31 +6619,121 @@ export function DebateExperience(
           </fieldset>
         </>
       ) : (
-        <div className={styles.basicDefaults} role="note">
-          <span aria-hidden="true">◇</span>
-          <div>
-            <strong>Prism handles the setup</strong>
-            <small>
-              Plainspoken Forum · you judge · Prism holds your seat · no Jury
-            </small>
+        <section
+          className={styles.basicSetupCard}
+          aria-label="Basic Debate setup"
+        >
+          <div className={styles.basicDefaults} role="note">
+            <span aria-hidden="true">◇</span>
+            <div>
+              <strong>Prism handles the setup</strong>
+              <small>
+                {formalityDescriptor.title} Forum · you judge · Prism holds your
+                seat · no Jury
+              </small>
+            </div>
+            <button type="button" onClick={() => chooseSetupMode("advanced")}>
+              Customize
+            </button>
           </div>
-          <button type="button" onClick={() => chooseSetupMode("advanced")}>
-            Customize
-          </button>
-        </div>
+          <div
+            className={styles.rowdinessControl}
+            data-rowdiness={formality}
+            data-tutorial-target="debate-rowdiness"
+            style={
+              {
+                "--debate-rowdiness-progress": `${rowdinessProgress}%`,
+              } as CSSProperties
+            }
+          >
+            <div className={styles.rowdinessReadout}>
+              <span>Rowdiness</span>
+              <strong>{formalityDescriptor.title}</strong>
+              <small>{formalityDescriptor.summary}</small>
+            </div>
+            <div className={styles.rowdinessInstrument}>
+              <div className={styles.rowdinessEndpoints} aria-hidden="true">
+                <span>University Union</span>
+                <span>Daytime Showdown</span>
+              </div>
+              <div className={styles.rowdinessRange}>
+                <div className={styles.rowdinessTrack} aria-hidden="true">
+                  <span>
+                    {DEBATE_ROWDINESS_SPECTRUM.map((level, index) => (
+                      <i
+                        key={level.id}
+                        data-reached={
+                          index <= rowdinessIndex ? "true" : undefined
+                        }
+                        data-current={
+                          level.id === formality ? "true" : undefined
+                        }
+                      />
+                    ))}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={DEBATE_ROWDINESS_SPECTRUM.length - 1}
+                  step="1"
+                  value={rowdinessIndex}
+                  aria-label="Debate rowdiness"
+                  aria-valuetext={`${formalityDescriptor.title}: ${formalityDescriptor.summary}`}
+                  aria-describedby="debate-rowdiness-copy"
+                  onChange={(event) => {
+                    const next =
+                      DEBATE_ROWDINESS_SPECTRUM[
+                        Number(event.currentTarget.value)
+                      ];
+                    if (next) chooseFormality(next.id);
+                  }}
+                />
+              </div>
+              <p id="debate-rowdiness-copy">
+                Changes the room’s heat, pacing, cut-ins, and moderator pressure
+                — never the facts or the Personas.
+              </p>
+            </div>
+          </div>
+        </section>
       )}
       <label
         className={`${styles.field} ${styles.moderatorTitleField}`}
         data-tutorial-target="debate-moderator-title"
       >
         <span>Moderator title</span>
-        <input
-          value={moderatorTitle}
-          maxLength={DEBATE_MODERATOR_TITLE_MAX_LENGTH}
-          onChange={(event) => setModeratorTitle(event.currentTarget.value)}
-          onBlur={() => setModeratorTitle(effectiveModeratorTitle)}
-          placeholder="Moderator, The House, The Court…"
-        />
+        <PrismRefractTarget
+          target={{
+            id: "debate-setup-moderator-title",
+            kind: "field",
+            label: "moderator title",
+            read: () => moderatorTitle,
+            preview: setModeratorTitle,
+            accept: setModeratorTitle,
+            disabled: () => busy,
+            generate: ({ currentValue, rejectedValues, signal }) =>
+              generateDebateRefractField(
+                "debate.setup.moderatorTitle",
+                currentValue,
+                rejectedValues,
+                signal,
+              ),
+          }}
+        >
+          {(binding) => (
+            <input
+              {...binding}
+              value={moderatorTitle}
+              maxLength={DEBATE_MODERATOR_TITLE_MAX_LENGTH}
+              onChange={(event) =>
+                setModeratorTitle(event.currentTarget.value)
+              }
+              onBlur={() => setModeratorTitle(effectiveModeratorTitle)}
+              placeholder="Moderator, The House, The Court…"
+            />
+          )}
+        </PrismRefractTarget>
         <small>
           Enter it exactly as the presiding voice should say and display it.
         </small>
@@ -5571,17 +6744,39 @@ export function DebateExperience(
             {setupMode === "basic" ? "Your idea" : "Territory"}
           </label>
           <div className={styles.territoryInput}>
-            <textarea
-              id="debate-territory"
-              value={topic}
-              onChange={(event) => setTopic(event.currentTarget.value)}
-              placeholder={
-                setupMode === "basic"
-                  ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
-                  : "Housing near transit, whether art can be separated from its creator…"
-              }
-              rows={3}
-            />
+            <PrismRefractTarget
+              target={{
+                id: "debate-setup-topic",
+                kind: "field",
+                label: setupMode === "basic" ? "debate idea" : "territory",
+                read: () => topic,
+                preview: setTopic,
+                accept: setTopic,
+                disabled: () => busy,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateDebateRefractField(
+                    "debate.setup.topic",
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
+              }}
+            >
+              {(binding) => (
+                <textarea
+                  {...binding}
+                  id="debate-territory"
+                  value={topic}
+                  onChange={(event) => setTopic(event.currentTarget.value)}
+                  placeholder={
+                    setupMode === "basic"
+                      ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
+                      : "Housing near transit, whether art can be separated from its creator…"
+                  }
+                  rows={3}
+                />
+              )}
+            </PrismRefractTarget>
             <button
               type="button"
               className={styles.territoryRandomizeButton}
@@ -5650,19 +6845,53 @@ export function DebateExperience(
         >
           <label className={styles.fieldWide}>
             <span>Motion</span>
-            <textarea
-              value={motion.motion}
-              onChange={(event) => {
-                const value = event.currentTarget.value;
-                setMotion((current) => ({
-                  ...current,
-                  id: "custom-motion",
-                  motion: value,
-                }));
-                setRoleChecks([]);
+            <PrismRefractTarget
+              target={{
+                id: "debate-setup-motion",
+                kind: "field",
+                label: "debate motion",
+                read: () => motion.motion,
+                preview: (value) =>
+                  setMotion((current) => ({
+                    ...current,
+                    id: "custom-motion",
+                    motion: value,
+                  })),
+                accept: (value) => {
+                  setMotion((current) => ({
+                    ...current,
+                    id: "custom-motion",
+                    motion: value,
+                  }));
+                  setRoleChecks([]);
+                },
+                disabled: () => busy,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateDebateRefractField(
+                    "debate.setup.motion",
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
               }}
-              rows={3}
-            />
+            >
+              {(binding) => (
+                <textarea
+                  {...binding}
+                  value={motion.motion}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setMotion((current) => ({
+                      ...current,
+                      id: "custom-motion",
+                      motion: value,
+                    }));
+                    setRoleChecks([]);
+                  }}
+                  rows={3}
+                />
+              )}
+            </PrismRefractTarget>
           </label>
           {motionReveal.positions
             ? (["for", "against"] as const).map((sideId) => {
@@ -5677,22 +6906,88 @@ export function DebateExperience(
                   >
                     <label className={styles.field}>
                       <span>{sideId === "for" ? "For" : "Against"} label</span>
-                      <input
-                        value={side.label}
-                        placeholder={sideId === "for" ? "For" : "Against"}
-                        onChange={(event) => {
-                          const value = event.currentTarget.value;
-                          setMotion((current) => ({
-                            ...current,
-                            id: "custom-motion",
-                            [sideId === "for" ? "forSide" : "againstSide"]: {
-                              ...side,
-                              label: value,
-                            },
-                          }));
-                          setRoleChecks([]);
+                      <PrismRefractTarget
+                        target={{
+                          id: `debate-setup-${sideId}-label`,
+                          kind: "field",
+                          label: `${sideId} label`,
+                          read: () => side.label,
+                          preview: (value) =>
+                            setMotion((current) => ({
+                              ...current,
+                              id: "custom-motion",
+                              [
+                                sideId === "for"
+                                  ? "forSide"
+                                  : "againstSide"
+                              ]: {
+                                ...current[
+                                  sideId === "for"
+                                    ? "forSide"
+                                    : "againstSide"
+                                ],
+                                label: value,
+                              },
+                            })),
+                          accept: (value) => {
+                            setMotion((current) => ({
+                              ...current,
+                              id: "custom-motion",
+                              [
+                                sideId === "for"
+                                  ? "forSide"
+                                  : "againstSide"
+                              ]: {
+                                ...current[
+                                  sideId === "for"
+                                    ? "forSide"
+                                    : "againstSide"
+                                ],
+                                label: value,
+                              },
+                            }));
+                            setRoleChecks([]);
+                          },
+                          disabled: () => busy,
+                          generate: ({
+                            currentValue,
+                            rejectedValues,
+                            signal,
+                          }) =>
+                            generateDebateRefractField(
+                              sideId === "for"
+                                ? "debate.setup.forLabel"
+                                : "debate.setup.againstLabel",
+                              currentValue,
+                              rejectedValues,
+                              signal,
+                            ),
                         }}
-                      />
+                      >
+                        {(binding) => (
+                          <input
+                            {...binding}
+                            value={side.label}
+                            placeholder={sideId === "for" ? "For" : "Against"}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setMotion((current) => ({
+                                ...current,
+                                id: "custom-motion",
+                                [
+                                  sideId === "for"
+                                    ? "forSide"
+                                    : "againstSide"
+                                ]: {
+                                  ...side,
+                                  label: value,
+                                },
+                              }));
+                              setRoleChecks([]);
+                            }}
+                          />
+                        )}
+                      </PrismRefractTarget>
                     </label>
                     {motionReveal.briefs ? (
                       <label
@@ -5702,22 +6997,88 @@ export function DebateExperience(
                         <span>
                           {sideId === "for" ? "For" : "Against"} brief
                         </span>
-                        <textarea
-                          value={side.brief}
-                          onChange={(event) => {
-                            const value = event.currentTarget.value;
-                            setMotion((current) => ({
-                              ...current,
-                              id: "custom-motion",
-                              [sideId === "for" ? "forSide" : "againstSide"]: {
-                                ...side,
-                                brief: value,
-                              },
-                            }));
-                            setRoleChecks([]);
+                        <PrismRefractTarget
+                          target={{
+                            id: `debate-setup-${sideId}-brief`,
+                            kind: "field",
+                            label: `${sideId} brief`,
+                            read: () => side.brief,
+                            preview: (value) =>
+                              setMotion((current) => ({
+                                ...current,
+                                id: "custom-motion",
+                                [
+                                  sideId === "for"
+                                    ? "forSide"
+                                    : "againstSide"
+                                ]: {
+                                  ...current[
+                                    sideId === "for"
+                                      ? "forSide"
+                                      : "againstSide"
+                                  ],
+                                  brief: value,
+                                },
+                              })),
+                            accept: (value) => {
+                              setMotion((current) => ({
+                                ...current,
+                                id: "custom-motion",
+                                [
+                                  sideId === "for"
+                                    ? "forSide"
+                                    : "againstSide"
+                                ]: {
+                                  ...current[
+                                    sideId === "for"
+                                      ? "forSide"
+                                      : "againstSide"
+                                  ],
+                                  brief: value,
+                                },
+                              }));
+                              setRoleChecks([]);
+                            },
+                            disabled: () => busy,
+                            generate: ({
+                              currentValue,
+                              rejectedValues,
+                              signal,
+                            }) =>
+                              generateDebateRefractField(
+                                sideId === "for"
+                                  ? "debate.setup.forBrief"
+                                  : "debate.setup.againstBrief",
+                                currentValue,
+                                rejectedValues,
+                                signal,
+                              ),
                           }}
-                          rows={5}
-                        />
+                        >
+                          {(binding) => (
+                            <textarea
+                              {...binding}
+                              value={side.brief}
+                              onChange={(event) => {
+                                const value = event.currentTarget.value;
+                                setMotion((current) => ({
+                                  ...current,
+                                  id: "custom-motion",
+                                  [
+                                    sideId === "for"
+                                      ? "forSide"
+                                      : "againstSide"
+                                  ]: {
+                                    ...side,
+                                    brief: value,
+                                  },
+                                }));
+                                setRoleChecks([]);
+                              }}
+                              rows={5}
+                            />
+                          )}
+                        </PrismRefractTarget>
                       </label>
                     ) : null}
                   </div>
@@ -5859,9 +7220,9 @@ export function DebateExperience(
             const fixedSeat =
               fixedPlayerJudgeModerator || fixedParticipantAdvocate;
             const bot = fixedPlayerJudgeModerator
-              ? DEBATE_PLAYER_JUDGE_PRISM
+              ? playerJudgeBot
               : fixedParticipantAdvocate
-                ? DEBATE_PLAYER_PARTICIPANT_PRISM
+                ? playerParticipantBot
                 : (botById.get(cast[key]) ?? null);
             const accent = bot?.color ?? "#8f7cff";
             return (
@@ -6074,15 +7435,22 @@ export function DebateExperience(
         <div className={styles.consentList}>
           {roleChecks.map((check) => {
             const bot = botById.get(check.botId);
+            const sideLabel =
+              check.sideId === "for"
+                ? motion.forSide.label
+                : motion.againstSide.label;
+            const comment =
+              check.reason?.trim() ||
+              (check.status === "devils_advocate"
+                ? `I’ll argue ${sideLabel} as Devil’s Advocate.`
+                : check.status === "decline"
+                  ? `I’m not willing to argue ${sideLabel}.`
+                  : `I’m willing to argue ${sideLabel}.`);
             return (
               <article key={check.botId} data-status={check.status}>
                 <div>
                   <strong>{bot?.name ?? check.botId}</strong>
-                  <span>
-                    {check.sideId === "for"
-                      ? motion.forSide.label
-                      : motion.againstSide.label}
-                  </span>
+                  <span>{sideLabel}</span>
                 </div>
                 <b>
                   {check.status === "accept"
@@ -6091,7 +7459,7 @@ export function DebateExperience(
                       ? "Devil’s Advocate"
                       : "Declined"}
                 </b>
-                {check.reason ? <p>{check.reason}</p> : null}
+                <p>{comment}</p>
               </article>
             );
           })}
@@ -6142,9 +7510,7 @@ export function DebateExperience(
               return;
             }
             if (setupMode === "basic") {
-              void checkRoles().then((accepted) => {
-                if (accepted) setStudioPanel("evidence");
-              });
+              void checkRoles();
               return;
             }
             void checkRoles();
@@ -6155,7 +7521,7 @@ export function DebateExperience(
             ? "Checking privately…"
             : roleChecksComplete
               ? setupMode === "basic"
-                ? "Add optional sources →"
+                ? "Add optional evidence →"
                 : "Prepare evidence →"
               : setupMode === "basic"
                 ? "Make sure they’re willing"
@@ -6165,199 +7531,626 @@ export function DebateExperience(
     </section>
   );
 
-  const renderEvidenceStep = (): React.JSX.Element => (
-    <section
-      className={`${styles.setupPanel} ${styles.dashboardPanel}`}
-      data-debate-dashboard-section="evidence"
-    >
-      <div className={styles.setupCopy}>
-        <p className={styles.eyebrow}>
-          03 / {setupMode === "basic" ? "Optional context" : "Evidence vault"}
-        </p>
-        <h2>
-          {setupMode === "basic"
-            ? "Want to give them anything else?"
-            : "Choose what enters the room"}
-        </h2>
-        <p>
-          {setupMode === "basic"
-            ? "You can start with nothing else. Add a note or let Prism find public sources when you want the debate grounded in specific context."
-            : format === "turnabout"
-              ? formality === "parliamentary"
-                ? "Every participant receives this same immutable packet. When the record opens, only these frozen sources may be presented."
-                : "Every participant receives this same immutable packet. Once Turnabout starts, only these frozen sources may be presented."
-              : "Every participant receives this same immutable packet. When the Forum opens, outside research stops."}
-        </p>
-      </div>
-      <label className={styles.fieldWide}>
-        <span>
-          {setupMode === "basic"
-            ? "Anything the debaters should know (optional)"
-            : "Player notes"}
-        </span>
-        <textarea
-          value={evidence.notes}
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            setEvidence((current) => ({
-              ...current,
-              notes: value,
-            }));
-          }}
-          placeholder={
-            setupMode === "basic"
-              ? "A fact, rule, scenario, or bit of context you want both sides to use."
-              : "Facts, definitions, constraints, or context you want everyone in the room to share."
-          }
-          rows={setupMode === "basic" ? 5 : 8}
-        />
-      </label>
-      <div
-        className={`${styles.researchBox} ${
-          setupMode === "basic" ? styles.basicResearchBox : ""
-        }`}
+  const renderEvidenceStep = (): React.JSX.Element => {
+    const exhibits = evidence.exhibits ?? [];
+    const objectTitle = evidenceObjectDraft
+      ? debateEvidenceExhibitTitle(evidenceObjectDraft)
+      : "";
+    const objectPreview: DebateEvidenceExhibitV1 | null = evidenceObjectDraft
+      ? {
+          id: "draft-exhibit",
+          adjective: evidenceObjectDraft.adjective,
+          object: evidenceObjectDraft.object,
+          title: objectTitle || "Evidence object",
+          observation: evidenceObjectDraft.observation,
+          emoji: evidenceObjectDraft.emoji,
+          visualKind: evidenceObjectDraft.imageId
+            ? evidenceObjectDraft.visualKind
+            : "emoji",
+          imageId: evidenceObjectDraft.imageId,
+          createdBy: evidenceObjectDraft.createdBy,
+        }
+      : null;
+    return (
+      <section
+        className={`${styles.setupPanel} ${styles.dashboardPanel}`}
+        data-debate-dashboard-section="evidence"
       >
-        {setupMode === "advanced" ? (
-          <>
-            <label className={styles.field}>
-              <span>Optional Brave Search</span>
-              <input
-                value={researchQuery}
-                onChange={(event) =>
-                  setResearchQuery(event.currentTarget.value)
-                }
-                placeholder="Search for frozen public evidence"
-                disabled={props.responseMode === "local"}
-              />
-            </label>
-            <div className={styles.researchActions}>
+        <div className={styles.setupCopy}>
+          <p className={styles.eyebrow}>
+            03 / {setupMode === "basic" ? "Optional context" : "Evidence vault"}
+          </p>
+          <h2>
+            {setupMode === "basic"
+              ? "Want to give them anything else?"
+              : "Choose what enters the room"}
+          </h2>
+          <p>
+            {setupMode === "basic"
+              ? "Add a note, public source, or physical exhibit—or start with nothing else."
+              : format === "turnabout"
+                ? "Every participant receives the same immutable packet. Sources and object exhibits can both be presented once the record opens."
+                : "Every participant receives the same immutable packet. Sources and object exhibits can be cited in the Forum; outside research stops at Start."}
+          </p>
+        </div>
+        <label className={styles.fieldWide}>
+          <span>
+            {setupMode === "basic"
+              ? "Anything the debaters should know (optional)"
+              : "Player notes"}
+          </span>
+          <textarea
+            value={evidence.notes}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setEvidence((current) => ({
+                ...current,
+                notes: value,
+              }));
+            }}
+            placeholder={
+              setupMode === "basic"
+                ? "A fact, rule, scenario, or bit of context you want both sides to use."
+                : "Facts, definitions, constraints, or context you want everyone in the room to share."
+            }
+            rows={setupMode === "basic" ? 5 : 8}
+          />
+        </label>
+        <div
+          className={`${styles.researchBox} ${
+            setupMode === "basic" ? styles.basicResearchBox : ""
+          }`}
+        >
+          <div className={styles.evidenceToolHeader}>
+            <div>
+              <span>Build the record</span>
+              <strong>
+                Add a physical exhibit or bring in public sources.
+              </strong>
+            </div>
+            <span className={styles.evidenceCapacity}>
+              {evidenceItemTotal}/{DEBATE_EVIDENCE_ITEM_MAX_COUNT} items
+            </span>
+          </div>
+          {setupMode === "advanced" ? (
+            <>
+              <label className={styles.field}>
+                <span>Optional Brave Search</span>
+                <input
+                  value={researchQuery}
+                  onChange={(event) =>
+                    setResearchQuery(event.currentTarget.value)
+                  }
+                  placeholder="Search for frozen public evidence"
+                  disabled={props.responseMode === "local"}
+                />
+              </label>
+              <div className={styles.researchActions}>
+                <button
+                  type="button"
+                  onClick={() => void research()}
+                  disabled={
+                    props.responseMode === "local" ||
+                    !researchQuery.trim() ||
+                    evidenceItemLimitReached ||
+                    busy
+                  }
+                  title={
+                    evidenceItemLimitReached
+                      ? "Remove an evidence item to search again"
+                      : undefined
+                  }
+                >
+                  Search &amp; add
+                </button>
+                <button
+                  type="button"
+                  className={styles.generateEvidenceButton}
+                  onClick={() => void generateEvidence()}
+                  disabled={
+                    props.responseMode === "local" ||
+                    !motion.motion.trim() ||
+                    evidenceItemLimitReached ||
+                    busy
+                  }
+                  title={
+                    evidenceItemLimitReached
+                      ? "Remove an evidence item to search again"
+                      : undefined
+                  }
+                  aria-label="Generate randomized evidence search from the current motion"
+                >
+                  <span aria-hidden="true">◇</span>
+                  {evidenceGenerating ? "Generating…" : "Add generated search"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div
+              className={styles.evidenceObjectActions}
+              data-tutorial-target="debate-exhibit"
+            >
               <button
                 type="button"
-                onClick={() => void research()}
+                className={styles.addEvidenceButton}
+                onClick={beginEvidenceObject}
                 disabled={
-                  props.responseMode === "local" ||
-                  !researchQuery.trim() ||
-                  evidenceSourceLimitReached ||
-                  busy
-                }
-                title={
-                  evidenceSourceLimitReached
-                    ? "Remove a source to search again"
-                    : undefined
+                  evidenceItemLimitReached || evidenceObjectVisualBusy !== null
                 }
               >
-                Search &amp; add
+                <span aria-hidden="true">＋</span>
+                <span>
+                  <strong>Add evidence</strong>
+                  <small>Create an editable object exhibit</small>
+                </span>
               </button>
               <button
                 type="button"
-                className={styles.generateEvidenceButton}
+                className={styles.findEvidenceButton}
                 onClick={() => void generateEvidence()}
                 disabled={
                   props.responseMode === "local" ||
                   !motion.motion.trim() ||
-                  evidenceSourceLimitReached ||
+                  evidenceItemLimitReached ||
                   busy
                 }
                 title={
-                  evidenceSourceLimitReached
-                    ? "Remove a source to search again"
-                    : undefined
+                  evidenceItemLimitReached
+                    ? "Remove an evidence item to search again"
+                    : props.responseMode === "local"
+                      ? "Public source search is unavailable in LOCAL mode"
+                      : undefined
                 }
-                aria-label="Generate randomized evidence from the current motion"
+                aria-label="Find public evidence sources from the current motion"
               >
                 <span aria-hidden="true">◇</span>
-                {evidenceGenerating ? "Generating…" : "Add generated search"}
+                <span>
+                  <strong>
+                    {evidenceGenerating
+                      ? "Finding sources…"
+                      : evidence.sources.length > 0
+                        ? "Find more sources"
+                        : "Find sources"}
+                  </strong>
+                  <small>Search the public web</small>
+                </span>
               </button>
             </div>
-          </>
-        ) : (
-          <button
-            type="button"
-            className={styles.generateEvidenceButton}
-            onClick={() => void generateEvidence()}
-            disabled={
-              props.responseMode === "local" ||
-              !motion.motion.trim() ||
-              evidenceSourceLimitReached ||
-              busy
-            }
-            title={
-              evidenceSourceLimitReached
-                ? "Remove a source to search again"
-                : undefined
-            }
-            aria-label="Generate randomized evidence from the current motion"
-          >
-            <span aria-hidden="true">◇</span>
-            {evidenceGenerating
-              ? "Finding sources…"
-              : evidence.sources.length > 0
-                ? "Find more sources"
-                : "Find sources for me"}
-          </button>
-        )}
-        {props.responseMode === "local" ? (
-          <p>
-            {setupMode === "basic"
-              ? "LOCAL keeps this offline. Notes still work, and sources stay optional."
-              : "LOCAL blocks Brave before network access. Manual and generated research stay unavailable; player notes remain local."}
-          </p>
-        ) : (
-          <p>
-            {setupMode === "basic"
-              ? `Each search adds distinct real public sources without replacing the ${evidence.sources.length} already locked. ${DEBATE_EVIDENCE_SOURCE_MAX_COUNT} sources maximum; Prism never fabricates them.`
-              : `Search again to add distinct real sources without replacing the current packet. Duplicate URLs are skipped; ${DEBATE_EVIDENCE_SOURCE_MAX_COUNT} sources maximum. Nothing is fabricated, and research ends permanently when the Duel starts.`}
-          </p>
-        )}
-      </div>
-      {evidence.sources.length > 0 ? (
-        <ul className={styles.evidenceList}>
-          {evidence.sources.map((source) => (
-            <li key={source.id}>
+          )}
+          {setupMode === "advanced" ? (
+            <div
+              className={styles.evidenceObjectActions}
+              data-tutorial-target="debate-exhibit"
+            >
               <button
                 type="button"
-                onClick={() => setSourceDrawerId(source.id)}
-              >
-                <span>{source.id}</span>
-                <strong>{source.title}</strong>
-                <small>{source.snippet}</small>
-              </button>
-              <button
-                type="button"
-                aria-label={`Remove ${source.title}`}
-                onClick={() =>
-                  setEvidence((current) => ({
-                    ...current,
-                    sources: current.sources.filter(
-                      (candidate) => candidate.id !== source.id,
-                    ),
-                  }))
+                className={styles.addEvidenceButton}
+                onClick={beginEvidenceObject}
+                disabled={
+                  evidenceItemLimitReached || evidenceObjectVisualBusy !== null
                 }
               >
-                Remove
+                <span aria-hidden="true">＋</span>
+                <span>
+                  <strong>Add evidence</strong>
+                  <small>Create an editable object exhibit</small>
+                </span>
               </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className={styles.packetSeal}>
-        <span aria-hidden="true">◇</span>
-        <div>
-          <strong>
-            {evidence.sources.length > 0 || evidence.notes.trim()
-              ? "Packet staged"
-              : "Empty packet staged"}
-          </strong>
-          <small>
-            {evidence.sources.length} / {DEBATE_EVIDENCE_SOURCE_MAX_COUNT}{" "}
-            source{evidence.sources.length === 1 ? "" : "s"} locked ·{" "}
-            {evidence.notes.trim() ? "notes included" : "no player notes"}
-          </small>
+            </div>
+          ) : null}
+          <p className={styles.evidenceToolNote}>
+            {props.responseMode === "local"
+              ? "LOCAL keeps public search off. Notes, object exhibits, emoji, uploads, and local image synthesis remain available."
+              : "Everything added here is shared with both sides and frozen when the Debate begins. Exhibit suggestions stay fully editable."}
+          </p>
         </div>
-        <b>Seals at Start</b>
-      </div>
-    </section>
-  );
+        {evidenceObjectDraft && objectPreview ? (
+          <section
+            className={styles.evidenceObjectEditor}
+            aria-label="Create an object exhibit"
+          >
+            <div className={styles.evidenceObjectPreview}>
+              <DebateEvidenceExhibitVisual exhibit={objectPreview} />
+              <div>
+                <span>Object exhibit</span>
+                <strong>{objectTitle || "{ADJECTIVE} {OBJECT}"}</strong>
+                <small>
+                  The text record is evidence. Its visual is presentation only.
+                </small>
+              </div>
+            </div>
+            <div className={styles.evidenceObjectNameFields}>
+              <label>
+                <span>Adjective</span>
+                <PrismRefractTarget
+                  target={{
+                    id: "debate-setup-exhibit-adjective",
+                    kind: "field",
+                    label: "object exhibit adjective",
+                    read: () => evidenceObjectDraft.adjective,
+                    preview: (value) =>
+                      setEvidenceObjectDraft((current) =>
+                        current ? { ...current, adjective: value } : current,
+                      ),
+                    accept: (value) =>
+                      updateEvidenceObjectName("adjective", value),
+                    disabled: () => evidenceObjectVisualBusy !== null || busy,
+                    generate: ({ currentValue, rejectedValues, signal }) =>
+                      generateDebateRefractField(
+                        "debate.setup.exhibitAdjective",
+                        currentValue,
+                        rejectedValues,
+                        signal,
+                      ),
+                  }}
+                >
+                  {(binding) => (
+                    <input
+                      {...binding}
+                      value={evidenceObjectDraft.adjective}
+                      onChange={(event) =>
+                        updateEvidenceObjectName(
+                          "adjective",
+                          event.currentTarget.value,
+                        )
+                      }
+                      placeholder="Rusty"
+                      disabled={evidenceObjectVisualBusy !== null}
+                    />
+                  )}
+                </PrismRefractTarget>
+              </label>
+              <label>
+                <span>Object</span>
+                <PrismRefractTarget
+                  target={{
+                    id: "debate-setup-exhibit-object",
+                    kind: "field",
+                    label: "object exhibit noun",
+                    read: () => evidenceObjectDraft.object,
+                    preview: (value) =>
+                      setEvidenceObjectDraft((current) =>
+                        current ? { ...current, object: value } : current,
+                      ),
+                    accept: (value) =>
+                      updateEvidenceObjectName("object", value),
+                    disabled: () => evidenceObjectVisualBusy !== null || busy,
+                    generate: ({ currentValue, rejectedValues, signal }) =>
+                      generateDebateRefractField(
+                        "debate.setup.exhibitObject",
+                        currentValue,
+                        rejectedValues,
+                        signal,
+                      ),
+                  }}
+                >
+                  {(binding) => (
+                    <input
+                      {...binding}
+                      value={evidenceObjectDraft.object}
+                      onChange={(event) =>
+                        updateEvidenceObjectName(
+                          "object",
+                          event.currentTarget.value,
+                        )
+                      }
+                      placeholder="spoon"
+                      disabled={evidenceObjectVisualBusy !== null}
+                    />
+                  )}
+                </PrismRefractTarget>
+              </label>
+            </div>
+            <label className={styles.fieldWide}>
+              <span>Observable fact</span>
+              <PrismRefractTarget
+                target={{
+                  id: "debate-setup-exhibit-observation",
+                  kind: "field",
+                  label: "object exhibit observable fact",
+                  read: () => evidenceObjectDraft.observation,
+                  preview: (value) =>
+                    setEvidenceObjectDraft((current) =>
+                      current ? { ...current, observation: value } : current,
+                    ),
+                  accept: (value) =>
+                    setEvidenceObjectDraft((current) =>
+                      current ? { ...current, observation: value } : current,
+                    ),
+                  disabled: () => evidenceObjectVisualBusy !== null || busy,
+                  generate: ({ currentValue, rejectedValues, signal }) =>
+                    generateDebateRefractField(
+                      "debate.setup.exhibitObservation",
+                      currentValue,
+                      rejectedValues,
+                      signal,
+                    ),
+                }}
+              >
+                {(binding) => (
+                  <textarea
+                    {...binding}
+                    value={evidenceObjectDraft.observation}
+                    onChange={(event) => {
+                      const value = event.currentTarget.value;
+                      setEvidenceObjectDraft((current) =>
+                        current
+                          ? { ...current, observation: value }
+                          : current,
+                      );
+                    }}
+                    placeholder="Describe only what everyone may treat as true about this object."
+                    rows={3}
+                  />
+                )}
+              </PrismRefractTarget>
+            </label>
+            <fieldset className={styles.evidenceEmojiPicker}>
+              <legend>Exhibit emoji</legend>
+              <div>
+                <input
+                  ref={evidenceExhibitEmojiRef}
+                  aria-label="Exhibit emoji"
+                  aria-describedby="debate-evidence-emoji-help"
+                  value={evidenceObjectDraft.emoji}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onClick={openEvidenceObjectEmojiPicker}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    openEvidenceObjectEmojiPicker();
+                  }}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setEvidenceObjectDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            emoji: normalizeDebateEvidenceEmojiChoice(
+                              value,
+                              current.emoji,
+                            ),
+                            emojiCustomized: true,
+                          }
+                        : current,
+                    );
+                  }}
+                  disabled={evidenceObjectVisualBusy !== null}
+                />
+                <button
+                  type="button"
+                  onClick={openEvidenceObjectEmojiPicker}
+                  disabled={evidenceObjectVisualBusy !== null}
+                >
+                  <strong>Choose any emoji</strong>
+                  <small id="debate-evidence-emoji-help">
+                    Opens your system emoji picker. You can also type or paste
+                    one.
+                  </small>
+                </button>
+              </div>
+            </fieldset>
+            <section
+              className={styles.evidenceExhibitAssetLibrary}
+              aria-label="Previously generated Debate exhibit sprites"
+              data-debate-exhibit-asset-library="true"
+            >
+              <header>
+                <div>
+                  <strong>Reuse a generated sprite</strong>
+                  <small>
+                    These came from Debate’s exhibit tool. Choosing one uses no
+                    image-generation tokens.
+                  </small>
+                </div>
+                {evidenceExhibitAssets.length > 0 ? (
+                  <span>{evidenceExhibitAssets.length} saved</span>
+                ) : null}
+              </header>
+              {evidenceExhibitAssetsLoading ? (
+                <p>Loading your Debate sprites…</p>
+              ) : evidenceExhibitAssetsUnavailable ? (
+                <p>Saved sprites are temporarily unavailable.</p>
+              ) : evidenceExhibitAssets.length > 0 ? (
+                <div className={styles.evidenceExhibitAssetRail}>
+                  {evidenceExhibitAssets.map((asset, index) => {
+                    const selected =
+                      evidenceObjectDraft.visualKind === "synthesized" &&
+                      evidenceObjectDraft.imageId === asset.id;
+                    return (
+                      <button
+                        key={asset.id}
+                        type="button"
+                        aria-label={`Reuse generated Debate exhibit sprite ${index + 1}`}
+                        aria-pressed={selected}
+                        title={
+                          objectTitle
+                            ? asset.prompt
+                            : "Name the object before choosing a sprite"
+                        }
+                        onClick={() => selectEvidenceExhibitAsset(asset)}
+                        disabled={
+                          !objectTitle || evidenceObjectVisualBusy !== null
+                        }
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/images/${encodeURIComponent(asset.id)}/thumb`}
+                          alt=""
+                        />
+                        {selected ? <span aria-hidden="true">✓</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p>
+                  Your first synthesized Debate exhibit will stay here for
+                  future proceedings.
+                </p>
+              )}
+            </section>
+            <input
+              ref={evidenceExhibitUploadRef}
+              className={styles.visuallyHidden}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (file) void uploadEvidenceObjectImage(file);
+              }}
+            />
+            <div className={styles.evidenceObjectVisualActions}>
+              <button
+                type="button"
+                onClick={() => evidenceExhibitUploadRef.current?.click()}
+                disabled={!objectTitle || evidenceObjectVisualBusy !== null}
+              >
+                {evidenceObjectVisualBusy === "upload"
+                  ? "Uploading…"
+                  : evidenceObjectDraft.visualKind === "upload"
+                    ? "Replace upload"
+                    : "Upload image"}
+              </button>
+              <button
+                type="button"
+                className={styles.generateEvidenceButton}
+                onClick={() => void synthesizeEvidenceObjectImage()}
+                disabled={!objectTitle || evidenceObjectVisualBusy !== null}
+              >
+                <span aria-hidden="true">◇</span>
+                {evidenceObjectVisualBusy === "synthesize"
+                  ? "Synthesizing…"
+                  : evidenceObjectDraft.visualKind === "synthesized"
+                    ? "Resynthesize"
+                    : "Synthesize exhibit"}
+              </button>
+              <small>
+                Uploaded and synthesized images are cut into a transparent stage
+                sprite. Emoji always remains as the fallback.
+              </small>
+            </div>
+            <div className={styles.evidenceObjectCommitActions}>
+              <button
+                type="button"
+                onClick={() => setEvidenceObjectDraft(null)}
+                disabled={evidenceObjectVisualBusy !== null}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={addEvidenceObject}
+                disabled={
+                  !objectTitle ||
+                  evidenceItemLimitReached ||
+                  evidenceObjectVisualBusy !== null
+                }
+              >
+                Add to evidence
+              </button>
+            </div>
+          </section>
+        ) : null}
+        {evidence.sources.length > 0 ? (
+          <section className={styles.evidenceCollection}>
+            <header>
+              <span>Public sources</span>
+              <small>{evidence.sources.length}</small>
+            </header>
+            <ul className={styles.evidenceList}>
+              {evidence.sources.map((source) => (
+                <li key={source.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSourceDrawerId(source.id)}
+                  >
+                    <span>{source.id}</span>
+                    <strong>{source.title}</strong>
+                    <small>{source.snippet}</small>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${source.title}`}
+                    onClick={() =>
+                      setEvidence((current) => ({
+                        ...current,
+                        sources: current.sources.filter(
+                          (candidate) => candidate.id !== source.id,
+                        ),
+                      }))
+                    }
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        {exhibits.length > 0 ? (
+          <section className={styles.evidenceCollection}>
+            <header>
+              <span>Object exhibits</span>
+              <small>{exhibits.length}</small>
+            </header>
+            <ul
+              className={`${styles.evidenceList} ${styles.evidenceExhibitList}`}
+            >
+              {exhibits.map((exhibit) => (
+                <li key={exhibit.id}>
+                  <button
+                    type="button"
+                    onClick={() => setSourceDrawerId(exhibit.id)}
+                  >
+                    <DebateEvidenceExhibitVisual exhibit={exhibit} />
+                    <span>{exhibit.id}</span>
+                    <strong>{exhibit.title}</strong>
+                    <small>{exhibit.observation}</small>
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${exhibit.title}`}
+                    onClick={() =>
+                      setEvidence((current) => ({
+                        ...current,
+                        exhibits: (current.exhibits ?? []).filter(
+                          (candidate) => candidate.id !== exhibit.id,
+                        ),
+                      }))
+                    }
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+        <div className={styles.packetSeal}>
+          <span aria-hidden="true">◇</span>
+          <div>
+            <strong>
+              {debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
+                ? "Packet staged"
+                : "Empty packet staged"}
+            </strong>
+            <small>
+              {debateEvidenceItemCount(evidence)} /{" "}
+              {DEBATE_EVIDENCE_ITEM_MAX_COUNT} items · {evidence.sources.length}{" "}
+              source
+              {evidence.sources.length === 1 ? "" : "s"} · {exhibits.length}{" "}
+              exhibit{exhibits.length === 1 ? "" : "s"} ·{" "}
+              {evidence.notes.trim() ? "notes included" : "no player notes"}
+            </small>
+          </div>
+          <b>Seals at Start</b>
+        </div>
+      </section>
+    );
+  };
 
   const renderReviewStep = (): React.JSX.Element => (
     <section
@@ -6383,7 +8176,7 @@ export function DebateExperience(
         </h2>
         <p>
           {setupMode === "basic"
-            ? "Prism has handled the debate structure. Start keeps this question, these debaters, their consent, and any sources together."
+            ? "Prism has handled the debate structure. Start keeps this question, these debaters, their consent, and any evidence together."
             : "Start locks the format, motion, cast, Jury, consent, model, Powers, and evidence into one proceeding."}
         </p>
       </div>
@@ -6454,14 +8247,12 @@ export function DebateExperience(
         <li data-ready="true">
           <span aria-hidden="true">✓</span>
           <div>
-            <strong>
-              {setupMode === "basic" ? "Sources optional" : "Evidence packet"}
-            </strong>
+            <strong>Evidence optional</strong>
             <small>
-              {evidence.sources.length > 0 || evidence.notes.trim()
+              {debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
                 ? setupMode === "basic"
                   ? "Your added context is ready."
-                  : `${evidence.sources.length} source${evidence.sources.length === 1 ? "" : "s"} and player notes will freeze at Start.`
+                  : `${evidence.sources.length} source${evidence.sources.length === 1 ? "" : "s"}, ${evidence.exhibits?.length ?? 0} exhibit${evidence.exhibits?.length === 1 ? "" : "s"}, and player notes will freeze at Start.`
                 : setupMode === "basic"
                   ? "Nothing else is required."
                   : "Evidence is optional; the empty packet will freeze at Start."}
@@ -6514,11 +8305,11 @@ export function DebateExperience(
             </strong>
             <p>
               {playerRole === "participant" && playerSideId === "for"
-                ? DEBATE_PLAYER_PARTICIPANT_PRISM.name
+                ? playerParticipantBot.name
                 : botById.get(cast.forAdvocate)?.name}{" "}
               vs.{" "}
               {playerRole === "participant" && playerSideId === "against"
-                ? DEBATE_PLAYER_PARTICIPANT_PRISM.name
+                ? playerParticipantBot.name
                 : botById.get(cast.againstAdvocate)?.name}
             </p>
           </article>
@@ -6554,7 +8345,9 @@ export function DebateExperience(
             <span>Evidence</span>
             <strong>
               {evidence.sources.length} source
-              {evidence.sources.length === 1 ? "" : "s"}
+              {evidence.sources.length === 1 ? "" : "s"} ·{" "}
+              {evidence.exhibits?.length ?? 0} exhibit
+              {evidence.exhibits?.length === 1 ? "" : "s"}
             </strong>
             <p>
               {evidence.notes ? "Player notes included" : "No player notes"}
@@ -7139,12 +8932,13 @@ export function DebateExperience(
           {turnaboutObjecting ? (
             <fieldset className={styles.turnaboutEvidencePicker}>
               <legend>Object with frozen evidence</legend>
-              {session.evidence.sources.length > 0 ? (
-                session.evidence.sources.map((source) => (
+              {debateEvidenceItemCount(session.evidence) > 0 ? (
+                debateEvidenceItems(session.evidence).map((item) => (
                   <label
-                    key={source.id}
+                    key={item.value.id}
+                    data-kind={item.kind}
                     data-selected={
-                      turnaboutEvidenceSourceId === source.id
+                      turnaboutEvidenceSourceId === item.value.id
                         ? "true"
                         : undefined
                     }
@@ -7152,13 +8946,27 @@ export function DebateExperience(
                     <input
                       type="radio"
                       name="turnabout-evidence"
-                      value={source.id}
-                      checked={turnaboutEvidenceSourceId === source.id}
-                      onChange={() => setTurnaboutEvidenceSourceId(source.id)}
+                      value={item.value.id}
+                      checked={turnaboutEvidenceSourceId === item.value.id}
+                      onChange={() =>
+                        setTurnaboutEvidenceSourceId(item.value.id)
+                      }
                     />
-                    <strong>{source.title}</strong>
-                    <span>{source.snippet}</span>
-                    <small>{source.id}</small>
+                    {item.kind === "exhibit" ? (
+                      <DebateEvidenceExhibitVisual exhibit={item.value} />
+                    ) : null}
+                    <strong>{item.value.title}</strong>
+                    <span>
+                      {item.kind === "source"
+                        ? item.value.snippet
+                        : item.value.observation}
+                    </span>
+                    <small>
+                      {item.kind === "source"
+                        ? "Public source"
+                        : "Object exhibit"}{" "}
+                      · {item.value.id}
+                    </small>
                   </label>
                 ))
               ) : (
@@ -7181,7 +8989,7 @@ export function DebateExperience(
               type="button"
               aria-pressed={turnaboutObjecting}
               onClick={() => setTurnaboutObjecting((current) => !current)}
-              disabled={busy || session.evidence.sources.length === 0}
+              disabled={busy || debateEvidenceItemCount(session.evidence) === 0}
             >
               Object
             </button>
@@ -7381,7 +9189,9 @@ export function DebateExperience(
                   data-streaming={streaming ? "true" : undefined}
                 >
                   <header>
-                    <strong>{visibleEventName(session, event)}</strong>
+                    <strong>
+                      {visibleEventName(session, event, playerName)}
+                    </strong>
                     <span>
                       {event.interrupted
                         ? "interrupted"
@@ -8812,36 +10622,38 @@ export function DebateExperience(
       (!debateEventIsJuryComment(presentedEvent) || juryCameraActive)
         ? presentedEvent
         : null) ??
-      [...session.events]
-        .reverse()
-        .find(
-          (event) =>
-            (!(
-              !juryCameraActive &&
-              (event.kind === "jury_deliberation" ||
-                (event.kind === "ballot" && event.speakerKind === "juror"))
-            ) &&
-              [
-                "intro",
-                "phase",
-                "speech",
-                "silence",
-                "testimony",
-                "press",
-                "objection",
-                "evidence",
-                "revelation",
-                "player_turn",
-                "reaction",
-                "interjection",
-                "judge_gavel",
-                "moderator_ruling",
-                "ballot",
-                "jury_deliberation",
-                "jury_verdict",
-              ].includes(event.kind)) ||
-            (event.kind === "verdict" && event.speakerKind === "player"),
-        ) ??
+      (!presenting
+        ? ([...session.events]
+            .reverse()
+            .find(
+              (event) =>
+                (!(
+                  !juryCameraActive &&
+                  (event.kind === "jury_deliberation" ||
+                    (event.kind === "ballot" && event.speakerKind === "juror"))
+                ) &&
+                  [
+                    "intro",
+                    "phase",
+                    "speech",
+                    "silence",
+                    "testimony",
+                    "press",
+                    "objection",
+                    "evidence",
+                    "revelation",
+                    "player_turn",
+                    "reaction",
+                    "interjection",
+                    "judge_gavel",
+                    "moderator_ruling",
+                    "ballot",
+                    "jury_deliberation",
+                    "jury_verdict",
+                  ].includes(event.kind)) ||
+                (event.kind === "verdict" && event.speakerKind === "player"),
+            ) ?? null)
+        : null) ??
       null;
     const participantPlayerBotId =
       session.playerRole === "participant"
@@ -8897,6 +10709,18 @@ export function DebateExperience(
     const forumPreparingNextTurn =
       busy && !presenting && judgeGavelSmashCue === null;
     const judgeGavelCameraForced = judgeGavelSmashCue !== null;
+    const activeEvidenceExhibit = (() => {
+      if (!presenting || !activeEvent) return null;
+      const evidenceIds = [
+        activeEvent.evidenceSourceId,
+        ...activeEvent.sourceIds,
+      ].filter((id): id is string => Boolean(id));
+      for (const evidenceId of evidenceIds) {
+        const item = debateEvidenceItemById(session.evidence, evidenceId);
+        if (item?.kind === "exhibit") return item.value;
+      }
+      return null;
+    })();
     const cameraTransition = debateCameraTransition(
       effectiveCameraMode,
       activeEvent,
@@ -8910,9 +10734,11 @@ export function DebateExperience(
           : effectiveCameraMode === "auto" || effectiveCameraMode === "jury"
             ? forumPreparingNextTurn
               ? "wide"
-              : activeGavelCue && gavelCameraReady
-                ? "moderator"
-                : debateAutoCameraView(activeRole)
+              : activeEvidenceExhibit
+                ? "wide"
+                : activeGavelCue && gavelCameraReady
+                  ? "moderator"
+                  : debateAutoCameraView(activeRole)
             : effectiveCameraMode;
     const juryDecisionCountdownSeconds = juryDeliberationDecision
       ? Math.max(
@@ -8998,12 +10824,17 @@ export function DebateExperience(
       (participantPlayerSpeaking &&
         (activeEvent?.kind === "objection" ||
           activeEvent?.stepKey === "participant_objection_reason"));
-    const participantPrismBot = debateParticipantPrismAvatar(session);
+    const participantPrismBot = debateParticipantPrismAvatar(
+      session,
+      playerName,
+    );
     const floorLabel =
       activeTurnClock?.status === "overtime"
         ? "Overtime"
         : activeEvent?.kind === "judge_gavel"
-          ? activeEvent.gavelReason === "overtime"
+          ? activeEvent.gavelReason === "audience_order"
+            ? "Order restored"
+            : activeEvent.gavelReason === "overtime"
             ? "Time called"
             : activeEvent.gavelReason === "resume"
               ? "Proceeding resumed"
@@ -9060,11 +10891,12 @@ export function DebateExperience(
       observerPerspective,
     );
     const thinkingBotId =
-      participantInputRole && participantPlayerBotId
+      voicePreparationSpeakerBotId ??
+      (participantInputRole && participantPlayerBotId
         ? participantPlayerBotId
         : busy && !presenting && session.status === "live"
           ? debateExpectedBotId(session)
-          : null;
+          : null);
     const juryThinkingBotId = pendingJuryThoughtBotId ?? thinkingBotId;
     const juryChamberVisible = cameraView === "jury";
     const participantJurySealed =
@@ -9167,6 +10999,11 @@ export function DebateExperience(
         ...session.jury.jurors.map((juror) => juror.id),
       ],
     });
+    const audienceSeats = audienceBots.map((bot, index) => ({
+      bot,
+      index,
+      layout: debateAudienceSeatLayout(index, audienceBots.length),
+    }));
     const audienceBeat = presenting
       ? debateAudienceBeatForEvent({
           event: activeEvent,
@@ -9177,11 +11014,36 @@ export function DebateExperience(
     const audienceReactingSeatIndices = new Set(
       audienceBeat?.seatIndices ?? [],
     );
-    const audienceChattering =
+    const audiencePressureActive =
+      session.playerRole === "judge" &&
+      !judgeJuryGavelLocked &&
+      !participantJurySealed &&
+      debateIdentPlaying === null &&
+      (session.status === "live" || session.status === "waiting_for_player");
+    const audiencePressureBand: DebateAudiencePressureBand | null =
+      audiencePressureActive ? currentAudiencePressureBand : null;
+    const audiencePressureTalkerIndices = new Set(
+      audiencePressureBand
+        ? debateAudienceTalkerIndices({
+            band: audiencePressureBand,
+            count: audienceBots.length,
+            seed: `${session.id}:${audiencePressureBand}`,
+          })
+        : [],
+    );
+    const legacyAudienceChattering =
       debateIdentPlaying === null &&
       !presenting &&
       !participantJurySealed &&
       (session.status === "live" || session.status === "waiting_for_player");
+    const audienceChattering =
+      audiencePressureBand !== null
+        ? audiencePressureBand !== "settled"
+        : legacyAudienceChattering;
+    const activeAudienceOrderResponse =
+      audienceOrderResponse?.sessionId === session.id
+        ? audienceOrderResponse
+        : null;
     const handleDebateAmbientBotVocalization = (
       cue: SessionAmbientBotVocalizationCue,
     ): boolean => {
@@ -9256,14 +11118,32 @@ export function DebateExperience(
           sessionKey={`debate:${session.id}`}
           volume={props.audioVolume}
           backgroundUrl={DEBATE_AUDIENCE_MURMUR_URL}
+          grainUrl={
+            session.playerRole === "judge"
+              ? DEBATE_AUDIENCE_CROSSTALK_URL
+              : null
+          }
           mix={
             debateIdentPlaying !== null
               ? DEBATE_FOLEY_MIX
-              : presenting
-                ? DEBATE_AUDIENCE_DUCKED_MIX
-                : DEBATE_AUDIENCE_IDLE_MIX
+              : activeAudienceOrderResponse &&
+                  !activeAudienceOrderResponse.returningRoomTone
+                ? DEBATE_FOLEY_MIX
+              : audiencePressureBand
+                ? debateAudiencePressureMix(audiencePressureBand)
+                : presenting
+                  ? DEBATE_AUDIENCE_DUCKED_MIX
+                  : DEBATE_AUDIENCE_IDLE_MIX
           }
-          mixTransitionMs={320}
+          mixTransitionMs={
+            audiencePressureBand === null
+              ? 320
+              : activeAudienceOrderResponse
+              ? activeAudienceOrderResponse.returningRoomTone
+                ? 4_000
+                : 90
+              : 900
+          }
           preloadFoleyUrls={DEBATE_LIVE_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
             session.format === "turnabout"
@@ -9300,6 +11180,9 @@ export function DebateExperience(
             } as CSSProperties
           }
         >
+          {debateIdentPlaying ? (
+            <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
+          ) : null}
           <header className={styles.liveHeader}>
             <button
               type="button"
@@ -9450,6 +11333,15 @@ export function DebateExperience(
                       className={styles.podiumForeground}
                       aria-hidden="true"
                     />
+                    {activeEvidenceExhibit ? (
+                      <DebateEvidencePedestal
+                        key={`${activeEvent?.id ?? "evidence"}:${activeEvidenceExhibit.id}`}
+                        exhibit={activeEvidenceExhibit}
+                        onOpen={() =>
+                          setSourceDrawerId(activeEvidenceExhibit.id)
+                        }
+                      />
+                    ) : null}
                     <DebateForumLightMasks depth="foreground" />
                     <DebateModeratorGavel
                       theme={props.theme}
@@ -9531,7 +11423,9 @@ export function DebateExperience(
                             <strong>
                               {playerControlled
                                 ? participantPrismBot.name
-                                : presentation.displayName}
+                                : bot.id === DEBATE_PLAYER_JUDGE_BOT_ID
+                                  ? playerName
+                                  : presentation.displayName}
                             </strong>
                             <small>{roleLabel}</small>
                             {!playerControlled && presentation.identityLabel ? (
@@ -9561,9 +11455,14 @@ export function DebateExperience(
                 activeCaptionText &&
                 (!juryChamberVisible || activeEvent.speakerKind !== "juror") ? (
                   <DebateLiveCaption
+                    key={activeEvent.id}
                     eventId={activeEvent.id}
                     speakerKind={activeEvent.speakerKind}
-                    speakerName={visibleEventName(session, activeEvent)}
+                    speakerName={visibleEventName(
+                      session,
+                      activeEvent,
+                      playerName,
+                    )}
                     text={activeCaptionText}
                   />
                 ) : null}
@@ -9743,7 +11642,7 @@ export function DebateExperience(
                   <span>{floorLabel}</span>
                   <strong>
                     {activeEvent
-                      ? visibleEventName(session, activeEvent)
+                      ? visibleEventName(session, activeEvent, playerName)
                       : session.format === "turnabout"
                         ? "The record"
                         : "The Forum"}
@@ -9838,94 +11737,126 @@ export function DebateExperience(
                 data-debate-audience="true"
                 data-audience-placement="below-screen"
                 data-audience-chattering={audienceChattering ? "true" : "false"}
+                data-audience-pressure={audiencePressureBand ?? undefined}
+                data-audience-order-response={
+                  activeAudienceOrderResponse?.kind
+                }
                 data-audience-count={audienceBots.length}
                 aria-label={`${audienceBots.length} spectators in the Debate audience`}
               >
-                {audienceBots.map((audienceBot, index) => {
-                  const conversationFacing = debateAudienceConversationFacing(
-                    index,
-                    audienceBots.length,
-                  );
-                  const audienceListenerReaction =
-                    audienceBeat && audienceReactingSeatIndices.has(index)
-                      ? audienceBeat.listenerReaction
-                      : null;
-                  const talking =
-                    audienceChattering &&
-                    debateAudienceSeatIsTalker(index, audienceBots.length);
-                  const foleyMouthShape = talking
-                    ? DEBATE_AUDIENCE_MOUTH_SHAPES[
-                        index % DEBATE_AUDIENCE_MOUTH_SHAPES.length
-                      ]!
-                    : null;
-                  return (
-                    <span
-                      className={styles.debateAudienceBotPortrait}
-                      data-talking={talking ? "true" : undefined}
-                      data-live-reacting={
-                        audienceListenerReaction ? "true" : undefined
-                      }
-                      data-audience-beat={
-                        audienceListenerReaction
-                          ? audienceBeat?.kind
-                          : undefined
-                      }
-                      data-listening-reaction={
-                        audienceListenerReaction ?? undefined
-                      }
-                      data-conversation-facing={conversationFacing}
-                      data-audience-source={
-                        debateAudienceBotIsGenerated(audienceBot)
-                          ? "generated"
-                          : "library"
-                      }
-                      key={audienceBot.id}
-                      style={
-                        {
-                          "--debate-audience-index": index,
-                          "--debate-audience-talk-delay": `${-index * 137}ms`,
-                        } as CSSProperties
-                      }
-                      title={
-                        debateAudienceBotIsGenerated(audienceBot)
-                          ? "Session spectator"
-                          : `${audienceBot.name} · Library spectator`
-                      }
-                    >
-                      {props.renderBotAvatar ? (
-                        props.renderBotAvatar(audienceBot, {
-                          role: "audience",
-                          lookAtRole: null,
-                          compact: true,
-                          talking,
-                          thinking: false,
-                          colorCycle: false,
-                          speechTiming: null,
-                          foleyMouthShape,
-                          listenerReaction: audienceListenerReaction,
-                        })
-                      ) : (
-                        <span className={styles.botGlyphFallback}>
-                          {props.renderBotGlyph(
-                            audienceBot.glyph ?? "lucideTriangle",
-                            {
-                              size: 34,
-                              strokeWidth: 1.25,
-                            },
-                          )}
-                        </span>
-                      )}
-                      {talking ? (
-                        <span
-                          className={styles.debateAudienceChatterChip}
-                          aria-hidden="true"
-                        >
-                          ...
-                        </span>
-                      ) : null}
-                    </span>
-                  );
-                })}
+                {(["rear", "front"] as const).map((depthRow) => (
+                  <span
+                    className={styles.debateAudienceLayer}
+                    data-depth-row={depthRow}
+                    key={depthRow}
+                    aria-hidden="true"
+                  >
+                    {audienceSeats
+                      .filter((seat) => seat.layout.depthRow === depthRow)
+                      .map(({ bot: audienceBot, index, layout }) => {
+                        const conversationFacing =
+                          debateAudienceConversationFacing(
+                            layout.rowIndex,
+                            layout.rowCount,
+                          );
+                        const audienceListenerReaction =
+                          audienceBeat && audienceReactingSeatIndices.has(index)
+                            ? audienceBeat.listenerReaction
+                            : null;
+                        const ambientTalking =
+                          audienceChattering &&
+                          (audiencePressureBand
+                            ? audiencePressureTalkerIndices.has(index)
+                            : debateAudienceSeatIsTalker(
+                                layout.rowIndex,
+                                layout.rowCount,
+                              ));
+                        const liveVocalReaction =
+                          audienceListenerReaction !== null &&
+                          (audienceBeat?.foleyCue === "objection" ||
+                            audienceBeat?.foleyCue === "concession" ||
+                            audienceBeat?.foleyCue === "ruling");
+                        const mouthActive = ambientTalking || liveVocalReaction;
+                        const foleyMouthShape = mouthActive
+                          ? DEBATE_AUDIENCE_MOUTH_SHAPES[
+                              index % DEBATE_AUDIENCE_MOUTH_SHAPES.length
+                            ]!
+                          : null;
+                        return (
+                          <span
+                            className={styles.debateAudienceBotPortrait}
+                            data-talking={mouthActive ? "true" : undefined}
+                            data-vocal-reaction={
+                              liveVocalReaction ? "true" : undefined
+                            }
+                            data-live-reacting={
+                              audienceListenerReaction ? "true" : undefined
+                            }
+                            data-audience-beat={
+                              audienceListenerReaction
+                                ? audienceBeat?.kind
+                                : undefined
+                            }
+                            data-listening-reaction={
+                              audienceListenerReaction ?? undefined
+                            }
+                            data-conversation-facing={conversationFacing}
+                            data-audience-source={
+                              debateAudienceBotIsGenerated(audienceBot)
+                                ? "generated"
+                                : "library"
+                            }
+                            key={audienceBot.id}
+                            style={
+                              {
+                                "--debate-audience-index": index,
+                                "--debate-audience-talk-delay": `${-index * 137}ms`,
+                                "--debate-audience-hush-delay": `${index * 42}ms`,
+                                "--debate-audience-glance": `${index % 2 === 0 ? -1.4 : 1.4}deg`,
+                              } as CSSProperties
+                            }
+                            title={
+                              debateAudienceBotIsGenerated(audienceBot)
+                                ? "Session spectator"
+                                : `${audienceBot.name} · Library spectator`
+                            }
+                          >
+                            {props.renderBotAvatar ? (
+                              props.renderBotAvatar(audienceBot, {
+                                role: "audience",
+                                lookAtRole: null,
+                                compact: true,
+                                talking: mouthActive,
+                                thinking: false,
+                                colorCycle: false,
+                                speechTiming: null,
+                                foleyMouthShape,
+                                listenerReaction: audienceListenerReaction,
+                              })
+                            ) : (
+                              <span className={styles.botGlyphFallback}>
+                                {props.renderBotGlyph(
+                                  audienceBot.glyph ?? "lucideTriangle",
+                                  {
+                                    size: 34,
+                                    strokeWidth: 1.25,
+                                  },
+                                )}
+                              </span>
+                            )}
+                            {ambientTalking ? (
+                              <span
+                                className={styles.debateAudienceChatterChip}
+                                aria-hidden="true"
+                              >
+                                ...
+                              </span>
+                            ) : null}
+                          </span>
+                        );
+                      })}
+                  </span>
+                ))}
               </div>
               <div className={styles.stageSupport}>
                 {session.format === "turnabout"
@@ -9986,14 +11917,16 @@ export function DebateExperience(
                       <button
                         type="button"
                         className={styles.judgeGavelButton}
-                        data-cooling={
-                          !judgeGavelCeremonyReady && judgeGavelOnCooldown
-                            ? "true"
+                        data-cue={judgeGavelCeremonyReady ? "true" : undefined}
+                        data-pressure={
+                          !judgeGavelCeremonyReady
+                            ? currentAudiencePressureBand
                             : undefined
                         }
-                        data-cue={judgeGavelCeremonyReady ? "true" : undefined}
-                        data-overtime={
-                          !judgeGavelCeremonyReady && judgeCanCallTime
+                        data-energized={
+                          !judgeGavelCeremonyReady &&
+                          (currentAudiencePressureBand === "restless" ||
+                            currentAudiencePressureBand === "disruptive")
                             ? "true"
                             : undefined
                         }
@@ -10005,41 +11938,72 @@ export function DebateExperience(
                             strikeJudgeGavelCeremonyRef.current?.();
                             return;
                           }
-                          void swingJudgeGavel(judgeCanCallTime);
+                          void orderDebateAudience();
                         }}
-                        disabled={
-                          busy ||
-                          (!judgeGavelCeremonyReady && judgeGavelOnCooldown)
-                        }
+                        disabled={busy || audienceOrderSaving}
                         aria-label={
                           judgeGavelCeremonyReady
                             ? "Slam the Judge gavel for this ceremonial cue. Space also swings it."
-                            : judgeGavelOnCooldown
-                              ? `Judge gavel ready in ${judgeGavelCooldownSeconds} seconds`
-                              : judgeCanCallTime
-                                ? "Swing the Judge gavel to call time. Space also swings it."
-                                : "Swing the Judge gavel and address the debaters. Space also swings it."
+                            : currentAudiencePressureBand === "restless" ||
+                                currentAudiencePressureBand === "disruptive"
+                              ? "Restore order without interrupting the speaker. Space also swings the gavel."
+                              : "Swing the gavel to settle the room without interrupting the speaker. Space also swings it."
                         }
                         title={
                           judgeGavelCeremonyReady
                             ? "Your cue — slam the gavel · Space"
-                            : judgeGavelOnCooldown
-                              ? `Gavel cooling down · ${judgeGavelCooldownSeconds}s`
-                              : judgeCanCallTime
-                                ? "Call time without opening an intervention · Space"
-                                : "Call the room to order · Space"
+                            : "Restore audience order · Space"
                         }
                       >
                         {judgeGavelCeremonyReady
                           ? "Slam now"
-                          : judgeGavelOnCooldown
-                            ? `${judgeGavelCooldownSeconds}s`
+                          : currentAudiencePressureBand === "restless" ||
+                              currentAudiencePressureBand === "disruptive"
+                            ? "Restore order"
+                            : "Gavel"}
+                        <kbd aria-hidden="true">Space</kbd>
+                      </button>
+                    ) : null}
+                    {judgeGavelAvailable && !judgeGavelCeremonyReady ? (
+                      <button
+                        type="button"
+                        className={styles.judgeInterveneButton}
+                        data-action={
+                          judgeCanCallTime ? "call-time" : "intervene"
+                        }
+                        data-overtime={judgeCanCallTime ? "true" : undefined}
+                        data-cooling={
+                          judgeGavelOnCooldown ? "true" : undefined
+                        }
+                        onClick={(event) => {
+                          event.currentTarget.blur();
+                          void swingJudgeGavel(judgeCanCallTime);
+                        }}
+                        disabled={
+                          busy ||
+                          debateFloorMutationInFlightRef.current ||
+                          judgeGavelOnCooldown
+                        }
+                        aria-label={
+                          judgeGavelOnCooldown
+                            ? `Intervention ready in ${judgeGavelCooldownSeconds} seconds`
+                            : judgeCanCallTime
+                              ? "Call time on the active speaker"
+                              : "Interrupt the active speaker and address the debaters"
+                        }
+                        title={
+                          judgeGavelOnCooldown
+                            ? `Intervention cooling down · ${judgeGavelCooldownSeconds}s`
                             : judgeCanCallTime
                               ? "Call time"
-                              : "Gavel"}
-                        {judgeGavelCeremonyReady || !judgeGavelOnCooldown ? (
-                          <kbd aria-hidden="true">Space</kbd>
-                        ) : null}
+                              : "Intervene"
+                        }
+                      >
+                        {judgeGavelOnCooldown
+                          ? `${judgeGavelCooldownSeconds}s`
+                          : judgeCanCallTime
+                            ? "Call time"
+                            : "Intervene"}
                       </button>
                     ) : null}
                     <button
@@ -10320,30 +12284,12 @@ export function DebateExperience(
               {renderPlayerWindow(session)}
             </div>
           ) : null}
-          {selectedSource ? (
-            <aside
-              className={styles.sourceDrawer}
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="debate-source-title"
-            >
-              <button
-                ref={sourceDrawerCloseButtonRef}
-                type="button"
-                onClick={() => setSourceDrawerId(null)}
-              >
-                Close
-              </button>
-              <span>{selectedSource.id}</span>
-              <h2 id="debate-source-title">{selectedSource.title}</h2>
-              <p>{selectedSource.snippet}</p>
-              {selectedSource.publishedAt ? (
-                <small>{selectedSource.publishedAt}</small>
-              ) : null}
-              <a href={selectedSource.url} target="_blank" rel="noreferrer">
-                Open original source
-              </a>
-            </aside>
+          {selectedEvidence ? (
+            <DebateEvidenceDrawer
+              item={selectedEvidence}
+              closeButtonRef={sourceDrawerCloseButtonRef}
+              onClose={() => setSourceDrawerId(null)}
+            />
           ) : null}
           {earlyEndOpen ? (
             <div
@@ -10505,6 +12451,26 @@ export function DebateExperience(
     );
   };
 
-  if (view === "live") return renderLive();
-  return renderLobby();
+  const experience = view === "live" ? renderLive() : renderLobby();
+  const synthesizingExhibitTitle = evidenceObjectDraft
+    ? debateEvidenceExhibitTitle(evidenceObjectDraft)
+    : "";
+  return (
+    <>
+      {experience}
+      <PrismBlockingLoader
+        open={evidenceObjectVisualBusy === "synthesize"}
+        title={
+          synthesizingExhibitTitle
+            ? `Synthesizing ${synthesizingExhibitTitle}`
+            : "Synthesizing exhibit artwork"
+        }
+        detail="Prism is generating a Debate-only transparent stage sprite from your object description."
+        stepLabel="Generating and cutting out the exhibit"
+        progress={null}
+        theme={props.theme}
+        footer="The exhibit text and emoji fallback remain unchanged while the sprite takes shape."
+      />
+    </>
+  );
 }

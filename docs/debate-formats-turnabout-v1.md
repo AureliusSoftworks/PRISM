@@ -1,6 +1,6 @@
 # Debate Formats and Turnabout V1
 
-Last reviewed: 2026-07-28
+Last reviewed: 2026-07-30
 
 ## Product direction
 
@@ -48,7 +48,10 @@ No Debate table rewrite is required for V1.
   contract reaches every generated speech and ballot while exact quote
   grounding is checked server-side before any objection can be sustained.
 - `apps/api/src/server.ts` exposes the Turnabout action route while reusing the
-  frozen Debate provider/model runtime and action-session accounting.
+  frozen Debate provider/model runtime and action-session accounting. It also
+  owns authenticated object-exhibit upload and synthesis routes; generated
+  sprites use one server-owned art bible and both paths normalize to a square
+  transparent PNG.
 - `apps/web/src/app/DebateExperience.tsx` freezes format during Start, renders
   the production catalog and Turnabout public record, selects format-specific
   room acoustics, and submits Press, Present Evidence, and Pass actions without
@@ -95,7 +98,9 @@ listed, backed up, or restored.
 5. **Press** records the action, advocate clarification or canonical silence,
    and an immediate moderator ruling while preserving stable floor ownership.
 6. **Present Evidence** must identify the active statement and one exact source
-   ID from the pre-Start frozen record.
+   or object-exhibit ID from the pre-Start frozen record. An exhibit's approved
+   `{ADJECTIVE} {OBJECT}` title and observable-fact text are canonical; its
+   emoji, uploaded image, or synthesized sprite is presentation only.
 7. The model may assess semantic conflict, but the server sustains only when
    both proposed quotes are exact contiguous excerpts from the recorded
    statement and frozen evidence. Ungrounded output is overruled with no
@@ -122,16 +127,19 @@ V1 proves that one Debate shell can host two genuinely different rulesets:
 - one witness-equivalent advocate per side with two statements each;
 - Judge, Participant, and Spectator adaptations;
 - Press, Object/Present Evidence, and Pass;
+- player-authored or PRISM-suggested object exhibits with emoji, uploaded art,
+  or consistently synthesized transparent sprites;
 - exact frozen-record validation, immediate rulings, one-step reversals, and
   deterministic resolution;
 - a public-record panel and action deck within the current Debate stage;
 - focused shared, API, integration, web, onboarding, and tutorial coverage.
 
-V1 deliberately defers authored per-format environment artwork, freeform
-evidence creation, multiple witnesses, cross-session case libraries, custom
-objection animations, interruptible voice choreography, executable Flyting or
-Cypher rules, and third-party format plugins. Those additions should follow
-playtesting of the rules, voice, and record clarity, not precede it.
+V1 deliberately defers authored per-format environment artwork, arbitrary
+evidence schemas beyond sources and object exhibits, multiple witnesses,
+cross-session case libraries, custom objection animations, interruptible voice
+choreography, executable Flyting or Cypher rules, and third-party format
+plugins. Those additions should follow playtesting of the rules, voice, and
+record clarity, not precede it.
 
 ## Compatibility and risks
 
@@ -142,13 +150,16 @@ playtesting of the rules, voice, and record clarity, not precede it.
   release gate.
 - **Consent:** advocacy consent is format-bound. A valid decline remains final,
   and consent from one format cannot be reused for another.
-- **Evidence:** model judgment is not canonical validation. Exact source ID,
-  freeze time, exact quote grounding, and evidence-like detail checks are
-  server-owned.
+- **Evidence:** model judgment is not canonical validation. Exact evidence ID,
+  freeze time, exact text grounding, image ownership, and evidence-like detail
+  checks are server-owned. A generated or uploaded visual may never add facts
+  beyond the exhibit title and observable-fact record.
 - **Orchestration:** format-specific steps must not leak into Forum player-turn
   or interjection routes. Floor ownership remains a stable bot ID.
 - **Presentation:** audio, reveal cadence, animation, camera direction, and
   objection staging may react to events but must never advance or mutate them.
+  The live pedestal appears only while an object exhibit is being cited and
+  opens the same frozen record drawer as transcript evidence links.
 - **Catalog safety:** only entries in the executable registry may pass shared
   validation or reach session creation. Disabled production cards are visible
   discovery, not placeholder server behavior.

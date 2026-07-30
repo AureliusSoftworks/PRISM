@@ -205,7 +205,16 @@ export function slateProjectOffsetsForSectionSelection(
       };
     }
     offset += part.titlePrefix.length + part.prose.length;
-    if (index < projected.length - 1) offset += 3;
+    const next = projected[index + 1];
+    if (
+      next &&
+      !(
+        part.section.kind === "imported" &&
+        next.section.kind === "imported"
+      )
+    ) {
+      offset += 3;
+    }
   }
   return null;
 }

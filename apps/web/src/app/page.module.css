@@ -4809,6 +4809,27 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.settingsAtmosphereControl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--settings-section-color) 14%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 80%, var(--bg-surface));
+}
+
+.settingsAtmosphereControl label {
+  margin: 0;
+}
+
+.settingsAtmosphereControl button {
+  flex: 0 0 auto;
+  min-width: 160px;
+}
+
 .settingsSection .settingsAtmosphereStyleOption {
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
@@ -5443,6 +5464,15 @@
   .settingsEntryGrid,
   .settingsScopeGrid {
     grid-template-columns: 1fr;
+  }
+
+  .settingsAtmosphereControl {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settingsAtmosphereControl button {
+    width: 100%;
   }
 
   .settingsShell {

@@ -55,6 +55,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     theme: "dark",
     graphicsQuality: "high",
     atmosphereStyle: DEFAULT_HUB_ATMOSPHERE_STYLE,
+    hubAtmosphereEnabled: 1,
     startupPreference: "home",
     preferredProvider: "local",
     ephemeralChatProviderPreferences: "{}",
@@ -155,6 +156,28 @@ describe("resolveNextSettings — atmosphere style", () => {
         baseline({ atmosphereStyle: "minimal" }),
       ).atmosphereStyle,
       "minimal",
+    );
+  });
+
+  it("saves the Home wallpaper toggle and defaults missing legacy values to enabled", () => {
+    assert.equal(
+      resolveNextSettings(
+        { hubAtmosphereEnabled: false },
+        baseline(),
+      ).hubAtmosphereEnabled,
+      0,
+    );
+    assert.equal(
+      resolveNextSettings({}, baseline({ hubAtmosphereEnabled: 0 }))
+        .hubAtmosphereEnabled,
+      0,
+    );
+    assert.equal(
+      resolveNextSettings(
+        { hubAtmosphereEnabled: "false" },
+        baseline({ hubAtmosphereEnabled: null }),
+      ).hubAtmosphereEnabled,
+      1,
     );
   });
 });

@@ -1,10 +1,12 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   normalizePrismCompanionActionIntents,
+  normalizePrismCompanionDebateDraft,
   resolveEphemeralChatProvider,
   type EphemeralChatModeId,
   type EphemeralChatProviderPreferences,
   type PrismCompanionActionIntent,
+  type PrismCompanionDebateDraft,
   type PrismCompanionMessage,
   type PrismCompanionSurfaceReference,
 } from "@localai/shared";
@@ -51,6 +53,7 @@ export interface PrismCompanionAuthoritativeContext {
     imageId: string;
     promptExcerpt: string;
   };
+  debateDraft: PrismCompanionDebateDraft | null;
 }
 
 interface BotRow {
@@ -115,6 +118,10 @@ export function buildPrismCompanionAuthoritativeContext(
   surface: PrismCompanionSurfaceReference,
 ): PrismCompanionAuthoritativeContext {
   const bots = availableBots(db, userId, surface.botIds ?? []);
+  const debateDraft =
+    surface.surfaceId === "debate"
+      ? normalizePrismCompanionDebateDraft(surface.debateDraft)
+      : undefined;
   const conversation = surface.conversationId
     ? (db
         .prepare(
@@ -242,6 +249,7 @@ export function buildPrismCompanionAuthoritativeContext(
           promptExcerpt: image.prompt.trim().slice(0, 120),
         }
       : null,
+    debateDraft: debateDraft ?? null,
   };
 }
 
@@ -288,6 +296,23 @@ function safeContextLines(context: PrismCompanionAuthoritativeContext): string[]
   if (context.image) {
     lines.push(
       `Selected Image Library asset: ${context.image.promptExcerpt || "untitled image"}`,
+    );
+  }
+  if (context.debateDraft) {
+    const draft = context.debateDraft;
+    lines.push(
+      `Unsaved Debate workbench: ${draft.setupMode} setup; ${draft.studioPanel} panel; ${draft.format}; ${draft.formality}; player role ${draft.playerRole}${draft.playerRole === "participant" ? ` on ${draft.playerSideId}` : ""}; Jury ${draft.juryEnabled ? "on" : "off"}.`,
+      `Draft moderator title: ${JSON.stringify(draft.moderatorTitle || "None")}`,
+      `Draft territory: ${JSON.stringify(draft.topic || "None")}`,
+      `Draft motion: ${JSON.stringify(draft.motion || "None")}`,
+      `Draft For side: ${JSON.stringify(draft.forLabel || "For")} — ${JSON.stringify(draft.forBrief || "No brief yet")}`,
+      `Draft Against side: ${JSON.stringify(draft.againstLabel || "Against")} — ${JSON.stringify(draft.againstBrief || "No brief yet")}`,
+      `Current object exhibit draft: ${JSON.stringify(
+        [draft.exhibitAdjective, draft.exhibitObject]
+          .filter(Boolean)
+          .join(" ") || "None",
+      )}; observation ${JSON.stringify(draft.exhibitObservation || "None")}.`,
+      `Current evidence item count: ${draft.evidenceItemCount}.`,
     );
   }
   return lines;
@@ -362,8 +387,14 @@ function prismCompanionScreenContextLines(
       ];
     case "debate":
       return [
-        `Screen: Debate, a structured live Duel with ${selectedBotNames.join(", ") || "the selected cast"}.`,
+        `Screen: Debate, a structured Duel with ${selectedBotNames.join(", ") || "the selected cast"}.`,
         companionInput,
+        ...(context.debateDraft
+          ? [
+              "The player is in the pre-proceeding Studio. The bounded setup values below are an unsaved, editable workbench draft, not committed Debate facts.",
+              "Help the player reason about the current format, register, role, cast, motion, and evidence without claiming any candidate was accepted, saved, or frozen.",
+            ]
+          : []),
         "Motion, cast, frozen evidence, floor controls, and the case board belong to the Debate experience.",
       ];
     case "marketplace":
@@ -412,7 +443,7 @@ export function prismCompanionSystemPrompt(
     "These legacy surface intents are offers only. Describe them as a next step, not as completed; committed orchestration results are represented separately by authoritative result receipts.",
     "Authoritative current screen semantics:",
     ...prismCompanionScreenContextLines(context),
-    "Authoritative current context:",
+    "Validated current context (unsaved workbench values are explicitly labeled):",
     ...safeContextLines(context),
   ].join("\n");
 }

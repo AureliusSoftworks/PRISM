@@ -650,11 +650,37 @@ fn toggle_fullscreen(window: tauri::WebviewWindow) -> Result<bool, String> {
     Ok(next_fullscreen)
 }
 
+#[tauri::command]
+fn open_emoji_picker(app: AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        app.run_on_main_thread(|| {
+            use objc2::MainThreadMarker;
+            use objc2_app_kit::NSApplication;
+
+            let mtm = MainThreadMarker::new()
+                .expect("Tauri scheduled the emoji picker on the macOS main thread");
+            NSApplication::sharedApplication(mtm).orderFrontCharacterPalette(None);
+        })
+        .map_err(|error| format!("Could not open the emoji picker: {error}"))?;
+        return Ok(true);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
 fn main() {
     let app = match tauri::Builder::default()
         .manage(RuntimeState::new())
         .manage(AppLifecycleState::new())
-        .invoke_handler(tauri::generate_handler![toggle_fullscreen])
+        .invoke_handler(tauri::generate_handler![
+            toggle_fullscreen,
+            open_emoji_picker
+        ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if is_app_quitting(&window.app_handle()) { return; }

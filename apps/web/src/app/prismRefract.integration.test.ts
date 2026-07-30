@@ -22,13 +22,17 @@ const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
 );
+const debateSource = readFileSync(
+  new URL("./DebateExperience.tsx", import.meta.url),
+  "utf8",
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
 );
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-describe("Prism Refract Signal integration", () => {
+describe("Prism Refract integration", () => {
   it("gives registered focused controls shortcut precedence and preserves companion fallback", () => {
     assert.match(
       companionSource,
@@ -53,6 +57,37 @@ describe("Prism Refract Signal integration", () => {
     assert.match(
       pageSource,
       /if \(view === "botcast"\)[\s\S]*<BotcastExperience[\s\S]*\{renderGlobalPrismCompanion\(\)\}/u,
+    );
+  });
+
+  it("keeps Prism available for Debate setup and contextually refracts registered drafts", () => {
+    assert.match(
+      pageSource,
+      /if \(view === "debate"\)[\s\S]*debateDraft: debateCompanionContext\.draft/u,
+    );
+    assert.match(
+      pageSource,
+      /onCompanionContextChange=\{setDebateCompanionContext\}[\s\S]*reason="debate-live-session"[\s\S]*\{renderGlobalPrismCompanion\(\)\}/u,
+    );
+    assert.match(
+      debateSource,
+      /id: "debate-setup-topic"[\s\S]*"debate\.setup\.topic"/u,
+    );
+    assert.match(
+      debateSource,
+      /id: "debate-setup-motion"[\s\S]*"debate\.setup\.motion"/u,
+    );
+    assert.match(
+      debateSource,
+      /id: "debate-setup-exhibit-adjective"[\s\S]*"debate\.setup\.exhibitObservation"/u,
+    );
+    assert.match(
+      debateSource,
+      /run: \(direction\) => synthesize\(direction\)/u,
+    );
+    assert.match(
+      tutorialSource,
+      /floating Prism remains available throughout setup[\s\S]*Wield Prism into a glowing setup field/u,
     );
   });
 

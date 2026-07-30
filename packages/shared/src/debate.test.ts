@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEBATE_EVIDENCE_ITEM_MAX_COUNT,
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMATS,
@@ -13,6 +14,8 @@ import {
   defaultDebateJuryStateV1,
   defaultDebateFormatStateV1,
   debateSourceIdsFromText,
+  debateEvidenceItemById,
+  debateEvidenceItemCount,
   debateSpokenText,
   debateFormalityGuidance,
   normalizeDebateFormalityId,
@@ -103,11 +106,26 @@ test("publishes a stable five-stop Debate formality spectrum with parliamentary 
   assert.equal(normalizeDebateFormalityId(undefined), "parliamentary");
   assert.equal(normalizeDebateFormalityId("unknown"), "parliamentary");
   assert.equal(normalizeDebateFormalityId("heated"), "heated");
-  assert.match(debateFormalityGuidance("free_for_all"), /daytime-chaos|theatrical/u);
-  assert.match(debateFormalityGuidance("plainspoken"), /Avoid canned parliamentary or court/u);
-  assert.match(debateFormalityGuidance("parliamentary"), /House, record, proceedings, points/u);
-  assert.match(debateFormalityGuidance("heated"), /challenge motives or credibility/u);
-  assert.match(debateFormalityGuidance("structured"), /formal, direct, and disciplined/u);
+  assert.match(
+    debateFormalityGuidance("free_for_all"),
+    /daytime-chaos|theatrical/u,
+  );
+  assert.match(
+    debateFormalityGuidance("plainspoken"),
+    /Avoid canned parliamentary or court/u,
+  );
+  assert.match(
+    debateFormalityGuidance("parliamentary"),
+    /House, record, proceedings, points/u,
+  );
+  assert.match(
+    debateFormalityGuidance("heated"),
+    /challenge motives or credibility/u,
+  );
+  assert.match(
+    debateFormalityGuidance("structured"),
+    /formal, direct, and disciplined/u,
+  );
 });
 
 test("defaults legacy Debate sessions to a disabled Jury", () => {
@@ -152,9 +170,7 @@ test("migrates seven-seat Jury records to the first five jurors and their ballot
     jurors,
     forepersonBotId: "juror-1",
     finalBallots: ballots,
-    speakerCounts: Object.fromEntries(
-      jurors.map((juror) => [juror.id, 1]),
-    ),
+    speakerCounts: Object.fromEntries(jurors.map((juror) => [juror.id, 1])),
   });
 
   assert.equal(normalized.cadence, "natural-five");
@@ -179,13 +195,11 @@ test("separates executable Debate formats from visible future productions", () =
     ["forum", "turnabout"],
   );
   assert.deepEqual(
-    DEBATE_FORMAT_CATALOG.map(
-      ({ id, productionName, availability }) => ({
-        id,
-        productionName,
-        availability,
-      }),
-    ),
+    DEBATE_FORMAT_CATALOG.map(({ id, productionName, availability }) => ({
+      id,
+      productionName,
+      availability,
+    })),
     [
       {
         id: "forum",
@@ -247,10 +261,8 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
   assert.equal(state.floorOwnerBotId, "bot-stable-1");
   assert.deepEqual(state.statements[0]?.sourceIds, ["source-1"]);
   assert.equal(
-    normalizeDebateFormatStateV1(
-      { version: 1, format: "forum" },
-      "turnabout",
-    ).format,
+    normalizeDebateFormatStateV1({ version: 1, format: "forum" }, "turnabout")
+      .format,
     "turnabout",
   );
 });
@@ -291,12 +303,15 @@ test("freezes only validated, unique evidence sources within the source limit", 
   const packet = normalizeDebateEvidencePacketV1({
     notes: "  player notes  ",
     sources: [
-      ...Array.from({ length: DEBATE_EVIDENCE_SOURCE_MAX_COUNT + 2 }, (_, index) => ({
-        id: `source-${index + 1}`,
-        title: `Source ${index + 1}`,
-        url: `https://example.com/${index + 1}`,
-        snippet: "Evidence",
-      })),
+      ...Array.from(
+        { length: DEBATE_EVIDENCE_SOURCE_MAX_COUNT + 2 },
+        (_, index) => ({
+          id: `source-${index + 1}`,
+          title: `Source ${index + 1}`,
+          url: `https://example.com/${index + 1}`,
+          snippet: "Evidence",
+        }),
+      ),
       {
         id: "source-1",
         title: "Duplicate",
@@ -309,11 +324,61 @@ test("freezes only validated, unique evidence sources within the source limit", 
 
   assert.equal(packet.notes, "player notes");
   assert.equal(packet.sources.length, DEBATE_EVIDENCE_SOURCE_MAX_COUNT);
-  assert.equal(new Set(packet.sources.map((source) => source.id)).size, packet.sources.length);
+  assert.equal(
+    new Set(packet.sources.map((source) => source.id)).size,
+    packet.sources.length,
+  );
   assert.equal(packet.frozenAt, null);
 });
 
-test("keeps valid source markers, removes invalid markers, and omits all markers from speech", () => {
+test("normalizes object exhibits into the shared evidence limit", () => {
+  const packet = normalizeDebateEvidencePacketV1({
+    sources: [
+      {
+        id: "source-1",
+        title: "Source",
+        url: "https://example.com/source",
+        snippet: "Source evidence",
+      },
+    ],
+    exhibits: Array.from(
+      { length: DEBATE_EVIDENCE_ITEM_MAX_COUNT + 2 },
+      (_, index) => ({
+        id: `exhibit-${index + 1}`,
+        adjective: index === 0 ? " rusty old " : "Red",
+        object: index === 0 ? " spoon " : `object ${index + 1}`,
+        observation: index === 0 ? "It is bent at the handle." : "",
+        emoji: index === 0 ? "🥄" : "📦",
+        visualKind: index === 0 ? "upload" : "synthesized",
+        imageId: index === 0 ? "image-1" : null,
+        createdBy: index === 0 ? "player" : "prism",
+      }),
+    ),
+  });
+
+  assert.equal(debateEvidenceItemCount(packet), DEBATE_EVIDENCE_ITEM_MAX_COUNT);
+  assert.equal(packet.exhibits?.length, DEBATE_EVIDENCE_ITEM_MAX_COUNT - 1);
+  assert.deepEqual(debateEvidenceItemById(packet, "exhibit-1"), {
+    kind: "exhibit",
+    value: {
+      id: "exhibit-1",
+      adjective: "rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "It is bent at the handle.",
+      emoji: "🥄",
+      visualKind: "upload",
+      imageId: "image-1",
+      createdBy: "player",
+    },
+  });
+  assert.equal(
+    debateEvidenceItemById(packet, "exhibit-2")?.value.imageId,
+    null,
+  );
+});
+
+test("keeps valid source and exhibit markers, removes invalid markers, and omits all markers from speech", () => {
   const evidence = normalizeDebateEvidencePacketV1({
     sources: [
       {
@@ -323,23 +388,39 @@ test("keeps valid source markers, removes invalid markers, and omits all markers
         snippet: "Housing evidence",
       },
     ],
+    exhibits: [
+      {
+        id: "exhibit-1",
+        adjective: "Rusty",
+        object: "spoon",
+        observation: "The handle is bent.",
+        emoji: "🥄",
+        visualKind: "emoji",
+      },
+    ],
   });
   const statement =
-    "Supply improved [[source:housing-1]], but this claim is unsupported [[source:missing]].";
+    "Supply improved [[source:housing-1]], but the utensil is bent [[exhibit:exhibit-1]] and this claim is unsupported [[source:missing]].";
   const sanitized = sanitizeDebateStatementSources(statement, evidence);
 
-  assert.deepEqual(sanitized.sourceIds, ["housing-1"]);
-  assert.deepEqual(debateSourceIdsFromText(sanitized.content, evidence), ["housing-1"]);
+  assert.deepEqual(sanitized.sourceIds, ["housing-1", "exhibit-1"]);
+  assert.deepEqual(debateSourceIdsFromText(sanitized.content, evidence), [
+    "housing-1",
+    "exhibit-1",
+  ]);
   assert.equal(sanitized.content.includes("[[source:missing]]"), false);
   assert.equal(
     debateSpokenText(sanitized.content),
-    "Supply improved, but this claim is unsupported.",
+    "Supply improved, but the utensil is bent and this claim is unsupported.",
   );
 });
 
 test("validates stable source IDs and mutation idempotency keys", () => {
   assert.equal(isValidDebateSourceId("source_12-a"), true);
   assert.equal(isValidDebateSourceId("Source 12"), false);
-  assert.equal(normalizeDebateIdempotencyKey("debate.advance:1234"), "debate.advance:1234");
+  assert.equal(
+    normalizeDebateIdempotencyKey("debate.advance:1234"),
+    "debate.advance:1234",
+  );
   assert.equal(normalizeDebateIdempotencyKey("short"), "");
 });

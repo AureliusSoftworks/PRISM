@@ -26,6 +26,8 @@ describe("Prism Refract API contract", () => {
       route,
       /const preferredProvider = localModeLocked[\s\S]*\? "local"/u,
     );
+    assert.match(route, /isPrismRefractDebateTextTarget\(request\.target\)/u);
+    assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);
   });
 

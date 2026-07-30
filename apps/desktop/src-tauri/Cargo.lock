@@ -2240,6 +2240,8 @@ dependencies = [
 name = "prism_desktop"
 version = "0.14.0"
 dependencies = [
+ "objc2",
+ "objc2-app-kit",
  "serde",
  "serde_json",
  "tauri",

@@ -107,6 +107,7 @@ export function restoreFactoryDefaultsInDatabase(
           theme = 'system',
           graphics_quality = 'high',
           atmosphere_style = 'prismatic',
+          hub_atmosphere_enabled = 1,
           hub_atmosphere_image_id = NULL,
           hub_atmosphere_image_style = NULL,
           startup_preference = 'home',

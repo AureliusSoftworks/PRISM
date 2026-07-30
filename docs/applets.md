@@ -27,21 +27,21 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 ## Current Versioned Modules
 
-| Applet | Version | Status | Notes |
-| --- | --- | --- | --- |
-| Chat | v1.35 | Active | Full playground with independent saved conversations, six-tier size presentation, and player-safe Quiet/Loud behavior inside each PRISM or persona Home. |
-| Zen | v1.33 | Active | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.39 | Active | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, and faithful replay. |
-| Signal | v1.52 | Active | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters. |
-| Debate | v0.2 | Preview | Power-permissive Forum and Turnabout proceedings with frozen evidence, explicit advocacy consent, organic cast reactions, and durable verdicts. |
-| Polling | v0.0 | Planned | AI-powered polling across bot groups. |
-| Feed | v0.0 | Planned | BotBook-style social feed. |
-| Games | v0.0 | Planned | Boardgame-like bot matches. |
-| Story | v0.29 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
-| Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.8 | Preview | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery. |
-| Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
-| Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
+| Applet  | Version | Status             | Notes                                                                                                                                                                                                                                                                                                       |
+| ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat    | v1.35   | Active             | Full playground with independent saved conversations, six-tier size presentation, and player-safe Quiet/Loud behavior inside each PRISM or persona Home.                                                                                                                                                    |
+| Zen     | v1.33   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues.                                                                                                                                                                  |
+| Coffee  | v2.39   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, and faithful replay.                                                                                                                                                     |
+| Signal  | v1.52   | Active             | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                 |
+| Debate  | v0.2    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. |
+| Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
+| Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
+| Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
+| Story   | v0.29   | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration.                                                                                                                                                                                                |
+| Gym     | v0.0    | Planned            | Bot training and memory-development surface.                                                                                                                                                                                                                                                                |
+| Slate   | v0.8    | Preview            | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery.                                                                                                            |
+| Pseudo  | v0.0    | Planned            | Sketch/system space for almost-code.                                                                                                                                                                                                                                                                        |
+| Surf    | v0.0    | Planned            | Simple browsing plus optional bot screen viewing.                                                                                                                                                                                                                                                           |
 
 Debate's release boundary and platform QA gaps are recorded in
 [Debate v0.1 Preview verification](./debate-v0.1-verification.md).
@@ -142,7 +142,7 @@ stages do not block the standalone preview.
   ballot record. Signal likewise lets mute and echo hosts take a human Producer
   guest, and muted off-air host chat returns canonical silence instead of
   rejecting the interaction. A muted host can also attempt `Interrupt guest
-  now`; the saved outcome is silence rather than a disabled control or
+now`; the saved outcome is silence rather than a disabled control or
   fabricated interjection.
 
 ### 2026-07-28
@@ -284,7 +284,7 @@ stages do not block the standalone preview.
   to `v1.46`, and `Story` to `v0.25` for holder-scoped bot naming. A Ready
   Power can add one bounded prefix or suffix whenever its holder names another
   bot—so Rick Sanchez may say `Sigmund Freud Bot` while remaining `Rick
-  Sanchez`, and unaffected speakers keep their own naming habits. Coffee and
+Sanchez`, and unaffected speakers keep their own naming habits. Coffee and
   Signal enforce the frozen target name in saved output; Story adapts it to
   cast dialogue, while Chat and Zen carry the rule as a cue when another bot is
   mentioned. Signal continues to treat public episode titles as editorial

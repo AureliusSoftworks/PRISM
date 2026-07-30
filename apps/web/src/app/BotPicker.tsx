@@ -10,7 +10,11 @@ import type {
 import sharedStyles from "./BotPicker.module.css";
 import pickerStyles from "./page.module.css";
 
-export { filterBotPickerItems } from "./botPickerFilter";
+export {
+  compareBotPickerItemsByName,
+  filterBotPickerItems,
+  sortBotPickerItems,
+} from "./botPickerFilter";
 
 export interface BotPickerItem {
   id: string;

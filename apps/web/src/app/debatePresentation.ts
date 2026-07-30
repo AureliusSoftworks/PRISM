@@ -1,5 +1,6 @@
 import type {
   DebateEventV1,
+  DebateEvidenceItemV1,
   DebateEvidencePacketV1,
   DebateEvidenceSourceV1,
   DebateTurnTimingV1,
@@ -7,9 +8,10 @@ import type {
 import { debateEstimatedSpeechDurationMs } from "@localai/shared";
 
 export const DEBATE_SOURCE_LINK_PREFIX = "prism-debate-source:";
+export const DEBATE_EVIDENCE_LINK_PREFIX = "prism-debate-evidence:";
 
-const SOURCE_MARKER =
-  /\[\[source:([a-z0-9][a-z0-9_-]{0,47})\]\]/giu;
+const EVIDENCE_MARKER =
+  /\[\[(source|exhibit):([a-z0-9][a-z0-9_-]{0,47})\]\]/giu;
 
 export function debateRevealDurationMs(spokenText: string): number {
   return debateEstimatedSpeechDurationMs(spokenText);
@@ -32,7 +34,10 @@ export function debateTurnClockState(
   const playbackProgress = speechTiming
     ? Math.max(
         0,
-        Math.min(1, speechTiming.elapsedMs / Math.max(1, speechTiming.durationMs)),
+        Math.min(
+          1,
+          speechTiming.elapsedMs / Math.max(1, speechTiming.durationMs),
+        ),
       )
     : 0;
   const elapsedMs = event.timing.estimatedDurationMs * playbackProgress;
@@ -66,10 +71,16 @@ export function debateVisibleContentAtProgress(
   const target = Math.max(1, Math.floor(content.length * clamped));
   let end = target;
 
-  const markerStart = content.lastIndexOf("[[source:", target);
+  const markerStart = content.lastIndexOf("[[", target);
   if (markerStart >= 0) {
     const markerEnd = content.indexOf("]]", markerStart);
-    if (markerEnd >= target) end = markerStart;
+    const marker = content.slice(markerStart, markerEnd + 2);
+    if (
+      markerEnd >= target &&
+      /^\[\[(?:source|exhibit):[^\]]+\]\]$/iu.test(marker)
+    ) {
+      end = markerStart;
+    }
   }
 
   const candidate = content.slice(0, end);
@@ -115,37 +126,62 @@ export function debateMarkdownSource(
   content: string,
   evidence: DebateEvidencePacketV1,
 ): string {
-  const allowed = new Set(evidence.sources.map((source) => source.id));
-  return content.replace(SOURCE_MARKER, (_marker, rawId: string) => {
-    const id = rawId.toLowerCase();
-    return allowed.has(id)
-      ? `[${id}](${DEBATE_SOURCE_LINK_PREFIX}${id})`
-      : "";
-  });
+  const allowed = new Set([
+    ...evidence.sources.map((source) => source.id),
+    ...(evidence.exhibits ?? []).map((exhibit) => exhibit.id),
+  ]);
+  return content.replace(
+    EVIDENCE_MARKER,
+    (_marker, _kind: string, rawId: string) => {
+      const id = rawId.toLowerCase();
+      return allowed.has(id)
+        ? `[${id}](${DEBATE_EVIDENCE_LINK_PREFIX}${id})`
+        : "";
+    },
+  );
+}
+
+export function debateEvidenceFromMarkdownHref(
+  href: string | undefined,
+  evidence: DebateEvidencePacketV1,
+): DebateEvidenceItemV1 | null {
+  if (!href) return null;
+  const prefix = href.startsWith(DEBATE_EVIDENCE_LINK_PREFIX)
+    ? DEBATE_EVIDENCE_LINK_PREFIX
+    : href.startsWith(DEBATE_SOURCE_LINK_PREFIX)
+      ? DEBATE_SOURCE_LINK_PREFIX
+      : null;
+  if (!prefix) return null;
+  const id = href.slice(prefix.length).toLowerCase();
+  const source = evidence.sources.find((candidate) => candidate.id === id);
+  if (source) return { kind: "source", value: source };
+  const exhibit = (evidence.exhibits ?? []).find(
+    (candidate) => candidate.id === id,
+  );
+  return exhibit ? { kind: "exhibit", value: exhibit } : null;
 }
 
 export function debateSourceFromMarkdownHref(
   href: string | undefined,
   evidence: DebateEvidencePacketV1,
 ): DebateEvidenceSourceV1 | null {
-  if (!href?.startsWith(DEBATE_SOURCE_LINK_PREFIX)) return null;
-  const id = href.slice(DEBATE_SOURCE_LINK_PREFIX.length).toLowerCase();
-  return evidence.sources.find((source) => source.id === id) ?? null;
+  const item = debateEvidenceFromMarkdownHref(href, evidence);
+  return item?.kind === "source" ? item.value : null;
 }
 
 export type DebateGalleryReaction =
-  | "attentive"
-  | "divided"
-  | "evidence"
-  | "question"
-  | "concession";
+  "attentive" | "divided" | "evidence" | "question" | "concession";
 
-export function debateGalleryReaction(
-  content: string,
-): DebateGalleryReaction {
+export function debateGalleryReaction(content: string): DebateGalleryReaction {
   const normalized = content.toLowerCase();
-  if (/\[\[source:[^\]]+\]\]/u.test(normalized)) return "evidence";
-  if (/\b(?:i concede|we concede|fair point|grant that|acknowledge)\b/u.test(normalized)) {
+  if (/\[\[(?:source|exhibit):[^\]]+\]\]/u.test(normalized)) {
+    return "evidence";
+  }
+  if (
+    /\b(?:i concede|we concede|fair point|grant that|acknowledge)\b/u.test(
+      normalized,
+    )
+  ) {
     return "concession";
   }
   if (content.includes("?")) return "question";
@@ -165,7 +201,9 @@ export function debateGalleryReactingIndices(
     1,
     content.split(/[.!?;:](?:\s|$)/u).filter((part) => part.trim()).length,
   );
-  const first = Math.abs(sequence * 5 + clauseCount * 3 + content.length) % seatCount;
-  const second = (first + 2 + (content.length % Math.max(2, seatCount - 1))) % seatCount;
+  const first =
+    Math.abs(sequence * 5 + clauseCount * 3 + content.length) % seatCount;
+  const second =
+    (first + 2 + (content.length % Math.max(2, seatCount - 1))) % seatCount;
   return first === second ? [first] : [first, second];
 }

@@ -124,6 +124,7 @@ export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
   atmosphereStyle?: HubAtmosphereStyle;
+  hubAtmosphereEnabled?: boolean;
   startupPreference?: PrismStartupPreference;
   capabilityRevelations?: PrismCapabilityRevelations;
   preferredProvider: ProviderName;
@@ -1598,6 +1599,7 @@ export function exportUserSnapshot(
          zen_wallpaper_grayscale_enabled,
          zen_wallpaper_blurred_edges_enabled,
          atmosphere_style,
+         hub_atmosphere_enabled,
          zen_wallpaper_style_notes,
          zen_message_font_min_px,
          zen_message_font_max_px,
@@ -1630,6 +1632,7 @@ export function exportUserSnapshot(
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
         atmosphere_style: string | null;
+        hub_atmosphere_enabled: number;
         startup_preference: string | null;
         preferred_provider: ProviderName;
         ephemeral_chat_provider_preferences: string | null;
@@ -1699,6 +1702,7 @@ export function exportUserSnapshot(
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
         atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
+        hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
         startupPreference: normalizePrismStartupPreference(
           user.startup_preference,
         ),
@@ -3052,6 +3056,7 @@ function importUserSnapshotWithinTransaction(
         theme = ?,
         graphics_quality = ?,
         atmosphere_style = ?,
+        hub_atmosphere_enabled = ?,
         hub_atmosphere_image_id = NULL,
         hub_atmosphere_image_style = NULL,
         startup_preference = ?,
@@ -3124,6 +3129,7 @@ function importUserSnapshotWithinTransaction(
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
       normalizeHubAtmosphereStyle(settings.atmosphereStyle),
+      settings.hubAtmosphereEnabled === false ? 0 : 1,
       normalizePrismStartupPreference(settings.startupPreference),
       settings.preferredProvider === "openai" ||
         settings.preferredProvider === "anthropic"

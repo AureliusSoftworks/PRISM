@@ -303,6 +303,7 @@ import {
   BotPickerTile,
   BotPickerToolbar,
   filterBotPickerItems,
+  sortBotPickerItems,
   type BotPickerGroup,
   type BotPickerGlyphRenderer,
 } from "./BotPicker";
@@ -719,6 +720,16 @@ type SignalAssetSlot =
   | "night-studio"
   | "logo";
 type SignalArtworkKind = SignalAssetSlot;
+type SignalGeneratedAsset = {
+  id: string;
+  prompt: string;
+  displayUrl: string;
+  createdAt: string;
+};
+type SignalGeneratedAssetLibrary = Record<
+  SignalAssetSlot,
+  SignalGeneratedAsset[]
+>;
 
 const SIGNAL_BOT_PICKER_TILE = {
   tileSize: 78,
@@ -794,14 +805,16 @@ function SignalBotDropdown({
   const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const normalizedSearch = searchValue.trim().toLocaleLowerCase();
   const visibleBots = useMemo(
-    () =>
-      bots
-        .filter(
-          (bot) =>
-            normalizedSearch.length === 0 ||
-            bot.name.toLocaleLowerCase().includes(normalizedSearch),
-        )
-        .sort((left, right) => {
+    () => {
+      const filteredBots = bots.filter(
+        (bot) =>
+          normalizedSearch.length === 0 ||
+          bot.name.toLocaleLowerCase().includes(normalizedSearch),
+      );
+      return sortBotPickerItems(
+        filteredBots,
+        hueLensCenter !== null,
+        (left, right) => {
           const leftHue = signalBotDropdownHue(left);
           const rightHue = signalBotDropdownHue(right);
           if (leftHue === null && rightHue !== null) return 1;
@@ -810,8 +823,10 @@ function SignalBotDropdown({
             return leftHue - rightHue;
           }
           return left.name.localeCompare(right.name);
-        }),
-    [bots, normalizedSearch],
+        },
+      );
+    },
+    [bots, hueLensCenter, normalizedSearch],
   );
   const hueFocusBotId = useMemo(() => {
     if (hueLensCenter === null) return null;
@@ -1101,6 +1116,16 @@ const SIGNAL_ASSET_LABELS: Record<SignalAssetSlot, string> = {
   "day-studio": "Light studio",
   "night-studio": "Dark studio",
   logo: "logo",
+};
+const SIGNAL_ASSET_LIBRARY_SCOPES: Record<SignalAssetSlot, string> = {
+  "day-studio": "signal_studio_day",
+  "night-studio": "signal_studio_night",
+  logo: "signal_logo",
+};
+const EMPTY_SIGNAL_GENERATED_ASSET_LIBRARY: SignalGeneratedAssetLibrary = {
+  "day-studio": [],
+  "night-studio": [],
+  logo: [],
 };
 
 type SignalBlockingOperation = {
@@ -1982,6 +2007,16 @@ export function BotcastExperience({
   const [artworkJob, setArtworkJob] = useState<SignalArtworkJobSnapshot | null>(
     null,
   );
+  const [generatedAssetLibrary, setGeneratedAssetLibrary] =
+    useState<SignalGeneratedAssetLibrary>(EMPTY_SIGNAL_GENERATED_ASSET_LIBRARY);
+  const [generatedAssetLibraryLoading, setGeneratedAssetLibraryLoading] =
+    useState(false);
+  const [generatedAssetLibraryUnavailable, setGeneratedAssetLibraryUnavailable] =
+    useState(false);
+  const [generatedAssetReuseId, setGeneratedAssetReuseId] = useState<
+    string | null
+  >(null);
+  const generatedAssetLibraryRequestRef = useRef(0);
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
   const [studioLayoutPreviewTheme, setStudioLayoutPreviewTheme] =
     useState<"light" | "dark">(theme);
@@ -2797,6 +2832,49 @@ export function BotcastExperience({
   const showIdentityControlsExpanded = Boolean(
     selectedShow && showIdentityControlsShowId === selectedShow.id,
   );
+  useEffect(() => {
+    if (!showIdentityControlsExpanded || !selectedShow) return;
+    const requestId = generatedAssetLibraryRequestRef.current + 1;
+    generatedAssetLibraryRequestRef.current = requestId;
+    setGeneratedAssetLibraryLoading(true);
+    setGeneratedAssetLibraryUnavailable(false);
+    const slots: SignalAssetSlot[] = [
+      "day-studio",
+      "night-studio",
+      "logo",
+    ];
+    void Promise.all(
+      slots.map(async (slot) => {
+        const scope = SIGNAL_ASSET_LIBRARY_SCOPES[slot];
+        const result = await request<{ images: SignalGeneratedAsset[] }>(
+          `/api/images/tool-assets?scope=${scope}&botId=${encodeURIComponent(selectedShow.hostBotId)}&limit=12`,
+        );
+        return [slot, result.images] as const;
+      }),
+    )
+      .then((entries) => {
+        if (generatedAssetLibraryRequestRef.current !== requestId) return;
+        setGeneratedAssetLibrary(
+          Object.fromEntries(entries) as SignalGeneratedAssetLibrary,
+        );
+      })
+      .catch(() => {
+        if (generatedAssetLibraryRequestRef.current !== requestId) return;
+        setGeneratedAssetLibraryUnavailable(true);
+      })
+      .finally(() => {
+        if (generatedAssetLibraryRequestRef.current === requestId) {
+          setGeneratedAssetLibraryLoading(false);
+        }
+      });
+    return () => {
+      generatedAssetLibraryRequestRef.current += 1;
+    };
+  }, [
+    request,
+    selectedShow,
+    showIdentityControlsExpanded,
+  ]);
   const selectedShowArtworkBusy = Boolean(
     selectedShow &&
       artworkJob?.showId === selectedShow.id &&
@@ -4999,6 +5077,37 @@ export function BotcastExperience({
     });
   };
 
+  const reuseGeneratedShowAsset = async (
+    slot: SignalAssetSlot,
+    asset: SignalGeneratedAsset,
+  ): Promise<void> => {
+    if (!selectedShow || busy || selectedShowArtworkBusy) return;
+    const label = SIGNAL_ASSET_LABELS[slot];
+    setBusy(true);
+    setGeneratedAssetReuseId(asset.id);
+    setError(null);
+    setNotice(`Installing the saved ${label}…`);
+    try {
+      const response = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/assets/${slot}/reuse`,
+        {
+          method: "POST",
+          body: JSON.stringify({ imageId: asset.id }),
+        },
+      );
+      replaceShow(response.show);
+      setNotice(
+        `The saved ${label} is live. No image-generation tokens were used.`,
+      );
+    } catch (reuseError) {
+      setError(signalErrorToast(`Reuse ${label}`, reuseError));
+      setNotice(`The current ${label} remains in place.`);
+    } finally {
+      setGeneratedAssetReuseId(null);
+      setBusy(false);
+    }
+  };
+
   const uploadShowAsset = async (
     slot: SignalAssetSlot,
     file: File,
@@ -5028,7 +5137,7 @@ export function BotcastExperience({
       );
       replaceShow(response.show);
       setNotice(
-        `The ${label} has been replaced. Its previous artwork remains in Images.`,
+        `The ${label} has been replaced. Its previous artwork remains saved.`,
       );
     } catch (uploadError) {
       setError(signalErrorToast("Upload Signal artwork", uploadError));
@@ -12896,6 +13005,100 @@ export function BotcastExperience({
                         Refresh the linked studio pair, tune the premise, name,
                         dashboard blurbs, and logo, or shape the opening ident.
                       </small>
+                    <section
+                      className={styles.generatedAssetLibrary}
+                      aria-label="Previously generated Signal artwork"
+                      data-signal-generated-asset-library="true"
+                    >
+                      <header>
+                        <div>
+                          <strong>Reuse generated artwork</strong>
+                          <small>
+                            Signal-only studios and logos. Reusing one skips
+                            image generation entirely.
+                          </small>
+                        </div>
+                      </header>
+                      {generatedAssetLibraryLoading ? (
+                        <p>Loading your Signal artwork…</p>
+                      ) : generatedAssetLibraryUnavailable ? (
+                        <p>Saved Signal artwork is temporarily unavailable.</p>
+                      ) : (
+                        <div className={styles.generatedAssetLanes}>
+                          {(
+                            [
+                              "night-studio",
+                              "day-studio",
+                              "logo",
+                            ] as const
+                          ).map((slot) => {
+                            const assets = generatedAssetLibrary[slot];
+                            const currentImageId =
+                              slot === "night-studio"
+                                ? selectedShow.nightAtmosphere.imageId
+                                : slot === "day-studio"
+                                  ? selectedShow.dayAtmosphere.imageId
+                                  : selectedShow.logo.imageId;
+                            return (
+                              <section
+                                key={slot}
+                                className={styles.generatedAssetLane}
+                                data-slot={slot}
+                              >
+                                <strong>
+                                  {SIGNAL_ASSET_LABELS[slot]}
+                                  {assets.length > 0
+                                    ? ` · ${assets.length}`
+                                    : ""}
+                                </strong>
+                                {assets.length > 0 ? (
+                                  <div>
+                                    {assets.map((asset, index) => {
+                                      const current =
+                                        currentImageId === asset.id;
+                                      return (
+                                        <button
+                                          key={asset.id}
+                                          type="button"
+                                          aria-label={`Reuse generated ${SIGNAL_ASSET_LABELS[slot]} ${index + 1}`}
+                                          aria-pressed={current}
+                                          title={asset.prompt}
+                                          onClick={() =>
+                                            void reuseGeneratedShowAsset(
+                                              slot,
+                                              asset,
+                                            )
+                                          }
+                                          disabled={
+                                            busy ||
+                                            selectedShowArtworkBusy ||
+                                            current
+                                          }
+                                        >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
+                                            src={`/api/images/${encodeURIComponent(asset.id)}/thumb`}
+                                            alt=""
+                                          />
+                                          {current ? (
+                                            <span aria-hidden="true">✓</span>
+                                          ) : generatedAssetReuseId ===
+                                            asset.id ? (
+                                            <span aria-hidden="true">…</span>
+                                          ) : null}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <small>No generated versions yet.</small>
+                                )}
+                              </section>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
                     <div className={styles.showLookControlGrid}>
                       <div className={styles.showLookControlGroup}>
                           <label

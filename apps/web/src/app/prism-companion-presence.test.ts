@@ -43,7 +43,7 @@ test("suppresses the floating assistant throughout bot creation and full-screen 
   assert.match(slate, /reason="slate-loading"/u);
 });
 
-test("suppresses the floating assistant only during live Signal and Coffee sessions", () => {
+test("suppresses the floating assistant only during live Signal, Coffee, and Debate sessions", () => {
   assert.match(
     signal,
     /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,160}episode\?\.status === "cancelled"/u,
@@ -59,6 +59,10 @@ test("suppresses the floating assistant only during live Signal and Coffee sessi
   assert.match(
     page,
     /coffeeLiveSessionActive \? \(\s*<PrismCompanionPresenceBoundary reason="coffee-live-session" \/>/u,
+  );
+  assert.match(
+    page,
+    /debateLiveSessionActive \|\| debateCompanionContext === null \? \(\s*<PrismCompanionPresenceBoundary reason="debate-live-session" \/>[\s\S]{0,180}\{renderGlobalPrismCompanion\(\)\}/u,
   );
   assert.match(
     companion,

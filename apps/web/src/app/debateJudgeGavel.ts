@@ -8,7 +8,7 @@ export const DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS = 2_000;
 export const DEBATE_JUDGE_GAVEL_CUE_WINDOW_MS = 2_800;
 export const DEBATE_JUDGE_GAVEL_MISSED_BEAT_MS = 900;
 
-export type DebateJudgeGavelSpaceAction = "cue" | "deliberate" | "smash";
+export type DebateJudgeGavelSpaceAction = "cue" | "order" | "smash";
 
 export function debateJudgeGavelCooldownBlocks(args: {
   overtime: boolean;
@@ -33,7 +33,7 @@ export function debateJudgeGavelSpaceAction(args: {
   editableTarget: boolean;
   ceremonialAvailable: boolean;
   liveJudge: boolean;
-  semanticAvailable: boolean;
+  orderAvailable: boolean;
   nowMs: number;
   smashUntilMs: number;
 }): DebateJudgeGavelSpaceAction | null {
@@ -43,5 +43,5 @@ export function debateJudgeGavelSpaceAction(args: {
   if (args.ceremonialAvailable) return "cue";
   if (!args.liveJudge) return null;
   if (args.nowMs < args.smashUntilMs) return "smash";
-  return args.semanticAvailable ? "deliberate" : null;
+  return args.orderAvailable ? "order" : null;
 }

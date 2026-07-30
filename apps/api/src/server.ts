@@ -189,8 +189,10 @@ import {
   createDebateSession,
   debateSessionForPlayer,
   endDebateSessionEarly,
+  generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
+  orderDebateAudience,
   pauseDebateSession,
   raiseDebateParticipantObjection,
   resolveDebateParticipantObjection,
@@ -278,6 +280,12 @@ import {
   normalizeSignalLogoImage,
   readSignalAssetSlot,
 } from "./signal-asset-upload.ts";
+import {
+  buildDebateExhibitSpritePrompt,
+  normalizeDebateExhibitDescriptor,
+  normalizeGeneratedDebateExhibitImage,
+  normalizeUploadedDebateExhibitImage,
+} from "./debate-exhibit-image.ts";
 import {
   normalizeSignalGenerationKeywords,
   withSignalGenerationKeywords,
@@ -751,6 +759,7 @@ import {
   normalizeEphemeralChatProviderPreferences,
   normalizePrismCompanionRequest,
   normalizePrismCompanionSurfaceReference,
+  isPrismRefractDebateTextTarget,
   normalizePrismExecuteProposalRequestV1,
   normalizePrismUndoRequestV1,
   normalizeGraphicsQuality,
@@ -842,6 +851,7 @@ import {
   type PrismJsonObject,
   type PrismCompanionCardV1,
   type PrismCompanionSurfaceReference,
+  type PrismRefractSignalTextTarget,
   type AutoFallbackModelRef,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
@@ -874,10 +884,16 @@ import {
   restoreImageAssetCleanupRecovery,
 } from "./image-asset-cleanup.ts";
 import {
+  DEBATE_EXHIBIT_IMAGE_PURPOSE,
   IMAGE_BOT_MEMBERSHIP_SQL,
+  SIGNAL_DAY_STUDIO_IMAGE_PURPOSE,
+  SIGNAL_LOGO_IMAGE_PURPOSE,
+  SIGNAL_NIGHT_STUDIO_IMAGE_PURPOSE,
+  contextualImageAssetScopeConfig,
   imageOriginForGenerate,
   normalizeImageRelatedBotIds,
   serializeImageRelatedBotIds,
+  signalArtworkImagePurpose,
   type ImageOrigin,
 } from "./image-provenance.ts";
 import {
@@ -2035,6 +2051,7 @@ interface UserDbRow {
   theme: "light" | "dark" | "system";
   graphics_quality: GraphicsQuality | string | null;
   atmosphere_style: string | null;
+  hub_atmosphere_enabled: number;
   hub_atmosphere_image_id: string | null;
   hub_atmosphere_image_style: string | null;
   startup_preference: PrismStartupPreference | string | null;
@@ -2405,7 +2422,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -6399,6 +6416,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
       ? "low"
       : "high";
   const relatedBotIds = [args.hostBotId];
+  const purpose = signalArtworkImagePurpose(args.kind);
   let provider: "openai" | "comfyui" | "ollama";
   let model: string;
   let revisedPrompt: string;
@@ -6576,7 +6594,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
          (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
           revised_prompt, url, size, quality, provider, model, local_rel_path,
           purpose, created_at)
-       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, 'gallery', ?)`,
+       VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       imageId,
       args.userId,
@@ -6590,6 +6608,7 @@ async function generateAndPersistSignalArtworkAsset(args: {
       provider,
       model,
       localRelPath,
+      purpose,
       createdAt,
     );
     if (
@@ -6673,11 +6692,12 @@ async function generateAndPersistStandaloneImageAsset(args: {
   preferredProvider: ImageProviderName;
   offlineOnly?: boolean;
   signal: AbortSignal;
-  size: "1536x1024" | "1024x1536";
+  size: "1536x1024" | "1024x1536" | "1024x1024";
   origin: ImageOrigin;
   purpose: string;
   featureLabel: string;
   relatedBotIds?: string[];
+  normalizeImageBytes?: (imageBytes: Buffer) => Promise<Buffer>;
 }): Promise<SignalArtworkGeneratedAsset> {
   const user = getUserRow(args.userId);
   const effectiveProvider = resolveImageProviderName({
@@ -6837,6 +6857,9 @@ async function generateAndPersistStandaloneImageAsset(args: {
       "AbortError",
     );
   }
+  if (args.normalizeImageBytes) {
+    imageBytes = await args.normalizeImageBytes(imageBytes);
+  }
   const persistenceStartedAt = Date.now();
   try {
     writeGeneratedImageBytes(localRelPath, imageBytes);
@@ -6887,6 +6910,49 @@ async function generateAndPersistStandaloneImageAsset(args: {
     imageId,
     imageUrl: displayUrl,
     timings: { downloadMs, localPersistenceMs },
+  };
+}
+
+async function persistUploadedDebateExhibitImageAsset(args: {
+  userId: string;
+  title: string;
+  imageBytes: Buffer;
+}): Promise<SignalArtworkGeneratedAsset> {
+  const imageId = randomId(12);
+  const localRelPath = buildGeneratedImageRelativePath(args.userId, imageId);
+  const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+  try {
+    writeGeneratedImageBytes(localRelPath, args.imageBytes);
+    await tryGenerateThumbAfterPngWrite(localRelPath);
+    const createdAt = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO images
+         (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+          revised_prompt, url, size, quality, provider, model, local_rel_path,
+          purpose, created_at)
+       VALUES (?, ?, NULL, NULL, '[]', 'debate', ?, ?, ?, '1024x1024',
+               'uploaded', 'upload', 'player-upload', ?, 'debate_exhibit', ?)`,
+    ).run(
+      imageId,
+      args.userId,
+      `[Debate exhibit upload] ${args.title}`,
+      `[Debate exhibit upload] ${args.title}`,
+      displayUrl,
+      localRelPath,
+      createdAt,
+    );
+  } catch (error) {
+    db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+      imageId,
+      args.userId,
+    );
+    tryUnlinkGeneratedImageFile(localRelPath);
+    throw error;
+  }
+  return {
+    imageId,
+    imageUrl: displayUrl,
+    timings: { downloadMs: 0, localPersistenceMs: 0 },
   };
 }
 
@@ -12761,9 +12827,9 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, status: "failed", error: result.error });
     }),
-    // Signal is a deliberately isolated anthology pipeline. Its internal
-    // botcast namespace reuses bot personas/providers but never enters
-    // Chat/Coffee memory or relationship paths.
+    // Prism Refract generates bounded, draft-only candidates for explicitly
+    // registered controls. Surface generators preserve their own isolation
+    // and never enter Chat/Coffee memory or relationship paths.
     route("POST", "/api/prism/refract", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
@@ -12812,33 +12878,64 @@ function buildRoutes(): RouteDefinition[] {
         request.preferredProvider !== "local"
           ? availableAccountModel
           : (requestedModelOverride ?? availableAccountModel);
-      const result = await generateBotcastRefractDraft(
-        db,
-        userId,
-        request.target,
-        request.currentValue,
-        request.rejectedValues,
-        modelOverride,
-        {
-          preferredProvider,
-          responseMode: autoEnabled
-            ? "auto"
-            : preferredProvider === "local"
-              ? "local"
-              : "online",
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
-          secondaryOllamaHost: user.secondary_ollama_host,
-          prismDefaultLlmModel: user.prism_default_llm_model,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
-          autoFallbackChain,
-          providerFactory: providerFactoryOverride,
-        },
-      );
+      const effectiveResponseMode = autoEnabled
+        ? "auto"
+        : preferredProvider === "local"
+          ? "local"
+          : "online";
+      const debateTarget = isPrismRefractDebateTextTarget(request.target)
+        ? request.target
+        : null;
+      const signalTarget = debateTarget
+        ? null
+        : (request.target as PrismRefractSignalTextTarget);
+      const result = debateTarget
+        ? await runWithUsageSession(
+            {
+              db,
+              userId,
+              privacyScope: "normal",
+              mode: "debate",
+              surface: "debate",
+            },
+            () =>
+              generateDebateRefractDraft(
+                db,
+                userId,
+                debateTarget,
+                request.currentValue,
+                request.rejectedValues,
+                debateAiRuntimeForUser(
+                  userId,
+                  preferredProvider,
+                  modelOverride,
+                  effectiveResponseMode,
+                ),
+              ),
+          )
+        : await generateBotcastRefractDraft(
+            db,
+            userId,
+            signalTarget!,
+            request.currentValue,
+            request.rejectedValues,
+            modelOverride,
+            {
+              preferredProvider,
+              responseMode: effectiveResponseMode,
+              openAiApiKey:
+                getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
+              anthropicApiKey:
+                getAnthropicApiKeyForUser(userId, userKey) ??
+                config.anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              preferredLocalModel: user.preferred_local_model,
+              preferredOnlineModel: user.preferred_online_model,
+              autoFallbackChain,
+              providerFactory: providerFactoryOverride,
+            },
+          );
       if (!result.generated || !result.value) {
         throw new HttpError(
           502,
@@ -12871,7 +12968,13 @@ function buildRoutes(): RouteDefinition[] {
           mode: "debate",
           surface: "debate",
         },
-        () => synthesizeDebateSlates(body.topic, body.formality, runtime),
+        () =>
+          synthesizeDebateSlates(
+            body.topic,
+            body.formality,
+            runtime,
+            body.direction,
+          ),
       );
       json(ctx.res, 200, { ok: true, slates });
     }),
@@ -12921,6 +13024,103 @@ function buildRoutes(): RouteDefinition[] {
           publishedAt: result.publishedAt ?? null,
         })),
       });
+    }),
+    route("POST", "/api/debates/exhibits/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const descriptor = normalizeDebateExhibitDescriptor({
+        adjective: body.adjective,
+        object: body.object,
+      });
+      const normalized = await normalizeUploadedDebateExhibitImage(
+        body.dataUrl,
+      );
+      const asset = await persistUploadedDebateExhibitImageAsset({
+        userId,
+        title: descriptor.title,
+        imageBytes: normalized.pngBytes,
+      });
+      json(ctx.res, 201, {
+        ok: true,
+        image: {
+          id: asset.imageId,
+          displayUrl: asset.imageUrl,
+          origin: "debate",
+          purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+        },
+      });
+    }),
+    route("POST", "/api/debates/exhibits/synthesize", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const descriptor = normalizeDebateExhibitDescriptor({
+        adjective: body.adjective,
+        object: body.object,
+      });
+      const prompt = buildDebateExhibitSpritePrompt(descriptor);
+      const user = getUserRow(userId);
+      const requestedImageProvider: ImageProviderName =
+        body.preferredProvider === "openai"
+          ? "openai"
+          : body.preferredProvider === "local"
+            ? "local"
+            : user.preferred_image_provider === "openai"
+              ? "openai"
+              : "local";
+      const offlineOnly =
+        normalizeResponseMode(
+          body.responseMode,
+          requestedImageProvider === "local" ? "local" : "online",
+        ) === "local" || userBlocksOnlineCapabilities(user);
+      const imageAbort = new AbortController();
+      const onClose = (): void => imageAbort.abort();
+      ctx.req.once("close", onClose);
+      const acquired = await tryAcquireImageSlot({
+        userId,
+        conversationId: null,
+        botId: null,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt: descriptor.title,
+        userMessage: `[Debate exhibit] ${descriptor.title}`,
+        source: "debate_exhibit",
+        requestedSize: "1024x1024",
+        abortController: imageAbort,
+      });
+      if (!acquired.ok) {
+        ctx.req.off("close", onClose);
+        throw new HttpError(
+          503,
+          "Another image is generating right now. The evidence object is unchanged.",
+        );
+      }
+      try {
+        const asset = await generateAndPersistStandaloneImageAsset({
+          userId,
+          prompt,
+          preferredProvider: requestedImageProvider,
+          offlineOnly,
+          signal: acquired.job.abortController.signal,
+          size: "1024x1024",
+          origin: "debate",
+          purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+          featureLabel: "an evidence exhibit",
+          normalizeImageBytes: async (imageBytes) =>
+            (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
+        });
+        json(ctx.res, 201, {
+          ok: true,
+          image: {
+            id: asset.imageId,
+            displayUrl: asset.imageUrl,
+            origin: "debate",
+            purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+          },
+        });
+      } finally {
+        ctx.req.off("close", onClose);
+        await releaseImageSlotIfOwned(userId, acquired.job.id);
+      }
     }),
     route("POST", "/api/debates/role-checks", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -13117,6 +13317,19 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         ctx.params.id,
         ctx.body as Parameters<typeof swingDebateJudgeGavel>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/judge-gavel/order", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = orderDebateAudience(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof orderDebateAudience>[3],
       );
       json(ctx.res, 200, {
         ok: true,
@@ -14003,6 +14216,125 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       json(ctx.res, 200, { ok: true, ...result });
+    }),
+    route("POST", "/api/botcast/shows/:id/assets/:slot/reuse", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+        throw new HttpError(
+          409,
+          "This show’s custom look is still generating.",
+        );
+      }
+      const slot = readSignalAssetSlot(ctx.params.slot);
+      const body = ctx.body as Record<string, unknown>;
+      const imageId = readOptionalString(body.imageId);
+      if (!imageId) {
+        throw new HttpError(400, "Choose a generated Signal asset.");
+      }
+      const purpose =
+        slot === "day-studio"
+          ? SIGNAL_DAY_STUDIO_IMAGE_PURPOSE
+          : slot === "night-studio"
+            ? SIGNAL_NIGHT_STUDIO_IMAGE_PURPOSE
+            : SIGNAL_LOGO_IMAGE_PURPOSE;
+      const image = db
+        .prepare(
+          `SELECT id, prompt, revised_prompt, url, size, quality, provider,
+                  bot_id, related_bot_ids, origin, created_at, local_rel_path,
+                  model, purpose
+             FROM images
+            WHERE id = ?
+              AND user_id = ?
+              AND bot_id = ?
+              AND origin = 'botcast'
+              AND purpose = ?
+              AND provider <> 'upload'
+              AND TRIM(COALESCE(local_rel_path, '')) <> ''
+            LIMIT 1`,
+        )
+        .get(imageId, userId, show.hostBotId, purpose) as
+        | {
+            id: string;
+            prompt: string;
+            revised_prompt: string | null;
+            url: string;
+            size: string;
+            quality: string;
+            provider: string;
+            bot_id: string | null;
+            related_bot_ids: string | null;
+            origin: string | null;
+            created_at: string;
+            local_rel_path: string | null;
+            model: string | null;
+            purpose: string | null;
+          }
+        | undefined;
+      if (!image?.local_rel_path) {
+        throw new HttpError(404, "That generated Signal asset is unavailable.");
+      }
+      try {
+        readGeneratedImageBytes(image.local_rel_path);
+      } catch {
+        throw new HttpError(
+          404,
+          "That generated Signal asset file is unavailable.",
+        );
+      }
+      const displayUrl = `/api/images/${encodeURIComponent(image.id)}/file`;
+      const microphoneTintMask =
+        slot === "logo"
+          ? undefined
+          : (db
+              .prepare(
+                `SELECT id, local_rel_path
+                   FROM images
+                  WHERE user_id = ?
+                    AND bot_id = ?
+                    AND origin = 'botcast'
+                    AND purpose = 'signal_microphone_tint_mask'
+                    AND created_at = ?
+                    AND TRIM(COALESCE(local_rel_path, '')) <> ''
+                  ORDER BY id DESC
+                  LIMIT 1`,
+              )
+              .get(userId, show.hostBotId, image.created_at) as
+              | { id: string; local_rel_path: string | null }
+              | undefined);
+      const microphoneTintMaskUrl = microphoneTintMask?.id
+        ? `/api/images/${encodeURIComponent(microphoneTintMask.id)}/file`
+        : null;
+      const savedShow = updateBotcastShow(
+        db,
+        userId,
+        show.id,
+        slot === "day-studio"
+          ? {
+              dayAtmosphereImageUrl: displayUrl,
+              dayAtmosphereImageId: image.id,
+              dayAtmosphereMicrophoneTintMaskUrl: microphoneTintMaskUrl,
+              dayAtmosphereMicrophoneTintMaskImageId:
+                microphoneTintMask?.id ?? null,
+            }
+          : slot === "night-studio"
+            ? {
+                nightAtmosphereImageUrl: displayUrl,
+                nightAtmosphereImageId: image.id,
+                nightAtmosphereMicrophoneTintMaskUrl: microphoneTintMaskUrl,
+                nightAtmosphereMicrophoneTintMaskImageId:
+                  microphoneTintMask?.id ?? null,
+              }
+            : {
+                logoImageUrl: displayUrl,
+                logoImageId: image.id,
+              },
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        show: savedShow,
+        image: mapImageRowToClient(image),
+      });
     }),
     route("POST", "/api/botcast/shows/:id/assets/:slot/upload", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -19587,6 +19919,7 @@ function buildRoutes(): RouteDefinition[] {
           theme: user.theme,
           graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
           atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
+          hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
           hubAtmosphereImageId: hubAtmosphereCache.imageId,
           hubAtmosphereImageStyle: hubAtmosphereCache.imageStyle,
           startupPreference: normalizePrismStartupPreference(
@@ -20060,6 +20393,8 @@ function buildRoutes(): RouteDefinition[] {
           ok: true,
           settings: {
             ...savedSettings,
+            hubAtmosphereEnabled:
+              committedUser.hub_atmosphere_enabled !== 0,
             hasOpenAiApiKey: Boolean(committedUser.openai_key_ciphertext),
             hasAnthropicApiKey: Boolean(committedUser.anthropic_key_ciphertext),
             hasElevenLabsApiKey: Boolean(
@@ -20105,6 +20440,7 @@ function buildRoutes(): RouteDefinition[] {
         theme: user.theme,
         graphicsQuality: user.graphics_quality,
         atmosphereStyle: user.atmosphere_style,
+        hubAtmosphereEnabled: user.hub_atmosphere_enabled,
         startupPreference: user.startup_preference,
         preferredProvider: user.preferred_provider,
         ephemeralChatProviderPreferences:
@@ -20238,7 +20574,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         `
         UPDATE users
-        SET display_name = ?, theme = ?, graphics_quality = ?, atmosphere_style = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+        SET display_name = ?, theme = ?, graphics_quality = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
@@ -20256,6 +20592,7 @@ function buildRoutes(): RouteDefinition[] {
         next.theme,
         next.graphicsQuality,
         next.atmosphereStyle,
+        next.hubAtmosphereEnabled,
         next.startupPreference,
         next.preferredProvider,
         JSON.stringify(next.ephemeralChatProviderPreferences),
@@ -20333,6 +20670,7 @@ function buildRoutes(): RouteDefinition[] {
           displayName: next.displayName,
           graphicsQuality: next.graphicsQuality,
           atmosphereStyle: next.atmosphereStyle,
+          hubAtmosphereEnabled: next.hubAtmosphereEnabled !== 0,
           startupPreference: next.startupPreference,
           preferredProvider: next.preferredProvider,
           ephemeralChatProviderPreferences:
@@ -21251,6 +21589,82 @@ function buildRoutes(): RouteDefinition[] {
           purpose: GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
         }),
       });
+    }),
+    route("GET", "/api/images/tool-assets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const scope = contextualImageAssetScopeConfig(ctx.query.get("scope"));
+      if (!scope) {
+        throw new HttpError(400, "Choose a recognized tool asset library.");
+      }
+      const botId = readOptionalString(ctx.query.get("botId"));
+      if (scope.botScoped && !botId) {
+        throw new HttpError(400, "This tool asset library requires a bot.");
+      }
+      if (!scope.botScoped && botId) {
+        throw new HttpError(
+          400,
+          "This tool asset library is not scoped to a bot.",
+        );
+      }
+      if (botId && !botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Unknown bot for this account.");
+      }
+      const limitRaw = ctx.query.get("limit");
+      const parsedLimit = limitRaw ? Number(limitRaw) : 18;
+      const limit = Number.isFinite(parsedLimit)
+        ? Math.min(48, Math.max(1, Math.floor(parsedLimit)))
+        : 18;
+      const rows = botId
+        ? db
+            .prepare(
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider,
+                      bot_id, related_bot_ids, origin, created_at,
+                      local_rel_path, model, purpose
+                 FROM images
+                WHERE user_id = ?
+                  AND origin = ?
+                  AND purpose = ?
+                  AND bot_id = ?
+                  AND provider <> 'upload'
+                  AND TRIM(COALESCE(local_rel_path, '')) <> ''
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?`,
+            )
+            .all(userId, scope.origin, scope.purpose, botId, limit)
+        : db
+            .prepare(
+              `SELECT id, prompt, revised_prompt, url, size, quality, provider,
+                      bot_id, related_bot_ids, origin, created_at,
+                      local_rel_path, model, purpose
+                 FROM images
+                WHERE user_id = ?
+                  AND origin = ?
+                  AND purpose = ?
+                  AND provider <> 'upload'
+                  AND TRIM(COALESCE(local_rel_path, '')) <> ''
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?`,
+            )
+            .all(userId, scope.origin, scope.purpose, limit);
+      const images = (
+        rows as Array<{
+          id: string;
+          prompt: string;
+          revised_prompt: string | null;
+          url: string;
+          size: string;
+          quality: string;
+          provider: string;
+          bot_id: string | null;
+          related_bot_ids: string | null;
+          origin: string | null;
+          created_at: string;
+          local_rel_path: string | null;
+          model: string | null;
+          purpose: string | null;
+        }>
+      ).map((row) => mapImageRowToClient(row));
+      json(ctx.res, 200, { ok: true, images });
     }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);

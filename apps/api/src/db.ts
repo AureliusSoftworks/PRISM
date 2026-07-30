@@ -180,6 +180,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       theme TEXT NOT NULL DEFAULT 'system',
       graphics_quality TEXT NOT NULL DEFAULT 'high',
       atmosphere_style TEXT NOT NULL DEFAULT 'prismatic',
+      hub_atmosphere_enabled INTEGER NOT NULL DEFAULT 1,
       hub_atmosphere_image_id TEXT,
       hub_atmosphere_image_style TEXT,
       startup_preference TEXT NOT NULL DEFAULT 'home',
@@ -2442,6 +2443,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE users ADD COLUMN atmosphere_style TEXT NOT NULL DEFAULT 'prismatic';",
     );
   }
+  const hasHubAtmosphereEnabled = userColumns.some(
+    (column) => column.name === "hub_atmosphere_enabled",
+  );
+  if (!hasHubAtmosphereEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN hub_atmosphere_enabled INTEGER NOT NULL DEFAULT 1;",
+    );
+  }
   const hasHubAtmosphereImageId = userColumns.some(
     (column) => column.name === "hub_atmosphere_image_id",
   );
@@ -3586,6 +3595,44 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE images ADD COLUMN purpose TEXT NOT NULL DEFAULT 'gallery';",
     );
   }
+
+  // Keep generated Signal artwork in its exact tool lane instead of the
+  // general Images panel. Current show JSON can safely identify legacy assets;
+  // replaced pre-provenance artwork remains in the gallery rather than being
+  // guessed from prompt text or dimensions.
+  db.exec(`
+    UPDATE images
+       SET purpose = CASE
+         WHEN EXISTS (
+           SELECT 1
+             FROM botcast_shows AS shows
+            WHERE shows.user_id = images.user_id
+              AND json_valid(shows.atmosphere_json)
+              AND json_extract(shows.atmosphere_json, '$.dayAtmosphere.imageId') = images.id
+         ) THEN 'signal_studio_day'
+         WHEN EXISTS (
+           SELECT 1
+             FROM botcast_shows AS shows
+            WHERE shows.user_id = images.user_id
+              AND json_valid(shows.atmosphere_json)
+              AND (
+                json_extract(shows.atmosphere_json, '$.nightAtmosphere.imageId') = images.id
+                OR json_extract(shows.atmosphere_json, '$.imageId') = images.id
+              )
+         ) THEN 'signal_studio_night'
+         WHEN EXISTS (
+           SELECT 1
+             FROM botcast_shows AS shows
+            WHERE shows.user_id = images.user_id
+              AND json_valid(shows.atmosphere_json)
+              AND json_extract(shows.atmosphere_json, '$.logo.imageId') = images.id
+         ) THEN 'signal_logo'
+         ELSE purpose
+       END
+     WHERE origin = 'botcast'
+       AND purpose = 'gallery'
+       AND provider <> 'upload';
+  `);
 
   // Migrate existing DBs to the bots.color and bots.glyph columns used
   // for the visual identifier that appears on the bot card and messages.

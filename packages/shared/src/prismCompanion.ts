@@ -1,5 +1,11 @@
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
 import type { PrismCompanionCardV1 } from "./prismOrchestration.js";
+import type {
+  DebateFormalityId,
+  DebateFormatId,
+  DebatePlayerRole,
+  DebateSideId,
+} from "./debate.js";
 
 export const PRISM_COMPANION_RECOVERY_LIMIT = 3;
 export const PRISM_COMPANION_MESSAGE_MAX_LENGTH = 4_000;
@@ -24,6 +30,27 @@ export const PRISM_COMPANION_SURFACE_IDS = [
 export type PrismCompanionSurfaceId =
   (typeof PRISM_COMPANION_SURFACE_IDS)[number];
 
+export interface PrismCompanionDebateDraft {
+  setupMode: "basic" | "advanced";
+  studioPanel: "motion" | "cast" | "evidence" | "archive";
+  format: DebateFormatId;
+  formality: DebateFormalityId;
+  playerRole: DebatePlayerRole;
+  playerSideId: DebateSideId;
+  juryEnabled: boolean;
+  moderatorTitle: string;
+  topic: string;
+  motion: string;
+  forLabel: string;
+  forBrief: string;
+  againstLabel: string;
+  againstBrief: string;
+  exhibitAdjective: string;
+  exhibitObject: string;
+  exhibitObservation: string;
+  evidenceItemCount: number;
+}
+
 export interface PrismCompanionSurfaceReference {
   surfaceId: PrismCompanionSurfaceId;
   botIds?: string[];
@@ -34,6 +61,7 @@ export interface PrismCompanionSurfaceReference {
   slateSectionId?: string;
   storySessionId?: string;
   debateSessionId?: string;
+  debateDraft?: PrismCompanionDebateDraft;
   imageId?: string;
   libraryGroupId?: string;
 }
@@ -109,6 +137,61 @@ function boundedId(value: unknown): string | undefined {
   return normalized;
 }
 
+function boundedDraftText(value: unknown, maxLength: number): string {
+  return typeof value === "string"
+    ? value.replace(/\s+/gu, " ").trim().slice(0, maxLength)
+    : "";
+}
+
+export function normalizePrismCompanionDebateDraft(
+  value: unknown,
+): PrismCompanionDebateDraft | undefined {
+  if (!isRecord(value)) return undefined;
+  const setupMode = value.setupMode === "advanced" ? "advanced" : "basic";
+  const studioPanel =
+    value.studioPanel === "cast" ||
+    value.studioPanel === "evidence" ||
+    value.studioPanel === "archive"
+      ? value.studioPanel
+      : "motion";
+  const format = value.format === "turnabout" ? "turnabout" : "forum";
+  const formality =
+    value.formality === "free_for_all" ||
+    value.formality === "heated" ||
+    value.formality === "structured" ||
+    value.formality === "parliamentary"
+      ? value.formality
+      : "plainspoken";
+  const playerRole =
+    value.playerRole === "participant" || value.playerRole === "spectator"
+      ? value.playerRole
+      : "judge";
+  return {
+    setupMode,
+    studioPanel,
+    format,
+    formality,
+    playerRole,
+    playerSideId: value.playerSideId === "against" ? "against" : "for",
+    juryEnabled: value.juryEnabled === true,
+    moderatorTitle: boundedDraftText(value.moderatorTitle, 72),
+    topic: boundedDraftText(value.topic, 1_000),
+    motion: boundedDraftText(value.motion, 320),
+    forLabel: boundedDraftText(value.forLabel, 32),
+    forBrief: boundedDraftText(value.forBrief, 1_200),
+    againstLabel: boundedDraftText(value.againstLabel, 32),
+    againstBrief: boundedDraftText(value.againstBrief, 1_200),
+    exhibitAdjective: boundedDraftText(value.exhibitAdjective, 48),
+    exhibitObject: boundedDraftText(value.exhibitObject, 96),
+    exhibitObservation: boundedDraftText(value.exhibitObservation, 800),
+    evidenceItemCount:
+      typeof value.evidenceItemCount === "number" &&
+      Number.isFinite(value.evidenceItemCount)
+        ? Math.max(0, Math.min(12, Math.trunc(value.evidenceItemCount)))
+        : 0,
+  };
+}
+
 export function isPrismCompanionSurfaceId(
   value: unknown,
 ): value is PrismCompanionSurfaceId {
@@ -124,6 +207,10 @@ export function normalizePrismCompanionSurfaceReference(
   const botIds = Array.isArray(value.botIds)
     ? Array.from(new Set(value.botIds.map(boundedId).filter(Boolean))).slice(0, 5)
     : [];
+  const debateDraft =
+    value.surfaceId === "debate"
+      ? normalizePrismCompanionDebateDraft(value.debateDraft)
+      : undefined;
   return {
     surfaceId: value.surfaceId,
     ...(botIds.length > 0 ? { botIds: botIds as string[] } : {}),
@@ -148,6 +235,7 @@ export function normalizePrismCompanionSurfaceReference(
     ...(boundedId(value.debateSessionId)
       ? { debateSessionId: boundedId(value.debateSessionId) }
       : {}),
+    ...(debateDraft ? { debateDraft } : {}),
     ...(boundedId(value.imageId)
       ? { imageId: boundedId(value.imageId) }
       : {}),

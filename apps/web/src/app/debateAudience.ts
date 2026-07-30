@@ -8,9 +8,9 @@ export const DEBATE_AUDIENCE_GENERATED_ID_PREFIX =
   "prism:debate-audience:generated:";
 
 const DEBATE_AUDIENCE_COUNT_BY_QUALITY = {
-  low: 5,
-  medium: 7,
-  high: 8,
+  low: 9,
+  medium: 13,
+  high: 15,
 } as const satisfies Record<GraphicsQuality, number>;
 
 const DEBATE_AUDIENCE_GENERATED_COLORS = [
@@ -83,6 +83,34 @@ export function debateAudienceBotCount(
 }
 
 export type DebateAudienceConversationFacing = "left" | "right";
+export type DebateAudienceDepthRow = "front" | "rear";
+
+export interface DebateAudienceSeatLayout {
+  depthRow: DebateAudienceDepthRow;
+  rowIndex: number;
+  rowCount: number;
+}
+
+export function debateAudienceSeatLayout(
+  index: number,
+  count: number,
+): DebateAudienceSeatLayout {
+  const safeCount = Math.max(0, Math.floor(count));
+  const safeIndex = Math.max(0, Math.min(safeCount - 1, Math.floor(index)));
+  const frontCount = Math.ceil(safeCount / 2);
+  if (safeIndex < frontCount) {
+    return {
+      depthRow: "front",
+      rowIndex: safeIndex,
+      rowCount: frontCount,
+    };
+  }
+  return {
+    depthRow: "rear",
+    rowIndex: safeIndex - frontCount,
+    rowCount: Math.max(0, safeCount - frontCount),
+  };
+}
 
 export function debateAudienceConversationFacing(
   index: number,

@@ -49,15 +49,20 @@ export {
 
 export {
   PRISM_REFRACT_DIRECTION_MAX_LENGTH,
+  PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS,
   PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH,
   PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
   PRISM_REFRACT_SIGNAL_TEXT_TARGET_KINDS,
+  isPrismRefractDebateTextTarget,
   normalizePrismRefractDirection,
   normalizePrismRefractRequest,
+  type PrismRefractDebateTextTarget,
+  type PrismRefractDebateTextTargetKind,
   type PrismRefractRequest,
   type PrismRefractResponse,
   type PrismRefractSignalTextTarget,
   type PrismRefractSignalTextTargetKind,
+  type PrismRefractTextTarget,
 } from "./prismRefract.js";
 
 export {
@@ -70,10 +75,12 @@ export {
   isPrismCompanionSurfaceId,
   normalizePrismCompanionActionIntent,
   normalizePrismCompanionActionIntents,
+  normalizePrismCompanionDebateDraft,
   normalizePrismCompanionMessages,
   normalizePrismCompanionRequest,
   normalizePrismCompanionSurfaceReference,
   type PrismCompanionActionIntent,
+  type PrismCompanionDebateDraft,
   type PrismCompanionHandoffDirection,
   type PrismCompanionMessage,
   type PrismCompanionRequest,
@@ -1070,6 +1077,7 @@ export {
 export * from "./slateComposition.js";
 export * from "./slateCreativeStudios.js";
 export * from "./slateDocument.js";
+export * from "./slateImportedManuscript.js";
 export * from "./slateMirror.js";
 export * from "./slateReviewExport.js";
 export * from "./slateStoryBible.js";

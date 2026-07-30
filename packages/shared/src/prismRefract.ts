@@ -1,5 +1,9 @@
 import type { ResponseMode } from "./autoFallback.js";
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
+import {
+  normalizePrismCompanionDebateDraft,
+  type PrismCompanionDebateDraft,
+} from "./prismCompanion.ts";
 
 export const PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT = 8;
 export const PRISM_REFRACT_DIRECTION_MAX_LENGTH = 500;
@@ -36,8 +40,34 @@ export type PrismRefractSignalTextTarget =
       showId: string;
     };
 
+export const PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS = [
+  "debate.setup.topic",
+  "debate.setup.moderatorTitle",
+  "debate.setup.motion",
+  "debate.setup.forLabel",
+  "debate.setup.forBrief",
+  "debate.setup.againstLabel",
+  "debate.setup.againstBrief",
+  "debate.setup.exhibitAdjective",
+  "debate.setup.exhibitObject",
+  "debate.setup.exhibitObservation",
+] as const;
+
+export type PrismRefractDebateTextTargetKind =
+  (typeof PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS)[number];
+
+export interface PrismRefractDebateTextTarget {
+  kind: PrismRefractDebateTextTargetKind;
+  context: PrismCompanionDebateDraft;
+  botIds: string[];
+}
+
+export type PrismRefractTextTarget =
+  | PrismRefractSignalTextTarget
+  | PrismRefractDebateTextTarget;
+
 export interface PrismRefractRequest {
-  target: PrismRefractSignalTextTarget;
+  target: PrismRefractTextTarget;
   currentValue: string;
   rejectedValues: string[];
   preferredProvider?: EphemeralChatResolvedProvider;
@@ -77,22 +107,72 @@ function boundedId(value: unknown, label: string): string {
   return normalized;
 }
 
-function valueLimitForTarget(kind: PrismRefractSignalTextTargetKind): number {
+function valueLimitForTarget(kind: PrismRefractTextTarget["kind"]): number {
   if (kind === "signal.show.name") return 120;
   if (kind === "signal.booking.topic") return 60;
   if (kind === "signal.create.premise") return 360;
   if (kind === "signal.show.premise") return 600;
+  if (kind === "debate.setup.moderatorTitle") return 72;
+  if (kind === "debate.setup.motion") return 320;
+  if (
+    kind === "debate.setup.forLabel" ||
+    kind === "debate.setup.againstLabel"
+  ) {
+    return 32;
+  }
+  if (kind === "debate.setup.exhibitAdjective") return 48;
+  if (kind === "debate.setup.exhibitObject") return 96;
+  if (kind === "debate.setup.exhibitObservation") return 800;
   return 1_000;
 }
 
-function normalizeTarget(value: unknown): PrismRefractSignalTextTarget {
+export function isPrismRefractDebateTextTarget(
+  target: PrismRefractTextTarget,
+): target is PrismRefractDebateTextTarget {
+  return PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.some(
+    (kind) => kind === target.kind,
+  );
+}
+
+function normalizeTarget(value: unknown): PrismRefractTextTarget {
+  if (
+    isRecord(value) &&
+    PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.some(
+      (kind) => kind === value.kind,
+    )
+  ) {
+    const context = normalizePrismCompanionDebateDraft(value.context);
+    if (!context) {
+      throw new Error("Debate setup context is required.");
+    }
+    const botIds = Array.isArray(value.botIds)
+      ? Array.from(
+          new Set(
+            value.botIds
+              .map((candidate) => {
+                try {
+                  return boundedId(candidate, "Debate cast member");
+                } catch {
+                  return null;
+                }
+              })
+              .filter((candidate): candidate is string => Boolean(candidate)),
+          ),
+        ).slice(0, 5)
+      : [];
+    return {
+      kind: value.kind as PrismRefractDebateTextTargetKind,
+      context,
+      botIds,
+    };
+  }
   if (
     !isRecord(value) ||
     !PRISM_REFRACT_SIGNAL_TEXT_TARGET_KINDS.some(
       (kind) => kind === value.kind,
     )
   ) {
-    throw new Error("A registered Signal Refract target is required.");
+    throw new Error("A registered Prism Refract target is required.");
   }
   const kind = value.kind as PrismRefractSignalTextTargetKind;
   if (kind === "signal.create.premise") {

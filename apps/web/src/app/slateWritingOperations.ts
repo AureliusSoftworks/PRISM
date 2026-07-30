@@ -148,6 +148,39 @@ export interface SlateWritingOperationResponse {
   clarification: SlateClarificationRequest | null;
 }
 
+export interface SlateWritingProposalPreview {
+  text: string;
+  wordCount: number;
+  characterCount: number;
+  truncated: boolean;
+}
+
+export function slateWritingProposalPreview(
+  value: string,
+  maximumCharacters = 3_200,
+): SlateWritingProposalPreview {
+  const normalizedMaximum = Math.max(320, Math.floor(maximumCharacters));
+  const wordCount = value.trim()
+    ? value.trim().split(/\s+/u).length
+    : 0;
+  if (value.length <= normalizedMaximum) {
+    return {
+      text: value,
+      wordCount,
+      characterCount: value.length,
+      truncated: false,
+    };
+  }
+  const edgeLength = Math.floor((normalizedMaximum - 120) / 2);
+  const hiddenCharacters = value.length - edgeLength * 2;
+  return {
+    text: `${value.slice(0, edgeLength)}\n\n… ${hiddenCharacters.toLocaleString("en-US")} characters hidden from this review excerpt …\n\n${value.slice(-edgeLength)}`,
+    wordCount,
+    characterCount: value.length,
+    truncated: true,
+  };
+}
+
 export function slateWritingOperationCanStop(
   operation: SlateWritingOperation | null,
 ): boolean {

@@ -7,6 +7,7 @@ import {
   debateAudienceBotsForSession,
   debateAudienceConversationFacing,
   debateAudienceRandom,
+  debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
 } from "./debateAudience.ts";
 
@@ -36,9 +37,34 @@ const libraryBots = [
 
 describe("Debate audience casting", () => {
   it("uses more reduced-detail spectators when graphics headroom allows", () => {
-    assert.equal(debateAudienceBotCount("low"), 5);
-    assert.equal(debateAudienceBotCount("medium"), 7);
-    assert.equal(debateAudienceBotCount("high"), 8);
+    assert.equal(debateAudienceBotCount("low"), 9);
+    assert.equal(debateAudienceBotCount("medium"), 13);
+    assert.equal(debateAudienceBotCount("high"), 15);
+  });
+
+  it("interleaves a slightly smaller rear row behind the foreground audience", () => {
+    assert.deepEqual(
+      Array.from({ length: 15 }, (_, index) =>
+        debateAudienceSeatLayout(index, 15),
+      ),
+      [
+        { depthRow: "front", rowIndex: 0, rowCount: 8 },
+        { depthRow: "front", rowIndex: 1, rowCount: 8 },
+        { depthRow: "front", rowIndex: 2, rowCount: 8 },
+        { depthRow: "front", rowIndex: 3, rowCount: 8 },
+        { depthRow: "front", rowIndex: 4, rowCount: 8 },
+        { depthRow: "front", rowIndex: 5, rowCount: 8 },
+        { depthRow: "front", rowIndex: 6, rowCount: 8 },
+        { depthRow: "front", rowIndex: 7, rowCount: 8 },
+        { depthRow: "rear", rowIndex: 0, rowCount: 7 },
+        { depthRow: "rear", rowIndex: 1, rowCount: 7 },
+        { depthRow: "rear", rowIndex: 2, rowCount: 7 },
+        { depthRow: "rear", rowIndex: 3, rowCount: 7 },
+        { depthRow: "rear", rowIndex: 4, rowCount: 7 },
+        { depthRow: "rear", rowIndex: 5, rowCount: 7 },
+        { depthRow: "rear", rowIndex: 6, rowCount: 7 },
+      ],
+    );
   });
 
   it("pairs neighboring spectators face-to-face with one restrained talker", () => {

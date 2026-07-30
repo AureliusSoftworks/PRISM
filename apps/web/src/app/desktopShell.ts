@@ -34,3 +34,14 @@ export async function toggleDesktopFullscreen(): Promise<boolean | null> {
   if (!invoke) return null;
   return invoke<boolean>("toggle_fullscreen");
 }
+
+export async function openDesktopEmojiPicker(): Promise<boolean> {
+  if (typeof window === "undefined") return false;
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!invoke) return false;
+  try {
+    return await invoke<boolean>("open_emoji_picker");
+  } catch {
+    return false;
+  }
+}
