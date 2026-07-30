@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   normalizePrismRefractRequest,
   normalizePrismRefractDirection,
+  PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
   PRISM_REFRACT_DIRECTION_MAX_LENGTH,
   PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
 } from "./prismRefract.ts";
@@ -67,6 +68,45 @@ test("normalizes a contextual Debate setup target without trusting extra fields"
     assert.equal(request.target.context.evidenceItemCount, 2);
     assert.equal("secret" in request.target.context, false);
   }
+});
+
+test("normalizes a contextual complete Debate exhibit pair", () => {
+  const request = normalizePrismRefractRequest({
+    target: {
+      kind: "debate.setup.exhibitPair",
+      botIds: [],
+      context: {
+        setupMode: "basic",
+        studioPanel: "evidence",
+        format: "forum",
+        formality: "plainspoken",
+        playerRole: "judge",
+        playerSideId: "for",
+        juryEnabled: false,
+        moderatorTitle: "Moderator",
+        topic: "Urban wildlife",
+        motion: "Cities should protect urban wildlife corridors.",
+        forLabel: "Protect",
+        forBrief: "",
+        againstLabel: "Develop",
+        againstBrief: "",
+        exhibitAdjective: "",
+        exhibitObject: "",
+        exhibitObservation: "",
+        evidenceItemCount: 1,
+      },
+    },
+    currentValue: "",
+    rejectedValues: Array.from(
+      { length: PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT },
+      (_, index) => `Existing object ${index + 1}`,
+    ),
+  });
+  assert.equal(request.target.kind, "debate.setup.exhibitPair");
+  assert.equal(
+    request.rejectedValues.length,
+    PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
+  );
 });
 
 test("rejects arbitrary and incomplete targets", () => {

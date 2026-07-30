@@ -317,7 +317,19 @@ describe("Debate experience", () => {
     );
     assert.match(source, /await research\(query, true\)/u);
     assert.match(source, /Search the public web/u);
-    assert.match(source, /randomDebateEvidenceObject\(\)/u);
+    assert.match(
+      source,
+      /"debate\.setup\.exhibitPair"[\s\S]*rejectedTitles[\s\S]*debateEvidenceObjectFromPrismCandidate/u,
+    );
+    assert.match(
+      source,
+      /randomDebateEvidenceObject\(Math\.random, rejectedTitles\)/u,
+    );
+    assert.match(source, /Prism is refracting…/u);
+    assert.match(
+      css,
+      /addEvidenceButton\[data-generating="true"\][\s\S]*debateRefractRainbowFlow 1\.7s linear infinite/u,
+    );
     assert.match(source, /\/api\/debates\/exhibits\/upload/u);
     assert.match(source, /\/api\/debates\/exhibits\/synthesize/u);
     assert.match(

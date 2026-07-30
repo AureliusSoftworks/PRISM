@@ -236,13 +236,60 @@ export function nextDebateEvidenceExhibitId(
 
 export function randomDebateEvidenceObject(
   random: () => number = Math.random,
+  rejectedTitles: readonly string[] = [],
 ): DebateEvidenceObjectDraft {
-  const adjective =
-    DEBATE_EXHIBIT_ADJECTIVES[
-      randomIndex(DEBATE_EXHIBIT_ADJECTIVES.length, random)
-    ]!;
-  const object =
-    DEBATE_EXHIBIT_OBJECTS[randomIndex(DEBATE_EXHIBIT_OBJECTS.length, random)]!;
+  const rejected = new Set(
+    rejectedTitles.map((title) => title.trim().toLocaleLowerCase()),
+  );
+  const adjectiveStart = randomIndex(DEBATE_EXHIBIT_ADJECTIVES.length, random);
+  const objectStart = randomIndex(DEBATE_EXHIBIT_OBJECTS.length, random);
+  let adjective: string = DEBATE_EXHIBIT_ADJECTIVES[adjectiveStart]!;
+  let object: string = DEBATE_EXHIBIT_OBJECTS[objectStart]!;
+  const combinationCount =
+    DEBATE_EXHIBIT_ADJECTIVES.length * DEBATE_EXHIBIT_OBJECTS.length;
+  for (let attempt = 0; attempt < combinationCount; attempt += 1) {
+    const objectOffset = objectStart + attempt;
+    adjective =
+      DEBATE_EXHIBIT_ADJECTIVES[
+        (adjectiveStart +
+          Math.floor(objectOffset / DEBATE_EXHIBIT_OBJECTS.length)) %
+          DEBATE_EXHIBIT_ADJECTIVES.length
+      ]!;
+    object =
+      DEBATE_EXHIBIT_OBJECTS[
+        objectOffset % DEBATE_EXHIBIT_OBJECTS.length
+      ]!;
+    const candidate = debateEvidenceExhibitTitle({ adjective, object });
+    if (!rejected.has(candidate.toLocaleLowerCase())) break;
+  }
+  const title = debateEvidenceExhibitTitle({ adjective, object });
+  return {
+    adjective,
+    object,
+    observation: `${title}.`,
+    emoji: debateEvidenceEmojiForObject(object, adjective),
+    emojiCustomized: false,
+    createdBy: "prism",
+    visualKind: "emoji",
+    imageId: null,
+  };
+}
+
+export function debateEvidenceObjectFromPrismCandidate(
+  candidate: string,
+): DebateEvidenceObjectDraft | null {
+  const normalized = candidate.replace(/\s+/gu, " ").trim();
+  if (
+    !/^[\p{L}\p{N}][\p{L}\p{N}'’-]*\s+[\p{L}\p{N}][\p{L}\p{N}'’\-\s]*$/u.test(
+      normalized,
+    )
+  ) {
+    return null;
+  }
+  const [adjectiveRaw = "", ...objectParts] = normalized.split(" ");
+  const adjective = adjectiveRaw.trim().slice(0, 48);
+  const object = objectParts.join(" ").trim().slice(0, 96).trim();
+  if (!adjective || !object) return null;
   const title = debateEvidenceExhibitTitle({ adjective, object });
   return {
     adjective,

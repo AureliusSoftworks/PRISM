@@ -8009,6 +8009,50 @@
     var(--debate-studio-raised);
 }
 
+.evidenceObjectActions > .addEvidenceButton[data-generating="true"] {
+  --debate-refract-rainbow-period: 52rem;
+  border-color: transparent;
+  background:
+    linear-gradient(
+        115deg,
+        color-mix(in srgb, var(--prism-p) 18%, var(--debate-studio-raised)) 0%,
+        color-mix(in srgb, var(--prism-r) 15%, var(--debate-studio-raised)) 15%,
+        color-mix(in srgb, #f4f86a 11%, var(--debate-studio-raised)) 30%,
+        color-mix(in srgb, #36f0b2 14%, var(--debate-studio-raised)) 45%,
+        color-mix(in srgb, var(--prism-i) 17%, var(--debate-studio-raised)) 60%,
+        color-mix(in srgb, var(--prism-s) 17%, var(--debate-studio-raised)) 78%,
+        color-mix(in srgb, var(--prism-m) 18%, var(--debate-studio-raised)) 100%
+      )
+      padding-box,
+    linear-gradient(
+        90deg,
+        var(--prism-p),
+        var(--prism-r),
+        #f4f86a,
+        #36f0b2,
+        var(--prism-i),
+        var(--prism-s),
+        var(--prism-m),
+        var(--prism-p)
+      )
+      border-box;
+  background-repeat: repeat-x;
+  background-size:
+    var(--debate-refract-rainbow-period) 100%,
+    var(--debate-refract-rainbow-period) 100%;
+  box-shadow:
+    0 0 25px -14px color-mix(in srgb, var(--prism-i) 72%, transparent),
+    0 0 34px -20px color-mix(in srgb, var(--prism-m) 70%, transparent);
+  opacity: 0.88;
+  animation: debateRefractRainbowFlow 1.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evidenceObjectActions > .addEvidenceButton[data-generating="true"] {
+    animation: none;
+  }
+}
+
 .evidenceObjectActions > .findEvidenceButton {
   background: color-mix(in srgb, var(--debate-studio-surface) 86%, transparent);
 }

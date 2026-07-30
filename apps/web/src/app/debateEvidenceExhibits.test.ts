@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
+  debateEvidenceObjectFromPrismCandidate,
   debateEvidenceEmojiForObject,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
@@ -28,11 +29,43 @@ describe("Debate evidence object generator", () => {
     );
   });
 
+  it("walks past exhibit titles that are already in the evidence packet", () => {
+    const first = randomDebateEvidenceObject(() => 0);
+    const next = randomDebateEvidenceObject(() => 0, [
+      `${first.adjective} ${first.object}`,
+    ]);
+    assert.notEqual(
+      `${next.adjective} ${next.object}`,
+      `${first.adjective} ${first.object}`,
+    );
+  });
+
   it("gives recognizable examples their natural emoji fallback", () => {
     assert.equal(debateEvidenceEmojiForObject("spoon", "Rusty"), "🥄");
     assert.equal(debateEvidenceEmojiForObject("potato", "Old"), "🥔");
     assert.equal(debateEvidenceEmojiForObject("freight train", "Chubby"), "🚂");
     assert.equal(debateEvidenceEmojiForObject("orangutan", "Red"), "🦧");
+  });
+
+  it("turns one contextual Prism pair into an editable evidence draft", () => {
+    assert.deepEqual(
+      debateEvidenceObjectFromPrismCandidate("Weathered transit map"),
+      {
+        adjective: "Weathered",
+        object: "transit map",
+        observation: "Weathered transit map.",
+        emoji: "🧾",
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "emoji",
+        imageId: null,
+      },
+    );
+    assert.equal(debateEvidenceObjectFromPrismCandidate("Spoon"), null);
+    assert.equal(
+      debateEvidenceObjectFromPrismCandidate("Weathered transit map."),
+      null,
+    );
   });
 
   it("keeps one complete user-selected emoji grapheme", () => {

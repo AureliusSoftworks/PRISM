@@ -112,6 +112,7 @@ import {
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
   debateEvidenceEmojiForObject,
+  debateEvidenceObjectFromPrismCandidate,
   nextDebateEvidenceExhibitId,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
@@ -1832,6 +1833,8 @@ export function DebateExperience(
   const [evidenceGenerating, setEvidenceGenerating] = useState(false);
   const [evidenceObjectDraft, setEvidenceObjectDraft] =
     useState<DebateEvidenceObjectDraft | null>(null);
+  const [evidenceObjectSuggestionBusy, setEvidenceObjectSuggestionBusy] =
+    useState(false);
   const [evidenceObjectVisualBusy, setEvidenceObjectVisualBusy] = useState<
     "upload" | "synthesize" | null
   >(null);
@@ -3718,10 +3721,39 @@ export function DebateExperience(
     };
   }, [evidenceObjectEditorOpen, loadEvidenceExhibitAssets]);
 
-  const beginEvidenceObject = (): void => {
-    if (evidenceItemLimitReached || evidenceObjectVisualBusy) return;
+  const beginEvidenceObject = async (): Promise<void> => {
+    if (
+      evidenceItemLimitReached ||
+      evidenceObjectSuggestionBusy ||
+      evidenceObjectVisualBusy
+    ) {
+      return;
+    }
+    const rejectedTitles = (evidence.exhibits ?? []).map(
+      (exhibit) => exhibit.title,
+    );
+    setEvidenceObjectSuggestionBusy(true);
     setError(null);
-    setEvidenceObjectDraft(randomDebateEvidenceObject());
+    try {
+      const candidate = await generateDebateRefractField(
+        "debate.setup.exhibitPair",
+        "",
+        rejectedTitles,
+        new AbortController().signal,
+      );
+      const contextualDraft =
+        debateEvidenceObjectFromPrismCandidate(candidate);
+      if (!contextualDraft) {
+        throw new Error("Prism returned an incomplete exhibit.");
+      }
+      setEvidenceObjectDraft(contextualDraft);
+    } catch {
+      setEvidenceObjectDraft(
+        randomDebateEvidenceObject(Math.random, rejectedTitles),
+      );
+    } finally {
+      setEvidenceObjectSuggestionBusy(false);
+    }
   };
 
   const selectEvidenceExhibitAsset = (asset: DebateExhibitAsset): void => {
@@ -7673,15 +7705,31 @@ export function DebateExperience(
               <button
                 type="button"
                 className={styles.addEvidenceButton}
-                onClick={beginEvidenceObject}
+                data-generating={
+                  evidenceObjectSuggestionBusy ? "true" : undefined
+                }
+                aria-busy={evidenceObjectSuggestionBusy}
+                onClick={() => void beginEvidenceObject()}
                 disabled={
-                  evidenceItemLimitReached || evidenceObjectVisualBusy !== null
+                  evidenceItemLimitReached ||
+                  evidenceObjectSuggestionBusy ||
+                  evidenceObjectVisualBusy !== null
                 }
               >
-                <span aria-hidden="true">＋</span>
+                <span aria-hidden="true">
+                  {evidenceObjectSuggestionBusy ? "◇" : "＋"}
+                </span>
                 <span>
-                  <strong>Add evidence</strong>
-                  <small>Create an editable object exhibit</small>
+                  <strong>
+                    {evidenceObjectSuggestionBusy
+                      ? "Prism is refracting…"
+                      : "Add evidence"}
+                  </strong>
+                  <small>
+                    {evidenceObjectSuggestionBusy
+                      ? "Finding a contextual object"
+                      : "Create an editable object exhibit"}
+                  </small>
                 </span>
               </button>
               <button
@@ -7725,15 +7773,31 @@ export function DebateExperience(
               <button
                 type="button"
                 className={styles.addEvidenceButton}
-                onClick={beginEvidenceObject}
+                data-generating={
+                  evidenceObjectSuggestionBusy ? "true" : undefined
+                }
+                aria-busy={evidenceObjectSuggestionBusy}
+                onClick={() => void beginEvidenceObject()}
                 disabled={
-                  evidenceItemLimitReached || evidenceObjectVisualBusy !== null
+                  evidenceItemLimitReached ||
+                  evidenceObjectSuggestionBusy ||
+                  evidenceObjectVisualBusy !== null
                 }
               >
-                <span aria-hidden="true">＋</span>
+                <span aria-hidden="true">
+                  {evidenceObjectSuggestionBusy ? "◇" : "＋"}
+                </span>
                 <span>
-                  <strong>Add evidence</strong>
-                  <small>Create an editable object exhibit</small>
+                  <strong>
+                    {evidenceObjectSuggestionBusy
+                      ? "Prism is refracting…"
+                      : "Add evidence"}
+                  </strong>
+                  <small>
+                    {evidenceObjectSuggestionBusy
+                      ? "Finding a contextual object"
+                      : "Create an editable object exhibit"}
+                  </small>
                 </span>
               </button>
             </div>

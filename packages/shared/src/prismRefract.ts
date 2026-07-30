@@ -6,6 +6,7 @@ import {
 } from "./prismCompanion.ts";
 
 export const PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT = 8;
+export const PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT = 12;
 export const PRISM_REFRACT_DIRECTION_MAX_LENGTH = 500;
 export const PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH = 160;
 
@@ -48,6 +49,7 @@ export const PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS = [
   "debate.setup.forBrief",
   "debate.setup.againstLabel",
   "debate.setup.againstBrief",
+  "debate.setup.exhibitPair",
   "debate.setup.exhibitAdjective",
   "debate.setup.exhibitObject",
   "debate.setup.exhibitObservation",
@@ -120,6 +122,7 @@ function valueLimitForTarget(kind: PrismRefractTextTarget["kind"]): number {
   ) {
     return 32;
   }
+  if (kind === "debate.setup.exhibitPair") return 145;
   if (kind === "debate.setup.exhibitAdjective") return 48;
   if (kind === "debate.setup.exhibitObject") return 96;
   if (kind === "debate.setup.exhibitObservation") return 800;
@@ -200,6 +203,10 @@ export function normalizePrismRefractRequest(
   }
   const target = normalizeTarget(value.target);
   const limit = valueLimitForTarget(target.kind);
+  const rejectedCandidateLimit =
+    target.kind === "debate.setup.exhibitPair"
+      ? PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT
+      : PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT;
   const currentValue =
     typeof value.currentValue === "string"
       ? value.currentValue.trim().slice(0, limit)
@@ -213,7 +220,7 @@ export function normalizePrismRefractRequest(
             )
             .map((candidate) => candidate.trim().slice(0, limit)),
         ),
-      ).slice(-PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT)
+      ).slice(-rejectedCandidateLimit)
     : [];
   const preferredProvider =
     value.preferredProvider === "local" ||

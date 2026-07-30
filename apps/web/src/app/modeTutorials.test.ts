@@ -87,7 +87,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /private LLM check/u);
     assert.match(copy, /Evidence is optional/u);
     assert.match(copy, /Find sources for me/u);
-    assert.match(copy, /Add evidence opens an editable object suggestion/u);
+    assert.match(
+      copy,
+      /Add evidence asks Prism for one surprising contextual.*ADJECTIVE.*OBJECT.*built-in object deck is only a reliable fallback/u,
+    );
     assert.doesNotMatch(copy, /Generate object/u);
     assert.match(copy, /open your system picker/u);
     assert.match(copy, /type and paste any emoji you want/u);

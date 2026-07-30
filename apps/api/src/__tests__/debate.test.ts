@@ -1278,7 +1278,7 @@ describe("Debate engine", () => {
         db,
         "user-1",
         {
-          kind: "debate.setup.exhibitObject",
+          kind: "debate.setup.exhibitPair",
           botIds: ["for", "missing"],
           context: {
             setupMode: "advanced",
@@ -1308,6 +1308,9 @@ describe("Debate engine", () => {
       assert.equal(result.value, "weathered ledger");
       assert.equal(result.generated, true);
       assert.match(prompt, /Museum ethics/u);
+      assert.match(prompt, /surprising, concrete physical exhibit/u);
+      assert.match(prompt, /single-word adjective followed by one tangible object/u);
+      assert.match(prompt, /Rejected candidates: old potato/u);
       assert.match(prompt, /Avery favors concrete institutional accountability/u);
       assert.match(prompt, /editable candidate only/u);
       const stored = db

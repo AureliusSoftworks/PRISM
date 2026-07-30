@@ -877,6 +877,7 @@ function debateRefractValueLimit(
   ) {
     return 32;
   }
+  if (kind === "debate.setup.exhibitPair") return 145;
   if (kind === "debate.setup.exhibitAdjective") return 48;
   if (kind === "debate.setup.exhibitObject") return 96;
   if (kind === "debate.setup.exhibitObservation") return 800;
@@ -901,6 +902,8 @@ function debateRefractInstruction(
       return "Write one clean 1-3 word public label for the Against side. Return only the label, no punctuation or explanation.";
     case "debate.setup.againstBrief":
       return "Write a fair 2-4 sentence private mandate for the Against advocate. Clarify the strongest burden and route without inventing evidence.";
+    case "debate.setup.exhibitPair":
+      return "Invent one surprising, concrete physical exhibit with an evocative relationship to the current territory and motion, without favoring either side or pretending the object proves anything. Return exactly one single-word adjective followed by one tangible object noun or short noun phrase in the format “{ADJECTIVE} {OBJECT}”. Prefer an indirect, memorable association over merely naming the debate subject.";
     case "debate.setup.exhibitAdjective":
       return "Write one vivid adjective that can naturally precede the current object. Return only the adjective.";
     case "debate.setup.exhibitObject":
@@ -976,7 +979,11 @@ export async function generateDebateRefractDraft(
       temperature: 0.88,
       validate: (value) =>
         typeof value.value === "string" &&
-        Boolean(compactText(value.value, limit)),
+        Boolean(compactText(value.value, limit)) &&
+        (target.kind !== "debate.setup.exhibitPair" ||
+          /^[\p{L}\p{N}][\p{L}\p{N}'’-]*\s+[\p{L}\p{N}][\p{L}\p{N}'’\-\s]*$/u.test(
+            compactText(value.value, limit),
+          )),
     },
   );
   const value = compactText(generation.value.value, limit);
