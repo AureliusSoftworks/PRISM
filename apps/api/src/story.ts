@@ -20,12 +20,17 @@ import {
   botPowerEternallyIntroducesV1,
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
+  botPowerIntermittentAudibilityEffectV1,
+  botPowerListenerHearsTurnV1,
+  botPowerAnnoyanceEffectV1,
+  botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
   botPowerBotNamingCueV1,
   botPowerPairwisePerceptionV1,
+  botPowerPairwiseSizeCueV1,
   botPowerAvatarVisibilityModeV1,
   botPowerSelfCueLinesV1,
   botPowerThemeMoodCueV1,
@@ -1225,7 +1230,7 @@ function applyStoryHardResponsePowers(
   const mumblingBotIds = new Set(
     bots.filter((bot) => botPowerMumblesSpeechV1(bot.powers)).map((bot) => bot.id),
   );
-  const quietPowersByBotId = new Map(
+  const powersByBotId = new Map(
     bots.map((bot) => [bot.id, bot.powers] as const),
   );
   const responseBudgetByBotId = new Map(
@@ -1267,7 +1272,11 @@ function applyStoryHardResponsePowers(
     eternalIntroductionBotIds.size === 0 &&
     echoBotIds.size === 0 &&
     mumblingBotIds.size === 0 &&
-    !bots.some((bot) => botPowerIntermittentMuteEffectV1(bot.powers)) &&
+    !bots.some((bot) =>
+      botPowerIntermittentMuteEffectV1(bot.powers) ||
+      botPowerIntermittentAudibilityEffectV1(bot.powers) ||
+      botPowerAnnoyanceEffectV1(bot.powers)
+    ) &&
     responseBudgetByBotId.size === 0 &&
     !hasInterruptionPower &&
     !hasPerceptionBoundary &&
@@ -1281,10 +1290,10 @@ function applyStoryHardResponsePowers(
   let priorBotSpeech: { botId: string; narration: string } | null = null;
   for (const [sceneIndex, scene] of episode.scenes.entries()) {
     let nextScene = scene;
-    const quietIgnored = Boolean(
+    const intermittentMuteIgnored = Boolean(
       scene.speakerBotId &&
       botPowerIntermittentMuteTurnIsIgnoredV1(
-        quietPowersByBotId.get(scene.speakerBotId),
+        powersByBotId.get(scene.speakerBotId),
         `${episode.id}:${scene.id}:${sceneIndex}`,
       ),
     );
@@ -1300,7 +1309,7 @@ function applyStoryHardResponsePowers(
       priorSpeaker &&
       currentSpeaker.id !== priorSpeaker.id &&
       !mutedBotIds.has(currentSpeaker.id) &&
-      !quietIgnored
+      !intermittentMuteIgnored
         ? strongestBotPowerInterruptionEffectV1(
             currentSpeaker.powers,
             (candidate) => storyPowerTargetMatches(candidate, priorSpeaker),
@@ -1344,14 +1353,14 @@ function applyStoryHardResponsePowers(
         lastInterruptionSceneByBotId.set(currentSpeaker.id, sceneIndex);
       }
     }
-    if (scene.speakerBotId && (mutedBotIds.has(scene.speakerBotId) || quietIgnored)) {
+    if (
+      scene.speakerBotId &&
+      (mutedBotIds.has(scene.speakerBotId) || intermittentMuteIgnored)
+    ) {
       const mutedNarration = applyBotPowerMuteResponseV1(scene.narration);
       nextScene = {
         ...scene,
-        narration:
-          quietIgnored && mutedNarration === "..."
-            ? `*${scene.speakerName || "The bot"}'s expression falls a little after going unheard.* ...`
-            : mutedNarration,
+        narration: mutedNarration,
         spritePose: scene.spritePose === "action" ? "action" : "idle",
       };
     } else if (
@@ -1400,7 +1409,7 @@ function applyStoryHardResponsePowers(
     if (
       currentSpeaker &&
       !mutedBotIds.has(currentSpeaker.id) &&
-      !quietIgnored &&
+      !intermittentMuteIgnored &&
       !echoBotIds.has(currentSpeaker.id)
     ) {
       nextScene = {
@@ -1418,20 +1427,51 @@ function applyStoryHardResponsePowers(
       !eternalIntroductionBotIds.has(scene.speakerBotId) &&
       !echoBotIds.has(scene.speakerBotId) &&
       !mutedBotIds.has(scene.speakerBotId) &&
-      !quietIgnored
+      !intermittentMuteIgnored
     ) {
       nextScene = {
         ...nextScene,
         narration: applyBotPowerMumbledResponseV1(nextScene.narration),
       };
     }
+    if (scene.speakerBotId && !mutedBotIds.has(scene.speakerBotId)) {
+      const speakerPowers = powersByBotId.get(scene.speakerBotId);
+      const audienceBotIds = bots
+        .filter((listener) => listener.id !== scene.speakerBotId)
+        .filter((listener) => botPowerPairwisePerceptionV1(
+          speakerPowers,
+          (target) => storyPowerTargetMatches(target, listener),
+          { holderSpeaking: true },
+        ).audible)
+        .filter((listener) => botPowerListenerHearsTurnV1({
+          powers: speakerPowers,
+          stableTurnKey: `${episode.id}:${scene.id}:${sceneIndex}`,
+          listenerBotId: listener.id,
+        }))
+        .map((listener) => listener.id)
+        .sort();
+      const annoyanceTargetBotId = botPowerAnnoyanceTargetV1({
+        powers: speakerPowers,
+        stableTurnKey: `${episode.id}:${scene.id}:${sceneIndex}`,
+        eligibleBotIds: audienceBotIds,
+      });
+      nextScene = {
+        ...nextScene,
+        audienceBotIds,
+        ...(annoyanceTargetBotId ? { annoyanceTargetBotId } : {}),
+      };
+    }
     const priorPerception =
       currentSpeaker && priorSpeaker && currentSpeaker.id !== priorSpeaker.id
-        ? botPowerPairwisePerceptionV1(
-            priorSpeaker.powers,
-            (target) => storyPowerTargetMatches(target, currentSpeaker),
-            { holderSpeaking: true },
-          )
+        ? {
+            audible:
+              priorScene?.audienceBotIds?.includes(currentSpeaker.id) ??
+              botPowerPairwisePerceptionV1(
+                priorSpeaker.powers,
+                (target) => storyPowerTargetMatches(target, currentSpeaker),
+                { holderSpeaking: true },
+              ).audible,
+          }
         : null;
     if (
       currentSpeaker &&
@@ -1443,7 +1483,17 @@ function applyStoryHardResponsePowers(
     ) {
       nextScene = {
         ...nextScene,
-        narration: `*Unable to hear ${priorSpeaker.name}, ${currentSpeaker.name} begins before ${priorSpeaker.name} has finished; both voices continue over one another, neither line cut short.* ${nextScene.narration}`,
+        narration: `*${currentSpeaker.name} catches only that ${priorSpeaker.name}'s voice was too faint to make out and continues without relying on the missing words.* ${nextScene.narration}`,
+      };
+    }
+    if (
+      currentSpeaker &&
+      priorScene?.annoyanceTargetBotId === currentSpeaker.id &&
+      !botPowerResponseIsSilentV1(nextScene.narration)
+    ) {
+      nextScene = {
+        ...nextScene,
+        narration: `*${currentSpeaker.name} is mildly irritated by the sheer volume, without turning it into anger.* ${nextScene.narration}`,
       };
     }
     scenes.push(nextScene);
@@ -1457,6 +1507,84 @@ function applyStoryHardResponsePowers(
   return {
     ...episode,
     scenes,
+  };
+}
+
+export async function repairStoryQuietContextDependencies(args: {
+  episode: StoryEpisodeManifest;
+  bots: readonly StoryBotProfile[];
+  provider: LlmProvider;
+  model: string;
+  reasoningEffort?: ReasoningEffort;
+}): Promise<StoryEpisodeManifest> {
+  const botsById = new Map(args.bots.map((bot) => [bot.id, bot] as const));
+  const affected = args.episode.scenes.flatMap((scene, index) => {
+    const prior = args.episode.scenes[index - 1];
+    if (
+      !prior?.speakerBotId ||
+      !scene.speakerBotId ||
+      prior.speakerBotId === scene.speakerBotId ||
+      !botPowerIntermittentAudibilityEffectV1(
+        botsById.get(prior.speakerBotId)?.powers,
+      ) ||
+      prior.audienceBotIds?.includes(scene.speakerBotId) !== false
+    ) {
+      return [];
+    }
+    return [{
+      sceneId: scene.id,
+      speakerName: scene.speakerName || botsById.get(scene.speakerBotId)?.name || "The character",
+      sceneTitle: scene.title,
+      location: args.episode.locations.find((location) => location.id === scene.locationId)?.name ?? scene.locationId,
+    }];
+  });
+  if (affected.length === 0) return args.episode;
+  const response = await args.provider.generateResponse(
+    [
+      {
+        role: "system",
+        content: [
+          "Repair only the supplied Story response scenes as strict JSON.",
+          "The responding character did not hear the immediately preceding line. That unheard speech has been deliberately removed from this context.",
+          "Rewrite each response so it relies only on the visible situation and a neutral awareness that the voice was too faint to make out. Do not reconstruct, quote, answer, summarize, or infer any missing words or topic.",
+          "Write one or two concise sentences preserving character voice, concrete action, and location continuity. Return {\"repairs\":[{\"sceneId\":string,\"narration\":string}]}. No markdown.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: JSON.stringify({ repairsNeeded: affected }),
+      },
+    ],
+    {
+      model: args.model,
+      maxTokens: Math.min(900, Math.max(220, affected.length * 180)),
+      temperature: 0.2,
+      ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
+    },
+  );
+  const parsed = extractJsonObjects(response).find((candidate) =>
+    candidate && typeof candidate === "object" && !Array.isArray(candidate)
+  ) as Record<string, unknown> | undefined;
+  const repairs = Array.isArray(parsed?.repairs) ? parsed.repairs : [];
+  const narrationBySceneId = new Map<string, string>();
+  for (const repair of repairs) {
+    if (!repair || typeof repair !== "object" || Array.isArray(repair)) continue;
+    const row = repair as Record<string, unknown>;
+    const sceneId = typeof row.sceneId === "string" ? row.sceneId.trim() : "";
+    const narration = typeof row.narration === "string"
+      ? row.narration.replace(/\s+/gu, " ").trim().slice(0, 1_400)
+      : "";
+    if (affected.some((entry) => entry.sceneId === sceneId) && narration) {
+      narrationBySceneId.set(sceneId, narration);
+    }
+  }
+  if (narrationBySceneId.size === 0) return args.episode;
+  return {
+    ...args.episode,
+    scenes: args.episode.scenes.map((scene) => {
+      const narration = narrationBySceneId.get(scene.id);
+      return narration ? { ...scene, narration } : scene;
+    }),
   };
 }
 
@@ -1712,7 +1840,23 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
         ...(themeMoodCue ? [themeMoodCue] : []),
         ...args.bots
           .filter((peer) => peer.id !== bot.id)
-          .flatMap((peer) => botPowerObserverCueLinesV1(peer.name, peer.powers)),
+          .flatMap((peer) => [
+            ...botPowerObserverCueLinesV1(
+              peer.name,
+              (peer.powers ?? []).filter((power) =>
+                !power.compiled?.effects.some(
+                  (effect) => effect.type === "avatar_scale",
+                )
+              ),
+            ),
+            botPowerPairwiseSizeCueV1({
+              observerName: bot.name,
+              observerPowers: bot.powers,
+              subjectName: peer.name,
+              subjectPowers: peer.powers,
+              tense: false,
+            }) ?? "",
+          ]),
       ]).replace(/\s+/gu, " ").trim();
       const cloneIdentity = buildCloneFamilyIdentityPrompt(bot, args.bots);
       return `- ${bot.id}: ${bot.name}. Persona: ${(bot.systemPrompt || "A distinct PRISM actor.").slice(0, 900)}${powers ? ` ${powers}` : ""}${cloneIdentity ? ` ${cloneIdentity.replace(/\s+/gu, " ")}` : ""}`;
@@ -2024,6 +2168,17 @@ export async function generateStorySessionEpisode(
       }
     }
     episode = applyStoryHardResponsePowers(episode, args.bots);
+    try {
+      episode = await repairStoryQuietContextDependencies({
+        episode,
+        bots: args.bots,
+        provider: args.provider,
+        model: args.model,
+        ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
+      });
+    } catch (error) {
+      console.warn("Story Quiet context repair pass failed; preserving the deterministic redacted fallback.", error);
+    }
     const now = new Date().toISOString();
     const progress = createInitialStoryProgress(episode, now);
     const transcript = createInitialStoryTranscript(episode, randomId(12), now);

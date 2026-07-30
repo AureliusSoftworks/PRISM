@@ -15,15 +15,21 @@ import {
   botPowerResponseIsSilentV1,
   botPowerIntermittentMuteEffectFromEffectsV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
+  botPowerIntermittentAudibilityEffectFromEffectsV1,
+  botPowerListenerHearsTurnFromEffectsV1,
+  botPowerAnnoyanceTargetFromEffectsV1,
   strongestBotPowerMoodBoostEffectFromEffectsV1,
   strongestBotPowerMoodDrainEffectFromEffectsV1,
   botPowerVoicePresenceModeFromEffectsV1,
   botPowerPairwisePerceptionFromEffectsV1,
+  botPowerPairwiseSizeCueFromEffectsV1,
+  botPowerAvatarScaleModeFromDescriptionV1,
   buildCoffeePowersPromptBlock,
   COFFEE_HISTORY_WINDOW_HARD_CAP,
   coffeePowerCupRateMultiplierV1,
   coffeePowerStayRateMultiplierV1,
   coffeePowerVesselModeV1,
+  normalizeBotPowerEffectV1,
   type BotPowerEffectV1,
   type BotPowerResponseBudgetEffectV1,
   type BotPowerResolvedThemeV1,
@@ -33,6 +39,7 @@ import {
   type CoffeePowerPlanV1,
   type CoffeeReplayPowerMoodBoostEventPayload,
   type CoffeeReplayPowerMoodDrainEventPayload,
+  type CoffeeReplayPowerAnnoyanceEventPayload,
   type ResolvedCoffeePowerBotV1,
 } from "@localai/shared";
 import {
@@ -72,15 +79,58 @@ export function parseCoffeePowerPlan(raw: string | null | undefined): CoffeePowe
       ...parsed,
       bots: Object.fromEntries(
         Object.entries(parsed.bots).map(([botId, bot]) => {
-          const effects = Array.isArray(bot.effects) ? [...bot.effects] : [];
-          const targetedInvisible = bot.powerNames?.some(
+          let effects = (Array.isArray(bot.effects) ? bot.effects : [])
+            .map(normalizeBotPowerEffectV1)
+            .filter((effect): effect is BotPowerEffectV1 => effect !== null);
+          const powerNames = bot.powerNames ?? [];
+          const namedScale = powerNames
+            .map((name) => botPowerAvatarScaleModeFromDescriptionV1(name, ""))
+            .find((mode) => mode !== null) ?? null;
+          const replace = (
+            type: BotPowerEffectV1["type"],
+            effect: BotPowerEffectV1,
+          ): void => {
+            effects = [...effects.filter((candidate) => candidate.type !== type), effect];
+          };
+          if (namedScale) replace("avatar_scale", { type: "avatar_scale", mode: namedScale });
+          const namedInvisible = powerNames.some(
             (name) => name.trim().toLowerCase() === "invisible",
-          ) && effects.some((effect) => effect.type === "awareness");
-          if (
-            targetedInvisible &&
-            !effects.some((effect) => effect.type === "avatar_visibility")
-          ) {
-            effects.push({ type: "avatar_visibility", mode: "translucent" });
+          );
+          if (namedInvisible || namedScale === "microscopic") {
+            replace("avatar_visibility", { type: "avatar_visibility", mode: "hidden" });
+          }
+          const quiet = powerNames.some((name) => name.trim().toLowerCase() === "quiet") ||
+            namedScale === "microscopic" ||
+            effects.some((effect) => effect.type === "voice_presence" && effect.mode === "quiet");
+          if (quiet) {
+            effects = effects.filter((effect) => effect.type !== "intermittent_mute");
+            replace("voice_presence", { type: "voice_presence", mode: "quiet" });
+            replace("intermittent_audibility", {
+              type: "intermittent_audibility",
+              chance: "half",
+              listeners: "bots",
+              missEvent: "too_faint_to_make_out",
+            });
+          }
+          const loud = powerNames.some((name) => name.trim().toLowerCase() === "loud") ||
+            namedScale === "colossal" ||
+            effects.some((effect) => effect.type === "voice_presence" && effect.mode === "loud");
+          if (loud) {
+            effects = effects.filter((effect) =>
+              !(effect.type === "social_influence" && effect.trigger === "after_speech" &&
+                effect.polarity === "negative" && effect.strength === "small")
+            );
+            replace("voice_presence", { type: "voice_presence", mode: "loud" });
+            replace("annoyance", {
+              type: "annoyance",
+              trigger: "after_spoken_turn",
+              chance: "half",
+              recipients: "one_audible_peer",
+              strength: "small",
+            });
+          }
+          if (namedScale === "microscopic" || namedScale === "colossal" || namedInvisible) {
+            replace("cup_rate", { type: "cup_rate", rate: "none" });
           }
           return [botId, { ...bot, effects }];
         }),
@@ -565,6 +615,7 @@ export function resolveCoffeePowersForSession(
     );
     const resolved: ResolvedCoffeePowerBotV1 = {
       botId: bot.id,
+      botName: bot.name,
       powerIds: powers.map((power) => power.id),
       powerNames: powers.map((power) => power.name || "Power"),
       selfCue: [
@@ -573,7 +624,11 @@ export function resolveCoffeePowersForSession(
       ].filter(Boolean).join(" "),
       observerCue: [
         namingObserverCue,
-        ...genericCuePowers.map((power) => power.compiled?.observerCue ?? ""),
+        ...genericCuePowers
+          .filter((power) =>
+            !power.compiled?.effects.some((effect) => effect.type === "avatar_scale")
+          )
+          .map((power) => power.compiled?.observerCue ?? ""),
       ].filter(Boolean).join(" "),
       visibleToBotIds:
         audienceIdsFromResolvedEffect(awareness, "awareness"),
@@ -633,12 +688,43 @@ export function coffeePowerQuietTurnIsIgnored(args: {
   botId: string;
   stableTurnKey: string;
 }): boolean {
+  // Compatibility for arbitrary legacy intermittent-mute Powers only. Quiet
+  // uses receiver-specific audibility and never deletes the player's line.
   const effects = args.plan?.bots[args.botId]?.effects ?? [];
+  if (botPowerIntermittentAudibilityEffectFromEffectsV1(effects)) return false;
   return Boolean(botPowerIntermittentMuteEffectFromEffectsV1(effects)) &&
-    botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
+    botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(effects, args.stableTurnKey);
+}
+
+export function coffeePowerMessageAudienceForTurn(args: {
+  plan: CoffeePowerPlanV1 | null;
+  speakerBotId: string;
+  candidateListenerBotIds: readonly string[];
+  stableTurnKey: string;
+}): string[] | null {
+  const frozen = args.plan?.bots[args.speakerBotId];
+  const effects = frozen?.effects ?? [];
+  const fixedAudience = frozen?.speechAudienceBotIds ?? null;
+  const hasQuietAudibility = Boolean(
+    botPowerIntermittentAudibilityEffectFromEffectsV1(effects),
+  );
+  if (!hasQuietAudibility && fixedAudience === null) return null;
+  return [...new Set(args.candidateListenerBotIds)]
+    .filter((listenerBotId) => listenerBotId !== args.speakerBotId)
+    .filter((listenerBotId) =>
+      fixedAudience === null || fixedAudience.includes(listenerBotId)
+    )
+    .filter((listenerBotId) => coffeePowerBotAudibleTo(
+      args.plan,
+      args.speakerBotId,
+      listenerBotId,
+    ))
+    .filter((listenerBotId) => botPowerListenerHearsTurnFromEffectsV1({
       effects,
-      args.stableTurnKey,
-    );
+      stableTurnKey: args.stableTurnKey,
+      listenerBotId,
+    }))
+    .sort();
 }
 
 /** Uses the frozen Coffee plan, so replay keeps the session's ghostly reveal. */
@@ -839,6 +925,7 @@ export function coffeePowersPromptForSpeaker(
   },
   addressedFandomTargetLabel?: string | null,
   theme?: BotPowerResolvedThemeV1,
+  sizeCueAlreadyNoticedBotIds: ReadonlySet<string> = new Set(),
 ): string {
   if (!plan) return "";
   const lines: string[] = [];
@@ -899,6 +986,26 @@ export function coffeePowersPromptForSpeaker(
     visiblePeerBotIds,
     socialByBotId,
   }));
+  const speakerSocial = socialByBotId[speakerBotId];
+  const speakerAlreadyTense = Boolean(
+    speakerSocial &&
+    (speakerSocial.disposition <= 0.32 ||
+      speakerSocial.valuesFriction >= 0.64 ||
+      speakerSocial.leavePressure >= 0.55),
+  );
+  for (const peerBotId of visiblePeerBotIds) {
+    const peer = plan.bots[peerBotId];
+    if (!peer) continue;
+    const cue = botPowerPairwiseSizeCueFromEffectsV1({
+      observerName: own?.botName ?? speakerBotId,
+      observerEffects: own?.effects ?? [],
+      subjectName: peer.botName ?? peerBotId,
+      subjectEffects: peer.effects,
+      tense: speakerAlreadyTense,
+      alreadyNoticed: sizeCueAlreadyNoticedBotIds.has(peerBotId),
+    });
+    if (cue) lines.push(cue);
+  }
   if (own?.selfCue && !ownHasLegacyIdentityOnlyCue) lines.push(own.selfCue);
   for (const effect of own?.effects ?? []) {
     const targetNames = effect.type === "response_bond" || effect.type === "selective_memory"
@@ -1124,6 +1231,54 @@ export function applyCoffeePowerAfterSpeech<T extends { disposition: number }>(a
     }
   }
   return next;
+}
+
+export function applyCoffeePowerAnnoyanceAfterSpeech<T extends { disposition: number }>(args: {
+  plan: CoffeePowerPlanV1 | null;
+  speakerBotId: string;
+  sourceMessageId: string;
+  audiblePeerBotIds: readonly string[];
+  socialByBotId: Record<string, T>;
+  occurredAt: string;
+}): {
+  socialByBotId: Record<string, T>;
+  events: CoffeeReplayPowerAnnoyanceEventPayload[];
+} {
+  const effects = args.plan?.bots[args.speakerBotId]?.effects ?? [];
+  const targetBotId = botPowerAnnoyanceTargetFromEffectsV1({
+    effects,
+    stableTurnKey: `${args.sourceMessageId}:${args.speakerBotId}`,
+    eligibleBotIds: args.audiblePeerBotIds.filter((botId) =>
+      botId !== args.speakerBotId &&
+      coffeePowerBotAudibleTo(args.plan, args.speakerBotId, botId)
+    ),
+  });
+  if (!targetBotId) return { socialByBotId: args.socialByBotId, events: [] };
+  const previous = args.socialByBotId[targetBotId];
+  if (!previous) return { socialByBotId: args.socialByBotId, events: [] };
+  const dispositionBefore = clamp01(previous.disposition);
+  const dispositionAfter = clamp01(
+    dispositionBefore -
+      strengthDelta("small") * resistanceMultiplier(args.plan!, targetBotId, "negative"),
+  );
+  return {
+    socialByBotId: {
+      ...args.socialByBotId,
+      [targetBotId]: { ...previous, disposition: dispositionAfter },
+    },
+    events: [{
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "powerAnnoyance",
+      botId: targetBotId,
+      sourceBotId: args.speakerBotId,
+      sourceMessageId: args.sourceMessageId,
+      strength: "small",
+      dispositionBefore,
+      dispositionAfter,
+      occurredAt: args.occurredAt,
+    }],
+  };
 }
 
 export function applyCoffeePowerMoodBoostAfterSpeech<T extends { disposition: number }>(args: {

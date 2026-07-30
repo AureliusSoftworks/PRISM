@@ -119542,6 +119542,16 @@ function HomeContent(): React.JSX.Element {
                     coffeePowerPlan.bots[bot.id]?.effects,
                   )
                 : botPowerAvatarScaleModeV1(bot.powers);
+              const seatPowerEdgeSide =
+                layoutIndex < (coffeeSeatLayoutCount - 1) / 2
+                  ? "left"
+                  : layoutIndex > (coffeeSeatLayoutCount - 1) / 2
+                    ? "right"
+                    : coffeeSeatStableHash(
+                        `${coffeeConversation?.id ?? "coffee"}:${bot.id}:size-edge`,
+                      ) % 2 === 0
+                      ? "left"
+                      : "right";
               const seatDeadAirAsideTalking =
                 activeCoffeeDeadAirAside?.commentatorBotId === bot.id &&
                 !seatPowerMuted;
@@ -120211,6 +120221,7 @@ function HomeContent(): React.JSX.Element {
                     seatAvatarVisibilityMode ?? undefined
                   }
                   data-power-avatar-scale={seatAvatarScaleMode ?? undefined}
+                  data-power-edge-side={seatPowerEdgeSide}
                   data-identity-mirror-active={
                     identityMirrorState ? "true" : undefined
                   }

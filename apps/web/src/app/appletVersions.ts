@@ -46,6 +46,8 @@ export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIntermittentMuteModePolicy =
   BotPowerHearingRepeatModePolicy;
+export type BotPowerIntermittentAudibilityModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAnnoyanceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerResponseBudgetModePolicy = BotPowerGhostModePolicy;
 export type BotPowerInterruptionModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIdentityMirrorModePolicy = BotPowerGhostModePolicy;
@@ -67,13 +69,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.27",
+    version: "1.28",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.26",
+    version: "1.27",
     status: "active",
   },
   arena: {
@@ -91,13 +93,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.26",
+    version: "2.27",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.51",
+    version: "1.52",
     status: "active",
   },
   feed: {
@@ -115,7 +117,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.26",
+    version: "0.27",
     status: "preview",
   },
   gym: {
@@ -395,7 +397,7 @@ export const BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Exhaustive size-Power policy: bot embodiments share one restrained relative scale. */
+/** Exhaustive six-tier size policy: embodiments use canonical scale and edge bias. */
 export const BOT_POWER_AVATAR_SCALE_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerAvatarScaleModePolicy
@@ -435,6 +437,46 @@ export const BOT_POWER_VOICE_PRESENCE_MODE_POLICY: Record<
   surf: "deferred",
 };
 
+/** Quiet listener rolls exist only where another bot can receive the line. */
+export const BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIntermittentAudibilityModePolicy
+> = {
+  chat: "irrelevant",
+  zen: "irrelevant",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Loud annoyance targets exactly one eligible audible bot, never the player. */
+export const BOT_POWER_ANNOYANCE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerAnnoyanceModePolicy
+> = {
+  chat: "irrelevant",
+  zen: "irrelevant",
+  arena: "deferred",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
 /** Exhaustive mumbling policy: only persisted public gibberish reaches listeners. */
 export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
   PrismAppletId,
@@ -455,7 +497,7 @@ export const BOT_POWER_SPEECH_OBFUSCATION_MODE_POLICY: Record<
   surf: "deferred",
 };
 
-/** Quiet's stable half-mute needs an explicit mood adaptation in every live bot mode. */
+/** Arbitrary intermittent-mute Powers retain an explicit mood adaptation in every live bot mode. */
 export const BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerIntermittentMuteModePolicy

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   applyBotPowerMumbledResponseV1,
+  botPowerDeterministicHalfChanceV1,
   botPowerSourceHashV1,
 } from "@localai/shared";
 import type { GenerateOptions, LlmProvider, ProviderMessage } from "../providers.ts";
@@ -536,7 +537,7 @@ describe("Story API helpers", () => {
     assert.match(prompt, /Ada — Echo Step: Ada's arrivals echo twice/u);
   });
 
-  it("keeps the reader omniscient while unaware characters overlap spectral speech", async () => {
+  it("keeps the reader's full line while unaware characters overlap hidden speech", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ryuk");
     seedBot(db, "bot-b", "Abraham Lincoln");
@@ -590,10 +591,10 @@ describe("Story API helpers", () => {
     });
 
     const prompt = provider.calls[0]?.messages.map((message) => message.content).join("\n") ?? "";
-    assert.match(prompt, /narrator and player always see Ryuk half-translucently/u);
+    assert.doesNotMatch(prompt, /half-translucently/u);
     assert.match(prompt, /Abraham Lincoln cannot see or hear Ryuk/u);
     assert.match(prompt, /never pause time/u);
-    assert.match(generated.episode?.scenes[1]?.narration ?? "", /begins before Ryuk has finished/u);
+    assert.match(generated.episode?.scenes[1]?.narration ?? "", /voice was too faint to make out/u);
     assert.match(generated.episode?.scenes[1]?.narration ?? "", /Lincoln begins a complete answer/u);
     assert.equal(generated.episode?.scenes[0]?.narration, generatedEpisode.scenes[0]?.narration);
   });
@@ -912,7 +913,7 @@ describe("Story API helpers", () => {
     assert.doesNotMatch(publicScene?.narration ?? "", /archive|key|glass/iu);
   });
 
-  it("adapts a deterministic Quiet turn into a silent mood-loss beat", async () => {
+  it("persists a Quiet listener miss and repairs the dependent response without leaked words", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");
     seedBot(db, "bot-b", "Bert");
@@ -932,7 +933,12 @@ describe("Story API helpers", () => {
         observerCue: "Bert is sometimes ignored.",
         effects: [
           { type: "voice_presence", mode: "quiet" },
-          { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+          {
+            type: "intermittent_audibility",
+            chance: "half",
+            listeners: "bots",
+            missEvent: "too_faint_to_make_out",
+          },
         ],
         ruleLabels: ["Quiet voice", "Half of turns unheard"],
       },
@@ -944,8 +950,33 @@ describe("Story API helpers", () => {
       model: "test-model",
     });
 
+    const episode = JSON.parse(episodeJson()) as {
+      id: string;
+      scenes: Array<Record<string, unknown>>;
+    };
+    let suffix = 0;
+    while (botPowerDeterministicHalfChanceV1(
+      `intermittent-audibility:${episode.id}:scene-2:1:bot-a`,
+    )) {
+      suffix += 1;
+      episode.id = `episode-quiet-${suffix}`;
+    }
+    episode.scenes[2] = {
+      ...episode.scenes[2],
+      speakerBotId: "bot-a",
+      speakerName: "Ada",
+      spritePose: "speaking",
+      narration: "Ada answers Bert's claim about the clear key and agrees to open its display case.",
+    };
+    const provider = new SequenceProvider([
+      JSON.stringify(episode),
+      JSON.stringify({ repairs: [{
+        sceneId: "scene-3",
+        narration: "Ada notices only that Bert's voice was too faint and studies the room instead.",
+      }] }),
+    ]);
     const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
-      provider: new SequenceProvider([episodeJson()]),
+      provider,
       providerName: "local",
       model: "test-model",
       bots,
@@ -954,8 +985,82 @@ describe("Story API helpers", () => {
       (scene) => scene.speakerBotId === "bot-b",
     );
 
-    assert.match(quietScene?.narration ?? "", /expression falls.*unheard.*\.\.\./u);
-    assert.equal(quietScene?.spritePose, "idle");
+    assert.match(quietScene?.narration ?? "", /clear key suspended/u);
+    assert.deepEqual(quietScene?.audienceBotIds, []);
+    assert.equal(quietScene?.spritePose, "speaking");
+    assert.equal(
+      generated.episode?.scenes[2]?.narration,
+      "Ada notices only that Bert's voice was too faint and studies the room instead.",
+    );
+    const repairPrompt = provider.calls[1]?.messages
+      .map((message) => message.content)
+      .join("\n") ?? "";
+    assert.match(repairPrompt, /too faint to make out/u);
+    assert.doesNotMatch(repairPrompt, /clear key|display case/u);
+  });
+
+  it("persists one replay-stable Loud annoyance target without creating anger", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ada");
+    seedBot(db, "bot-b", "Bert");
+    const name = "Loud";
+    const intent = "Bert is loud and half his lines mildly annoy one audible bot peer.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(JSON.stringify([{
+      version: 1,
+      id: "loud",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Speak loudly.",
+        observerCue: "One audible peer may be mildly annoyed.",
+        effects: [
+          { type: "voice_presence", mode: "loud" },
+          {
+            type: "annoyance",
+            trigger: "after_spoken_turn",
+            chance: "half",
+            recipients: "one_audible_peer",
+            strength: "small",
+          },
+        ],
+        ruleLabels: ["Loud voice", "May annoy one audible peer"],
+      },
+    }]));
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"], provider: "local", model: "test-model",
+    });
+    const episode = JSON.parse(episodeJson()) as {
+      id: string;
+      scenes: Array<Record<string, unknown>>;
+    };
+    let suffix = 0;
+    while (!botPowerDeterministicHalfChanceV1(
+      `annoyance:${episode.id}:scene-2:1`,
+    )) {
+      suffix += 1;
+      episode.id = `episode-loud-${suffix}`;
+    }
+    episode.scenes[2] = {
+      ...episode.scenes[2],
+      speakerBotId: "bot-a",
+      speakerName: "Ada",
+      spritePose: "speaking",
+      narration: "Ada makes a measured observation about the room.",
+    };
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider: new SequenceProvider([JSON.stringify(episode)]),
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    assert.equal(generated.episode?.scenes[1]?.annoyanceTargetBotId, "bot-a");
+    assert.match(generated.episode?.scenes[2]?.narration ?? "", /mildly irritated/u);
+    assert.match(generated.episode?.scenes[2]?.narration ?? "", /without turning it into anger/u);
   });
 
   it("bounds hard minimal Story speakers without cutting a sentence", async () => {

@@ -35,6 +35,11 @@ import {
   botPowerHasSpeakingOnlyAvatarVisibilityV1,
   botPowerIntermittentMuteEffectV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
+  botPowerIntermittentAudibilityEffectV1,
+  botPowerListenerHearsTurnV1,
+  botPowerAnnoyanceTargetFromEffectsV1,
+  botPowerAvatarScaleModeFromDescriptionV1,
+  botPowerPairwiseSizeCueFromEffectsV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerObserverProjectionV1,
@@ -507,12 +512,12 @@ test("voice presence does not override physical size or visibility presentation"
   assert.equal(botPowerVoicePresenceModeV1(powers), "loud");
   assert.equal(botPowerVoiceGainMultiplierV1(powers), 1.18);
   assert.equal(botPowerTextScaleV1(powers), 1.12);
-  assert.equal(botPowerAvatarScaleModeV1(powers), "smaller");
+  assert.equal(botPowerAvatarScaleModeV1(powers), "small");
   assert.equal(botPowerAvatarVisibilityModeV1(powers), "speaking_only");
   assert.equal(botPowerHasSpeakingOnlyAvatarVisibilityV1(powers), true);
 });
 
-test("quiet turns use one replay-stable half chance and retain their mood penalty", () => {
+test("legacy Quiet upgrades to listener-specific replay-stable hearing without a mood penalty", () => {
   const name = "Quiet";
   const intent = "Her voice is very quiet and half of her turns are ignored.";
   const powers = [{
@@ -541,14 +546,24 @@ test("quiet turns use one replay-stable half chance and retain their mood penalt
   assert.ok(outcomes.some((outcome) => !outcome));
   assert.equal(botPowerVoiceGainMultiplierV1(powers), 0.72);
   assert.equal(botPowerTextScaleV1(powers), 0.88);
-  assert.deepEqual(botPowerIntermittentMuteEffectV1(powers), {
-    type: "intermittent_mute",
+  assert.equal(botPowerIntermittentMuteEffectV1(powers), null);
+  assert.deepEqual(botPowerIntermittentAudibilityEffectV1(powers), {
+    type: "intermittent_audibility",
     chance: "half",
-    moodPenalty: "small",
+    listeners: "bots",
+    missEvent: "too_faint_to_make_out",
   });
   assert.equal(
-    botPowerIntermittentMuteTurnIsIgnoredV1(powers, "saved-turn-7"),
-    botPowerIntermittentMuteTurnIsIgnoredV1(powers, "saved-turn-7"),
+    botPowerListenerHearsTurnV1({
+      powers,
+      stableTurnKey: "saved-turn-7",
+      listenerBotId: "listener-a",
+    }),
+    botPowerListenerHearsTurnV1({
+      powers,
+      stableTurnKey: "saved-turn-7",
+      listenerBotId: "listener-a",
+    }),
   );
 });
 
@@ -1104,14 +1119,15 @@ test("legacy Microscopic and Invisible presentations upgrade without a recompile
   };
 
   assert.equal(botPowerAvatarVisibilityModeV1(legacyPower("Microscopic")), "hidden");
-  assert.equal(botPowerAvatarVisibilityModeV1(legacyPower("Invisible")), "translucent");
+  assert.equal(botPowerAvatarVisibilityModeV1(legacyPower("Invisible")), "hidden");
+  assert.equal(botPowerAvatarScaleModeV1(legacyPower("Microscopic")), "microscopic");
   assert.match(
     legacyPower("Microscopic")[0]?.compiled?.selfCue ?? "",
-    /at any time/u,
+    /microscopic/u,
   );
 });
 
-test("targeted legacy Invisible snapshots gain spectral presentation idempotently", () => {
+test("targeted legacy Invisible snapshots gain fully hidden presentation idempotently", () => {
   const name = "Invisible";
   const intent = "Only visible to Light Yagami.";
   const sourceHash = botPowerSourceHashV1(name, intent);
@@ -1145,7 +1161,7 @@ test("targeted legacy Invisible snapshots gain spectral presentation idempotentl
     ).length,
     1,
   );
-  assert.equal(botPowerAvatarVisibilityModeV1(upgraded), "translucent");
+  assert.equal(botPowerAvatarVisibilityModeV1(upgraded), "hidden");
 });
 
 test("pairwise and observer perception separate participant, live, and replay truth", () => {
@@ -1196,7 +1212,7 @@ test("pairwise and observer perception separate participant, live, and replay tr
       perspective: "live",
       visibility: "hidden",
       audible: false,
-      spectral: true,
+      spectral: false,
     },
   );
   assert.deepEqual(
@@ -1204,9 +1220,9 @@ test("pairwise and observer perception separate participant, live, and replay tr
     {
       version: 1,
       perspective: "replay",
-      visibility: "translucent",
-      audible: true,
-      spectral: true,
+      visibility: "hidden",
+      audible: false,
+      spectral: false,
     },
   );
 
@@ -1288,14 +1304,14 @@ test("legacy Lazy Cameron Powers gain a hard minimal response budget without a r
   );
 });
 
-test("avatar scale effects normalize safely and smaller wins without stacking", () => {
+test("six-tier avatar scale effects normalize legacy values and preserve smaller-side precedence", () => {
   assert.deepEqual(
     normalizeBotPowerEffectV1({ type: "avatar_scale", mode: "larger" }),
-    { type: "avatar_scale", mode: "larger" },
+    { type: "avatar_scale", mode: "large" },
   );
   assert.deepEqual(
     normalizeBotPowerEffectV1({ type: "avatar_scale", mode: "smaller" }),
-    { type: "avatar_scale", mode: "smaller" },
+    { type: "avatar_scale", mode: "small" },
   );
   assert.equal(
     normalizeBotPowerEffectV1({ type: "avatar_scale", mode: "enormous" }),
@@ -1303,10 +1319,10 @@ test("avatar scale effects normalize safely and smaller wins without stacking", 
   );
   assert.equal(
     botPowerAvatarScaleModeFromEffectsV1([
-      { type: "avatar_scale", mode: "larger" },
-      { type: "avatar_scale", mode: "smaller" },
+      { type: "avatar_scale", mode: "colossal" },
+      { type: "avatar_scale", mode: "tiny" },
     ]),
-    "smaller",
+    "tiny",
   );
 
   const name = "Large";
@@ -1323,14 +1339,54 @@ test("avatar scale effects normalize safely and smaller wins without stacking", 
       sourceHash: botPowerSourceHashV1(name, intent),
       selfCue: "You are unusually large.",
       observerCue: "This bot is unusually large.",
-      effects: [{ type: "avatar_scale" as const, mode: "larger" as const }],
+      effects: [{ type: "avatar_scale" as const, mode: "large" as const }],
       ruleLabels: ["Larger avatar"],
     },
   };
-  assert.equal(botPowerAvatarScaleModeV1([readyPower]), "larger");
+  assert.equal(botPowerAvatarScaleModeV1([readyPower]), "large");
   assert.equal(
     botPowerAvatarScaleModeV1([{ ...readyPower, enabled: false }]),
     null,
+  );
+});
+
+test("size names, numeric wording, annoyance targeting, and social thresholds are deterministic", () => {
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Nanoscopic", ""), "microscopic");
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Height", "Exactly 50% smaller."), "tiny");
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Height", "Exactly 25% smaller."), "small");
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Height", "Exactly 25% larger."), "large");
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Height", "Exactly 50% larger."), "giant");
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Presence", "Too large to fit on screen."), "colossal");
+  assert.equal(botPowerAvatarScaleModeFromDescriptionV1("Big Heart", "Has big ideas."), null);
+
+  const annoyanceArgs = {
+    effects: [{ type: "annoyance", trigger: "after_spoken_turn", chance: "half", recipients: "one_audible_peer", strength: "small" }],
+    stableTurnKey: "message-4",
+    eligibleBotIds: ["peer-b", "peer-a"],
+  } as const;
+  assert.equal(
+    botPowerAnnoyanceTargetFromEffectsV1(annoyanceArgs),
+    botPowerAnnoyanceTargetFromEffectsV1(annoyanceArgs),
+  );
+  assert.equal(
+    botPowerPairwiseSizeCueFromEffectsV1({
+      observerName: "A",
+      observerEffects: [],
+      subjectName: "B",
+      subjectEffects: [{ type: "avatar_scale", mode: "small" }],
+      tense: false,
+    }),
+    null,
+  );
+  assert.match(
+    botPowerPairwiseSizeCueFromEffectsV1({
+      observerName: "A",
+      observerEffects: [],
+      subjectName: "B",
+      subjectEffects: [{ type: "avatar_scale", mode: "small" }],
+      tense: true,
+    }) ?? "",
+    /tension-gated/iu,
   );
 });
 

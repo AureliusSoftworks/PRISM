@@ -69,6 +69,10 @@ export interface StoryScene {
   locationId: string;
   narration: string;
   speakerBotId?: string | null;
+  /** Bot characters that actually received this spoken line; the player always does. */
+  audienceBotIds?: string[];
+  /** Replay-stable Loud outcome; this is mild irritation, never anger by itself. */
+  annoyanceTargetBotId?: string;
   speakerName?: string;
   spritePose?: StorySpritePose;
   backgroundAssetId?: string;
@@ -314,6 +318,11 @@ function parseScenes(raw: unknown): StoryScene[] {
     const field = `scenes[${index}]`;
     const spritePose = readOptionalString(row.spritePose);
     const itemIds = readOptionalStringArray(row.itemIds, `${field}.itemIds`);
+    const audienceBotIds = readOptionalStringArray(
+      row.audienceBotIds,
+      `${field}.audienceBotIds`,
+    );
+    const annoyanceTargetBotId = readOptionalString(row.annoyanceTargetBotId);
     if (spritePose && !STORY_SPRITE_POSE_SET.has(spritePose)) {
       throw new Error(`Unknown story sprite pose "${spritePose}".`);
     }
@@ -326,6 +335,8 @@ function parseScenes(raw: unknown): StoryScene[] {
         typeof row.speakerBotId === "string" && row.speakerBotId.trim().length > 0
           ? row.speakerBotId.trim()
           : null,
+      ...(audienceBotIds ? { audienceBotIds } : {}),
+      ...(annoyanceTargetBotId ? { annoyanceTargetBotId } : {}),
       ...(readOptionalString(row.speakerName) ? { speakerName: readOptionalString(row.speakerName) } : {}),
       ...(spritePose ? { spritePose: spritePose as StorySpritePose } : {}),
       ...(readOptionalString(row.backgroundAssetId)

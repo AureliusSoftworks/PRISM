@@ -120,13 +120,20 @@ describe("mode tutorials", () => {
   });
 
   it("explains relative avatar-size Powers across live bot modes", () => {
-    assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /larger or smaller/u);
-    assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /larger or smaller/u);
-    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /larger or smaller/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /larger or smaller/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Microscopic/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /fully unseen even while speaking/u);
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /half-translucent/u);
+    for (const mode of ["zen", "chat", "coffee"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps[0]?.body ?? "";
+      assert.match(copy, /Microscopic/u);
+      assert.match(copy, /Tiny/u);
+      assert.match(copy, /Small/u);
+      assert.match(copy, /Large/u);
+      assert.match(copy, /Giant/u);
+      assert.match(copy, /Colossal/u);
+    }
+    const signalCopy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
+    assert.match(signalCopy, /Microscopic/u);
+    assert.match(signalCopy, /Colossal/u);
+    assert.match(signalCopy, /300% edge-cropped/u);
+    assert.match(signalCopy, /Invisible fully hides the body and lights/u);
   });
 
   it("teaches prompt-authored sight and hearing exclusions in social modes", () => {
@@ -187,14 +194,25 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(slateCopy, /separate Action field|typing exactly \*\*|Shh/u);
   });
 
-  it("explains fixed Loud/Quiet presentation and Quiet's mood cost", () => {
-    for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
+  it("explains fixed Loud/Quiet presentation and listener-specific outcomes", () => {
+    for (const mode of ["zen", "chat"] as const) {
       const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
       assert.match(copy, /Loud and Quiet/u);
-      assert.match(copy, /voice-volume|spoken volume/u);
-      assert.match(copy, /half/u);
-      assert.match(copy, /mood/u);
+      assert.match(copy, /voice (?:and )?text trims|text and voice trims/u);
+      assert.doesNotMatch(copy, /Quiet[^.]{0,100}(?:lose|mood cost|mood penalty)/iu);
     }
+    for (const mode of ["coffee", "botcast"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /Quiet/u);
+      assert.match(copy, /Loud/u);
+      assert.match(copy, /50%|half/u);
+      assert.doesNotMatch(copy, /Quiet[^.]{0,100}(?:lose|mood cost|mood penalty)/iu);
+    }
+    assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /no bot listener/u);
+    assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /player always receives it/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /too faint/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /mildly annoy exactly one audible peer/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /neutral too-faint event/u);
   });
 
   it("explains that short-term amnesia also forgets the standing topic", () => {
@@ -901,7 +919,7 @@ describe("mode tutorials", () => {
       body: chooseRelationship?.body.replace(/ A bot-name prefix or suffix changes only how its holder names other bots:.*$/u, ""),
     }, {
       heading: "Choose a relationship",
-      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, does not retain the broader topic unless your current message states it, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+      body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona understands only your current message, treats it as fresh first contact, never knows prior turns or their own earlier replies, does not retain the broader topic unless your current message states it, and responds directly instead of defaulting to the same introduction. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Size Powers use six distinct presentations: Microscopic is unseen, Tiny is half size, Small is three-quarter size, Large is one-quarter larger, Giant is half larger, and Colossal fills and crops against the nearest edge. Names and controls stay normal-sized. Invisible fully hides the body and attached lights while preserving attributed text and speech. Loud and Quiet use fixed text and voice trims; in this one-person lane Quiet never removes a turn because there is no bot listener. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Back or Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
       clickLabel: "a PRISM or persona tile",
       targetSelector: '[data-tutorial-target="chat-bot-picker"]',
     });

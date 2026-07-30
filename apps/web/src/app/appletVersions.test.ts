@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY,
+  BOT_POWER_ANNOYANCE_MODE_POLICY,
   BOT_POWER_AVATAR_SCALE_MODE_POLICY,
   BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY,
   BOT_POWER_CANDOR_MODE_POLICY,
@@ -11,6 +12,7 @@ import {
   BOT_POWER_HEARING_REPEAT_MODE_POLICY,
   BOT_POWER_IDENTITY_MIRROR_MODE_POLICY,
   BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY,
+  BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
   BOT_POWER_INTERRUPTION_MODE_POLICY,
   BOT_POWER_GHOST_MODE_POLICY,
   BOT_POWER_MUTE_MODE_POLICY,
@@ -58,19 +60,19 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.27");
-    assert.equal(PRISM_APPLETS.zen.version, "1.26");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.26");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.51");
+    assert.equal(PRISM_APPLETS.chat.version, "1.28");
+    assert.equal(PRISM_APPLETS.zen.version, "1.27");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.27");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.52");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.26");
+    assert.equal(PRISM_APPLETS.story.version, "0.27");
     assert.equal(PRISM_APPLETS.slate.version, "0.7");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.27");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.26");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.26");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.51");
-    assert.equal(prismAppletVersionLabel("story"), "v0.26");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.28");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.27");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.27");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.52");
+    assert.equal(prismAppletVersionLabel("story"), "v0.27");
     assert.equal(prismAppletVersionLabel("slate"), "v0.7");
   });
 
@@ -330,6 +332,24 @@ describe("applet version helpers", () => {
       pseudo: "deferred",
       surf: "deferred",
     });
+  });
+
+  it("limits Quiet hearing and Loud annoyance to applets with bot listeners", () => {
+    for (const policy of [
+      BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
+      BOT_POWER_ANNOYANCE_MODE_POLICY,
+    ]) {
+      assert.deepEqual(Object.keys(policy), Object.keys(PRISM_APPLETS));
+      assert.equal(policy.chat, "irrelevant");
+      assert.equal(policy.zen, "irrelevant");
+      assert.equal(policy.coffee, "direct");
+      assert.equal(policy.botcast, "direct");
+      assert.equal(policy.story, "adapted");
+      assert.equal(policy.slate, "irrelevant");
+      for (const applet of prismPlannedRoadmapApplets()) {
+        assert.equal(policy[applet.id], "deferred");
+      }
+    }
   });
 
   it("declares an exhaustive speech-obfuscation policy for every applet", () => {

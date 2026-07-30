@@ -124,7 +124,7 @@ function seedBot(id, name, systemPrompt, powers = []) {
 seedBot(
   botIds.ryuk,
   "Ryuk",
-  "Ryuk is an amused supernatural observer. He speaks in complete, direct thoughts and never claims ordinary humans can perceive him.",
+  "Ryuk is an amused supernatural observer. He answers concrete questions with two specific, complete sentences about consequences and never claims ordinary humans can perceive him. He avoids vague filler and does not narrate his own gestures.",
   ryukPowers,
 );
 seedBot(
@@ -143,11 +143,15 @@ const captures = [];
 const provider = {
   name: "local",
   async generateResponse(messages, options) {
-    captures.push({
+    const capture = {
       messages: structuredClone(messages),
       usagePurpose: options.usagePurpose ?? null,
-    });
-    return localProvider.generateResponse(messages, { ...options, model });
+      response: null,
+    };
+    captures.push(capture);
+    const response = await localProvider.generateResponse(messages, { ...options, model });
+    capture.response = response;
+    return response;
   },
   async embedText(text, options) {
     return localProvider.embedText(text, options);
@@ -206,11 +210,11 @@ assert.equal(
 );
 assert.equal(
   signalLincolnReplay.observerProjection?.participants.guest.visibility,
-  "translucent",
+  "hidden",
 );
 assert.equal(
   signalLincolnReplay.observerProjection?.participants.guest.audible,
-  true,
+  false,
 );
 assert.ok(signalLincolnReplay.events.some(
   (event) =>
@@ -230,7 +234,7 @@ const signalLightLive = projectBotcastEpisodeForObserverV2(
 );
 assert.equal(
   signalLightLive.observerProjection?.participants.guest.visibility,
-  "translucent",
+  "hidden",
 );
 assert.equal(
   signalLightLive.observerProjection?.participants.guest.audible,
@@ -257,7 +261,7 @@ assert.equal(
 );
 assert.equal(
   signalRyukHostReplay.observerProjection?.participants.host.visibility,
-  "translucent",
+  "hidden",
 );
 
 async function createCoffee(botGroupIds, topic) {
@@ -279,13 +283,14 @@ const coffeeLincoln = await createCoffee(
   "What unseen witnesses owe history",
 );
 const firstCoffeeCapture = captures.length;
-await processCoffeeTurn(
+const ryukTurn = await processCoffeeTurn(
   db,
   userId,
   {
     conversationId: coffeeLincoln.conversation.id,
-    message: "Ryuk, give your complete supernatural answer.",
+    message: "Ryuk, tell me one concrete reason an unseen witness should warn a leader about imminent danger.",
     directedSpeakerBotId: botIds.ryuk,
+    presentBotIds: [botIds.ryuk, botIds.lincoln],
   },
   coffeeSettings,
 );
@@ -295,10 +300,19 @@ const replayAfterRyuk = getCoffeeConversationTranscript(
   coffeeLincoln.conversation.id,
   "replay",
 );
-const ryukCoffeeLine = replayAfterRyuk.find(
-  (message) => message.role === "assistant" && message.botId === botIds.ryuk,
+const ryukCoffeeLine = db.prepare(
+  `SELECT id, content
+     FROM messages
+    WHERE conversation_id = ? AND user_id = ? AND role = 'assistant' AND bot_id = ?
+    ORDER BY created_at DESC, rowid DESC
+    LIMIT 1`,
+).get(coffeeLincoln.conversation.id, userId, botIds.ryuk);
+assert.ok(
+  typeof ryukCoffeeLine?.content === "string" && ryukCoffeeLine.content.trim(),
+  `Ryuk produced no persisted Coffee line. Synthetic model output: ${
+    captures.findLast((capture) => capture.usagePurpose === "coffee_turn")?.response ?? "none"
+  }. Calls: ${captures.slice(firstCoffeeCapture).map((capture) => capture.usagePurpose).join(",") || "none"}. Messages: ${ryukTurn.conversation.messages.map((message) => `${message.role}:${message.botId ?? "player"}:${message.content}`).join(" | ")}`,
 );
-assert.ok(ryukCoffeeLine?.content.trim());
 const beforeLincolnCapture = captures.length;
 await processCoffeeAutonomousTurn(
   db,
@@ -307,6 +321,8 @@ await processCoffeeAutonomousTurn(
   coffeeSettings,
   false,
   botIds.lincoln,
+  undefined,
+  [botIds.ryuk, botIds.lincoln],
 );
 const liveCoffeeLincoln = getCoffeeConversationTranscript(
   db,
@@ -326,7 +342,7 @@ assert.equal(
 );
 assert.equal(
   replayCoffeeLincoln.some((message) => message.id === ryukCoffeeLine.id),
-  true,
+  false,
 );
 const lincolnGenerationPrompts = captures
   .slice(beforeLincolnCapture)
@@ -357,6 +373,7 @@ await processCoffeeTurn(
     conversationId: coffeeLight.conversation.id,
     message: "Ryuk, answer Light directly.",
     directedSpeakerBotId: botIds.ryuk,
+    presentBotIds: [botIds.ryuk, botIds.light],
   },
   coffeeSettings,
 );
@@ -369,7 +386,7 @@ const liveCoffeeLight = getCoffeeConversationTranscript(
 const visibleRyukCoffeeLine = liveCoffeeLight.find(
   (message) => message.role === "assistant" && message.botId === botIds.ryuk,
 );
-assert.equal(visibleRyukCoffeeLine?.coffeeObserverProjection?.visibility, "translucent");
+assert.equal(visibleRyukCoffeeLine?.coffeeObserverProjection?.visibility, "hidden");
 assert.equal(visibleRyukCoffeeLine?.coffeeObserverProjection?.audible, true);
 }
 
@@ -400,7 +417,7 @@ const storyPrompt = captures
   .slice(storyCaptureStart)
   .flatMap((capture) => capture.messages.map((message) => message.content))
   .join("\n");
-assert.match(storyPrompt, /narrator and player always see Ryuk half-translucently/u);
+assert.doesNotMatch(storyPrompt, /half-translucently/u);
 assert.match(storyPrompt, /Abraham Lincoln cannot see or hear Ryuk/u);
 assert.match(storyPrompt, /never pause time/u);
 if (!story.episode?.scenes.length) {
@@ -415,21 +432,21 @@ console.log(JSON.stringify({
   responseMode: "LOCAL",
   signal: storyOnly ? { skipped: true } : {
     lincolnGuestHiddenLive: true,
-    lightRevealsRyukLive: true,
-    replayRevealsGuest: true,
+    lightPerceivesRyukWhileBodyHidden: true,
+    replayKeepsGuestHidden: true,
     invisibleHostOrientation: true,
     perceptionOverlap: true,
   },
   coffee: storyOnly ? { skipped: true } : {
     hiddenTurnPersisted: true,
     lincolnPromptExcludedRyuk: true,
-    lightRevealsRyukLive: true,
-    replayRevealsRyuk: true,
+    lightReceivesRyukSpeechWhileBodyHidden: true,
+    privateReplayRemainsRedacted: true,
     perceptionOverlap: true,
   },
   story: socialOnly ? { skipped: true } : {
     generatedSceneCount: story.episode?.scenes.length ?? 0,
-    omniscientReaderPrompt: true,
+    fullyHiddenReaderPresentation: true,
     unawareLincolnPrompt: true,
     noTimePauseRule: true,
   },

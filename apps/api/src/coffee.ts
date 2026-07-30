@@ -208,6 +208,7 @@ import {
   applyCoffeeHearingRepeatMoodPenalty,
   applyCoffeeQuietIgnoredMoodPenalty,
   applyCoffeePowerAfterSpeech,
+  applyCoffeePowerAnnoyanceAfterSpeech,
   applyCoffeePowerMoodBoostAfterSpeech,
   applyCoffeePowerMoodDrainAfterDirectAddress,
   coffeePowerActionBias,
@@ -226,7 +227,8 @@ import {
   coffeePowerHistoryForSpeaker,
   coffeePowerHistoryLimitForSpeaker,
   coffeePowerHearingRepeatDirective,
-  coffeePowerMessageAudience,
+  coffeePowerMessageAudienceForTurn,
+  coffeePowerVoicePresenceMode,
   coffeePowerRouterPromptLines,
   coffeePowerResponseBudgetForBot,
   coffeePowerSpeakerOverride,
@@ -15152,14 +15154,34 @@ async function generateCoffeeBotReply(args: {
       coffeePowerPlan,
       message.botId,
       speaker.id,
+    ) && (
+      message.coffeeAudienceBotIds === null ||
+      message.coffeeAudienceBotIds === undefined ||
+      message.coffeeAudienceBotIds.includes(speaker.id)
     );
     if (!visible && !audible) return [];
-    return [audible ? message : { ...message, content: "..." }];
+    const sourceVoicePresence = coffeePowerVoicePresenceMode(
+      coffeePowerPlan,
+      message.botId,
+    );
+    return [audible
+      ? message
+      : {
+          ...message,
+          content: sourceVoicePresence === "quiet"
+            ? "*[Their voice is too faint to make out.]*"
+            : "...",
+        }];
   });
   const latestTableMessageBeforePerception =
     coffeeBotPromptHistory(arrivalVisibleHistory).at(-1) ?? null;
   const latestVisibleTableMessage =
     coffeeBotPromptHistory(speakerVisibleHistory).at(-1) ?? null;
+  const perceivedLatestAssistantBeforeTurn = latestAssistantBeforeTurn
+    ? speakerVisibleHistory.find(
+        (message) => message.id === latestAssistantBeforeTurn.id,
+      ) ?? null
+    : null;
   const speakerVisibleMessageIds = new Set(speakerVisibleHistory.map((message) => message.id));
   const speakerHistoryWasArrivalScoped =
     speakerVisibleHistory.length !== speakerHistorySource.length;
@@ -15169,7 +15191,10 @@ async function generateCoffeeBotReply(args: {
   const speakerSawLatestTableMomentWithoutHearingIt = Boolean(
     latestTableMessageBeforePerception?.role === "assistant" &&
       latestVisibleTableMessage?.id === latestTableMessageBeforePerception.id &&
-      latestVisibleTableMessage.content === "..." &&
+      (
+        latestVisibleTableMessage.content === "..." ||
+        /too faint to make out/iu.test(latestVisibleTableMessage.content)
+      ) &&
       latestTableMessageBeforePerception.content !== "...",
   );
   const speakerTableFocus = speakerEternallyIntroduces && sessionKickoff
@@ -15260,7 +15285,7 @@ async function generateCoffeeBotReply(args: {
               : null,
           sourceText:
             turnKind === "autonomous"
-              ? latestAssistantBeforeTurn?.content ?? null
+              ? perceivedLatestAssistantBeforeTurn?.content ?? null
               : null,
           directlyAddressed:
             turnKind === "autonomous" && addressedBotId === speaker.id,
@@ -15271,6 +15296,20 @@ async function generateCoffeeBotReply(args: {
             ? group.find((bot) => bot.id === priorAssistantSpeakerBotId)?.name ?? "the prior speaker"
             : "the table audience",
         settings.theme,
+        new Set(
+          speakerPromptGroup
+            .filter((peer) =>
+              peer.id !== speaker.id &&
+              speakerVisibleHistory.some((message) =>
+                /\b(?:microscopic|tiny|small|little|large|big|giant|huge|colossal|titanic|size|stature|short|towering)\b/iu.test(
+                  message.content,
+                ) && message.content.toLocaleLowerCase().includes(
+                  peer.name.toLocaleLowerCase(),
+                )
+              )
+            )
+            .map((peer) => peer.id),
+        ),
       ),
       speakerPerceptionPrompt,
       !speakerEternallyIntroduces ? coffeeMoodBoostPromptForSpeakerV1({
@@ -15766,6 +15805,12 @@ async function generateCoffeeBotReply(args: {
       });
   const assistantNow = new Date().toISOString();
   const assistantMessageId = randomId(12);
+  const coffeeAudienceBotIds = coffeePowerMessageAudienceForTurn({
+    plan: coffeePowerPlan,
+    speakerBotId: speaker.id,
+    candidateListenerBotIds: turnGroup.map((bot) => bot.id),
+    stableTurnKey: `${row.id}:${assistantMessageId}`,
+  });
   let nextSocialByBotId = computeNextCoffeeSocialState({
     previousByBotId: preTurnSocialByBotId,
     group,
@@ -15785,6 +15830,17 @@ async function generateCoffeeBotReply(args: {
       socialByBotId: nextSocialByBotId,
     });
   }
+  const annoyanceOutcome = !speakerIsMutedForTurn
+    ? applyCoffeePowerAnnoyanceAfterSpeech({
+        plan: coffeePowerPlan,
+        speakerBotId: speaker.id,
+        sourceMessageId: assistantMessageId,
+        audiblePeerBotIds: coffeeAudienceBotIds ?? turnGroup.map((bot) => bot.id),
+        socialByBotId: nextSocialByBotId,
+        occurredAt: assistantNow,
+      })
+    : { socialByBotId: nextSocialByBotId, events: [] };
+  nextSocialByBotId = annoyanceOutcome.socialByBotId;
   const moodBoostRecipientBotIds = !speakerIsMutedForTurn
     ? resolveCoffeeMoodBoostRecipientIdsV1({
         line: replyText,
@@ -15863,7 +15919,6 @@ async function generateCoffeeBotReply(args: {
     }
   }
 
-  const coffeeAudienceBotIds = coffeePowerMessageAudience(coffeePowerPlan, speaker.id);
   const replyAddressedBotId = extractLastAddressedBotId({
     line: replyText,
     speakerBotId: speaker.id,
@@ -16086,6 +16141,7 @@ async function generateCoffeeBotReply(args: {
           ...(perceptionOverlapEvent ? [perceptionOverlapEvent] : []),
           ...moodBoostOutcome.events,
           ...moodDrainOutcome.events,
+          ...annoyanceOutcome.events,
           ...coffeeReplayMoodEvents,
           {
             v: 1,
@@ -16102,6 +16158,7 @@ async function generateCoffeeBotReply(args: {
           ...(perceptionOverlapEvent ? [perceptionOverlapEvent] : []),
           ...moodBoostOutcome.events,
           ...moodDrainOutcome.events,
+          ...annoyanceOutcome.events,
           ...coffeeReplayMoodEvents,
         ];
   const coffeeReplayEvents: CoffeeReplayEventPayload[] = listenerReaction

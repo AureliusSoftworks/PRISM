@@ -24,15 +24,16 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet | Version | Status | Notes |
 | --- | --- | --- | --- |
-| Chat | v1.27 | Active | Full playground with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Zen | v1.26 | Active | Calm one-to-one continuity with direct human access to a companion and holder-scoped bot-naming and social-reaction cues. |
-| Coffee | v2.26 | Active | Multi-bot tables with frozen pairwise sight, hearing, holder-scoped bot naming, and soft recipient reactions. |
-| Signal | v1.51 | Active | Synthesized studios tint only microphone lights by host and guest color, alongside Premium video and host-owned final beats. |
+| Chat | v1.28 | Active | Direct companion lane with six-tier size presentation and player-safe Quiet/Loud trims. |
+| Zen | v1.27 | Active | Calm one-to-one continuity with draggable six-tier embodiment and player-safe Quiet/Loud trims. |
+| Coffee | v2.27 | Active | Multi-bot tables with frozen pairwise sight, listener-specific Quiet hearing, one-peer Loud annoyance, and six-tier bodies. |
+| Signal | v1.52 | Active | Frozen six-tier studio bodies plus replayed peer-hearing and one-peer annoyance outcomes. |
 | Arena | v0.0 | Planned | Moderated bot debate surface. |
 | Polling | v0.0 | Planned | AI-powered polling across bot groups. |
 | Feed | v0.0 | Planned | BotBook-style social feed. |
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
+| Story | v0.27 | Preview | Compact adventures with scene audience IDs and one bounded repair pass for missed Quiet speech. |
 | Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
@@ -67,13 +68,12 @@ stages do not block the standalone preview.
 
 - Participant truth is pairwise: each bot receives only the bodies, actions,
   and speech its frozen Power matrix allows.
-- Live observer truth is cast-dependent. A matching bot such as Light can
-  reveal a targeted-Invisible participant half-translucently and audibly; the
-  player never counts as that matching bot.
-- Replay truth restores a spectral participant half-translucently and audibly
-  without retroactively informing unaware participants. Mute, fully hidden or
-  Microscopic presentation, canonical silence, and speech obfuscation retain
-  precedence. Ordinary private channels remain private in replay.
+- Invisible and Microscopic bodies remain fully hidden in live and replay,
+  including attached lights, coffee, and steam. Nameplates, attribution,
+  captions, and otherwise-audible speech remain available to the player.
+- Replay preserves the same body visibility while retaining complete player
+  captions and voice. Participant-only speech restrictions remain private and
+  never become knowledge merely because replay can present the attributed line.
 - Signal and Coffee enforce this directly. Chat and Zen preserve direct human
   access to the selected companion. Slate has no participant-observer contract,
   so the policy is irrelevant there. Arena, Polling, Feed, Games, Gym, Pseudo,
@@ -81,6 +81,18 @@ stages do not block the standalone preview.
   perspectives.
 
 ## Changelog
+
+- Bumped `Chat` to `v1.28`, `Zen` to `v1.27`, `Coffee` to `v2.27`, `Signal`
+  to `v1.52`, and `Story` to `v0.27` for canonical Microscopic, Tiny, Small,
+  Large, Giant, and Colossal bodies at hidden, 50%, 75%, 125%, 150%, and
+  edge-cropped 300% presentations. Nameplates, controls, hitboxes, captions,
+  and cups remain normal-sized; Microscopic, Colossal, and Invisible suppress
+  cups. Quiet now reaches the player while each bot listener gets a persisted
+  independent half-hearing roll with no leaked words on a miss. Loud uses one
+  persisted half-chance annoyance target among audible peers. Story persists
+  scene audiences and performs at most one context-redacted repair pass.
+  Planned applets remain deferred and Slate remains irrelevant until an applet
+  explicitly declares support.
 
 ### 2026-07-22
 
@@ -167,8 +179,9 @@ stages do not block the standalone preview.
   to `v1.40` for shared spectral perception. Targeted
   Invisible Powers now separate bot knowledge from live observer projection
   and replay truth. Signal and Coffee persist complete hidden turns and stable
-  overlapping handoffs; replay restores half-translucent bodies, captions, and
-  independently stoppable voice channels.
+  overlapping handoffs. This release's half-translucent replay treatment was
+  superseded by the six-tier update: Invisible bodies now remain fully hidden
+  while attribution, captions, and otherwise-audible voice remain available.
 
 - Bumped `Signal` to `v1.39` for show-scoped film grain across the composited
   studio screen. Align stage now previews and saves its strength from zero to
@@ -232,9 +245,10 @@ stages do not block the standalone preview.
 - Bumped `Chat` to `v1.20`, `Zen` to `v1.19`, `Coffee` to `v2.16`, and `Signal`
   to `v1.26` to separate physical presentation
   Powers. Small changes only avatar scale, Microscopic remains fully unseen
-  even while speaking, Invisible remains continuously half-translucent, and
-  Ghost alone uses the speaking-only reveal. Loud no longer cancels size or
-  visibility; Coffee and Signal freeze these states for replay.
+  even while speaking, and Ghost alone uses the speaking-only reveal. The
+  original half-translucent Invisible treatment was superseded by the six-tier
+  update's fully hidden live-and-replay contract. Loud no longer cancels size
+  or visibility; Coffee and Signal freeze these states for replay.
 
 - Bumped `Signal` to `v1.25` to restore captions to live sessions without
   bringing the full transcript back on screen. Only the active line appears in

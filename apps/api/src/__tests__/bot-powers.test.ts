@@ -10,13 +10,13 @@ import { compileBotPowers } from "../bot-powers.ts";
 import {
   applyCoffeeHearingRepeatMoodPenalty,
   applyCoffeePowerAfterSpeech,
-  applyCoffeeQuietIgnoredMoodPenalty,
+  applyCoffeePowerAnnoyanceAfterSpeech,
   coffeePowerBotCanSpeak,
   coffeePowerBotEchoesAddressedSpeech,
   coffeePowerBotEternallyIntroduces,
   coffeePowerBotMumblesSpeech,
   coffeePowerBotIsMuted,
-  coffeePowerQuietTurnIsIgnored,
+  coffeePowerMessageAudienceForTurn,
   coffeePowerCandorPromptForTurn,
   coffeePowerEchoSourceForTurn,
   coffeePowerBotVisibleTo,
@@ -92,7 +92,7 @@ test("local compiler produces ready structured powers", async () => {
   assert.equal(result.powers[0]?.compiled?.effects[0]?.type, "awareness");
   assert.deepEqual(result.powers[0]?.compiled?.effects[1], {
     type: "avatar_visibility",
-    mode: "translucent",
+    mode: "hidden",
   });
   assert.equal(
     result.powers[0]?.compiled?.sourceHash,
@@ -195,7 +195,7 @@ test("prompt-authored compound invisibility compiles independent Plankton sight 
       type: "speech_audience",
       allowed: [{ kind: "bot", name: "Plankton", botId: "plankton-id" }],
     },
-    { type: "avatar_visibility", mode: "translucent" },
+    { type: "avatar_visibility", mode: "hidden" },
   ]);
 });
 
@@ -216,17 +216,17 @@ test("Loud Simon compiles fixed amplification, larger text, annoyance, and prece
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
     { type: "voice_presence", mode: "loud" },
     {
-      type: "social_influence",
-      trigger: "after_speech",
-      polarity: "negative",
+      type: "annoyance",
+      trigger: "after_spoken_turn",
+      chance: "half",
+      recipients: "one_audible_peer",
       strength: "small",
-      targets: [{ kind: "all" }],
     },
   ]);
   assert.match(result.powers[0]?.compiled?.ruleLabels.join(" ") ?? "", /Amplified voice/u);
 });
 
-test("Quiet Karen compiles fixed attenuation, smaller text, and replay-safe half mute", async () => {
+test("Quiet Karen compiles fixed attenuation and listener-specific replay-safe hearing", async () => {
   const result = await compileBotPowers({
     provider,
     botName: "Quiet Karen",
@@ -242,7 +242,12 @@ test("Quiet Karen compiles fixed attenuation, smaller text, and replay-safe half
   });
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
     { type: "voice_presence", mode: "quiet" },
-    { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
+    {
+      type: "intermittent_audibility",
+      chance: "half",
+      listeners: "bots",
+      missEvent: "too_faint_to_make_out",
+    },
   ]);
   assert.match(result.powers[0]?.compiled?.ruleLabels.join(" ") ?? "", /Smaller spoken text/u);
 });
@@ -523,7 +528,7 @@ test("compiler creates exclusive visibility rules without consulting the local m
       type: "awareness",
       allowed: [{ kind: "bot", name: "Light Yagami" }],
     },
-    { type: "avatar_visibility", mode: "translucent" },
+    { type: "avatar_visibility", mode: "hidden" },
   ]);
 });
 
@@ -595,7 +600,7 @@ test("compiler keeps terror separate when a speaking-only ghost does not request
   );
 });
 
-test("compiler makes Microscopic a smaller permanently hidden avatar without consulting the model", async () => {
+test("compiler makes Microscopic a hidden, quiet, coffee-free compound without consulting the model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
     name: "local",
@@ -621,17 +626,27 @@ test("compiler makes Microscopic a smaller permanently hidden avatar without con
   assert.equal(calls, 0);
   assert.equal(result.powers[0]?.compileStatus, "ready");
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
-    { type: "avatar_scale", mode: "smaller" },
+    { type: "avatar_scale", mode: "microscopic" },
     { type: "avatar_visibility", mode: "hidden" },
+    { type: "voice_presence", mode: "quiet" },
+    {
+      type: "intermittent_audibility",
+      chance: "half",
+      listeners: "bots",
+      missEvent: "too_faint_to_make_out",
+    },
+    { type: "cup_rate", rate: "none" },
   ]);
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
-    "Smaller avatar",
-    "Hidden while microscopic",
+    "Microscopic avatar",
+    "Invisible avatar",
+    "Quiet voice",
+    "No coffee",
   ]);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /at any time/u);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /microscopic/u);
 });
 
-test("compiler makes Invisible continuously half-translucent without consulting the model", async () => {
+test("compiler makes Invisible fully hidden without consulting the model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
     name: "local",
@@ -656,9 +671,9 @@ test("compiler makes Invisible continuously half-translucent without consulting 
   });
   assert.equal(calls, 0);
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
-    { type: "avatar_visibility", mode: "translucent" },
+    { type: "avatar_visibility", mode: "hidden" },
   ]);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /half-translucent/u);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /fully invisible/u);
 });
 
 test("compiler deterministically distinguishes larger and smaller physical forms", async () => {
@@ -697,10 +712,10 @@ test("compiler deterministically distinguishes larger and smaller physical forms
   });
   assert.equal(calls, 0);
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
-    { type: "avatar_scale", mode: "larger" },
+    { type: "avatar_scale", mode: "large" },
   ]);
   assert.deepEqual(result.powers[1]?.compiled?.effects, [
-    { type: "avatar_scale", mode: "smaller" },
+    { type: "avatar_scale", mode: "small" },
   ]);
 });
 
@@ -1206,38 +1221,81 @@ test("Coffee freezes the reusable mumbling effect into its session plan", () => 
   assert.equal(coffeePowerBotMumblesSpeech(plan, "other"), false);
 });
 
-test("Coffee freezes Quiet half-mute outcomes and applies one holder mood cost", () => {
+test("Coffee freezes independent Quiet listener rolls and one-peer Loud annoyance", () => {
   const plan = resolvedPlan({
     karen: [
       { type: "voice_presence", mode: "quiet" },
-      { type: "intermittent_mute", chance: "half", moodPenalty: "small" },
-    ],
-  });
-  const key = Array.from({ length: 40 }, (_, index) => `coffee-turn-${index}`)
-    .find((candidate) => coffeePowerQuietTurnIsIgnored({
-      plan,
-      botId: "karen",
-      stableTurnKey: candidate,
-    }));
-  assert.ok(key);
-  assert.equal(
-    coffeePowerQuietTurnIsIgnored({ plan, botId: "karen", stableTurnKey: key! }),
-    true,
-  );
-  const next = applyCoffeeQuietIgnoredMoodPenalty({
-    socialByBotId: {
-      karen: {
-        disposition: 0.6,
-        valuesFriction: 0.2,
-        restraint: 0.6,
-        engagement: 0.6,
-        leavePressure: 0.1,
+      {
+        type: "intermittent_audibility",
+        chance: "half",
+        listeners: "bots",
+        missEvent: "too_faint_to_make_out",
       },
-    },
-    botId: "karen",
+    ],
+    simon: [
+      { type: "voice_presence", mode: "loud" },
+      {
+        type: "annoyance",
+        trigger: "after_spoken_turn",
+        chance: "half",
+        recipients: "one_audible_peer",
+        strength: "small",
+      },
+    ],
+    ada: [],
+    bert: [],
   });
-  assert.ok((next.karen?.disposition ?? 1) < 0.6);
-  assert.ok((next.karen?.engagement ?? 1) < 0.6);
+  const key = Array.from({ length: 80 }, (_, index) => `coffee-turn-${index}`)
+    .find((candidate) => coffeePowerMessageAudienceForTurn({
+      plan,
+      speakerBotId: "karen",
+      candidateListenerBotIds: ["ada", "bert"],
+      stableTurnKey: candidate,
+    })?.length === 1);
+  assert.ok(key);
+  const heard = coffeePowerMessageAudienceForTurn({
+    plan,
+    speakerBotId: "karen",
+    candidateListenerBotIds: ["ada", "bert"],
+    stableTurnKey: key!,
+  });
+  assert.equal(heard?.length, 1);
+  assert.deepEqual(heard, coffeePowerMessageAudienceForTurn({
+    plan,
+    speakerBotId: "karen",
+    candidateListenerBotIds: ["bert", "ada"],
+    stableTurnKey: key!,
+  }));
+
+  const loudMessageId = Array.from({ length: 80 }, (_, index) => `loud-${index}`)
+    .find((sourceMessageId) => applyCoffeePowerAnnoyanceAfterSpeech({
+      plan,
+      speakerBotId: "simon",
+      sourceMessageId,
+      audiblePeerBotIds: ["ada", "bert"],
+      socialByBotId: { ada: { disposition: 0.6 }, bert: { disposition: 0.6 } },
+      occurredAt: "2026-07-22T00:00:00.000Z",
+    }).events.length === 1);
+  assert.ok(loudMessageId);
+  const annoyance = applyCoffeePowerAnnoyanceAfterSpeech({
+    plan,
+    speakerBotId: "simon",
+    sourceMessageId: loudMessageId!,
+    audiblePeerBotIds: ["ada", "bert"],
+    socialByBotId: {
+      ada: { disposition: 0.6 },
+      bert: { disposition: 0.6 },
+    },
+    occurredAt: "2026-07-22T00:00:00.000Z",
+  });
+  assert.equal(annoyance.events.length, 1);
+  const target = annoyance.events[0]!.botId;
+  assert.ok(target === "ada" || target === "bert");
+  assert.ok((annoyance.socialByBotId[target]?.disposition ?? 1) < 0.6);
+  assert.equal(
+    annoyance.socialByBotId[target === "ada" ? "bert" : "ada"]?.disposition,
+    0.6,
+  );
 });
 
 test("Coffee power plans resolve exact addressed-speech echo sources", () => {
@@ -2270,6 +2328,52 @@ test("Coffee adapts addressed fandom to the current player or peer focus", () =>
   assert.match(prompt, /Coffee fandom: obsessively idolize Ada now/iu);
   assert.match(prompt, /Freshly reveal delight/iu);
   assert.match(prompt, /never stalk, coerce, invent private knowledge/iu);
+});
+
+test("Coffee size cues respect tension thresholds and stop after a visible notice", () => {
+  const obviousPlan = resolvedPlan({
+    normal: [],
+    colossus: [{ type: "avatar_scale", mode: "colossal" }],
+  });
+  obviousPlan.bots.normal!.botName = "Normal Nora";
+  obviousPlan.bots.colossus!.botName = "Colossal Casey";
+  assert.match(
+    coffeePowersPromptForSpeaker(obviousPlan, "normal", ["colossus"]),
+    /Strong, non-repetitive size cue/iu,
+  );
+  assert.doesNotMatch(
+    coffeePowersPromptForSpeaker(
+      obviousPlan,
+      "normal",
+      ["colossus"],
+      {},
+      undefined,
+      undefined,
+      undefined,
+      new Set(["colossus"]),
+    ),
+    /size cue/iu,
+  );
+
+  const subtlePlan = resolvedPlan({
+    normal: [],
+    small: [{ type: "avatar_scale", mode: "small" }],
+  });
+  subtlePlan.bots.normal!.botName = "Normal Nora";
+  subtlePlan.bots.small!.botName = "Small Sam";
+  assert.doesNotMatch(
+    coffeePowersPromptForSpeaker(subtlePlan, "normal", ["small"]),
+    /size cue/iu,
+  );
+  assert.match(
+    coffeePowersPromptForSpeaker(
+      subtlePlan,
+      "normal",
+      ["small"],
+      { normal: { disposition: 0.2, valuesFriction: 0, restraint: 1, engagement: 0.5, leavePressure: 0 } },
+    ),
+    /Tension-gated size cue/iu,
+  );
 });
 
 test("Coffee speaker pressures are contextual, deterministic, and capped", () => {
