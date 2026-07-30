@@ -26,6 +26,10 @@ const debateSource = readFileSync(
   new URL("./DebateExperience.tsx", import.meta.url),
   "utf8",
 );
+const debateStyles = readFileSync(
+  new URL("./DebateExperience.module.css", import.meta.url),
+  "utf8",
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
@@ -111,6 +115,18 @@ describe("Prism Refract integration", () => {
     assert.match(
       companionSource,
       /const preventCapturedFieldInput[\s\S]*event\.preventDefault\(\)[\s\S]*"beforeinput"/u,
+    );
+    assert.match(
+      companionSource,
+      /nextEditableControl[\s\S]*session\.phase === "ready"[\s\S]*session\.candidateValue !== null[\s\S]*acceptPrismRefract\(\);[\s\S]*return;[\s\S]*releasePrismRefract\(true\)/u,
+    );
+    const nextInputAcceptance =
+      companionSource.match(
+        /const nextEditableControl =[\s\S]*?releasePrismRefract\(true\);/u,
+      )?.[0] ?? "";
+    assert.doesNotMatch(
+      nextInputAcceptance,
+      /acceptPrismRefract\(\);[\s\S]*event\.preventDefault\(\)/u,
     );
   });
 
@@ -261,6 +277,14 @@ describe("Prism Refract integration", () => {
       signalStyles,
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*data-prism-refract-state[\s\S]*animation: none/u,
     );
+    assert.match(
+      debateStyles,
+      /data-prism-refract-state="generating"[\s\S]*--debate-refract-rainbow-period[\s\S]*linear-gradient\([\s\S]*var\(--prism-p\)[\s\S]*animation: debateRefractRainbowFlow 1\.7s linear infinite/u,
+    );
+    assert.match(
+      debateStyles,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*data-prism-refract-state[\s\S]*animation: none/u,
+    );
   });
 
   it("removes redundant Signal randomizer/save chrome and preserves normal magic clicks", () => {
@@ -292,7 +316,7 @@ describe("Prism Refract integration", () => {
     assert.match(tutorialSource, /skippable Wield Prism teaching beat/u);
     assert.match(
       tutorialSource,
-      /Space rerolls[\s\S]*Option-clicking the same control[\s\S]*Control-clicking the same control[\s\S]*Enter or Tab keeps the current draft[\s\S]*Option-clicking a different registered control[\s\S]*Control-clicking a different registered control[\s\S]*Escape[\s\S]*restores/u,
+      /Space rerolls[\s\S]*Option-clicking the same control[\s\S]*Control-clicking the same control[\s\S]*Enter, Tab, or clicking another input keeps the current draft[\s\S]*Option-clicking a different registered control[\s\S]*Control-clicking a different registered control[\s\S]*Escape[\s\S]*non-input outside click restores/u,
     );
     assert.match(pageSource, /tutorialProgress\.prismWield/u);
     assert.match(pageSource, /tutorialProgress\.signalRefract/u);

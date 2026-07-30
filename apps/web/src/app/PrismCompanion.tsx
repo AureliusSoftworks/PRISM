@@ -1431,6 +1431,35 @@ export default function PrismCompanion({
         }
         return;
       }
+      const nextEditableControl =
+        event.button === 0 && eventTarget instanceof Element
+          ? eventTarget.closest<
+              | HTMLInputElement
+              | HTMLTextAreaElement
+              | HTMLSelectElement
+              | HTMLElement
+            >(
+              'input:not([type="button"]):not([type="submit"]):not([type="reset"]), textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+            )
+          : null;
+      const nextEditableControlDisabled =
+        nextEditableControl instanceof HTMLInputElement ||
+        nextEditableControl instanceof HTMLTextAreaElement ||
+        nextEditableControl instanceof HTMLSelectElement
+          ? nextEditableControl.disabled
+          : nextEditableControl?.getAttribute("aria-disabled") === "true";
+      if (
+        nextEditableControl &&
+        !nextEditableControlDisabled &&
+        session.registration.target.kind !== "magic" &&
+        session.phase === "ready" &&
+        session.candidateValue !== null
+      ) {
+        // Keep the settled candidate without swallowing the pointer event so
+        // the next control receives its normal click and focus behavior.
+        acceptPrismRefract();
+        return;
+      }
       releasePrismRefract(true);
     };
     const preventCapturedFieldInput = (event: InputEvent): void => {

@@ -182,7 +182,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /floating Prism remains available throughout setup/u);
     assert.match(copy, /bounded, unsaved workbench draft/u);
     assert.match(copy, /Wield Prism into a glowing setup field/u);
-    assert.match(copy, /Space rerolls; Enter or Tab accepts; Escape restores/u);
+    assert.match(
+      copy,
+      /Space rerolls; Enter, Tab, or clicking another input accepts; Escape or a non-input outside click restores/u,
+    );
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
       copy,
