@@ -44,6 +44,7 @@ import {
   botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeV1,
   applyBotPowerEchoResponseV1,
+  botPowerCupRateMultiplierForBotV1,
   botPowerIsMutedV1,
   botPowerResponseIsSilentV1,
   botPowerVoiceGainMultiplierV1,
@@ -8151,7 +8152,13 @@ export function BotcastExperience({
       bot: BotcastBotSummary,
       role: "host" | "guest",
     ): CoffeeCupVisualState | null => {
-      const powerRateMultiplier = cupRateMultiplierForBot(bot);
+      const snapshot = botcastSnapshotPowersForRoleV1(
+        args.currentEpisode,
+        role,
+      );
+      const powerRateMultiplier = snapshot !== null
+        ? botPowerCupRateMultiplierForBotV1(snapshot)
+        : cupRateMultiplierForBot(bot);
       if (powerRateMultiplier <= 0) return null;
       const producerGuestRole =
         role === "guest" && args.currentEpisode.guestKind === "producer";
@@ -8452,13 +8459,15 @@ export function BotcastExperience({
                     : undefined
                 }
               >
-                {avatar(
-                  args.host,
-                  "host",
-                  roleIsSpeaking("host"),
-                  roleIsThinking("host"),
-                  hostSipping && hostCupTravel.sipFaceActive,
-                )}
+                <span className={styles.avatarEmbodiment} aria-hidden="true">
+                  {avatar(
+                    args.host,
+                    "host",
+                    roleIsSpeaking("host"),
+                    roleIsThinking("host"),
+                    hostSipping && hostCupTravel.sipFaceActive,
+                  )}
+                </span>
                 {activeVoiceAction &&
                 args.activeMessage?.speakerRole === "host" ? (
                   <span
@@ -8571,13 +8580,15 @@ export function BotcastExperience({
                     : undefined
                 }
               >
-                {avatar(
-                  args.guest,
-                  "guest",
-                  roleIsSpeaking("guest"),
-                  roleIsThinking("guest"),
-                  guestSipping && guestCupTravel.sipFaceActive,
-                )}
+                <span className={styles.avatarEmbodiment} aria-hidden="true">
+                  {avatar(
+                    args.guest,
+                    "guest",
+                    roleIsSpeaking("guest"),
+                    roleIsThinking("guest"),
+                    guestSipping && guestCupTravel.sipFaceActive,
+                  )}
+                </span>
                 {activeVoiceAction &&
                 args.activeMessage?.speakerRole === "guest" ? (
                   <span

@@ -639,28 +639,29 @@ describe("mode tutorials", () => {
   });
 
   it("explains relative avatar-size Powers across live bot modes", () => {
-    assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /larger or smaller/u);
-    assert.match(
-      MODE_TUTORIALS.chat.steps[0]?.body ?? "",
-      /larger or smaller/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
-      /larger or smaller/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /larger or smaller/u,
-    );
-    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /Microscopic/u);
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /fully unseen even while speaking/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /half-translucent/u,
-    );
+    for (const mode of ["zen", "chat", "coffee"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps[0]?.body ?? "";
+      assert.match(copy, /Microscopic/u);
+      assert.match(copy, /Tiny/u);
+      assert.match(copy, /Small/u);
+      assert.match(copy, /Large/u);
+      assert.match(copy, /Giant/u);
+      assert.match(copy, /Colossal/u);
+    }
+    const signalCopy = MODE_TUTORIALS.botcast.steps[5]?.body ?? "";
+    assert.match(signalCopy, /Microscopic/u);
+    assert.match(signalCopy, /Colossal/u);
+    assert.match(signalCopy, /300% edge-cropped/u);
+    assert.match(signalCopy, /Invisible fully hides the body and lights/u);
+  });
+
+  it("teaches prompt-authored sight and hearing exclusions in social modes", () => {
+    for (const mode of ["coffee", "botcast"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /plain-language Power prompt/u);
+      assert.match(copy, /sight and hearing separately/u);
+      assert.match(copy, /excluded bot stays excluded/u);
+    }
   });
 
   it("explains that Auto requires substantive interview progress", () => {
@@ -776,16 +777,25 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("explains fixed Loud/Quiet presentation and Quiet's mood cost", () => {
-    for (const mode of ["zen", "chat", "coffee", "botcast"] as const) {
-      const copy = MODE_TUTORIALS[mode].steps
-        .map((step) => step.body)
-        .join(" ");
+  it("explains fixed Loud/Quiet presentation and listener-specific outcomes", () => {
+    for (const mode of ["zen", "chat"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
       assert.match(copy, /Loud and Quiet/u);
-      assert.match(copy, /voice-volume|spoken volume/u);
-      assert.match(copy, /half/u);
-      assert.match(copy, /mood/u);
+      assert.match(copy, /voice (?:and )?text trims|text and voice trims/u);
+      assert.doesNotMatch(copy, /Quiet[^.]{0,100}(?:lose|mood cost|mood penalty)/iu);
     }
+    for (const mode of ["coffee", "botcast"] as const) {
+      const copy = MODE_TUTORIALS[mode].steps.map((step) => step.body).join(" ");
+      assert.match(copy, /Quiet/u);
+      assert.match(copy, /Loud/u);
+      assert.match(copy, /50%|half/u);
+      assert.doesNotMatch(copy, /Quiet[^.]{0,100}(?:lose|mood cost|mood penalty)/iu);
+    }
+    assert.match(MODE_TUTORIALS.zen.steps[0]?.body ?? "", /no bot listener/u);
+    assert.match(MODE_TUTORIALS.chat.steps[0]?.body ?? "", /player always receives it/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /too faint/u);
+    assert.match(MODE_TUTORIALS.coffee.steps[0]?.body ?? "", /mildly annoy exactly one audible peer/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[5]?.body ?? "", /neutral too-faint event/u);
   });
 
   it("presents the production applet as Signal", () => {

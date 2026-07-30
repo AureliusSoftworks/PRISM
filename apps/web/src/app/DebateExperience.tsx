@@ -47,6 +47,7 @@ import {
   type DebateSideId,
   type DebateTurnaboutFormatStateV1,
   type DebateTurnaboutStatementV1,
+  type BotPowerAvatarScaleMode,
   type GraphicsQuality,
   type ResponseMode,
 } from "@localai/shared";
@@ -72,6 +73,8 @@ import {
   debateAudienceBotCount,
   debateAudienceBotIsGenerated,
   debateAudienceBotsForSession,
+  debateAudienceConversationFacing,
+  debateAudienceSeatIsTalker,
 } from "./debateAudience";
 import {
   debateArchivedJuryRecordIsCopyable,
@@ -1305,7 +1308,7 @@ function debateBotPresentation(
   glyph: string | null;
   voiceSourceBotId: string;
   visibility: "visible" | "hidden" | "translucent" | "speaking_only";
-  scale: "normal" | "larger" | "smaller";
+  scale: "normal" | BotPowerAvatarScaleMode;
   colorCycle: boolean;
 } {
   const effects =
@@ -8857,7 +8860,14 @@ export function DebateExperience(
                 aria-label={`${audienceBots.length} spectators in the Debate audience`}
               >
                 {audienceBots.map((audienceBot, index) => {
-                  const talking = audienceMurmuring && index % 3 !== 1;
+                  const conversationFacing =
+                    debateAudienceConversationFacing(
+                      index,
+                      audienceBots.length,
+                    );
+                  const talking =
+                    audienceMurmuring &&
+                    debateAudienceSeatIsTalker(index, audienceBots.length);
                   const foleyMouthShape = talking
                     ? DEBATE_AUDIENCE_MOUTH_SHAPES[
                         index % DEBATE_AUDIENCE_MOUTH_SHAPES.length
@@ -8867,6 +8877,7 @@ export function DebateExperience(
                     <span
                       className={styles.debateAudienceBotPortrait}
                       data-talking={talking ? "true" : undefined}
+                      data-conversation-facing={conversationFacing}
                       data-audience-source={
                         debateAudienceBotIsGenerated(audienceBot)
                           ? "generated"
@@ -8908,6 +8919,14 @@ export function DebateExperience(
                           )}
                         </span>
                       )}
+                      {talking ? (
+                        <span
+                          className={styles.debateAudienceChatterChip}
+                          aria-hidden="true"
+                        >
+                          ...
+                        </span>
+                      ) : null}
                     </span>
                   );
                 })}

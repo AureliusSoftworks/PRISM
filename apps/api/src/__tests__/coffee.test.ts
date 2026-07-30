@@ -424,7 +424,8 @@ describe("Coffee spectral observer projection", () => {
     assert.deepEqual(upgradedAgain, upgraded);
     assert.deepEqual(upgraded?.bots.ryuk?.effects, [
       { type: "awareness", allowed: [light] },
-      { type: "avatar_visibility", mode: "translucent" },
+      { type: "avatar_visibility", mode: "hidden" },
+      { type: "cup_rate", rate: "none" },
     ]);
   });
 
@@ -598,6 +599,168 @@ describe("Coffee spectral observer projection", () => {
         lincolnReply?.coffeeReplayEvents?.some(
           (event) => event.kind === "perceptionOverlap",
         ),
+    );
+  });
+
+  it("shows a Quiet line to the player while persisting a missed bot audience", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const name = "Quiet";
+    const intent = "Alice is quiet; each bot listener independently hears only half her lines.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "quiet",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Speak quietly.",
+          observerCue: "Alice can be too faint for an individual bot to make out.",
+          effects: [
+            { type: "voice_presence", mode: "quiet" },
+            {
+              type: "intermittent_audibility",
+              chance: "half",
+              listeners: "bots",
+              missEvent: "too_faint_to_make_out",
+            },
+          ],
+          ruleLabels: ["Quiet voice", "Independent listener hearing"],
+        },
+      }]),
+      ALICE.id,
+    );
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "The amber key",
+    });
+    let missedLine = "";
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const line = `Quiet evidence ${attempt}: the amber key rests under the clock.`;
+      const turn = await withMockedCoffeeFetch(line, () => processCoffeeTurn(
+        db,
+        userId,
+        {
+          conversationId: session.conversation.id,
+          message: `Alice, state clue ${attempt}.`,
+          directedSpeakerBotId: ALICE.id,
+        },
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+      ));
+      const message = turn.conversation.messages.findLast(
+        (candidate) => candidate.botId === ALICE.id,
+      );
+      if (message?.coffeeAudienceBotIds?.length === 0) {
+        assert.equal(message.content, line);
+        missedLine = line;
+        break;
+      }
+    }
+    assert.ok(missedLine);
+    const borisBodies: unknown[] = [];
+    await withMockedCoffeeFetch(
+      "I can only respond to what reached me.",
+      () => processCoffeeAutonomousTurn(
+        db,
+        userId,
+        session.conversation.id,
+        { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        false,
+        BORIS.id,
+      ),
+      { chatBodies: borisBodies },
+    );
+    const prompt = JSON.stringify(borisBodies);
+    assert.doesNotMatch(prompt, new RegExp(missedLine.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.match(prompt, /too faint to make out/u);
+  });
+
+  it("persists Loud annoyance for exactly one audible Coffee peer", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const name = "Loud";
+    const intent = "Alice is audibly loud and half her lines mildly annoy one audible bot peer.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = ?").run(
+      JSON.stringify([{
+        version: 1,
+        id: "loud",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Speak loudly.",
+          observerCue: "One audible peer may be mildly annoyed.",
+          effects: [
+            { type: "voice_presence", mode: "loud" },
+            {
+              type: "annoyance",
+              trigger: "after_spoken_turn",
+              chance: "half",
+              recipients: "one_audible_peer",
+              strength: "small",
+            },
+          ],
+          ruleLabels: ["Loud voice", "May annoy one audible peer"],
+        },
+      }]),
+      ALICE.id,
+    );
+    const session = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      initialTopic: "Volume",
+    });
+    let sourceMessageId = "";
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const turn = await withMockedCoffeeFetch(
+        `A loud but complete point number ${attempt}.`,
+        () => processCoffeeTurn(
+          db,
+          userId,
+          {
+            conversationId: session.conversation.id,
+            message: `Alice, make point ${attempt}.`,
+            directedSpeakerBotId: ALICE.id,
+          },
+          { preferredProvider: "local", sessionRemainingMs: 120_000 },
+        ),
+      );
+      const message = turn.conversation.messages.findLast(
+        (candidate) => candidate.botId === ALICE.id,
+      );
+      const event = message?.coffeeReplayEvents?.find(
+        (candidate) => candidate.kind === "powerAnnoyance",
+      );
+      if (event?.kind === "powerAnnoyance") {
+        assert.equal(event.botId, BORIS.id);
+        assert.ok(event.dispositionAfter < event.dispositionBefore);
+        sourceMessageId = message?.id ?? "";
+        break;
+      }
+    }
+    assert.ok(sourceMessageId);
+    const replay = getCoffeeConversationTranscript(
+      db,
+      userId,
+      session.conversation.id,
+      "replay",
+    );
+    const persisted = replay.find((message) => message.id === sourceMessageId);
+    assert.equal(
+      persisted?.coffeeReplayEvents?.filter(
+        (event) => event.kind === "powerAnnoyance",
+      ).length,
+      1,
     );
   });
 });

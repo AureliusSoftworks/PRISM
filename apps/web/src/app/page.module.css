@@ -765,13 +765,11 @@
     scale 180ms ease;
 }
 
-.storySpriteWrap[data-power-avatar-scale="larger"] {
-  scale: 1.12;
-}
-
-.storySpriteWrap[data-power-avatar-scale="smaller"] {
-  scale: 0.86;
-}
+.storySpriteWrap[data-power-avatar-scale="tiny"] { scale: 0.5; }
+.storySpriteWrap[data-power-avatar-scale="small"] { scale: 0.75; }
+.storySpriteWrap[data-power-avatar-scale="large"] { scale: 1.25; translate: -6% 0; }
+.storySpriteWrap[data-power-avatar-scale="giant"] { scale: 1.5; translate: -16% 0; }
+.storySpriteWrap[data-power-avatar-scale="colossal"] { scale: 3; translate: -58% 0; }
 
 @property --bot-color {
   syntax: "<color>";
@@ -1015,27 +1013,52 @@
   }
 }
 
-/* Size Powers adjust the rendered bot, not seat or page layout geometry. */
-.zenLiveBotPresencePlate[data-power-avatar-scale="larger"]
-  > .botAmbientPresenceRig {
-  scale: 1.12;
-  transform-origin: 50% 86%;
+/* Size Powers transform only the embodied bot rig. Seat geometry, nameplates,
+   cups, controls, captions, and drag authority remain normal-sized. */
+.zenLiveBotPresencePlate,
+.coffeeSeat {
+  --power-avatar-scale: 1;
+  --power-avatar-shift-x: 0%;
 }
 
-.zenLiveBotPresencePlate[data-power-avatar-scale="smaller"]
-  > .botAmbientPresenceRig {
-  scale: 0.86;
-  transform-origin: 50% 86%;
+:is(.zenLiveBotPresencePlate, .coffeeSeat)[data-power-avatar-scale="tiny"] {
+  --power-avatar-scale: 0.5;
+}
+:is(.zenLiveBotPresencePlate, .coffeeSeat)[data-power-avatar-scale="small"] {
+  --power-avatar-scale: 0.75;
+}
+:is(.zenLiveBotPresencePlate, .coffeeSeat)[data-power-avatar-scale="large"] {
+  --power-avatar-scale: 1.25;
+  --power-avatar-outward-shift: 6%;
+}
+:is(.zenLiveBotPresencePlate, .coffeeSeat)[data-power-avatar-scale="giant"] {
+  --power-avatar-scale: 1.5;
+  --power-avatar-outward-shift: 16%;
+}
+:is(.zenLiveBotPresencePlate, .coffeeSeat)[data-power-avatar-scale="colossal"] {
+  --power-avatar-scale: 3;
+  --power-avatar-outward-shift: 58%;
 }
 
-.coffeeSeat[data-power-avatar-scale="larger"] .coffeeSeatPlate {
-  scale: 1.12;
-  transform-origin: 50% 70%;
+.zenLiveBotPresencePlate:not([data-dragging="true"])[data-canvas-side="left"] {
+  --power-avatar-shift-x: calc(-1 * var(--power-avatar-outward-shift, 0%));
+}
+.zenLiveBotPresencePlate:not([data-dragging="true"])[data-canvas-side="right"] {
+  --power-avatar-shift-x: var(--power-avatar-outward-shift, 0%);
+}
+.coffeeSeat[data-power-edge-side="left"] {
+  --power-avatar-shift-x: calc(-1 * var(--power-avatar-outward-shift, 0%));
+}
+.coffeeSeat[data-power-edge-side="right"] {
+  --power-avatar-shift-x: var(--power-avatar-outward-shift, 0%);
 }
 
-.coffeeSeat[data-power-avatar-scale="smaller"] .coffeeSeatPlate {
-  scale: 0.86;
-  transform-origin: 50% 70%;
+.zenLiveBotPresencePlate > .botAmbientPresenceRig,
+.coffeeSeat .coffeeSeatPlate > .botAmbientPresenceRig {
+  scale: var(--power-avatar-scale);
+  translate: var(--power-avatar-shift-x) 0;
+  transform-origin: 50% 78%;
+  transition: scale 180ms ease, translate 180ms ease, opacity 180ms ease;
 }
 
 /* Color Powers animate the holder's rendered accent; inline authored color stays underneath. */
@@ -1047,12 +1070,21 @@
   animation: botPowerSpectrumColorCycle 7.2s linear infinite;
 }
 
+/* Geometry probes remain based on the normal body box even while the art scales. */
+.zenLiveBotPresencePlate[data-power-avatar-scale="tiny"] .zenLiveBotPresenceHitTarget { scale: 2; }
+.zenLiveBotPresencePlate[data-power-avatar-scale="small"] .zenLiveBotPresenceHitTarget { scale: 1.333333; }
+.zenLiveBotPresencePlate[data-power-avatar-scale="large"] .zenLiveBotPresenceHitTarget { scale: 0.8; }
+.zenLiveBotPresencePlate[data-power-avatar-scale="giant"] .zenLiveBotPresenceHitTarget { scale: 0.666667; }
+.zenLiveBotPresencePlate[data-power-avatar-scale="colossal"] .zenLiveBotPresenceHitTarget { scale: 0.333333; }
+
 /* Visibility Powers affect only the embodied avatar, not its seat or transcript. */
-.zenLiveBotPresencePlate[data-power-avatar-visibility="hidden"] {
+.zenLiveBotPresencePlate[data-power-avatar-visibility="hidden"]
+  > .botAmbientPresenceRig {
   opacity: 0;
 }
 
-.zenLiveBotPresencePlate[data-power-avatar-visibility="translucent"] {
+.zenLiveBotPresencePlate[data-power-avatar-visibility="translucent"]
+  > .botAmbientPresenceRig {
   opacity: 0.5;
 }
 
@@ -1060,13 +1092,16 @@
     [data-roster-preview="true"]
   )
   .coffeeSeatPlate[data-live-body-style="zen"] {
+  opacity: 1;
+}
+
+.coffeeSeat[data-power-avatar-visibility="hidden"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"] > .botAmbientPresenceRig {
   opacity: 0;
 }
 
-.coffeeSeat[data-power-avatar-visibility="translucent"]:not(
-    [data-roster-preview="true"]
-  )
-  .coffeeSeatPlate[data-live-body-style="zen"] {
+.coffeeSeat[data-power-avatar-visibility="translucent"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"] > .botAmbientPresenceRig {
   opacity: 0.5;
 }
 

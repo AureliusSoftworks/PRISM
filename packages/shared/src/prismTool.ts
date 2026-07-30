@@ -262,6 +262,20 @@ export interface CoffeeReplayPowerMoodDrainEventPayload {
   occurredAt: string;
 }
 
+export interface CoffeeReplayPowerAnnoyanceEventPayload {
+  v: 1;
+  name: "coffeeReplayEvent";
+  kind: "powerAnnoyance";
+  /** The one eligible audible peer affected by this line. */
+  botId: string;
+  sourceBotId: string;
+  sourceMessageId: string;
+  strength: "small";
+  dispositionBefore: number;
+  dispositionAfter: number;
+  occurredAt: string;
+}
+
 export interface CoffeeReplayTopOffEventPayload {
   v: 1;
   name: "coffeeReplayEvent";
@@ -405,6 +419,7 @@ export type CoffeeReplayEventPayload =
   | CoffeeReplayMoodEventPayload
   | CoffeeReplayPowerMoodBoostEventPayload
   | CoffeeReplayPowerMoodDrainEventPayload
+  | CoffeeReplayPowerAnnoyanceEventPayload
   | CoffeeReplayTopOffEventPayload
   | CoffeeReplayEmptyCupAttemptEventPayload
   | CoffeeReplayPlayerDepartureEventPayload
@@ -1449,6 +1464,35 @@ export function normalizeCoffeeReplayEventPayload(
       powerName,
       strength,
       ...(theme ? { theme } : {}),
+      dispositionBefore,
+      dispositionAfter,
+      occurredAt,
+    };
+  }
+  if (row.kind === "powerAnnoyance") {
+    const sourceBotId = normalizeCoffeeReplayBotId(row.sourceBotId);
+    const sourceMessageId = normalizeCoffeeReplayBotId(row.sourceMessageId);
+    const dispositionBefore = clampCoffeeReplayUnitValue(row.dispositionBefore);
+    const dispositionAfter = clampCoffeeReplayUnitValue(row.dispositionAfter);
+    if (
+      !sourceBotId ||
+      sourceBotId === botId ||
+      !sourceMessageId ||
+      row.strength !== "small" ||
+      dispositionBefore === undefined ||
+      dispositionAfter === undefined ||
+      dispositionAfter > dispositionBefore
+    ) {
+      return undefined;
+    }
+    return {
+      v: 1,
+      name: "coffeeReplayEvent",
+      kind: "powerAnnoyance",
+      botId,
+      sourceBotId,
+      sourceMessageId,
+      strength: "small",
       dispositionBefore,
       dispositionAfter,
       occurredAt,

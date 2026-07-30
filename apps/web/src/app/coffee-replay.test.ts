@@ -68,6 +68,39 @@ describe("coffee replay helpers", () => {
     );
   });
 
+  it("reports the one persisted Loud annoyance target", () => {
+    const review = formatCoffeeReviewClipboardText({
+      messages: [{
+        id: "colossal-line",
+        role: "assistant",
+        botId: "colossal",
+        botName: "Colossal Casey",
+        content: "THIS TABLE IS COZY.",
+        coffeeReplayEvents: [{
+          v: 1 as const,
+          name: "coffeeReplayEvent" as const,
+          kind: "powerAnnoyance" as const,
+          botId: "listener",
+          sourceBotId: "colossal",
+          sourceMessageId: "colossal-line",
+          strength: "small" as const,
+          dispositionBefore: 0.7,
+          dispositionAfter: 0.64,
+          occurredAt: "2026-07-22T07:00:00.000Z",
+        }],
+      }],
+      context: { bots: [
+        { id: "colossal", name: "Colossal Casey" },
+        { id: "listener", name: "Listener Lee" },
+      ] },
+    });
+
+    assert.match(
+      review,
+      /powerAnnoyance: Colossal Casey \(colossal\) mildly annoyed Listener Lee \(listener\) \(small, disposition 0\.70 -> 0\.64, sourceMessage=colossal-line\)/u,
+    );
+  });
+
   it("keeps saved listener reactions out of transcript rows while exposing replay diagnostics", () => {
     const message = {
       id: "message-1",

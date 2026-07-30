@@ -22,14 +22,21 @@ describe("avatar scale Power visual contract", () => {
       pageSource,
       /data-power-avatar-scale=\{[\s\S]{0,160}botPowerAvatarScaleModeV1\(bot\.powers\)/u,
     );
-    assert.match(
-      pageCss,
-      /\.zenLiveBotPresencePlate\[data-power-avatar-scale="larger"\][\s\S]{0,100}> \.botAmbientPresenceRig\s*\{[^}]*scale:\s*1\.12/u,
-    );
-    assert.match(
-      pageCss,
-      /\.zenLiveBotPresencePlate\[data-power-avatar-scale="smaller"\][\s\S]{0,100}> \.botAmbientPresenceRig\s*\{[^}]*scale:\s*0\.86/u,
-    );
+    for (const [mode, scale] of [
+      ["tiny", "0.5"],
+      ["small", "0.75"],
+      ["large", "1.25"],
+      ["giant", "1.5"],
+      ["colossal", "3"],
+    ] as const) {
+      assert.match(
+        pageCss,
+        new RegExp(`data-power-avatar-scale="${mode}"\\] \\{[\\s\\S]{0,100}--power-avatar-scale: ${scale.replace(".", "\\.")}`, "u"),
+      );
+    }
+    assert.match(pageCss, /data-canvas-side="left"[\s\S]{0,120}--power-avatar-shift-x/u);
+    assert.match(pageCss, /:not\(\[data-dragging="true"\]\)/u);
+    assert.match(pageCss, /> \.botAmbientPresenceRig,[\s\S]{0,180}scale: var\(--power-avatar-scale\)/u);
   });
 
   it("uses Coffee's frozen plan after session start and live Powers before it", () => {
@@ -41,14 +48,11 @@ describe("avatar scale Power visual contract", () => {
       pageSource,
       /data-power-avatar-scale=\{seatAvatarScaleMode \?\? undefined\}/u,
     );
-    assert.match(
-      pageCss,
-      /\.coffeeSeat\[data-power-avatar-scale="larger"\] \.coffeeSeatPlate\s*\{[^}]*scale:\s*1\.12/u,
-    );
-    assert.match(
-      pageCss,
-      /\.coffeeSeat\[data-power-avatar-scale="smaller"\] \.coffeeSeatPlate\s*\{[^}]*scale:\s*0\.86/u,
-    );
+    assert.match(pageSource, /const seatPowerEdgeSide[\s\S]{0,420}coffeeSeatStableHash/u);
+    assert.match(pageSource, /data-power-edge-side=\{seatPowerEdgeSide\}/u);
+    assert.match(pageCss, /\.coffeeSeat\[data-power-edge-side="left"\][\s\S]{0,100}--power-avatar-shift-x/u);
+    assert.match(pageCss, /\.coffeeSeat \.coffeeSeatPlate > \.botAmbientPresenceRig[\s\S]{0,160}scale: var\(--power-avatar-scale\)/u);
+    assert.doesNotMatch(pageCss, /coffeeSeatPlate[^}]*scale:\s*(?:0\.5|0\.75|1\.25|1\.5|3)/u);
   });
 
   it("prefers Signal's immutable episode snapshot for live use and replay", () => {
@@ -64,14 +68,21 @@ describe("avatar scale Power visual contract", () => {
       signalSource,
       /data-power-avatar-scale=\{[\s\S]{0,100}roleAvatarScaleMode\("guest", args\.guest\)/u,
     );
-    assert.match(
-      signalCss,
-      /\.avatarRig\[data-power-avatar-scale="larger"\] \{ scale: 1\.12; \}/u,
-    );
-    assert.match(
-      signalCss,
-      /\.avatarRig\[data-power-avatar-scale="smaller"\] \{ scale: \.86; \}/u,
-    );
+    for (const [mode, scale] of [
+      ["tiny", ".5"],
+      ["small", ".75"],
+      ["large", "1.25"],
+      ["giant", "1.5"],
+      ["colossal", "3"],
+    ] as const) {
+      assert.match(
+        signalCss,
+        new RegExp(`\\.avatarRig\\[data-power-avatar-scale="${mode}"\\] \\{[^}]*--signal-power-avatar-scale: ${scale.replace(".", "\\.")}`, "u"),
+      );
+    }
+    assert.match(signalCss, /\.avatarEmbodiment \{[^}]*scale: var\(--signal-power-avatar-scale/u);
+    assert.match(signalCss, /data-signal-presence="host"[\s\S]{0,110}calc\(-1 \* var\(--signal-power-avatar-shift/u);
+    assert.match(signalCss, /data-signal-presence="guest"[\s\S]{0,100}var\(--signal-power-avatar-shift/u);
   });
 
   it("adapts the same relative size to Story's active bot sprite", () => {
@@ -79,13 +90,10 @@ describe("avatar scale Power visual contract", () => {
       pageSource,
       /className=\{styles\.storySpriteWrap\}[\s\S]{0,260}data-power-avatar-scale=\{[\s\S]{0,120}botPowerAvatarScaleModeV1\(npcActor\.bot\.powers\)/u,
     );
-    assert.match(
-      pageCss,
-      /\.storySpriteWrap\[data-power-avatar-scale="larger"\] \{[^}]*scale:\s*1\.12/u,
-    );
-    assert.match(
-      pageCss,
-      /\.storySpriteWrap\[data-power-avatar-scale="smaller"\] \{[^}]*scale:\s*0\.86/u,
-    );
+    assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="tiny"\] \{ scale: 0\.5; \}/u);
+    assert.match(pageCss, /\.storySpriteWrap\[data-power-avatar-scale="small"\] \{ scale: 0\.75; \}/u);
+    assert.match(pageCss, /data-power-avatar-scale="large"[^}]*scale: 1\.25; translate: -6% 0/u);
+    assert.match(pageCss, /data-power-avatar-scale="giant"[^}]*scale: 1\.5; translate: -16% 0/u);
+    assert.match(pageCss, /data-power-avatar-scale="colossal"[^}]*scale: 3; translate: -58% 0/u);
   });
 });

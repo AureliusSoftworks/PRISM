@@ -264,7 +264,7 @@ describe("bot marketplace static catalog", () => {
     const expected = new Map<string, { name: string; effects: string[] }>([
       ["silent-jack", { name: "Mute", effects: ["mute"] }],
       ["lazy-cameron", { name: "Lazy", effects: ["response_budget"] }],
-      ["tiny-bill", { name: "Microscopic", effects: ["avatar_scale", "avatar_visibility"] }],
+      ["tiny-bill", { name: "Tiny", effects: ["avatar_scale"] }],
       [
         "interrupting-tom",
         {
@@ -344,15 +344,22 @@ describe("bot marketplace static catalog", () => {
         botId
       );
       if (botId === "tiny-bill") {
-        const visibility = powers[0]?.compiled?.effects.find(
-          (effect) => effect.type === "avatar_visibility",
+        const scale = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "avatar_scale",
         );
-        assert.equal(visibility?.type, "avatar_visibility");
-        assert.equal(visibility?.mode, "hidden");
-        assert.match(entry.description ?? "", /too small to see at all/u);
+        assert.equal(scale?.type, "avatar_scale");
+        assert.equal(scale?.mode, "tiny");
+        assert.equal(entry.subtitle, "Half-sized, never half-hearted.");
+        assert.match(entry.description ?? "", /half-sized optimist/u);
         assert.match(
           bundle.botJson.profile?.appearance.presence ?? "",
-          /Never visually perceptible/u,
+          /unmistakably present/u,
+        );
+        assert.equal(
+          powers[0]?.compiled?.effects.some(
+            (effect) => effect.type === "avatar_visibility",
+          ),
+          false,
         );
       }
       if (botId === "lazy-cameron") {

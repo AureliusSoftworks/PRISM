@@ -38,7 +38,26 @@ export type BotPowerTopicDirection = "toward" | "away";
 export type BotPowerMemoryMode = "remember" | "forget";
 export type BotPowerResponseBudgetMode = "minimal" | "brief" | "expansive";
 export type BotPowerEnforcement = "soft" | "hard";
-export type BotPowerAvatarScaleMode = "larger" | "smaller";
+export const BOT_POWER_AVATAR_SCALE_MODES_V1 = [
+  "microscopic",
+  "tiny",
+  "small",
+  "large",
+  "giant",
+  "colossal",
+] as const;
+export type BotPowerAvatarScaleMode =
+  (typeof BOT_POWER_AVATAR_SCALE_MODES_V1)[number];
+export const BOT_POWER_AVATAR_SCALE_MULTIPLIER_V1: Readonly<
+  Record<BotPowerAvatarScaleMode, number>
+> = {
+  microscopic: 0,
+  tiny: 0.5,
+  small: 0.75,
+  large: 1.25,
+  giant: 1.5,
+  colossal: 3,
+};
 export type BotPowerAvatarColorCyclePaletteV1 = "spectrum";
 export type BotPowerAvatarColorCycleSpeedV1 = "steady";
 export type BotPowerAvatarVisibilityModeV1 =
@@ -118,7 +137,7 @@ export type BotPowerEffectV1 =
     }
   /** Apply one bounded live-avatar visibility treatment. */
   | { type: "avatar_visibility"; mode: BotPowerAvatarVisibilityModeV1 }
-  /** Render the holder at a restrained relative size without changing layout. */
+  /** Render the holder at one canonical physical size without scaling UI chrome. */
   | { type: "avatar_scale"; mode: BotPowerAvatarScaleMode }
   /** Cycle the holder's rendered accent without changing the saved bot color. */
   | {
@@ -135,6 +154,21 @@ export type BotPowerEffectV1 =
       type: "intermittent_mute";
       chance: "half";
       moodPenalty: BotPowerStrength;
+    }
+  /** Each bot listener independently hears half of the holder's completed lines. */
+  | {
+      type: "intermittent_audibility";
+      chance: "half";
+      listeners: "bots";
+      missEvent: "too_faint_to_make_out";
+    }
+  /** Half of audible lines mildly annoy one eligible audible bot peer. */
+  | {
+      type: "annoyance";
+      trigger: "after_spoken_turn";
+      chance: "half";
+      recipients: "one_audible_peer";
+      strength: "small";
     }
   | {
       type: "social_influence";
@@ -257,6 +291,7 @@ export interface BotPowerV1 {
 
 export interface ResolvedCoffeePowerBotV1 {
   botId: string;
+  botName?: string;
   powerIds: string[];
   powerNames?: string[];
   selfCue: string;
@@ -551,11 +586,12 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
           : "speaking_only",
     };
   }
-  if (
-    effect.type === "avatar_scale" &&
-    (effect.mode === "larger" || effect.mode === "smaller")
-  ) {
-    return { type: "avatar_scale", mode: effect.mode };
+  if (effect.type === "avatar_scale") {
+    if ((BOT_POWER_AVATAR_SCALE_MODES_V1 as readonly unknown[]).includes(effect.mode)) {
+      return { type: "avatar_scale", mode: effect.mode as BotPowerAvatarScaleMode };
+    }
+    if (effect.mode === "smaller") return { type: "avatar_scale", mode: "small" };
+    if (effect.mode === "larger") return { type: "avatar_scale", mode: "large" };
   }
   if (effect.type === "avatar_color_cycle") {
     return {
@@ -578,6 +614,23 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
       type: "intermittent_mute",
       chance: "half",
       moodPenalty: normalizeStrength(effect.moodPenalty),
+    };
+  }
+  if (effect.type === "intermittent_audibility") {
+    return {
+      type: "intermittent_audibility",
+      chance: "half",
+      listeners: "bots",
+      missEvent: "too_faint_to_make_out",
+    };
+  }
+  if (effect.type === "annoyance") {
+    return {
+      type: "annoyance",
+      trigger: "after_spoken_turn",
+      chance: "half",
+      recipients: "one_audible_peer",
+      strength: "small",
     };
   }
   if (effect.type === "social_influence") {
@@ -753,69 +806,222 @@ export function normalizeCompiledBotPowerV1(value: unknown): CompiledBotPowerV1 
   };
 }
 
+export function botPowerAvatarScaleModeFromDescriptionV1(
+  nameValue: unknown,
+  intentValue: unknown,
+): BotPowerAvatarScaleMode | null {
+  const name = compactText(nameValue, BOT_POWER_NAME_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const exactNames: Record<string, BotPowerAvatarScaleMode> = {
+    microscopic: "microscopic",
+    infinitesimal: "microscopic",
+    nanoscopic: "microscopic",
+    subvisible: "microscopic",
+    tiny: "tiny",
+    miniature: "tiny",
+    diminutive: "tiny",
+    "pint-sized": "tiny",
+    "pint sized": "tiny",
+    small: "small",
+    little: "small",
+    compact: "small",
+    undersized: "small",
+    large: "large",
+    big: "large",
+    oversized: "large",
+    giant: "giant",
+    gigantic: "giant",
+    huge: "giant",
+    massive: "giant",
+    towering: "giant",
+    colossal: "colossal",
+    titanic: "colossal",
+    gargantuan: "colossal",
+    "kaiju-sized": "colossal",
+    "kaiju sized": "colossal",
+    "screen-filling": "colossal",
+    "screen filling": "colossal",
+  };
+  if (exactNames[name]) return exactNames[name];
+  const combined = `${name} ${intent}`;
+  if (/\b(?:50\s*%|half)[ -]?(?:normal[ -]?)?(?:size|sized)?\s*smaller\b|\b(?:half-sized|half sized|half (?:of )?(?:the )?normal size)\b/u.test(combined)) {
+    return "tiny";
+  }
+  if (/\b25\s*%\s*smaller\b/u.test(combined)) return "small";
+  if (/\b25\s*%\s*larger\b/u.test(combined)) return "large";
+  if (/\b50\s*%\s*larger\b/u.test(combined)) return "giant";
+  if (/\b(?:too\s+large\s+to\s+fit|won't\s+fit\s+(?:on|in)\s+(?:the\s+)?screen|screen-filling|kaiju-sized)\b/u.test(combined)) {
+    return "colossal";
+  }
+  const statedAsPhysicalState = (words: string): boolean =>
+    new RegExp(
+      `\\b(?:is|becomes?|turns?|remains?|looks?|appears?|renders?|makes?\\s+(?:the\\s+)?(?:bot|them|it|him|her))\\s+(?:physically\\s+)?(?:a\\s+)?(?:${words})\\b`,
+      "u",
+    ).test(intent);
+  if (statedAsPhysicalState("microscopic|infinitesimal|nanoscopic|subvisible")) return "microscopic";
+  if (statedAsPhysicalState("tiny|miniature|diminutive|pint-sized")) return "tiny";
+  if (statedAsPhysicalState("small|smaller|little|compact|undersized")) return "small";
+  if (statedAsPhysicalState("large|larger|big|oversized")) return "large";
+  if (statedAsPhysicalState("giant|gigantic|huge|massive|towering")) return "giant";
+  if (statedAsPhysicalState("colossal|titanic|gargantuan|kaiju-sized|screen-filling")) return "colossal";
+  const physically = (words: string): boolean =>
+    new RegExp(
+      `(?:\\b(?:physically|visibly|literally|in\\s+size)\\b[\\s\\S]{0,45}\\b(?:${words})\\b|\\b(?:${words})\\b[\\s\\S]{0,35}\\b(?:body|form|size|sized|stature|avatar|bot)\\b)`,
+      "u",
+    ).test(intent);
+  if (physically("microscopic|infinitesimal|nanoscopic|subvisible")) return "microscopic";
+  if (physically("tiny|miniature|diminutive|pint-sized")) return "tiny";
+  if (physically("small|smaller|little|compact|undersized")) return "small";
+  if (physically("large|larger|big|oversized")) return "large";
+  if (physically("giant|gigantic|huge|massive|towering")) return "giant";
+  if (physically("colossal|titanic|gargantuan|kaiju-sized|screen-filling")) return "colossal";
+  return null;
+}
+
+function replaceEffectTypeV1(
+  effects: readonly BotPowerEffectV1[],
+  type: BotPowerEffectV1["type"],
+  replacement: BotPowerEffectV1,
+): BotPowerEffectV1[] {
+  return [...effects.filter((effect) => effect.type !== type), replacement].slice(0, 8);
+}
+
 function upgradeLegacyAvatarPresentationV1(
   compiled: CompiledBotPowerV1,
   name: string,
+  intent: string,
 ): CompiledBotPowerV1 {
   const normalizedName = name.trim().toLowerCase();
+  const describedScale = botPowerAvatarScaleModeFromDescriptionV1(name, intent);
+  let upgraded = compiled;
+  if (describedScale) {
+    upgraded = {
+      ...upgraded,
+      effects: replaceEffectTypeV1(
+        upgraded.effects,
+        "avatar_scale",
+        { type: "avatar_scale", mode: describedScale },
+      ),
+    };
+  }
+  const hasQuiet = upgraded.effects.some(
+    (effect) => effect.type === "voice_presence" && effect.mode === "quiet",
+  );
+  if (hasQuiet) {
+    upgraded = {
+      ...upgraded,
+      effects: ([
+        ...upgraded.effects.filter((effect) => effect.type !== "intermittent_mute"),
+        ...(upgraded.effects.some((effect) => effect.type === "intermittent_audibility")
+          ? []
+          : [{
+              type: "intermittent_audibility" as const,
+              chance: "half" as const,
+              listeners: "bots" as const,
+              missEvent: "too_faint_to_make_out" as const,
+            }]),
+      ] satisfies BotPowerEffectV1[]).slice(0, 8),
+    };
+  }
+  const hasLoud = upgraded.effects.some(
+    (effect) => effect.type === "voice_presence" && effect.mode === "loud",
+  );
+  if (hasLoud) {
+    upgraded = {
+      ...upgraded,
+      effects: ([
+        ...upgraded.effects.filter(
+          (effect) =>
+            effect.type !== "annoyance" &&
+            !(effect.type === "social_influence" &&
+              effect.trigger === "after_speech" &&
+              effect.polarity === "negative" &&
+              effect.strength === "small"),
+        ),
+        {
+          type: "annoyance" as const,
+          trigger: "after_spoken_turn" as const,
+          chance: "half" as const,
+          recipients: "one_audible_peer" as const,
+          strength: "small" as const,
+        },
+      ] satisfies BotPowerEffectV1[]).slice(0, 8),
+    };
+  }
+  if (describedScale === "microscopic") {
+    upgraded = {
+      ...upgraded,
+      selfCue: "You are microscopic and impossible to see. Your voice is faint, and each bot listener independently has only a fifty-fifty chance to make out a line.",
+      observerCue: "The Power holder is microscopic and unseen. Their faint words may be too quiet for each bot listener to make out.",
+      effects: ([
+        ...upgraded.effects.filter((effect) =>
+          !["avatar_scale", "avatar_visibility", "voice_presence", "intermittent_mute", "intermittent_audibility", "cup_rate"].includes(effect.type)
+        ),
+        { type: "avatar_scale", mode: "microscopic" },
+        { type: "avatar_visibility", mode: "hidden" },
+        { type: "voice_presence", mode: "quiet" },
+        { type: "intermittent_audibility", chance: "half", listeners: "bots", missEvent: "too_faint_to_make_out" },
+        { type: "cup_rate", rate: "none" },
+      ] satisfies BotPowerEffectV1[]).slice(0, 8),
+      ruleLabels: ["Microscopic body", "Invisible avatar", "Quiet voice", "No coffee"],
+    };
+  } else if (describedScale === "colossal") {
+    upgraded = {
+      ...upgraded,
+      selfCue: "You are colossal and too large to fit within the stage. Your booming voice has a fifty-fifty chance to mildly annoy one bot who can hear it.",
+      observerCue: "The Power holder is a screen-filling colossal presence whose booming lines may mildly annoy one audible bot peer.",
+      effects: ([
+        ...upgraded.effects.filter((effect) =>
+          !["avatar_scale", "voice_presence", "annoyance", "cup_rate"].includes(effect.type)
+        ),
+        { type: "avatar_scale", mode: "colossal" },
+        { type: "voice_presence", mode: "loud" },
+        { type: "annoyance", trigger: "after_spoken_turn", chance: "half", recipients: "one_audible_peer", strength: "small" },
+        { type: "cup_rate", rate: "none" },
+      ] satisfies BotPowerEffectV1[]).slice(0, 8),
+      ruleLabels: ["Colossal body", "Loud voice", "May annoy one audible bot", "No coffee"],
+    };
+  }
   const visibilityEffect = compiled.effects.find(
     (effect) => effect.type === "avatar_visibility",
   );
-  if (normalizedName === "microscopic" && visibilityEffect) {
+  const targetedInvisible =
+    normalizedName === "invisible" &&
+    compiled.effects.some((effect) => effect.type === "awareness");
+  if (targetedInvisible) {
     return {
-      ...compiled,
-      selfCue:
-        "You are microscopic: too small to be visually perceived at any time, though your voice can still be heard.",
-      observerCue:
-        "The Power holder is microscopic and cannot be visually perceived, even while speaking; their voice can still be heard.",
-      effects: compiled.effects.map((effect) =>
+      ...upgraded,
+      effects: replaceEffectTypeV1(
+        upgraded.effects,
+        "avatar_visibility",
+        { type: "avatar_visibility", mode: "hidden" },
+      ),
+      ruleLabels: Array.from(
+        new Set([...upgraded.ruleLabels, "Invisible avatar and lights"]),
+      ).slice(0, 8),
+    };
+  }
+  if (
+    normalizedName === "invisible" &&
+    visibilityEffect?.type === "avatar_visibility"
+  ) {
+    return {
+      ...upgraded,
+      selfCue: "You are fully invisible. Your voice and attributed words remain present.",
+      observerCue: "The Power holder is fully invisible, including their attached lights and coffee, while their voice and name remain present.",
+      effects: upgraded.effects.map((effect) =>
         effect.type === "avatar_visibility"
           ? { type: "avatar_visibility", mode: "hidden" }
           : effect,
       ),
-      ruleLabels: compiled.ruleLabels.map((label) =>
-        label === "Appears only while speaking" ? "Hidden while microscopic" : label,
-      ),
+      ruleLabels: ["Invisible avatar and lights", "No coffee", "Voice remains audible"],
     };
   }
-  if (
-    normalizedName === "invisible" &&
-    visibilityEffect?.type === "avatar_visibility" &&
-    visibilityEffect.mode === "speaking_only"
-  ) {
-    return {
-      ...compiled,
-      selfCue:
-        "You remain continuously half-translucent. Speaking does not make you more visible.",
-      observerCue:
-        "The Power holder remains continuously half-translucent, including while speaking.",
-      effects: compiled.effects.map((effect) =>
-        effect.type === "avatar_visibility"
-          ? { type: "avatar_visibility", mode: "translucent" }
-          : effect,
-      ),
-      ruleLabels: compiled.ruleLabels.map((label) =>
-        label === "Appears only while speaking" ? "Half-translucent avatar" : label,
-      ),
-    };
-  }
-  if (
-    normalizedName === "invisible" &&
-    !visibilityEffect &&
-    compiled.effects.some((effect) => effect.type === "awareness")
-  ) {
-    return {
-      ...compiled,
-      effects: [
-        ...compiled.effects,
-        { type: "avatar_visibility" as const, mode: "translucent" as const },
-      ].slice(0, 8),
-      ruleLabels: Array.from(
-        new Set([...compiled.ruleLabels, "Half-translucent observer presence"]),
-      ).slice(0, 8),
-    };
-  }
-  return compiled;
+  return upgraded;
 }
 
 function upgradeLegacyLazyResponseBudgetV1(
@@ -965,7 +1171,7 @@ export function normalizeBotPowerV1(value: unknown): BotPowerV1 | null {
     })
       ? upgradeLegacyLazyResponseBudgetV1(
           upgradeLegacySimulationEvangelistV1(
-            upgradeLegacyAvatarPresentationV1(parsedCompiled, name),
+            upgradeLegacyAvatarPresentationV1(parsedCompiled, name, intent),
             name,
             intent,
           ),
@@ -1527,6 +1733,9 @@ export function botPowerVoicePresenceModeFromEffectsV1(
   value: unknown,
 ): BotPowerVoicePresenceMode | null {
   if (!Array.isArray(value)) return null;
+  const sizeMode = botPowerAvatarScaleModeFromEffectsV1(value);
+  if (sizeMode === "microscopic") return "quiet";
+  if (sizeMode === "colossal") return "loud";
   const modes = value
     .map(normalizeBotPowerEffectV1)
     .filter(
@@ -1600,6 +1809,118 @@ export function botPowerIntermittentMuteEffectV1(
   return botPowerIntermittentMuteEffectFromEffectsV1(
     activeBotPowerEffectsV1(value),
   );
+}
+
+export function botPowerIntermittentAudibilityEffectFromEffectsV1(
+  value: unknown,
+): Extract<BotPowerEffectV1, { type: "intermittent_audibility" }> | null {
+  if (!Array.isArray(value)) return null;
+  const sizeMode = botPowerAvatarScaleModeFromEffectsV1(value);
+  if (sizeMode === "microscopic") {
+    return {
+      type: "intermittent_audibility",
+      chance: "half",
+      listeners: "bots",
+      missEvent: "too_faint_to_make_out",
+    };
+  }
+  if (sizeMode === "colossal") return null;
+  return value
+    .map(normalizeBotPowerEffectV1)
+    .find(
+      (effect): effect is Extract<BotPowerEffectV1, { type: "intermittent_audibility" }> =>
+        effect?.type === "intermittent_audibility",
+    ) ?? null;
+}
+
+export function botPowerIntermittentAudibilityEffectV1(
+  value: unknown,
+): Extract<BotPowerEffectV1, { type: "intermittent_audibility" }> | null {
+  return botPowerIntermittentAudibilityEffectFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+  );
+}
+
+export function botPowerListenerHearsTurnFromEffectsV1(args: {
+  effects: unknown;
+  stableTurnKey: string;
+  listenerBotId: string;
+}): boolean {
+  if (!botPowerIntermittentAudibilityEffectFromEffectsV1(args.effects)) return true;
+  return botPowerDeterministicHalfChanceV1(
+    `intermittent-audibility:${args.stableTurnKey}:${args.listenerBotId}`,
+  );
+}
+
+export function botPowerListenerHearsTurnV1(args: {
+  powers: unknown;
+  stableTurnKey: string;
+  listenerBotId: string;
+}): boolean {
+  return botPowerListenerHearsTurnFromEffectsV1({
+    effects: activeBotPowerEffectsV1(args.powers),
+    stableTurnKey: args.stableTurnKey,
+    listenerBotId: args.listenerBotId,
+  });
+}
+
+export function botPowerAnnoyanceEffectFromEffectsV1(
+  value: unknown,
+): Extract<BotPowerEffectV1, { type: "annoyance" }> | null {
+  if (!Array.isArray(value)) return null;
+  const sizeMode = botPowerAvatarScaleModeFromEffectsV1(value);
+  if (sizeMode === "microscopic") return null;
+  if (sizeMode === "colossal") {
+    return {
+      type: "annoyance",
+      trigger: "after_spoken_turn",
+      chance: "half",
+      recipients: "one_audible_peer",
+      strength: "small",
+    };
+  }
+  return value
+    .map(normalizeBotPowerEffectV1)
+    .find(
+      (effect): effect is Extract<BotPowerEffectV1, { type: "annoyance" }> =>
+        effect?.type === "annoyance",
+    ) ?? null;
+}
+
+export function botPowerAnnoyanceEffectV1(
+  value: unknown,
+): Extract<BotPowerEffectV1, { type: "annoyance" }> | null {
+  return botPowerAnnoyanceEffectFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+export function botPowerAnnoyanceTargetFromEffectsV1(args: {
+  effects: unknown;
+  stableTurnKey: string;
+  eligibleBotIds: readonly string[];
+}): string | null {
+  if (!botPowerAnnoyanceEffectFromEffectsV1(args.effects)) return null;
+  const eligible = [...new Set(args.eligibleBotIds.filter(Boolean))].sort();
+  if (eligible.length === 0) return null;
+  if (!botPowerDeterministicHalfChanceV1(`annoyance:${args.stableTurnKey}`)) return null;
+  let hash = 0x811c9dc5;
+  const seed = `annoyance-target:${args.stableTurnKey}`;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash ^= seed.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return eligible[hash % eligible.length] ?? null;
+}
+
+export function botPowerAnnoyanceTargetV1(args: {
+  powers: unknown;
+  stableTurnKey: string;
+  eligibleBotIds: readonly string[];
+}): string | null {
+  return botPowerAnnoyanceTargetFromEffectsV1({
+    effects: activeBotPowerEffectsV1(args.powers),
+    stableTurnKey: args.stableTurnKey,
+    eligibleBotIds: args.eligibleBotIds,
+  });
 }
 
 /** Stable 50/50 coin used by persisted/replayable Power outcomes. */
@@ -1678,6 +1999,7 @@ export function botPowerAvatarVisibilityModeFromEffectsV1(
   value: unknown,
 ): BotPowerAvatarVisibilityModeV1 | null {
   if (!Array.isArray(value)) return null;
+  if (botPowerAvatarScaleModeFromEffectsV1(value) === "microscopic") return "hidden";
   const modes = value
     .map(normalizeBotPowerEffectV1)
     .filter(
@@ -1737,11 +2059,17 @@ export function botPowerPairwisePerceptionFromEffectsV1(
   const avatarMode = botPowerAvatarVisibilityModeFromEffectsV1(effects);
   const presentationVisible = avatarMode !== "hidden" &&
     (avatarMode !== "speaking_only" || options.holderSpeaking === true);
+  const hasExplicitAwareness = effects.some((effect) => effect.type === "awareness");
+  const awarenessAllows = botPowerRestrictionAllowsV1(
+    effects,
+    "awareness",
+    matchesTarget,
+  );
   return {
     version: 1,
-    visible:
-      presentationVisible &&
-      botPowerRestrictionAllowsV1(effects, "awareness", matchesTarget),
+    // A targeted awareness rule can grant supernatural perception even while
+    // the embodiment remains hidden from the human-facing stage.
+    visible: hasExplicitAwareness ? awarenessAllows : presentationVisible,
     audible:
       !effects.some((effect) => effect.type === "mute") &&
       botPowerRestrictionAllowsV1(effects, "speech_audience", matchesTarget),
@@ -1864,8 +2192,12 @@ export function botPowerAvatarScaleModeFromEffectsV1(
         effect?.type === "avatar_scale",
     )
     .map((effect) => effect.mode);
-  if (modes.includes("smaller")) return "smaller";
-  return modes.includes("larger") ? "larger" : null;
+  if (modes.includes("microscopic")) return "microscopic";
+  if (modes.includes("tiny")) return "tiny";
+  if (modes.includes("small")) return "small";
+  if (modes.includes("colossal")) return "colossal";
+  if (modes.includes("giant")) return "giant";
+  return modes.includes("large") ? "large" : null;
 }
 
 /** Returns the effective relative avatar size from enabled Ready Powers. */
@@ -1891,6 +2223,52 @@ export function botPowerHasAvatarColorCycleV1(value: unknown): boolean {
   return botPowerHasAvatarColorCycleFromEffectsV1(
     activeBotPowerEffectsV1(value),
   );
+}
+
+export function botPowerPairwiseSizeCueFromEffectsV1(args: {
+  observerName: string;
+  observerEffects: unknown;
+  subjectName: string;
+  subjectEffects: unknown;
+  tense?: boolean;
+  alreadyNoticed?: boolean;
+}): string | null {
+  const observerSize = botPowerAvatarScaleModeFromEffectsV1(args.observerEffects);
+  const subjectSize = botPowerAvatarScaleModeFromEffectsV1(args.subjectEffects);
+  if (observerSize === subjectSize || args.alreadyNoticed) return null;
+  const observerLabel = observerSize ?? "normal-sized";
+  const subjectLabel = subjectSize ?? "normal-sized";
+  const sizes = [observerSize, subjectSize];
+  const subject = compactText(args.subjectName, 80) || "The other bot";
+  const observer = compactText(args.observerName, 80) || "You";
+  if (sizes.includes("microscopic") || sizes.includes("colossal")) {
+    return `Strong, non-repetitive size cue: ${subject} is ${subjectLabel} while ${observer} is ${observerLabel}. You are likely to notice this obvious difference once, in character. Size alone never creates anger.`;
+  }
+  if (sizes.includes("tiny") || sizes.includes("giant")) {
+    return `Optional size cue: ${subject} is ${subjectLabel} while ${observer} is ${observerLabel}. You may remark once if it fits naturally; size alone never creates anger.`;
+  }
+  if ((sizes.includes("small") || sizes.includes("large")) && args.tense) {
+    return `Tension-gated size cue: because you are already tense, you may make one pointed remark about ${subject}'s ${subjectLabel} stature. The size difference did not create the tension.`;
+  }
+  return null;
+}
+
+export function botPowerPairwiseSizeCueV1(args: {
+  observerName: string;
+  observerPowers: unknown;
+  subjectName: string;
+  subjectPowers: unknown;
+  tense?: boolean;
+  alreadyNoticed?: boolean;
+}): string | null {
+  return botPowerPairwiseSizeCueFromEffectsV1({
+    observerName: args.observerName,
+    observerEffects: activeBotPowerEffectsV1(args.observerPowers),
+    subjectName: args.subjectName,
+    subjectEffects: activeBotPowerEffectsV1(args.subjectPowers),
+    tense: args.tense,
+    alreadyNoticed: args.alreadyNoticed,
+  });
 }
 
 export type BotPowerResponseBudgetEffectV1 = Extract<
@@ -2682,7 +3060,16 @@ export function composeBotIdentityMirrorPowersV1(
 }
 
 export function botPowerCupRateMultiplierForBotV1(value: unknown): number {
-  const effect = activeBotPowerEffectsV1(value).find(
+  const effects = activeBotPowerEffectsV1(value);
+  const scaleMode = botPowerAvatarScaleModeFromEffectsV1(effects);
+  if (
+    scaleMode === "microscopic" ||
+    scaleMode === "colossal" ||
+    botPowerAvatarVisibilityModeFromEffectsV1(effects) === "hidden"
+  ) {
+    return 0;
+  }
+  const effect = effects.find(
     (candidate) => candidate.type === "cup_rate",
   );
   if (!effect || effect.type !== "cup_rate") return 1;
@@ -2733,6 +3120,7 @@ export function coffeePowerCupRateMultiplierV1(
   plan: CoffeePowerPlanV1 | null | undefined,
   botId: string
 ): number {
+  if (coffeePowerVesselModeV1(plan, botId) === "none") return 0;
   const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "cup_rate");
   if (!effect || effect.type !== "cup_rate") return 1;
   return effect.rate === "none"
@@ -2751,8 +3139,19 @@ export function coffeePowerVesselModeV1(
   plan: CoffeePowerPlanV1 | null | undefined,
   botId: string
 ): CoffeePowerVesselModeV1 {
-  const effect = plan?.bots[botId]?.effects.find((candidate) => candidate.type === "cup_rate");
-  return effect?.type === "cup_rate" && effect.rate === "none" ? "none" : "coffee";
+  const effects = plan?.bots[botId]?.effects ?? [];
+  const scaleMode = botPowerAvatarScaleModeFromEffectsV1(effects);
+  if (
+    scaleMode === "microscopic" ||
+    scaleMode === "colossal" ||
+    botPowerAvatarVisibilityModeFromEffectsV1(effects) === "hidden"
+  ) {
+    return "none";
+  }
+  const effect = effects.find((candidate) => candidate.type === "cup_rate");
+  return effect?.type === "cup_rate" && effect.rate === "none"
+    ? "none"
+    : "coffee";
 }
 
 /** A no-vessel bot keeps ordinary seeded stay pacing instead of becoming immortal. */

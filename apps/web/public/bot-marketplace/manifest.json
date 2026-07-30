@@ -1207,27 +1207,6 @@
       ]
     },
     {
-      "id": "tiny-bill",
-      "name": "Tiny Bill",
-      "subtitle": "Too small to be perceived",
-      "description": "A microscopic optimist who speaks and acts normally despite being far too small to see at all.",
-      "botHash": "e123aec3dddfd8f55957ad914444e591",
-      "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
-      "memoryCount": 0,
-      "color": "#8dd9ff",
-      "glyph": "lucideTelescope",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "microscopic",
-        "invisible",
-        "tiny"
-      ]
-    },
-    {
       "id": "interrupting-tom",
       "name": "Interrupting Tom",
       "subtitle": "Professional conversation hijacker",
@@ -2847,6 +2826,27 @@
         "introduction",
         "confusion",
         "agitation"
+      ]
+    },
+    {
+      "id": "tiny-bill",
+      "name": "Tiny Bill",
+      "subtitle": "Half-sized, never half-hearted.",
+      "description": "A bright half-sized optimist whose courage, warmth, and appetite for adventure remain gloriously full scale.",
+      "botHash": "e123aec3dddfd8f55957ad914444e591",
+      "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
+      "memoryCount": 0,
+      "color": "#8dd9ff",
+      "glyph": "lucideTelescope",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "tiny",
+        "half-sized",
+        "optimist"
       ]
     }
   ]

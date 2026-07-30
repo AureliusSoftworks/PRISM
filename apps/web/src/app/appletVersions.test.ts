@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOT_POWER_ADDRESSED_FANDOM_MODE_POLICY,
+  BOT_POWER_ANNOYANCE_MODE_POLICY,
   BOT_POWER_AVATAR_SCALE_MODE_POLICY,
   BOT_POWER_AVATAR_COLOR_CYCLE_MODE_POLICY,
   BOT_POWER_AVATAR_VISIBILITY_MODE_POLICY,
@@ -14,6 +15,7 @@ import {
   BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY,
   BOT_POWER_FALSE_NAME_MODE_POLICY,
   BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY,
+  BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
   BOT_POWER_INTERRUPTION_MODE_POLICY,
   BOT_POWER_GHOST_MODE_POLICY,
   BOT_POWER_MUTE_MODE_POLICY,
@@ -66,7 +68,7 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.coffee.version, "2.39");
     assert.equal(PRISM_APPLETS.debate.version, "0.2");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.40");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.52");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.29");
     assert.equal(PRISM_APPLETS.story.status, "planned");
@@ -76,7 +78,7 @@ describe("applet version helpers", () => {
     assert.equal(prismAppletVersionLabel("zen"), "v1.33");
     assert.equal(prismAppletVersionLabel("coffee"), "v2.39");
     assert.equal(prismAppletVersionLabel("debate"), "v0.2");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.40");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.52");
     assert.equal(prismAppletVersionLabel("story"), "v0.29");
     assert.equal(prismAppletVersionLabel("slate"), "v0.8");
   });
@@ -359,6 +361,25 @@ describe("applet version helpers", () => {
       pseudo: "deferred",
       surf: "deferred",
     });
+  });
+
+  it("limits Quiet hearing and Loud annoyance to applets with bot listeners", () => {
+    for (const policy of [
+      BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
+      BOT_POWER_ANNOYANCE_MODE_POLICY,
+    ]) {
+      assert.deepEqual(Object.keys(policy), Object.keys(PRISM_APPLETS));
+      assert.equal(policy.chat, "irrelevant");
+      assert.equal(policy.zen, "irrelevant");
+      assert.equal(policy.coffee, "direct");
+      assert.equal(policy.botcast, "direct");
+      assert.equal(policy.story, "adapted");
+      assert.equal(policy.slate, "irrelevant");
+      for (const applet of prismPlannedRoadmapApplets()) {
+        if (applet.id === "story") continue;
+        assert.equal(policy[applet.id], "deferred");
+      }
+    }
   });
 
   it("declares an exhaustive speech-obfuscation policy for every applet", () => {

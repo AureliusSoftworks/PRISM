@@ -2190,13 +2190,12 @@
   opacity: 0;
 }
 
-.botStagePresence[data-scale="larger"] {
-  --debate-presence-scale: 1.08;
-}
-
-.botStagePresence[data-scale="smaller"] {
-  --debate-presence-scale: 0.92;
-}
+.botStagePresence[data-scale="microscopic"] { --debate-presence-scale: 0; }
+.botStagePresence[data-scale="tiny"] { --debate-presence-scale: 0.5; }
+.botStagePresence[data-scale="small"] { --debate-presence-scale: 0.75; }
+.botStagePresence[data-scale="large"] { --debate-presence-scale: 1.25; }
+.botStagePresence[data-scale="giant"] { --debate-presence-scale: 1.5; }
+.botStagePresence[data-scale="colossal"] { --debate-presence-scale: 3; }
 
 .botStagePresence[data-visibility="hidden"],
 .botStagePresence[data-visibility="speaking_only"]:not([data-speaking="true"]) {
@@ -4878,13 +4877,12 @@
   opacity: 0;
 }
 
-.juryChamberSeat[data-scale="larger"] {
-  scale: 1.15;
-}
-
-.juryChamberSeat[data-scale="smaller"] {
-  scale: 0.82;
-}
+.juryChamberSeat[data-scale="microscopic"] { scale: 0; }
+.juryChamberSeat[data-scale="tiny"] { scale: 0.5; }
+.juryChamberSeat[data-scale="small"] { scale: 0.75; }
+.juryChamberSeat[data-scale="large"] { scale: 1.25; }
+.juryChamberSeat[data-scale="giant"] { scale: 1.5; }
+.juryChamberSeat[data-scale="colossal"] { scale: 3; }
 
 .juryChamberSeat[data-seat="0"] {
   left: 50%;

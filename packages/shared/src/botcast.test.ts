@@ -569,7 +569,7 @@ describe("Signal replayed ghost avatar presence", () => {
           "guest",
         ),
       ),
-      "smaller",
+      "small",
     );
   });
 

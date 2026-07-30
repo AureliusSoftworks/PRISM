@@ -850,6 +850,18 @@ describe("hydrateAssistantMessageParts", () => {
       {
         v: 1,
         name: "coffeeReplayEvent",
+        kind: "powerAnnoyance",
+        botId: "bot-2",
+        sourceBotId: "bot-1",
+        sourceMessageId: "message-1",
+        strength: "small",
+        dispositionBefore: 0.7,
+        dispositionAfter: 0.64,
+        occurredAt: "2026-07-02T15:03:18.000Z",
+      },
+      {
+        v: 1,
+        name: "coffeeReplayEvent",
         kind: "playerSip",
         occurredAt: "2026-07-02T15:03:18.000Z",
         fillId: "fill-1",

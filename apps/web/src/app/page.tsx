@@ -38870,9 +38870,7 @@ function BotPowerBadge({
           ? "Half-translucent spectral presence"
           : "Hidden while idle; appears while speaking";
     if (effect.type === "avatar_scale")
-      return effect.mode === "larger"
-        ? "Slightly larger avatar"
-        : "Slightly smaller avatar";
+      return `${effect.mode.slice(0, 1).toUpperCase()}${effect.mode.slice(1)} physical size`;
     if (effect.type === "avatar_color_cycle")
       return "Avatar continuously cycles through the color spectrum";
     if (effect.type === "voice_presence")
@@ -38883,6 +38881,10 @@ function BotPowerBadge({
       return "Normal-volume gibberish; intended words remain private";
     if (effect.type === "intermittent_mute")
       return `Half of turns go unheard with a ${effect.moodPenalty} mood cost`;
+    if (effect.type === "intermittent_audibility")
+      return "Each bot listener independently hears half of completed lines";
+    if (effect.type === "annoyance")
+      return "Half of audible lines mildly annoy one eligible audible peer";
     if (effect.type === "social_influence") {
       return `${effect.trigger === "session_start" ? "Session start" : "After speaking"}: ${effect.polarity} ${effect.strength} effect on ${targetNames(effect.targets)}`;
     }
@@ -38931,7 +38933,9 @@ function BotPowerBadge({
       return "Only the current other-speaker message each turn";
     if (effect.type === "designation")
       return `${effect.placement === "prefix" ? "Prefixes" : "Suffixes"} other bot names with ${effect.text}`;
-    return `${effect.frequency}: ${effect.cue}`;
+    if (effect.type === "action_bias")
+      return `${effect.frequency}: ${effect.cue}`;
+    return "Active Power effect";
   });
   const title = `${active.map((power) => power.name).join(", ")}${labels.length ? ` — ${labels.join(", ")}` : ""}.${warningText}`;
   const badge = (
@@ -124372,6 +124376,16 @@ function HomeContent(): React.JSX.Element {
                     coffeePowerPlan.bots[bot.id]?.effects,
                   )
                 : botPowerHasAvatarColorCycleV1(bot.powers);
+              const seatPowerEdgeSide =
+                layoutIndex < (coffeeSeatLayoutCount - 1) / 2
+                  ? "left"
+                  : layoutIndex > (coffeeSeatLayoutCount - 1) / 2
+                    ? "right"
+                    : coffeeSeatStableHash(
+                        `${coffeeConversation?.id ?? "coffee"}:${bot.id}:size-edge`,
+                      ) % 2 === 0
+                       ? "left"
+                       : "right";
               const seatDeadAirAsideTalking =
                 activeCoffeeDeadAirAside?.commentatorBotId === bot.id &&
                 !seatPowerMuted;
@@ -125162,6 +125176,7 @@ function HomeContent(): React.JSX.Element {
                   data-power-avatar-color-cycle={
                     seatAvatarColorCycle ? "spectrum" : undefined
                   }
+                  data-power-edge-side={seatPowerEdgeSide}
                   data-identity-mirror-active={
                     identityMirrorState || identityShapeshiftState
                       ? "true"
@@ -129349,6 +129364,17 @@ function HomeContent(): React.JSX.Element {
                               )
                         }
                         isTalking={debateMouthActive}
+                        avatarSfx={botAvatarSfxForProfile(
+                          botSnapshot.voiceProfile,
+                          botSnapshot.id,
+                        )}
+                        avatarSfxState={
+                          avatarState.talking
+                            ? "talking"
+                            : avatarState.thinking
+                              ? "thinking"
+                              : "idle"
+                        }
                         blinkWhileTalking
                         mouthShape={debateMouthShape}
                         moodHint={debateMoodHint}

@@ -153,11 +153,15 @@ import {
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
+  botPowerIntermittentAudibilityEffectV1,
+  botPowerListenerHearsTurnV1,
+  botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerObserverCueLinesV1,
   botPowerObserverProjectionV1,
   botPowerPairwisePerceptionV1,
+  botPowerPairwiseSizeCueV1,
   botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botPowerSelfCueLinesV1,
@@ -8404,6 +8408,44 @@ const BOTCAST_SILENT_HOST_SPEECH_CLAIM_PATTERNS = [
   /\b(?:you|the\s+host)\s+(?:asked|said|told\s+me|argued|claimed|mentioned)\b/iu,
 ] as const;
 
+function botcastQuietHearingOutcomeV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  sourceMessageId: string,
+  listenerBotId: string,
+): boolean | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "power_effect") continue;
+    if (
+      event.payload.effect === "quiet_hearing" &&
+      event.payload.sourceMessageId === sourceMessageId &&
+      event.payload.listenerBotId === listenerBotId &&
+      typeof event.payload.heard === "boolean"
+    ) {
+      return event.payload.heard;
+    }
+  }
+  return null;
+}
+
+function botcastLatestAnnoyanceCueV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  targetBotId: string,
+): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "power_effect") continue;
+    if (
+      event.payload.effect === "annoyance" &&
+      event.payload.targetBotId === targetBotId &&
+      event.payload.strength === "small"
+    ) {
+      return "The other bot's latest amplified line mildly grated on you. Let that color this response lightly without inventing a larger conflict.";
+    }
+  }
+  return null;
+}
+
 /** Rejects lines that turn a saved silent host turn into imaginary speech. */
 export function botcastGuestClaimsSilentHostSpoke(content: string): boolean {
   return BOTCAST_SILENT_HOST_SPEECH_CLAIM_PATTERNS.some((pattern) =>
@@ -8588,9 +8630,23 @@ export function buildBotcastSpeakerPrompt(
         (effect) =>
           effect.type === "identity_mirror" ||
           effect.type === "identity_shapeshift" ||
-          effect.type === "false_name",
+          effect.type === "false_name" ||
+          effect.type === "avatar_scale",
       ),
   );
+  const pairwiseSizeAlreadyNoticed = args.episode.messages.some((message) =>
+    /\b(?:microscopic|tiny|small|little|large|big|giant|huge|colossal|titanic|size|stature|short|towering)\b/iu.test(
+      message.content,
+    ) && message.content.toLocaleLowerCase().includes(peer.name.toLocaleLowerCase())
+  );
+  const pairwiseSizeCue = botPowerPairwiseSizeCueV1({
+    observerName: speaker.name,
+    observerPowers: speaker.powers,
+    subjectName: peer.name,
+    subjectPowers: peer.powers,
+    tense: args.episode.tensionStage !== "calm",
+    alreadyNoticed: pairwiseSizeAlreadyNoticed,
+  });
   const powersPrompt = buildBotPowersPromptBlock([
     ...botPowerSelfCueLinesV1(genericSpeakerCuePowers),
     ...(fandomCue ? [fandomCue] : []),
@@ -8598,17 +8654,25 @@ export function buildBotcastSpeakerPrompt(
     ...(peerTotallyAbsent
       ? []
       : botPowerObserverCueLinesV1(peer.name, genericPeerCuePowers)),
+    ...(peerTotallyAbsent || !pairwiseSizeCue ? [] : [pairwiseSizeCue]),
     ...(botPowerBotNamingCueV1(speaker.name, speaker.powers, [peer.name])
       ? [botPowerBotNamingCueV1(speaker.name, speaker.powers, [peer.name])!]
       : []),
   ]);
-  const identityMirrorPrompt = botcastIdentityMirrorPromptV1({
-    events: args.episode.events,
-    speaker,
-    speakerRole: args.speakerRole,
-  });
-  const activeIdentityMirrorState =
-    botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
+  const annoyanceCue = botcastLatestAnnoyanceCueV1(
+    args.episode.events,
+    speaker.id,
+  );
+  const identityMirrorPrompt = speakerEternallyIntroduces
+    ? null
+    : botcastIdentityMirrorPromptV1({
+        events: args.episode.events,
+        speaker,
+        speakerRole: args.speakerRole,
+      });
+  const activeIdentityMirrorState = speakerEternallyIntroduces
+    ? null
+    : botcastIdentityMirrorStatesV1(args.episode.events).get(speaker.id) ?? null;
   const identityMirrorJustChanged = Boolean(
     activeIdentityMirrorState &&
       activeIdentityMirrorState.sourceMessageId ===
@@ -8848,7 +8912,15 @@ export function buildBotcastSpeakerPrompt(
   const transcript = transcriptMessages
     .map((message) => {
       const peerMessage = message.botId !== speaker.id;
-      const audible = !peerMessage || peerPerception.audible;
+      const quietHearing = peerMessage
+        ? botcastQuietHearingOutcomeV1(
+            args.episode.events,
+            message.id,
+            speaker.id,
+          )
+        : null;
+      const audible = !peerMessage ||
+        (peerPerception.audible && quietHearing !== false);
       const visible = !peerMessage || peerPerception.visible;
       const canonicalSilentResponse = botPowerResponseIsSilentV1(message.content);
       const silentResponse = !audible || canonicalSilentResponse;
@@ -8860,9 +8932,11 @@ export function buildBotcastSpeakerPrompt(
         args.episode.events,
         message.id,
       );
-      const spokenClaim = silentResponse
-        ? BOT_POWER_CANONICAL_SILENCE_V1
-        : botCrosstalkPrimarySpeakerContent(message.content, listenerPlan);
+      const spokenClaim = quietHearing === false
+        ? "[Their voice was too faint to make out.]"
+        : silentResponse
+          ? BOT_POWER_CANONICAL_SILENCE_V1
+          : botCrosstalkPrimarySpeakerContent(message.content, listenerPlan);
       return `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${stageActionText ? `*${stageActionText}* ` : ""}${spokenClaim}`;
     })
     .join("\n");
@@ -9008,6 +9082,7 @@ export function buildBotcastSpeakerPrompt(
         ...(falseNamePrompt ? [falseNamePrompt] : []),
         ...(cloneIdentityPrompt ? [cloneIdentityPrompt] : []),
         ...(powersPrompt ? [powersPrompt] : []),
+        ...(annoyanceCue ? [annoyanceCue] : []),
         ...(peerPerceptionRule ? [peerPerceptionRule] : []),
         ...(powerEncounterRule ? [powerEncounterRule] : []),
         ...(candorRule ? [candorRule] : []),
@@ -13200,11 +13275,18 @@ export async function advanceBotcastEpisode(
         { holderSpeaking: true },
       )
     : null;
+  const precedingQuietHearing = latestOnAirMessage
+    ? botcastQuietHearingOutcomeV1(
+        episode.events,
+        latestOnAirMessage.id,
+        speaker.id,
+      )
+    : null;
   if (
     episode.guestKind === "bot" &&
     latestOnAirMessage &&
     precedingPerception &&
-    !precedingPerception.audible &&
+    (!precedingPerception.audible || precedingQuietHearing === false) &&
     !botPowerResponseIsSilentV1(latestOnAirMessage.content) &&
     !botPowerResponseIsSilentV1(content)
   ) {
@@ -13388,6 +13470,60 @@ export async function advanceBotcastEpisode(
       );
       return priorPlan?.spokenCue ? [priorPlan.spokenCue] : [];
     });
+  const hasQuietHearingRoll = Boolean(
+    botPowerIntermittentAudibilityEffectV1(speaker.powers),
+  );
+  const listenerHeardLine = listenerPerception.audible &&
+    (!hasQuietHearingRoll || botPowerListenerHearsTurnV1({
+      powers: speaker.powers,
+      stableTurnKey: `${episode.id}:${messageId}`,
+      listenerBotId: listener.id,
+    }));
+  if (hasQuietHearingRoll && episode.guestKind !== "producer") {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "quiet_hearing",
+        sourceBotId: speaker.id,
+        sourceMessageId: messageId,
+        listenerBotId: listener.id,
+        heard: listenerHeardLine,
+        missEvent: listenerHeardLine ? null : "too_faint_to_make_out",
+      },
+      now,
+    );
+  }
+  const annoyanceTargetId = botPowerAnnoyanceTargetV1({
+    powers: speaker.powers,
+    stableTurnKey: `${episode.id}:${messageId}:${speaker.id}`,
+    eligibleBotIds:
+      episode.guestKind !== "producer" &&
+      listenerHeardLine &&
+      !(listenerRole === "guest" && guestAlreadyDeparted)
+        ? [listener.id]
+        : [],
+  });
+  if (annoyanceTargetId) {
+    recordEvent(
+      db,
+      userId,
+      episode.id,
+      "power_effect",
+      {
+        v: 1,
+        effect: "annoyance",
+        sourceBotId: speaker.id,
+        sourceMessageId: messageId,
+        targetBotId: annoyanceTargetId,
+        strength: "small",
+      },
+      now,
+    );
+  }
   let listenerReactionCandidate = powerInterruptionPlan
     ? buildBotCrosstalkListenerReactionPlanV1({
         seed: `signal-power-crosstalk-v1:${episode.id}:${messageId}:${listener.id}`,
@@ -13409,7 +13545,7 @@ export async function advanceBotcastEpisode(
         picklesBeatKind ||
         socialSilenceMarker ||
         episode.guestKind === "producer" ||
-        speakerQuietIgnored ||
+        !listenerHeardLine ||
         (listenerRole === "guest" && guestAlreadyDeparted) ||
         !listenerPerception.audible
       )

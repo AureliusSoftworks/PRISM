@@ -935,6 +935,10 @@ function coffeeReviewReplayEventLine(
     const source = botNameById.get(event.sourceBotId) ?? event.sourceBotId;
     return `- ${event.occurredAt} powerMoodDrain: ${bot} directly addressed ${source} and was drained by ${event.powerName} (${event.strength}, disposition ${coffeeReviewUnitValue(event.dispositionBefore)} -> ${coffeeReviewUnitValue(event.dispositionAfter)}, sourceMessage=${event.sourceMessageId})`;
   }
+  if (event.kind === "powerAnnoyance") {
+    const source = coffeeReviewBotLabel(event.sourceBotId, botNameById);
+    return `- ${event.occurredAt} powerAnnoyance: ${source} mildly annoyed ${bot} (${event.strength}, disposition ${coffeeReviewUnitValue(event.dispositionBefore)} -> ${coffeeReviewUnitValue(event.dispositionAfter)}, sourceMessage=${event.sourceMessageId})`;
+  }
   if (event.kind === "perceptionOverlap") {
     const preceding = coffeeReviewBotLabel(
       event.precedingBotId,

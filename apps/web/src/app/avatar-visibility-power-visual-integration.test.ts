@@ -17,18 +17,18 @@ const signalCss = readFileSync(
 );
 
 describe("avatar visibility Power visual contract", () => {
-  it("keeps Chat and Zen microscopic avatars hidden and Invisible avatars translucent", () => {
+  it("fully hides Chat and Zen embodiments while preserving their outer plate", () => {
     assert.match(
       pageSource,
       /data-power-avatar-visibility=\{[\s\S]{0,180}botPowerAvatarVisibilityModeV1\(bot\.powers\)/u,
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="hidden"\]\s*\{[^}]*opacity:\s*0;/u,
+      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="hidden"\][\s\S]{0,80}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0;/u,
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="translucent"\]\s*\{[^}]*opacity:\s*0\.5;/u,
+      /\.zenLiveBotPresencePlate\[data-power-avatar-visibility="translucent"\][\s\S]{0,80}> \.botAmbientPresenceRig\s*\{[^}]*opacity:\s*0\.5;/u,
     );
   });
 
@@ -58,18 +58,24 @@ describe("avatar visibility Power visual contract", () => {
     );
     assert.match(
       signalCss,
-      /\.avatarRig\[data-power-avatar-visibility="hidden"\] \{ opacity: 0; \}/u,
+      /\.avatarRig\[data-power-avatar-visibility="hidden"\] \.avatarEmbodiment \{ opacity: 0; \}/u,
     );
     assert.match(
       signalCss,
-      /\.avatarRig\[data-power-avatar-visibility="translucent"\] \{ opacity: \.5; \}/u,
+      /\.avatarRig\[data-power-avatar-visibility="translucent"\] \.avatarEmbodiment \{ opacity: \.5; \}/u,
+    );
+    assert.match(
+      signalCss,
+      /\.avatarRig\[data-power-avatar-visibility="hidden"\]::after \{ opacity: 0; animation: none; \}/u,
     );
   });
 
-  it("labels speaking-only, hidden, and translucent states distinctly in Avatar Studio", () => {
-    assert.match(pageSource, /Fully hidden, including while speaking/u);
-    assert.match(pageSource, /Half-translucent spectral presence/u);
-    assert.match(pageSource, /Hidden while idle; appears while speaking/u);
+  it("leaves Signal attribution outside the hidden embodiment", () => {
+    assert.match(
+      signalSource,
+      /<span className=\{styles\.avatarEmbodiment\}[\s\S]{0,600}<\/span>[\s\S]{0,300}className=\{styles\.voiceActionText\}/u,
+    );
+    assert.match(signalCss, /\.avatarRig > \.voiceActionText/u);
   });
 
   it("adapts hidden, translucent, and speaking-only states to Story", () => {
