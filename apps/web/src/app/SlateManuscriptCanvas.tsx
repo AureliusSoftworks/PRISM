@@ -43,7 +43,11 @@ interface SlateManuscriptCanvasProps {
   disabled?: boolean;
   placeholder: string;
   annotations?: readonly SlateDocumentAnnotationV1[];
-  onChange: (value: string, document: SlateSectionDocumentV1) => void;
+  onChange: (
+    value: string,
+    document: SlateSectionDocumentV1,
+    documentKey: string,
+  ) => void;
   onSelectionChange: (selection: SlateCanvasSelection) => void;
   onLockSelection: () => void;
   onDiscussSelection?: () => void;
@@ -214,7 +218,11 @@ export function SlateManuscriptCanvas({
       lastProjectedTextRef.current = next;
       lastProjectedDocumentRef.current = JSON.stringify(nextDocument);
       documentRef.current = nextDocument;
-      onChangeRef.current(next, nextDocument);
+      onChangeRef.current(
+        next,
+        nextDocument,
+        activeDocumentKeyRef.current,
+      );
     },
     onSelectionUpdate: ({ editor: activeEditor }) => {
       const { from, to } = activeEditor.state.selection;

@@ -26,6 +26,7 @@ import {
   slateProjectSourceIsReady,
   slateProjectSparkForCreation,
   slateProjectTitleForCreation,
+  slateCanvasUpdateMatchesActiveSection,
 } from "./slateWorkspaceState.ts";
 
 const structure: SlateStructureItem[] = ["one", "two", "three"].map((id) => ({
@@ -86,6 +87,30 @@ describe("Slate workspace state", () => {
     );
     assert.equal(slateProjectTitleForCreation(""), "Untitled Story");
     assert.equal(slateProjectTitleForCreation("  My Book  "), "My Book");
+  });
+
+  it("rejects stale canvas updates from the empty pre-section editor", () => {
+    assert.equal(
+      slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: "imported-section",
+        documentKey: "no-section",
+      }),
+      false,
+    );
+    assert.equal(
+      slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: "second-section",
+        documentKey: "first-section",
+      }),
+      false,
+    );
+    assert.equal(
+      slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: "imported-section",
+        documentKey: "imported-section",
+      }),
+      true,
+    );
   });
 
   it("turns one natural-language direction into the internal revision action", () => {

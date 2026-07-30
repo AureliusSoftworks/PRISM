@@ -64,6 +64,7 @@ import {
   slateProjectSourceIsReady,
   slateProjectSparkForCreation,
   slateProjectTitleForCreation,
+  slateCanvasUpdateMatchesActiveSection,
   slateProjectOffsetsForSectionSelection,
   slateRevisionActionForDirection,
   slateRevisionScopeForWorkspace,
@@ -2215,10 +2216,15 @@ export default function SlateWorkspace({
   const updateActiveSectionProse = (
     prose: string,
     document?: SlateSectionDocumentV1,
+    documentKey = "no-section",
   ): void => {
     const current = activeSectionRef.current;
     if (
       !current ||
+      !slateCanvasUpdateMatchesActiveSection({
+        activeSectionId: current.id,
+        documentKey,
+      }) ||
       (prose === current.prose &&
         (!document ||
           JSON.stringify(document) === JSON.stringify(current.document)))

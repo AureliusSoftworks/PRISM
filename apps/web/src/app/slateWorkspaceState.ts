@@ -51,6 +51,16 @@ export function slateProjectTitleForCreation(
   return (title.trim() || fallback).slice(0, 180);
 }
 
+export function slateCanvasUpdateMatchesActiveSection({
+  activeSectionId,
+  documentKey,
+}: {
+  activeSectionId: string | null;
+  documentKey: string;
+}): boolean {
+  return activeSectionId !== null && activeSectionId === documentKey;
+}
+
 export function slateRevisionActionForDirection({
   direction,
   selectionLength,
