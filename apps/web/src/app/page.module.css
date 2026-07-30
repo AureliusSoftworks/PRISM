@@ -6992,6 +6992,64 @@
   -webkit-overflow-scrolling: touch;
 }
 
+.appLayout[data-chat-sidebar-hidden="true"] .compose.debateJudgeComposer {
+  position: fixed;
+  right: clamp(24px, 4vw, 64px);
+  bottom: 22px;
+  left: clamp(24px, 4vw, 64px);
+  z-index: 90;
+  width: auto;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line-strong));
+  border-radius: 14px;
+  padding: 9px 12px 11px;
+  background:
+    radial-gradient(
+      ellipse 52% 90% at 50% 0%,
+      color-mix(in srgb, var(--accent) 13%, transparent),
+      transparent 74%
+    ),
+    color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  box-shadow:
+    0 24px 70px color-mix(in srgb, #000 42%, transparent),
+    0 0 34px color-mix(in srgb, var(--accent) 10%, transparent);
+  backdrop-filter: blur(22px) saturate(1.14);
+}
+
+.debateJudgeComposerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 auto 6px;
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.debateJudgeComposerHeader button {
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  font: inherit;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.debateJudgeComposerHeader button:hover:not(:disabled),
+.debateJudgeComposerHeader button:focus-visible {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
+}
+
+.debateJudgeComposerHeader button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .desktopViewportNotice {
   display: none;
 }

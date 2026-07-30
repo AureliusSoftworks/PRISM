@@ -27,6 +27,7 @@ describe("mode tutorials", () => {
         '[data-tutorial-target="debate-evidence"]',
         '[data-tutorial-target="debate-readiness"]',
         '[data-tutorial-target="debate-start"]',
+        '[data-tutorial-target="debate-judge-gavel"]',
         '[data-tutorial-target="debate-case-board"]',
         '[data-tutorial-target="debate-jury-chamber"]',
         '[data-tutorial-target="debate-camera"]',
@@ -52,10 +53,16 @@ describe("mode tutorials", () => {
     assert.match(copy, /private LLM check/u);
     assert.match(copy, /Sources are optional/u);
     assert.match(copy, /Find sources for me/u);
+    assert.match(copy, /later searches add distinct sources/u);
+    assert.match(copy, /up to 12/u);
     assert.match(copy, /LOCAL blocks research before network access/u);
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
     assert.match(copy, /inaccessible speech never enters captions, voice/u);
     assert.match(copy, /shared case board, or listener-facing ballot reasons/u);
+    assert.match(copy, /sparse replay-stable roll/u);
+    assert.match(copy, /own saved Persona/u);
+    assert.match(copy, /one short in-character vocal reaction/u);
+    assert.match(copy, /not a new argument, vote, role change/u);
     assert.match(copy, /one strike calls attention at every phase change/u);
     assert.match(
       copy,
@@ -86,8 +93,15 @@ describe("mode tutorials", () => {
     assert.match(copy, /territory dice remains available/u);
     assert.match(
       copy,
-      /Resume preserves the exact next juror, discussion turn, ballot, or interrupted line/u,
+      /Resume has the moderator or Judge call the proceeding back to order with a saved gavel action/u,
     );
+    assert.match(copy, /preserves the exact next juror, discussion turn/u);
+    assert.match(
+      copy,
+      /neither housekeeping beat enters the readable proceedings or copied transcript/u,
+    );
+    assert.match(copy, /context gavel or Pause becomes available again/u);
+    assert.match(copy, /bot-moderated roles may Pause again immediately/u);
     assert.match(copy, /End early skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
     assert.match(copy, /choose Begin deliberation or Skip deliberation/u);
@@ -118,11 +132,26 @@ describe("mode tutorials", () => {
       /Live Pause first calls the room to order with the moderator’s gavel and announcement/u,
     );
     assert.match(copy, /traditional three-cast majority/u);
+    assert.match(copy, /Gavel stays available throughout/u);
+    assert.match(copy, /Space swings it/u);
+    assert.match(copy, /advocate’s overtime it calls time/u);
+    assert.match(copy, /opens one message to both advocates/u);
+    assert.match(copy, /resumes the exact interrupted schedule/u);
+    assert.match(copy, /three one-tap responses/u);
+    assert.match(copy, /fourth Write my own choice/u);
+    assert.match(copy, /dice to draft editable Judge prose/u);
+    assert.match(copy, /Final rulings stay one-tap/u);
+    assert.match(copy, /two seconds after the first strike/u);
+    assert.match(copy, /extra smashes are pure showmanship/u);
+    assert.match(copy, /eight-second server cooldown/u);
     assert.match(copy, /Public prose arrives with the live voice/u);
     assert.match(copy, /actual animated bot behind an authored side podium/u);
     assert.match(copy, /Each visible podium carries its bot's glyph/u);
     assert.match(copy, /follows floor ownership rather than speech or prose/u);
-    assert.match(copy, /full-width command deck rises/u);
+    assert.match(
+      copy,
+      /Participant and Turnabout actions still rise in a full-width command deck/u,
+    );
     assert.match(copy, /Auto is the quiet default camera/u);
     assert.match(copy, /cuts instantly/u);
     assert.match(copy, /Choose a manual view to hold the shot/u);

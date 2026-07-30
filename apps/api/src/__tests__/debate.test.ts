@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
+  DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   botPowerSourceHashV1,
@@ -29,10 +30,12 @@ import {
   refineDebateCaseBoard,
   resumeDebateSession,
   skipDebateJuryDeliberation,
+  submitDebateJudgeGavelMessage,
   submitDebateInterjection,
   submitDebatePlayerTurn,
   submitDebateTurnaboutAction,
   submitDebateVerdict,
+  swingDebateJudgeGavel,
   type DebateAiRuntime,
 } from "../debate.ts";
 import type {
@@ -130,6 +133,33 @@ class OvertimeProvider extends DebateProviderStub {
   }
 }
 
+class JudgeGavelProvider extends DebateProviderStub {
+  public routePrompt = "";
+  public responsePrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("silently route one unscheduled human Judge")) {
+      this.routePrompt = text;
+      return JSON.stringify({
+        botId: "against",
+        reason: "The question challenges the opposing side's constraint.",
+      });
+    }
+    if (text.includes("human Judge struck the gavel")) {
+      this.responsePrompt = text;
+      return JSON.stringify({
+        content:
+          "The limiting constraint is implementation capacity, so our side would phase the rule carefully.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class JuryProvider extends DebateProviderStub {
   public aftermathPrompts: string[] = [];
   public closingPrompt = "";
@@ -168,6 +198,33 @@ class JuryProvider extends DebateProviderStub {
       return JSON.stringify({
         content:
           "The strongest point is whether the proposal answers the exact tradeoff in the public record.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class PersonaSurpriseProvider extends JuryProvider {
+  public reactionPrompt = "";
+  private readonly reactionBotId: string;
+
+  public constructor(reactionBotId: string) {
+    super();
+    this.reactionBotId = reactionBotId;
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("private PRISM Debate surprise detector")) {
+      this.reactionPrompt = text;
+      return JSON.stringify({
+        surprised: true,
+        botId: this.reactionBotId,
+        expected: "I expected a simpler defense of the proposal.",
+        reaction: "Oh. I see.",
       });
     }
     return super.generateResponse(messages, options);
@@ -334,6 +391,7 @@ function runtime(): DebateAiRuntime {
 function runtimeWith(provider: LlmProvider): DebateAiRuntime {
   return {
     preferredProvider: "local",
+    personaReactionRoll: () => 1,
     local: {
       provider,
       providerName: "local",
@@ -359,6 +417,7 @@ function autoRuntime(
   return {
     preferredProvider: "local",
     responseMode: "auto",
+    personaReactionRoll: () => 1,
     local,
     online,
     lanes: [local, online],
@@ -865,8 +924,8 @@ async function createJuryDebateForRole(
   role: "judge" | "participant" | "spectator",
   extraLibraryBots = 0,
   format: "forum" | "turnabout" = "forum",
+  provider: JuryProvider = new JuryProvider(),
 ) {
-  const provider = new JuryProvider();
   const debateRuntime = runtimeWith(provider);
   seedBot(db, "moderator", "Mira");
   seedBot(db, "for", "Avery");
@@ -1140,6 +1199,132 @@ describe("Debate engine", () => {
       assert.equal(
         participant.events.some((event) =>
           event.stepKey.startsWith("jury_sidebar_"),
+        ),
+        false,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("adds sparse Persona-grounded vocal Foley without changing the floor or ballot state", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new PersonaSurpriseProvider("against");
+      const debateRuntime = {
+        ...runtimeWith(provider),
+        personaReactionRoll: () => 0,
+      };
+      let session = await createJudgeDebate(db, debateRuntime);
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "persona-reaction:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "persona-reaction:opening",
+        },
+        debateRuntime,
+      );
+
+      const opening = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.speakerBotId === session.forAdvocate.id,
+      );
+      const reaction = session.events.find((event) =>
+        event.stepKey.startsWith("persona_reaction_"),
+      );
+      assert.ok(opening);
+      assert.partialDeepStrictEqual(reaction, {
+        kind: "reaction",
+        speakerKind: "advocate",
+        speakerBotId: session.againstAdvocate.id,
+        sideId: "against",
+        content: "Oh. I see.",
+        parentEventId: opening.id,
+        provider: "local",
+        model: "debate-test",
+      });
+      assert.match(provider.reactionPrompt, /saved Persona details/u);
+      assert.match(provider.reactionPrompt, /Basil is thoughtful/u);
+      assert.match(
+        provider.reactionPrompt,
+        /Mere disagreement is not surprise/u,
+      );
+      assert.match(provider.reactionPrompt, /Never use relationship memory/u);
+      assert.equal(session.ballots.length, 0);
+      assert.equal(session.againstAdvocate.sideId, "against");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets visible jurors react while keeping individual Jury Foley out of Participant records", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new PersonaSurpriseProvider("juror-1");
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "forum",
+        provider,
+      );
+      created.runtime.personaReactionRoll = () => 0;
+      let session = created.session;
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "jury-persona-reaction:intro",
+        },
+        created.runtime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "jury-persona-reaction:opening",
+        },
+        created.runtime,
+      );
+
+      const reaction = session.events.find((event) =>
+        event.stepKey.startsWith("persona_reaction_"),
+      );
+      assert.partialDeepStrictEqual(reaction, {
+        kind: "reaction",
+        speakerKind: "juror",
+        speakerBotId: "juror-1",
+        content: "Oh. I see.",
+      });
+      assert.equal(session.jury.phase, "waiting");
+      assert.equal(session.jury.initialBallots.length, 0);
+      assert.equal(session.jury.finalBallots.length, 0);
+
+      const participantView = debateSessionForPlayer({
+        ...session,
+        playerRole: "participant",
+        playerSideId: "against",
+      });
+      assert.equal(
+        participantView.events.some(
+          (event) => event.kind === "reaction" && event.speakerKind === "juror",
         ),
         false,
       );
@@ -1672,6 +1857,215 @@ describe("Debate engine", () => {
       );
       assert.match(provider.correctionPrompt, /restore the scheduled order/u);
       assert.doesNotMatch(provider.correctionPrompt, /Vote independently/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets the player Judge gavel in, address the floor once, and resume the exact scheduled step", async () => {
+    const db = createTestDb();
+    const provider = new JudgeGavelProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        playerJudgeUsesPrism: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "judge-gavel:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "judge-gavel:opening",
+        },
+        debateRuntime,
+      );
+      const resumeStepKey = session.stepKey;
+      const opening = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.stepKey === "opening_for" &&
+          event.speakerBotId === session.forAdvocate.id,
+      );
+      assert.ok(opening);
+      const heardCharacterCount = Math.max(
+        1,
+        Math.floor(opening.content.length / 2),
+      );
+
+      const interrupted = swingDebateJudgeGavel(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "judge-gavel:swing",
+        eventId: opening.id,
+        heardCharacterCount,
+        overtime: false,
+      });
+      assert.equal(interrupted.status, "waiting_for_player");
+      assert.equal(interrupted.stepKey, "judge_gavel_message");
+      assert.equal(interrupted.judgeGavel?.resumeStepKey, resumeStepKey);
+      assert.equal(interrupted.judgeGavel?.resumeStatus, "live");
+      assert.ok(
+        Date.parse(interrupted.judgeGavelCooldownUntil ?? "") - Date.now() <=
+          DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
+      );
+      const revisedOpening = interrupted.events.find(
+        (event) => event.id === opening.id,
+      );
+      assert.equal(revisedOpening?.interrupted, true);
+      assert.equal(revisedOpening?.interruptedBy, "player");
+      assert.ok(
+        (revisedOpening?.content.length ?? opening.content.length) <
+          opening.content.length,
+      );
+      const gavel = interrupted.events.find(
+        (event) => event.kind === "judge_gavel",
+      );
+      assert.partialDeepStrictEqual(gavel, {
+        speakerKind: "player",
+        speakerBotId: DEBATE_PLAYER_JUDGE_BOT_ID,
+        parentEventId: opening.id,
+        gavelReason: "intervention",
+        content: "The Judge calls the room to order.",
+      });
+
+      const resumed = await submitDebateJudgeGavelMessage(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: interrupted.revision,
+          idempotencyKey: "judge-gavel:message",
+          content: "Which practical constraint matters most here?",
+        },
+        debateRuntime,
+      );
+      assert.equal(resumed.status, "live");
+      assert.equal(resumed.stepKey, resumeStepKey);
+      assert.equal(resumed.judgeGavel, null);
+      const playerMessage = resumed.events.find(
+        (event) =>
+          event.kind === "player_turn" &&
+          event.stepKey === "judge_gavel_message",
+      );
+      const answer = resumed.events.find(
+        (event) =>
+          event.kind === "speech" && event.stepKey === "judge_gavel_response",
+      );
+      assert.equal(playerMessage?.speakerBotId, DEBATE_PLAYER_JUDGE_BOT_ID);
+      assert.equal(playerMessage?.parentEventId, gavel?.id);
+      assert.equal(answer?.speakerBotId, session.againstAdvocate.id);
+      assert.equal(answer?.parentEventId, playerMessage?.id);
+      assert.match(provider.routePrompt, /Which practical constraint/u);
+      assert.match(
+        provider.responsePrompt,
+        /previously scheduled Debate order/u,
+      );
+
+      await assert.rejects(
+        async () =>
+          swingDebateJudgeGavel(db, "user-1", session.id, {
+            expectedRevision: resumed.revision,
+            idempotencyKey: "judge-gavel:cooldown",
+            eventId: null,
+            overtime: false,
+          }),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 429 &&
+          /ready again/u.test(error.message),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets the player Judge call time on an overtime advocate without opening an intervention", async () => {
+    const db = createTestDb();
+    const provider = new OvertimeProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        playerJudgeUsesPrism: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "judge-gavel-overtime:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "judge-gavel-overtime:opening",
+        },
+        debateRuntime,
+      );
+      const resumeStepKey = session.stepKey;
+      const opening = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.stepKey === "opening_for" &&
+          event.timing?.status === "overtime",
+      );
+      assert.ok(opening?.timing);
+      const heardCharacterCount = Math.min(
+        opening.content.length - 1,
+        Math.ceil(
+          opening.content.length *
+            (opening.timing.limitMs / opening.timing.estimatedDurationMs),
+        ) + 1,
+      );
+
+      const calledTime = swingDebateJudgeGavel(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "judge-gavel-overtime:swing",
+        eventId: opening.id,
+        heardCharacterCount,
+        overtime: true,
+      });
+      assert.equal(calledTime.status, "live");
+      assert.equal(calledTime.stepKey, resumeStepKey);
+      assert.equal(calledTime.judgeGavel, null);
+      const revisedOpening = calledTime.events.find(
+        (event) => event.id === opening.id,
+      );
+      assert.equal(revisedOpening?.interrupted, true);
+      assert.equal(revisedOpening?.interruptedBy, "player");
+      assert.equal(
+        calledTime.events.some(
+          (event) =>
+            event.kind === "moderator_ruling" &&
+            event.parentEventId === opening.id,
+        ),
+        false,
+      );
+      assert.partialDeepStrictEqual(
+        calledTime.events.find((event) => event.kind === "judge_gavel"),
+        {
+          speakerKind: "player",
+          speakerBotId: DEBATE_PLAYER_JUDGE_BOT_ID,
+          parentEventId: opening.id,
+          gavelReason: "overtime",
+          content: "The Judge calls time.",
+        },
+      );
     } finally {
       db.close();
     }
@@ -2888,12 +3282,110 @@ describe("Debate engine", () => {
         stepKey: "pause",
         content: "This debate is now paused.",
       });
-      const resumed = resumeDebateSession(db, "user-1", created.id, {
+      const resumeRequest = {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:stable:0001",
-      });
+      };
+      const resumed = resumeDebateSession(
+        db,
+        "user-1",
+        created.id,
+        resumeRequest,
+      );
       assert.equal(resumed.status, "live");
       assert.equal(resumed.stepKey, first.stepKey);
+      assert.equal(resumed.events.length, paused.events.length + 1);
+      assert.partialDeepStrictEqual(resumed.events.at(-1), {
+        kind: "judge_gavel",
+        speakerKind: "moderator",
+        speakerBotId: resumed.moderator.id,
+        stepKey: "resume",
+        content: "The proceeding is called back to order.",
+        gavelReason: "resume",
+      });
+      assert.ok(
+        Date.parse(resumed.judgeGavelCooldownUntil ?? "") - Date.now() <=
+          DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
+      );
+      assert.deepEqual(
+        resumeDebateSession(db, "user-1", created.id, resumeRequest),
+        resumed,
+      );
+      assert.throws(
+        () =>
+          swingDebateJudgeGavel(db, "user-1", created.id, {
+            expectedRevision: resumed.revision,
+            idempotencyKey: "resume:context-gavel-cooldown",
+            eventId: null,
+            overtime: false,
+          }),
+        (error: unknown) =>
+          error instanceof HttpError && error.statusCode === 429,
+      );
+      assert.throws(
+        () =>
+          pauseDebateSession(db, "user-1", created.id, {
+            expectedRevision: resumed.revision,
+            idempotencyKey: "resume:pause-cooldown",
+          }),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 429 &&
+          /may pause again/u.test(error.message),
+      );
+
+      const storedRow = db
+        .prepare(
+          "SELECT session_json FROM debate_sessions WHERE id = ? AND user_id = ?",
+        )
+        .get(created.id, "user-1") as { session_json: string };
+      const settledState = JSON.parse(storedRow.session_json) as Record<
+        string,
+        unknown
+      >;
+      settledState.judgeGavelCooldownUntil = new Date(
+        Date.now() - 1,
+      ).toISOString();
+      db.prepare(
+        "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
+      ).run(JSON.stringify(settledState), created.id, "user-1");
+      const pausedAgain = pauseDebateSession(db, "user-1", created.id, {
+        expectedRevision: resumed.revision,
+        idempotencyKey: "resume:pause-after-cooldown",
+      });
+      assert.equal(pausedAgain.status, "paused");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets bot-moderated roles pause immediately after the resume gavel", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createDebateForRole(db, "spectator");
+      const paused = pauseDebateSession(db, "user-1", created.id, {
+        expectedRevision: created.revision,
+        idempotencyKey: "spectator:pause-before-resume",
+      });
+      const resumed = resumeDebateSession(db, "user-1", created.id, {
+        expectedRevision: paused.revision,
+        idempotencyKey: "spectator:resume-gavel",
+      });
+      assert.partialDeepStrictEqual(resumed.events.at(-1), {
+        kind: "judge_gavel",
+        speakerKind: "moderator",
+        speakerBotId: resumed.moderator.id,
+        stepKey: "resume",
+        content: "The proceeding is called back to order.",
+        gavelReason: "resume",
+      });
+      assert.equal(resumed.judgeGavelCooldownUntil, null);
+
+      const pausedAgain = pauseDebateSession(db, "user-1", created.id, {
+        expectedRevision: resumed.revision,
+        idempotencyKey: "spectator:pause-after-resume",
+      });
+      assert.equal(pausedAgain.status, "paused");
     } finally {
       db.close();
     }
@@ -3218,6 +3710,18 @@ describe("Debate engine", () => {
         speakerBotId: paused.moderator.id,
         stepKey: "pause",
         content: "...",
+      });
+      const resumed = resumeDebateSession(db, "user-1", paused.id, {
+        expectedRevision: paused.revision,
+        idempotencyKey: "resume:muted:0001",
+      });
+      assert.partialDeepStrictEqual(resumed.events.at(-1), {
+        kind: "judge_gavel",
+        speakerKind: "moderator",
+        speakerBotId: resumed.moderator.id,
+        stepKey: "resume",
+        content: "...",
+        gavelReason: "resume",
       });
     } finally {
       db.close();

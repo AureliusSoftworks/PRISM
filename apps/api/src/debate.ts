@@ -7,6 +7,8 @@ import {
   DEBATE_JURY_DISCUSSION_TURNS,
   DEBATE_JURY_EARLY_DISCUSSION_TURNS,
   DEBATE_JURY_SIZE,
+  DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
+  DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH,
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_PLAYER_TURN_MAX_LENGTH,
   DEBATE_SCHEMA_VERSION,
@@ -17,6 +19,7 @@ import {
   applyBotPowerResponseBudgetV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerObserverProjectionFromEffectsV1,
+  debateEventIsTranscriptHousekeeping,
   debateFormalityGuidance,
   debateEstimatedSpeechDurationMs,
   botPowerPairwisePerceptionFromEffectsV1,
@@ -57,6 +60,10 @@ import {
   type DebateFormalityId,
   type DebateFormatId,
   type DebateInterjectionRequest,
+  type DebateJudgeGavelMessageRequest,
+  type DebateJudgeGavelReason,
+  type DebateJudgeGavelRequest,
+  type DebateJudgeGavelStateV1,
   type DebateJuryBallotV1,
   type DebateJuryStateV1,
   type DebateJurorSnapshotV1,
@@ -151,6 +158,8 @@ export interface DebateAiRuntime {
   /** Always local; used only for asynchronous, non-blocking case-board distillation. */
   auxiliary?: LlmProvider;
   preferredProvider: ProviderName;
+  /** Test seam for the otherwise replay-stable persona surprise roll. */
+  personaReactionRoll?: (key: string) => number;
 }
 
 const DEBATE_BOT_SELECT = `
@@ -1002,6 +1011,53 @@ function freezeEvidence(value: unknown, now: string): DebateEvidencePacketV1 {
   return { ...evidence, frozenAt: now };
 }
 
+function normalizeJudgeGavelState(
+  value: unknown,
+): DebateJudgeGavelStateV1 | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Partial<DebateJudgeGavelStateV1>;
+  const validStatus = new Set<DebateSessionV1["status"]>([
+    "live",
+    "waiting_for_player",
+    "paused",
+    "completed",
+    "failed",
+    "cancelled",
+  ]);
+  const validPhase = new Set<DebateSessionV1["phase"]>([
+    "opening",
+    "challenge",
+    "rebuttal",
+    "closing",
+    "verdict",
+  ]);
+  if (
+    candidate.status !== "awaiting_message" ||
+    typeof candidate.gavelEventId !== "string" ||
+    typeof candidate.invokedAt !== "string" ||
+    !candidate.resumeStatus ||
+    !validStatus.has(candidate.resumeStatus) ||
+    !candidate.resumePhase ||
+    !validPhase.has(candidate.resumePhase) ||
+    typeof candidate.resumeStepKey !== "string"
+  ) {
+    return null;
+  }
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    status: "awaiting_message",
+    gavelEventId: candidate.gavelEventId,
+    sourceEventId:
+      typeof candidate.sourceEventId === "string"
+        ? candidate.sourceEventId
+        : null,
+    invokedAt: candidate.invokedAt,
+    resumeStatus: candidate.resumeStatus,
+    resumePhase: candidate.resumePhase,
+    resumeStepKey: candidate.resumeStepKey,
+  };
+}
+
 function serializeSessionState(session: DebateSessionV1): string {
   return JSON.stringify({ ...session, events: [] });
 }
@@ -1071,6 +1127,11 @@ function parseSessionRow(
     formality,
     setupPresetId,
     jury,
+    judgeGavel: normalizeJudgeGavelState(parsed.judgeGavel),
+    judgeGavelCooldownUntil:
+      typeof parsed.judgeGavelCooldownUntil === "string"
+        ? parsed.judgeGavelCooldownUntil
+        : null,
     revision: row.revision,
     status: row.status,
     phase: row.phase,
@@ -1122,7 +1183,8 @@ export function debateSessionForPlayer(
       session.jury.enabled &&
       session.playerRole === "participant" &&
       (event.kind === "jury_deliberation" ||
-        (event.kind === "ballot" && event.speakerKind === "juror"))
+        (event.speakerKind === "juror" &&
+          (event.kind === "ballot" || event.kind === "reaction")))
     ) {
       return [];
     }
@@ -1405,6 +1467,8 @@ export function createDebateSession(
     jury,
     playerVerdict: null,
     winnerSideId: null,
+    judgeGavel: null,
+    judgeGavelCooldownUntil: null,
     events: [],
     error: null,
     createdAt: now,
@@ -1473,6 +1537,11 @@ function mutationReplay(
       juryEnabled: jury.enabled,
     }),
     jury,
+    judgeGavel: normalizeJudgeGavelState(parsed.judgeGavel),
+    judgeGavelCooldownUntil:
+      typeof parsed.judgeGavelCooldownUntil === "string"
+        ? parsed.judgeGavelCooldownUntil
+        : null,
     endedEarlyAt:
       typeof parsed.endedEarlyAt === "string" ? parsed.endedEarlyAt : null,
   };
@@ -1713,6 +1782,100 @@ function commitRevisedEventMutation(
   }
 }
 
+function commitJudgeGavelMutation(
+  db: DatabaseSync,
+  userId: string,
+  previous: DebateSessionV1,
+  nextInput: DebateSessionV1,
+  idempotencyKey: string,
+  retainedEvents: readonly DebateEventV1[],
+  newEvents: readonly DebateEventV1[],
+): DebateSessionV1 {
+  const now = new Date().toISOString();
+  const next: DebateSessionV1 = {
+    ...nextInput,
+    revision: previous.revision + 1,
+    updatedAt: now,
+    events: [...retainedEvents, ...newEvents],
+  };
+  const retainedSequence = retainedEvents.at(-1)?.sequence ?? 0;
+  const ownsTransaction = !db.isTransaction;
+  if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
+  try {
+    const current = db
+      .prepare(
+        "SELECT revision FROM debate_sessions WHERE id = ? AND user_id = ?",
+      )
+      .get(previous.id, userId) as { revision?: number } | undefined;
+    if (current?.revision !== previous.revision) {
+      throw new HttpError(
+        409,
+        "Debate changed while the Judge raised the gavel. Refresh and retry.",
+      );
+    }
+    const result = db
+      .prepare(
+        `UPDATE debate_sessions
+            SET revision = ?, status = ?, phase = ?, step_key = ?,
+                winner_side_id = ?, session_json = ?, error = ?,
+                updated_at = ?, completed_at = ?
+          WHERE id = ? AND user_id = ? AND revision = ?`,
+      )
+      .run(
+        next.revision,
+        next.status,
+        next.phase,
+        next.stepKey,
+        next.winnerSideId,
+        serializeSessionState(next),
+        next.error,
+        now,
+        next.completedAt,
+        next.id,
+        userId,
+        previous.revision,
+      );
+    if (Number(result.changes) !== 1) {
+      throw new HttpError(
+        409,
+        "Debate changed while the Judge raised the gavel. Refresh and retry.",
+      );
+    }
+    db.prepare(
+      `DELETE FROM debate_events
+        WHERE user_id = ? AND session_id = ? AND sequence > ?`,
+    ).run(userId, previous.id, retainedSequence);
+    const updateEvent = db.prepare(
+      `UPDATE debate_events
+          SET event_json = ?
+        WHERE id = ? AND user_id = ? AND session_id = ?`,
+    );
+    for (const event of retainedEvents) {
+      updateEvent.run(JSON.stringify(event), event.id, userId, previous.id);
+    }
+    insertEvents(db, userId, next.id, newEvents);
+    db.prepare(
+      `INSERT INTO debate_mutations
+         (user_id, session_id, idempotency_key, expected_revision,
+          result_revision, response_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      userId,
+      next.id,
+      idempotencyKey,
+      previous.revision,
+      next.revision,
+      JSON.stringify(next),
+      now,
+    );
+    if (ownsTransaction) db.exec("COMMIT");
+    return next;
+  } catch (error) {
+    if (ownsTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function makeEvent(
   session: DebateSessionV1,
   args: {
@@ -1732,6 +1895,7 @@ function makeEvent(
     statementId?: string | null;
     evidenceSourceId?: string | null;
     ruling?: "sustained" | "overruled" | null;
+    gavelReason?: DebateJudgeGavelReason;
     timing?: DebateTurnTimingV1;
   },
 ): DebateEventV1 {
@@ -1766,6 +1930,7 @@ function makeEvent(
       ? { evidenceSourceId: args.evidenceSourceId }
       : {}),
     ...(args.ruling !== undefined ? { ruling: args.ruling } : {}),
+    ...(args.gavelReason ? { gavelReason: args.gavelReason } : {}),
     ...(args.timing ? { timing: args.timing } : {}),
     createdAt: new Date().toISOString(),
   };
@@ -1858,6 +2023,7 @@ function latestModeratorEvent(
       .find(
         (event) =>
           event.speakerBotId === session.moderator.id &&
+          !debateEventIsTranscriptHousekeeping(event) &&
           (!openingOnly ||
             event.stepKey === "intro" ||
             event.stepKey === "turnabout_intro"),
@@ -2263,7 +2429,11 @@ function publicTranscript(
           "interjection",
         ]);
   const events = session.events
-    .filter((event) => publicKinds.has(event.kind))
+    .filter(
+      (event) =>
+        publicKinds.has(event.kind) &&
+        !debateEventIsTranscriptHousekeeping(event),
+    )
     .slice(-18);
   if (events.length === 0) return "No public speech yet.";
   const lines = events.flatMap((event) => {
@@ -3142,6 +3312,220 @@ function hearingRepeatReaction(
 
 function stablePowerChance(key: string): number {
   return createHash("sha256").update(key).digest()[0]! / 255;
+}
+
+const DEBATE_PERSONA_SURPRISE_REACTION_CHANCE = 0.24;
+const DEBATE_PERSONA_SURPRISE_STEP_PREFIX = "persona_reaction_";
+const DEBATE_PERSONA_SURPRISE_TRIGGER_KINDS = new Set<DebateEventKind>([
+  "speech",
+  "testimony",
+  "evidence",
+  "revelation",
+  "player_turn",
+  "interjection",
+  "jury_deliberation",
+]);
+
+function personaSurpriseTrigger(
+  events: readonly DebateEventV1[],
+): DebateEventV1 | null {
+  return (
+    [...events]
+      .reverse()
+      .find(
+        (event) =>
+          DEBATE_PERSONA_SURPRISE_TRIGGER_KINDS.has(event.kind) &&
+          (event.speakerKind === "advocate" ||
+            event.speakerKind === "juror" ||
+            event.speakerKind === "player") &&
+          event.content !== BOT_POWER_CANONICAL_SILENCE_V1,
+      ) ?? null
+  );
+}
+
+function eligiblePersonaSurpriseObservers(
+  session: DebateSessionV1,
+  trigger: DebateEventV1,
+): DebateBotSnapshotV1[] {
+  const jurorOnly = trigger.speakerKind === "juror";
+  const base = jurorOnly
+    ? session.jury.jurors
+    : [
+        session.forAdvocate,
+        session.againstAdvocate,
+        ...(session.jury.enabled && session.playerRole !== "participant"
+          ? session.jury.jurors
+          : []),
+      ];
+  const recentlyReacted = new Set(
+    [...session.events]
+      .reverse()
+      .filter((event) =>
+        event.stepKey.startsWith(DEBATE_PERSONA_SURPRISE_STEP_PREFIX),
+      )
+      .slice(0, 2)
+      .flatMap((event) => (event.speakerBotId ? [event.speakerBotId] : [])),
+  );
+  const eligible = base.filter(
+    (observer) =>
+      observer.id !== trigger.speakerBotId &&
+      session.powerPlan.bots[observer.id]?.hardMuted !== true &&
+      botHeardEvent(session, trigger, observer.id),
+  );
+  const fresh = eligible.filter(
+    (observer) => !recentlyReacted.has(observer.id),
+  );
+  return fresh.length > 0 ? fresh : eligible;
+}
+
+function personaSurpriseReactionIsConcise(content: string): boolean {
+  const words = content.match(/[\p{L}\p{N}’'-]+/gu)?.length ?? 0;
+  return words >= 1 && words <= 9 && content.length <= 80;
+}
+
+async function generatePersonaSurpriseReaction(
+  session: DebateSessionV1,
+  trigger: DebateEventV1,
+  runtime: DebateAiRuntime,
+): Promise<DebateEventV1 | null> {
+  const rollKey = `${session.id}:${trigger.sequence}:persona-surprise-v1`;
+  const roll =
+    runtime.personaReactionRoll?.(rollKey) ?? stablePowerChance(rollKey);
+  if (roll >= DEBATE_PERSONA_SURPRISE_REACTION_CHANCE) return null;
+
+  const eligible = eligiblePersonaSurpriseObservers(session, trigger);
+  if (eligible.length === 0) return null;
+  const speaker =
+    trigger.speakerBotId === null
+      ? trigger.speakerKind === "player"
+        ? "the player"
+        : "the floor"
+      : (debateBots(session).find((bot) => bot.id === trigger.speakerBotId)
+          ?.name ?? "the speaker");
+  const generation = await generateJson(
+    lanesForSession(runtime, session),
+    [
+      {
+        role: "system",
+        content: [
+          "You are a private PRISM Debate surprise detector.",
+          "Choose at most one eligible listener whose saved Persona would genuinely find the newest audible contribution contrary to expectation, unexpectedly revealing, or newly explanatory.",
+          "Mere disagreement is not surprise. Do not manufacture a reaction just because the probability gate opened.",
+          "Ground the expectation only in that listener's saved Persona details and the public Debate record. Never use relationship memory, hidden intent, private speech, a hidden Power, or outside facts.",
+          "A reaction is vocal Foley, not a new floor turn: one to nine words such as “Hmm.”, “Oh, I see.”, or “Ah. That explains it.” It may be distinctive to the Persona, but cannot add an argument, evidence, accusation, ruling, or vote.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: [
+          `Motion: ${session.motion.motion}`,
+          `Newest audible contribution from ${speaker}: ${debateSpokenText(
+            trigger.content,
+          )}`,
+          "",
+          "Eligible listeners and their saved Persona details:",
+          ...eligible.map(
+            (observer) =>
+              `- ${observer.id} | ${observer.name} | ${compactText(
+                stripBotProfileMetaSuffix(observer.systemPrompt),
+                1_000,
+              )}`,
+          ),
+          "",
+          "Recent public record:",
+          publicTranscript(session),
+          "",
+          'Return JSON only: {"surprised":true|false,"botId":"eligible id or empty","expected":"private one-sentence expectation or empty","reaction":"one-to-nine-word vocal Foley or empty"}.',
+        ].join("\n"),
+      },
+    ],
+    {
+      maxTokens: 180,
+      temperature: 0.45,
+      validate: (value) =>
+        value.surprised === false ||
+        (value.surprised === true &&
+          typeof value.botId === "string" &&
+          eligible.some((observer) => observer.id === value.botId) &&
+          typeof value.expected === "string" &&
+          value.expected.trim().length > 0 &&
+          typeof value.reaction === "string" &&
+          personaSurpriseReactionIsConcise(
+            compactText(debateSpokenText(value.reaction), 80),
+          )),
+    },
+  );
+  if (generation.value.surprised !== true) return null;
+  const botId =
+    typeof generation.value.botId === "string" ? generation.value.botId : "";
+  const reaction =
+    typeof generation.value.reaction === "string"
+      ? generation.value.reaction
+      : "";
+  const observer = eligible.find((candidate) => candidate.id === botId);
+  const content = compactText(debateSpokenText(reaction), 80);
+  if (
+    !observer ||
+    !personaSurpriseReactionIsConcise(content) ||
+    content === BOT_POWER_CANONICAL_SILENCE_V1
+  ) {
+    return null;
+  }
+  const recentDuplicate = [...session.events]
+    .reverse()
+    .find(
+      (event) =>
+        event.speakerBotId === observer.id &&
+        event.stepKey.startsWith(DEBATE_PERSONA_SURPRISE_STEP_PREFIX),
+    );
+  if (
+    recentDuplicate &&
+    recentDuplicate.content.toLocaleLowerCase() === content.toLocaleLowerCase()
+  ) {
+    return null;
+  }
+
+  return makeEvent(
+    { ...session, phase: trigger.phase },
+    {
+      kind: "reaction",
+      speakerKind: observer.role,
+      speakerBotId: observer.id,
+      sideId: observer.sideId,
+      content,
+      stepKey: `${DEBATE_PERSONA_SURPRISE_STEP_PREFIX}${trigger.sequence}`,
+      parentEventId: trigger.id,
+      provider: generation.provider,
+      model: generation.model,
+      autoRecovery: generation.autoRecovery,
+    },
+  );
+}
+
+async function withPersonaSurpriseReaction(
+  previous: DebateSessionV1,
+  next: DebateSessionV1,
+  newEvents: readonly DebateEventV1[],
+  runtime: DebateAiRuntime,
+): Promise<DebateEventV1[]> {
+  const events = [...newEvents];
+  const trigger = personaSurpriseTrigger(events);
+  if (!trigger) return events;
+  const reactionContext: DebateSessionV1 = {
+    ...next,
+    events: [...previous.events, ...events],
+  };
+  try {
+    const reaction = await generatePersonaSurpriseReaction(
+      reactionContext,
+      trigger,
+      runtime,
+    );
+    if (reaction) events.push(reaction);
+  } catch {
+    // Persona Foley is atmospheric. It must never pause the floor.
+  }
+  return events;
 }
 
 const DAYTIME_SHOWDOWN_FLOOR_BREAK_STEPS = new Set([
@@ -5497,6 +5881,12 @@ export async function advanceDebateSession(
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");
   }
+  if (session.judgeGavel?.status === "awaiting_message") {
+    throw new HttpError(
+      409,
+      "Address the debaters or resume the floor before advancing.",
+    );
+  }
   if (session.status === "waiting_for_player") {
     throw new HttpError(409, "This Debate is waiting for the player.");
   }
@@ -5547,7 +5937,12 @@ export async function advanceDebateSession(
       session.format === "turnabout"
         ? await advanceTurnaboutStep(active, runtime)
         : await advanceStep(active, runtime);
-    let events = transitioned.events;
+    const events = await withPersonaSurpriseReaction(
+      session,
+      transitioned.session,
+      transitioned.events,
+      runtime,
+    );
     const trigger = jurySidebarTrigger(
       transitioned.session,
       transitioned.events,
@@ -5555,13 +5950,12 @@ export async function advanceDebateSession(
     if (trigger) {
       const juryContext: DebateSessionV1 = {
         ...transitioned.session,
-        events: [...session.events, ...transitioned.events],
+        events: [...session.events, ...events],
       };
       try {
-        events = [
-          ...transitioned.events,
+        events.push(
           await generateJurySidebarTurn(juryContext, trigger, runtime),
-        ];
+        );
       } catch {
         // A sidebar reaction is atmospheric. It must never pause the floor.
       }
@@ -5654,21 +6048,28 @@ export async function submitDebateTurnaboutAction(
       runtime,
       "player",
     );
+    const next = withTurnaboutState(
+      { ...session, status: "waiting_for_player" },
+      {
+        ...pressed.state,
+        phase: "examination",
+        activeStatementId: statement.id,
+        floorOwnerBotId: statement.speakerBotId,
+      },
+    );
+    const events = await withPersonaSurpriseReaction(
+      session,
+      next,
+      pressed.events,
+      runtime,
+    );
     return commitMutation(
       db,
       userId,
       session,
-      withTurnaboutState(
-        { ...session, status: "waiting_for_player" },
-        {
-          ...pressed.state,
-          phase: "examination",
-          activeStatementId: statement.id,
-          floorOwnerBotId: statement.speakerBotId,
-        },
-      ),
+      next,
       checked.idempotencyKey,
-      pressed.events,
+      events,
     );
   }
 
@@ -5785,20 +6186,27 @@ export async function submitDebateTurnaboutAction(
   };
   const newEvents: DebateEventV1[] = [objection, evidenceEvent, rulingEvent];
   if (contradiction.ruling === "overruled") {
+    const next = withTurnaboutState(
+      { ...session, status: "waiting_for_player" },
+      {
+        ...nextState,
+        phase: "examination",
+        activeStatementId: statement.id,
+      },
+    );
+    const events = await withPersonaSurpriseReaction(
+      session,
+      next,
+      newEvents,
+      runtime,
+    );
     return commitMutation(
       db,
       userId,
       session,
-      withTurnaboutState(
-        { ...session, status: "waiting_for_player" },
-        {
-          ...nextState,
-          phase: "examination",
-          activeStatementId: statement.id,
-        },
-      ),
+      next,
       checked.idempotencyKey,
-      newEvents,
+      events,
     );
   }
 
@@ -5854,13 +6262,20 @@ export async function submitDebateTurnaboutAction(
     autoRecovery: reversal.autoRecovery,
   });
   newEvents.push(revelationEvent);
+  const next = turnaboutNextStatement(session, nextState);
+  const events = await withPersonaSurpriseReaction(
+    session,
+    next,
+    newEvents,
+    runtime,
+  );
   return commitMutation(
     db,
     userId,
     session,
-    turnaboutNextStatement(session, nextState),
+    next,
     checked.idempotencyKey,
-    newEvents,
+    events,
   );
 }
 
@@ -6095,6 +6510,12 @@ export async function submitDebateInterjection(
     caseBoard,
     revisedSpeech,
   );
+  const newEvents = await withPersonaSurpriseReaction(
+    { ...session, events: revisedEvents },
+    { ...session, caseBoard, events: revisedEvents },
+    [interjection, rulingEvent, boardEvent],
+    runtime,
+  );
   const committed = commitRevisedEventMutation(
     db,
     userId,
@@ -6102,7 +6523,7 @@ export async function submitDebateInterjection(
     { ...session, caseBoard, events: session.events },
     checked.idempotencyKey,
     revisedSpeech,
-    [interjection, rulingEvent, boardEvent],
+    newEvents,
   );
   queueCaseBoardRefinement(
     db,
@@ -6111,6 +6532,471 @@ export async function submitDebateInterjection(
     [revisedSpeech],
     runtime.auxiliary,
   );
+  return committed;
+}
+
+const JUDGE_GAVEL_INTERRUPTIBLE_EVENT_KINDS = new Set<DebateEventKind>([
+  "intro",
+  "phase",
+  "speech",
+  "silence",
+  "testimony",
+  "press",
+  "objection",
+  "evidence",
+  "revelation",
+  "player_turn",
+  "reaction",
+  "interjection",
+  "moderator_ruling",
+  "jury_deliberation",
+  "jury_verdict",
+]);
+
+function judgeGavelCooldownRemainingMs(session: DebateSessionV1): number {
+  const cooldownUntil = Date.parse(session.judgeGavelCooldownUntil ?? "");
+  return Number.isFinite(cooldownUntil)
+    ? Math.max(0, cooldownUntil - Date.now())
+    : 0;
+}
+
+function judgeGavelRevisedEvent(
+  session: DebateSessionV1,
+  target: DebateEventV1,
+  heardCharacterCount: number,
+): DebateEventV1 {
+  const heardCount = Math.max(
+    0,
+    Math.min(target.content.length, Math.floor(heardCharacterCount)),
+  );
+  if (heardCount >= target.content.length) return target;
+  const prefix =
+    heardCount > 0
+      ? interruptedStatementPrefix(target.content, heardCount)
+      : "";
+  const publicPrefix = sanitizeDebateStatementSources(
+    prefix || "…",
+    session.evidence,
+  );
+  return {
+    ...target,
+    content: publicPrefix.content || "…",
+    sourceIds: publicPrefix.sourceIds,
+    interrupted: true,
+    interruptedBy: "player",
+  };
+}
+
+function debateFormatStateAfterJudgeGavel(
+  session: DebateSessionV1,
+  revisedEvent: DebateEventV1 | null,
+): DebateSessionV1["formatState"] {
+  if (
+    !revisedEvent?.statementId ||
+    session.formatState.format !== "turnabout"
+  ) {
+    return session.formatState;
+  }
+  return {
+    ...session.formatState,
+    statements: session.formatState.statements.map((statement) =>
+      statement.id === revisedEvent.statementId
+        ? {
+            ...statement,
+            content: revisedEvent.content,
+            sourceIds: revisedEvent.sourceIds,
+          }
+        : statement,
+    ),
+  };
+}
+
+export function swingDebateJudgeGavel(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateJudgeGavelRequest,
+): DebateSessionV1 {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (session.playerRole !== "judge") {
+    throw new HttpError(409, "Only the player Judge may swing this gavel.");
+  }
+  if (
+    session.status === "completed" ||
+    session.status === "cancelled" ||
+    session.status === "failed" ||
+    session.status === "paused"
+  ) {
+    throw new HttpError(409, "The gavel is unavailable in this Debate state.");
+  }
+  if (session.judgeGavel?.status === "awaiting_message") {
+    throw new HttpError(409, "Address the debaters before swinging again.");
+  }
+  const cooldownRemainingMs = judgeGavelCooldownRemainingMs(session);
+  if (cooldownRemainingMs > 0) {
+    throw new HttpError(
+      429,
+      `The gavel is ready again in ${Math.max(
+        1,
+        Math.ceil(cooldownRemainingMs / 1_000),
+      )} seconds.`,
+    );
+  }
+
+  const targetId = compactText(request.eventId, 200);
+  const target = targetId
+    ? (session.events.find((event) => event.id === targetId) ?? null)
+    : null;
+  if (
+    targetId &&
+    (!target || !JUDGE_GAVEL_INTERRUPTIBLE_EVENT_KINDS.has(target.kind))
+  ) {
+    throw new HttpError(409, "That live floor is no longer interruptible.");
+  }
+  const heardCharacterCount =
+    target && Number.isInteger(request.heardCharacterCount)
+      ? Number(request.heardCharacterCount)
+      : (target?.content.length ?? 0);
+  if (
+    target &&
+    (heardCharacterCount < 0 || heardCharacterCount > target.content.length)
+  ) {
+    throw new HttpError(400, "The heard floor position is invalid.");
+  }
+  const laterEvents = target
+    ? session.events.filter((event) => event.sequence > target.sequence)
+    : [];
+  if (target) {
+    const relatedEventIds = new Set([target.id]);
+    for (const event of laterEvents) {
+      if (!event.parentEventId || !relatedEventIds.has(event.parentEventId)) {
+        throw new HttpError(
+          409,
+          "The Debate has already moved beyond that floor.",
+        );
+      }
+      relatedEventIds.add(event.id);
+    }
+  }
+
+  const overtime =
+    request.overtime === true &&
+    target?.speakerKind === "advocate" &&
+    target.timing?.status === "overtime";
+  if (request.overtime === true && !overtime) {
+    throw new HttpError(409, "That advocate is not over time.");
+  }
+  if (overtime && target?.timing) {
+    const overtimeCharacterThreshold = Math.max(
+      1,
+      Math.floor(
+        target.content.length *
+          (target.timing.limitMs / target.timing.estimatedDurationMs),
+      ) - 32,
+    );
+    if (heardCharacterCount < overtimeCharacterThreshold) {
+      throw new HttpError(409, "That advocate has not reached overtime yet.");
+    }
+  }
+
+  const revisedTarget = target
+    ? judgeGavelRevisedEvent(session, target, heardCharacterCount)
+    : null;
+  const retainedEvents = target
+    ? session.events
+        .filter((event) => event.sequence <= target.sequence)
+        .map((event) => (event.id === target.id ? revisedTarget! : event))
+    : [...session.events];
+  const caseBoard =
+    revisedTarget && revisedTarget.content !== target?.content
+      ? caseBoardAfterInterruptedSpeech(session, revisedTarget)
+      : session.caseBoard;
+  const eventSession: DebateSessionV1 = {
+    ...session,
+    caseBoard,
+    formatState: debateFormatStateAfterJudgeGavel(session, revisedTarget),
+    events: retainedEvents,
+  };
+  const boardEvent =
+    revisedTarget && session.format === "forum"
+      ? caseBoardEvent(eventSession, caseBoard, revisedTarget)
+      : null;
+  if (boardEvent) {
+    boardEvent.sequence = retainedEvents.length + 1;
+  }
+  const eventsBeforeGavel = boardEvent
+    ? [...retainedEvents, boardEvent]
+    : retainedEvents;
+  const now = new Date();
+  const gavelReason: DebateJudgeGavelReason = overtime
+    ? "overtime"
+    : "intervention";
+  const gavelEvent = makeEvent(
+    { ...eventSession, events: eventsBeforeGavel },
+    {
+      kind: "judge_gavel",
+      speakerKind: "player",
+      speakerBotId: session.moderator.id,
+      sideId: target?.sideId ?? null,
+      content: overtime
+        ? "The Judge calls time."
+        : "The Judge calls the room to order.",
+      stepKey: overtime ? "judge_gavel_overtime" : "judge_gavel",
+      parentEventId: target?.id ?? null,
+      gavelReason,
+    },
+  );
+  const judgeGavel: DebateJudgeGavelStateV1 | null = overtime
+    ? null
+    : {
+        version: DEBATE_SCHEMA_VERSION,
+        status: "awaiting_message",
+        gavelEventId: gavelEvent.id,
+        sourceEventId: target?.id ?? null,
+        invokedAt: now.toISOString(),
+        resumeStatus: session.status,
+        resumePhase: session.phase,
+        resumeStepKey: session.stepKey,
+      };
+  return commitJudgeGavelMutation(
+    db,
+    userId,
+    session,
+    {
+      ...eventSession,
+      status: overtime ? session.status : "waiting_for_player",
+      stepKey: overtime ? session.stepKey : "judge_gavel_message",
+      judgeGavel,
+      judgeGavelCooldownUntil: new Date(
+        now.getTime() + DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
+      ).toISOString(),
+      events: session.events,
+    },
+    checked.idempotencyKey,
+    retainedEvents,
+    boardEvent ? [boardEvent, gavelEvent] : [gavelEvent],
+  );
+}
+
+function directlyAddressedJudgeGavelBot(
+  session: DebateSessionV1,
+  content: string,
+): DebateBotSnapshotV1 | null {
+  const normalized = content.toLocaleLowerCase();
+  const addressed = [session.forAdvocate, session.againstAdvocate].filter(
+    (bot) =>
+      bot.name.trim().length > 0 &&
+      normalized.includes(bot.name.trim().toLocaleLowerCase()),
+  );
+  return addressed.length === 1 ? addressed[0]! : null;
+}
+
+async function judgeGavelRespondent(
+  session: DebateSessionV1,
+  content: string,
+  runtime: DebateAiRuntime,
+): Promise<DebateBotSnapshotV1> {
+  const directlyAddressed = directlyAddressedJudgeGavelBot(session, content);
+  if (directlyAddressed) return directlyAddressed;
+  const advocates = [session.forAdvocate, session.againstAdvocate];
+  try {
+    const generation = await generateJson(
+      lanesForSession(runtime, session),
+      [
+        {
+          role: "system",
+          content: [
+            "You silently route one unscheduled human Judge intervention in a two-sided Debate.",
+            "Choose the advocate who is most directly addressed or best positioned to answer the Judge's message from the public context.",
+            "Do not write the answer, favor a side, or invent private intent.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            "Eligible advocates:",
+            ...advocates.map(
+              (bot) =>
+                `- ${bot.id} | ${bot.name} | ${sideLabel(
+                  session,
+                  bot.sideId ?? "for",
+                )} | ${compactText(bot.systemPrompt, 220)}`,
+            ),
+            "",
+            `Judge message: ${content}`,
+            "",
+            "Public transcript:",
+            publicTranscript(session, undefined, false),
+            "",
+            'Return JSON only: {"botId":"eligible id","reason":"brief routing reason"}.',
+          ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 100,
+        temperature: 0.2,
+        validate: (value) =>
+          typeof value.botId === "string" &&
+          advocates.some((bot) => bot.id === value.botId),
+      },
+    );
+    const botId = compactText(generation.value.botId, 200);
+    const routed = advocates.find((bot) => bot.id === botId);
+    if (routed) return routed;
+  } catch {
+    // A stable floor-aware fallback keeps the intervention moving.
+  }
+  const latestAdvocateId = [...session.events]
+    .reverse()
+    .find((event) => event.speakerKind === "advocate")?.speakerBotId;
+  return (
+    advocates.find((bot) => bot.id !== latestAdvocateId) ?? session.forAdvocate
+  );
+}
+
+export async function submitDebateJudgeGavelMessage(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateJudgeGavelMessageRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  const gavel = session.judgeGavel;
+  if (
+    session.playerRole !== "judge" ||
+    session.status !== "waiting_for_player" ||
+    session.stepKey !== "judge_gavel_message" ||
+    gavel?.status !== "awaiting_message"
+  ) {
+    throw new HttpError(409, "The Judge has no open gavel intervention.");
+  }
+  const pass = request.pass === true;
+  const rawContent = multilineText(
+    request.content,
+    DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH,
+  );
+  if (!pass && !rawContent) {
+    throw new HttpError(
+      400,
+      "Address the debaters or resume without a message.",
+    );
+  }
+  if (pass) {
+    return commitMutation(
+      db,
+      userId,
+      session,
+      {
+        ...session,
+        status: gavel.resumeStatus,
+        phase: gavel.resumePhase,
+        stepKey: gavel.resumeStepKey,
+        judgeGavel: null,
+        events: session.events,
+      },
+      checked.idempotencyKey,
+      [],
+    );
+  }
+  const publicMessage = sanitizeDebateStatementSources(
+    rawContent,
+    session.evidence,
+  );
+  if (!publicMessage.content) {
+    throw new HttpError(
+      400,
+      "Address the debaters or resume without a message.",
+    );
+  }
+  const playerEvent = makeEvent(session, {
+    kind: "player_turn",
+    speakerKind: "player",
+    speakerBotId: session.moderator.id,
+    content: publicMessage.content,
+    sourceIds: publicMessage.sourceIds,
+    stepKey: "judge_gavel_message",
+    parentEventId: gavel.gavelEventId,
+  });
+  const withMessage: DebateSessionV1 = {
+    ...session,
+    events: [...session.events, playerEvent],
+  };
+  const respondent = await judgeGavelRespondent(
+    withMessage,
+    publicMessage.content,
+    runtime,
+  );
+  const response = await generateSpeech(
+    withMessage,
+    respondent,
+    [
+      "The human Judge struck the gavel outside the normal schedule and addressed both advocates.",
+      `Judge message: ${publicMessage.content}`,
+      "Answer the Judge directly in one concise, substantive response from your assigned side.",
+      "Do not treat this as a new formal round, speak for the other advocate, or invent evidence.",
+      "After this answer, the previously scheduled Debate order resumes.",
+    ].join("\n"),
+    runtime,
+  );
+  const responseEvent = makeEvent(withMessage, {
+    kind: response.silent ? "silence" : "speech",
+    speakerKind: "advocate",
+    speakerBotId: respondent.id,
+    sideId: respondent.sideId,
+    content: response.content,
+    sourceIds: response.sourceIds,
+    stepKey: "judge_gavel_response",
+    parentEventId: playerEvent.id,
+    provider: response.provider,
+    model: response.model,
+    autoRecovery: response.autoRecovery,
+    timing: debateTurnTiming(session, respondent, response.content),
+  });
+  const responseContext: DebateSessionV1 = {
+    ...withMessage,
+    events: [...withMessage.events, responseEvent],
+  };
+  const caseBoard =
+    session.format === "forum"
+      ? updateCaseBoard(session, responseEvent)
+      : session.caseBoard;
+  const boardEvent =
+    session.format === "forum" && caseBoard !== session.caseBoard
+      ? caseBoardEvent(responseContext, caseBoard, responseEvent)
+      : null;
+  const newEvents = boardEvent
+    ? [playerEvent, responseEvent, boardEvent]
+    : [playerEvent, responseEvent];
+  const committed = commitMutation(
+    db,
+    userId,
+    session,
+    {
+      ...session,
+      status: gavel.resumeStatus,
+      phase: gavel.resumePhase,
+      stepKey: gavel.resumeStepKey,
+      judgeGavel: null,
+      caseBoard,
+      events: session.events,
+    },
+    checked.idempotencyKey,
+    newEvents,
+  );
+  if (session.format === "forum") {
+    queueCaseBoardRefinement(
+      db,
+      userId,
+      committed,
+      [responseEvent],
+      runtime.auxiliary,
+    );
+  }
   return committed;
 }
 
@@ -6242,6 +7128,20 @@ function debatePauseAnnouncementEvent(session: DebateSessionV1): DebateEventV1 {
   });
 }
 
+function debateResumeGavelEvent(session: DebateSessionV1): DebateEventV1 {
+  return makeEvent(session, {
+    kind: "judge_gavel",
+    speakerKind: "moderator",
+    speakerBotId: session.moderator.id,
+    sideId: null,
+    stepKey: "resume",
+    content: moderatorIsHardMuted(session)
+      ? BOT_POWER_CANONICAL_SILENCE_V1
+      : "The proceeding is called back to order.",
+    gavelReason: "resume",
+  });
+}
+
 export function pauseDebateSession(
   db: DatabaseSync,
   userId: string,
@@ -6253,6 +7153,25 @@ export function pauseDebateSession(
   const session = checked.session;
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");
+  }
+  if (session.judgeGavel?.status === "awaiting_message") {
+    throw new HttpError(
+      409,
+      "Address the debaters or resume the floor before pausing.",
+    );
+  }
+  const cooldownRemainingMs =
+    session.playerRole === "judge"
+      ? judgeGavelCooldownRemainingMs(session)
+      : 0;
+  if (cooldownRemainingMs > 0) {
+    throw new HttpError(
+      429,
+      `The hearing may pause again in ${Math.max(
+        1,
+        Math.ceil(cooldownRemainingMs / 1_000),
+      )} seconds.`,
+    );
   }
   const pauseEvent = debatePauseAnnouncementEvent(session);
   return commitMutation(
@@ -6307,6 +7226,12 @@ export function skipDebateJuryDeliberation(
   ) {
     throw new HttpError(409, "This Debate is already finished.");
   }
+  if (session.judgeGavel?.status === "awaiting_message") {
+    throw new HttpError(
+      409,
+      "Address the debaters or resume the floor before skipping deliberation.",
+    );
+  }
   const nextSession = skippedJuryDeliberationSession(session);
   const event = makeEvent(nextSession, {
     kind: "jury_deliberation",
@@ -6340,6 +7265,12 @@ export function endDebateSessionEarly(
     session.status === "failed"
   ) {
     throw new HttpError(409, "This Debate is already finished.");
+  }
+  if (session.judgeGavel?.status === "awaiting_message") {
+    throw new HttpError(
+      409,
+      "Address the debaters or resume the floor before ending early.",
+    );
   }
   if (
     session.jury.enabled &&
@@ -6443,15 +7374,32 @@ export function resumeDebateSession(
   sessionId: string,
   request: { expectedRevision: number; idempotencyKey: string },
 ): DebateSessionV1 {
-  return simpleMutation(db, userId, sessionId, request, (session) => {
-    if (session.status !== "paused")
-      throw new HttpError(409, "This Debate is not paused.");
-    return {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (session.status !== "paused") {
+    throw new HttpError(409, "This Debate is not paused.");
+  }
+  const now = new Date();
+  const gavelEvent = debateResumeGavelEvent(session);
+  return commitMutation(
+    db,
+    userId,
+    session,
+    {
       ...session,
       status: statusForStep(session.stepKey),
+      judgeGavelCooldownUntil:
+        session.playerRole === "judge"
+          ? new Date(
+              now.getTime() + DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
+            ).toISOString()
+          : session.judgeGavelCooldownUntil,
       error: null,
-    };
-  });
+    },
+    checked.idempotencyKey,
+    [gavelEvent],
+  );
 }
 
 export function deleteDebateSession(

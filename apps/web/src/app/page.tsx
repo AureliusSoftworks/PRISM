@@ -47194,6 +47194,7 @@ function HomeContent(): React.JSX.Element {
   const emptyStateSpotlightRef = useRef<HTMLDivElement | null>(null);
   const draftComposerRef = useRef<ComposerInputHandle | null>(null);
   const signalGuestComposerRef = useRef<ComposerInputHandle | null>(null);
+  const debateJudgeComposerRef = useRef<ComposerInputHandle | null>(null);
   const signalActionSfxGateRef = useRef<CoffeeActionSfxGateState>({
     lastPlayedAtMs: null,
     lastPlayedAtMsByKind: {},
@@ -78412,7 +78413,7 @@ function HomeContent(): React.JSX.Element {
   }
 
   type ShellComposerVariant =
-    "chat" | "coffee-global" | "coffee-table" | "signal";
+    "chat" | "coffee-global" | "coffee-table" | "signal" | "debate";
   type ShellComposerRenderOptions = {
     variant: ShellComposerVariant;
     formRef?: React.Ref<HTMLFormElement>;
@@ -78432,6 +78433,7 @@ function HomeContent(): React.JSX.Element {
     onInputActivity?: () => void;
     onFocus?: () => void;
     inputDisabled?: boolean;
+    generatingRandomPrompt?: boolean;
     actionInputEnabled?: boolean;
     interruptActive?: boolean;
     interruptLabel?: string;
@@ -78478,6 +78480,9 @@ function HomeContent(): React.JSX.Element {
     onInputActivity,
     onFocus = handleComposerFocus,
     inputDisabled = false,
+    generatingRandomPrompt = variant === "coffee-table" || variant === "signal"
+      ? false
+      : composerRandomPromptBusy,
     actionInputEnabled = true,
     interruptActive = false,
     interruptLabel = "Shh",
@@ -78516,15 +78521,12 @@ function HomeContent(): React.JSX.Element {
         value={value}
         placeholder={placeholder}
         writingAssistEnabled={
-          // Live spell-correct stays a Chat/Zen affordance. Coffee and Signal
-          // composers run assist-free; corrections apply at send time instead.
-          variant === "chat" && settings?.composerWritingAssist !== false
+          // Live spell-correct stays a Chat/Zen/Judge writing affordance.
+          // Coffee and Signal composers apply corrections at send time.
+          (variant === "chat" || variant === "debate") &&
+          settings?.composerWritingAssist !== false
         }
-        generatingRandomPrompt={
-          variant === "coffee-table" || variant === "signal"
-            ? false
-            : composerRandomPromptBusy
-        }
+        generatingRandomPrompt={generatingRandomPrompt}
         submitDisabled={submitDisabled}
         submitLabel={submitLabel}
         submitAriaLabel={submitAriaLabel}
@@ -78583,6 +78585,7 @@ function HomeContent(): React.JSX.Element {
           variant === "coffee-table" ? "true" : undefined
         }
         data-signal-guest-compose={variant === "signal" ? "true" : undefined}
+        data-debate-judge-compose={variant === "debate" ? "true" : undefined}
         style={formStyle}
         onSubmit={onSubmit}
         onPointerDownCapture={handleComposerPointerDown}
@@ -129388,6 +129391,95 @@ function HomeContent(): React.JSX.Element {
                   </span>
                 );
               }}
+              renderJudgeComposer={(composer) => {
+                const currentValue = composer.value.trim();
+                const submitCurrentValue = (): void => {
+                  const value = (
+                    debateJudgeComposerRef.current?.getValue() ?? composer.value
+                  )
+                    .slice(0, composer.maxLength)
+                    .trim();
+                  if (value) {
+                    composer.onSubmit(value);
+                  } else {
+                    composer.onGenerate();
+                  }
+                };
+                return renderShellComposer({
+                  variant: "debate",
+                  className: styles.debateJudgeComposer,
+                  value: composer.value,
+                  editorRef: debateJudgeComposerRef,
+                  placeholder: composer.placeholder,
+                  inputDisabled: composer.disabled || composer.generating,
+                  generatingRandomPrompt: composer.generating,
+                  actionInputEnabled: false,
+                  submitDisabled: composer.disabled || composer.generating,
+                  submitLabel: currentValue ? (
+                    "Send to the floor"
+                  ) : (
+                    <BotGlyph name="dice" size={30} strokeWidth={1.45} />
+                  ),
+                  submitAriaLabel: composer.generating
+                    ? "Drafting a Judge response"
+                    : currentValue
+                      ? "Send Judge response to the floor"
+                      : "Draft an editable Judge response",
+                  submitIconOnly: !currentValue,
+                  onSubmit: (event) => {
+                    event.preventDefault();
+                    submitCurrentValue();
+                  },
+                  onKeyDown: (event) => {
+                    if (
+                      shouldSubmitComposerOnEnter({
+                        key: event.key,
+                        shiftKey: event.shiftKey,
+                        isComposing: event.nativeEvent.isComposing,
+                      })
+                    ) {
+                      event.preventDefault();
+                      submitCurrentValue();
+                    }
+                  },
+                  onChange: (event) =>
+                    composer.onValueChange(
+                      event.currentTarget.value.slice(0, composer.maxLength),
+                    ),
+                  onValueChange: (value) =>
+                    composer.onValueChange(value.slice(0, composer.maxLength)),
+                  mentionBots: EMPTY_COMPOSER_MENTION_PICKS,
+                  commandPicks: EMPTY_COMPOSER_COMMAND_PICKS,
+                  toolPicks: EMPTY_COMPOSER_COMMAND_PICKS,
+                  promptPicks: EMPTY_COMPOSER_COMMAND_PICKS,
+                  wildcardPicks: EMPTY_COMPOSER_COMMAND_PICKS,
+                  topContent: (
+                    <div className={styles.debateJudgeComposerHeader}>
+                      <span>
+                        {composer.kind === "gavel"
+                          ? "Custom Judge intervention"
+                          : "Custom Judge question"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={composer.onBack}
+                        disabled={composer.disabled || composer.generating}
+                      >
+                        Quick choices
+                      </button>
+                    </div>
+                  ),
+                  showQueuedPromptRail: false,
+                  composeBotSelected: true,
+                  composeReady: !composer.disabled,
+                  composeSendTint: true,
+                });
+              }}
+              onJudgeComposerReveal={() =>
+                debateJudgeComposerRef.current?.focus({
+                  preventScroll: true,
+                })
+              }
               onExit={() => {
                 stopBotcastUtterance();
                 const origin = debateOriginLocationRef.current;

@@ -38,6 +38,16 @@ export function debateModeratorGavelCue(args: {
   const { event } = args;
   if (!event) return null;
 
+  if (event.kind === "judge_gavel") {
+    return {
+      eventId: event.id,
+      kind:
+        event.gavelReason === "intervention" ||
+        event.gavelReason === "resume"
+          ? "order"
+          : "attention",
+    };
+  }
   if (event.kind === "moderator_ruling") {
     return { eventId: event.id, kind: "order" };
   }

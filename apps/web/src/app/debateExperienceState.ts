@@ -1,12 +1,62 @@
 import {
+  DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
   DEBATE_SETUP_PRESETS,
   type DebateAdvocacyConsent,
+  type DebateEvidenceSourceV1,
   type DebateFormalityId,
   type DebateFormatId,
   type DebateMotionSlateV1,
   type DebatePlayerRole,
   type DebateSetupPresetId,
 } from "@localai/shared";
+
+function canonicalDebateEvidenceUrl(value: string): string {
+  try {
+    const parsed = new URL(value.trim());
+    parsed.hash = "";
+    return parsed.toString().replace(/\/$/u, "");
+  } catch {
+    return value.trim();
+  }
+}
+
+function nextDebateEvidenceSourceId(usedIds: Set<string>): string {
+  let index = 1;
+  while (usedIds.has(`brave-${index}`)) index += 1;
+  const id = `brave-${index}`;
+  usedIds.add(id);
+  return id;
+}
+
+/**
+ * Existing evidence is locked in first. Later Brave searches only append
+ * distinct URLs into the packet's remaining source slots.
+ */
+export function mergeDebateEvidenceSources(
+  current: readonly DebateEvidenceSourceV1[],
+  incoming: readonly DebateEvidenceSourceV1[],
+): DebateEvidenceSourceV1[] {
+  const merged = current.slice(0, DEBATE_EVIDENCE_SOURCE_MAX_COUNT);
+  const usedIds = new Set(merged.map((source) => source.id));
+  const usedUrls = new Set(
+    merged.map((source) => canonicalDebateEvidenceUrl(source.url)),
+  );
+
+  for (const source of incoming) {
+    if (merged.length >= DEBATE_EVIDENCE_SOURCE_MAX_COUNT) break;
+    const canonicalUrl = canonicalDebateEvidenceUrl(source.url);
+    if (!canonicalUrl || usedUrls.has(canonicalUrl)) continue;
+
+    const id = usedIds.has(source.id)
+      ? nextDebateEvidenceSourceId(usedIds)
+      : source.id;
+    usedIds.add(id);
+    usedUrls.add(canonicalUrl);
+    merged.push({ ...source, id });
+  }
+
+  return merged;
+}
 
 export interface DebateCastSelection {
   moderator: string;

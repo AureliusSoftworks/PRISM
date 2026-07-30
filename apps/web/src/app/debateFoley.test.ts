@@ -247,6 +247,48 @@ describe("Debate moderator gavel", () => {
     }
   });
 
+  it("gives the player Judge one time-call strike and a stronger intervention cue", () => {
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: debateEvent("judge_gavel", {
+          speakerKind: "player",
+          speakerBotId: "prism:player-judge",
+          gavelReason: "overtime",
+        }),
+        moderatorBotId: "prism:player-judge",
+      }),
+      { eventId: "event:judge_gavel", kind: "attention" },
+    );
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "turnabout",
+        event: debateEvent("judge_gavel", {
+          speakerKind: "player",
+          speakerBotId: "prism:player-judge",
+          gavelReason: "intervention",
+        }),
+        moderatorBotId: "prism:player-judge",
+      }),
+      { eventId: "event:judge_gavel", kind: "order" },
+    );
+  });
+
+  it("calls a resumed proceeding to order with the stronger gavel cue", () => {
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: debateEvent("judge_gavel", {
+          speakerKind: "moderator",
+          speakerBotId: "moderator",
+          gavelReason: "resume",
+        }),
+        moderatorBotId: "moderator",
+      }),
+      { eventId: "event:judge_gavel", kind: "order" },
+    );
+  });
+
   it("adds extra procedural strikes around Turnabout challenges", () => {
     for (const kind of ["objection", "revelation"] as const) {
       assert.deepEqual(

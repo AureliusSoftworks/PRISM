@@ -17,12 +17,16 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
   DEBATE_FORMAT_CATALOG,
   DEBATE_FORMALITY_SPECTRUM,
+  DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH,
   DEBATE_PLAYER_JUDGE_BOT_ID,
+  DEBATE_PLAYER_TURN_MAX_LENGTH,
   DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
   botPowerObserverProjectionFromEffectsV1,
+  debateEventIsTranscriptHousekeeping,
   debateFormalityDescriptor,
   debateSpokenText,
   type DebateAdvocacyConsent,
@@ -57,11 +61,18 @@ import {
   debateMotionRevealState,
   debatePlayerJudgePrefilledCast,
   derivedDebateSetupPresetId,
+  mergeDebateEvidenceSources,
   randomDebateCast,
   randomDebatePlayerJudgeCast,
   type DebateCastSelection,
 } from "./debateExperienceState";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
+import {
+  debateJudgeGuidedStepKind,
+  debateJudgeQuickChoices,
+  type DebateJudgeGuidedStepKind,
+  type DebateJudgeQuickChoice,
+} from "./debateJudgeQuickChoices";
 import { randomDebateTerritory } from "./debateTerritoryRandomizer";
 import {
   debateMarkdownSource,
@@ -139,6 +150,10 @@ import {
   debateVocalFoleyTargetId,
   type DebateModeratorGavelCue,
 } from "./debateFoley";
+import {
+  DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS,
+  debateJudgeGavelSpaceAction,
+} from "./debateJudgeGavel";
 import {
   DEBATE_FORUM_FOLEY_ROOM_SEND,
   DEBATE_TURNABOUT_FOLEY_ROOM_SEND,
@@ -226,6 +241,21 @@ export interface DebateExperienceProps {
   onUtterance?: (utterance: DebateUtterance) => Promise<boolean>;
   onStopUtterance?: () => void;
   onLiveSessionActiveChange?: (active: boolean) => void;
+  renderJudgeComposer?: (composer: DebateJudgeComposerRenderProps) => ReactNode;
+  onJudgeComposerReveal?: () => void;
+}
+
+export interface DebateJudgeComposerRenderProps {
+  kind: "gavel" | "question";
+  value: string;
+  placeholder: string;
+  maxLength: number;
+  disabled: boolean;
+  generating: boolean;
+  onValueChange: (value: string) => void;
+  onGenerate: () => void;
+  onSubmit: (value?: string) => void;
+  onBack: () => void;
 }
 
 type DebateView = "dashboard" | "live";
@@ -611,6 +641,7 @@ const DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS = new Set([
   "player_turn",
   "reaction",
   "interjection",
+  "judge_gavel",
   "moderator_ruling",
   "jury_deliberation",
   "jury_verdict",
@@ -720,6 +751,7 @@ function debatePresentationEvents(
         event.kind === "player_turn" ||
         event.kind === "reaction" ||
         event.kind === "interjection" ||
+        event.kind === "judge_gavel" ||
         event.kind === "moderator_ruling" ||
         event.kind === "ballot" ||
         event.kind === "jury_deliberation" ||
@@ -1005,27 +1037,29 @@ export function formatDebateVerboseTranscript(
     "",
     "## Event stream",
     "",
-    ...session.events.flatMap((event) => [
-      `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
-      "",
-      `- Speaker: ${visibleEventName(session, event)} (${event.speakerKind})`,
-      `- Side: ${debateSideLabel(session, event.sideId)}`,
-      `- Step: ${event.stepKey}`,
-      `- Statement: ${event.statementId ?? "None"}`,
-      `- Evidence item: ${event.evidenceSourceId ?? "None"}`,
-      `- Ruling: ${event.ruling ?? "None"}`,
-      `- At: ${event.createdAt}`,
-      `- Sources: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
-      `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
-      `- Delivery: ${
-        event.interrupted
-          ? `Interrupted by ${event.interruptedBy ?? "unknown"}`
-          : "Complete"
-      }`,
-      "",
-      event.content,
-      "",
-    ]),
+    ...session.events
+      .filter((event) => !debateEventIsTranscriptHousekeeping(event))
+      .flatMap((event) => [
+        `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
+        "",
+        `- Speaker: ${visibleEventName(session, event)} (${event.speakerKind})`,
+        `- Side: ${debateSideLabel(session, event.sideId)}`,
+        `- Step: ${event.stepKey}`,
+        `- Statement: ${event.statementId ?? "None"}`,
+        `- Evidence item: ${event.evidenceSourceId ?? "None"}`,
+        `- Ruling: ${event.ruling ?? "None"}`,
+        `- At: ${event.createdAt}`,
+        `- Sources: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
+        `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
+        `- Delivery: ${
+          event.interrupted
+            ? `Interrupted by ${event.interruptedBy ?? "unknown"}`
+            : "Complete"
+        }`,
+        "",
+        event.content,
+        "",
+      ]),
     ...(session.formatState.format === "turnabout"
       ? [
           `## Turnabout ${debatePublicMaterialName(session.formality).toLowerCase()}`,
@@ -1327,6 +1361,8 @@ export function DebateExperience(
     useState<DebateEvidencePacketV1>(EMPTY_EVIDENCE);
   const [researchQuery, setResearchQuery] = useState("");
   const [evidenceGenerating, setEvidenceGenerating] = useState(false);
+  const evidenceSourceLimitReached =
+    evidence.sources.length >= DEBATE_EVIDENCE_SOURCE_MAX_COUNT;
   const [playerDraft, setPlayerDraft] = useState("");
   const [turnaboutObjecting, setTurnaboutObjecting] = useState(false);
   const [turnaboutEvidenceSourceId, setTurnaboutEvidenceSourceId] =
@@ -1348,7 +1384,13 @@ export function DebateExperience(
   const [presenting, setPresenting] = useState(false);
   const [liveGavelCue, setLiveGavelCue] =
     useState<DebateModeratorGavelCue | null>(null);
+  const [judgeGavelSmashCue, setJudgeGavelSmashCue] =
+    useState<DebateModeratorGavelCue | null>(null);
   const [interjectionDraft, setInterjectionDraft] = useState("");
+  const [judgeGavelDraft, setJudgeGavelDraft] = useState("");
+  const [judgeComposerOpen, setJudgeComposerOpen] = useState(false);
+  const [judgeComposerGenerating, setJudgeComposerGenerating] = useState(false);
+  const [judgeGavelNowMs, setJudgeGavelNowMs] = useState(() => Date.now());
   const [cameraMode, setCameraMode] = useState<DebateCameraMode>("auto");
   const [stageAlignment, setStageAlignment] = useState<DebateStageAlignmentV6>(
     () => copyDebateStageAlignment(DEFAULT_DEBATE_STAGE_ALIGNMENT),
@@ -1412,12 +1454,110 @@ export function DebateExperience(
   const stageAlignmentCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const judgeGavelSmashCounterRef = useRef(0);
+  const judgeGavelSmashUntilRef = useRef(0);
+  const judgeGavelSmashClearTimerRef = useRef<number | null>(null);
+  const suppressNextJudgeGavelPresentationCueRef = useRef(false);
+  const judgeGavelKeyboardContextRef = useRef({
+    liveJudge: false,
+    semanticEligible: false,
+    cooldownUntilMs: Number.NaN,
+  });
+  const judgeGavelSmashRef = useRef<
+    ((kind: DebateModeratorGavelCue["kind"]) => void) | null
+  >(null);
+  const swingJudgeGavelRef = useRef<(() => Promise<void>) | null>(null);
+  const judgeGavelKeyboardBlocked =
+    stageAlignmentOpen ||
+    sourceDrawerId !== null ||
+    earlyEndOpen ||
+    pendingDeleteSession !== null;
+  const judgeGavelKeyboardLive =
+    view === "live" &&
+    activeSession?.playerRole === "judge" &&
+    activeSession.status !== "completed" &&
+    activeSession.status !== "failed" &&
+    activeSession.status !== "cancelled" &&
+    activeSession.status !== "paused" &&
+    !judgeGavelKeyboardBlocked;
+  judgeGavelKeyboardContextRef.current = {
+    liveJudge: judgeGavelKeyboardLive,
+    semanticEligible:
+      judgeGavelKeyboardLive &&
+      !busy &&
+      activeSession?.judgeGavel?.status !== "awaiting_message",
+    cooldownUntilMs: Date.parse(activeSession?.judgeGavelCooldownUntil ?? ""),
+  };
 
   useEffect(() => {
     if (!autoRecoveryNotice) return;
     const timeout = window.setTimeout(() => setAutoRecoveryNotice(null), 5_200);
     return () => window.clearTimeout(timeout);
   }, [autoRecoveryNotice]);
+
+  useEffect(() => {
+    const cooldownUntil = Date.parse(
+      activeSession?.judgeGavelCooldownUntil ?? "",
+    );
+    if (!Number.isFinite(cooldownUntil) || cooldownUntil <= Date.now()) {
+      return;
+    }
+    const kickoff = window.setTimeout(() => setJudgeGavelNowMs(Date.now()), 0);
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      setJudgeGavelNowMs(now);
+      if (now >= cooldownUntil) window.clearInterval(interval);
+    }, 250);
+    return () => {
+      window.clearTimeout(kickoff);
+      window.clearInterval(interval);
+    };
+  }, [activeSession?.judgeGavelCooldownUntil]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const nowMs = Date.now();
+      const context = judgeGavelKeyboardContextRef.current;
+      const target = event.target instanceof Element ? event.target : null;
+      const gavelShortcutTarget = target?.closest<HTMLElement>(
+        '[data-space-shortcut="true"]',
+      );
+      const editableTarget = Boolean(
+        !gavelShortcutTarget &&
+        target?.closest(
+          'input, textarea, select, button, a[href], [contenteditable="true"], [role="button"], [role="textbox"]',
+        ),
+      );
+      const semanticAvailable =
+        context.semanticEligible &&
+        (!Number.isFinite(context.cooldownUntilMs) ||
+          context.cooldownUntilMs <= nowMs);
+      const action = debateJudgeGavelSpaceAction({
+        code: event.code,
+        hasModifier:
+          event.altKey || event.ctrlKey || event.metaKey || event.shiftKey,
+        editableTarget,
+        liveJudge: context.liveJudge,
+        semanticAvailable,
+        nowMs,
+        smashUntilMs: judgeGavelSmashUntilRef.current,
+      });
+      if (!action) return;
+      event.preventDefault();
+      gavelShortcutTarget?.blur();
+      if (action === "smash") {
+        judgeGavelSmashRef.current?.("attention");
+        return;
+      }
+      void swingJudgeGavelRef.current?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+  useEffect(() => {
+    setJudgeComposerOpen(false);
+    setJudgeComposerGenerating(false);
+  }, [activeSession?.id, activeSession?.stepKey]);
   const deleteUndoResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -1495,6 +1635,10 @@ export function DebateExperience(
         clearTimeout(stageAlignmentCopyResetTimerRef.current);
         stageAlignmentCopyResetTimerRef.current = null;
       }
+      if (judgeGavelSmashClearTimerRef.current) {
+        clearTimeout(judgeGavelSmashClearTimerRef.current);
+        judgeGavelSmashClearTimerRef.current = null;
+      }
       if (deleteUndoResetTimerRef.current) {
         clearTimeout(deleteUndoResetTimerRef.current);
         deleteUndoResetTimerRef.current = null;
@@ -1552,7 +1696,10 @@ export function DebateExperience(
     stageAlignmentSoundCheck?.status,
   ]);
 
-  const liveSessionActive = view === "live" && activeSession !== null;
+  const liveSessionActive =
+    view === "live" &&
+    activeSession !== null &&
+    activeSession.status !== "paused";
   useEffect(() => {
     onLiveSessionActiveChange?.(liveSessionActive);
   }, [liveSessionActive, onLiveSessionActiveChange]);
@@ -2388,7 +2535,13 @@ export function DebateExperience(
     generated = false,
   ): Promise<void> => {
     const query = (queryOverride ?? researchQuery).trim();
-    if (!query || props.responseMode === "local") return;
+    if (
+      !query ||
+      props.responseMode === "local" ||
+      evidenceSourceLimitReached
+    ) {
+      return;
+    }
     setBusy(true);
     setEvidenceGenerating(generated);
     setError(null);
@@ -2405,7 +2558,7 @@ export function DebateExperience(
       );
       setEvidence((current) => ({
         ...current,
-        sources: result.sources.slice(0, 12),
+        sources: mergeDebateEvidenceSources(current.sources, result.sources),
       }));
     } catch (caught) {
       setError(
@@ -2527,11 +2680,19 @@ export function DebateExperience(
       for (const event of fresh) {
         if (presentationRunRef.current !== runId) return;
         setTranscriptVisibleThroughSequence(event.sequence);
-        const gavelCue = debateModeratorGavelCue({
-          format: next.format,
-          event,
-          moderatorBotId: next.moderator.id,
-        });
+        const suppressGavelCue =
+          event.kind === "judge_gavel" &&
+          suppressNextJudgeGavelPresentationCueRef.current;
+        if (suppressGavelCue) {
+          suppressNextJudgeGavelPresentationCueRef.current = false;
+        }
+        const gavelCue = suppressGavelCue
+          ? null
+          : debateModeratorGavelCue({
+              format: next.format,
+              event,
+              moderatorBotId: next.moderator.id,
+            });
         setLiveGavelCue(gavelCue);
         const orderCameraCutMs =
           gavelCue?.kind === "order" ? DEBATE_GAVEL_ORDER_CAMERA_CUT_MS : 0;
@@ -2558,6 +2719,15 @@ export function DebateExperience(
             visibleContent: event.content,
           });
           await new Promise((resolve) => window.setTimeout(resolve, 900));
+          continue;
+        }
+        if (event.kind === "judge_gavel" && event.gavelReason !== "resume") {
+          setLiveReveal({
+            eventId: event.id,
+            visibleContent: event.content,
+            speechTiming: null,
+          });
+          await new Promise((resolve) => window.setTimeout(resolve, 260));
           continue;
         }
         if (event.speakerKind === "system") {
@@ -2886,12 +3056,9 @@ export function DebateExperience(
     return () => window.clearTimeout(timer);
   }, [activeSession, advance, busy, earlyEndOpen, presenting, view]);
 
-  const submitPlayerTurn = async (
-    event: FormEvent<HTMLFormElement>,
-  ): Promise<void> => {
-    event.preventDefault();
+  const submitPlayerTurnContent = async (content: string): Promise<void> => {
     const previous = activeSession;
-    if (!previous || busy) return;
+    if (!previous || busy || !content.trim()) return;
     setBusy(true);
     setError(null);
     try {
@@ -2900,7 +3067,7 @@ export function DebateExperience(
         requestBody({
           expectedRevision: previous.revision,
           idempotencyKey: nextMutationKey("player-turn"),
-          content: playerDraft,
+          content,
           targetSideId:
             previous.stepKey === "challenge_judge_question"
               ? judgeTarget
@@ -2909,6 +3076,7 @@ export function DebateExperience(
       );
       if (mountedRef.current) setBusy(false);
       setPlayerDraft("");
+      setJudgeComposerOpen(false);
       await adoptSession(previous, result.session);
     } catch (caught) {
       setError(
@@ -2919,6 +3087,13 @@ export function DebateExperience(
     } finally {
       if (mountedRef.current) setBusy(false);
     }
+  };
+
+  const submitPlayerTurn = async (
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> => {
+    event.preventDefault();
+    await submitPlayerTurnContent(playerDraft);
   };
 
   const passPlayerTurn = async (): Promise<void> => {
@@ -2949,6 +3124,128 @@ export function DebateExperience(
     } finally {
       if (mountedRef.current) setBusy(false);
     }
+  };
+
+  const revealJudgeComposer = (): void => {
+    setJudgeComposerOpen(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => props.onJudgeComposerReveal?.());
+    });
+  };
+
+  const submitJudgeQuickChoice = async (
+    kind: "gavel" | "question",
+    choice: DebateJudgeQuickChoice,
+  ): Promise<void> => {
+    if (choice.content === null) {
+      revealJudgeComposer();
+      return;
+    }
+    if (kind === "gavel") {
+      await submitJudgeGavelMessage(undefined, false, choice.content);
+      return;
+    }
+    await submitPlayerTurnContent(choice.content);
+  };
+
+  const generateJudgeComposerDraft = async (): Promise<void> => {
+    const previous = activeSession;
+    const guidedKind = previous
+      ? debateJudgeGuidedStepKind({
+          playerRole: previous.playerRole,
+          status: previous.status,
+          stepKey: previous.stepKey,
+          judgeGavelStatus: previous.judgeGavel?.status,
+        })
+      : null;
+    if (
+      !previous ||
+      (guidedKind !== "gavel" && guidedKind !== "question") ||
+      busy ||
+      judgeComposerGenerating
+    ) {
+      return;
+    }
+    const targetLabel =
+      judgeTarget === "for"
+        ? previous.motion.forSide.label
+        : previous.motion.againstSide.label;
+    const heardContext = previous.events
+      .filter((event) =>
+        [
+          "speech",
+          "testimony",
+          "press",
+          "evidence",
+          "player_turn",
+          "interjection",
+          "moderator_ruling",
+        ].includes(event.kind),
+      )
+      .slice(-4)
+      .map((event) => debateSpokenText(event.content).trim())
+      .filter(Boolean)
+      .join("\n");
+    const task =
+      guidedKind === "gavel"
+        ? "Write one short, neutral Judge direction to both advocates. It may demand clarification, redirect them to the motion, or ask them to answer the strongest objection. Do not choose a winner."
+        : `Write one crisp, neutral Judge question for the ${targetLabel} side. Test its reasoning or evidence without arguing for either side.`;
+    setJudgeComposerGenerating(true);
+    setError(null);
+    try {
+      const result = await props.request<{ prompt?: string }>(
+        "/api/composer/random-prompt",
+        requestBody({
+          mode: "sandbox",
+          preferredProvider: previous.provider,
+          modelOverride: previous.model,
+          recentMessages: [
+            {
+              role: "assistant",
+              botName: "Debate floor",
+              content: [
+                `Motion: ${previous.motion.motion}`,
+                `For: ${previous.motion.forSide.label}`,
+                `Against: ${previous.motion.againstSide.label}`,
+                heardContext ? `Recent public floor:\n${heardContext}` : "",
+                task,
+                "Return only the Judge's words.",
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            },
+          ],
+        }),
+      );
+      const prompt = result.prompt?.trim() ?? "";
+      if (!prompt) return;
+      if (guidedKind === "gavel") {
+        setJudgeGavelDraft(
+          prompt.slice(0, DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH),
+        );
+      } else {
+        setPlayerDraft(prompt.slice(0, DEBATE_PLAYER_TURN_MAX_LENGTH));
+      }
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Prism could not draft a Judge response.",
+      );
+    } finally {
+      if (mountedRef.current) setJudgeComposerGenerating(false);
+    }
+  };
+
+  const submitJudgeComposerDraft = async (
+    kind: "gavel" | "question",
+    contentOverride?: string,
+  ): Promise<void> => {
+    if (kind === "gavel") {
+      await submitJudgeGavelMessage(undefined, false, contentOverride);
+      return;
+    }
+    await submitPlayerTurnContent(contentOverride ?? playerDraft);
   };
 
   const submitTurnaboutAction = async (
@@ -2986,7 +3283,10 @@ export function DebateExperience(
     }
   };
 
-  const submitVerdict = async (sideId: DebateSideId): Promise<void> => {
+  const submitVerdict = async (
+    sideId: DebateSideId,
+    reasonOverride?: string,
+  ): Promise<void> => {
     const previous = activeSession;
     if (!previous || busy) return;
     setBusy(true);
@@ -2998,7 +3298,7 @@ export function DebateExperience(
           expectedRevision: previous.revision,
           idempotencyKey: nextMutationKey("verdict"),
           sideId,
-          reason: playerDraft,
+          reason: reasonOverride ?? playerDraft,
         }),
       );
       if (mountedRef.current) setBusy(false);
@@ -3027,6 +3327,158 @@ export function DebateExperience(
     }
     setLiveGavelCue(null);
     setPresenting(false);
+  };
+
+  const triggerJudgeGavelSmash = (
+    kind: DebateModeratorGavelCue["kind"],
+  ): void => {
+    judgeGavelSmashCounterRef.current += 1;
+    const cue: DebateModeratorGavelCue = {
+      eventId: `player-smash:${judgeGavelSmashCounterRef.current}`,
+      kind,
+    };
+    setCameraMode("moderator");
+    setJudgeGavelSmashCue(cue);
+    if (judgeGavelSmashClearTimerRef.current) {
+      window.clearTimeout(judgeGavelSmashClearTimerRef.current);
+    }
+    judgeGavelSmashClearTimerRef.current = window.setTimeout(
+      () => {
+        setJudgeGavelSmashCue((current) =>
+          current?.eventId === cue.eventId ? null : current,
+        );
+        judgeGavelSmashClearTimerRef.current = null;
+      },
+      debateModeratorGavelSpeechLeadMs(kind) + 220,
+    );
+  };
+
+  const swingJudgeGavel = async (overtimeOverride?: boolean): Promise<void> => {
+    const previous = activeSession;
+    if (
+      !previous ||
+      previous.playerRole !== "judge" ||
+      previous.judgeGavel?.status === "awaiting_message" ||
+      busy
+    ) {
+      return;
+    }
+    const target =
+      presenting && presentationEventId
+        ? (previous.events.find((event) => event.id === presentationEventId) ??
+          null)
+        : null;
+    const heardCharacterCount =
+      target && liveReveal?.eventId === target.id
+        ? liveReveal.visibleContent.length
+        : (target?.content.length ?? 0);
+    const targetClock =
+      target && liveReveal?.eventId === target.id
+        ? debateTurnClockState(target, liveReveal.speechTiming ?? null)
+        : null;
+    const overtime =
+      overtimeOverride ??
+      (target?.speakerKind === "advocate" &&
+        targetClock?.status === "overtime");
+    if (presenting) cancelCurrentPresentation();
+    judgeGavelSmashUntilRef.current =
+      Date.now() + DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS;
+    suppressNextJudgeGavelPresentationCueRef.current = true;
+    triggerJudgeGavelSmash(overtime ? "attention" : "order");
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(previous.id)}/judge-gavel`,
+        requestBody({
+          expectedRevision: previous.revision,
+          idempotencyKey: nextMutationKey(
+            overtime ? "judge-gavel-overtime" : "judge-gavel",
+          ),
+          eventId: target?.id ?? null,
+          heardCharacterCount,
+          overtime,
+        }),
+      );
+      const gavelEvent = [...result.session.events]
+        .reverse()
+        .find((event) => event.kind === "judge_gavel");
+      if (!gavelEvent) {
+        suppressNextJudgeGavelPresentationCueRef.current = false;
+      }
+      setJudgeGavelNowMs(Date.now());
+      if (mountedRef.current) setBusy(false);
+      await adoptSession(
+        {
+          ...previous,
+          events: gavelEvent
+            ? result.session.events.filter(
+                (event) => event.id !== gavelEvent.id,
+              )
+            : result.session.events,
+        },
+        result.session,
+      );
+    } catch (caught) {
+      judgeGavelSmashUntilRef.current = 0;
+      suppressNextJudgeGavelPresentationCueRef.current = false;
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The Judge's gavel was unavailable.",
+      );
+      setTranscriptVisibleThroughSequence(null);
+      setLiveReveal(null);
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  };
+  judgeGavelSmashRef.current = triggerJudgeGavelSmash;
+  swingJudgeGavelRef.current = () => swingJudgeGavel();
+
+  const submitJudgeGavelMessage = async (
+    event?: FormEvent<HTMLFormElement>,
+    pass = false,
+    contentOverride?: string,
+  ): Promise<void> => {
+    event?.preventDefault();
+    const previous = activeSession;
+    const content = contentOverride ?? judgeGavelDraft;
+    if (
+      !previous ||
+      previous.judgeGavel?.status !== "awaiting_message" ||
+      busy ||
+      (!pass && !content.trim())
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(previous.id)}/judge-gavel/message`,
+        requestBody({
+          expectedRevision: previous.revision,
+          idempotencyKey: nextMutationKey(
+            pass ? "judge-gavel-resume" : "judge-gavel-message",
+          ),
+          content: pass ? undefined : content,
+          pass,
+        }),
+      );
+      setJudgeGavelDraft("");
+      setJudgeComposerOpen(false);
+      if (mountedRef.current) setBusy(false);
+      await adoptSession(previous, result.session);
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The debaters could not answer the Judge.",
+      );
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
   };
 
   const pauseOrResume = async (): Promise<void> => {
@@ -4569,10 +5021,16 @@ export function DebateExperience(
                 disabled={
                   props.responseMode === "local" ||
                   !researchQuery.trim() ||
+                  evidenceSourceLimitReached ||
                   busy
                 }
+                title={
+                  evidenceSourceLimitReached
+                    ? "Remove a source to search again"
+                    : undefined
+                }
               >
-                Search once
+                Search &amp; add
               </button>
               <button
                 type="button"
@@ -4581,12 +5039,18 @@ export function DebateExperience(
                 disabled={
                   props.responseMode === "local" ||
                   !motion.motion.trim() ||
+                  evidenceSourceLimitReached ||
                   busy
+                }
+                title={
+                  evidenceSourceLimitReached
+                    ? "Remove a source to search again"
+                    : undefined
                 }
                 aria-label="Generate randomized evidence from the current motion"
               >
                 <span aria-hidden="true">◇</span>
-                {evidenceGenerating ? "Generating…" : "Generate evidence"}
+                {evidenceGenerating ? "Generating…" : "Add generated search"}
               </button>
             </div>
           </>
@@ -4596,12 +5060,24 @@ export function DebateExperience(
             className={styles.generateEvidenceButton}
             onClick={() => void generateEvidence()}
             disabled={
-              props.responseMode === "local" || !motion.motion.trim() || busy
+              props.responseMode === "local" ||
+              !motion.motion.trim() ||
+              evidenceSourceLimitReached ||
+              busy
+            }
+            title={
+              evidenceSourceLimitReached
+                ? "Remove a source to search again"
+                : undefined
             }
             aria-label="Generate randomized evidence from the current motion"
           >
             <span aria-hidden="true">◇</span>
-            {evidenceGenerating ? "Finding sources…" : "Find sources for me"}
+            {evidenceGenerating
+              ? "Finding sources…"
+              : evidence.sources.length > 0
+                ? "Find more sources"
+                : "Find sources for me"}
           </button>
         )}
         {props.responseMode === "local" ? (
@@ -4613,8 +5089,8 @@ export function DebateExperience(
         ) : (
           <p>
             {setupMode === "basic"
-              ? "Prism searches once for real public sources related to this debate. It never fabricates them."
-              : "Search manually, or let Prism vary a real-source query from the current motion. Nothing is fabricated; research ends permanently when the Duel starts."}
+              ? `Each search adds distinct real public sources without replacing the ${evidence.sources.length} already locked. ${DEBATE_EVIDENCE_SOURCE_MAX_COUNT} sources maximum; Prism never fabricates them.`
+              : `Search again to add distinct real sources without replacing the current packet. Duplicate URLs are skipped; ${DEBATE_EVIDENCE_SOURCE_MAX_COUNT} sources maximum. Nothing is fabricated, and research ends permanently when the Duel starts.`}
           </p>
         )}
       </div>
@@ -4657,8 +5133,8 @@ export function DebateExperience(
               : "Empty packet staged"}
           </strong>
           <small>
-            {evidence.sources.length} frozen source
-            {evidence.sources.length === 1 ? "" : "s"} ·{" "}
+            {evidence.sources.length} / {DEBATE_EVIDENCE_SOURCE_MAX_COUNT}{" "}
+            source{evidence.sources.length === 1 ? "" : "s"} locked ·{" "}
             {evidence.notes.trim() ? "notes included" : "no player notes"}
           </small>
         </div>
@@ -5031,10 +5507,171 @@ export function DebateExperience(
     );
   };
 
+  const renderJudgeGuidedControls = (
+    session: DebateSessionV1,
+    kind: DebateJudgeGuidedStepKind,
+  ): React.JSX.Element => {
+    if (kind === "verdict") {
+      return (
+        <section
+          className={styles.judgeChoiceDock}
+          data-kind="verdict"
+          data-tutorial-target="debate-judge-guided-controls"
+          role="group"
+          aria-label="Choose the final Debate ruling"
+        >
+          <header>
+            <p>Final ruling</p>
+            <strong>Which side carried the motion?</strong>
+          </header>
+          <div className={styles.judgeVerdictChoices}>
+            <button
+              type="button"
+              data-side="for"
+              onClick={() => void submitVerdict("for", "")}
+              disabled={busy}
+            >
+              <span>{session.motion.forSide.label}</span>
+              <small>Rule for this side</small>
+            </button>
+            <button
+              type="button"
+              data-side="against"
+              onClick={() => void submitVerdict("against", "")}
+              disabled={busy}
+            >
+              <span>{session.motion.againstSide.label}</span>
+              <small>Rule for this side</small>
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    const choices = debateJudgeQuickChoices(kind);
+    const targetLabel =
+      judgeTarget === "for"
+        ? session.motion.forSide.label
+        : session.motion.againstSide.label;
+    return (
+      <section
+        className={styles.judgeChoiceDock}
+        data-kind={kind}
+        data-composer-open={judgeComposerOpen ? "true" : undefined}
+        data-tutorial-target="debate-judge-guided-controls"
+        role="group"
+        aria-label={
+          kind === "gavel"
+            ? "Choose a Judge intervention"
+            : `Choose a Judge question for ${targetLabel}`
+        }
+      >
+        <header>
+          <p>{kind === "gavel" ? "The gavel has the room" : "Your question"}</p>
+          <strong>
+            {kind === "gavel"
+              ? "How do you want to redirect the floor?"
+              : `What do you want to ask ${targetLabel}?`}
+          </strong>
+          {kind === "question" ? (
+            <div
+              className={styles.judgeTargetChoices}
+              role="group"
+              aria-label="Choose which side to question"
+            >
+              {(["for", "against"] as const).map((sideId) => (
+                <button
+                  type="button"
+                  key={sideId}
+                  aria-pressed={judgeTarget === sideId}
+                  data-selected={judgeTarget === sideId ? "true" : undefined}
+                  onClick={() => setJudgeTarget(sideId)}
+                  disabled={busy}
+                >
+                  {sideId === "for"
+                    ? session.motion.forSide.label
+                    : session.motion.againstSide.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </header>
+        {judgeComposerOpen ? (
+          <div className={styles.judgeCustomChoiceNotice}>
+            <span>Write below, or roll the dice for an editable draft.</span>
+            <button
+              type="button"
+              onClick={() => setJudgeComposerOpen(false)}
+              disabled={busy || judgeComposerGenerating}
+            >
+              Back to quick choices
+            </button>
+          </div>
+        ) : (
+          <div className={styles.judgeQuickChoices}>
+            {choices.map((choice, index) => (
+              <button
+                type="button"
+                key={choice.id}
+                data-choice-kind={choice.content === null ? "custom" : "quick"}
+                onClick={() => void submitJudgeQuickChoice(kind, choice)}
+                disabled={busy}
+                aria-label={`${index + 1}. ${choice.label}. ${choice.detail}`}
+              >
+                <span>{choice.label}</span>
+                <small>{choice.detail}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderPlayerWindow = (
     session: DebateSessionV1,
   ): React.JSX.Element | null => {
     if (session.status !== "waiting_for_player") return null;
+    if (
+      session.stepKey === "judge_gavel_message" &&
+      session.judgeGavel?.status === "awaiting_message"
+    ) {
+      return (
+        <form
+          className={styles.playerWindow}
+          data-kind="judge-gavel"
+          onSubmit={submitJudgeGavelMessage}
+          data-tutorial-target="debate-judge-gavel-message"
+        >
+          <p className={styles.eyebrow}>The gavel has the room</p>
+          <h2>Address the debaters</h2>
+          <textarea
+            value={judgeGavelDraft}
+            onChange={(event) => setJudgeGavelDraft(event.currentTarget.value)}
+            maxLength={DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH}
+            rows={3}
+            autoFocus
+            placeholder="Ask a question, demand clarification, or redirect the exchange…"
+          />
+          <div>
+            <button
+              type="button"
+              onClick={() => void submitJudgeGavelMessage(undefined, true)}
+              disabled={busy}
+            >
+              Resume without message
+            </button>
+            <button
+              type="submit"
+              className={styles.primaryButton}
+              disabled={busy || !judgeGavelDraft.trim()}
+            >
+              Send to the floor
+            </button>
+          </div>
+        </form>
+      );
+    }
     if (
       session.stepKey === "verdict_player" ||
       session.stepKey === "turnabout_verdict_player"
@@ -5324,6 +5961,7 @@ export function DebateExperience(
                   (session.jury.enabled &&
                     event.kind === "ballot" &&
                     event.speakerKind === "juror")) &&
+                !debateEventIsTranscriptHousekeeping(event) &&
                 (transcriptVisibleThroughSequence === null ||
                   event.sequence <= transcriptVisibleThroughSequence),
             )
@@ -5344,7 +5982,9 @@ export function DebateExperience(
                     <span>
                       {event.interrupted
                         ? "interrupted"
-                        : event.kind.replace("_", " ")}{" "}
+                        : event.stepKey.startsWith("persona_reaction_")
+                          ? "vocal reaction"
+                          : event.kind.replace("_", " ")}{" "}
                       · {event.phase}
                     </span>
                   </header>
@@ -5442,14 +6082,21 @@ export function DebateExperience(
         </aside>
       );
     }
+    const presentedPublicEvent = presentationEventId
+      ? (session.events.find((event) => event.id === presentationEventId) ??
+        null)
+      : null;
     const latestPublicEvent =
-      (presentationEventId
-        ? session.events.find((event) => event.id === presentationEventId)
+      (presentedPublicEvent &&
+      !debateEventIsTranscriptHousekeeping(presentedPublicEvent)
+        ? presentedPublicEvent
         : null) ??
       [...session.events]
         .reverse()
-        .find((event) =>
-          DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS.has(event.kind),
+        .find(
+          (event) =>
+            DEBATE_VISIBLE_TRANSCRIPT_EVENT_KINDS.has(event.kind) &&
+            !debateEventIsTranscriptHousekeeping(event),
         ) ??
       null;
     const latestPublicContent =
@@ -5521,7 +6168,9 @@ export function DebateExperience(
     const chamberContent =
       activeEvent &&
       (activeEvent.kind === "jury_deliberation" ||
-        activeEvent.kind === "jury_verdict")
+        activeEvent.kind === "jury_verdict" ||
+        (activeEvent.kind === "reaction" &&
+          activeEvent.speakerKind === "juror"))
         ? liveReveal?.eventId === activeEvent.id
           ? liveReveal.visibleContent
           : activeEvent.content
@@ -6742,6 +7391,12 @@ export function DebateExperience(
   const renderLive = (): React.JSX.Element => {
     if (!activeSession) return renderLobby();
     const session = activeSession;
+    const judgeGuidedStep = debateJudgeGuidedStepKind({
+      playerRole: session.playerRole,
+      status: session.status,
+      stepKey: session.stepKey,
+      judgeGavelStatus: session.judgeGavel?.status,
+    });
     const juryCameraActive = debateJuryCameraIsActive(cameraMode, session);
     const activeEvent =
       (presentationEventId
@@ -6769,6 +7424,7 @@ export function DebateExperience(
                 "player_turn",
                 "reaction",
                 "interjection",
+                "judge_gavel",
                 "moderator_ruling",
                 "ballot",
                 "jury_deliberation",
@@ -6801,11 +7457,14 @@ export function DebateExperience(
           : activeSpeakerId === session.againstAdvocate.id
             ? "against"
             : null;
-    const activeGavelCue = presenting ? liveGavelCue : null;
+    const activeGavelCue =
+      judgeGavelSmashCue ?? (presenting ? liveGavelCue : null);
     const gavelCameraReady =
+      judgeGavelSmashCue !== null ||
       activeGavelCue?.kind !== "order" ||
       presentationEventId === activeGavelCue.eventId;
-    const forumPreparingNextTurn = busy && !presenting;
+    const forumPreparingNextTurn =
+      busy && !presenting && judgeGavelSmashCue === null;
     const cameraView = juryCameraActive
       ? "jury"
       : cameraMode === "auto" || cameraMode === "jury"
@@ -6842,37 +7501,67 @@ export function DebateExperience(
       presenting && activeEvent
         ? debateTurnClockState(activeEvent, activeSpeechTiming)
         : null;
+    const judgeGavelCooldownRemainingMs = Math.max(
+      0,
+      Date.parse(session.judgeGavelCooldownUntil ?? "") - judgeGavelNowMs || 0,
+    );
+    const judgeGavelCooldownSeconds = Math.ceil(
+      judgeGavelCooldownRemainingMs / 1_000,
+    );
+    const pauseOnGavelCooldown =
+      session.playerRole === "judge" &&
+      session.status !== "paused" &&
+      judgeGavelCooldownRemainingMs > 0;
+    const judgeCanCallTime =
+      presenting &&
+      activeEvent?.speakerKind === "advocate" &&
+      activeTurnClock?.status === "overtime";
+    const judgeGavelAvailable =
+      session.playerRole === "judge" &&
+      session.status !== "completed" &&
+      session.status !== "failed" &&
+      session.status !== "cancelled" &&
+      session.status !== "paused" &&
+      session.judgeGavel?.status !== "awaiting_message";
     const listenerReaction = debateGalleryReaction(activePublicContent);
     const floorLabel =
       activeTurnClock?.status === "overtime"
         ? "Overtime"
-        : activeEvent?.kind === "moderator_ruling"
-          ? "Moderator ruling"
-          : activeEvent?.kind === "testimony"
-            ? "Statement entered"
-            : activeEvent?.kind === "press"
-              ? "Statement pressed"
-              : activeEvent?.kind === "objection"
-                ? "Objection"
-                : activeEvent?.kind === "evidence"
-                  ? "Frozen evidence"
-                  : activeEvent?.kind === "revelation"
-                    ? "Reversal"
-                    : activeEvent?.kind === "interjection"
-                      ? "Floor interrupted"
-                      : activeEvent?.kind === "reaction"
-                        ? "After the verdict"
-                        : activeEvent?.kind === "phase"
-                          ? "Moderator transition"
-                          : activeEvent?.kind === "ballot"
-                            ? "Ballot"
-                            : activeEvent?.kind === "jury_deliberation"
-                              ? "Jury chamber"
-                              : activeEvent?.kind === "jury_verdict"
-                                ? "Jury verdict"
-                                : activeEvent
-                                  ? "On the floor"
-                                  : "Awaiting the floor";
+        : activeEvent?.kind === "judge_gavel"
+          ? activeEvent.gavelReason === "overtime"
+            ? "Time called"
+            : activeEvent.gavelReason === "resume"
+              ? "Proceeding resumed"
+              : "Judge intervention"
+          : activeEvent?.kind === "moderator_ruling"
+            ? "Moderator ruling"
+            : activeEvent?.kind === "testimony"
+              ? "Statement entered"
+              : activeEvent?.kind === "press"
+                ? "Statement pressed"
+                : activeEvent?.kind === "objection"
+                  ? "Objection"
+                  : activeEvent?.kind === "evidence"
+                    ? "Frozen evidence"
+                    : activeEvent?.kind === "revelation"
+                      ? "Reversal"
+                      : activeEvent?.kind === "interjection"
+                        ? "Floor interrupted"
+                        : activeEvent?.kind === "reaction"
+                          ? activeEvent.stepKey.startsWith("persona_reaction_")
+                            ? "In-character reaction"
+                            : "After the verdict"
+                          : activeEvent?.kind === "phase"
+                            ? "Moderator transition"
+                            : activeEvent?.kind === "ballot"
+                              ? "Ballot"
+                              : activeEvent?.kind === "jury_deliberation"
+                                ? "Jury chamber"
+                                : activeEvent?.kind === "jury_verdict"
+                                  ? "Jury verdict"
+                                  : activeEvent
+                                    ? "On the floor"
+                                    : "Awaiting the floor";
     const forPresentation = debateBotPresentation(
       session,
       session.forAdvocate,
@@ -7098,19 +7787,83 @@ export function DebateExperience(
               session.status !== "failed" &&
               session.status !== "cancelled" ? (
                 <>
+                  {judgeGavelAvailable ? (
+                    <button
+                      type="button"
+                      className={styles.judgeGavelButton}
+                      data-cooling={
+                        judgeGavelCooldownRemainingMs > 0 ? "true" : undefined
+                      }
+                      data-overtime={judgeCanCallTime ? "true" : undefined}
+                      data-space-shortcut="true"
+                      data-tutorial-target="debate-judge-gavel"
+                      onClick={(event) => {
+                        event.currentTarget.blur();
+                        void swingJudgeGavel(judgeCanCallTime);
+                      }}
+                      disabled={busy || judgeGavelCooldownRemainingMs > 0}
+                      aria-label={
+                        judgeGavelCooldownRemainingMs > 0
+                          ? `Judge gavel ready in ${judgeGavelCooldownSeconds} seconds`
+                          : judgeCanCallTime
+                            ? "Swing the Judge gavel to call time. Space also swings it."
+                            : "Swing the Judge gavel and address the debaters. Space also swings it."
+                      }
+                      title={
+                        judgeGavelCooldownRemainingMs > 0
+                          ? `Gavel cooling down · ${judgeGavelCooldownSeconds}s`
+                          : judgeCanCallTime
+                            ? "Call time without opening an intervention · Space"
+                            : "Call the room to order · Space"
+                      }
+                    >
+                      {judgeGavelCooldownRemainingMs > 0
+                        ? `${judgeGavelCooldownSeconds}s`
+                        : judgeCanCallTime
+                          ? "Call time"
+                          : "Gavel"}
+                      {judgeGavelCooldownRemainingMs <= 0 ? (
+                        <kbd aria-hidden="true">Space</kbd>
+                      ) : null}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => void pauseOrResume()}
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      session.judgeGavel?.status === "awaiting_message" ||
+                      pauseOnGavelCooldown
+                    }
+                    aria-label={
+                      pauseOnGavelCooldown
+                        ? `Pause available after the gavel cooldown in ${judgeGavelCooldownSeconds} seconds`
+                        : session.status === "paused"
+                          ? "Resume Debate"
+                          : "Pause Debate"
+                    }
+                    title={
+                      pauseOnGavelCooldown
+                        ? `Call to order settling · ${judgeGavelCooldownSeconds}s`
+                        : undefined
+                    }
                   >
-                    {session.status === "paused" ? "Resume" : "Pause"}
+                    {session.status === "paused"
+                      ? "Resume"
+                      : pauseOnGavelCooldown
+                        ? `Pause · ${judgeGavelCooldownSeconds}s`
+                        : "Pause"}
                   </button>
                   {session.phase !== "verdict" || juryDeliberating ? (
                     <button
                       type="button"
                       className={styles.endEarlyButton}
                       onClick={() => setEarlyEndOpen(true)}
-                      disabled={busy || (!juryDeliberating && presenting)}
+                      disabled={
+                        busy ||
+                        session.judgeGavel?.status === "awaiting_message" ||
+                        (!juryDeliberating && presenting)
+                      }
                       aria-label={
                         juryDeliberating
                           ? "Skip Jury deliberation"
@@ -7373,6 +8126,8 @@ export function DebateExperience(
                     </strong>
                     <small>The exact next action is preserved.</small>
                   </div>
+                ) : judgeGuidedStep && !presenting && !juryChamberVisible ? (
+                  renderJudgeGuidedControls(session, judgeGuidedStep)
                 ) : session.status === "waiting_for_player" &&
                   !presenting &&
                   !juryChamberVisible ? (
@@ -7382,7 +8137,16 @@ export function DebateExperience(
                     aria-hidden="true"
                   >
                     <span>◇</span>
-                    <strong>The floor turns to you</strong>
+                    <strong>
+                      {session.judgeGavel?.status === "awaiting_message"
+                        ? "The gavel has the room"
+                        : "The floor turns to you"}
+                    </strong>
+                    {session.judgeGavel?.status === "awaiting_message" ? (
+                      <small>
+                        Address the debaters, then the scheduled order resumes.
+                      </small>
+                    ) : null}
                   </div>
                 ) : session.status === "completed" &&
                   !presenting &&
@@ -7656,7 +8420,9 @@ export function DebateExperience(
               </form>
             </div>
           ) : null}
-          {session.status === "waiting_for_player" && !presenting ? (
+          {session.status === "waiting_for_player" &&
+          !presenting &&
+          judgeGuidedStep === null ? (
             <div className={styles.liveCommandDeck} data-kind="player">
               {renderPlayerWindow(session)}
             </div>
@@ -7751,6 +8517,90 @@ export function DebateExperience(
             </div>
           ) : null}
         </main>
+        {judgeComposerOpen &&
+        (judgeGuidedStep === "gavel" || judgeGuidedStep === "question") ? (
+          props.renderJudgeComposer ? (
+            props.renderJudgeComposer({
+              kind: judgeGuidedStep,
+              value:
+                judgeGuidedStep === "gavel" ? judgeGavelDraft : playerDraft,
+              placeholder:
+                judgeGuidedStep === "gavel"
+                  ? "Address both advocates…"
+                  : `Ask the ${
+                      judgeTarget === "for"
+                        ? session.motion.forSide.label
+                        : session.motion.againstSide.label
+                    } side…`,
+              maxLength:
+                judgeGuidedStep === "gavel"
+                  ? DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH
+                  : DEBATE_PLAYER_TURN_MAX_LENGTH,
+              disabled: busy,
+              generating: judgeComposerGenerating,
+              onValueChange:
+                judgeGuidedStep === "gavel"
+                  ? setJudgeGavelDraft
+                  : setPlayerDraft,
+              onGenerate: () => void generateJudgeComposerDraft(),
+              onSubmit: (value) =>
+                void submitJudgeComposerDraft(judgeGuidedStep, value),
+              onBack: () => setJudgeComposerOpen(false),
+            })
+          ) : (
+            <form
+              className={styles.judgeComposerFallback}
+              data-tutorial-target="debate-judge-composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (
+                  (judgeGuidedStep === "gavel"
+                    ? judgeGavelDraft
+                    : playerDraft
+                  ).trim()
+                ) {
+                  void submitJudgeComposerDraft(judgeGuidedStep);
+                } else {
+                  void generateJudgeComposerDraft();
+                }
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setJudgeComposerOpen(false)}
+                disabled={busy || judgeComposerGenerating}
+              >
+                Back
+              </button>
+              <textarea
+                value={
+                  judgeGuidedStep === "gavel" ? judgeGavelDraft : playerDraft
+                }
+                onChange={(event) =>
+                  (judgeGuidedStep === "gavel"
+                    ? setJudgeGavelDraft
+                    : setPlayerDraft)(event.currentTarget.value)
+                }
+                maxLength={
+                  judgeGuidedStep === "gavel"
+                    ? DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH
+                    : DEBATE_PLAYER_TURN_MAX_LENGTH
+                }
+                placeholder="Write a custom Judge response…"
+                autoFocus
+                disabled={busy || judgeComposerGenerating}
+              />
+              <button type="submit" disabled={busy || judgeComposerGenerating}>
+                {(judgeGuidedStep === "gavel"
+                  ? judgeGavelDraft
+                  : playerDraft
+                ).trim()
+                  ? "Send"
+                  : "Draft for me"}
+              </button>
+            </form>
+          )
+        ) : null}
         {renderStageAlignmentModal(session)}
       </>
     );

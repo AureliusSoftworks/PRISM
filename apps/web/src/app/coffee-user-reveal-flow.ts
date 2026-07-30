@@ -16,7 +16,7 @@ export type CoffeeUserRevealFlowState =
   | "tableTyping";
 
 export function coffeeComposerUsesRichInput(args: {
-  variant: "chat" | "coffee-global" | "coffee-table" | "signal";
+  variant: "chat" | "coffee-global" | "coffee-table" | "signal" | "debate";
   markdownEditorEnabled: boolean;
 }): boolean {
   return (

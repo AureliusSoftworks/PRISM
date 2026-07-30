@@ -15,6 +15,8 @@ import type { LlmProviderName } from "./index.js";
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
 export const DEBATE_PLAYER_JUDGE_BOT_ID = "prism:player-judge" as const;
+export const DEBATE_JUDGE_GAVEL_COOLDOWN_MS = 8_000;
+export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
 export const DEBATE_MOTION_MAX_LENGTH = 320;
 export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
 export const DEBATE_SIDE_BRIEF_MAX_LENGTH = 1_200;
@@ -464,6 +466,7 @@ export type DebateEventKind =
   | "player_turn"
   | "reaction"
   | "interjection"
+  | "judge_gavel"
   | "moderator_ruling"
   | "case_board"
   | "ballot"
@@ -476,6 +479,7 @@ export type DebateSpeakerKind =
   "moderator" | "advocate" | "juror" | "player" | "system";
 
 export type DebateTurnTimingStatus = "within_limit" | "overtime";
+export type DebateJudgeGavelReason = "intervention" | "overtime" | "resume";
 
 export interface DebateTurnTimingV1 {
   limitMs: number;
@@ -505,8 +509,26 @@ export interface DebateEventV1 {
   statementId?: string | null;
   evidenceSourceId?: string | null;
   ruling?: DebateTurnaboutRuling | null;
+  gavelReason?: DebateJudgeGavelReason;
   timing?: DebateTurnTimingV1;
   createdAt: string;
+}
+
+export function debateEventIsTranscriptHousekeeping(
+  event: Pick<DebateEventV1, "stepKey">,
+): boolean {
+  return event.stepKey === "pause" || event.stepKey === "resume";
+}
+
+export interface DebateJudgeGavelStateV1 {
+  version: typeof DEBATE_SCHEMA_VERSION;
+  status: "awaiting_message";
+  gavelEventId: string;
+  sourceEventId: string | null;
+  invokedAt: string;
+  resumeStatus: DebateStatus;
+  resumePhase: DebatePhase;
+  resumeStepKey: string;
 }
 
 export interface DebateBallotV1 {
@@ -587,6 +609,9 @@ export interface DebateSessionV1 {
   jury: DebateJuryStateV1;
   playerVerdict: DebateSideId | null;
   winnerSideId: DebateSideId | null;
+  /** Active only after an unscheduled player-Judge gavel strike. */
+  judgeGavel?: DebateJudgeGavelStateV1 | null;
+  judgeGavelCooldownUntil?: string | null;
   events: DebateEventV1[];
   error: string | null;
   createdAt: string;
@@ -680,6 +705,17 @@ export interface DebateInterjectionRequest extends DebateMutationRequest {
   eventId: string;
   heardCharacterCount: number;
   content: string;
+}
+
+export interface DebateJudgeGavelRequest extends DebateMutationRequest {
+  eventId?: string | null;
+  heardCharacterCount?: number;
+  overtime?: boolean;
+}
+
+export interface DebateJudgeGavelMessageRequest extends DebateMutationRequest {
+  content?: string;
+  pass?: boolean;
 }
 
 export type DebateTurnaboutAction = "press" | "present_evidence" | "pass";
