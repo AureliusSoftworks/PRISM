@@ -309,7 +309,7 @@ describe("portable .slate archive contract", () => {
 
     assert.equal(verifySlateArchiveBundle(bundle), bundle);
     assert.equal(bundle.manifest.format, "prism-slate-project-v1");
-    assert.equal(bundle.manifest.version, 1);
+    assert.equal(bundle.manifest.version, 2);
     assert.deepEqual(Object.keys(bundle.files).sort(), [
       "data/continuity.json",
       "data/manuscript.json",
@@ -318,6 +318,32 @@ describe("portable .slate archive contract", () => {
     ]);
     assert.match(bundle.files["manuscript.md"]!, /^# The Portable Draft/m);
     assert.match(bundle.files["manuscript.md"]!, /^## The Arrival/m);
+    const manuscriptData = JSON.parse(
+      bundle.files["data/manuscript.json"]!,
+    ) as {
+      schemaVersion: number;
+      documents: Array<Record<string, unknown>>;
+      annotations: unknown[];
+      writing: Record<string, unknown[]>;
+    };
+    assert.equal(manuscriptData.schemaVersion, 2);
+    assert.equal(manuscriptData.documents.length, 1);
+    assert.equal(manuscriptData.documents[0]?.section_revision, 1);
+    assert.match(
+      String(manuscriptData.documents[0]?.document_hash),
+      /^[a-f0-9]{64}$/,
+    );
+    assert.match(
+      String(manuscriptData.documents[0]?.prose_hash),
+      /^[a-f0-9]{64}$/,
+    );
+    assert.deepEqual(manuscriptData.annotations, []);
+    assert.deepEqual(Object.keys(manuscriptData.writing).sort(), [
+      "clarifications",
+      "developerEvents",
+      "mutations",
+      "operations",
+    ]);
     assert.equal(JSON.stringify(bundle).includes("user_id"), false);
     assert.equal(JSON.stringify(bundle).includes("openai_api_key"), false);
     assert.equal(JSON.stringify(bundle).includes("slate_continuity_jobs"), false);

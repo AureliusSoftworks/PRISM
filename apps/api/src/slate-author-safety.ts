@@ -16,11 +16,16 @@ import {
 } from "node:fs";
 import { basename, join, posix, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  createSlateSectionDocumentV1,
+  slateSectionDocumentSnapshot,
+} from "./slate-section-documents.ts";
 
 export const SLATE_RECOVERY_FORMAT = "prism-slate-recovery-v1" as const;
 export const SLATE_ARCHIVE_FORMAT = "prism-slate-project-v1" as const;
 export const SLATE_RECOVERY_VERSION = 1 as const;
-export const SLATE_ARCHIVE_VERSION = 1 as const;
+export const SLATE_ARCHIVE_LEGACY_VERSION = 1 as const;
+export const SLATE_ARCHIVE_VERSION = 2 as const;
 
 const RECOVERY_FILE_SUFFIX = ".slate-recovery.json";
 const MAX_ARCHIVE_PATH_LENGTH = 512;
@@ -58,6 +63,46 @@ export interface SlateSafetyContentV1 {
   };
 }
 
+/**
+ * V2 keeps the V1 authorial payload intact and adds the rich manuscript and
+ * safely portable operation receipts needed to restore Slate's cockpit.
+ * Idempotency keys, provider credentials, raw requests, hidden prompts, jobs,
+ * and caches are deliberately excluded.
+ */
+export interface SlateSafetyContentV2
+  extends Omit<SlateSafetyContentV1, "schemaVersion"> {
+  schemaVersion: 2;
+  documents: SlateSafetyRow[];
+  annotations: SlateSafetyRow[];
+  writing: {
+    operations: SlateSafetyRow[];
+    clarifications: SlateSafetyRow[];
+    mutations: SlateSafetyRow[];
+    developerEvents: SlateSafetyRow[];
+  };
+  studios: {
+    characterProfiles: SlateSafetyRow[];
+    characterArcs: SlateSafetyRow[];
+    characterArcBeats: SlateSafetyRow[];
+    narrativeEdges: SlateSafetyRow[];
+    mirror: {
+      profiles: SlateSafetyRow[];
+      versions: SlateSafetyRow[];
+      binding: SlateSafetyRow | null;
+    };
+    sourceShelf: SlateSafetyRow[];
+    visualReferences: SlateSafetyRow[];
+    reviewCircle: {
+      sessions: SlateSafetyRow[];
+      results: SlateSafetyRow[];
+      roomNotes: SlateSafetyRow[];
+    };
+    momentumSnapshots: SlateSafetyRow[];
+  };
+}
+
+export type SlateSafetyContent = SlateSafetyContentV1 | SlateSafetyContentV2;
+
 export interface SlateRecoverySnapshotV1 {
   format: typeof SLATE_RECOVERY_FORMAT;
   version: typeof SLATE_RECOVERY_VERSION;
@@ -66,7 +111,7 @@ export interface SlateRecoverySnapshotV1 {
   seriesId: string;
   contentHash: string;
   snapshotHash: string;
-  content: SlateSafetyContentV1;
+  content: SlateSafetyContent;
 }
 
 export interface SlateRecoveryGeneration {
@@ -120,9 +165,8 @@ export interface SlateArchiveFileManifestV1 {
   sha256: string;
 }
 
-export interface SlateArchiveManifestV1 {
+interface SlateArchiveManifestBase {
   format: typeof SLATE_ARCHIVE_FORMAT;
-  version: typeof SLATE_ARCHIVE_VERSION;
   exportedAt: string;
   project: {
     id: string;
@@ -138,9 +182,21 @@ export interface SlateArchiveManifestV1 {
   files: SlateArchiveFileManifestV1[];
 }
 
+export interface SlateArchiveManifestV1 extends SlateArchiveManifestBase {
+  version: typeof SLATE_ARCHIVE_LEGACY_VERSION;
+}
+
+export interface SlateArchiveManifestV2 extends SlateArchiveManifestBase {
+  version: typeof SLATE_ARCHIVE_VERSION;
+}
+
+export type SlateArchiveManifest =
+  | SlateArchiveManifestV1
+  | SlateArchiveManifestV2;
+
 /** A dependency-free bundle ready for a future ZIP transport adapter. */
 export interface SlateArchiveBundleV1 {
-  manifest: SlateArchiveManifestV1;
+  manifest: SlateArchiveManifest;
   files: Record<string, string>;
 }
 
@@ -177,7 +233,15 @@ const PROJECT_COLUMNS = [
   "updated_at",
 ] as const;
 
-const SERIES_COLUMNS = ["id", "title", "description", "created_at", "updated_at"] as const;
+const SERIES_COLUMNS = [
+  "id",
+  "title",
+  "description",
+  "continuity_active_generation",
+  "continuity_previous_generation",
+  "created_at",
+  "updated_at",
+] as const;
 
 interface CollectionSpec {
   readonly output: keyof Pick<
@@ -222,10 +286,117 @@ const PROJECT_COLLECTIONS: readonly CollectionSpec[] = [
     table: "slate_section_versions",
     columns: [
       "id", "project_id", "section_id", "revision", "reason", "title", "summary",
-      "direction", "prose", "locked", "status", "content_hash", "created_at",
+      "direction", "prose", "locked", "status", "content_hash", "document_json",
+      "document_hash", "prose_hash", "created_at",
     ],
     orderBy: "section_id, revision, id",
   },
+] as const;
+
+const DOCUMENT_COLUMNS = [
+  "section_id", "project_id", "schema_version", "section_revision",
+  "document_json", "document_hash", "prose_hash", "created_at", "updated_at",
+] as const;
+
+const ANNOTATION_COLUMNS = [
+  "id", "project_id", "section_id", "block_id", "anchor_json", "kind", "body",
+  "resolved", "created_at", "updated_at",
+] as const;
+
+const WRITING_OPERATION_COLUMNS = [
+  "id", "project_id", "section_id", "parent_operation_id", "kind", "status",
+  "direction_intent_json", "validated_snapshot_json", "revision_fingerprint",
+  "continuity_generation", "mirror_profile_version_id", "provider", "model",
+  "proposal_text", "proposal_hash", "revision_id", "created_at", "updated_at",
+  "started_at", "completed_at", "resolved_at",
+] as const;
+
+const CLARIFICATION_COLUMNS = [
+  "id", "project_id", "section_id", "operation_id", "kind", "status", "prompt",
+  "choices_json", "allows_custom_vibe", "evidence_json", "revision_fingerprint",
+  "continuity_generation", "mirror_profile_version_id", "answer_kind",
+  "answer_choice_id", "custom_vibe", "structured_direction_json",
+  "resume_operation_id", "created_at", "answered_at", "stale_at",
+] as const;
+
+const WRITING_MUTATION_COLUMNS = [
+  "id", "project_id", "operation_id", "action", "result_operation_id",
+  "created_at",
+] as const;
+
+const DEVELOPER_EVENT_COLUMNS = [
+  "id", "series_id", "project_id", "section_id", "section_revision", "sequence",
+  "stage", "kind", "summary", "detail_json", "source_ids_json", "operation_id",
+  "clarification_id", "provider", "model", "continuity_generation", "created_at",
+] as const;
+
+const CHARACTER_PROFILE_COLUMNS = [
+  "id", "series_id", "project_id", "entity_id", "generation", "layer",
+  "profile_json", "field_locks_json", "provenance_json", "created_at",
+  "updated_at",
+] as const;
+
+const CHARACTER_ARC_COLUMNS = [
+  "id", "series_id", "project_id", "character_profile_id", "generation",
+  "intended_json", "observed_json", "provenance_json", "created_at",
+  "updated_at",
+] as const;
+
+const CHARACTER_ARC_BEAT_COLUMNS = [
+  "id", "series_id", "project_id", "character_arc_id", "section_id",
+  "generation", "track", "ordinal", "beat_json", "provenance_json",
+  "created_at", "updated_at",
+] as const;
+
+const NARRATIVE_EDGE_COLUMNS = [
+  "id", "series_id", "project_id", "generation", "from_ref_json",
+  "to_ref_json", "kind", "branch_id", "story_time_json",
+  "manuscript_order_json", "provenance_json", "created_at", "updated_at",
+] as const;
+
+const MIRROR_PROFILE_COLUMNS = [
+  "id", "name", "pen_name", "frozen", "created_at", "updated_at",
+] as const;
+
+const MIRROR_VERSION_COLUMNS = [
+  "id", "profile_id", "version", "voice_card_json",
+  "eligibility_summary_json", "created_at",
+] as const;
+
+const MIRROR_BINDING_COLUMNS = [
+  "project_id", "profile_version_id", "project_overlay_json",
+  "pov_overlays_json", "created_at", "updated_at",
+] as const;
+
+const SOURCE_SHELF_COLUMNS = [
+  "id", "project_id", "title", "kind", "content", "metadata_json",
+  "promoted_source_id", "mirror_eligible", "created_at", "updated_at",
+] as const;
+
+const VISUAL_REFERENCE_COLUMNS = [
+  "id", "project_id", "section_id", "entity_id", "kind", "status",
+  "image_id", "prompt", "reference_state_json", "visual_style_version",
+  "provider", "model", "created_at", "pinned_at",
+] as const;
+
+const REVIEW_SESSION_COLUMNS = [
+  "id", "project_id", "section_id", "artifact_json",
+  "section_revisions_json", "continuity_version", "continuity_generation",
+  "provider", "model", "created_at",
+] as const;
+
+const REVIEW_RESULT_COLUMNS = [
+  "id", "session_id", "ordinal", "reviewer_id", "reviewer_snapshot_json",
+  "result_json", "created_at",
+] as const;
+
+const REVIEW_ROOM_NOTE_COLUMNS = [
+  "session_id", "room_note_json", "created_at",
+] as const;
+
+const MOMENTUM_SNAPSHOT_COLUMNS = [
+  "id", "project_id", "section_id", "kind", "state_json",
+  "source_fingerprint", "created_at",
 ] as const;
 
 interface ContinuityCollectionSpec {
@@ -242,7 +413,7 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     columns: [
       "id", "series_id", "project_id", "section_id", "scope_kind", "kind",
       "source_revision", "content", "content_hash", "authority", "provider", "model",
-      "producer_versions_json", "supersedes_source_id", "created_at",
+      "producer_versions_json", "generation", "supersedes_source_id", "created_at",
     ],
     orderBy: "created_at, id",
   },
@@ -251,7 +422,8 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     table: "slate_continuity_entities",
     columns: [
       "id", "series_id", "kind", "canonical_name", "description", "locked",
-      "anchors_json", "source_id", "producer_versions_json", "created_at", "updated_at",
+      "anchors_json", "source_id", "producer_versions_json", "generation",
+      "created_at", "updated_at",
     ],
     orderBy: "canonical_name, id",
   },
@@ -259,7 +431,8 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     output: "aliases",
     table: "slate_continuity_aliases",
     columns: [
-      "id", "series_id", "entity_id", "alias", "normalized_alias", "source_id", "created_at",
+      "id", "series_id", "entity_id", "alias", "normalized_alias", "source_id",
+      "generation", "created_at",
     ],
     orderBy: "normalized_alias, id",
   },
@@ -270,7 +443,7 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
       "id", "series_id", "project_id", "section_id", "scope_kind", "subject_entity_id",
       "predicate", "object_entity_id", "value", "epistemic_status", "perspective_entity_id",
       "confidence", "anchors_json", "source_id", "supersedes_claim_id",
-      "producer_versions_json", "created_at",
+      "producer_versions_json", "generation", "created_at",
     ],
     orderBy: "created_at, id",
   },
@@ -280,7 +453,7 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     columns: [
       "id", "series_id", "project_id", "section_id", "scope_kind", "title", "description",
       "chronology_key", "participant_entity_ids_json", "location_entity_id", "anchors_json",
-      "source_id", "producer_versions_json", "created_at",
+      "source_id", "producer_versions_json", "generation", "created_at",
     ],
     orderBy: "chronology_key, created_at, id",
   },
@@ -289,7 +462,8 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     table: "slate_continuity_relationships",
     columns: [
       "id", "series_id", "from_entity_id", "to_entity_id", "kind", "state",
-      "epistemic_status", "anchors_json", "source_id", "producer_versions_json", "created_at",
+      "epistemic_status", "anchors_json", "source_id", "producer_versions_json",
+      "generation", "created_at",
     ],
     orderBy: "created_at, id",
   },
@@ -298,7 +472,7 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     table: "slate_continuity_knowledge",
     columns: [
       "id", "series_id", "character_entity_id", "claim_id", "learned_event_id", "status",
-      "anchors_json", "source_id", "producer_versions_json", "created_at",
+      "anchors_json", "source_id", "producer_versions_json", "generation", "created_at",
     ],
     orderBy: "created_at, id",
   },
@@ -308,7 +482,7 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
     columns: [
       "id", "series_id", "project_id", "section_id", "scope_kind", "label", "status",
       "due_section_id", "anchors_json", "source_id", "producer_versions_json",
-      "created_at", "updated_at",
+      "generation", "created_at", "updated_at",
     ],
     orderBy: "created_at, id",
   },
@@ -319,7 +493,7 @@ const CONTINUITY_COLLECTIONS: readonly ContinuityCollectionSpec[] = [
       "id", "series_id", "project_id", "section_id", "scope_kind", "kind", "severity",
       "status", "summary", "explanation", "claim_ids_json", "anchors_json",
       "recommended_resolution", "resolution_json", "producer_versions_json",
-      "created_at", "resolved_at",
+      "generation", "created_at", "resolved_at",
     ],
     orderBy: "created_at, id",
   },
@@ -484,6 +658,72 @@ function rowsByIds(
     ));
   }
   return rows;
+}
+
+function capturePortableSeriesGenerations(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  seriesId: string,
+): SlateSafetyRow[] {
+  const spec = continuitySpec("generations");
+  const series = scalarRows(
+    db,
+    `SELECT continuity_active_generation, continuity_previous_generation
+       FROM slate_series
+      WHERE id = ? AND user_id = ?`,
+    seriesId,
+    userId,
+  )[0];
+  const activeGeneration = Number(series?.continuity_active_generation ?? 0);
+  const previousGeneration =
+    series?.continuity_previous_generation === null ||
+    series?.continuity_previous_generation === undefined
+      ? null
+      : Number(series.continuity_previous_generation);
+  const rows = scalarRows(
+    db,
+    `SELECT ${spec.columns.map((column) => `generations.${column}`).join(", ")}
+       FROM slate_continuity_generations AS generations
+       JOIN slate_projects AS projects
+         ON projects.id = generations.project_id
+        AND projects.user_id = generations.user_id
+      WHERE generations.user_id = ? AND projects.series_id = ?
+      ORDER BY generations.generation, generations.created_at, generations.id`,
+    userId,
+    seriesId,
+  );
+  const selected = new Map<number, SlateSafetyRow>();
+  const rank = (row: SlateSafetyRow): number => {
+    const generation = Number(row.generation);
+    const expectedStatus = generation === activeGeneration
+      ? "active"
+      : generation === previousGeneration
+        ? "superseded"
+        : null;
+    return (
+      (row.status === expectedStatus ? 100 : 0) +
+      (row.project_id === projectId ? 10 : 0)
+    );
+  };
+  for (const row of rows) {
+    const generation = Number(row.generation);
+    const current = selected.get(generation);
+    if (!current || rank(row) > rank(current)) selected.set(generation, row);
+  }
+  return [...selected.values()]
+    .map((row): SlateSafetyRow => ({
+      ...row,
+      project_id: projectId,
+      comparison_summary:
+        row.project_id === projectId
+          ? row.comparison_summary
+          : "Series Continuity generation metadata.",
+    }))
+    .sort((left, right) =>
+      Number(left.generation) - Number(right.generation) ||
+      String(left.id).localeCompare(String(right.id)),
+    );
 }
 
 function captureProjectContinuity(
@@ -737,12 +977,11 @@ function captureProjectContinuity(
     knowledge,
     threads,
     concerns,
-    generations: continuityRows(
+    generations: capturePortableSeriesGenerations(
       db,
-      "generations",
-      "user_id = ? AND project_id = ?",
       userId,
       projectId,
+      seriesId,
     ),
   };
 }
@@ -753,11 +992,665 @@ function onlyRow(rows: SlateSafetyRow[], label: string): SlateSafetyRow {
   return row;
 }
 
+function captureSectionDocuments(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  sections: SlateSafetyRow[],
+): SlateSafetyRow[] {
+  const stored = scalarRows(
+    db,
+    `SELECT ${DOCUMENT_COLUMNS.join(", ")}
+       FROM slate_section_documents
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY section_id`,
+    projectId,
+    userId,
+  );
+  const bySection = new Map(
+    stored.map((row) => [String(row.section_id), row] as const),
+  );
+  for (const section of sections) {
+    const sectionId = String(section.id);
+    const prose = String(section.prose);
+    const existing = bySection.get(sectionId);
+    if (existing) {
+      try {
+        const snapshot = slateSectionDocumentSnapshot(
+          JSON.parse(String(existing.document_json)),
+          Number(existing.section_revision),
+        );
+        if (
+          Number(existing.section_revision) === Number(section.revision) &&
+          snapshot.prose === prose &&
+          snapshot.documentHash === existing.document_hash &&
+          snapshot.proseHash === existing.prose_hash
+        ) {
+          continue;
+        }
+      } catch {
+        // Replace corrupt or stale rich state with an exact legacy projection.
+      }
+    }
+    const snapshot = slateSectionDocumentSnapshot(
+      createSlateSectionDocumentV1(sectionId, prose),
+      Number(section.revision),
+    );
+    bySection.set(sectionId, {
+      section_id: sectionId,
+      project_id: projectId,
+      schema_version: 1,
+      section_revision: Number(section.revision),
+      document_json: JSON.stringify(snapshot.document),
+      document_hash: snapshot.documentHash,
+      prose_hash: snapshot.proseHash,
+      created_at: String(section.created_at),
+      updated_at: String(section.updated_at),
+    });
+  }
+  return [...bySection.values()].sort((left, right) =>
+    String(left.section_id).localeCompare(String(right.section_id)),
+  );
+}
+
+function emptySlateStudioContent(): SlateSafetyContentV2["studios"] {
+  return {
+    characterProfiles: [],
+    characterArcs: [],
+    characterArcBeats: [],
+    narrativeEdges: [],
+    mirror: {
+      profiles: [],
+      versions: [],
+      binding: null,
+    },
+    sourceShelf: [],
+    visualReferences: [],
+    reviewCircle: {
+      sessions: [],
+      results: [],
+      roomNotes: [],
+    },
+    momentumSnapshots: [],
+  };
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function parsedJsonRecord(value: SlateScalar): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+  try {
+    return jsonRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function referencedSourceIds(value: unknown, output = new Set<string>()): Set<string> {
+  if (Array.isArray(value)) {
+    for (const item of value) referencedSourceIds(item, output);
+    return output;
+  }
+  const object = jsonRecord(value);
+  if (!object) return output;
+  if (typeof object.sourceId === "string" && object.sourceId) {
+    output.add(object.sourceId);
+  }
+  if (Array.isArray(object.sourceIds)) {
+    for (const sourceId of object.sourceIds) {
+      if (typeof sourceId === "string" && sourceId) output.add(sourceId);
+    }
+  }
+  for (const child of Object.values(object)) {
+    referencedSourceIds(child, output);
+  }
+  return output;
+}
+
+function portableJsonReferences(
+  value: unknown,
+  sourceIds: ReadonlySet<string>,
+  sectionIds: ReadonlySet<string>,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => portableJsonReferences(item, sourceIds, sectionIds));
+  }
+  const object = jsonRecord(value);
+  if (!object) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(object)) {
+    if (key === "sourceId") {
+      result[key] =
+        typeof child === "string" && sourceIds.has(child) ? child : null;
+      continue;
+    }
+    if (key === "sourceIds" && Array.isArray(child)) {
+      result[key] = child.filter(
+        (sourceId): sourceId is string =>
+          typeof sourceId === "string" && sourceIds.has(sourceId),
+      );
+      continue;
+    }
+    if (
+      (key === "sectionId" ||
+        key === "sourceSectionId" ||
+        key === "expectedSectionId" ||
+        key === "observedSectionId" ||
+        key === "openedSectionId" ||
+        key === "resolvedSectionId" ||
+        key === "expectedPayoffStartSectionId" ||
+        key === "expectedPayoffEndSectionId") &&
+      child !== null
+    ) {
+      result[key] =
+        typeof child === "string" && sectionIds.has(child) ? child : null;
+      continue;
+    }
+    if (key === "anchors" && Array.isArray(child)) {
+      result[key] = child.filter((candidate) => {
+        const anchor = jsonRecord(candidate);
+        return Boolean(
+          anchor &&
+          typeof anchor.sourceId === "string" &&
+          sourceIds.has(anchor.sourceId) &&
+          (
+            anchor.sectionId === null ||
+            (typeof anchor.sectionId === "string" && sectionIds.has(anchor.sectionId))
+          ),
+        );
+      }).map((anchor) => portableJsonReferences(anchor, sourceIds, sectionIds));
+      continue;
+    }
+    result[key] = portableJsonReferences(child, sourceIds, sectionIds);
+  }
+  return result;
+}
+
+function jsonHasOnlyPortableSources(
+  value: unknown,
+  sourceIds: ReadonlySet<string>,
+): boolean {
+  const references = referencedSourceIds(value);
+  return references.size > 0 && [...references].every((id) => sourceIds.has(id));
+}
+
+function sanitizedMirrorVersionMetadata(
+  row: SlateSafetyRow,
+  capturedVersionIds: ReadonlySet<string>,
+): string {
+  const metadata = parsedJsonRecord(row.eligibility_summary_json) ?? {};
+  return JSON.stringify({
+    ...metadata,
+    parentVersionId:
+      typeof metadata.parentVersionId === "string" &&
+      capturedVersionIds.has(metadata.parentVersionId)
+        ? metadata.parentVersionId
+        : null,
+    sampleIds: [],
+    eligibleSampleCount: 0,
+    excludedSampleCount: 0,
+    archiveNote:
+      "Writer samples are intentionally excluded from portable Slate archives.",
+  });
+}
+
+function captureSlateStudios(
+  db: DatabaseSync,
+  userId: string,
+  projectId: string,
+  seriesId: string,
+  sectionIds: ReadonlySet<string>,
+  content: SlateSafetyContentV2,
+): SlateSafetyContentV2["studios"] {
+  const studios = emptySlateStudioContent();
+  const entityIds = new Set(
+    content.continuity.entities
+      .map((row) => rowString(row, "id"))
+      .filter((id): id is string => Boolean(id)),
+  );
+  const initialSourceIds = new Set(
+    content.continuity.sources
+      .map((row) => rowString(row, "id"))
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  const profileCandidates = scalarRows(
+    db,
+    `SELECT ${CHARACTER_PROFILE_COLUMNS.join(", ")}
+       FROM slate_character_profiles
+      WHERE user_id = ? AND series_id = ?
+      ORDER BY generation, created_at, id`,
+    userId,
+    seriesId,
+  ).filter((row) =>
+    row.project_id === projectId ||
+    (typeof row.entity_id === "string" && entityIds.has(row.entity_id)),
+  );
+  const profileCandidateIds = new Set(
+    profileCandidates.map((row) => String(row.id)),
+  );
+  const arcCandidates = scalarRows(
+    db,
+    `SELECT ${CHARACTER_ARC_COLUMNS.join(", ")}
+       FROM slate_character_arcs
+      WHERE user_id = ? AND series_id = ?
+      ORDER BY generation, created_at, id`,
+    userId,
+    seriesId,
+  ).filter((row) =>
+    row.project_id === projectId ||
+    profileCandidateIds.has(String(row.character_profile_id)),
+  );
+  const arcCandidateIds = new Set(arcCandidates.map((row) => String(row.id)));
+  const beatCandidates = scalarRows(
+    db,
+    `SELECT ${CHARACTER_ARC_BEAT_COLUMNS.join(", ")}
+       FROM slate_character_arc_beats
+      WHERE user_id = ? AND series_id = ?
+      ORDER BY generation, character_arc_id, track, ordinal, id`,
+    userId,
+    seriesId,
+  ).filter((row) =>
+    arcCandidateIds.has(String(row.character_arc_id)) &&
+    (
+      row.section_id === null ||
+      (typeof row.section_id === "string" && sectionIds.has(row.section_id))
+    ),
+  );
+  const edgeCandidates = scalarRows(
+    db,
+    `SELECT ${NARRATIVE_EDGE_COLUMNS.join(", ")}
+       FROM slate_narrative_edges
+      WHERE user_id = ? AND series_id = ?
+      ORDER BY generation, created_at, id`,
+    userId,
+    seriesId,
+  ).filter((row) => row.project_id === projectId || row.project_id === null);
+
+  const referencedCharacterSourceIds = new Set<string>();
+  for (const row of [
+    ...profileCandidates,
+    ...arcCandidates,
+    ...beatCandidates,
+    ...edgeCandidates,
+  ]) {
+    for (const column of [
+      "profile_json", "provenance_json", "intended_json", "observed_json",
+      "beat_json", "from_ref_json", "to_ref_json",
+    ]) {
+      const parsed = parsedJsonRecord(row[column]);
+      if (!parsed) continue;
+      for (const sourceId of referencedSourceIds(parsed)) {
+        referencedCharacterSourceIds.add(sourceId);
+      }
+    }
+  }
+  const missingSourceIds = new Set(
+    [...referencedCharacterSourceIds].filter((id) => !initialSourceIds.has(id)),
+  );
+  const writerAuthoritySources = rowsByIds(
+    db,
+    "sources",
+    userId,
+    seriesId,
+    missingSourceIds,
+  ).filter((row) =>
+    row.project_id === null &&
+    row.section_id === null &&
+    row.scope_kind === "series" &&
+    row.authority === "human" &&
+    row.kind === "review_direction",
+  ).map((row) => ({
+    ...row,
+    supersedes_source_id: null,
+  }));
+  content.continuity.sources.push(...writerAuthoritySources);
+  content.continuity.sources.sort((left, right) =>
+    String(left.created_at).localeCompare(String(right.created_at)) ||
+    String(left.id).localeCompare(String(right.id)),
+  );
+  const portableSourceIds = new Set(
+    content.continuity.sources
+      .map((row) => rowString(row, "id"))
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  studios.characterProfiles = profileCandidates.flatMap((row) => {
+    const profile = parsedJsonRecord(row.profile_json);
+    const provenance = parsedJsonRecord(row.provenance_json);
+    if (!profile || !provenance) return [];
+    const sanitizedProfile = Object.fromEntries(
+      Object.entries(profile).flatMap(([field, raw]) => {
+        const stored = jsonRecord(raw);
+        if (!stored) return [[field, raw]];
+        const fieldProvenance = jsonRecord(stored.provenance);
+        if (
+          fieldProvenance &&
+          !jsonHasOnlyPortableSources(fieldProvenance, portableSourceIds)
+        ) {
+          return [];
+        }
+        return [[
+          field,
+          portableJsonReferences(stored, portableSourceIds, sectionIds),
+        ]];
+      }),
+    );
+    if (
+      Object.keys(sanitizedProfile).length === 0 ||
+      !jsonHasOnlyPortableSources(provenance, portableSourceIds)
+    ) {
+      return [];
+    }
+    return [{
+      ...row,
+      project_id: row.project_id === projectId ? projectId : null,
+      entity_id:
+        typeof row.entity_id === "string" && entityIds.has(row.entity_id)
+          ? row.entity_id
+          : null,
+      profile_json: JSON.stringify(sanitizedProfile),
+      provenance_json: JSON.stringify(
+        portableJsonReferences(provenance, portableSourceIds, sectionIds),
+      ),
+    }];
+  });
+  const capturedProfileIds = new Set(
+    studios.characterProfiles.map((row) => String(row.id)),
+  );
+  studios.characterArcs = arcCandidates.flatMap((row) => {
+    const provenance = parsedJsonRecord(row.provenance_json);
+    if (
+      !capturedProfileIds.has(String(row.character_profile_id)) ||
+      !provenance ||
+      !jsonHasOnlyPortableSources(provenance, portableSourceIds)
+    ) {
+      return [];
+    }
+    return [{
+      ...row,
+      project_id: row.project_id === projectId ? projectId : null,
+      intended_json: JSON.stringify(
+        portableJsonReferences(
+          parsedJsonRecord(row.intended_json) ?? {},
+          portableSourceIds,
+          sectionIds,
+        ),
+      ),
+      observed_json: JSON.stringify(
+        portableJsonReferences(
+          parsedJsonRecord(row.observed_json) ?? {},
+          portableSourceIds,
+          sectionIds,
+        ),
+      ),
+      provenance_json: JSON.stringify(
+        portableJsonReferences(provenance, portableSourceIds, sectionIds),
+      ),
+    }];
+  });
+  const capturedArcIds = new Set(
+    studios.characterArcs.map((row) => String(row.id)),
+  );
+  studios.characterArcBeats = beatCandidates.flatMap((row) => {
+    const provenance = parsedJsonRecord(row.provenance_json);
+    const beat = parsedJsonRecord(row.beat_json);
+    if (
+      !capturedArcIds.has(String(row.character_arc_id)) ||
+      !provenance ||
+      !beat ||
+      !jsonHasOnlyPortableSources(provenance, portableSourceIds)
+    ) {
+      return [];
+    }
+    return [{
+      ...row,
+      project_id: row.project_id === projectId ? projectId : null,
+      beat_json: JSON.stringify(
+        portableJsonReferences(beat, portableSourceIds, sectionIds),
+      ),
+      provenance_json: JSON.stringify(
+        portableJsonReferences(provenance, portableSourceIds, sectionIds),
+      ),
+    }];
+  });
+  const capturedBeatIds = new Set(
+    studios.characterArcBeats.map((row) => String(row.id)),
+  );
+  const endpointIsPortable = (row: SlateSafetyRow): boolean => {
+    for (const column of ["from_ref_json", "to_ref_json"]) {
+      const endpoint = parsedJsonRecord(row[column]);
+      if (
+        !endpoint ||
+        typeof endpoint.kind !== "string" ||
+        typeof endpoint.id !== "string"
+      ) {
+        return false;
+      }
+      const ids =
+        endpoint.kind === "event"
+          ? new Set(content.continuity.events.map((item) => String(item.id)))
+          : endpoint.kind === "claim"
+            ? new Set(content.continuity.claims.map((item) => String(item.id)))
+            : endpoint.kind === "thread"
+              ? new Set(content.continuity.threads.map((item) => String(item.id)))
+              : endpoint.kind === "arc_beat"
+                ? capturedBeatIds
+                : endpoint.kind === "section"
+                  ? sectionIds
+                  : new Set<string>();
+      if (!ids.has(endpoint.id)) return false;
+    }
+    return true;
+  };
+  studios.narrativeEdges = edgeCandidates.flatMap((row) => {
+    const provenance = parsedJsonRecord(row.provenance_json);
+    if (
+      !provenance ||
+      !jsonHasOnlyPortableSources(provenance, portableSourceIds) ||
+      !endpointIsPortable(row)
+    ) {
+      return [];
+    }
+    return [{
+      ...row,
+      project_id: row.project_id === projectId ? projectId : null,
+      provenance_json: JSON.stringify(
+        portableJsonReferences(provenance, portableSourceIds, sectionIds),
+      ),
+    }];
+  });
+
+  const binding = scalarRows(
+    db,
+    `SELECT ${MIRROR_BINDING_COLUMNS.join(", ")}
+       FROM slate_project_mirror_bindings
+      WHERE project_id = ? AND user_id = ?`,
+    projectId,
+    userId,
+  )[0] ?? null;
+  const mirrorVersionIds = new Set<string>();
+  if (binding?.profile_version_id) {
+    mirrorVersionIds.add(String(binding.profile_version_id));
+  }
+  for (const row of [
+    ...content.writing.operations,
+    ...content.writing.clarifications,
+  ]) {
+    if (typeof row.mirror_profile_version_id === "string") {
+      mirrorVersionIds.add(row.mirror_profile_version_id);
+    }
+  }
+  const versionRows = mirrorVersionIds.size === 0
+    ? []
+    : scalarRows(
+        db,
+        `SELECT ${MIRROR_VERSION_COLUMNS.map((column) => `versions.${column}`).join(", ")}
+           FROM slate_mirror_profile_versions AS versions
+           JOIN slate_mirror_profiles AS profiles
+             ON profiles.id = versions.profile_id
+            AND profiles.user_id = versions.user_id
+          WHERE versions.user_id = ?
+            AND versions.id IN (${[...mirrorVersionIds].map(() => "?").join(", ")})
+          ORDER BY versions.profile_id, versions.version, versions.id`,
+        userId,
+        ...mirrorVersionIds,
+      );
+  const capturedVersionIds = new Set(versionRows.map((row) => String(row.id)));
+  studios.mirror.versions = versionRows.map((row) => ({
+    ...row,
+    eligibility_summary_json: sanitizedMirrorVersionMetadata(
+      row,
+      capturedVersionIds,
+    ),
+  }));
+  const mirrorProfileIds = new Set(
+    studios.mirror.versions.map((row) => String(row.profile_id)),
+  );
+  studios.mirror.profiles = mirrorProfileIds.size === 0
+    ? []
+    : scalarRows(
+        db,
+        `SELECT ${MIRROR_PROFILE_COLUMNS.join(", ")}
+           FROM slate_mirror_profiles
+          WHERE user_id = ?
+            AND id IN (${[...mirrorProfileIds].map(() => "?").join(", ")})
+          ORDER BY created_at, id`,
+        userId,
+        ...mirrorProfileIds,
+      );
+  studios.mirror.binding =
+    binding && capturedVersionIds.has(String(binding.profile_version_id))
+      ? binding
+      : null;
+  content.writing.operations = content.writing.operations.map((row) => ({
+    ...row,
+    mirror_profile_version_id:
+      typeof row.mirror_profile_version_id === "string" &&
+      capturedVersionIds.has(row.mirror_profile_version_id)
+        ? row.mirror_profile_version_id
+        : null,
+  }));
+  content.writing.clarifications = content.writing.clarifications.map((row) => ({
+    ...row,
+    mirror_profile_version_id:
+      typeof row.mirror_profile_version_id === "string" &&
+      capturedVersionIds.has(row.mirror_profile_version_id)
+        ? row.mirror_profile_version_id
+        : null,
+  }));
+
+  studios.sourceShelf = scalarRows(
+    db,
+    `SELECT ${SOURCE_SHELF_COLUMNS.join(", ")}
+       FROM slate_source_shelf_items
+      WHERE user_id = ? AND project_id = ?
+      ORDER BY created_at, id`,
+    userId,
+    projectId,
+  ).map((row) => ({
+    ...row,
+    promoted_source_id:
+      typeof row.promoted_source_id === "string" &&
+      portableSourceIds.has(row.promoted_source_id)
+        ? row.promoted_source_id
+        : null,
+    mirror_eligible: 0,
+  }));
+  studios.visualReferences = scalarRows(
+    db,
+    `SELECT ${VISUAL_REFERENCE_COLUMNS.join(", ")}
+       FROM slate_visual_references
+      WHERE user_id = ? AND project_id = ?
+      ORDER BY created_at, id`,
+    userId,
+    projectId,
+  ).map((row) => ({
+    ...row,
+    section_id:
+      typeof row.section_id === "string" && sectionIds.has(row.section_id)
+        ? row.section_id
+        : null,
+    entity_id:
+      typeof row.entity_id === "string" && entityIds.has(row.entity_id)
+        ? row.entity_id
+        : null,
+    reference_state_json: JSON.stringify(
+      portableJsonReferences(
+        parsedJsonRecord(row.reference_state_json) ?? {},
+        portableSourceIds,
+        sectionIds,
+      ),
+    ),
+  }));
+  studios.reviewCircle.sessions = scalarRows(
+    db,
+    `SELECT ${REVIEW_SESSION_COLUMNS.join(", ")}
+       FROM slate_review_circle_sessions
+      WHERE user_id = ? AND project_id = ?
+      ORDER BY created_at, id`,
+    userId,
+    projectId,
+  );
+  const reviewSessionIds = new Set(
+    studios.reviewCircle.sessions.map((row) => String(row.id)),
+  );
+  if (reviewSessionIds.size > 0) {
+    studios.reviewCircle.results = scalarRows(
+      db,
+      `SELECT ${REVIEW_RESULT_COLUMNS.join(", ")}
+         FROM slate_review_circle_results
+        WHERE user_id = ?
+          AND session_id IN (${[...reviewSessionIds].map(() => "?").join(", ")})
+        ORDER BY session_id, ordinal, id`,
+      userId,
+      ...reviewSessionIds,
+    );
+    studios.reviewCircle.roomNotes = scalarRows(
+      db,
+      `SELECT ${REVIEW_ROOM_NOTE_COLUMNS.join(", ")}
+         FROM slate_review_circle_room_notes
+        WHERE user_id = ?
+          AND session_id IN (${[...reviewSessionIds].map(() => "?").join(", ")})
+        ORDER BY session_id`,
+      userId,
+      ...reviewSessionIds,
+    );
+  }
+  studios.momentumSnapshots = scalarRows(
+    db,
+    `SELECT ${MOMENTUM_SNAPSHOT_COLUMNS.join(", ")}
+       FROM slate_momentum_snapshots
+      WHERE user_id = ? AND project_id = ?
+      ORDER BY created_at, id`,
+    userId,
+    projectId,
+  ).map((row) => ({
+    ...row,
+    section_id:
+      typeof row.section_id === "string" && sectionIds.has(row.section_id)
+        ? row.section_id
+        : null,
+    state_json: JSON.stringify(
+      portableJsonReferences(
+        parsedJsonRecord(row.state_json) ?? {},
+        portableSourceIds,
+        sectionIds,
+      ),
+    ),
+  }));
+  return studios;
+}
+
 export function captureSlateSafetyContent(
   db: DatabaseSync,
   userId: string,
   projectId: string,
-): SlateSafetyContentV1 {
+): SlateSafetyContentV2 {
   const project = onlyRow(
     scalarRows(
       db,
@@ -781,14 +1674,23 @@ export function captureSlateSafetyContent(
     "Slate series not found.",
   );
 
-  const content: SlateSafetyContentV1 = {
-    schemaVersion: 1,
+  const content: SlateSafetyContentV2 = {
+    schemaVersion: 2,
     series,
     project,
     revisions: [],
     versions: [],
     sections: [],
     sectionVersions: [],
+    documents: [],
+    annotations: [],
+    writing: {
+      operations: [],
+      clarifications: [],
+      mutations: [],
+      developerEvents: [],
+    },
+    studios: emptySlateStudioContent(),
     continuity: {
       sources: [],
       entities: [],
@@ -825,6 +1727,100 @@ export function captureSlateSafetyContent(
     seriesId,
     sectionIds,
     revisionIds,
+  );
+  content.documents = captureSectionDocuments(
+    db,
+    userId,
+    projectId,
+    content.sections,
+  );
+  const capturedSourceIds = new Set(
+    content.continuity.sources
+      .map((row) => rowString(row, "id"))
+      .filter((id): id is string => Boolean(id)),
+  );
+  content.annotations = scalarRows(
+    db,
+    `SELECT ${ANNOTATION_COLUMNS.join(", ")}
+       FROM slate_section_annotations
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY created_at, id`,
+    projectId,
+    userId,
+  ).map((row) => {
+    try {
+      const parsed = JSON.parse(String(row.anchor_json)) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return row;
+      const anchor = parsed as Record<string, unknown>;
+      const sectionId = String(row.section_id);
+      const sectionRevision = Number(anchor.sectionRevision);
+      const sourceId = typeof anchor.sourceId === "string" &&
+        (
+          capturedSourceIds.has(anchor.sourceId) ||
+          anchor.sourceId.startsWith("document:")
+        )
+        ? anchor.sourceId
+        : `document:${sectionId}:revision:${sectionRevision}`;
+      return {
+        ...row,
+        anchor_json: JSON.stringify({
+          ...anchor,
+          sourceId,
+          sectionId,
+        }),
+      };
+    } catch {
+      return row;
+    }
+  });
+  content.writing.operations = scalarRows(
+    db,
+    `SELECT ${WRITING_OPERATION_COLUMNS.join(", ")}
+       FROM slate_writing_operations
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY created_at, id`,
+    projectId,
+    userId,
+  );
+  content.writing.clarifications = scalarRows(
+    db,
+    `SELECT ${CLARIFICATION_COLUMNS.join(", ")}
+       FROM slate_clarification_requests
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY created_at, id`,
+    projectId,
+    userId,
+  );
+  content.writing.mutations = scalarRows(
+    db,
+    `SELECT ${WRITING_MUTATION_COLUMNS.join(", ")}
+       FROM slate_writing_operation_mutations
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY created_at, id`,
+    projectId,
+    userId,
+  );
+  content.writing.developerEvents = scalarRows(
+    db,
+    `SELECT ${DEVELOPER_EVENT_COLUMNS.join(", ")}
+       FROM slate_continuity_developer_events
+      WHERE project_id = ? AND user_id = ?
+      ORDER BY sequence, id`,
+    projectId,
+    userId,
+  ).map((row) => ({
+    ...row,
+    source_ids_json: JSON.stringify(
+      stringArray(row.source_ids_json).filter((id) => capturedSourceIds.has(id)),
+    ),
+  }));
+  content.studios = captureSlateStudios(
+    db,
+    userId,
+    projectId,
+    seriesId,
+    sectionIds,
+    content,
   );
   return content;
 }
@@ -1210,7 +2206,7 @@ function archiveFile(path: string, mediaType: SlateArchiveFileManifestV1["mediaT
   };
 }
 
-function markdownFallback(content: SlateSafetyContentV1): string {
+function markdownFallback(content: SlateSafetyContent): string {
   const title = typeof content.project.title === "string" ? content.project.title : "Untitled";
   const sections = content.sections
     .filter((section) => typeof section.prose === "string" && section.prose.length > 0)
@@ -1221,34 +2217,62 @@ function markdownFallback(content: SlateSafetyContentV1): string {
   return [`# ${title}`, ...sections].join("\n\n").trimEnd() + "\n";
 }
 
+function portableActiveContinuityGeneration(
+  content: SlateSafetyContent,
+): number {
+  const seriesGeneration = Number(
+    content.series.continuity_active_generation ?? 0,
+  );
+  return Number.isSafeInteger(seriesGeneration) && seriesGeneration > 0
+    ? seriesGeneration
+    : Number(content.project.continuity_active_generation);
+}
+
 export function createSlateArchiveBundle(
   snapshot: SlateRecoverySnapshotV1,
   exportedAt = new Date(),
 ): SlateArchiveBundleV1 {
   verifySlateRecoverySnapshot(snapshot);
+  const archiveVersion = snapshot.content.schemaVersion === 2
+    ? SLATE_ARCHIVE_VERSION
+    : SLATE_ARCHIVE_LEGACY_VERSION;
+  const manuscriptPayload = snapshot.content.schemaVersion === 2
+    ? {
+        schemaVersion: 2,
+        revisions: snapshot.content.revisions,
+        versions: snapshot.content.versions,
+        sections: snapshot.content.sections,
+        sectionVersions: snapshot.content.sectionVersions,
+        documents: snapshot.content.documents,
+        annotations: snapshot.content.annotations,
+        writing: snapshot.content.writing,
+      }
+    : {
+        schemaVersion: 1,
+        revisions: snapshot.content.revisions,
+        versions: snapshot.content.versions,
+        sections: snapshot.content.sections,
+        sectionVersions: snapshot.content.sectionVersions,
+      };
   const dataFiles = [
     archiveFile("data/project.json", "application/json", {
-      schemaVersion: 1,
+      schemaVersion: archiveVersion,
       series: snapshot.content.series,
       project: snapshot.content.project,
+      ...(snapshot.content.schemaVersion === 2
+        ? { studios: snapshot.content.studios }
+        : {}),
     }),
-    archiveFile("data/manuscript.json", "application/json", {
-      schemaVersion: 1,
-      revisions: snapshot.content.revisions,
-      versions: snapshot.content.versions,
-      sections: snapshot.content.sections,
-      sectionVersions: snapshot.content.sectionVersions,
-    }),
+    archiveFile("data/manuscript.json", "application/json", manuscriptPayload),
     archiveFile("data/continuity.json", "application/json", {
-      schemaVersion: 1,
+      schemaVersion: archiveVersion,
       ...snapshot.content.continuity,
     }),
     archiveFile("manuscript.md", "text/markdown", markdownFallback(snapshot.content)),
   ];
   const project = snapshot.content.project;
-  const manifest: SlateArchiveManifestV1 = {
+  const manifestBase = {
     format: SLATE_ARCHIVE_FORMAT,
-    version: SLATE_ARCHIVE_VERSION,
     exportedAt: exportedAt.toISOString(),
     project: {
       id: String(project.id),
@@ -1258,11 +2282,14 @@ export function createSlateArchiveBundle(
     continuity: {
       activeVersion: String(project.continuity_active_version),
       targetVersion: String(project.continuity_target_version),
-      activeGeneration: Number(project.continuity_active_generation),
+      activeGeneration: portableActiveContinuityGeneration(snapshot.content),
     },
     contentHash: snapshot.contentHash,
     files: dataFiles.map((file) => file.manifest).sort((left, right) => left.path.localeCompare(right.path)),
   };
+  const manifest: SlateArchiveManifest = archiveVersion === SLATE_ARCHIVE_VERSION
+    ? { ...manifestBase, version: SLATE_ARCHIVE_VERSION }
+    : { ...manifestBase, version: SLATE_ARCHIVE_LEGACY_VERSION };
   return {
     manifest,
     files: Object.fromEntries(dataFiles.map((file) => [file.path, file.content])),
@@ -1272,7 +2299,10 @@ export function createSlateArchiveBundle(
 export function verifySlateArchiveBundle(bundle: SlateArchiveBundleV1): SlateArchiveBundleV1 {
   if (
     bundle.manifest.format !== SLATE_ARCHIVE_FORMAT ||
-    bundle.manifest.version !== SLATE_ARCHIVE_VERSION
+    (
+      bundle.manifest.version !== SLATE_ARCHIVE_LEGACY_VERSION &&
+      bundle.manifest.version !== SLATE_ARCHIVE_VERSION
+    )
   ) {
     throw new Error("Unsupported Slate archive format.");
   }
@@ -1311,49 +2341,78 @@ export function verifySlateArchiveBundle(bundle: SlateArchiveBundleV1): SlateArc
     throw new Error("Slate archive is missing a required data file.");
   }
   const parsedProject = JSON.parse(projectData) as Pick<
-    SlateSafetyContentV1,
+    SlateSafetyContent,
     "series" | "project"
-  > & { schemaVersion: number };
+  > & Partial<Pick<SlateSafetyContentV2, "studios">> & {
+    schemaVersion: number;
+  };
   const parsedManuscript = JSON.parse(manuscriptData) as Pick<
     SlateSafetyContentV1,
     "revisions" | "versions" | "sections" | "sectionVersions"
-  > & { schemaVersion: number };
+  > & Partial<Pick<SlateSafetyContentV2, "documents" | "annotations" | "writing">> & {
+    schemaVersion: number;
+  };
   const parsedContinuity = JSON.parse(continuityData) as SlateSafetyContentV1["continuity"] & {
     schemaVersion: number;
   };
+  const archiveVersion = bundle.manifest.version;
   if (
-    parsedProject.schemaVersion !== 1 ||
-    parsedManuscript.schemaVersion !== 1 ||
-    parsedContinuity.schemaVersion !== 1
+    parsedProject.schemaVersion !== archiveVersion ||
+    parsedManuscript.schemaVersion !== archiveVersion ||
+    parsedContinuity.schemaVersion !== archiveVersion
   ) {
     throw new Error("Unsupported Slate archive data schema.");
   }
   const { schemaVersion: _projectSchemaVersion, ...projectContent } = parsedProject;
   const { schemaVersion: _manuscriptSchemaVersion, ...manuscriptContent } = parsedManuscript;
   const { schemaVersion: _continuitySchemaVersion, ...continuityContent } = parsedContinuity;
-  const content = {
-    schemaVersion: 1 as const,
-    ...projectContent,
-    ...manuscriptContent,
-    continuity: continuityContent,
-  };
-  if (sha256(canonicalSlateJson(content)) !== bundle.manifest.contentHash) {
+  const contentForHash: SlateSafetyContent | Omit<SlateSafetyContentV2, "studios"> =
+    archiveVersion === SLATE_ARCHIVE_VERSION
+      ? {
+        schemaVersion: 2,
+        ...projectContent,
+        ...manuscriptContent,
+        documents: parsedManuscript.documents ?? [],
+        annotations: parsedManuscript.annotations ?? [],
+        writing: parsedManuscript.writing ?? {
+          operations: [],
+          clarifications: [],
+          mutations: [],
+          developerEvents: [],
+        },
+        continuity: continuityContent,
+      }
+      : {
+        schemaVersion: 1,
+        ...projectContent,
+        ...manuscriptContent,
+        continuity: continuityContent,
+      };
+  if (sha256(canonicalSlateJson(contentForHash)) !== bundle.manifest.contentHash) {
     throw new Error("Slate archive authoritative content checksum does not match.");
   }
+  const content: SlateSafetyContent =
+    archiveVersion === SLATE_ARCHIVE_VERSION
+      ? {
+          ...(contentForHash as Omit<SlateSafetyContentV2, "studios">),
+          studios: parsedProject.studios ?? emptySlateStudioContent(),
+        }
+      : contentForHash as SlateSafetyContentV1;
   if (
     bundle.manifest.project.id !== String(content.project.id) ||
     bundle.manifest.project.title !== String(content.project.title) ||
     bundle.manifest.project.seriesId !== String(content.project.series_id) ||
     bundle.manifest.continuity.activeVersion !== String(content.project.continuity_active_version) ||
     bundle.manifest.continuity.targetVersion !== String(content.project.continuity_target_version) ||
-    bundle.manifest.continuity.activeGeneration !== Number(content.project.continuity_active_generation)
+    bundle.manifest.continuity.activeGeneration !==
+      portableActiveContinuityGeneration(content)
   ) {
     throw new Error("Slate archive manifest does not match its project data.");
   }
   return bundle;
 }
 
-export function serializeSlateArchiveManifest(manifest: SlateArchiveManifestV1): string {
+export function serializeSlateArchiveManifest(manifest: SlateArchiveManifest): string {
   return `${canonicalSlateJson(manifest)}\n`;
 }
 

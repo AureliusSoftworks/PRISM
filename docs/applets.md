@@ -39,7 +39,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Games | v0.0 | Planned | Boardgame-like bot matches. |
 | Story | v0.29 | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration. |
 | Gym | v0.0 | Planned | Bot training and memory-development surface. |
-| Slate | v0.7 | Preview | Prose-fiction production desk with source-specific starts, generated title and cover options, long-form section storage, private Continuity guidance, clean exports, and a movable ephemeral Markdown companion. |
+| Slate | v0.8 | Preview | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery. |
 | Pseudo | v0.0 | Planned | Sketch/system space for almost-code. |
 | Surf | v0.0 | Planned | Simple browsing plus optional bot screen viewing. |
 
@@ -69,7 +69,7 @@ All current and future persona-review systems should follow the shared
 [Review Artifacts](./review-artifacts.md) boundary.
 
 Slate stayed planned `v0.0` until its first functional vertical slice became
-usable end to end. It entered preview at `v0.1` and is now `v0.7`; later snapshot
+usable end to end. It entered preview at `v0.1` and is now `v0.8`; later snapshot
 stages do not block the standalone preview.
 
 ## Spectral perception policy
@@ -92,6 +92,17 @@ stages do not block the standalone preview.
 ## Changelog
 
 ### 2026-07-29
+
+- Bumped `Slate` to preview `v0.8` for the manuscript-first Writer's Cockpit:
+  TipTap section documents, Story Map, adaptive Inspector, natural-language
+  Director, inline proposals, exactly three grounded clarification choices plus
+  a custom vibe, focused Story Bible and History desks, generation-scoped
+  Continuity, and exportable section-level Slate Review provenance. Writing
+  operations now start asynchronously so Stop and Redirect can abort a live
+  provider request. Character Studio projects source-linked profiles, observed
+  arcs, and causal edges from accepted prose while letting the writer curate
+  field-level canon and a separate intended arc. The Composer receives distinct
+  Direction Intent, Continuity Brief, Mirror Brief, and Momentum Target inputs.
 
 - Reworked Debate’s five built-in proceeding presets as flavor-first room
   choices: University Union, Daytime Showdown, Crossfire, Town Hall, and Bench

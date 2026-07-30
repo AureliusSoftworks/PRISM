@@ -63,6 +63,7 @@ export type ImageJobSource =
   | "zen_wallpaper"
   | "signal_artwork"
   | "slate_cover"
+  | "slate_visual_bible"
   | "coffee_drink";
 
 export type RunningImageJob = {

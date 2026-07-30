@@ -4,6 +4,12 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS } from "./modeTutorials.ts";
 
 const source = readFileSync(new URL("./SlateWorkspace.tsx", import.meta.url), "utf8");
+const cockpitComponentSource = [
+  readFileSync(new URL("./SlateStoryMap.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./SlateManuscriptCanvas.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./SlateDirectorBar.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("./SlateDirectionQuestion.tsx", import.meta.url), "utf8"),
+].join("\n");
 const workspaceCss = readFileSync(
   new URL("./slateWorkspace.module.css", import.meta.url),
   "utf8",
@@ -16,7 +22,7 @@ const companionSource = readFileSync(
 
 describe("Slate workspace integration", () => {
   it("renders every registered Slate tutorial target in the live workspace", () => {
-    const renderedSlateSources = `${source}\n${pageSource}\n${companionSource}`;
+    const renderedSlateSources = `${source}\n${cockpitComponentSource}\n${pageSource}\n${companionSource}`;
     for (const step of MODE_TUTORIALS.slate.steps) {
       const match = step.targetSelector.match(/data-tutorial-target="([^"]+)"/);
       assert.ok(match?.[1], `Could not read target from ${step.targetSelector}`);
@@ -89,7 +95,8 @@ describe("Slate workspace integration", () => {
     assert.doesNotMatch(exportSource, /appendChild|removeChild|\.append\(|\.remove\(/);
     assert.match(source, /Take a clean copy/);
     assert.match(source, /Directions, Continuity notes, and review metadata stay private/);
-    assert.match(source, /aria-controls="slate-export-panel"/);
+    assert.match(source, /data-tutorial-target="slate-project-tools"/);
+    assert.match(source, /Clean manuscript export/);
   });
 
   it("keeps the export card branded, theme-owned, and responsive", () => {

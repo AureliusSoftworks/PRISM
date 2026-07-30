@@ -130,7 +130,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   slate: {
     id: "slate",
     name: "Slate",
-    version: "0.7",
+    version: "0.8",
     status: "preview",
   },
   pseudo: {

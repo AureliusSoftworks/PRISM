@@ -674,6 +674,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       title TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
+      continuity_active_generation INTEGER NOT NULL DEFAULT 0,
+      continuity_previous_generation INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -787,11 +789,47 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       locked INTEGER NOT NULL,
       status TEXT NOT NULL,
       content_hash TEXT NOT NULL,
+      document_json TEXT NOT NULL DEFAULT '',
+      document_hash TEXT NOT NULL DEFAULT '',
+      prose_hash TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       UNIQUE(user_id, section_id, revision),
       FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
       FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE CASCADE,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_section_documents (
+      section_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      section_revision INTEGER NOT NULL,
+      document_json TEXT NOT NULL,
+      document_hash TEXT NOT NULL,
+      prose_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_section_annotations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT NOT NULL,
+      block_id TEXT NOT NULL,
+      anchor_json TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      resolved INTEGER NOT NULL DEFAULT 0,
+      idempotency_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, project_id, idempotency_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS slate_manuscript_state (
       project_id TEXT PRIMARY KEY,
@@ -895,6 +933,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       provider TEXT,
       model TEXT,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       supersedes_source_id TEXT,
       created_at TEXT NOT NULL,
       UNIQUE(user_id, section_id, source_revision, kind),
@@ -915,6 +954,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       anchors_json TEXT NOT NULL DEFAULT '[]',
       source_id TEXT,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -929,6 +969,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       alias TEXT NOT NULL,
       normalized_alias TEXT NOT NULL,
       source_id TEXT,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       UNIQUE(user_id, series_id, entity_id, normalized_alias),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -954,6 +995,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       source_id TEXT NOT NULL,
       supersedes_claim_id TEXT,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
@@ -980,6 +1022,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       anchors_json TEXT NOT NULL DEFAULT '[]',
       source_id TEXT NOT NULL,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
@@ -1000,6 +1043,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       anchors_json TEXT NOT NULL DEFAULT '[]',
       source_id TEXT NOT NULL,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
@@ -1018,6 +1062,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       anchors_json TEXT NOT NULL DEFAULT '[]',
       source_id TEXT NOT NULL,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
@@ -1039,6 +1084,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       anchors_json TEXT NOT NULL DEFAULT '[]',
       source_id TEXT NOT NULL,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1065,6 +1111,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       recommended_resolution TEXT,
       resolution_json TEXT,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       resolved_at TEXT,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1126,6 +1173,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       checkpoint_json TEXT NOT NULL,
       candidate_counts_json TEXT NOT NULL DEFAULT '{}',
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY(source_id) REFERENCES slate_continuity_sources(id) ON DELETE CASCADE,
@@ -1145,11 +1193,330 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       token_estimate INTEGER NOT NULL,
       token_budget INTEGER NOT NULL,
       producer_versions_json TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       UNIQUE(user_id, project_id, source_fingerprint),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
       FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_writing_operations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT,
+      parent_operation_id TEXT,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      direction_intent_json TEXT NOT NULL,
+      validated_snapshot_json TEXT NOT NULL,
+      revision_fingerprint TEXT NOT NULL,
+      continuity_generation INTEGER NOT NULL DEFAULT 0,
+      mirror_profile_version_id TEXT,
+      provider TEXT,
+      model TEXT,
+      proposal_text TEXT,
+      proposal_hash TEXT,
+      revision_id TEXT,
+      idempotency_key TEXT NOT NULL,
+      error TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      started_at TEXT,
+      completed_at TEXT,
+      resolved_at TEXT,
+      UNIQUE(user_id, project_id, idempotency_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL,
+      FOREIGN KEY(parent_operation_id) REFERENCES slate_writing_operations(id) ON DELETE SET NULL,
+      FOREIGN KEY(revision_id) REFERENCES slate_revisions(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_clarification_requests (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT,
+      operation_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'awaiting_answer',
+      prompt TEXT NOT NULL,
+      choices_json TEXT NOT NULL,
+      allows_custom_vibe INTEGER NOT NULL DEFAULT 1,
+      evidence_json TEXT NOT NULL DEFAULT '[]',
+      revision_fingerprint TEXT NOT NULL,
+      continuity_generation INTEGER NOT NULL DEFAULT 0,
+      mirror_profile_version_id TEXT,
+      answer_kind TEXT,
+      answer_choice_id TEXT,
+      custom_vibe TEXT,
+      structured_direction_json TEXT,
+      answer_idempotency_key TEXT,
+      resume_operation_id TEXT,
+      created_at TEXT NOT NULL,
+      answered_at TEXT,
+      stale_at TEXT,
+      UNIQUE(user_id, operation_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL,
+      FOREIGN KEY(operation_id) REFERENCES slate_writing_operations(id) ON DELETE CASCADE,
+      FOREIGN KEY(resume_operation_id) REFERENCES slate_writing_operations(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_writing_operation_mutations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      operation_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      result_operation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, operation_id, action, idempotency_key),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(operation_id) REFERENCES slate_writing_operations(id) ON DELETE CASCADE,
+      FOREIGN KEY(result_operation_id) REFERENCES slate_writing_operations(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_character_profiles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      project_id TEXT,
+      entity_id TEXT,
+      generation INTEGER NOT NULL DEFAULT 0,
+      layer TEXT NOT NULL,
+      profile_json TEXT NOT NULL,
+      field_locks_json TEXT NOT NULL DEFAULT '{}',
+      provenance_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(entity_id) REFERENCES slate_continuity_entities(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_character_arcs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      project_id TEXT,
+      character_profile_id TEXT NOT NULL,
+      generation INTEGER NOT NULL DEFAULT 0,
+      intended_json TEXT NOT NULL,
+      observed_json TEXT NOT NULL,
+      provenance_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(character_profile_id) REFERENCES slate_character_profiles(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_character_arc_beats (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      project_id TEXT,
+      character_arc_id TEXT NOT NULL,
+      section_id TEXT,
+      generation INTEGER NOT NULL DEFAULT 0,
+      track TEXT NOT NULL,
+      ordinal INTEGER NOT NULL DEFAULT 0,
+      beat_json TEXT NOT NULL,
+      provenance_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(character_arc_id) REFERENCES slate_character_arcs(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_narrative_edges (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      project_id TEXT,
+      generation INTEGER NOT NULL DEFAULT 0,
+      from_ref_json TEXT NOT NULL,
+      to_ref_json TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      branch_id TEXT,
+      story_time_json TEXT,
+      manuscript_order_json TEXT,
+      provenance_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_mirror_profiles (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      pen_name TEXT,
+      frozen INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_mirror_profile_versions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      profile_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      voice_card_json TEXT NOT NULL,
+      eligibility_summary_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, profile_id, version),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(profile_id) REFERENCES slate_mirror_profiles(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_mirror_samples (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      profile_id TEXT NOT NULL,
+      project_id TEXT,
+      section_id TEXT,
+      kind TEXT NOT NULL,
+      eligibility TEXT NOT NULL,
+      source_hash TEXT NOT NULL,
+      sample_text TEXT NOT NULL,
+      provenance_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(profile_id) REFERENCES slate_mirror_profiles(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE SET NULL,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_project_mirror_bindings (
+      project_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      profile_version_id TEXT NOT NULL,
+      project_overlay_json TEXT NOT NULL DEFAULT '{}',
+      pov_overlays_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(profile_version_id) REFERENCES slate_mirror_profile_versions(id) ON DELETE RESTRICT
+    );
+    CREATE TABLE IF NOT EXISTS slate_visual_references (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT,
+      entity_id TEXT,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'study',
+      image_id TEXT,
+      prompt TEXT NOT NULL,
+      reference_state_json TEXT NOT NULL DEFAULT '{}',
+      visual_style_version TEXT,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      pinned_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL,
+      FOREIGN KEY(entity_id) REFERENCES slate_continuity_entities(id) ON DELETE SET NULL,
+      FOREIGN KEY(image_id) REFERENCES images(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_source_shelf_items (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      metadata_json TEXT NOT NULL DEFAULT '{}',
+      promoted_source_id TEXT,
+      mirror_eligible INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(promoted_source_id) REFERENCES slate_continuity_sources(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_review_circle_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT NOT NULL,
+      artifact_json TEXT NOT NULL,
+      section_revisions_json TEXT NOT NULL,
+      continuity_version TEXT NOT NULL,
+      continuity_generation INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_review_circle_results (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      reviewer_id TEXT NOT NULL,
+      reviewer_snapshot_json TEXT NOT NULL,
+      result_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(session_id, ordinal),
+      FOREIGN KEY(session_id) REFERENCES slate_review_circle_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_review_circle_room_notes (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      room_note_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(session_id) REFERENCES slate_review_circle_sessions(id) ON DELETE CASCADE,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS slate_momentum_snapshots (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT,
+      kind TEXT NOT NULL,
+      state_json TEXT NOT NULL,
+      source_fingerprint TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS slate_continuity_developer_events (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      series_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      section_id TEXT,
+      section_revision INTEGER,
+      sequence INTEGER NOT NULL,
+      stage TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      detail_json TEXT NOT NULL DEFAULT '{}',
+      source_ids_json TEXT NOT NULL DEFAULT '[]',
+      operation_id TEXT,
+      clarification_id TEXT,
+      provider TEXT,
+      model TEXT,
+      continuity_generation INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, project_id, sequence),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(series_id) REFERENCES slate_series(id) ON DELETE CASCADE,
+      FOREIGN KEY(project_id) REFERENCES slate_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(section_id) REFERENCES slate_sections(id) ON DELETE SET NULL,
+      FOREIGN KEY(operation_id) REFERENCES slate_writing_operations(id) ON DELETE SET NULL,
+      FOREIGN KEY(clarification_id) REFERENCES slate_clarification_requests(id) ON DELETE SET NULL
     );
     CREATE TABLE IF NOT EXISTS bots (
       id TEXT PRIMARY KEY,
@@ -1904,6 +2271,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     "TEXT NOT NULL DEFAULT 'current'",
   );
   addSlateProjectColumn("continuity_last_success_at", "TEXT");
+  const slateSeriesColumnNames = new Set(
+    (
+      db.prepare("PRAGMA table_info(slate_series)").all() as Array<{
+        name: string;
+      }>
+    ).map((column) => column.name),
+  );
+  const addSlateSeriesColumn = (name: string, definition: string): void => {
+    if (slateSeriesColumnNames.has(name)) return;
+    db.exec(`ALTER TABLE slate_series ADD COLUMN ${name} ${definition};`);
+    slateSeriesColumnNames.add(name);
+  };
+  addSlateSeriesColumn(
+    "continuity_active_generation",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  addSlateSeriesColumn("continuity_previous_generation", "INTEGER");
   db.exec(`
     INSERT OR IGNORE INTO slate_series
       (id, user_id, title, description, created_at, updated_at)
@@ -1913,7 +2297,106 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     UPDATE slate_projects
        SET series_id = 'legacy-series-' || id
      WHERE series_id IS NULL OR series_id = '';
+    UPDATE slate_series
+       SET continuity_active_generation = (
+             SELECT MIN(projects.continuity_active_generation)
+               FROM slate_projects AS projects
+              WHERE projects.user_id = slate_series.user_id
+                AND projects.series_id = slate_series.id
+                AND projects.continuity_active_generation > 0
+           ),
+           continuity_previous_generation = (
+             SELECT CASE
+                      WHEN COUNT(DISTINCT projects.continuity_previous_generation) = 1
+                        THEN MIN(projects.continuity_previous_generation)
+                      ELSE NULL
+                    END
+               FROM slate_projects AS projects
+              WHERE projects.user_id = slate_series.user_id
+                AND projects.series_id = slate_series.id
+                AND projects.continuity_active_generation > 0
+           )
+     WHERE continuity_active_generation = 0
+       AND (
+         SELECT COUNT(DISTINCT projects.continuity_active_generation)
+           FROM slate_projects AS projects
+          WHERE projects.user_id = slate_series.user_id
+            AND projects.series_id = slate_series.id
+            AND projects.continuity_active_generation > 0
+       ) = 1;
+    UPDATE slate_projects
+       SET continuity_active_generation = (
+             SELECT series.continuity_active_generation
+               FROM slate_series AS series
+              WHERE series.id = slate_projects.series_id
+                AND series.user_id = slate_projects.user_id
+           ),
+           continuity_previous_generation = (
+             SELECT series.continuity_previous_generation
+               FROM slate_series AS series
+              WHERE series.id = slate_projects.series_id
+                AND series.user_id = slate_projects.user_id
+           )
+     WHERE EXISTS (
+       SELECT 1
+         FROM slate_series AS series
+        WHERE series.id = slate_projects.series_id
+          AND series.user_id = slate_projects.user_id
+          AND series.continuity_active_generation > 0
+          AND (
+            slate_projects.continuity_active_generation
+              <> series.continuity_active_generation
+            OR slate_projects.continuity_previous_generation
+              IS NOT series.continuity_previous_generation
+          )
+     );
   `);
+  const addColumnIfMissing = (
+    table: string,
+    name: string,
+    definition: string,
+  ): void => {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
+    if (columns.some((column) => column.name === name)) return;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition};`);
+  };
+  addColumnIfMissing(
+    "slate_section_versions",
+    "document_json",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  addColumnIfMissing(
+    "slate_section_annotations",
+    "idempotency_key",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  addColumnIfMissing(
+    "slate_section_versions",
+    "document_hash",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  addColumnIfMissing(
+    "slate_section_versions",
+    "prose_hash",
+    "TEXT NOT NULL DEFAULT ''",
+  );
+  for (const table of [
+    "slate_continuity_sources",
+    "slate_continuity_entities",
+    "slate_continuity_aliases",
+    "slate_continuity_claims",
+    "slate_continuity_events",
+    "slate_continuity_relationships",
+    "slate_continuity_knowledge",
+    "slate_continuity_threads",
+    "slate_continuity_concerns",
+    "slate_continuity_source_indexes",
+    "slate_continuity_context_briefs",
+  ]) {
+    addColumnIfMissing(table, "generation", "INTEGER NOT NULL DEFAULT 0");
+  }
   const slateEntityColumns = db
     .prepare("PRAGMA table_info(slate_continuity_entities)")
     .all() as Array<{ name: string }>;
@@ -3736,6 +4219,75 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_slate_context_briefs_section_created ON slate_continuity_context_briefs (user_id, project_id, section_id, created_at DESC);",
   );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_section_documents_project ON slate_section_documents (user_id, project_id, section_id);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_section_annotations_section ON slate_section_annotations (user_id, project_id, section_id, resolved, updated_at DESC);",
+  );
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_slate_section_annotations_idempotency ON slate_section_annotations (user_id, project_id, idempotency_key);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_operations_project_updated ON slate_writing_operations (user_id, project_id, updated_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_operations_status ON slate_writing_operations (user_id, project_id, status, created_at);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_clarifications_operation ON slate_clarification_requests (user_id, project_id, operation_id, status);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_operation_mutations_operation ON slate_writing_operation_mutations (user_id, project_id, operation_id, created_at);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_character_profiles_active ON slate_character_profiles (user_id, series_id, generation, project_id);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_character_arcs_active ON slate_character_arcs (user_id, series_id, generation, project_id);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_narrative_edges_active ON slate_narrative_edges (user_id, series_id, generation, project_id, kind);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_mirror_versions_profile ON slate_mirror_profile_versions (user_id, profile_id, version DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_visual_refs_project ON slate_visual_references (user_id, project_id, status, created_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_source_shelf_project ON slate_source_shelf_items (user_id, project_id, updated_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_review_circle_project ON slate_review_circle_sessions (user_id, project_id, created_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_review_circle_results ON slate_review_circle_results (user_id, session_id, ordinal);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_momentum_project ON slate_momentum_snapshots (user_id, project_id, section_id, created_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_developer_events_project ON slate_continuity_developer_events (user_id, project_id, sequence);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_slate_developer_events_section ON slate_continuity_developer_events (user_id, project_id, section_id, section_revision, sequence);",
+  );
+  for (const table of [
+    "slate_continuity_sources",
+    "slate_continuity_entities",
+    "slate_continuity_aliases",
+    "slate_continuity_claims",
+    "slate_continuity_events",
+    "slate_continuity_relationships",
+    "slate_continuity_knowledge",
+    "slate_continuity_threads",
+    "slate_continuity_concerns",
+  ]) {
+    db.exec(
+      `CREATE INDEX IF NOT EXISTS idx_${table}_active_generation ON ${table} (user_id, series_id, generation);`,
+    );
+  }
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_coffee_polls_session_updated ON coffee_polls (user_id, conversation_id, updated_at DESC);",
   );

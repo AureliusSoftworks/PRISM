@@ -15,6 +15,9 @@ import {
 import {
   detectAndPersistSlateContinuityConcernsInTransaction,
 } from "./slate-continuity-concerns.ts";
+import {
+  projectAcceptedSourceToCharacterStudioInTransaction,
+} from "./slate-character-studio.ts";
 import { SlateContinuityCurrentCanonResolver } from "./slate-continuity-current-canon.ts";
 import {
   compileContinuityContextBrief,
@@ -40,6 +43,7 @@ interface SourceRow {
   source_revision: number;
   content: string;
   content_hash: string;
+  generation: number;
 }
 
 interface EntityRow {
@@ -56,6 +60,8 @@ interface AuxiliaryModelInput {
 interface DraftProjectRow {
   id: string;
   series_id: string;
+  project_active_generation: number;
+  series_active_generation: number;
   title: string;
   premise: string;
   voice: string;
@@ -141,6 +147,7 @@ function previousCheckpoint(
     .prepare(
       `SELECT checkpoint_json FROM slate_continuity_source_indexes
         WHERE user_id = ? AND project_id = ? AND section_id = ?
+          AND generation = ?
           AND source_revision < ?
         ORDER BY source_revision DESC, updated_at DESC
         LIMIT 1`,
@@ -149,6 +156,7 @@ function previousCheckpoint(
       source.user_id,
       source.project_id,
       source.section_id,
+      source.generation,
       source.source_revision,
     ) as { checkpoint_json: string } | undefined;
   if (!row) return null;
@@ -170,6 +178,7 @@ function isLatestSectionSource(db: DatabaseSync, source: SourceRow): boolean {
     .prepare(
       `SELECT id FROM slate_continuity_sources
         WHERE user_id = ? AND project_id = ? AND section_id = ?
+          AND generation = ?
           AND supersedes_source_id = ?
         LIMIT 1`,
     )
@@ -177,6 +186,7 @@ function isLatestSectionSource(db: DatabaseSync, source: SourceRow): boolean {
       source.user_id,
       source.project_id,
       source.section_id,
+      source.generation,
       source.id,
     ) as {
     id: string;
@@ -301,7 +311,7 @@ function prepareAuxiliaryModelInput(
   const source = db
     .prepare(
       `SELECT id, user_id, series_id, project_id, section_id, source_revision,
-              content, content_hash
+              content, content_hash, generation
          FROM slate_continuity_sources
         WHERE id = ? AND user_id = ? AND project_id = ?`,
     )
@@ -371,7 +381,7 @@ export function processSlateContinuityJobDeterministically({
   const source = db
     .prepare(
       `SELECT id, user_id, series_id, project_id, section_id, source_revision,
-              content, content_hash
+              content, content_hash, generation
          FROM slate_continuity_sources
         WHERE id = ? AND user_id = ? AND project_id = ?`,
     )
@@ -445,6 +455,7 @@ export function processSlateContinuityJobDeterministically({
         now,
         needsAuxiliary,
       );
+      projectAcceptedSourceToCharacterStudioInTransaction(db, source.id, now);
       rescanDeterministicConcernsInTransaction(db, source, now);
       db.prepare(
         `UPDATE slate_projects SET continuity_last_success_at = ?
@@ -458,18 +469,18 @@ export function processSlateContinuityJobDeterministically({
       .prepare(
         `SELECT id, canonical_name, anchors_json
            FROM slate_continuity_entities
-          WHERE user_id = ? AND series_id = ?`,
+          WHERE user_id = ? AND series_id = ? AND generation = ?`,
       )
-      .all(source.user_id, source.series_id) as unknown as EntityRow[];
+      .all(source.user_id, source.series_id, source.generation) as unknown as EntityRow[];
     const entityByName = new Map(
       storedEntities.map((row) => [normalizeContinuityName(row.canonical_name), row]),
     );
     const aliases = db
       .prepare(
         `SELECT normalized_alias, entity_id FROM slate_continuity_aliases
-          WHERE user_id = ? AND series_id = ?`,
+          WHERE user_id = ? AND series_id = ? AND generation = ?`,
       )
-      .all(source.user_id, source.series_id) as Array<{
+      .all(source.user_id, source.series_id, source.generation) as Array<{
       normalized_alias: string;
       entity_id: string;
     }>;
@@ -484,14 +495,15 @@ export function processSlateContinuityJobDeterministically({
       if (!entity) {
         const id = stableId("continuity-entity", [
           source.series_id,
+          String(source.generation),
           candidate.normalizedName,
         ]);
         db.prepare(
           `INSERT OR IGNORE INTO slate_continuity_entities
             (id, user_id, series_id, kind, canonical_name, description,
              locked, anchors_json, source_id, producer_versions_json,
-             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, ?)`,
+             generation, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, ?, ?)`,
         ).run(
           id,
           source.user_id,
@@ -501,6 +513,7 @@ export function processSlateContinuityJobDeterministically({
           JSON.stringify(candidate.anchors),
           source.id,
           versionsJson,
+          source.generation,
           now,
           now,
         );
@@ -527,8 +540,8 @@ export function processSlateContinuityJobDeterministically({
         db.prepare(
           `INSERT INTO slate_continuity_aliases
             (id, user_id, series_id, entity_id, alias, normalized_alias,
-             source_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             source_id, generation, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(user_id, series_id, entity_id, normalized_alias)
            DO UPDATE SET alias = excluded.alias,
                          source_id = excluded.source_id,
@@ -536,6 +549,7 @@ export function processSlateContinuityJobDeterministically({
         ).run(
           stableId("continuity-alias", [
             source.series_id,
+            String(source.generation),
             entity.id,
             normalizedAlias,
           ]),
@@ -545,6 +559,7 @@ export function processSlateContinuityJobDeterministically({
           alias,
           normalizedAlias,
           source.id,
+          source.generation,
           now,
         );
         entityByName.set(normalizedAlias, entity);
@@ -565,8 +580,9 @@ export function processSlateContinuityJobDeterministically({
           (id, user_id, series_id, project_id, section_id, scope_kind,
            subject_entity_id, predicate, object_entity_id, value,
            epistemic_status, perspective_entity_id, confidence, anchors_json,
-           source_id, supersedes_claim_id, producer_versions_json, created_at)
-         VALUES (?, ?, ?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+           source_id, supersedes_claim_id, producer_versions_json, generation,
+           created_at)
+         VALUES (?, ?, ?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
       ).run(
         stableId("continuity-claim", [source.id, candidate.candidateId]),
         source.user_id,
@@ -583,6 +599,7 @@ export function processSlateContinuityJobDeterministically({
         JSON.stringify(candidate.anchors),
         source.id,
         versionsJson,
+        source.generation,
         now,
       );
     }
@@ -592,8 +609,8 @@ export function processSlateContinuityJobDeterministically({
         (source_id, user_id, series_id, project_id, section_id,
          source_revision, action, processing_key, content_hash,
          checkpoint_json, candidate_counts_json, producer_versions_json,
-         created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         generation, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(source_id) DO UPDATE SET
          action = excluded.action,
          processing_key = excluded.processing_key,
@@ -615,6 +632,7 @@ export function processSlateContinuityJobDeterministically({
       JSON.stringify(plan.checkpoint),
       JSON.stringify({ entities: entities.length, claims: claims.length }),
       versionsJson,
+      source.generation,
       now,
       now,
     );
@@ -625,6 +643,7 @@ export function processSlateContinuityJobDeterministically({
       now,
       needsAuxiliary,
     );
+    projectAcceptedSourceToCharacterStudioInTransaction(db, source.id, now);
     rescanDeterministicConcernsInTransaction(db, source, now);
     db.prepare(
       `UPDATE slate_projects SET continuity_last_success_at = ?
@@ -663,6 +682,7 @@ function claimsForAuxiliaryReconciliation(
     db,
     source.user_id,
     source.series_id,
+    source.generation,
   );
   const pairs = new Set(
     extraction.claims.map(
@@ -684,6 +704,7 @@ function claimsForAuxiliaryReconciliation(
            ON object.id = claims.object_entity_id
           AND object.user_id = claims.user_id
         WHERE claims.user_id = ? AND claims.series_id = ?
+          AND claims.generation = ?
           AND claims.source_id <> ?
           AND claims.epistemic_status <> 'superseded'
           AND NOT EXISTS (
@@ -694,7 +715,7 @@ function claimsForAuxiliaryReconciliation(
         ORDER BY claims.created_at DESC, claims.id ASC
         LIMIT 2048`,
     )
-    .all(source.user_id, source.series_id, source.id) as Array<{
+    .all(source.user_id, source.series_id, source.generation, source.id) as Array<{
     id: string;
     predicate: string;
     value: string;
@@ -765,7 +786,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
   const source = db
     .prepare(
       `SELECT id, user_id, series_id, project_id, section_id, source_revision,
-              content, content_hash
+              content, content_hash, generation
          FROM slate_continuity_sources
         WHERE id = ? AND user_id = ? AND project_id = ?`,
     )
@@ -826,6 +847,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
       {},
     );
     if (counts.auxiliaryFingerprint === input.sourceFingerprint) {
+      projectAcceptedSourceToCharacterStudioInTransaction(db, source.id, now);
       rescanDeterministicConcernsInTransaction(db, source, now);
       db.exec("COMMIT");
       return;
@@ -835,9 +857,9 @@ export async function processSlateContinuityAuxiliaryModelJob({
       .prepare(
         `SELECT id, canonical_name, description, locked, anchors_json
            FROM slate_continuity_entities
-          WHERE user_id = ? AND series_id = ?`,
+          WHERE user_id = ? AND series_id = ? AND generation = ?`,
       )
-      .all(source.user_id, source.series_id) as unknown as StoredAuxiliaryEntity[];
+      .all(source.user_id, source.series_id, source.generation) as unknown as StoredAuxiliaryEntity[];
     const entityById = new Map(storedEntities.map((entity) => [entity.id, entity]));
     const entityByName = new Map(
       storedEntities.map((entity) => [
@@ -848,9 +870,9 @@ export async function processSlateContinuityAuxiliaryModelJob({
     const storedAliases = db
       .prepare(
         `SELECT normalized_alias, entity_id FROM slate_continuity_aliases
-          WHERE user_id = ? AND series_id = ?`,
+          WHERE user_id = ? AND series_id = ? AND generation = ?`,
       )
-      .all(source.user_id, source.series_id) as Array<{
+      .all(source.user_id, source.series_id, source.generation) as Array<{
       normalized_alias: string;
       entity_id: string;
     }>;
@@ -871,6 +893,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
       if (!entity) {
         const id = stableId("continuity-entity", [
           source.series_id,
+          String(source.generation),
           normalizedName,
         ]);
         entity = {
@@ -884,8 +907,8 @@ export async function processSlateContinuityAuxiliaryModelJob({
           `INSERT OR IGNORE INTO slate_continuity_entities
             (id, user_id, series_id, kind, canonical_name, description,
              locked, anchors_json, source_id, producer_versions_json,
-             created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+             generation, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
         ).run(
           id,
           source.user_id,
@@ -896,6 +919,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
           entity.anchors_json,
           source.id,
           versionsJson,
+          source.generation,
           now,
           now,
         );
@@ -930,8 +954,8 @@ export async function processSlateContinuityAuxiliaryModelJob({
         db.prepare(
           `INSERT INTO slate_continuity_aliases
             (id, user_id, series_id, entity_id, alias, normalized_alias,
-             source_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             source_id, generation, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(user_id, series_id, entity_id, normalized_alias)
            DO UPDATE SET alias = excluded.alias,
                          source_id = excluded.source_id,
@@ -939,6 +963,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
         ).run(
           stableId("continuity-alias", [
             source.series_id,
+            String(source.generation),
             entity.id,
             normalizedAlias,
           ]),
@@ -948,6 +973,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
           rawAlias,
           normalizedAlias,
           source.id,
+          source.generation,
           now,
         );
         entityByName.set(normalizedAlias, entity);
@@ -1018,8 +1044,9 @@ export async function processSlateContinuityAuxiliaryModelJob({
             (id, user_id, series_id, project_id, section_id, scope_kind,
              subject_entity_id, predicate, object_entity_id, value,
              epistemic_status, perspective_entity_id, confidence, anchors_json,
-             source_id, supersedes_claim_id, producer_versions_json, created_at)
-           VALUES (?, ?, ?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+             source_id, supersedes_claim_id, producer_versions_json, generation,
+             created_at)
+           VALUES (?, ?, ?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
         ).run(
           claimId,
           source.user_id,
@@ -1036,6 +1063,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
           JSON.stringify(candidate.anchors),
           source.id,
           versionsJson,
+          source.generation,
           now,
         );
       }
@@ -1046,9 +1074,9 @@ export async function processSlateContinuityAuxiliaryModelJob({
             (id, user_id, series_id, project_id, section_id, scope_kind, kind,
              severity, status, summary, explanation, claim_ids_json,
              anchors_json, recommended_resolution, resolution_json,
-             producer_versions_json, created_at, resolved_at)
+             producer_versions_json, generation, created_at, resolved_at)
            VALUES (?, ?, ?, ?, ?, 'section', 'ambiguous_extraction', 'note',
-                   'open', ?, ?, ?, ?, 'dismiss_extraction', NULL, ?, ?, NULL)`,
+                   'open', ?, ?, ?, ?, 'dismiss_extraction', NULL, ?, ?, ?, NULL)`,
         ).run(
           stableId("continuity-concern", [
             source.id,
@@ -1064,6 +1092,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
           JSON.stringify([claimId]),
           JSON.stringify(candidate.anchors),
           versionsJson,
+          source.generation,
           now,
         );
       }
@@ -1090,8 +1119,8 @@ export async function processSlateContinuityAuxiliaryModelJob({
           (id, user_id, series_id, project_id, section_id, scope_kind, title,
            description, chronology_key, participant_entity_ids_json,
            location_entity_id, anchors_json, source_id,
-           producer_versions_json, created_at)
-         VALUES (?, ?, ?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           producer_versions_json, generation, created_at)
+         VALUES (?, ?, ?, ?, ?, 'section', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         stableId("continuity-event", [source.id, candidate.candidateId]),
         source.user_id,
@@ -1106,6 +1135,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
         JSON.stringify(candidate.anchors),
         source.id,
         versionsJson,
+        source.generation,
         now,
       );
     }
@@ -1125,8 +1155,8 @@ export async function processSlateContinuityAuxiliaryModelJob({
         `INSERT OR IGNORE INTO slate_continuity_relationships
           (id, user_id, series_id, from_entity_id, to_entity_id, kind, state,
            epistemic_status, anchors_json, source_id,
-           producer_versions_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           producer_versions_json, generation, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         stableId("continuity-relationship", [
           source.id,
@@ -1142,6 +1172,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
         JSON.stringify(candidate.anchors),
         source.id,
         versionsJson,
+        source.generation,
         now,
       );
     }
@@ -1149,6 +1180,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
     for (const candidate of extraction.threads) {
       const threadId = stableId("continuity-thread", [
         source.series_id,
+        String(source.generation),
         normalizeContinuityName(candidate.label),
       ]);
       const existing = db
@@ -1173,8 +1205,8 @@ export async function processSlateContinuityAuxiliaryModelJob({
           `INSERT INTO slate_continuity_threads
             (id, user_id, series_id, project_id, section_id, scope_kind, label,
              status, due_section_id, anchors_json, source_id,
-             producer_versions_json, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'book', ?, 'open', NULL, ?, ?, ?, ?, ?)`,
+             producer_versions_json, generation, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 'book', ?, 'open', NULL, ?, ?, ?, ?, ?, ?)`,
         ).run(
           threadId,
           source.user_id,
@@ -1185,6 +1217,7 @@ export async function processSlateContinuityAuxiliaryModelJob({
           JSON.stringify(candidate.anchors),
           source.id,
           versionsJson,
+          source.generation,
           now,
           now,
         );
@@ -1216,8 +1249,8 @@ export async function processSlateContinuityAuxiliaryModelJob({
           (id, user_id, series_id, project_id, section_id, scope_kind, kind,
            severity, status, summary, explanation, claim_ids_json,
            anchors_json, recommended_resolution, resolution_json,
-           producer_versions_json, created_at, resolved_at)
-         VALUES (?, ?, ?, ?, ?, 'section', ?, ?, 'open', ?, ?, ?, ?, ?, NULL, ?, ?, NULL)`,
+           producer_versions_json, generation, created_at, resolved_at)
+         VALUES (?, ?, ?, ?, ?, 'section', ?, ?, 'open', ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)`,
       ).run(
         stableId("continuity-concern", [source.id, candidate.candidateId]),
         source.user_id,
@@ -1232,10 +1265,12 @@ export async function processSlateContinuityAuxiliaryModelJob({
         JSON.stringify(anchors),
         candidate.recommendedResolution,
         versionsJson,
+        source.generation,
         now,
       );
     }
 
+    projectAcceptedSourceToCharacterStudioInTransaction(db, source.id, now);
     rescanDeterministicConcernsInTransaction(db, source, now);
 
     db.prepare(
@@ -1299,12 +1334,27 @@ export function compileSlateDraftContinuityContext(
 ) {
   const project = db
     .prepare(
-      `SELECT id, series_id, title, premise, voice, non_negotiables_json,
-              structure_json, direction
-         FROM slate_projects WHERE id = ? AND user_id = ?`,
+      `SELECT projects.id, projects.series_id, projects.title, projects.premise,
+              projects.voice, projects.non_negotiables_json,
+              projects.structure_json, projects.direction,
+              projects.continuity_active_generation AS project_active_generation,
+              series.continuity_active_generation AS series_active_generation
+         FROM slate_projects AS projects
+         JOIN slate_series AS series
+           ON series.id = projects.series_id
+          AND series.user_id = projects.user_id
+        WHERE projects.id = ? AND projects.user_id = ?`,
     )
     .get(projectId, userId) as DraftProjectRow | undefined;
   if (!project) throw new Error("Slate project not found.");
+  const seriesGeneration = Number(project.series_active_generation);
+  const projectGeneration = Number(project.project_active_generation);
+  const activeGeneration =
+    Number.isInteger(seriesGeneration) && seriesGeneration > 0
+      ? seriesGeneration
+      : Number.isInteger(projectGeneration) && projectGeneration > 0
+        ? projectGeneration
+        : 0;
   const sections = db
     .prepare(
       `SELECT id, structure_item_id, ordinal, title, summary, direction, prose,
@@ -1403,17 +1453,19 @@ export function compileSlateDraftContinuityContext(
     db,
     userId,
     project.series_id,
+    activeGeneration,
   );
   const entityRows = db
     .prepare(
       `SELECT entities.id, entities.canonical_name, entities.description,
               entities.locked, entities.anchors_json, entities.source_id
-         FROM slate_continuity_entities entities
+        FROM slate_continuity_entities entities
         WHERE entities.user_id = ? AND entities.series_id = ?
+          AND entities.generation = ?
         ORDER BY entities.canonical_name ASC
         LIMIT 10000`,
     )
-    .all(userId, project.series_id) as Array<{
+    .all(userId, project.series_id, activeGeneration) as Array<{
     id: string;
     canonical_name: string;
     description: string;
@@ -1424,11 +1476,11 @@ export function compileSlateDraftContinuityContext(
   const aliasRows = db
     .prepare(
       `SELECT entity_id, alias, source_id
-         FROM slate_continuity_aliases
-        WHERE user_id = ? AND series_id = ?
+        FROM slate_continuity_aliases
+        WHERE user_id = ? AND series_id = ? AND generation = ?
         ORDER BY alias ASC`,
     )
-    .all(userId, project.series_id) as Array<{
+    .all(userId, project.series_id, activeGeneration) as Array<{
     entity_id: string;
     alias: string;
     source_id: string | null;
@@ -1489,15 +1541,17 @@ export function compileSlateDraftContinuityContext(
               epistemic_status, confidence, created_at, anchors_json, source_id
          FROM slate_continuity_claims
         WHERE user_id = ? AND series_id = ?
+          AND generation = ?
           AND NOT EXISTS (
             SELECT 1 FROM slate_continuity_claims replacement
              WHERE replacement.user_id = slate_continuity_claims.user_id
                AND replacement.supersedes_claim_id = slate_continuity_claims.id
+               AND replacement.generation = slate_continuity_claims.generation
           )
         ORDER BY created_at DESC, id ASC
         LIMIT 4096`,
     )
-    .all(userId, project.series_id) as Array<{
+    .all(userId, project.series_id, activeGeneration) as Array<{
     id: string;
     project_id: string | null;
     subject_entity_id: string | null;
@@ -1552,12 +1606,12 @@ export function compileSlateDraftContinuityContext(
     .prepare(
       `SELECT id, from_entity_id, to_entity_id, kind, state, epistemic_status,
               anchors_json, source_id
-         FROM slate_continuity_relationships
-        WHERE user_id = ? AND series_id = ?
+        FROM slate_continuity_relationships
+        WHERE user_id = ? AND series_id = ? AND generation = ?
         ORDER BY created_at DESC, id ASC
         LIMIT 2048`,
     )
-    .all(userId, project.series_id) as Array<{
+    .all(userId, project.series_id, activeGeneration) as Array<{
     id: string;
     from_entity_id: string;
     to_entity_id: string;
@@ -1595,12 +1649,12 @@ export function compileSlateDraftContinuityContext(
       `SELECT id, title, description, chronology_key,
               participant_entity_ids_json, location_entity_id, anchors_json,
               source_id
-         FROM slate_continuity_events
-        WHERE user_id = ? AND series_id = ?
+        FROM slate_continuity_events
+        WHERE user_id = ? AND series_id = ? AND generation = ?
         ORDER BY created_at DESC, id ASC
         LIMIT 2048`,
     )
-    .all(userId, project.series_id) as Array<{
+    .all(userId, project.series_id, activeGeneration) as Array<{
     id: string;
     title: string;
     description: string;
@@ -1640,12 +1694,12 @@ export function compileSlateDraftContinuityContext(
     .prepare(
       `SELECT id, character_entity_id, claim_id, learned_event_id, status,
               anchors_json, source_id
-         FROM slate_continuity_knowledge
-        WHERE user_id = ? AND series_id = ?
+        FROM slate_continuity_knowledge
+        WHERE user_id = ? AND series_id = ? AND generation = ?
         ORDER BY created_at DESC, id ASC
         LIMIT 2048`,
     )
-    .all(userId, project.series_id) as Array<{
+    .all(userId, project.series_id, activeGeneration) as Array<{
     id: string;
     character_entity_id: string;
     claim_id: string;
@@ -1678,11 +1732,12 @@ export function compileSlateDraftContinuityContext(
       `SELECT id, label, due_section_id, anchors_json, source_id
          FROM slate_continuity_threads
         WHERE user_id = ? AND series_id = ?
+          AND generation = ?
           AND (project_id = ? OR project_id IS NULL)
           AND status IN ('open', 'due')
         ORDER BY updated_at ASC, id ASC`,
     )
-    .all(userId, project.series_id, projectId) as Array<{
+    .all(userId, project.series_id, activeGeneration, projectId) as Array<{
     id: string;
     label: string;
     due_section_id: string | null;
@@ -1712,8 +1767,8 @@ export function compileSlateDraftContinuityContext(
     `INSERT OR IGNORE INTO slate_continuity_context_briefs
       (id, user_id, project_id, section_id, section_revision,
        source_fingerprint, rendered_brief, token_estimate, token_budget,
-       producer_versions_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       producer_versions_json, generation, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     stableId("continuity-context", [projectId, compiled.sourceFingerprint]),
     userId,
@@ -1725,6 +1780,7 @@ export function compileSlateDraftContinuityContext(
     compiled.tokenEstimate,
     compiled.tokenBudget,
     JSON.stringify(compiled.producerVersions),
+    activeGeneration,
     new Date().toISOString(),
   );
   return compiled;
