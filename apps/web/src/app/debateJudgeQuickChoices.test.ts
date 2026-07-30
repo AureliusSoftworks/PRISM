@@ -20,6 +20,15 @@ describe("Debate Judge quick choices", () => {
       debateJudgeGuidedStepKind({
         playerRole: "judge",
         status: "waiting_for_player",
+        stepKey: "judge_objection_ruling",
+        objectionRulingStatus: "awaiting_ruling",
+      }),
+      "objection",
+    );
+    assert.equal(
+      debateJudgeGuidedStepKind({
+        playerRole: "judge",
+        status: "waiting_for_player",
         stepKey: "challenge_judge_question",
       }),
       "question",
@@ -50,26 +59,48 @@ describe("Debate Judge quick choices", () => {
     );
   });
 
-  it("offers three direct responses, a custom path, and a quiet dismissal", () => {
-    for (const kind of ["gavel", "question"] as const) {
-      const choices = debateJudgeQuickChoices(kind);
-      assert.equal(choices.length, 5);
-      assert.equal(
-        choices
-          .slice(0, 3)
-          .every(
-            (choice) =>
-              choice.action === "submit" && Boolean(choice.content?.trim()),
-          ),
-        true,
-      );
-      assert.equal(choices[3]?.id, "custom");
-      assert.equal(choices[3]?.action, "compose");
-      assert.equal(choices[3]?.content, null);
-      assert.equal(choices[4]?.id, "nevermind");
-      assert.equal(choices[4]?.label, "nevermind");
-      assert.equal(choices[4]?.action, "dismiss");
-      assert.equal(choices[4]?.content, null);
-    }
+  it("gives the gavel an explicit End Debate action", () => {
+    const choices = debateJudgeQuickChoices("gavel");
+    assert.equal(choices.length, 6);
+    assert.deepEqual(choices[0], {
+      id: "end-debate",
+      label: "End Debate",
+      detail: "Close the floor and deliver your ruling",
+      content: null,
+      action: "end",
+    });
+    assert.equal(
+      choices
+        .slice(1, 4)
+        .every(
+          (choice) =>
+            choice.action === "submit" && Boolean(choice.content?.trim()),
+        ),
+      true,
+    );
+    assert.equal(choices[4]?.action, "compose");
+    assert.equal(choices[5]?.action, "dismiss");
+  });
+
+  it("keeps questions to three direct prompts, custom prose, or dismissal", () => {
+    const choices = debateJudgeQuickChoices("question");
+    assert.equal(choices.length, 5);
+    assert.equal(
+      choices
+        .slice(0, 3)
+        .every(
+          (choice) =>
+            choice.action === "submit" && Boolean(choice.content?.trim()),
+        ),
+      true,
+    );
+    assert.equal(choices[3]?.id, "custom");
+    assert.equal(choices[3]?.action, "compose");
+    assert.equal(choices[4]?.id, "nevermind");
+    assert.equal(choices[4]?.action, "dismiss");
+  });
+
+  it("reserves objection rulings for the timed Sustained / Overruled dock", () => {
+    assert.deepEqual(debateJudgeQuickChoices("objection"), []);
   });
 });

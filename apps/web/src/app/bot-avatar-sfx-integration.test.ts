@@ -87,6 +87,21 @@ test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state
   assert.match(signalSource, /avatarState\.thinking/);
 });
 
+test("Debate routes the thinking bot's frozen SFX profile into its live avatar", () => {
+  const debateSource = sourceBefore(
+    "scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}",
+    3_000,
+  );
+  assert.match(
+    debateSource,
+    /avatarSfx=\{botAvatarSfxForProfile\(\s*botSnapshot\.voiceProfile,\s*botSnapshot\.id,\s*\)\}/u,
+  );
+  assert.match(
+    debateSource,
+    /avatarSfxState=\{\s*avatarState\.talking\s*\?\s*"talking"\s*:\s*avatarState\.thinking\s*\?\s*"thinking"\s*:\s*"idle"\s*\}/u,
+  );
+});
+
 test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on stage", () => {
   const botcastSource = readFileSync(
     new URL("./BotcastExperience.tsx", import.meta.url),

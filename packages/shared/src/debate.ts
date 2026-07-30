@@ -17,6 +17,7 @@ export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
 export const DEBATE_PLAYER_JUDGE_BOT_ID = "prism:player-judge" as const;
 export const DEBATE_JUDGE_GAVEL_COOLDOWN_MS = 8_000;
 export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
+export const DEBATE_OBJECTION_RULING_TIMEOUT_MS = 8_000;
 export const DEBATE_MODERATOR_TITLE_MAX_LENGTH = 72;
 export const DEBATE_MOTION_MAX_LENGTH = 320;
 export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
@@ -535,6 +536,18 @@ export interface DebateJudgeGavelStateV1 {
   resumeStepKey: string;
 }
 
+export interface DebateObjectionRulingStateV1 {
+  version: typeof DEBATE_SCHEMA_VERSION;
+  status: "awaiting_ruling";
+  interruptedEventId: string;
+  objectionEventId: string;
+  interruptedBotId: string;
+  objectingBotId: string;
+  resumeStatus: DebateStatus;
+  resumePhase: DebatePhase;
+  resumeStepKey: string;
+}
+
 export interface DebateBallotV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   voterBotId: string;
@@ -618,6 +631,8 @@ export interface DebateSessionV1 {
   /** Active only after an unscheduled player-Judge gavel strike. */
   judgeGavel?: DebateJudgeGavelStateV1 | null;
   judgeGavelCooldownUntil?: string | null;
+  /** Active after a bot objection until the human Judge rules. */
+  objectionRuling?: DebateObjectionRulingStateV1 | null;
   events: DebateEventV1[];
   error: string | null;
   createdAt: string;
@@ -724,6 +739,10 @@ export interface DebateJudgeGavelRequest extends DebateMutationRequest {
 export interface DebateJudgeGavelMessageRequest extends DebateMutationRequest {
   content?: string;
   pass?: boolean;
+}
+
+export interface DebateObjectionRulingRequest extends DebateMutationRequest {
+  ruling: DebateTurnaboutRuling;
 }
 
 export type DebateTurnaboutAction = "press" | "present_evidence" | "pass";

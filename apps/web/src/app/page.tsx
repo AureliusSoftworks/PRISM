@@ -146,6 +146,15 @@ import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { CoffeeAtmosphereScene } from "./CoffeeAtmosphereScene";
 import { DebateExperience, type DebateUtterance } from "./DebateExperience";
+import {
+  DEFAULT_DEBATE_JURY_SETTINGS,
+  DEBATE_JURY_DECISION_TIMEOUT_MAX_MS,
+  DEBATE_JURY_DECISION_TIMEOUT_MIN_MS,
+  DEBATE_JURY_DECISION_TIMEOUT_STEP_MS,
+  readDebateJurySettings,
+  writeDebateJurySettings,
+  type DebateJurySettings,
+} from "./debateJurySettings";
 import { debateJudgeGavelVoiceMood } from "./debateJudgeGavel";
 import { debateAudioEnabled } from "./debatePresentation";
 import { BotPickerGrid, BotPickerTile } from "./BotPicker";
@@ -43101,6 +43110,25 @@ function HomeContent(): React.JSX.Element {
     new Map(),
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [debateJurySettings, setDebateJurySettings] =
+    useState<DebateJurySettings>(DEFAULT_DEBATE_JURY_SETTINGS);
+  const debateJurySettingsScopeId = user?.id ?? "signed-out";
+  useEffect(() => {
+    setDebateJurySettings(
+      readDebateJurySettings(debateJurySettingsScopeId),
+    );
+  }, [debateJurySettingsScopeId]);
+  const updateDebateJurySettings = useCallback(
+    (patch: Partial<DebateJurySettings>): void => {
+      setDebateJurySettings((current) =>
+        writeDebateJurySettings(debateJurySettingsScopeId, {
+          ...current,
+          ...patch,
+        }),
+      );
+    },
+    [debateJurySettingsScopeId],
+  );
   const startupPreferenceAppliedForUserRef = useRef<string | null>(null);
   useEffect(() => {
     if (!user || !settings) return;
@@ -98929,6 +98957,8 @@ function HomeContent(): React.JSX.Element {
         ? "slate"
         : view === "botcast"
           ? "botcast"
+          : view === "debate"
+            ? "debate"
           : "connections";
     const actionDisabled = (action: UniversalNavbarAction): boolean =>
       disabled || disabledActions[action] === true;
@@ -108031,6 +108061,122 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   </div>
                 )}
+                {settings && activeSettingsScope === "debate" && (
+                  <div className={`${styles.form} ${styles.settingsWorkspace}`}>
+                    <div className={styles.settingsSectionGrid}>
+                      <section
+                        className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
+                        data-settings-section="debate"
+                        aria-labelledby="debate-jury-settings-title"
+                      >
+                        <header className={styles.settingsSectionHeader}>
+                          <div>
+                            <span className={styles.settingsEyebrow}>
+                              Jury
+                            </span>
+                            <h4 id="debate-jury-settings-title">
+                              Deliberation handoff
+                            </h4>
+                          </div>
+                          <div className={styles.settingsSectionHeaderAside}>
+                            <small>Auto is always the default.</small>
+                            <PanelSectionInfo
+                              id="settings-section-info-debate-jury"
+                              label="About Jury deliberation"
+                            >
+                              When formal deliberation begins, Debate pauses for
+                              a short choice. Auto keeps the current camera and
+                              lets the Jury work quickly off-camera;
+                              Participate opens the Jury chamber when your role
+                              allows it; Skip moves directly to final ballots.
+                            </PanelSectionInfo>
+                          </div>
+                        </header>
+                        <div className={styles.settingsFieldGrid}>
+                          <label
+                            className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={
+                                debateJurySettings.autoDeliberationEnabled
+                              }
+                              onChange={(event) =>
+                                updateDebateJurySettings({
+                                  autoDeliberationEnabled:
+                                    event.currentTarget.checked,
+                                })
+                              }
+                            />
+                            <span>
+                              <strong>Automatically choose Auto</strong>
+                              <small>
+                                On by default. Turn this off to keep the choice
+                                open until you answer; Auto remains the primary
+                                option.
+                              </small>
+                            </span>
+                          </label>
+                          <label
+                            className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}
+                          >
+                            <span className={styles.settingsRangeHeader}>
+                              <span>
+                                <strong>Choice countdown</strong>
+                                <small>
+                                  How long Debate waits before starting fast
+                                  off-camera deliberation.
+                                </small>
+                              </span>
+                              <span className={styles.settingsRangeValue}>
+                                {Math.round(
+                                  debateJurySettings.decisionTimeoutMs / 1_000,
+                                )}
+                                s
+                              </span>
+                            </span>
+                            <input
+                              type="range"
+                              min={DEBATE_JURY_DECISION_TIMEOUT_MIN_MS}
+                              max={DEBATE_JURY_DECISION_TIMEOUT_MAX_MS}
+                              step={DEBATE_JURY_DECISION_TIMEOUT_STEP_MS}
+                              value={debateJurySettings.decisionTimeoutMs}
+                              aria-label="Jury deliberation choice countdown"
+                              onChange={(event) =>
+                                updateDebateJurySettings({
+                                  decisionTimeoutMs: Number(
+                                    event.currentTarget.value,
+                                  ),
+                                })
+                              }
+                            />
+                          </label>
+                        </div>
+                      </section>
+                    </div>
+
+                    <div className={styles.settingsSaveDock}>
+                      <div className={styles.settingsDockRow}>
+                        <span>
+                          Saved for this account on this device. Jury camera
+                          cuts remain manual; Judge / Moderator sessions stay
+                          on Auto.
+                        </span>
+                        <div className={styles.settingsDockActions}>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            onClick={() =>
+                              resetSingleModeTutorial("debate")
+                            }
+                          >
+                            Reset Debate tutorial
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {settings && activeSettingsScope === "slate" && (
                   <div className={`${styles.form} ${styles.settingsWorkspace}`}>
                     <div className={styles.settingsSectionGrid}>
@@ -108106,6 +108252,7 @@ function HomeContent(): React.JSX.Element {
                 {settings &&
                   activeSettingsScope !== "coffee" &&
                   activeSettingsScope !== "zen" &&
+                  activeSettingsScope !== "debate" &&
                   activeSettingsScope !== "botcast" &&
                   activeSettingsScope !== "slate" && (
                     <form
@@ -129224,6 +129371,10 @@ function HomeContent(): React.JSX.Element {
                 }),
               )}
               audioVolume={settings?.voiceVolume ?? 0}
+              juryAutoDeliberationEnabled={
+                debateJurySettings.autoDeliberationEnabled
+              }
+              juryDecisionTimeoutMs={debateJurySettings.decisionTimeoutMs}
               request={api}
               renderBotGlyph={(glyph, options) => (
                 <BotGlyph

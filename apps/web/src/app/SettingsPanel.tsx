@@ -6,6 +6,7 @@ import {
   CircleHelp,
   Coffee,
   FlaskConical,
+  Gavel,
   Info,
   House,
   KeyRound,
@@ -25,6 +26,7 @@ export type SettingsScope =
   | "chat"
   | "zen"
   | "coffee"
+  | "debate"
   | "botcast"
   | "slate"
   | "connections"
@@ -75,6 +77,7 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "chat", title: "Chat", icon: <MessageCircle size={16} strokeWidth={2} /> },
       { scope: "zen", title: "Zen", icon: <Sparkles size={16} strokeWidth={2} /> },
       { scope: "coffee", title: "Coffee", icon: <Coffee size={16} strokeWidth={2} /> },
+      { scope: "debate", title: "Debate", icon: <Gavel size={16} strokeWidth={2} /> },
       { scope: "botcast", title: "Signal", icon: <Radio size={16} strokeWidth={2} /> },
       { scope: "slate", title: "Slate", icon: <BookOpen size={16} strokeWidth={2} /> },
     ],

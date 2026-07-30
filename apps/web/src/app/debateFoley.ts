@@ -88,13 +88,6 @@ export function debateModeratorGavelCue(args: {
       audienceReaction: "order",
     };
   }
-  if (event.kind === "interjection") {
-    return {
-      eventId: event.id,
-      kind: "order",
-      audienceReaction: "order",
-    };
-  }
   if (event.kind === "verdict" && event.speakerKind !== "player") {
     return { eventId: event.id, kind: "order" };
   }
@@ -117,10 +110,7 @@ export function debateModeratorGavelCue(args: {
         : {}),
     };
   }
-  if (
-    args.format === "turnabout" &&
-    (event.kind === "objection" || event.kind === "revelation")
-  ) {
+  if (args.format === "turnabout" && event.kind === "revelation") {
     return { eventId: event.id, kind: "attention" };
   }
   return null;

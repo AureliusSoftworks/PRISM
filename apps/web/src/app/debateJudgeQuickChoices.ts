@@ -1,11 +1,12 @@
-export type DebateJudgeGuidedStepKind = "gavel" | "question" | "verdict";
+export type DebateJudgeGuidedStepKind =
+  "gavel" | "question" | "objection" | "verdict";
 
 export interface DebateJudgeQuickChoice {
   id: string;
   label: string;
   detail: string;
   content: string | null;
-  action: "submit" | "compose" | "dismiss";
+  action: "submit" | "compose" | "dismiss" | "end";
 }
 
 export function debateJudgeGuidedStepKind(args: {
@@ -13,9 +14,16 @@ export function debateJudgeGuidedStepKind(args: {
   status: string;
   stepKey: string;
   judgeGavelStatus?: string | null;
+  objectionRulingStatus?: string | null;
 }): DebateJudgeGuidedStepKind | null {
   if (args.playerRole !== "judge" || args.status !== "waiting_for_player") {
     return null;
+  }
+  if (
+    args.stepKey === "judge_objection_ruling" &&
+    args.objectionRulingStatus === "awaiting_ruling"
+  ) {
+    return "objection";
   }
   if (
     args.stepKey === "judge_gavel_message" &&
@@ -50,6 +58,13 @@ const NEVERMIND_JUDGE_CHOICE: DebateJudgeQuickChoice = {
 };
 
 const JUDGE_GAVEL_CHOICES: readonly DebateJudgeQuickChoice[] = [
+  {
+    id: "end-debate",
+    label: "End Debate",
+    detail: "Close the floor and deliver your ruling",
+    content: null,
+    action: "end",
+  },
   {
     id: "clarify",
     label: "Clarify the claim",
@@ -104,5 +119,6 @@ const JUDGE_QUESTION_CHOICES: readonly DebateJudgeQuickChoice[] = [
 export function debateJudgeQuickChoices(
   kind: Exclude<DebateJudgeGuidedStepKind, "verdict">,
 ): readonly DebateJudgeQuickChoice[] {
+  if (kind === "objection") return [];
   return kind === "gavel" ? JUDGE_GAVEL_CHOICES : JUDGE_QUESTION_CHOICES;
 }

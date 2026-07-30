@@ -1513,6 +1513,10 @@
   transition: none;
 }
 
+.forumCamera[data-camera-transition="objection-pan"] {
+  transition: transform 900ms cubic-bezier(0.22, 0.72, 0.2, 1);
+}
+
 .debateAudienceRow {
   position: relative;
   z-index: 1;
@@ -1552,6 +1556,7 @@
 
 .debateAudienceBotPortrait {
   --debate-audience-depth: 1;
+  --debate-audience-facing-scale: 1;
   position: relative;
   width: clamp(62px, 7.4vw, 112px);
   min-width: 0;
@@ -1565,6 +1570,10 @@
   transition:
     filter 420ms ease,
     opacity 420ms ease;
+}
+
+.debateAudienceBotPortrait[data-conversation-facing="right"] {
+  --debate-audience-facing-scale: -1;
 }
 
 .debateAudienceBotPortrait::after {
@@ -1598,7 +1607,64 @@
   top: -12%;
   left: 50%;
   width: 138%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scaleX(var(--debate-audience-facing-scale));
+}
+
+.debateAudienceChatterChip {
+  position: absolute;
+  z-index: 4;
+  top: 7%;
+  display: grid;
+  min-width: 25px;
+  height: 17px;
+  box-sizing: border-box;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, currentColor 48%, transparent);
+  border-radius: 999px;
+  color: rgba(250, 248, 255, 0.9);
+  background: rgba(19, 16, 25, 0.88);
+  box-shadow:
+    0 3px 10px rgba(0, 0, 0, 0.36),
+    0 0 8px color-mix(in srgb, currentColor 18%, transparent);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.66rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  animation: debate-audience-chatter-chip 1.8s ease-in-out
+    var(--debate-audience-talk-delay) infinite alternate;
+}
+
+.debateAudienceBotPortrait[data-conversation-facing="right"]
+  .debateAudienceChatterChip {
+  right: 3%;
+}
+
+.debateAudienceBotPortrait[data-conversation-facing="left"]
+  .debateAudienceChatterChip {
+  left: 3%;
+}
+
+.debateAudienceChatterChip::after {
+  position: absolute;
+  bottom: -4px;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid color-mix(in srgb, currentColor 42%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 42%, transparent);
+  background: rgba(19, 16, 25, 0.88);
+  content: "";
+  transform: rotate(45deg);
+}
+
+.debateAudienceBotPortrait[data-conversation-facing="right"]
+  .debateAudienceChatterChip::after {
+  right: 5px;
+}
+
+.debateAudienceBotPortrait[data-conversation-facing="left"]
+  .debateAudienceChatterChip::after {
+  left: 5px;
 }
 
 .debateAudienceBotPortrait[data-talking="true"] {
@@ -1643,6 +1709,18 @@
   to {
     transform: translateY(11%) rotate(0.45deg)
       scale(var(--debate-audience-depth));
+  }
+}
+
+@keyframes debate-audience-chatter-chip {
+  from {
+    opacity: 0.7;
+    translate: 0 1px;
+  }
+
+  to {
+    opacity: 1;
+    translate: 0 -1px;
   }
 }
 
@@ -1762,6 +1840,10 @@
 }
 
 .debaterFocusDepthOverlay[data-visible="true"][data-camera-transition="move"] {
+  transition-delay: 760ms;
+}
+
+.debaterFocusDepthOverlay[data-visible="true"][data-camera-transition="objection-pan"] {
   transition-delay: 760ms;
 }
 
@@ -2134,6 +2216,29 @@
     color-mix(in srgb, var(--debate-moderator-color) 14%, transparent);
 }
 
+.cameraControls[data-locked="true"] {
+  opacity: 0.48;
+}
+
+.cameraControls button:disabled,
+.cameraAdvanced[data-locked="true"] > summary {
+  cursor: not-allowed;
+}
+
+.cameraControls button:disabled {
+  opacity: 0.58;
+}
+
+.cameraControls[data-forced-auto="true"] button[data-selected="true"] {
+  cursor: default;
+  opacity: 1;
+}
+
+.cameraAdvanced[data-locked="true"] > summary {
+  pointer-events: none;
+  opacity: 0.58;
+}
+
 .cameraControls .alignmentLaunchButton {
   margin-left: 3px;
   border-color: color-mix(in srgb, #b6a9ff 38%, transparent);
@@ -2190,12 +2295,24 @@
   opacity: 0;
 }
 
-.botStagePresence[data-scale="microscopic"] { --debate-presence-scale: 0; }
-.botStagePresence[data-scale="tiny"] { --debate-presence-scale: 0.5; }
-.botStagePresence[data-scale="small"] { --debate-presence-scale: 0.75; }
-.botStagePresence[data-scale="large"] { --debate-presence-scale: 1.25; }
-.botStagePresence[data-scale="giant"] { --debate-presence-scale: 1.5; }
-.botStagePresence[data-scale="colossal"] { --debate-presence-scale: 3; }
+.botStagePresence[data-scale="microscopic"] {
+  --debate-presence-scale: 0;
+}
+.botStagePresence[data-scale="tiny"] {
+  --debate-presence-scale: 0.5;
+}
+.botStagePresence[data-scale="small"] {
+  --debate-presence-scale: 0.75;
+}
+.botStagePresence[data-scale="large"] {
+  --debate-presence-scale: 1.25;
+}
+.botStagePresence[data-scale="giant"] {
+  --debate-presence-scale: 1.5;
+}
+.botStagePresence[data-scale="colossal"] {
+  --debate-presence-scale: 3;
+}
 
 .botStagePresence[data-visibility="hidden"],
 .botStagePresence[data-visibility="speaking_only"]:not([data-speaking="true"]) {
@@ -2935,14 +3052,16 @@
 }
 
 .judgeQuickChoices,
-.judgeVerdictChoices {
+.judgeVerdictChoices,
+.judgeObjectionChoices {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 7px;
 }
 
 .judgeQuickChoices > button,
-.judgeVerdictChoices > button {
+.judgeVerdictChoices > button,
+.judgeObjectionChoices > button {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -2979,7 +3098,9 @@
 .judgeQuickChoices > button:hover:not(:disabled),
 .judgeQuickChoices > button:focus-visible,
 .judgeVerdictChoices > button:hover:not(:disabled),
-.judgeVerdictChoices > button:focus-visible {
+.judgeVerdictChoices > button:focus-visible,
+.judgeObjectionChoices > button:hover:not(:disabled),
+.judgeObjectionChoices > button:focus-visible {
   border-color: color-mix(
     in srgb,
     var(--debate-moderator-color) 66%,
@@ -2990,12 +3111,14 @@
 }
 
 .judgeQuickChoices > button:active:not(:disabled),
-.judgeVerdictChoices > button:active:not(:disabled) {
+.judgeVerdictChoices > button:active:not(:disabled),
+.judgeObjectionChoices > button:active:not(:disabled) {
   transform: translateY(0) scale(0.985);
 }
 
 .judgeQuickChoices > button:disabled,
 .judgeVerdictChoices > button:disabled,
+.judgeObjectionChoices > button:disabled,
 .judgeTargetChoices button:disabled {
   cursor: wait;
   opacity: 0.55;
@@ -3038,7 +3161,8 @@
 }
 
 .judgeQuickChoices span,
-.judgeVerdictChoices span {
+.judgeVerdictChoices span,
+.judgeObjectionChoices span {
   overflow: hidden;
   font-size: clamp(10px, 1vw, 13px);
   font-weight: 780;
@@ -3048,7 +3172,8 @@
 }
 
 .judgeQuickChoices small,
-.judgeVerdictChoices small {
+.judgeVerdictChoices small,
+.judgeObjectionChoices small {
   overflow: hidden;
   color: #aaa1b8;
   font-size: clamp(8px, 0.78vw, 10px);
@@ -3061,6 +3186,27 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   width: min(100%, 620px);
   justify-self: center;
+}
+
+.judgeObjectionChoices {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 620px);
+  justify-self: center;
+}
+
+.judgeObjectionChoices > button[data-ruling="sustained"] {
+  border-color: color-mix(in srgb, #57e59b 52%, transparent);
+}
+
+.judgeObjectionChoices > button[data-ruling="overruled"] {
+  border-color: color-mix(in srgb, #ff8d7a 50%, transparent);
+}
+
+.judgeObjectionTimeout {
+  justify-self: center;
+  color: #958da1;
+  font-size: 9px;
+  letter-spacing: 0.02em;
 }
 
 .judgeVerdictChoices > button[data-side="for"] {
@@ -3118,7 +3264,8 @@
 }
 
 .live[data-theme="light"] .judgeQuickChoices > button,
-.live[data-theme="light"] .judgeVerdictChoices > button {
+.live[data-theme="light"] .judgeVerdictChoices > button,
+.live[data-theme="light"] .judgeObjectionChoices > button {
   color: #2a2431;
   background: linear-gradient(
     135deg,
@@ -3131,7 +3278,9 @@
 }
 
 .live[data-theme="light"] .judgeQuickChoices small,
-.live[data-theme="light"] .judgeVerdictChoices small {
+.live[data-theme="light"] .judgeVerdictChoices small,
+.live[data-theme="light"] .judgeObjectionChoices small,
+.live[data-theme="light"] .judgeObjectionTimeout {
   color: #6a6072;
 }
 
@@ -4877,12 +5026,24 @@
   opacity: 0;
 }
 
-.juryChamberSeat[data-scale="microscopic"] { scale: 0; }
-.juryChamberSeat[data-scale="tiny"] { scale: 0.5; }
-.juryChamberSeat[data-scale="small"] { scale: 0.75; }
-.juryChamberSeat[data-scale="large"] { scale: 1.25; }
-.juryChamberSeat[data-scale="giant"] { scale: 1.5; }
-.juryChamberSeat[data-scale="colossal"] { scale: 3; }
+.juryChamberSeat[data-scale="microscopic"] {
+  scale: 0;
+}
+.juryChamberSeat[data-scale="tiny"] {
+  scale: 0.5;
+}
+.juryChamberSeat[data-scale="small"] {
+  scale: 0.75;
+}
+.juryChamberSeat[data-scale="large"] {
+  scale: 1.25;
+}
+.juryChamberSeat[data-scale="giant"] {
+  scale: 1.5;
+}
+.juryChamberSeat[data-scale="colossal"] {
+  scale: 3;
+}
 
 .juryChamberSeat[data-seat="0"] {
   left: 50%;
@@ -5201,10 +5362,19 @@
   background: color-mix(in srgb, #f8e9dc 68%, #ffffff);
 }
 
-.juryDeliberationChoice[data-context="sealed"] {
+.juryDeliberationChoice[data-context="sealed"],
+.juryDeliberationChoice[data-context="prompt"] {
   position: static;
   margin-top: 10px;
   transform: none;
+}
+
+.juryDeliberationChoice button[data-default="true"] {
+  border-color: color-mix(in srgb, var(--debate-active-color) 74%, white);
+  color: #fff;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.22),
+    0 0 18px color-mix(in srgb, var(--debate-active-color) 26%, transparent);
 }
 
 .live[data-jury-chamber="true"] :is(.stageSupport, .floorStatus) {
@@ -5219,7 +5389,8 @@
   padding-bottom: 0;
 }
 
-.stageStateOverlay[data-kind="jury-sealed"] {
+.stageStateOverlay[data-kind="jury-sealed"],
+.stageStateOverlay[data-kind="jury-choice"] {
   background:
     radial-gradient(
       circle at 50% 48%,
@@ -5229,9 +5400,15 @@
     rgba(7, 6, 9, 0.72);
 }
 
-.stageStateOverlay[data-kind="jury-sealed"] > span {
+.stageStateOverlay[data-kind="jury-sealed"] > span,
+.stageStateOverlay[data-kind="jury-choice"] > span {
   font-size: 13px;
   letter-spacing: 0.2em;
+}
+
+.stageStateOverlay[data-kind="jury-choice"] {
+  gap: 8px;
+  padding: 24px;
 }
 
 .anonymousJuryBallot {
@@ -7546,7 +7723,8 @@
 
   .debateAudienceBotPortrait[data-talking="true"],
   .debateAudienceBotPortrait[data-talking="true"]
-    [data-coffee-plate-emoji-part="mouth"] {
+    [data-coffee-plate-emoji-part="mouth"],
+  .debateAudienceChatterChip {
     animation: none;
   }
 }

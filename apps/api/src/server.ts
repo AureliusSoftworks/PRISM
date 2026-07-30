@@ -196,6 +196,7 @@ import {
   skipDebateJuryDeliberation,
   submitDebateInterjection,
   submitDebateJudgeGavelMessage,
+  submitDebateObjectionRuling,
   submitDebatePlayerTurn,
   submitDebateTurnaboutAction,
   submitDebateVerdict,
@@ -13199,6 +13200,38 @@ function buildRoutes(): RouteDefinition[] {
             userId,
             ctx.params.id,
             ctx.body as Parameters<typeof submitDebateJudgeGavelMessage>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/objection-ruling", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          submitDebateObjectionRuling(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof submitDebateObjectionRuling>[3],
             runtime,
           ),
       );

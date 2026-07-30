@@ -33,6 +33,7 @@ import {
   skipDebateJuryDeliberation,
   submitDebateJudgeGavelMessage,
   submitDebateInterjection,
+  submitDebateObjectionRuling,
   submitDebatePlayerTurn,
   submitDebateTurnaboutAction,
   submitDebateVerdict,
@@ -146,8 +147,23 @@ class JudgeGavelProvider extends DebateProviderStub {
     if (text.includes("silently route one unscheduled human Judge")) {
       this.routePrompt = text;
       return JSON.stringify({
+        shouldRespond: true,
         botId: "against",
         reason: "The question challenges the opposing side's constraint.",
+      });
+    }
+    if (text.includes("silently classify one unscheduled human Judge")) {
+      this.routePrompt = text;
+      if (text.includes("This Court is adjourned.")) {
+        return JSON.stringify({
+          shouldRespond: false,
+          reason: "The Judge issued a final procedural ruling.",
+        });
+      }
+      return JSON.stringify({
+        shouldRespond: true,
+        botId: "against",
+        reason: "The Judge requested a direct answer.",
       });
     }
     if (text.includes("human Judge struck the gavel")) {
@@ -274,7 +290,7 @@ class DaytimeShowdownProvider extends JuryProvider {
         content: "Basil, you dodge harder than your argument lands.",
       });
     }
-    if (text.includes("just talked over Basil")) {
+    if (text.includes("just cut off Basil")) {
       this.rulingPrompt = text;
       return JSON.stringify({
         content: "Avery, enough. Basil had the floor, and Basil gets it back.",
@@ -834,6 +850,7 @@ async function createJudgeDebate(
     consentFormality?: "free_for_all" | "plainspoken";
     moderatorTitle?: string;
     playerJudgeUsesPrism?: boolean;
+    againstPowers?: BotPowerV1[];
   } = {},
 ) {
   seedBot(db, "moderator", "Mira");
@@ -844,7 +861,7 @@ async function createJudgeDebate(
     [],
     options.forSystemPrompt ?? "Avery is thoughtful, candid, and concise.",
   );
-  seedBot(db, "against", "Basil");
+  seedBot(db, "against", "Basil", options.againstPowers);
   const checks = await checkDebateAdvocacyRoles(
     db,
     "user-1",
@@ -899,11 +916,18 @@ async function createDebateForRole(
     debateRuntime?: DebateAiRuntime;
     formality?: DebateFormalityId;
     moderatorTitle?: string;
+    forSystemPrompt?: string;
   } = {},
 ) {
   const debateRuntime = options.debateRuntime ?? runtime();
   seedBot(db, "moderator", "Mira");
-  seedBot(db, "for", "Avery");
+  seedBot(
+    db,
+    "for",
+    "Avery",
+    [],
+    options.forSystemPrompt ?? "Avery is thoughtful, candid, and concise.",
+  );
   seedBot(db, "against", "Basil");
   const checks = await checkDebateAdvocacyRoles(
     db,
@@ -1766,7 +1790,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("freezes default Prism as the player Judge's procedural moderator", async () => {
+  it("freezes Prism as a player-controlled, otherwise inactive Judge proxy", async () => {
     const db = createTestDb();
     try {
       const session = await createJudgeDebate(db, runtime(), {
@@ -1779,11 +1803,15 @@ describe("Debate engine", () => {
       assert.deepEqual(session.moderator.powers, []);
       assert.match(
         session.moderator.systemPrompt,
-        /neutral procedural proxy for the human Judge/u,
+        /player-controlled visual and procedural proxy for the human Judge/u,
       );
       assert.match(
         session.moderator.systemPrompt,
-        /human Judge alone supplies player turns and the binding verdict/u,
+        /Remain publicly silent and inactive unless the human Judge explicitly acts/u,
+      );
+      assert.match(
+        session.moderator.systemPrompt,
+        /Never invent moderator speech, questions, rulings, ballots, gestures/u,
       );
       assert.equal(session.forAdvocate.id, "for");
       assert.equal(session.againstAdvocate.id, "against");
@@ -1796,11 +1824,114 @@ describe("Debate engine", () => {
     }
   });
 
+  it("keeps the human Judge publicly inactive until the player acts", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtime();
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        playerJudgeUsesPrism: true,
+      });
+      const advance = async (key: string) => {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `debate.advance:inactive-judge:${key}`,
+          },
+          debateRuntime,
+        );
+      };
+
+      await advance("intro");
+      assert.equal(session.stepKey, "opening_for");
+      assert.deepEqual(session.events, []);
+
+      await advance("opening-for");
+      await advance("opening-against");
+      assert.equal(session.stepKey, "challenge_judge_question");
+      assert.equal(session.status, "waiting_for_player");
+
+      session = submitDebatePlayerTurn(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "debate.turn:inactive-judge:pass",
+        content: "",
+        pass: true,
+      });
+      assert.equal(session.stepKey, "rebuttal_against");
+      assert.equal(
+        session.events.some((event) => event.speakerKind === "player"),
+        false,
+      );
+
+      let mutation = 0;
+      while (session.stepKey !== "verdict_player") {
+        mutation += 1;
+        await advance(`remaining-${mutation}`);
+        assert.ok(mutation < 12);
+      }
+      assert.deepEqual(
+        session.events.filter(
+          (event) =>
+            event.speakerKind === "moderator" ||
+            event.speakerBotId === session.moderator.id,
+        ),
+        [],
+      );
+
+      session = submitDebateVerdict(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "debate.verdict:inactive-judge",
+        sideId: "for",
+        reason: "The affirmative carried the public exchange.",
+      });
+      assert.equal(session.status, "completed");
+      assert.equal(session.events.at(-1)?.speakerKind, "player");
+      assert.deepEqual(
+        session.events.filter((event) => event.speakerKind === "moderator"),
+        [],
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("opens a human-Judge Turnabout directly onto advocate testimony", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtimeWith(new TurnaboutProvider());
+    try {
+      let session = await createTurnaboutForRole(db, "judge", debateRuntime);
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:inactive-turnabout-judge:intro",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.stepKey, "turnabout_testimony_for");
+      assert.deepEqual(session.events, []);
+      assert.equal(session.formatState.format, "turnabout");
+      if (session.formatState.format !== "turnabout") {
+        assert.fail("Turnabout state should stay discriminated.");
+      }
+      assert.equal(session.formatState.floorOwnerBotId, session.forAdvocate.id);
+    } finally {
+      db.close();
+    }
+  });
+
   it("makes saved persona diction binding for Debate speech and ballot reasons", async () => {
     const db = createTestDb();
     try {
       const provider = new PersonaVoicePromptProvider();
-      let session = await createJudgeDebate(db, runtimeWith(provider));
+      const debateRuntime = runtimeWith(provider);
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -1809,7 +1940,7 @@ describe("Debate engine", () => {
           expectedRevision: session.revision,
           idempotencyKey: "debate.advance:persona-voice:0001",
         },
-        runtimeWith(provider),
+        debateRuntime,
       );
       assert.match(provider.speechPrompt, /Persona voice is binding/);
       assert.match(
@@ -1828,12 +1959,149 @@ describe("Debate engine", () => {
     }
   });
 
-  it("records advocate overtime and requires a linked moderator correction before advancing", async () => {
+  it("has the moderator announce each timed Forum floor allocation aloud", async () => {
+    const db = createTestDb();
+    const provider = new PersonaVoicePromptProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
+      const advance = async (key: string) => {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `debate.advance:floor-time:${key}`,
+          },
+          debateRuntime,
+        );
+      };
+
+      await advance("intro");
+      assert.match(
+        provider.speechPrompt,
+        /tell both advocates that each has 20 seconds for their opening/u,
+      );
+      assert.match(provider.speechPrompt, /Say the number aloud/u);
+
+      await advance("opening-for");
+      await advance("opening-against");
+      await advance("challenge-for-prompt");
+      assert.match(
+        provider.speechPrompt,
+        /tell Avery they have 12 seconds to answer the challenge/u,
+      );
+
+      await advance("challenge-for-answer");
+      await advance("challenge-against-prompt");
+      assert.match(
+        provider.speechPrompt,
+        /tell Basil they have 12 seconds to answer the challenge/u,
+      );
+      await advance("challenge-against-answer");
+
+      await advance("moderator-to-rebuttal");
+      assert.match(
+        provider.speechPrompt,
+        /tell both advocates that each has 15 seconds for rebuttal/u,
+      );
+
+      await advance("rebuttal-against");
+      await advance("rebuttal-for");
+      await advance("moderator-to-closing");
+      assert.match(
+        provider.speechPrompt,
+        /tell both advocates that each has 15 seconds for their closing/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not announce a false countdown for a participant input window", async () => {
+    const db = createTestDb();
+    const provider = new PersonaVoicePromptProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening-for", "opening-against"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `debate.advance:participant-floor-time:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:participant-floor-time:challenge",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.stepKey, "challenge_participant_turn");
+      assert.match(
+        provider.speechPrompt,
+        /Do not announce a countdown for the participant's own input window/u,
+      );
+      assert.doesNotMatch(provider.speechPrompt, /12 seconds/u);
+
+      session = submitDebatePlayerTurn(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "debate.turn:participant-floor-time:pass",
+        content: "",
+        pass: true,
+      });
+      for (const key of [
+        "participant-partner",
+        "opponent-prompt",
+        "opponent-answer",
+        "moderator-to-rebuttal",
+      ]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `debate.advance:participant-floor-time:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.match(
+        provider.speechPrompt,
+        /tell the room that Avery and Basil each have 15 seconds whenever they personally take a rebuttal floor/u,
+      );
+      assert.match(
+        provider.speechPrompt,
+        /Do not assign a countdown to the participant's own input window/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records advocate overtime and keeps linked moderator correction in bot-moderated proceedings", async () => {
     const db = createTestDb();
     const provider = new OvertimeProvider();
     const debateRuntime = runtimeWith(provider);
     try {
-      let session = await createJudgeDebate(db, debateRuntime);
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -1878,6 +2146,57 @@ describe("Debate engine", () => {
       );
       assert.match(provider.correctionPrompt, /restore the scheduled order/u);
       assert.doesNotMatch(provider.correctionPrompt, /Vote independently/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves overtime enforcement to the human Judge instead of Prism", async () => {
+    const db = createTestDb();
+    const provider = new OvertimeProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        playerJudgeUsesPrism: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:judge-overtime-intro:0001",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:judge-overtime-opening:0001",
+        },
+        debateRuntime,
+      );
+
+      const opening = session.events.find(
+        (event) =>
+          event.stepKey === "opening_for" &&
+          event.kind === "speech" &&
+          event.speakerBotId === session.forAdvocate.id,
+      );
+      assert.equal(opening?.timing?.status, "overtime");
+      assert.equal(
+        session.events.some(
+          (event) =>
+            event.kind === "moderator_ruling" &&
+            event.parentEventId === opening?.id,
+        ),
+        false,
+      );
+      assert.equal(provider.correctionPrompt, "");
+      assert.equal(session.stepKey, "opening_against");
     } finally {
       db.close();
     }
@@ -2005,6 +2324,85 @@ describe("Debate engine", () => {
           error.statusCode === 429 &&
           /ready again/u.test(error.message),
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records a gavel ruling without manufacturing an advocate rebuttal", async () => {
+    const db = createTestDb();
+    const provider = new JudgeGavelProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        playerJudgeUsesPrism: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "judge-gavel-ruling:intro",
+        },
+        debateRuntime,
+      );
+      const resumeStepKey = session.stepKey;
+      const interrupted = swingDebateJudgeGavel(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "judge-gavel-ruling:swing",
+        eventId: null,
+        overtime: false,
+      });
+      const resumed = await submitDebateJudgeGavelMessage(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: interrupted.revision,
+          idempotencyKey: "judge-gavel-ruling:message",
+          content: "This Court is adjourned. The floor is closed.",
+        },
+        debateRuntime,
+      );
+
+      assert.equal(resumed.status, "live");
+      assert.equal(resumed.stepKey, resumeStepKey);
+      assert.equal(resumed.judgeGavel, null);
+      assert.equal(
+        resumed.events.filter(
+          (event) => event.stepKey === "judge_gavel_response",
+        ).length,
+        0,
+      );
+      assert.equal(resumed.events.at(-1)?.kind, "player_turn");
+      assert.match(provider.routePrompt, /controls courtroom procedure/u);
+      assert.equal(provider.responsePrompt, "");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets the player Judge end the Debate from an open gavel intervention", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createJudgeDebate(db);
+      const interrupted = swingDebateJudgeGavel(db, "user-1", created.id, {
+        expectedRevision: created.revision,
+        idempotencyKey: "judge-gavel-end:swing",
+        eventId: null,
+        overtime: false,
+      });
+      assert.equal(interrupted.judgeGavel?.status, "awaiting_message");
+
+      const concluding = endDebateSessionEarly(db, "user-1", created.id, {
+        expectedRevision: interrupted.revision,
+        idempotencyKey: "judge-gavel-end:conclude",
+      });
+      assert.equal(concluding.phase, "verdict");
+      assert.equal(concluding.status, "waiting_for_player");
+      assert.equal(concluding.stepKey, "verdict_player");
+      assert.equal(concluding.judgeGavel, null);
     } finally {
       db.close();
     }
@@ -2173,7 +2571,8 @@ describe("Debate engine", () => {
     const provider = new ConcretePersonaProvider();
     const debateRuntime = runtimeWith(provider);
     try {
-      let session = await createJudgeDebate(db, debateRuntime, {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
         forSystemPrompt: [
           "Parker is goofy, literal-minded, and distractible.",
           "Parker uses simple everyday words, follows odd logic, and avoids technical overconfidence.",
@@ -2231,12 +2630,6 @@ describe("Debate engine", () => {
         expectedRevision: session.revision,
         idempotencyKey: "debate.persona-capability:end-early:0001",
       });
-      session = submitDebateVerdict(db, "user-1", session.id, {
-        expectedRevision: session.revision,
-        idempotencyKey: "debate.persona-capability:verdict:0001",
-        sideId: "for",
-        reason: "The limited record favored For.",
-      });
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -2271,7 +2664,9 @@ describe("Debate engine", () => {
     const forumDb = createTestDb();
     try {
       const forumProvider = new PersonaVoicePromptProvider();
-      let forum = await createJudgeDebate(forumDb, runtimeWith(forumProvider));
+      let forum = await createDebateForRole(forumDb, "spectator", {
+        debateRuntime: runtimeWith(forumProvider),
+      });
       forum = await advanceDebateSession(
         forumDb,
         "user-1",
@@ -2302,7 +2697,7 @@ describe("Debate engine", () => {
       const turnaboutProvider = new PersonaVoicePromptProvider();
       let turnabout = await createTurnaboutForRole(
         turnaboutDb,
-        "judge",
+        "spectator",
         runtimeWith(turnaboutProvider),
       );
       turnabout = await advanceDebateSession(
@@ -2434,11 +2829,63 @@ describe("Debate engine", () => {
     }
   });
 
+  it("uses first-person self-reference when the moderator title does not begin with The", async () => {
+    const db = createTestDb();
+    const provider = new PersonaVoicePromptProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        formality: "plainspoken",
+        moderatorTitle: "Moderator",
+      });
+
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:moderator-first-person:intro",
+        },
+        debateRuntime,
+      );
+      assert.match(provider.speechPrompt, /title does not begin with "The"/u);
+      assert.match(provider.speechPrompt, /using I, me, my, mine, or myself/u);
+      assert.match(provider.speechPrompt, /"I ask\.\.\." or "I find\.\.\."/u);
+      assert.doesNotMatch(provider.speechPrompt, /"Moderator asks\.\.\."/u);
+
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "debate.end:moderator-first-person",
+      });
+      await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:moderator-first-person:ballot",
+        },
+        debateRuntime,
+      );
+      assert.match(
+        provider.ballotPrompt,
+        /begin the public reason in the first person/u,
+      );
+      assert.match(provider.ballotPrompt, /"I find\.\.\." or "I think\.\.\."/u);
+      assert.doesNotMatch(provider.ballotPrompt, /"Moderator finds\.\.\."/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("freezes formality in session and routes its canonical guidance into live speech and ballots", async () => {
     const db = createTestDb();
     try {
       const provider = new PersonaVoicePromptProvider();
-      let session = await createJudgeDebate(db, runtimeWith(provider), {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime: runtimeWith(provider),
         formality: "plainspoken",
       });
       assert.equal(session.formality, "plainspoken");
@@ -2485,7 +2932,7 @@ describe("Debate engine", () => {
       const provider = new PersonaVoicePromptProvider();
       let session = await createTurnaboutForRole(
         db,
-        "judge",
+        "spectator",
         runtimeWith(provider),
         { formality: "free_for_all" },
       );
@@ -2661,9 +3108,9 @@ describe("Debate engine", () => {
           event.kind === "speech" &&
           event.speakerBotId === "against",
       );
-      const interjection = session.events.find(
+      const objection = session.events.find(
         (event) =>
-          event.stepKey === "opening_against" && event.kind === "interjection",
+          event.stepKey === "opening_against" && event.kind === "objection",
       );
       const ruling = session.events.find(
         (event) =>
@@ -2672,13 +3119,14 @@ describe("Debate engine", () => {
       );
       assert.equal(interruptedSpeech?.interrupted, true);
       assert.equal(interruptedSpeech?.interruptedBy, "bot");
-      assert.equal(interjection?.speakerBotId, "for");
-      assert.equal(interjection?.parentEventId, interruptedSpeech?.id);
+      assert.equal(objection?.speakerBotId, "for");
+      assert.equal(objection?.parentEventId, interruptedSpeech?.id);
+      assert.match(objection?.content ?? "", /^Objection!/u);
       assert.equal(ruling?.speakerBotId, "moderator");
-      assert.equal(ruling?.parentEventId, interjection?.id);
+      assert.equal(ruling?.parentEventId, objection?.id);
       assert.match(
         provider.rulingPrompt,
-        /Avery: Basil, you dodge harder than your argument lands/u,
+        /public objection: Objection! Basil, you dodge harder than your argument lands/u,
       );
 
       let judgeSession = createDebateSession(
@@ -2710,6 +3158,7 @@ describe("Debate engine", () => {
         debateRuntime,
       );
       assert.equal(judgeSession.setupPresetId, "custom");
+      provider.moderatorPrompt = "";
 
       judgeSession = await advanceDebateSession(
         db,
@@ -2731,10 +3180,7 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.match(
-        provider.moderatorPrompt,
-        /volatile energy of a live daytime confrontation show/u,
-      );
+      assert.equal(provider.moderatorPrompt, "");
       assert.match(provider.advocatePrompt, /full-contact verbal sparring/u);
     } finally {
       db.close();
@@ -2932,23 +3378,13 @@ describe("Debate engine", () => {
         sideId: "for",
         reason: "The limited record favored the affirmative.",
       });
-      let mutation = 0;
-      while (session.status !== "completed") {
-        mutation += 1;
-        session = await advanceDebateSession(
-          db,
-          "user-1",
-          session.id,
-          {
-            expectedRevision: session.revision,
-            idempotencyKey: `early-judge:ballot:${mutation}`,
-          },
-          runtime(),
-        );
-        assert.ok(mutation < 8);
-      }
+      assert.equal(session.status, "completed");
       assert.equal(session.winnerSideId, "for");
-      assert.equal(session.ballots.length, 3);
+      assert.equal(session.ballots.length, 0);
+      assert.equal(
+        session.events.filter((event) => event.kind === "ballot").length,
+        0,
+      );
       assert.ok(session.endedEarlyAt);
     } finally {
       db.close();
@@ -3279,22 +3715,9 @@ describe("Debate engine", () => {
         sideId: "for",
         reason: "The sustained contradiction changed the public record.",
       });
-      while (session.status !== "completed") {
-        mutation += 1;
-        session = await advanceDebateSession(
-          db,
-          "user-1",
-          session.id,
-          {
-            expectedRevision: session.revision,
-            idempotencyKey: `turnabout-ballot:${mutation}`,
-          },
-          debateRuntime,
-        );
-        assert.ok(mutation < 40);
-      }
+      assert.equal(session.status, "completed");
       assert.equal(session.winnerSideId, "for");
-      assert.equal(session.ballots.length, 3);
+      assert.equal(session.ballots.length, 0);
       assert.equal(session.formatState.format, "turnabout");
       assert.equal(
         session.events.at(-1)?.content.includes("public record"),
@@ -3554,6 +3977,9 @@ describe("Debate engine", () => {
         assert.match(press.content, new RegExp(`\\b${setup.noun}\\b`, "u"));
         assert.match(press.content, new RegExp(`\\b${speaker.name}\\b`, "u"));
         assert.match(press.content, /“[^”]+”/u);
+        if (setup.formality !== "free_for_all") {
+          assert.match(press.content, /^I ask\b/u);
+        }
         assert.doesNotMatch(
           press.content,
           new RegExp(statement.id.slice(0, 8)),
@@ -3564,7 +3990,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("runs a complete Judge Duel with a final player ruling and bot epilogue", async () => {
+  it("runs a complete Judge Duel whose final ruling does not launch bot ballots", async () => {
     const db = createTestDb();
     try {
       let session = await createJudgeDebate(db);
@@ -3605,13 +4031,13 @@ describe("Debate engine", () => {
 
       assert.equal(session.winnerSideId, "against");
       assert.equal(session.playerVerdict, "against");
-      assert.equal(session.ballots.length, 3);
-      assert.ok(session.ballots.every((ballot) => ballot.sideId === "for"));
+      assert.equal(session.ballots.length, 0);
       assert.equal(
         session.events.filter((event) => event.kind === "ballot").length,
-        3,
+        0,
       );
       assert.equal(session.events.at(-1)?.kind, "verdict");
+      assert.equal(session.events.at(-1)?.speakerKind, "player");
       assert.ok(
         session.caseBoard.every((card) => card.sourceIds.includes("housing-1")),
       );
@@ -3706,7 +4132,7 @@ describe("Debate engine", () => {
       assert.equal(paused.events.length, first.events.length + 1);
       assert.partialDeepStrictEqual(paused.events.at(-1), {
         kind: "moderator_ruling",
-        speakerKind: "moderator",
+        speakerKind: "player",
         speakerBotId: paused.moderator.id,
         stepKey: "pause",
         content: "This debate is now paused.",
@@ -3726,7 +4152,7 @@ describe("Debate engine", () => {
       assert.equal(resumed.events.length, paused.events.length + 1);
       assert.partialDeepStrictEqual(resumed.events.at(-1), {
         kind: "judge_gavel",
-        speakerKind: "moderator",
+        speakerKind: "player",
         speakerBotId: resumed.moderator.id,
         stepKey: "resume",
         content: "The proceeding is called back to order.",
@@ -4718,7 +5144,7 @@ describe("Debate engine", () => {
   it("pauses recoverably on provider failure and skips without fabricated dialogue", async () => {
     const db = createTestDb();
     try {
-      const created = await createJudgeDebate(db);
+      const created = await createDebateForRole(db, "spectator");
       const failed = await advanceDebateSession(
         db,
         "user-1",
@@ -4771,7 +5197,9 @@ describe("Debate engine", () => {
         new MalformedDebateProvider(),
         new DebateProviderStub(),
       );
-      const created = await createJudgeDebate(db, recoveringRuntime);
+      const created = await createDebateForRole(db, "spectator", {
+        debateRuntime: recoveringRuntime,
+      });
       assert.equal(created.responseMode, "auto");
       assert.deepEqual(created.generationChain, [
         { provider: "local", model: "debate-primary" },
@@ -4896,9 +5324,9 @@ describe("Debate engine", () => {
           event.kind === "speech" &&
           event.speakerBotId === "for",
       );
-      const interjections = session.events.filter(
+      const objections = session.events.filter(
         (event) =>
-          event.stepKey === "opening_for" && event.kind === "interjection",
+          event.stepKey === "opening_for" && event.kind === "objection",
       );
       const ruling = session.events.find(
         (event) =>
@@ -4907,11 +5335,12 @@ describe("Debate engine", () => {
       assert.equal(interruptedSpeech?.interrupted, true);
       assert.equal(interruptedSpeech?.interruptedBy, "bot");
       assert.match(interruptedSpeech?.content ?? "", /…$/u);
-      assert.equal(interjections.length, 1);
-      assert.equal(interjections[0]?.speakerBotId, "against");
-      assert.equal(interjections[0]?.parentEventId, interruptedSpeech?.id);
+      assert.equal(objections.length, 1);
+      assert.equal(objections[0]?.speakerBotId, "against");
+      assert.equal(objections[0]?.parentEventId, interruptedSpeech?.id);
+      assert.match(objections[0]?.content ?? "", /^Objection!/u);
       assert.equal(ruling?.speakerBotId, "moderator");
-      assert.equal(ruling?.parentEventId, interjections[0]?.id);
+      assert.equal(ruling?.parentEventId, objections[0]?.id);
       assert.doesNotMatch(
         session.caseBoard.find(
           (card) => card.createdEventId === interruptedSpeech?.id,
@@ -4921,6 +5350,132 @@ describe("Debate engine", () => {
       assert.equal(session.stepKey, "opening_against");
     } finally {
       db.close();
+    }
+  });
+
+  it("waits for a human Judge after the spoken objection and makes the ruling consequential", async () => {
+    for (const ruling of ["sustained", "overruled"] as const) {
+      const db = createTestDb();
+      try {
+        const debateRuntime = runtime();
+        let session = await createJudgeDebate(db, debateRuntime, {
+          againstPowers: [
+            readyPower(
+              "always-interrupt",
+              "Always Cuts In",
+              "Always interrupt Avery.",
+              [
+                {
+                  type: "interruption",
+                  frequency: "frequent",
+                  strength: "large",
+                  certainty: "always",
+                  targets: [{ kind: "bot", botId: "for", name: "Avery" }],
+                },
+              ],
+            ),
+          ],
+        });
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `judge-objection:${ruling}:intro`,
+          },
+          debateRuntime,
+        );
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `judge-objection:${ruling}:opening`,
+          },
+          debateRuntime,
+        );
+
+        const interrupted = session.events.find(
+          (event) =>
+            event.kind === "speech" &&
+            event.stepKey === "opening_for" &&
+            event.speakerBotId === "for",
+        );
+        const objection = session.events.find(
+          (event) =>
+            event.kind === "objection" &&
+            event.stepKey === "opening_for" &&
+            event.speakerBotId === "against",
+        );
+        assert.equal(session.status, "waiting_for_player");
+        assert.equal(session.stepKey, "judge_objection_ruling");
+        assert.partialDeepStrictEqual(session.objectionRuling, {
+          status: "awaiting_ruling",
+          interruptedEventId: interrupted?.id,
+          objectionEventId: objection?.id,
+          interruptedBotId: "for",
+          objectingBotId: "against",
+          resumeStatus: "live",
+          resumeStepKey: "opening_against",
+        });
+        assert.match(objection?.content ?? "", /^Objection!/u);
+        assert.equal(
+          session.events.some((event) => event.kind === "moderator_ruling"),
+          false,
+        );
+
+        const request = {
+          expectedRevision: session.revision,
+          idempotencyKey: `judge-objection:${ruling}:ruling`,
+          ruling,
+        };
+        const resolved = await submitDebateObjectionRuling(
+          db,
+          "user-1",
+          session.id,
+          request,
+          debateRuntime,
+        );
+        const judgeRuling = resolved.events.find(
+          (event) =>
+            event.kind === "moderator_ruling" &&
+            event.speakerKind === "player" &&
+            event.parentEventId === objection?.id,
+        );
+        const continuation = resolved.events.find(
+          (event) =>
+            event.stepKey === "judge_objection_continuation" &&
+            event.parentEventId === judgeRuling?.id,
+        );
+        assert.equal(resolved.status, "live");
+        assert.equal(resolved.stepKey, "opening_against");
+        assert.equal(resolved.objectionRuling, null);
+        assert.equal(judgeRuling?.ruling, ruling);
+        assert.equal(judgeRuling?.speakerBotId, resolved.moderator.id);
+        assert.equal(
+          Boolean(continuation),
+          ruling === "overruled",
+          `${ruling} continuation`,
+        );
+        if (continuation) {
+          assert.equal(continuation.speakerBotId, "for");
+          assert.equal(continuation.sideId, "for");
+        }
+        assert.deepEqual(
+          await submitDebateObjectionRuling(
+            db,
+            "user-1",
+            session.id,
+            request,
+            debateRuntime,
+          ),
+          resolved,
+        );
+      } finally {
+        db.close();
+      }
     }
   });
 
@@ -5016,7 +5571,7 @@ describe("Debate engine", () => {
   it("refines the case board locally without blocking or losing the prior board on failure", async () => {
     const db = createTestDb();
     try {
-      const created = await createJudgeDebate(db);
+      const created = await createDebateForRole(db, "spectator");
       const intro = await advanceDebateSession(
         db,
         "user-1",
@@ -5228,7 +5783,7 @@ describe("Debate engine", () => {
   it("round-trips Debate sessions and events through account backup and clears them on reset", async () => {
     const db = createTestDb();
     try {
-      const created = await createJudgeDebate(db);
+      const created = await createDebateForRole(db, "spectator");
       const advanced = await advanceDebateSession(
         db,
         "user-1",

@@ -82,6 +82,35 @@ export function debateAudienceBotCount(
   return DEBATE_AUDIENCE_COUNT_BY_QUALITY[graphicsQuality];
 }
 
+export type DebateAudienceConversationFacing = "left" | "right";
+
+export function debateAudienceConversationFacing(
+  index: number,
+  count: number,
+): DebateAudienceConversationFacing {
+  const safeCount = Math.max(1, Math.floor(count));
+  const safeIndex = Math.max(0, Math.min(safeCount - 1, Math.floor(index)));
+  if (safeCount % 2 === 1 && safeIndex === safeCount - 1) return "left";
+  return safeIndex % 2 === 0 ? "right" : "left";
+}
+
+export function debateAudienceSeatIsTalker(
+  index: number,
+  count: number,
+): boolean {
+  const safeCount = Math.max(0, Math.floor(count));
+  const safeIndex = Math.floor(index);
+  if (
+    safeCount < 2 ||
+    safeIndex < 0 ||
+    safeIndex >= safeCount ||
+    (safeCount % 2 === 1 && safeIndex === safeCount - 1)
+  ) {
+    return false;
+  }
+  return safeIndex % 2 === Math.floor(safeIndex / 2) % 2;
+}
+
 export function debateAudienceBotIsGenerated(
   bot: Pick<DebateBotSnapshotV1, "id">,
 ): boolean {

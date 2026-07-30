@@ -5,7 +5,9 @@ import {
   debateAudienceBotCount,
   debateAudienceBotIsGenerated,
   debateAudienceBotsForSession,
+  debateAudienceConversationFacing,
   debateAudienceRandom,
+  debateAudienceSeatIsTalker,
 } from "./debateAudience.ts";
 
 const libraryBots = [
@@ -37,6 +39,22 @@ describe("Debate audience casting", () => {
     assert.equal(debateAudienceBotCount("low"), 5);
     assert.equal(debateAudienceBotCount("medium"), 7);
     assert.equal(debateAudienceBotCount("high"), 8);
+  });
+
+  it("pairs neighboring spectators face-to-face with one restrained talker", () => {
+    assert.deepEqual(
+      Array.from({ length: 7 }, (_, index) =>
+        debateAudienceConversationFacing(index, 7),
+      ),
+      ["right", "left", "right", "left", "right", "left", "left"],
+    );
+    assert.deepEqual(
+      Array.from({ length: 7 }, (_, index) =>
+        debateAudienceSeatIsTalker(index, 7),
+      ),
+      [true, false, false, true, true, false, false],
+    );
+    assert.equal(debateAudienceSeatIsTalker(0, 1), false);
   });
 
   it("selects stable, distinct Library spectators outside the active cast", () => {

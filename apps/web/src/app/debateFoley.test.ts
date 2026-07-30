@@ -242,20 +242,21 @@ describe("Debate moderator gavel", () => {
     }
   });
 
-  it("calls for order when either format is interrupted", () => {
+  it("lets the advocate speak an objection before any moderator gavel", () => {
     for (const format of ["forum", "turnabout"] as const) {
-      assert.deepEqual(
-        debateModeratorGavelCue({
-          format,
-          event: debateEvent("interjection"),
-          moderatorBotId: "moderator",
-        }),
-        {
-          eventId: "event:interjection",
-          kind: "order",
-          audienceReaction: "order",
-        },
-      );
+      for (const kind of ["interjection", "objection"] as const) {
+        assert.equal(
+          debateModeratorGavelCue({
+            format,
+            event: debateEvent(kind, {
+              speakerKind: "advocate",
+              speakerBotId: "against",
+            }),
+            moderatorBotId: "moderator",
+          }),
+          null,
+        );
+      }
     }
   });
 
@@ -313,28 +314,26 @@ describe("Debate moderator gavel", () => {
     );
   });
 
-  it("adds extra procedural strikes around Turnabout challenges", () => {
-    for (const kind of ["objection", "revelation"] as const) {
-      assert.deepEqual(
-        debateModeratorGavelCue({
-          format: "turnabout",
-          event: debateEvent(kind),
-          moderatorBotId: "moderator",
-        }),
-        { eventId: `event:${kind}`, kind: "attention" },
-      );
-      assert.equal(
-        debateModeratorGavelCue({
-          format: "forum",
-          event: debateEvent(kind),
-          moderatorBotId: "moderator",
-        }),
-        null,
-      );
-    }
+  it("keeps the extra Turnabout strike for revelations, after objections are heard", () => {
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "turnabout",
+        event: debateEvent("revelation"),
+        moderatorBotId: "moderator",
+      }),
+      { eventId: "event:revelation", kind: "attention" },
+    );
+    assert.equal(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: debateEvent("revelation"),
+        moderatorBotId: "moderator",
+      }),
+      null,
+    );
   });
 
-  it("calls the room to order for moderator rulings and bot verdicts", () => {
+  it("calls the room to order only after moderator rulings and bot verdicts", () => {
     const ruling = debateEvent("moderator_ruling", {
       speakerKind: "moderator",
       speakerBotId: "moderator",
@@ -347,6 +346,22 @@ describe("Debate moderator gavel", () => {
       }),
       {
         eventId: ruling.id,
+        kind: "order",
+        audienceReaction: "order",
+      },
+    );
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: debateEvent("moderator_ruling", {
+          speakerKind: "player",
+          speakerBotId: "prism:player-judge",
+          ruling: "overruled",
+        }),
+        moderatorBotId: "prism:player-judge",
+      }),
+      {
+        eventId: "event:moderator_ruling",
         kind: "order",
         audienceReaction: "order",
       },
@@ -400,7 +415,7 @@ describe("Debate moderator gavel", () => {
     });
   });
 
-  it("bundles the courtroom murmur, sparse Foley, and synchronized reactions", () => {
+  it("bundles the selected murmur, sparse Foley, and synchronized reactions", () => {
     assert.equal(
       DEBATE_AUDIENCE_MURMUR_URL,
       "/audio/debate/courtroom-audience-murmur-loop.mp3",
