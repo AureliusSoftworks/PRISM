@@ -76,6 +76,10 @@ describe("Slate AI workspace controls", () => {
     assert.match(workspace, /Use as \{activeSection\?\.prose\.trim\(\)/u);
     assert.match(workspace, /aria-modal="true"/u);
     assert.match(workspace, /data-active-speaker/u);
+    assert.match(workspace, /<strong>Lux<\/strong>/u);
+    assert.match(workspace, /<strong>Umbra<\/strong>/u);
+    assert.match(workspace, /styles\.deliberationEmpty/u);
+    assert.match(workspace, /styles\.deliberationCurrent/u);
     assert.match(styles, /\.deliberationHemisphere\[data-side="lux"\]/u);
     assert.match(styles, /\.deliberationHemisphere\[data-side="umbra"\]/u);
     assert.match(styles, /@keyframes slateLuxHemispherePulse/u);

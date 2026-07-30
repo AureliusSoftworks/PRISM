@@ -5688,10 +5688,15 @@ export default function SlateWorkspace({
             >
               <section className={styles.deliberationHemisphere} data-side="lux">
                 <header>
-                  <span className={styles.deliberationSigil}>▲</span>
+                  <span className={styles.deliberationSigil} aria-hidden="true">
+                    ▲
+                  </span>
                   <div>
-                    <strong>LIGHT</strong>
-                    <span>Lux · generative hemisphere</span>
+                    <span className={styles.deliberationIdentity}>
+                      <strong>Lux</strong>
+                      <i>Light</i>
+                    </span>
+                    <span>Generative hemisphere · opens the field</span>
                   </div>
                 </header>
                 <div className={styles.deliberationThoughtStream} aria-live="polite">
@@ -5705,7 +5710,11 @@ export default function SlateWorkspace({
                       </article>
                     ))
                   ) : (
-                    <p>Possibility gathers here.</p>
+                    <div className={styles.deliberationEmpty}>
+                      <span aria-hidden="true">✦</span>
+                      <p>Possibility gathers here.</p>
+                      <small>Lux will find the living shape inside the question.</small>
+                    </div>
                   )}
                   {deliberationActiveSpeaker === "lux" ? (
                     <div className={styles.deliberationThinking} role="status">
@@ -5719,12 +5728,13 @@ export default function SlateWorkspace({
               </section>
 
               <div className={styles.deliberationSeam} aria-hidden="true">
+                <span className={styles.deliberationCurrent} />
                 <div className={styles.deliberationCore}>
                   <span data-side="lux" />
                   <span data-side="umbra" />
                   <i />
                 </div>
-                <span>
+                <span className={styles.deliberationSeamState}>
                   {deliberationActiveSpeaker === "synthesis"
                     ? "resolving"
                     : deliberationSynthesis
@@ -5737,10 +5747,15 @@ export default function SlateWorkspace({
 
               <section className={styles.deliberationHemisphere} data-side="umbra">
                 <header>
-                  <span className={styles.deliberationSigil}>▽</span>
+                  <span className={styles.deliberationSigil} aria-hidden="true">
+                    ▽
+                  </span>
                   <div>
-                    <strong>DARK</strong>
-                    <span>Umbra · adversarial hemisphere</span>
+                    <span className={styles.deliberationIdentity}>
+                      <strong>Umbra</strong>
+                      <i>Shadow</i>
+                    </span>
+                    <span>Adversarial hemisphere · tests what survives</span>
                   </div>
                 </header>
                 <div className={styles.deliberationThoughtStream} aria-live="polite">
@@ -5754,7 +5769,11 @@ export default function SlateWorkspace({
                       </article>
                     ))
                   ) : (
-                    <p>Pressure waits in the dark.</p>
+                    <div className={styles.deliberationEmpty}>
+                      <span aria-hidden="true">✦</span>
+                      <p>Pressure waits in the dark.</p>
+                      <small>Umbra will find the fault line before the story does.</small>
+                    </div>
                   )}
                   {deliberationActiveSpeaker === "umbra" ? (
                     <div className={styles.deliberationThinking} role="status">
