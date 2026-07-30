@@ -6606,6 +6606,8 @@
 }
 
 .voiceModeSelectorButton {
+  appearance: none;
+  -webkit-appearance: none;
   box-sizing: border-box;
   height: 30px;
   display: inline-flex;
@@ -6636,7 +6638,7 @@
 
 .voiceModeSelectorButton:hover,
 .voiceModeSelectorButton:focus-visible,
-.voiceModeSelector[open] .voiceModeSelectorButton {
+.voiceModeSelector[data-open="true"] .voiceModeSelectorButton {
   border-color: var(--line-strong);
   background: var(--bg-hover);
   outline: none;
@@ -6647,7 +6649,7 @@
   cursor: not-allowed;
 }
 
-.voiceModeSelector[open] .voiceModeSelectorButton svg {
+.voiceModeSelector[data-open="true"] .voiceModeSelectorButton svg {
   transform: rotate(180deg);
 }
 

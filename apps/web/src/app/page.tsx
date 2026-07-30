@@ -43180,32 +43180,11 @@ function HomeContent(): React.JSX.Element {
     applyGraphicsQualityToDocument(document, graphicsQuality);
   }, [graphicsQuality]);
   const voiceModeSelectionBusyRef = useRef(false);
-  const voiceModeSelectorRef = useRef<HTMLDetailsElement | null>(null);
+  const voiceModeSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] = useState(false);
   const [voicePlaybackNotice, setVoicePlaybackNotice] = useState<string | null>(
     null,
   );
-  useEffect(() => {
-    const closeVoiceSelector = (event: PointerEvent | KeyboardEvent): void => {
-      const selector = voiceModeSelectorRef.current;
-      if (!selector?.open) return;
-      if (event instanceof KeyboardEvent && event.key === "Escape") {
-        selector.removeAttribute("open");
-        return;
-      }
-      if (event instanceof PointerEvent) {
-        const target = event.target;
-        if (target instanceof Node && !selector.contains(target)) {
-          selector.removeAttribute("open");
-        }
-      }
-    };
-    document.addEventListener("pointerdown", closeVoiceSelector, true);
-    document.addEventListener("keydown", closeVoiceSelector);
-    return () => {
-      document.removeEventListener("pointerdown", closeVoiceSelector, true);
-      document.removeEventListener("keydown", closeVoiceSelector);
-    };
-  }, []);
   const [elevenLabsVoiceCatalog, setElevenLabsVoiceCatalog] = useState<
     ElevenLabsVoiceCatalogEntry[]
   >([]);
@@ -52590,16 +52569,49 @@ function HomeContent(): React.JSX.Element {
     const currentDisplayName = voiceModeDisplayName(configuredChoice, {
       localPremiumFallback: premiumLocalOnly,
     });
+    const menuId = "navbar-voice-mode-menu";
+    const voiceEntries = VOICE_PLAYBACK_CHOICES.map(
+      (choice): PrismMenuEntry => {
+        const optionDisabled =
+          disabled ||
+          (choice === "premium" && (premiumUnavailable || premiumLocalOnly));
+        const premiumDisabledReason =
+          choice === "premium" && premiumLocalOnly
+            ? "Switch response routing to AUTO or ONLINE before choosing Premium. LOCAL keeps speech on this device."
+            : choice === "premium" && premiumUnavailable
+              ? "Connect an ElevenLabs key in Settings → Keys to use Premium."
+              : undefined;
+        return {
+          id: `voice-${choice}`,
+          kind: "radio",
+          group: "voice-mode",
+          label:
+            choice === "premium"
+              ? "Premium · ONLINE"
+              : voiceModeDisplayName(choice),
+          checked: choice === currentChoice,
+          disabled: optionDisabled,
+          disabledReason: premiumDisabledReason,
+          onSelect: () => {
+            if (choice !== currentChoice) {
+              return selectGlobalVoiceChoice(choice);
+            }
+          },
+        };
+      },
+    );
     return (
-      <details
+      <div
         key={disabled ? "voice-mode-locked" : "voice-mode-active"}
-        ref={voiceModeSelectorRef}
         className={styles.voiceModeSelector}
         data-voice-mode={currentChoice}
         data-disabled={disabled ? "true" : undefined}
+        data-open={voiceModeSelectorOpen ? "true" : undefined}
         data-tutorial-target={options.tutorialTarget}
       >
-        <summary
+        <button
+          ref={voiceModeSelectorButtonRef}
+          type="button"
           className={styles.voiceModeSelectorButton}
           aria-label={
             disabled && disabledReason
@@ -52607,66 +52619,52 @@ function HomeContent(): React.JSX.Element {
               : `Voice mode: ${currentDisplayName}`
           }
           aria-disabled={disabled ? "true" : undefined}
+          aria-haspopup="menu"
+          aria-expanded={!disabled && voiceModeSelectorOpen}
+          aria-controls={!disabled && voiceModeSelectorOpen ? menuId : undefined}
           title={disabled ? disabledReason : undefined}
-          onClick={(event) => {
-            if (!disabled) return;
-            event.preventDefault();
-          }}
+          disabled={disabled}
+          onClick={() => setVoiceModeSelectorOpen((open) => !open)}
         >
           <span>Voice</span>
           <span aria-hidden="true">·</span>
           <strong>{currentDisplayName}</strong>
           <ChevronDown size={13} strokeWidth={2.2} aria-hidden="true" />
-        </summary>
-        <div
-          className={styles.voiceModeSelectorMenu}
-          role="radiogroup"
-          aria-label="Voice mode"
-        >
-          {VOICE_PLAYBACK_CHOICES.map((choice) => {
-            const optionDisabled =
-              disabled ||
-              (choice === "premium" &&
-                (premiumUnavailable || premiumLocalOnly));
-            const premiumDisabledReason =
-              choice === "premium" && premiumLocalOnly
-                ? "Switch response routing to AUTO or ONLINE before choosing Premium. LOCAL keeps speech on this device."
-                : choice === "premium" && premiumUnavailable
-                  ? "Connect an ElevenLabs key in Settings → Keys to use Premium."
-                  : undefined;
-            return (
-              <button
-                key={choice}
-                type="button"
-                role="radio"
-                aria-checked={choice === currentChoice}
-                className={styles.voiceModeSelectorOption}
-                data-selected={choice === currentChoice ? "true" : undefined}
-                disabled={optionDisabled}
-                title={premiumDisabledReason}
-                onClick={() => {
-                  voiceModeSelectorRef.current?.removeAttribute("open");
-                  if (choice !== currentChoice) {
-                    void selectGlobalVoiceChoice(choice);
-                  }
+        </button>
+        {!disabled &&
+        voiceModeSelectorOpen &&
+        voiceModeSelectorButtonRef.current &&
+        typeof document !== "undefined"
+          ? createPortal(
+              <PrismMenuSurface
+                request={{
+                  id: menuId,
+                  label: "Voice mode",
+                  anchor: {
+                    kind: "element",
+                    element: voiceModeSelectorButtonRef.current,
+                    preferredPlacement: "bottom-start",
+                  },
+                  accent: PRISM_DEFAULT_ACCENT,
+                  theme: resolvedTheme,
+                  minWidth: 180,
+                  focusRestoreTarget: voiceModeSelectorButtonRef,
+                  entries: voiceEntries,
                 }}
-              >
-                <span>
-                  {choice === "premium"
-                    ? "Premium · ONLINE"
-                    : voiceModeDisplayName(choice)}
-                </span>
-                <span
-                  className={styles.voiceModeSelectorCheck}
-                  aria-hidden="true"
-                >
-                  {choice === currentChoice ? "●" : ""}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </details>
+                onClose={(closeOptions) => {
+                  setVoiceModeSelectorOpen(false);
+                  if (closeOptions?.restoreFocus === false) return;
+                  window.requestAnimationFrame(() =>
+                    voiceModeSelectorButtonRef.current?.focus({
+                      preventScroll: true,
+                    }),
+                  );
+                }}
+              />,
+              document.body,
+            )
+          : null}
+      </div>
     );
   };
   const renderCoffeeHeaderModelChrome = (
@@ -99114,24 +99112,31 @@ function HomeContent(): React.JSX.Element {
             aria-hidden="true"
           />
         </button>
-        {!disabled && appSwitcherOpen && appSwitcherRef.current ? (
-          <PrismMenuSurface
-            request={{
-              id: menuId,
-              label: "Switch Prism app",
-              anchor: {
-                kind: "element",
-                element: appSwitcherRef.current,
-                preferredPlacement: "bottom-start",
-              },
-              accent: PRISM_DEFAULT_ACCENT,
-              theme: resolvedTheme,
-              minWidth: 238,
-              entries,
-            }}
-            onClose={() => setAppSwitcherOpen(false)}
-          />
-        ) : null}
+        {!disabled &&
+        appSwitcherOpen &&
+        appSwitcherRef.current &&
+        typeof document !== "undefined"
+          ? createPortal(
+              <PrismMenuSurface
+                request={{
+                  id: menuId,
+                  label: "Switch Prism app",
+                  anchor: {
+                    kind: "element",
+                    element: appSwitcherRef.current,
+                    preferredPlacement: "bottom-start",
+                  },
+                  accent: PRISM_DEFAULT_ACCENT,
+                  theme: resolvedTheme,
+                  minWidth: 238,
+                  focusRestoreTarget: appSwitcherRef,
+                  entries,
+                }}
+                onClose={() => setAppSwitcherOpen(false)}
+              />,
+              document.body,
+            )
+          : null}
       </div>
     );
   };
@@ -100137,27 +100142,33 @@ function HomeContent(): React.JSX.Element {
               <MenuIcon className={styles.headerIconGlyph} aria-hidden="true" />
             )}
           </button>
-          {chatOverflowMenuOpen && chatOverflowMenuRef.current ? (
-            <PrismMenuSurface
-              request={{
-                id: "responsive-chat-tools",
-                label: "Conversation tools",
-                anchor: {
-                  kind: "element",
-                  element: chatOverflowMenuRef.current,
-                  preferredPlacement: "bottom-end",
-                },
-                accent: normalizeAccentForTheme(
-                  activeBot?.color ?? PRISM_DEFAULT_ACCENT,
-                  resolvedTheme,
-                ),
-                theme: resolvedTheme,
-                minWidth: 236,
-                entries: overflowEntries,
-              }}
-              onClose={() => setChatOverflowMenuOpen(false)}
-            />
-          ) : null}
+          {chatOverflowMenuOpen &&
+          chatOverflowMenuRef.current &&
+          typeof document !== "undefined"
+            ? createPortal(
+                <PrismMenuSurface
+                  request={{
+                    id: "responsive-chat-tools",
+                    label: "Conversation tools",
+                    anchor: {
+                      kind: "element",
+                      element: chatOverflowMenuRef.current,
+                      preferredPlacement: "bottom-end",
+                    },
+                    accent: normalizeAccentForTheme(
+                      activeBot?.color ?? PRISM_DEFAULT_ACCENT,
+                      resolvedTheme,
+                    ),
+                    theme: resolvedTheme,
+                    minWidth: 236,
+                    focusRestoreTarget: chatOverflowMenuRef,
+                    entries: overflowEntries,
+                  }}
+                  onClose={() => setChatOverflowMenuOpen(false)}
+                />,
+                document.body,
+              )
+            : null}
         </div>
         {showToolbarMemoriesButton ? chatToolbarImageReadyChip : null}
       </div>

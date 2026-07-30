@@ -18,12 +18,12 @@ describe("universal voice selector", () => {
       pageSource,
       /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{currentDisplayName\}<\/strong>/,
     );
-    assert.match(pageSource, /VOICE_PLAYBACK_CHOICES\.map\(\(choice\) =>/);
-    assert.match(pageSource, /role="radiogroup" aria-label="Voice mode"/);
     assert.match(
       pageSource,
-      /role="radio" aria-checked=\{choice === currentChoice\}/,
+      /VOICE_PLAYBACK_CHOICES\.map\( \(choice\): PrismMenuEntry =>/,
     );
+    assert.match(pageSource, /kind: "radio", group: "voice-mode"/);
+    assert.match(pageSource, /label: "Voice mode"/);
     assert.doesNotMatch(pageSource, /styles\.voiceHeaderButton/);
   });
 
@@ -67,7 +67,7 @@ describe("universal voice selector", () => {
   it("lets Signal change the next line without cutting off the live mic", () => {
     assert.match(
       pageSource,
-      /tutorialTarget: "botcast-voice-mode"/,
+      /tutorialTarget: options\.voiceTutorialTarget \?\? "botcast-voice-mode"/,
     );
     assert.match(
       pageSource,
