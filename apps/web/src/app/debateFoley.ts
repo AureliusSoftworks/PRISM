@@ -60,37 +60,37 @@ export const DEBATE_AUDIENCE_REACTIONS = {
   session: {
     url: "/audio/debate/courtroom-audience-session-settle.mp3",
     durationMs: 3_000,
-    trim: 0.82,
+    trim: 1,
   },
   order: {
     url: "/audio/debate/courtroom-audience-order-hush.mp3",
     durationMs: 2_300,
-    trim: 0.42,
+    trim: 0.72,
   },
   objection: {
     url: "/audio/debate/courtroom-audience-order-hush.mp3",
     durationMs: 2_300,
-    trim: 0.24,
+    trim: 0.46,
   },
   evidence: {
     url: "/audio/debate/courtroom-paper-shuffle.mp3",
     durationMs: 1_100,
-    trim: 0.34,
+    trim: 0.62,
   },
   question: {
     url: "/audio/debate/courtroom-chair-shift.mp3",
     durationMs: 1_100,
-    trim: 0.26,
+    trim: 0.5,
   },
   concession: {
     url: "/audio/debate/courtroom-audience-session-settle.mp3",
     durationMs: 3_000,
-    trim: 0.28,
+    trim: 0.54,
   },
   ruling: {
     url: "/audio/debate/courtroom-audience-order-hush.mp3",
     durationMs: 2_300,
-    trim: 0.34,
+    trim: 0.62,
   },
 } as const satisfies Record<
   DebateAudienceReactionKind,

@@ -187,10 +187,7 @@ describe("Debate experience", () => {
     assert.match(source, /Try another version/u);
     assert.match(source, /Who should argue\?/u);
     assert.match(source, /Make sure they’re willing/u);
-    assert.match(
-      source,
-      /const checkRoles = async \(\): Promise<void> =>/u,
-    );
+    assert.match(source, /const checkRoles = async \(\): Promise<void> =>/u);
     assert.match(
       source,
       /const comment =[\s\S]{0,420}I’m willing to argue \$\{sideLabel\}/u,
@@ -209,7 +206,7 @@ describe("Debate experience", () => {
       /checkRoles\(\)\.then\([\s\S]{0,180}setStudioPanel\("evidence"\)/u,
     );
     assert.match(source, /Add optional evidence →/u);
-    assert.match(source, /Find sources for me/u);
+    assert.match(source, /Find sources/u);
     assert.match(source, /Start Debate/u);
     assert.match(source, /data-tutorial-target="debate-rowdiness"/u);
     assert.match(source, /aria-label="Debate rowdiness"/u);
@@ -336,14 +333,8 @@ describe("Debate experience", () => {
       source,
       /import \{ PrismBlockingLoader \} from "\.\/PrismBlockingLoader"/u,
     );
-    assert.match(
-      source,
-      /open=\{evidenceObjectVisualBusy === "synthesize"\}/u,
-    );
-    assert.match(
-      source,
-      /Generating and cutting out the exhibit/u,
-    );
+    assert.match(source, /open=\{evidenceObjectVisualBusy === "synthesize"\}/u);
+    assert.match(source, /Generating and cutting out the exhibit/u);
     assert.match(
       source,
       /The exhibit text and emoji fallback remain unchanged while the sprite takes shape/u,
@@ -352,15 +343,15 @@ describe("Debate experience", () => {
       source,
       /setEvidenceObjectVisualBusy\("synthesize"\)[\s\S]{0,800}\/api\/debates\/exhibits\/synthesize[\s\S]{0,1600}finally \{[\s\S]{0,120}setEvidenceObjectVisualBusy\(null\)/u,
     );
-    assert.match(
-      source,
-      /\/api\/images\/tool-assets\?scope=debate_exhibit/u,
-    );
+    assert.match(source, /\/api\/images\/tool-assets\?scope=debate_exhibit/u);
     assert.match(
       source,
       /aria-label="Previously generated Debate exhibit sprites"/u,
     );
-    assert.match(source, /Choosing one uses no[\s\S]{0,40}image-generation tokens/u);
+    assert.match(
+      source,
+      /Choosing one uses no[\s\S]{0,40}image-generation tokens/u,
+    );
     assert.match(source, /selectEvidenceExhibitAsset\(asset\)/u);
     assert.match(css, /\.evidenceExhibitAssetRail/u);
     assert.match(source, /The text record is evidence/u);
@@ -422,7 +413,7 @@ describe("Debate experience", () => {
     assert.match(source, /Find more sources/u);
     assert.match(source, /Remove an evidence item to search again/u);
     assert.match(source, /DEBATE_EVIDENCE_ITEM_MAX_COUNT/u);
-    assert.match(source, />\s*Add evidence\s*</u);
+    assert.match(source, /:\s*"Add evidence"/u);
     assert.doesNotMatch(source, />\s*\+ Add object\s*</u);
     assert.doesNotMatch(source, />\s*Generate object\s*</u);
     assert.match(source, /className=\{styles\.evidenceToolHeader\}/u);
@@ -1521,15 +1512,22 @@ describe("Debate experience", () => {
     assert.match(source, /className=\{styles\.debateAudienceRow\}/u);
   });
 
-  it("pairs a reduced-detail bot audience with pressure-scaled chatter", () => {
-    assert.match(source, /debateAudienceBotsForSession\(\{/u);
+  it("keeps the full audience look while stabilizing low-cost portrait effects", () => {
+    assert.match(
+      source,
+      /const liveAudienceBots = useMemo\([\s\S]*debateAudienceBotsForSession\(\{/u,
+    );
     assert.match(
       source,
       /count:\s*debateAudienceBotCount\(props\.graphicsQuality\)/u,
     );
     assert.match(
       source,
-      /excludedBotIds:\s*\[[\s\S]{0,180}stageCast\.map[\s\S]{0,180}session\.jury\.jurors\.map/u,
+      /excludedBotIds:\s*\[[\s\S]{0,180}activeSession\.moderator\.id[\s\S]{0,240}activeSession\.jury\.jurors\.map/u,
+    );
+    assert.match(
+      source,
+      /memo\(function DebateAudiencePortrait[\s\S]*talking: liveVocalReaction/u,
     );
     assert.match(source, /className=\{styles\.debateAudienceRow\}/u);
     assert.match(source, /data-audience-count=\{audienceBots\.length\}/u);
@@ -1580,9 +1578,12 @@ describe("Debate experience", () => {
       css,
       /\.debateAudienceRow\s*\{[^}]*position:\s*relative[^}]*z-index:\s*1/u,
     );
+    const audiencePortraitRule =
+      css.match(/\.debateAudienceBotPortrait\s*\{[^}]*\}/u)?.[0] ?? "";
+    assert.doesNotMatch(audiencePortraitRule, /filter:/u);
     assert.match(
       css,
-      /\.debateAudienceBotPortrait\s*\{[^}]*filter:\s*brightness\(0\.68\) saturate\(0\.72\)/u,
+      /\.debateAudienceBotPortrait::before\s*\{[^}]*--debate-audience-shade-opacity/u,
     );
     assert.match(
       css,
@@ -1590,12 +1591,13 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.debateAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*opacity:\s*0\.62/u,
+      /\.debateAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*opacity:\s*0\.5/u,
     );
     assert.match(css, /\.debateAudienceChatterChip\s*\{/u);
-    assert.match(css, /@keyframes debate-audience-mouth-crosstalk/u);
-    assert.match(css, /@keyframes debate-audience-cascade-hush/u);
-    assert.match(css, /@keyframes debate-audience-awkward-glance/u);
+    assert.doesNotMatch(css, /@keyframes debate-audience-mouth-crosstalk/u);
+    assert.doesNotMatch(css, /@keyframes debate-audience-head-crosstalk/u);
+    assert.doesNotMatch(css, /@keyframes debate-audience-cascade-hush/u);
+    assert.doesNotMatch(css, /@keyframes debate-audience-awkward-glance/u);
     assert.match(page, /debateAudienceBotIsGenerated\(botSnapshot\)/u);
     assert.match(
       page,
@@ -1605,11 +1607,16 @@ describe("Debate experience", () => {
       pageCss,
       /\.debateBotPresencePlate\[data-debate-role="audience"\]/u,
     );
-    assert.match(page, /blinkEnabled=\{avatarState\.role === "audience"\}/u);
-    assert.match(page, /enabled=\{detailLevel === "full" \|\| blinkEnabled\}/u);
+    assert.match(page, /const staticAudiencePortrait = avatarState\.role === "audience"/u);
+    assert.match(page, /blinkEnabled=\{false\}/u);
+    assert.match(page, /runtimeEffectsEnabled=\{!staticAudiencePortrait\}/u);
+    assert.match(
+      page,
+      /motionActive=\{[\s\S]{0,120}!staticAudiencePortrait/u,
+    );
     assert.match(
       source,
-      /const mouthActive =\s*ambientTalking \|\| liveVocalReaction/u,
+      /Keep the authored audience portrait static during ambient chatter/u,
     );
     assert.match(source, /data-vocal-reaction=/u);
   });
@@ -2061,14 +2068,17 @@ describe("Debate experience", () => {
   it("keeps non-Judge ambience while pressure-mixing the Judge audience", () => {
     assert.match(source, /<SessionAtmosphereLayer/u);
     assert.match(source, /backgroundUrl=\{DEBATE_AUDIENCE_MURMUR_URL\}/u);
-    assert.match(source, /grainUrl=\{[\s\S]{0,120}DEBATE_AUDIENCE_CROSSTALK_URL/u);
     assert.match(
       source,
-      /const DEBATE_AUDIENCE_IDLE_MIX = \{[\s\S]{0,100}background:\s*0\.16/u,
+      /grainUrl=\{[\s\S]{0,120}DEBATE_AUDIENCE_CROSSTALK_URL/u,
     );
     assert.match(
       source,
-      /const DEBATE_AUDIENCE_DUCKED_MIX = \{[\s\S]{0,100}background:\s*0\.025/u,
+      /const DEBATE_AUDIENCE_IDLE_MIX = \{[\s\S]{0,100}background:\s*0\.42/u,
+    );
+    assert.match(
+      source,
+      /const DEBATE_AUDIENCE_DUCKED_MIX = \{[\s\S]{0,100}background:\s*0\.1/u,
     );
     assert.match(
       source,
@@ -2102,6 +2112,11 @@ describe("Debate experience", () => {
     assert.match(source, /hardMuted:/u);
     assert.match(source, /data-vocal-foley/u);
     assert.match(page, /avatarState\.foleyMouthShape \?\? "closed"/u);
+    assert.match(page, /const DEBATE_THINKING_SFX_MIX_GAIN = 0\.2/u);
+    assert.match(
+      page,
+      /botAvatarSfxForDebateState\([\s\S]{0,260}avatarState\.thinking/u,
+    );
     assert.match(page, /DEBATE_FORUM_VOICE_ROOM_SEND/u);
     assert.match(page, /playbackSurface === "debate"/u);
     assert.match(page, /"debate",\s*utterance\.format,\s*\);/u);
@@ -2121,11 +2136,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /data-live-reacting=\{[\s\S]{0,120}audienceListenerReaction/u,
+      /data-live-reacting=\{listenerReaction \? "true" : undefined\}/u,
     );
     assert.match(source, /data-audience-beat=\{/u);
     assert.match(source, /data-listening-reaction=\{/u);
-    assert.match(source, /listenerReaction:\s*audienceListenerReaction/u);
+    assert.match(
+      source,
+      /listenerReaction=\{audienceListenerReaction\}/u,
+    );
     assert.match(
       source,
       /if \(semanticAudienceReaction\) \{\s*playDebateAudienceReaction\(semanticAudienceReaction, event\.id\);\s*\}\s*if \(event\.kind === "silence"\)/u,

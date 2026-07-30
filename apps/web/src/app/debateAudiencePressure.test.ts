@@ -45,8 +45,8 @@ describe("Debate audience pressure", () => {
     assert.equal(debateAudiencePressureBand(70), "disruptive");
     assert.equal(debateAudiencePressureBand(100), "disruptive");
     assert.deepEqual(debateAudiencePressureMix("disruptive"), {
-      background: 0.3,
-      grain: 0.72,
+      background: 0.68,
+      grain: 0.92,
       foley: 0.34,
     });
   });
@@ -67,7 +67,10 @@ describe("Debate audience pressure", () => {
         playerRole: "judge",
       }),
     );
-    assert.deepEqual([...scores].sort((a, b) => a - b), scores);
+    assert.deepEqual(
+      [...scores].sort((a, b) => a - b),
+      scores,
+    );
     assert.ok(new Set(scores).size === scores.length);
   });
 

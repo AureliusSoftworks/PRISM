@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -208,6 +209,7 @@ import {
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
+  type DebateAudienceBeatKind,
   type DebateModeratorGavelCue,
 } from "./debateFoley";
 import {
@@ -319,9 +321,7 @@ export interface DebateExperienceProps {
   onUtterance?: (utterance: DebateUtterance) => Promise<boolean>;
   onStopUtterance?: () => void;
   onLiveSessionActiveChange?: (active: boolean) => void;
-  onCompanionContextChange?: (
-    context: DebateCompanionContext | null,
-  ) => void;
+  onCompanionContextChange?: (context: DebateCompanionContext | null) => void;
   renderJudgeComposer?: (composer: DebateJudgeComposerRenderProps) => ReactNode;
   onJudgeComposerReveal?: () => void;
 }
@@ -459,6 +459,98 @@ const DEBATE_AUDIENCE_MOUTH_SHAPES = [
   "open-round",
   "speech-closed",
 ] as const satisfies readonly ZenLiveBotMouthShape[];
+
+interface DebateAudiencePortraitProps {
+  bot: DebateBotSnapshotV1;
+  index: number;
+  rowIndex: number;
+  rowCount: number;
+  ambientTalking: boolean;
+  listenerReaction: DebateBotAvatarState["listenerReaction"];
+  beatKind: DebateAudienceBeatKind | null;
+  renderBotGlyph: BotPickerGlyphRenderer;
+  renderBotAvatar?: DebateExperienceProps["renderBotAvatar"];
+}
+
+const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
+  bot,
+  index,
+  rowIndex,
+  rowCount,
+  ambientTalking,
+  listenerReaction,
+  beatKind,
+  renderBotGlyph,
+  renderBotAvatar,
+}: DebateAudiencePortraitProps): React.JSX.Element {
+  const conversationFacing = debateAudienceConversationFacing(
+    rowIndex,
+    rowCount,
+  );
+  const liveVocalReaction =
+    listenerReaction !== null &&
+    (beatKind === "objection" ||
+      beatKind === "concession" ||
+      beatKind === "ruling");
+  const foleyMouthShape = liveVocalReaction
+    ? DEBATE_AUDIENCE_MOUTH_SHAPES[index % DEBATE_AUDIENCE_MOUTH_SHAPES.length]!
+    : null;
+  return (
+    <span
+      className={styles.debateAudienceBotPortrait}
+      data-talking={ambientTalking || liveVocalReaction ? "true" : undefined}
+      data-vocal-reaction={liveVocalReaction ? "true" : undefined}
+      data-live-reacting={listenerReaction ? "true" : undefined}
+      data-audience-beat={
+        listenerReaction ? (beatKind ?? undefined) : undefined
+      }
+      data-listening-reaction={listenerReaction ?? undefined}
+      data-conversation-facing={conversationFacing}
+      data-audience-source={
+        debateAudienceBotIsGenerated(bot) ? "generated" : "library"
+      }
+      style={
+        {
+          "--debate-audience-index": index,
+        } as CSSProperties
+      }
+      title={
+        debateAudienceBotIsGenerated(bot)
+          ? "Session spectator"
+          : `${bot.name} · Library spectator`
+      }
+    >
+      {renderBotAvatar ? (
+        renderBotAvatar(bot, {
+          role: "audience",
+          lookAtRole: null,
+          compact: true,
+          // Keep the authored audience portrait static during ambient chatter.
+          // Only the short semantic reaction opens the face.
+          talking: liveVocalReaction,
+          thinking: false,
+          colorCycle: false,
+          speechTiming: null,
+          foleyMouthShape,
+          listenerReaction,
+        })
+      ) : (
+        <span className={styles.botGlyphFallback}>
+          {renderBotGlyph(bot.glyph ?? "lucideTriangle", {
+            size: 34,
+            strokeWidth: 1.25,
+          })}
+        </span>
+      )}
+      {ambientTalking ? (
+        <span className={styles.debateAudienceChatterChip} aria-hidden="true">
+          ...
+        </span>
+      ) : null}
+    </span>
+  );
+});
+
 const DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS = 50;
 const DEBATE_FOLEY_MIX = {
   background: 0,
@@ -467,21 +559,21 @@ const DEBATE_FOLEY_MIX = {
 } as const satisfies SessionAtmosphereMix;
 const DEBATE_AUDIENCE_IDLE_MIX = {
   ...DEBATE_FOLEY_MIX,
-  background: 0.16,
+  background: 0.42,
 } as const satisfies SessionAtmosphereMix;
 const DEBATE_AUDIENCE_DUCKED_MIX = {
   ...DEBATE_FOLEY_MIX,
-  background: 0.025,
+  background: 0.1,
 } as const satisfies SessionAtmosphereMix;
 const DEBATE_AMBIENT_FOLEY_PROFILE = {
   minDelayMs: 14_000,
   maxDelayMs: 32_000,
-  trim: 0.44,
+  trim: 0.72,
 } as const satisfies SessionAmbientFoleyProfile;
 const DEBATE_VOCAL_FOLEY_PROFILE = {
   minDelayMs: 22_000,
   maxDelayMs: 46_000,
-  trim: 0.42,
+  trim: 0.68,
 } as const satisfies SessionAmbientFoleyProfile;
 
 const DEBATE_CAMERA_VIEWS: ReadonlyArray<{
@@ -1808,6 +1900,23 @@ export function DebateExperience(
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
   );
+  const liveAudienceBots = useMemo(
+    () =>
+      activeSession
+        ? debateAudienceBotsForSession({
+            sessionId: activeSession.id,
+            count: debateAudienceBotCount(props.graphicsQuality),
+            bots,
+            excludedBotIds: [
+              activeSession.moderator.id,
+              activeSession.forAdvocate.id,
+              activeSession.againstAdvocate.id,
+              ...activeSession.jury.jurors.map((juror) => juror.id),
+            ],
+          })
+        : [],
+    [activeSession, bots, props.graphicsQuality],
+  );
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<DebateFormatId>("forum");
   const [formality, setFormality] = useState<DebateFormalityId>("plainspoken");
@@ -1843,8 +1952,10 @@ export function DebateExperience(
   >([]);
   const [evidenceExhibitAssetsLoading, setEvidenceExhibitAssetsLoading] =
     useState(false);
-  const [evidenceExhibitAssetsUnavailable, setEvidenceExhibitAssetsUnavailable] =
-    useState(false);
+  const [
+    evidenceExhibitAssetsUnavailable,
+    setEvidenceExhibitAssetsUnavailable,
+  ] = useState(false);
   const evidenceExhibitAssetsRequestRef = useRef(0);
   const evidenceExhibitEmojiRef = useRef<HTMLInputElement | null>(null);
   const evidenceExhibitUploadRef = useRef<HTMLInputElement | null>(null);
@@ -1953,8 +2064,10 @@ export function DebateExperience(
   const [presentationEventId, setPresentationEventId] = useState<string | null>(
     null,
   );
-  const [audiencePressurePresentationEventId, setAudiencePressurePresentationEventId] =
-    useState<string | null>(null);
+  const [
+    audiencePressurePresentationEventId,
+    setAudiencePressurePresentationEventId,
+  ] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoRecoveryNotice, setAutoRecoveryNotice] = useState<string | null>(
@@ -2087,7 +2200,7 @@ export function DebateExperience(
           audiencePressurePresentationEventId &&
           liveReveal?.eventId !== audiencePressurePresentationEventId
             ? 0
-            : liveReveal?.visibleContent.length ?? 0,
+            : (liveReveal?.visibleContent.length ?? 0),
         resetAfterSequence:
           audiencePressureReset?.sessionId === activeSession.id
             ? audiencePressureReset.resetAfterSequence
@@ -2211,9 +2324,7 @@ export function DebateExperience(
         return;
       }
       if (action === "smash") {
-        judgeGavelSmashRef.current?.(
-          judgeGavelSmashShowmanshipKindRef.current,
-        );
+        judgeGavelSmashRef.current?.(judgeGavelSmashShowmanshipKindRef.current);
         return;
       }
       void orderDebateAudienceRef.current?.();
@@ -2299,7 +2410,7 @@ export function DebateExperience(
     debateAtmosphereControllerRef.current?.playFoley(
       DEBATE_AUDIENCE_AGITATION_URL,
       {
-        trim: 0.48,
+        trim: 0.78,
         lowCutHz: 90,
         highCutHz: 8_200,
         stereoPan: 0.04,
@@ -2851,21 +2962,15 @@ export function DebateExperience(
   ].filter(Boolean).length;
   const debateCompanionBotIds = useMemo(
     () =>
-      (
-        playerRole === "participant"
-          ? [effectiveModeratorBotId, cast[participantOpponentCastSlot]]
-          : [
-              effectiveModeratorBotId,
-              cast.forAdvocate,
-              cast.againstAdvocate,
-            ]
-      ).filter(
-        (botId): botId is string =>
-          Boolean(
-            botId &&
-              botId !== DEBATE_PLAYER_JUDGE_BOT_ID &&
-              botId !== DEBATE_PLAYER_PARTICIPANT_BOT_ID,
-          ),
+      (playerRole === "participant"
+        ? [effectiveModeratorBotId, cast[participantOpponentCastSlot]]
+        : [effectiveModeratorBotId, cast.forAdvocate, cast.againstAdvocate]
+      ).filter((botId): botId is string =>
+        Boolean(
+          botId &&
+          botId !== DEBATE_PLAYER_JUDGE_BOT_ID &&
+          botId !== DEBATE_PLAYER_PARTICIPANT_BOT_ID,
+        ),
       ),
     [cast, effectiveModeratorBotId, participantOpponentCastSlot, playerRole],
   );
@@ -3497,41 +3602,47 @@ export function DebateExperience(
     ],
   );
 
-  const synthesize = useCallback(async (direction = ""): Promise<void> => {
-    if (!topic.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await request<{ slates: DebateMotionSlateV1[] }>(
-        "/api/debates/synthesize",
-        requestBody({
-          topic,
-          formality,
-          preferredProvider: props.modelOverride?.provider ?? preferredProvider,
-          modelOverride: props.modelOverride?.model,
-          responseMode: props.responseMode,
-          direction,
-        }),
-      );
-      setSlates(result.slates);
-      setMotion(result.slates[0] ?? EMPTY_SLATE);
-    } catch (caught) {
-      setError(
-        caught instanceof Error ? caught.message : "Synthesis was unavailable.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    busy,
-    preferredProvider,
-    props.modelOverride?.model,
-    props.modelOverride?.provider,
-    props.responseMode,
-    request,
-    formality,
-    topic,
-  ]);
+  const synthesize = useCallback(
+    async (direction = ""): Promise<void> => {
+      if (!topic.trim() || busy) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await request<{ slates: DebateMotionSlateV1[] }>(
+          "/api/debates/synthesize",
+          requestBody({
+            topic,
+            formality,
+            preferredProvider:
+              props.modelOverride?.provider ?? preferredProvider,
+            modelOverride: props.modelOverride?.model,
+            responseMode: props.responseMode,
+            direction,
+          }),
+        );
+        setSlates(result.slates);
+        setMotion(result.slates[0] ?? EMPTY_SLATE);
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Synthesis was unavailable.",
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      busy,
+      preferredProvider,
+      props.modelOverride?.model,
+      props.modelOverride?.provider,
+      props.responseMode,
+      request,
+      formality,
+      topic,
+    ],
+  );
 
   const synthesisMagic = useMemo<PrismRefractMagicTarget>(
     () => ({
@@ -3741,8 +3852,7 @@ export function DebateExperience(
         rejectedTitles,
         new AbortController().signal,
       );
-      const contextualDraft =
-        debateEvidenceObjectFromPrismCandidate(candidate);
+      const contextualDraft = debateEvidenceObjectFromPrismCandidate(candidate);
       if (!contextualDraft) {
         throw new Error("Prism returned an incomplete exhibit.");
       }
@@ -6758,9 +6868,7 @@ export function DebateExperience(
               {...binding}
               value={moderatorTitle}
               maxLength={DEBATE_MODERATOR_TITLE_MAX_LENGTH}
-              onChange={(event) =>
-                setModeratorTitle(event.currentTarget.value)
-              }
+              onChange={(event) => setModeratorTitle(event.currentTarget.value)}
               onBlur={() => setModeratorTitle(effectiveModeratorTitle)}
               placeholder="Moderator, The House, The Court…"
             />
@@ -6948,15 +7056,9 @@ export function DebateExperience(
                             setMotion((current) => ({
                               ...current,
                               id: "custom-motion",
-                              [
-                                sideId === "for"
-                                  ? "forSide"
-                                  : "againstSide"
-                              ]: {
+                              [sideId === "for" ? "forSide" : "againstSide"]: {
                                 ...current[
-                                  sideId === "for"
-                                    ? "forSide"
-                                    : "againstSide"
+                                  sideId === "for" ? "forSide" : "againstSide"
                                 ],
                                 label: value,
                               },
@@ -6965,15 +7067,9 @@ export function DebateExperience(
                             setMotion((current) => ({
                               ...current,
                               id: "custom-motion",
-                              [
-                                sideId === "for"
-                                  ? "forSide"
-                                  : "againstSide"
-                              ]: {
+                              [sideId === "for" ? "forSide" : "againstSide"]: {
                                 ...current[
-                                  sideId === "for"
-                                    ? "forSide"
-                                    : "againstSide"
+                                  sideId === "for" ? "forSide" : "againstSide"
                                 ],
                                 label: value,
                               },
@@ -7006,14 +7102,11 @@ export function DebateExperience(
                               setMotion((current) => ({
                                 ...current,
                                 id: "custom-motion",
-                                [
-                                  sideId === "for"
-                                    ? "forSide"
-                                    : "againstSide"
-                                ]: {
-                                  ...side,
-                                  label: value,
-                                },
+                                [sideId === "for" ? "forSide" : "againstSide"]:
+                                  {
+                                    ...side,
+                                    label: value,
+                                  },
                               }));
                               setRoleChecks([]);
                             }}
@@ -7039,35 +7132,29 @@ export function DebateExperience(
                               setMotion((current) => ({
                                 ...current,
                                 id: "custom-motion",
-                                [
-                                  sideId === "for"
-                                    ? "forSide"
-                                    : "againstSide"
-                                ]: {
-                                  ...current[
-                                    sideId === "for"
-                                      ? "forSide"
-                                      : "againstSide"
-                                  ],
-                                  brief: value,
-                                },
+                                [sideId === "for" ? "forSide" : "againstSide"]:
+                                  {
+                                    ...current[
+                                      sideId === "for"
+                                        ? "forSide"
+                                        : "againstSide"
+                                    ],
+                                    brief: value,
+                                  },
                               })),
                             accept: (value) => {
                               setMotion((current) => ({
                                 ...current,
                                 id: "custom-motion",
-                                [
-                                  sideId === "for"
-                                    ? "forSide"
-                                    : "againstSide"
-                                ]: {
-                                  ...current[
-                                    sideId === "for"
-                                      ? "forSide"
-                                      : "againstSide"
-                                  ],
-                                  brief: value,
-                                },
+                                [sideId === "for" ? "forSide" : "againstSide"]:
+                                  {
+                                    ...current[
+                                      sideId === "for"
+                                        ? "forSide"
+                                        : "againstSide"
+                                    ],
+                                    brief: value,
+                                  },
                               }));
                               setRoleChecks([]);
                             },
@@ -7096,11 +7183,9 @@ export function DebateExperience(
                                 setMotion((current) => ({
                                   ...current,
                                   id: "custom-motion",
-                                  [
-                                    sideId === "for"
-                                      ? "forSide"
-                                      : "againstSide"
-                                  ]: {
+                                  [sideId === "for"
+                                    ? "forSide"
+                                    : "againstSide"]: {
                                     ...side,
                                     brief: value,
                                   },
@@ -7938,9 +8023,7 @@ export function DebateExperience(
                     onChange={(event) => {
                       const value = event.currentTarget.value;
                       setEvidenceObjectDraft((current) =>
-                        current
-                          ? { ...current, observation: value }
-                          : current,
+                        current ? { ...current, observation: value } : current,
                       );
                     }}
                     placeholder="Describe only what everyone may treat as true about this object."
@@ -10899,10 +10982,10 @@ export function DebateExperience(
           ? activeEvent.gavelReason === "audience_order"
             ? "Order restored"
             : activeEvent.gavelReason === "overtime"
-            ? "Time called"
-            : activeEvent.gavelReason === "resume"
-              ? "Proceeding resumed"
-              : "Judge intervention"
+              ? "Time called"
+              : activeEvent.gavelReason === "resume"
+                ? "Proceeding resumed"
+                : "Judge intervention"
           : activeEvent?.kind === "moderator_ruling"
             ? "Moderator ruling"
             : activeEvent?.kind === "testimony"
@@ -11054,15 +11137,7 @@ export function DebateExperience(
                   : null,
       },
     ];
-    const audienceBots = debateAudienceBotsForSession({
-      sessionId: session.id,
-      count: debateAudienceBotCount(props.graphicsQuality),
-      bots,
-      excludedBotIds: [
-        ...stageCast.map(({ bot }) => bot.id),
-        ...session.jury.jurors.map((juror) => juror.id),
-      ],
-    });
+    const audienceBots = liveAudienceBots;
     const audienceSeats = audienceBots.map((bot, index) => ({
       bot,
       index,
@@ -11193,20 +11268,20 @@ export function DebateExperience(
               : activeAudienceOrderResponse &&
                   !activeAudienceOrderResponse.returningRoomTone
                 ? DEBATE_FOLEY_MIX
-              : audiencePressureBand
-                ? debateAudiencePressureMix(audiencePressureBand)
-                : presenting
-                  ? DEBATE_AUDIENCE_DUCKED_MIX
-                  : DEBATE_AUDIENCE_IDLE_MIX
+                : audiencePressureBand
+                  ? debateAudiencePressureMix(audiencePressureBand)
+                  : presenting
+                    ? DEBATE_AUDIENCE_DUCKED_MIX
+                    : DEBATE_AUDIENCE_IDLE_MIX
           }
           mixTransitionMs={
             audiencePressureBand === null
               ? 320
               : activeAudienceOrderResponse
-              ? activeAudienceOrderResponse.returningRoomTone
-                ? 4_000
-                : 90
-              : 900
+                ? activeAudienceOrderResponse.returningRoomTone
+                  ? 4_000
+                  : 90
+                : 900
           }
           preloadFoleyUrls={DEBATE_LIVE_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
@@ -11802,9 +11877,7 @@ export function DebateExperience(
                 data-audience-placement="below-screen"
                 data-audience-chattering={audienceChattering ? "true" : "false"}
                 data-audience-pressure={audiencePressureBand ?? undefined}
-                data-audience-order-response={
-                  activeAudienceOrderResponse?.kind
-                }
+                data-audience-order-response={activeAudienceOrderResponse?.kind}
                 data-audience-count={audienceBots.length}
                 aria-label={`${audienceBots.length} spectators in the Debate audience`}
               >
@@ -11818,11 +11891,6 @@ export function DebateExperience(
                     {audienceSeats
                       .filter((seat) => seat.layout.depthRow === depthRow)
                       .map(({ bot: audienceBot, index, layout }) => {
-                        const conversationFacing =
-                          debateAudienceConversationFacing(
-                            layout.rowIndex,
-                            layout.rowCount,
-                          );
                         const audienceListenerReaction =
                           audienceBeat && audienceReactingSeatIndices.has(index)
                             ? audienceBeat.listenerReaction
@@ -11835,88 +11903,19 @@ export function DebateExperience(
                                 layout.rowIndex,
                                 layout.rowCount,
                               ));
-                        const liveVocalReaction =
-                          audienceListenerReaction !== null &&
-                          (audienceBeat?.foleyCue === "objection" ||
-                            audienceBeat?.foleyCue === "concession" ||
-                            audienceBeat?.foleyCue === "ruling");
-                        const mouthActive = ambientTalking || liveVocalReaction;
-                        const foleyMouthShape = mouthActive
-                          ? DEBATE_AUDIENCE_MOUTH_SHAPES[
-                              index % DEBATE_AUDIENCE_MOUTH_SHAPES.length
-                            ]!
-                          : null;
                         return (
-                          <span
-                            className={styles.debateAudienceBotPortrait}
-                            data-talking={mouthActive ? "true" : undefined}
-                            data-vocal-reaction={
-                              liveVocalReaction ? "true" : undefined
-                            }
-                            data-live-reacting={
-                              audienceListenerReaction ? "true" : undefined
-                            }
-                            data-audience-beat={
-                              audienceListenerReaction
-                                ? audienceBeat?.kind
-                                : undefined
-                            }
-                            data-listening-reaction={
-                              audienceListenerReaction ?? undefined
-                            }
-                            data-conversation-facing={conversationFacing}
-                            data-audience-source={
-                              debateAudienceBotIsGenerated(audienceBot)
-                                ? "generated"
-                                : "library"
-                            }
+                          <DebateAudiencePortrait
                             key={audienceBot.id}
-                            style={
-                              {
-                                "--debate-audience-index": index,
-                                "--debate-audience-talk-delay": `${-index * 137}ms`,
-                                "--debate-audience-hush-delay": `${index * 42}ms`,
-                                "--debate-audience-glance": `${index % 2 === 0 ? -1.4 : 1.4}deg`,
-                              } as CSSProperties
-                            }
-                            title={
-                              debateAudienceBotIsGenerated(audienceBot)
-                                ? "Session spectator"
-                                : `${audienceBot.name} · Library spectator`
-                            }
-                          >
-                            {props.renderBotAvatar ? (
-                              props.renderBotAvatar(audienceBot, {
-                                role: "audience",
-                                lookAtRole: null,
-                                compact: true,
-                                talking: mouthActive,
-                                thinking: false,
-                                colorCycle: false,
-                                speechTiming: null,
-                                foleyMouthShape,
-                                listenerReaction: audienceListenerReaction,
-                              })
-                            ) : (
-                              <span className={styles.botGlyphFallback}>
-                                {props.renderBotGlyph(
-                                  audienceBot.glyph ?? "lucideTriangle",
-                                  {
-                                    size: 34,
-                                    strokeWidth: 1.25,
-                                  },
-                                )}
-                              </span>
-                            )}
-                            {ambientTalking ? (
-                              <span
-                                className={styles.debateAudienceChatterChip}
-                                aria-hidden="true"
-                              >
-                                ...
-                              </span>
-                            ) : null}
-                          </span>
+                            bot={audienceBot}
+                            index={index}
+                            rowIndex={layout.rowIndex}
+                            rowCount={layout.rowCount}
+                            ambientTalking={ambientTalking}
+                            listenerReaction={audienceListenerReaction}
+                            beatKind={audienceBeat?.kind ?? null}
+                            renderBotAvatar={props.renderBotAvatar}
+                            renderBotGlyph={props.renderBotGlyph}
+                          />
                         );
                       })}
                   </span>
@@ -12036,9 +12035,7 @@ export function DebateExperience(
                           judgeCanCallTime ? "call-time" : "intervene"
                         }
                         data-overtime={judgeCanCallTime ? "true" : undefined}
-                        data-cooling={
-                          judgeGavelOnCooldown ? "true" : undefined
-                        }
+                        data-cooling={judgeGavelOnCooldown ? "true" : undefined}
                         onClick={(event) => {
                           event.currentTarget.blur();
                           void swingJudgeGavel(judgeCanCallTime);

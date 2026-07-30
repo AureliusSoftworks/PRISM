@@ -6,18 +6,10 @@ import type {
 import type { SessionAtmosphereMix } from "./session-atmosphere-audio.ts";
 
 export type DebateAudiencePressureBand =
-  | "settled"
-  | "murmuring"
-  | "restless"
-  | "disruptive";
+  "settled" | "murmuring" | "restless" | "disruptive";
 
 export type DebateAudiencePressureReaction =
-  | "attentive"
-  | "concession"
-  | "divided"
-  | "evidence"
-  | "question"
-  | null;
+  "attentive" | "concession" | "divided" | "evidence" | "question" | null;
 
 export const DEBATE_AUDIENCE_INITIAL_PRESSURE = 12;
 
@@ -30,10 +22,10 @@ const DEBATE_AUDIENCE_EVENT_HEAT = {
 } as const satisfies Record<DebateFormalityId, number>;
 
 const DEBATE_AUDIENCE_PRESSURE_MIX = {
-  settled: { background: 0.04, grain: 0, foley: 0.34 },
-  murmuring: { background: 0.14, grain: 0.06, foley: 0.34 },
-  restless: { background: 0.22, grain: 0.32, foley: 0.34 },
-  disruptive: { background: 0.3, grain: 0.72, foley: 0.34 },
+  settled: { background: 0.12, grain: 0, foley: 0.34 },
+  murmuring: { background: 0.34, grain: 0.14, foley: 0.34 },
+  restless: { background: 0.5, grain: 0.52, foley: 0.34 },
+  disruptive: { background: 0.68, grain: 0.92, foley: 0.34 },
 } as const satisfies Record<DebateAudiencePressureBand, SessionAtmosphereMix>;
 
 const DEBATE_AUDIENCE_HEAT_EVENT_KINDS = new Set<DebateEventV1["kind"]>([
@@ -147,9 +139,7 @@ export function debateAudiencePressureScore(args: {
   activeEventId?: string | null;
   visibleCharacterCount?: number | null;
   resetAfterSequence?: number | null;
-  reactionForEvent?: (
-    event: DebateEventV1,
-  ) => DebateAudiencePressureReaction;
+  reactionForEvent?: (event: DebateEventV1) => DebateAudiencePressureReaction;
 }): number {
   if (args.playerRole !== "judge") return 0;
   const visibleThroughSequence =
@@ -164,10 +154,7 @@ export function debateAudiencePressureScore(args: {
     (left, right) => left.sequence - right.sequence,
   )) {
     if (event.sequence > visibleThroughSequence) break;
-    if (
-      resetAfterSequence !== null &&
-      event.sequence <= resetAfterSequence
-    ) {
+    if (resetAfterSequence !== null && event.sequence <= resetAfterSequence) {
       continue;
     }
     if (eventResetsAudiencePressure(event)) {

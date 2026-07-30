@@ -161,11 +161,7 @@ import {
 } from "./debateJurySettings";
 import { debateJudgeGavelVoiceMood } from "./debateJudgeGavel";
 import { debateAudioEnabled } from "./debatePresentation";
-import {
-  BotPickerGrid,
-  BotPickerTile,
-  sortBotPickerItems,
-} from "./BotPicker";
+import { BotPickerGrid, BotPickerTile, sortBotPickerItems } from "./BotPicker";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
 import {
   coffeeGroupAtmosphereImageUrl,
@@ -11479,6 +11475,18 @@ function botAvatarSfxForSignalMix(
     ...sfx,
     volume: Math.max(0, Math.min(1, sfx.volume * normalizedGain)),
   };
+}
+
+const DEBATE_THINKING_SFX_MIX_GAIN = 0.2;
+
+function botAvatarSfxForDebateState(
+  sfx: BotAvatarSfxPlayback | null,
+  thinking: boolean,
+): BotAvatarSfxPlayback | null {
+  return botAvatarSfxForSignalMix(
+    sfx,
+    thinking ? DEBATE_THINKING_SFX_MIX_GAIN : 1,
+  );
 }
 
 function marketplacePreviewBotFromArchive(
@@ -29309,6 +29317,7 @@ interface ZenLiveBotMannequinProps {
   eyeTargetDirection?: import("./botFaceEyeMovement").BotFaceGazeDirection;
   eyeTimelineMs?: number | null;
   eyeStateStartedAtMs?: number | null;
+  runtimeEffectsEnabled?: boolean;
 }
 
 interface BotAmbientPresenceRigProps {
@@ -29402,6 +29411,7 @@ function ZenLiveBotMannequin({
   eyeTargetDirection = 0,
   eyeTimelineMs,
   eyeStateStartedAtMs,
+  runtimeEffectsEnabled = true,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const avatarSfxAudioRef = useRef<HTMLAudioElement | null>(null);
   const avatarSfxLoadedSourceRef = useRef<string | null>(null);
@@ -29527,11 +29537,13 @@ function ZenLiveBotMannequin({
       data-avatar-details-visuals={hasAvatarDetailsVisuals ? "true" : undefined}
       style={presenceBodyStyle}
     >
-      <audio
-        ref={avatarSfxAudioRef}
-        preload="auto"
-        data-bot-avatar-sfx-runtime="true"
-      />
+      {runtimeEffectsEnabled ? (
+        <audio
+          ref={avatarSfxAudioRef}
+          preload="auto"
+          data-bot-avatar-sfx-runtime="true"
+        />
+      ) : null}
       <span
         className={styles.zenLiveBotPresenceFace}
         data-zen-live-bot-body-frame="true"
@@ -94862,10 +94874,10 @@ function HomeContent(): React.JSX.Element {
                 </div>
                 <p>
                   Your first Home scene starts rendering quietly while you
-                  finish setup, then appears automatically when you enter
-                  PRISM. You can disable it later in Appearance settings. If
-                  generation is unavailable, setup continues and Appearance
-                  can try again later.
+                  finish setup, then appears automatically when you enter PRISM.
+                  You can disable it later in Appearance settings. If generation
+                  is unavailable, setup continues and Appearance can try again
+                  later.
                 </p>
               </div>
             ) : null}
@@ -129822,6 +129834,7 @@ function HomeContent(): React.JSX.Element {
                 />
               )}
               renderBotAvatar={(botSnapshot, avatarState) => {
+                const staticAudiencePortrait = avatarState.role === "audience";
                 const playerJudgePrism =
                   botSnapshot.id === DEBATE_PLAYER_JUDGE_BOT_ID;
                 const generatedAudienceBot =
@@ -129928,8 +129941,14 @@ function HomeContent(): React.JSX.Element {
                   >
                     <BotAmbientPresenceRig
                       theme={resolvedTheme}
-                      isTalking={debateMouthActive}
-                      motionActive={!debateMouthActive && !avatarState.thinking}
+                      isTalking={
+                        staticAudiencePortrait ? false : debateMouthActive
+                      }
+                      motionActive={
+                        !staticAudiencePortrait &&
+                        !debateMouthActive &&
+                        !avatarState.thinking
+                      }
                       phaseOffsetSeconds={
                         avatarState.role === "moderator"
                           ? 2.4
@@ -129952,10 +129971,17 @@ function HomeContent(): React.JSX.Element {
                               )
                         }
                         isTalking={debateMouthActive}
-                        avatarSfx={botAvatarSfxForProfile(
-                          botSnapshot.voiceProfile,
-                          botSnapshot.id,
-                        )}
+                        avatarSfx={
+                          staticAudiencePortrait
+                            ? null
+                            : botAvatarSfxForDebateState(
+                                botAvatarSfxForProfile(
+                                  botSnapshot.voiceProfile,
+                                  botSnapshot.id,
+                                ),
+                                avatarState.thinking,
+                              )
+                        }
                         avatarSfxState={
                           avatarState.talking
                             ? "talking"
@@ -129963,8 +129989,8 @@ function HomeContent(): React.JSX.Element {
                               ? "thinking"
                               : "idle"
                         }
-                        blinkEnabled={avatarState.role === "audience"}
-                        blinkWhileTalking
+                        blinkEnabled={false}
+                        blinkWhileTalking={!staticAudiencePortrait}
                         mouthShape={debateMouthShape}
                         moodHint={debateMoodHint}
                         scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}
@@ -130016,6 +130042,7 @@ function HomeContent(): React.JSX.Element {
                             : (botSnapshot.color ?? PRISM_DEFAULT_ACCENT),
                           resolvedTheme,
                         )}
+                        runtimeEffectsEnabled={!staticAudiencePortrait}
                       />
                     </BotAmbientPresenceRig>
                   </span>
@@ -131138,9 +131165,7 @@ function HomeContent(): React.JSX.Element {
         data-group-room-atmosphere-active={
           botGroupRoomAtmosphereVisible ? "true" : undefined
         }
-        data-hub-atmosphere-active={
-          hubAtmosphereMounted ? "true" : undefined
-        }
+        data-hub-atmosphere-active={hubAtmosphereMounted ? "true" : undefined}
         data-chat-overflow-menu-open={chatOverflowMenuOpen ? "true" : undefined}
         data-zen-header-hidden={
           sidebarOpen || zenHeaderVisible || zenHeaderPinned

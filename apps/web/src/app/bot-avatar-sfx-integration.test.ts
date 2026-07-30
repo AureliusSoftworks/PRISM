@@ -43,7 +43,10 @@ test("new bot paths attempt unique thinking loops while preserving the fallback"
 
 test("Avatar Studio presents the built-in fallback without pretending it was uploaded", () => {
   assert.match(pageSource, /PRISM Computer Calculating/u);
-  assert.match(pageSource, /Built-in fallback · no uploaded file · thinking only/u);
+  assert.match(
+    pageSource,
+    /Built-in fallback · no uploaded file · thinking only/u,
+  );
   assert.match(pageSource, /aria-label="Avatar sound mode"/u);
   assert.match(pageSource, />\s*Mute\s*<\/button>/u);
   assert.match(pageSource, /Use PRISM default avatar sound/u);
@@ -63,7 +66,7 @@ test("Avatar Studio drives SFX from its idle, blink, talking, and thinking previ
 
 test("Zen, Coffee, and live Signal resolve each visible bot's SFX and live state", () => {
   const zenSource = sourceBefore(
-    "scheduleKey={`zen-live-${bot?.id ?? \"prism\"}-${moodHint}`}",
+    'scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}',
   );
   assert.match(zenSource, /avatarSfx=\{botAvatarSfxForBot\(bot\)\}/);
   assert.match(zenSource, /showThinkingSpinner \|\| transitioning/);
@@ -94,7 +97,7 @@ test("Debate routes the thinking bot's frozen SFX profile into its live avatar",
   );
   assert.match(
     debateSource,
-    /avatarSfx=\{botAvatarSfxForProfile\(\s*botSnapshot\.voiceProfile,\s*botSnapshot\.id,\s*\)\}/u,
+    /avatarSfx=\{botAvatarSfxForDebateState\(\s*botAvatarSfxForProfile\(\s*botSnapshot\.voiceProfile,\s*botSnapshot\.id,\s*\),\s*avatarState\.thinking,\s*\)\}/u,
   );
   assert.match(
     debateSource,
@@ -120,10 +123,7 @@ test("Signal keeps dashboard avatars quiet and respects Persona SFX triggers on 
   );
   assert.match(liveStageAvatarSource, /surface: "stage"/u);
   assert.match(liveStageAvatarSource, /signalAvatarSfxShouldPlay\(\{/u);
-  assert.match(
-    liveStageAvatarSource,
-    /introActive: episodePreRoll !== null/u,
-  );
+  assert.match(liveStageAvatarSource, /introActive: episodePreRoll !== null/u);
   assert.match(
     liveStageAvatarSource,
     /episodeOutroSfxMutedId === args\.currentEpisode\.id/u,
