@@ -391,6 +391,7 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(headings, [
       "Begin with pages or a spark",
+      "Choose one shared route",
       "Find the scene in Story Map",
       "Write in the manuscript",
       "Direct one move",
@@ -400,6 +401,7 @@ describe("mode tutorials", () => {
     ]);
     assert.deepEqual(selectors, [
       '[data-tutorial-target="slate-create-project"]',
+      '[data-tutorial-target="auto-response-mode"]',
       '[data-tutorial-target="slate-structure"]',
       '[data-tutorial-target="slate-manuscript"]',
       '[data-tutorial-target="slate-direction"]',
@@ -423,7 +425,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /writer-approved canon/u);
     assert.match(copy, /lock it against inference/u);
     assert.match(copy, /Observed track remains accepted-prose evidence/u);
-    assert.match(copy, /OFFLINE, AUTO, and ONLINE/u);
+    assert.match(copy, /LOCAL, AUTO, and ONLINE/u);
+    assert.match(copy, /other applets see the same default/u);
+    assert.match(copy, /Leave routing on Auto/u);
     assert.match(copy, /Slate Review export/u);
     assert.match(copy, /never hidden reasoning/u);
     assert.match(copy, /it never edits the document/u);

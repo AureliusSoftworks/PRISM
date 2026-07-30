@@ -51817,10 +51817,11 @@ function HomeContent(): React.JSX.Element {
     disabledReason: string | null = null,
     respectActiveBotLock = true,
   ): React.ReactNode => {
-    // The toggle simply mirrors `effectivePreferredProvider`, which is
-    // already pinned to "local" when the active chat bot is offline-only.
-    // We keep the lock indicator + disabled flag tied to that same source
-    // of truth so it can never disagree with the model pickers below it.
+    // Shared applet navbars must mirror the saved account route, while
+    // chat-scoped controls still respect an active bot's offline-only lock.
+    const providerPreference = respectActiveBotLock
+      ? effectivePreferredProvider
+      : (settings?.preferredProvider ?? "local");
     const lockedByActiveBot =
       respectActiveBotLock && activeBot?.online_enabled === 0;
     const autoAllowed =
@@ -51829,7 +51830,7 @@ function HomeContent(): React.JSX.Element {
         detail?.mode !== "chat" &&
         detail?.hubRole !== "side");
     if (autoAllowed && settings) {
-      const binaryMode = responseModeForProvider(effectivePreferredProvider);
+      const binaryMode = responseModeForProvider(providerPreference);
       const resolvedPrimary = forceAutoAllowed
         ? binaryMode === "local"
           ? {
@@ -51855,7 +51856,7 @@ function HomeContent(): React.JSX.Element {
             }
         : resolveModelChoiceForResponseMode({
             responseMode: binaryMode,
-            providerPreference: effectivePreferredProvider,
+            providerPreference,
             choices: visibleModelChoicesByProvider(
               modelCatalog,
               settings,
@@ -51883,7 +51884,7 @@ function HomeContent(): React.JSX.Element {
         runnable,
       });
       const responseMode = autoResponseModeForProvider(
-        effectivePreferredProvider,
+        providerPreference,
         settings.autoModeEnabled,
         autoConfigured && !lockedByActiveBot,
       );
@@ -51894,6 +51895,10 @@ function HomeContent(): React.JSX.Element {
           (nextMode === "auto" && !autoConfigured)
         )
           return;
+        if (!respectActiveBotLock) {
+          void persistSharedAppletResponseMode(nextMode);
+          return;
+        }
         void persistAutoModeEnabled(nextMode === "auto");
         if (nextMode === "local") void switchProvider("local");
         if (nextMode === "online") {
@@ -51904,7 +51909,7 @@ function HomeContent(): React.JSX.Element {
               inferOnlineProviderForModelId(settings.preferredOnlineModel))
             : resolveModelChoiceForResponseMode({
                 responseMode: "online",
-                providerPreference: effectivePreferredProvider,
+                providerPreference,
                 choices: visibleModelChoicesByProvider(
                   modelCatalog,
                   settings,
@@ -51956,12 +51961,12 @@ function HomeContent(): React.JSX.Element {
         </div>
       );
     }
-    const responseMode = responseModeForProvider(effectivePreferredProvider);
+    const responseMode = responseModeForProvider(providerPreference);
     const isLocal = responseMode === "local";
     const nextMode = nextResponseMode(responseMode);
     const nextResolvedProvider = resolveModelChoiceForResponseMode({
       responseMode: nextMode,
-      providerPreference: effectivePreferredProvider,
+      providerPreference,
       choices: visibleModelChoicesByProvider(
         modelCatalog,
         settings,
@@ -52029,6 +52034,115 @@ function HomeContent(): React.JSX.Element {
           </span>
         </button>
       </div>
+    );
+  };
+
+  const renderSharedAccountRoutingControls = (
+    surfaceLabel: string,
+  ): React.ReactNode => {
+    if (!settings) {
+      return renderProviderModeToggle(
+        styles.chatHeaderModeToggle,
+        true,
+        null,
+        false,
+      );
+    }
+    const accountProvider = settings.preferredProvider;
+    const binaryResponseMode = responseModeForProvider(accountProvider);
+    const accountModelChoice =
+      binaryResponseMode === "local"
+        ? visibleConcreteModelChoiceForProvider(
+            modelCatalog,
+            settings,
+            "local",
+            settings.preferredLocalModel,
+          )
+        : visibleConcreteOnlineModelChoice(
+            modelCatalog,
+            settings,
+            settings.preferredOnlineModel,
+          );
+    const accountModelProvider: Provider =
+      binaryResponseMode === "local"
+        ? "local"
+        : (onlineChatModelOptions.find(
+            (model) => model.id === accountModelChoice,
+          )?.provider ?? inferOnlineProviderForModelId(accountModelChoice));
+    const primary = resolvedAutoPrimaryForComposer(
+      modelCatalog,
+      settings,
+      accountModelProvider,
+      accountModelChoice,
+    );
+    const runnable = [
+      ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
+      ...onlineChatModelOptions,
+    ]
+      .filter(
+        (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
+      )
+      .map((model) => ({ provider: model.provider, model: model.id }));
+    const responseMode = primary
+      ? autoFallbackResponseModeForSend({
+          autoEnabled: settings.autoModeEnabled,
+          primary,
+          chain: settings.autoFallbackChain,
+          runnable,
+        })
+      : binaryResponseMode;
+    const modelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
+      settings,
+      responseMode,
+      modelOptionsForResponseMode(modelCatalog, settings, responseMode),
+      accountModelChoice,
+      accountModelProvider,
+    );
+    const primaryLabel = resolvedAutoPrimaryLabel(primary, modelOptions);
+    return (
+      <>
+        {renderProviderModeToggle(
+          styles.chatHeaderModeToggle,
+          true,
+          null,
+          false,
+        )}
+        <ComposerModelPicker
+          value={accountModelChoice}
+          onChange={(nextChoice) =>
+            void persistSharedAppletAccountModelChoice(
+              nextChoice,
+              responseMode,
+              modelOptions,
+            )
+          }
+          options={modelOptions}
+          provider={
+            responseMode === "auto"
+              ? "all"
+              : accountModelProvider === "local"
+                ? "local"
+                : "online"
+          }
+          loading={modelCatalogLoading}
+          disabled={!settings}
+          title={
+            responseMode === "auto"
+              ? `${surfaceLabel} primary model for AUTO; shared across applets`
+              : `${surfaceLabel} ${responseModeShortLabel(responseMode)} model; shared across applets`
+          }
+          ariaLabel={`${surfaceLabel} account model; shared across applets`}
+          placement="down"
+          minMenuWidthPx={180}
+          autoOptionLabel="Provider default"
+          autoOptionTriggerLabel={primaryLabel}
+          autoOptionMetaOverride="Uses the provider default for this shared account route."
+          settingsDefaultModelId={accountModelChoice}
+          dismissPopoversSignal={composerPopoverDismissSignal}
+          showDisabledOption
+        />
+      </>
     );
   };
 
@@ -80503,6 +80617,106 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setSettings(previous);
       setError(err instanceof Error ? err.message : "Provider switch failed.");
+    }
+  }
+
+  async function persistSharedAppletResponseMode(
+    responseMode: AutoResponseMode,
+  ): Promise<void> {
+    if (!settings) return;
+    const previous = settings;
+    const preferredProvider: Provider =
+      responseMode === "local"
+        ? "local"
+        : responseMode === "online"
+          ? (onlineChatModelOptions.find(
+              (model) => model.id === settings.preferredOnlineModel,
+            )?.provider ??
+            inferOnlineProviderForModelId(settings.preferredOnlineModel))
+          : settings.preferredProvider;
+    const patch = {
+      autoModeEnabled: responseMode === "auto",
+      preferredProvider,
+    };
+    if (
+      settings.autoModeEnabled === patch.autoModeEnabled &&
+      settings.preferredProvider === patch.preferredProvider
+    ) {
+      return;
+    }
+    setSettings({ ...settings, ...patch });
+    setError(null);
+    setPanelError(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      await refreshSettings();
+    } catch (err) {
+      setSettings(previous);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Shared response mode failed to save.",
+      );
+    }
+  }
+
+  async function persistSharedAppletAccountModelChoice(
+    nextChoice: string,
+    responseMode: AutoResponseMode,
+    options: readonly ModelCatalogEntry[],
+  ): Promise<void> {
+    if (
+      !settings ||
+      nextChoice === DISABLED_MODEL_CHOICE ||
+      modelChoiceIsDisabled(nextChoice)
+    ) {
+      return;
+    }
+    const previous = settings;
+    const selectedOption =
+      nextChoice === AUTO_MODEL_CHOICE
+        ? null
+        : options.find((option) => option.id === nextChoice) ?? null;
+    const targetProvider: Provider =
+      selectedOption?.provider ??
+      (responseMode === "local"
+        ? "local"
+        : responseMode === "online"
+          ? settings.preferredProvider === "local"
+            ? inferOnlineProviderForModelId(settings.preferredOnlineModel)
+            : settings.preferredProvider
+          : settings.preferredProvider);
+    const preferredModel =
+      nextChoice === AUTO_MODEL_CHOICE ? "" : nextChoice.trim();
+    const patch =
+      targetProvider === "local"
+        ? {
+            preferredProvider: targetProvider,
+            preferredLocalModel: preferredModel,
+          }
+        : {
+            preferredProvider: targetProvider,
+            preferredOnlineModel: preferredModel,
+          };
+    setSettings({ ...settings, ...patch });
+    setError(null);
+    setPanelError(null);
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      await refreshSettings();
+    } catch (err) {
+      setSettings(previous);
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Shared account model failed to save.",
+      );
     }
   }
 
@@ -130338,7 +130552,9 @@ function HomeContent(): React.JSX.Element {
           className={themeClass}
           theme={resolvedTheme}
           sidebarHeader={renderSharedAppletSidebarHeader("slate")}
-          navigationHeader={renderSharedAppletNavbar("Slate tools")}
+          navigationHeader={renderSharedAppletNavbar("Slate tools", {
+            modelControls: renderSharedAccountRoutingControls("Slate"),
+          })}
           onHemisphereSettingsSnapshot={setSlateHemisphereSettingsSnapshot}
           hemisphereSettingsUpdate={slateHemisphereSettingsUpdate}
           globalCompanionEnabled

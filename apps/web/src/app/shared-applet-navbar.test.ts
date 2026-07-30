@@ -80,7 +80,19 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.doesNotMatch(signalCss, /\.signalGlobalProviderControl/u);
   assert.match(
     pageSource,
-    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools"\)\}/,
+    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
+  );
+  assert.match(
+    pageSource,
+    /const renderSharedAccountRoutingControls =[\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*true,[\s\S]*null,[\s\S]*false,[\s\S]*<ComposerModelPicker/u,
+  );
+  assert.match(
+    pageSource,
+    /async function persistSharedAppletAccountModelChoice[\s\S]*preferredLocalModel[\s\S]*preferredOnlineModel[\s\S]*api\("\/api\/settings"/u,
+  );
+  assert.match(
+    pageSource,
+    /async function persistSharedAppletResponseMode[\s\S]*autoModeEnabled:[\s\S]*preferredProvider,[\s\S]*api\("\/api\/settings"/u,
   );
 });
 

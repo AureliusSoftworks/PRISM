@@ -291,6 +291,12 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
         targetSelector: '[data-tutorial-target="slate-create-project"]',
       },
       {
+        heading: "Choose one shared route",
+        body: "The navbar’s LOCAL, AUTO, and ONLINE controls and model picker are account-wide. Change either here and the other applets see the same default; Slate projects on Auto follow it immediately. A project you deliberately pinned to Offline, Online, or a specific model in Project tools keeps that explicit override.",
+        clickLabel: "LOCAL, AUTO, ONLINE, or the model picker",
+        targetSelector: '[data-tutorial-target="auto-response-mode"]',
+      },
+      {
         heading: "Find the scene in Story Map",
         body: "Open acts, chapters, and scenes as a hierarchy. Pick the section you want, rename or reorder it when needed, and collapse Story Map whenever the manuscript needs more room. Shape with Slate is optional; your own structure remains authoritative.",
         clickLabel: "the Story Map",
@@ -316,7 +322,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Open tools only when needed",
-        body: "Project tools holds OFFLINE, AUTO, and ONLINE prose routing, model choice, clean exports, portable backup and recovery, title and cover actions, and the temporary Lux and Umbra desk. These controls leave the cockpit again when you close the drawer. History opens its own focused desk for safe provenance, examples, and a current-section Slate Review export—never hidden reasoning.",
+        body: "Project tools holds optional project-specific prose routing and model overrides, clean exports, portable backup and recovery, title and cover actions, and the temporary Lux and Umbra desk. Leave routing on Auto to follow the synchronized navbar defaults. These controls leave the cockpit again when you close the drawer. History opens its own focused desk for safe provenance, examples, and a current-section Slate Review export—never hidden reasoning.",
         clickLabel: "Project tools",
         targetSelector: '[data-tutorial-target="slate-project-tools"]',
       },
