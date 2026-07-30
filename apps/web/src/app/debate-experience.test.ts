@@ -4,7 +4,9 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
+  DEBATE_JURY_SIZE,
   DEBATE_PLAYER_JUDGE_BOT_ID,
+  DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   debateEventIsTranscriptHousekeeping,
 } from "@localai/shared";
@@ -47,6 +49,21 @@ const identSource = readFileSync(
 );
 
 describe("Debate experience", () => {
+  it("presents the moderator introduction instead of treating it as transcript-only", () => {
+    assert.match(
+      source,
+      /function debatePresentationEvents[\s\S]{0,900}event\.kind === "intro" \|\|[\s\S]{0,80}event\.kind === "speech"/u,
+    );
+    assert.match(
+      source,
+      /await adoptSession\(null, result\.session, \{ playIntro: true \}\)/u,
+    );
+    assert.match(
+      source,
+      /setPresenting\(fresh\.length > 0 \|\| options\.playIntro === true\)/u,
+    );
+  });
+
   it("keeps pause and resume housekeeping outside the readable record", () => {
     assert.equal(
       debateEventIsTranscriptHousekeeping({ stepKey: "pause" }),
@@ -203,7 +220,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /roleLabel: normalizeDebateModeratorTitle\(session\.moderatorTitle\)/u,
+      /roleLabel:[\s\S]{0,180}normalizeDebateModeratorTitle\(session\.moderatorTitle\)/u,
     );
     assert.match(
       source,
@@ -324,15 +341,15 @@ describe("Debate experience", () => {
     assert.match(source, /data-tutorial-target="debate-format"/u);
     assert.match(source, /option\.productionName/u);
     assert.match(source, /option\.cadence/u);
-    assert.match(source, /data-availability=\{option\.availability\}/u);
     assert.match(
       source,
-      /disabled=\{option\.availability === "coming_soon"\}/u,
+      /participantForumOnly\s*\? "participant-forum-only"\s*: option\.availability/u,
     );
+    assert.match(source, /const disabled =[\s\S]{0,120}participantForumOnly/u);
     assert.match(source, />\s*Coming later\s*</u);
     assert.match(
       source,
-      /if \(option\.availability !== "available"\) return;/u,
+      /if \(option\.availability !== "available" \|\| disabled\)/u,
     );
     assert.match(source, /format,\s+motion,/u);
     assert.match(source, /\/turnabout-action/u);
@@ -540,7 +557,7 @@ describe("Debate experience", () => {
     assert.match(source, /onClick=\{randomizeCast\}/u);
     assert.match(
       source,
-      /disabled=\{bots\.length < \(playerRole === "judge" \? 2 : 3\)\}/u,
+      /disabled=\{bots\.length < \(playerRole === "spectator" \? 3 : 2\)\}/u,
     );
     assert.match(
       source,
@@ -585,14 +602,15 @@ describe("Debate experience", () => {
     assert.match(source, /\/jury\/skip-deliberation/u);
     assert.match(
       source,
-      /juryDeliberating \? "Skip deliberation" : "End early"/u,
+      /juryDeliberating \? "Skip deliberation" : "End debate"/u,
     );
     assert.match(
       source,
       /debateAwaitsJuryDeliberationChoice\(activeSession\)/u,
     );
     assert.match(source, /Auto deliberate/u);
-    assert.match(source, />\s*Participate\s*</u);
+    assert.match(source, />\s*Watch Jury\s*</u);
+    assert.doesNotMatch(source, />\s*Participate\s*</u);
     assert.match(source, /Skip to ballots/u);
     assert.match(source, /Auto is the default and begins in/u);
     assert.match(source, /juryAutoDeliberationEnabled/u);
@@ -603,9 +621,16 @@ describe("Debate experience", () => {
       source,
       /limited \$\{debatePublicMaterialName\(session\.formality\)\.toLowerCase\(\)\}/u,
     );
-    assert.match(source, /disabled=\{busy \|\| presenting\}/u);
+    assert.match(
+      source,
+      /disabled=\{busy \|\| \(!juryDeliberating && presenting\)\}/u,
+    );
+    assert.match(
+      source,
+      /if \(presenting\) cancelCurrentPresentation\(\);[\s\S]{0,180}jury\/skip-deliberation/u,
+    );
     assert.match(css, /\.juryDeliberationChoice/u);
-    assert.match(css, /\.liveControls \.endEarlyButton/u);
+    assert.match(css, /\.proceedingControlActions \.endEarlyButton/u);
   });
 
   it("lets a hard-muted moderator create an open-floor Debate instead of blocking cast", () => {
@@ -794,8 +819,18 @@ describe("Debate experience", () => {
       source,
       /data-tutorial-target="debate-judge-objection-ruling"/u,
     );
-    assert.match(source, />Sustained</u);
-    assert.match(source, />Overruled</u);
+    assert.match(source, /role="alertdialog"/u);
+    assert.match(source, /ref=\{objectionRulingDockRef\}/u);
+    assert.match(source, /aria-keyshortcuts="S"/u);
+    assert.match(source, /aria-keyshortcuts="O"/u);
+    assert.match(source, /Sustained <kbd>S<\/kbd>/u);
+    assert.match(source, /Overruled <kbd>O<\/kbd>/u);
+    assert.match(source, /debateJudgeObjectionRulingShortcut/u);
+    assert.match(source, /objectionRulingDockRef\.current\?\.focus\(\)/u);
+    assert.match(
+      source,
+      /input, textarea, select, \[contenteditable="true"\]/u,
+    );
     assert.match(source, /No ruling defaults to Overruled\./u);
     assert.match(source, /void submitObjectionRuling\("overruled"\)/u);
     assert.match(
@@ -837,7 +872,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps live controls, paused copy, and confirmation actions legible in Light Mode", () => {
+  it("keeps in-room controls, paused copy, and confirmation actions legible in Light Mode", () => {
     assert.match(
       css,
       /\.dashboard\[data-theme="light"\] \.confirmDialog button/u,
@@ -853,7 +888,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.live\[data-theme="light"\] \.liveHeader \.exitButton,\s*\.live\[data-theme="light"\] \.liveControls button\s*\{[^}]*color:\s*#3b3343;[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\)/u,
+      /\.live\[data-theme="light"\] \.liveHeader \.exitButton,\s*\.live\[data-theme="light"\] \.proceedingControlActions button\s*\{[^}]*color:\s*#3b3343;[^}]*background:\s*rgba\(255,\s*255,\s*255,\s*0\.78\)/u,
     );
     assert.match(
       css,
@@ -901,10 +936,11 @@ describe("Debate experience", () => {
     assert.match(css, /\.returnToLiveButton/u);
   });
 
-  it("allows live Participant interjections and gives the moderator the ruling", () => {
+  it("keeps ordinary Participant interjections as a conversational floor break", () => {
     assert.match(source, /\/interject/u);
     assert.match(source, /Interject now/u);
-    assert.match(source, /The moderator will rule after you cut in/u);
+    assert.match(source, /Conversational cut-in/u);
+    assert.match(source, /The moderator will restore the scheduled floor/u);
     assert.match(source, /"interjection"/u);
     assert.match(source, /"moderator_ruling"/u);
     assert.match(source, /debateGalleryReactingIndices/u);
@@ -915,7 +951,180 @@ describe("Debate experience", () => {
     assert.match(css, /\.floorStatus/u);
   });
 
-  it("keeps the player Judge's gavel live with overtime and one-message intervention paths", () => {
+  it("lets a Participant shout first, then state or withdraw a persisted objection", () => {
+    assert.match(source, /\/participant-objection`/u);
+    assert.match(source, /\/participant-objection\/resolve/u);
+    assert.match(source, /participantObjectionShortcutEnabledRef/u);
+    assert.match(source, /event\.key\.toLocaleLowerCase\(\) !== "o"/u);
+    assert.match(
+      source,
+      /input, textarea, select, button, a\[href\],[\s\S]{0,100}\[role="textbox"\]/u,
+    );
+    assert.match(source, /aria-keyshortcuts="O"/u);
+    assert.match(source, />\s*Objection!\s*<kbd/u);
+    assert.match(source, /cancelCurrentPresentation\(\)/u);
+    assert.match(source, /participant_objection_reason/u);
+    assert.match(source, /Objection raised/u);
+    assert.match(source, /State the point/u);
+    assert.match(
+      source,
+      /The floor is held\. The moderator will rule when you submit\./u,
+    );
+    assert.match(
+      source,
+      /What specifically is wrong with the claim, procedure, or cited evidence\?/u,
+    );
+    assert.match(source, />\s*Withdraw\s*</u);
+    assert.match(source, />\s*Submit objection\s*</u);
+    assert.match(
+      source,
+      /session\.stepKey === "participant_objection_reason"[\s\S]{0,140}session\.participantObjection\?\.status === "awaiting_reason"/u,
+    );
+    assert.match(
+      source,
+      /participantObjectionAwaitingReason[\s\S]{0,150}Resolve your objection first/u,
+    );
+    assert.match(
+      source,
+      /const previousEventIds = new Set\([\s\S]{0,180}!previousEventIds\.has\(event\.id\)/u,
+    );
+    assert.match(css, /\.participantFloorRail/u);
+    assert.match(css, /\.participantObjectionButton/u);
+    assert.match(css, /\.participantObjectionDock/u);
+    assert.match(
+      css,
+      /\.participantObjectionActions button\s*\{[^}]*min-height:\s*44px/u,
+    );
+    assert.match(
+      css,
+      /@media \(forced-colors: active\)[\s\S]*?\.participantFloorRail/u,
+    );
+  });
+
+  it("directs every Participant floor turn through the PRISM advocate podium", () => {
+    assert.match(source, /function debateParticipantFloorRole/u);
+    assert.match(
+      source,
+      /session\.playerRole !== "participant"[\s\S]{0,120}event\?\.speakerKind !== "player"/u,
+    );
+    assert.match(
+      source,
+      /const participantFloorRole = debateParticipantFloorRole\(\s*session,\s*activeEvent/u,
+    );
+    assert.match(
+      source,
+      /activeEvent\?\.speakerKind === "player" && participantPlayerBotId[\s\S]{0,100}\? participantPlayerBotId/u,
+    );
+    assert.match(
+      source,
+      /event\?\.kind === "objection" \|\| event\?\.kind === "interjection"/u,
+    );
+    assert.match(
+      source,
+      /data-participant-proxy=\{\s*playerControlled \? "true" : undefined/u,
+    );
+    assert.match(
+      source,
+      /playerControlled && participantCuttingIn[\s\S]{0,80}\? "true"/u,
+    );
+    assert.match(
+      source,
+      /playerControlled && participantObjecting[\s\S]{0,80}\? "true"/u,
+    );
+    assert.match(
+      source,
+      /session\.playerRole === "participant" &&\s*session\.playerSideId !== "against"\s*\? null/u,
+    );
+    assert.match(
+      source,
+      /session\.playerRole === "participant" &&\s*session\.playerSideId === "against"\s*\? null/u,
+    );
+    assert.match(
+      css,
+      /\.botStagePresence\[data-participant-proxy="true"\]\[data-cut-in="true"\]/u,
+    );
+    assert.match(
+      css,
+      /\.botStagePresence\[data-participant-proxy="true"\]\[data-objecting="true"\]/u,
+    );
+    assert.match(
+      css,
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]{0,320}\.botStagePresence/u,
+    );
+    assert.doesNotMatch(source, /styles\.playerPresence/u);
+    assert.doesNotMatch(css, /\.playerPresence/u);
+  });
+
+  it("replaces the selected Participant advocate with PRISM and casts only a Judge and opponent", () => {
+    assert.equal(DEBATE_PLAYER_PARTICIPANT_BOT_ID, "prism:player-participant");
+    assert.match(source, /const DEBATE_PLAYER_PARTICIPANT_PRISM/u);
+    assert.match(source, /function debateParticipantPrismAvatar/u);
+    assert.match(
+      source,
+      /id: DEBATE_PLAYER_JUDGE_BOT_ID,[\s\S]{0,160}role: "advocate"/u,
+    );
+    assert.match(
+      source,
+      /session\.playerRole === "participant" \? "PRISM · You" : "You"/u,
+    );
+    assert.match(
+      source,
+      /const participantInputRole:[\s\S]{0,180}!presenting[\s\S]{0,180}session\.status === "waiting_for_player"/u,
+    );
+    assert.match(
+      source,
+      /const activeRole:[\s\S]{0,100}participantInputRole \?\?/u,
+    );
+    assert.match(
+      source,
+      /session\.phase === "opening"[\s\S]{0,100}"Deliver your opening"[\s\S]{0,100}session\.phase === "closing"[\s\S]{0,100}"Deliver your closing"/u,
+    );
+    assert.match(
+      source,
+      /participantInputRole && participantPlayerBotId[\s\S]{0,80}\? participantPlayerBotId/u,
+    );
+    assert.match(
+      source,
+      /const appearanceBot = playerControlled\s*\? participantPrismBot/u,
+    );
+    assert.match(
+      source,
+      /fixedParticipantAdvocate[\s\S]{0,220}DEBATE_PLAYER_PARTICIPANT_PRISM/u,
+    );
+    assert.match(
+      source,
+      /playerRole === "participant"\s*\? \["moderator", participantOpponentCastSlot\]/u,
+    );
+    assert.match(
+      source,
+      /playerRole === "participant" && playerSideId === "for"\s*\? undefined\s*: cast\.forAdvocate/u,
+    );
+    assert.match(
+      source,
+      /playerRole === "participant" && playerSideId === "against"\s*\? undefined\s*: cast\.againstAdvocate/u,
+    );
+    assert.match(source, /Participant is available in Forum only\./u);
+    assert.match(
+      source,
+      /const participantForumOnly =\s*playerRole === "participant" && option\.id === "turnabout"/u,
+    );
+    assert.match(
+      source,
+      /disabled=\{role === "participant" && format !== "forum"\}/u,
+    );
+    assert.match(source, /function debateParticipantModeratorTitle/u);
+    assert.match(source, /`\$\{normalized\} · Judge`/u);
+    assert.match(
+      css,
+      /\.botIdentityPosition\[data-participant-proxy="true"\] \.botIdentityPlate/u,
+    );
+    assert.doesNotMatch(source, /Pass to partner/u);
+    assert.doesNotMatch(source, /partner/iu);
+    assert.doesNotMatch(source, /challenge_participant_partner/u);
+    assert.doesNotMatch(source, /rebuttal_(?:against|for)_partner/u);
+  });
+
+  it("keeps Judge adjudication and lifecycle controls together without requiring a gavel to pause", () => {
     assert.match(source, /\/judge-gavel`/u);
     assert.match(source, /\/judge-gavel\/message`/u);
     assert.match(source, /data-tutorial-target="debate-judge-gavel"/u);
@@ -979,9 +1188,29 @@ describe("Debate experience", () => {
       /event\.kind === "judge_gavel" &&\s*event\.gavelReason === "intervention"[\s\S]{0,260}speechTiming:\s*null/u,
     );
     assert.match(page, /debateJudgeGavelVoiceMood\(utterance\.event\)/u);
-    assert.match(source, /const pauseOnGavelCooldown =/u);
-    assert.match(source, /Pause available after the gavel cooldown in/u);
-    assert.match(source, /Pause · \$\{judgeGavelCooldownSeconds\}s/u);
+    assert.match(source, /data-tutorial-target="debate-proceeding-controls"/u);
+    assert.match(source, /Judge proceeding controls/u);
+    assert.match(
+      source,
+      />\s*\{session\.status === "paused" \? "Resume" : "Pause"\}\s*</u,
+    );
+    assert.match(source, /\?\s*"Skip deliberation"\s*:\s*"End debate"/u);
+    assert.doesNotMatch(source, /className=\{styles\.liveControls\}/u);
+    assert.doesNotMatch(source, /pauseOnGavelCooldown/u);
+    assert.match(
+      source,
+      /const lifecycleControlGavel =[\s\S]{0,180}event\.stepKey === "pause" \|\| event\.stepKey === "resume"[\s\S]{0,180}!lifecycleControlGavel/u,
+    );
+    assert.match(
+      source,
+      /options\.automaticJudgeGavel !== true[\s\S]{0,120}!lifecycleControlGavel/u,
+    );
+    assert.ok(
+      (source.match(/automaticJudgeGavel:\s*true/gu) ?? []).length >= 2,
+      "Pause and interrupted-presentation Resume must both make lifecycle gavel presentation automatic",
+    );
+    assert.match(css, /\.proceedingControls/u);
+    assert.match(css, /\.proceedingControlActions/u);
     assert.match(css, /\.judgeGavelButton/u);
     assert.match(css, /\.judgeGavelButton kbd/u);
     assert.match(css, /@keyframes debate-judge-gavel-ready/u);
@@ -989,18 +1218,49 @@ describe("Debate experience", () => {
     assert.match(css, /\.floorStatus\[data-kind="judge_gavel"\]/u);
     assert.match(source, /Choose a Judge intervention/u);
     assert.match(source, /submitJudgeQuickChoice/u);
+    assert.doesNotMatch(source, /choice\.action === "end"/u);
     assert.match(
       source,
-      /choice\.action === "end"[\s\S]{0,100}setEarlyEndOpen\(true\)/u,
+      /className=\{styles\.endEarlyButton\}[\s\S]{0,100}data-action="end"/u,
     );
     assert.match(source, /Final authority/u);
     assert.match(source, /End this Debate\?/u);
+    assert.match(source, /function debateJudgeGavelLockedForJury/u);
+    assert.match(
+      source,
+      /const judgeGavelJuryLocked =\s*debateJudgeGavelLockedForJury\(activeSession\) \|\|[\s\S]{0,100}judgeGavelActiveTarget\?\.speakerKind === "juror"/u,
+    );
+    assert.match(
+      source,
+      /ceremonialAvailable:\s*!judgeGavelJuryLocked &&[\s\S]{0,120}objectionRuling\?\.status !== "awaiting_ruling" &&[\s\S]{0,80}judgeGavelCeremony\?\.status === "ready"/u,
+    );
+    assert.match(
+      source,
+      /debateJudgeGavelLockedForJury\(previous\)[\s\S]{0,100}previous\.judgeGavel\?\.status/u,
+    );
+    assert.match(
+      source,
+      /previous\.objectionRuling\?\.status === "awaiting_ruling"/u,
+    );
+    assert.match(
+      source,
+      /activeSession\.objectionRuling\?\.status !== "awaiting_ruling"/u,
+    );
+    assert.match(
+      source,
+      /const judgeGavelCeremonyReady =\s*!judgeJuryGavelLocked/u,
+    );
+    assert.match(
+      source,
+      /session\.status !== "paused" &&\s*!judgeJuryGavelLocked/u,
+    );
+    assert.match(source, /!judgeObjectionAwaitingRuling/u);
   });
 
   it("performs a missed Judge gavel cue as a silent camera beat", () => {
     assert.match(
       source,
-      /gavelCue && next\.playerRole === "judge"[\s\S]{0,180}requestJudgeGavelCeremonyRef\.current\?\.\(gavelCue\)[\s\S]{0,100}gavelCue = null/u,
+      /gavelCue &&[\s\S]{0,120}next\.playerRole === "judge"[\s\S]{0,180}requestJudgeGavelCeremonyRef\.current\?\.\(gavelCue\)[\s\S]{0,100}gavelCue = null/u,
     );
     assert.match(source, /data-debate-judge-gavel-cue="true"/u);
     assert.match(source, /The room is waiting on you\./u);
@@ -1021,7 +1281,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /\{judgeGavelCeremony \? \(\s*judgeGavelCeremony\.status === "ready" \? \(/u,
+      /\{judgeGavelCeremony && !judgeJuryGavelLocked \? \(\s*judgeGavelCeremony\.status === "ready" \? \(/u,
     );
     assert.match(
       source,
@@ -1137,7 +1397,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /function debateJuryCameraIsActive[\s\S]{0,220}session\.playerRole === "spectator"/u,
+      /function debateJuryCameraIsActive[\s\S]{0,260}session\.playerRole === "spectator"[\s\S]{0,80}session\.playerRole === "judge"/u,
     );
     assert.doesNotMatch(
       source,
@@ -1199,15 +1459,15 @@ describe("Debate experience", () => {
     assert.match(css, /@keyframes jury-ballot-cast/u);
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="0"\]\s*\{[^}]*left:\s*50%[^}]*top:\s*53%[^}]*width:\s*clamp\(80px,\s*8vw,\s*115px\)/u,
+      /\.juryChamberSeat\[data-seat="0"\]\s*\{[^}]*left:\s*50%[^}]*top:\s*50%[^}]*width:\s*clamp\(138px,\s*12\.8vw,\s*200px\)/u,
     );
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="1"\]\s*\{[^}]*left:\s*27%[^}]*top:\s*58%[^}]*width:\s*clamp\(86px,\s*8\.6vw,\s*123px\)/u,
+      /\.juryChamberSeat\[data-seat="1"\]\s*\{[^}]*left:\s*27%[^}]*top:\s*56%[^}]*width:\s*clamp\(146px,\s*13\.5vw,\s*210px\)/u,
     );
     assert.match(
       css,
-      /\.juryChamberSeat\[data-seat="4"\]\s*\{[^}]*left:\s*83%[^}]*top:\s*65%/u,
+      /\.juryChamberSeat\[data-seat="4"\]\s*\{[^}]*left:\s*87%[^}]*top:\s*64%/u,
     );
     assert.doesNotMatch(css, /\.juryChamberSeat\[data-seat="5"\]/u);
     assert.match(
@@ -1240,6 +1500,26 @@ describe("Debate experience", () => {
       ),
       true,
     );
+  });
+
+  it("keeps the Participant Jury anonymous and renders the canonical five votes", () => {
+    assert.equal(DEBATE_JURY_SIZE, 5);
+    assert.match(
+      source,
+      /participantView\s*\? Array\.from\(\{ length: DEBATE_JURY_SIZE \}/u,
+    );
+    assert.match(source, /data-anonymous="true"/u);
+    assert.match(source, /Anonymous Jury seat \$\{index \+ 1\}/u);
+    assert.match(
+      source,
+      /session\.playerRole === "participant"[\s\S]{0,100}Array\.from\(\{ length: DEBATE_JURY_SIZE \}/u,
+    );
+    assert.doesNotMatch(source, /Array\.from\(\{ length: 7 \}/u);
+    assert.match(
+      css,
+      /\.juryRosterSeats\s*\{[^}]*grid-template-columns:\s*repeat\(5,/u,
+    );
+    assert.match(css, /\.juryRosterSeats > span\[data-anonymous="true"\]/u);
   });
 
   it("queues the latest juror thought and keeps Jury comments out of Proceedings", () => {
@@ -1589,6 +1869,79 @@ describe("Debate experience", () => {
     );
   });
 
+  it("lets the public gallery react live without stalling the floor", () => {
+    assert.match(source, /debateAudienceBeatForEvent\(\{/u);
+    assert.match(
+      source,
+      /publicContent:\s*activePublicContent,[\s\S]{0,120}seatCount:\s*audienceBots\.length/u,
+    );
+    assert.match(
+      source,
+      /data-live-reacting=\{[\s\S]{0,120}audienceListenerReaction/u,
+    );
+    assert.match(source, /data-audience-beat=\{/u);
+    assert.match(source, /data-listening-reaction=\{/u);
+    assert.match(source, /listenerReaction:\s*audienceListenerReaction/u);
+    assert.match(
+      source,
+      /if \(semanticAudienceReaction\) \{\s*playDebateAudienceReaction\(semanticAudienceReaction, event\.id\);\s*\}\s*if \(event\.kind === "silence"\)/u,
+    );
+    assert.doesNotMatch(source, /await playDebateAudienceReaction/u);
+    assert.doesNotMatch(
+      source,
+      /window\.setTimeout\(resolve,\s*reaction\.durationMs\)/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceBotPortrait\[data-live-reacting="true"\]\s*\{[^}]*animation:\s*debate-audience-live-reaction/u,
+    );
+    assert.match(
+      css,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.debateAudienceBotPortrait\[data-live-reacting="true"\]/u,
+    );
+  });
+
+  it("shouts bot objections while keeping the visible transcript literal", () => {
+    assert.match(source, /voicePerformanceText\?: string \| null/u);
+    assert.match(
+      source,
+      /voicePerformanceText:\s*event\.kind === "objection"\s*\?\s*`\[shouts\] \$\{spokenText\}`\s*:\s*null/u,
+    );
+    assert.match(source, /spokenText,\s*voicePerformanceText:/u);
+    assert.match(
+      page,
+      /const debateVoicePerformanceText =\s*utterance\.voicePerformanceText \?\?\s*\(usePlayerVoice[\s\S]{0,120}voicePerformanceTextFromActionCues\(utterance\.spokenText\)/u,
+    );
+    assert.match(page, /voicePerformanceText:\s*debateVoicePerformanceText/u);
+    assert.match(
+      page,
+      /botPowerVoiceGainMultiplierV1\(speakerPowers\) \*\s*\(utterance\.event\.kind === "objection" \? 1\.14 : 1\)/u,
+    );
+  });
+
+  it("keeps historical side colors stable and marks only the active case card", () => {
+    assert.match(
+      source,
+      /card\.createdEventId === activeEvent\?\.id\s*\?\s*"true"/u,
+    );
+    assert.match(
+      css,
+      /\.caseBoard[\s\S]{0,100}\.caseColumns[\s\S]{0,100}section\[data-side="for"\][\s\S]{0,100}li\[data-active="true"\]/u,
+    );
+    assert.match(
+      css,
+      /\.transcriptFeed article\[data-side="for"\] header strong\s*\{[^}]*var\(--debate-for-color\)/u,
+    );
+    assert.match(
+      css,
+      /\.transcriptFeed article\[data-side="against"\] header strong\s*\{[^}]*var\(--debate-against-color\)/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.transcriptFeed article header strong\s*\{[^}]*var\(--debate-active-color\)/u,
+    );
+  });
+
   it("bookends a new live Forum and its completed verdict with the Living Chamber ident", () => {
     assert.match(source, /playDebateIdentAudio\(\{/u);
     assert.match(
@@ -1648,7 +2001,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("forces Judge camera direction to Auto while preserving manual cameras for other roles", () => {
+  it("keeps the Judge public floor on Auto while allowing the live Jury chamber", () => {
     assert.match(
       source,
       /type DebateCameraView = "wide" \| "left" \| "moderator" \| "right" \| "jury"/u,
@@ -1668,7 +2021,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /function debateCameraModeForSession[\s\S]{0,180}session\.playerRole === "judge" \? "auto" : cameraMode/u,
+      /function debateCameraModeForSession[\s\S]{0,220}session\.playerRole !== "judge"\) return cameraMode;[\s\S]{0,100}cameraMode === "jury" \? "jury" : "auto"/u,
     );
     assert.match(
       source,
@@ -1699,28 +2052,29 @@ describe("Debate experience", () => {
       source,
       /data-locked=\{judgeGavelCameraForced \? "true" : undefined\}/u,
     );
-    assert.match(
-      source,
-      /disabled=\{\s*judgeGavelCameraForced \|\|\s*session\.playerRole === "judge"\s*\}/u,
-    );
+    assert.match(source, /disabled=\{judgeGavelCameraForced\}/u);
     assert.doesNotMatch(
       source,
       /const triggerJudgeGavelSmash[\s\S]{0,420}setCameraMode\("moderator"\)/u,
     );
     assert.match(source, /data-camera-view=\{cameraView\}/u);
     assert.match(source, /data-camera-mode=\{effectiveCameraMode\}/u);
-    assert.match(source, /locked to Auto while you are Judge/u);
     assert.match(
       source,
-      /session\.playerRole === "judge"\s*\? camera\.id === "auto"/u,
+      /session\.playerRole === "judge"\s*\? camera\.id === "auto" \|\|[\s\S]{0,100}camera\.id === "jury" && session\.jury\.enabled/u,
     );
     assert.match(
       source,
-      /session\.playerRole === "spectator" \? \(\s*<button[\s\S]{0,300}setCameraMode\("jury"\)/u,
+      /session\.playerRole === "spectator" \? \([\s\S]{0,600}Watch Jury/u,
     );
+    assert.match(
+      source,
+      /session\.playerRole === "judge" \? \([\s\S]{0,400}selectDebateCameraMode\("jury"\)[\s\S]{0,260}Watch Jury/u,
+    );
+    assert.match(source, /Watch Jury/u);
     assert.match(
       css,
-      /\.cameraControls\[data-forced-auto="true"\] button\[data-selected="true"\]/u,
+      /\.cameraControls\[data-judge-camera="true"\] button\[data-selected="true"\]/u,
     );
     assert.match(source, /data-tutorial-target="debate-camera"/u);
     assert.match(
@@ -1799,7 +2153,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /function debateCameraTransition[\s\S]{0,260}event\?\.kind === "objection" \? "objection-pan" : "cut"/u,
+      /function debateCameraTransition[\s\S]{0,300}event\?\.kind === "objection" \|\| event\?\.kind === "interjection"[\s\S]{0,80}\? "objection-pan"[\s\S]{0,40}: "cut"/u,
     );
     assert.match(
       css,
@@ -1886,7 +2240,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /await adoptSession\(previous,\s*\{\s*\.\.\.result\.session,\s*status:\s*previous\.status,\s*\}\);\s*setActiveSession\(result\.session\)/u,
+      /await adoptSession\(\s*previous,\s*\{\s*\.\.\.result\.session,\s*status:\s*previous\.status,\s*\},\s*\{\s*automaticJudgeGavel:\s*true,\s*\},\s*\);\s*setActiveSession\(result\.session\)/u,
     );
     assert.match(source, /session\.status === "paused" && !presenting/u);
     assert.match(
@@ -1960,7 +2314,7 @@ describe("Debate experience", () => {
     assert.match(source, /playerVoice:\s*next\.playerRole === "judge"/u);
     assert.match(
       source,
-      /roleLabel: normalizeDebateModeratorTitle\(session\.moderatorTitle\)/u,
+      /roleLabel:[\s\S]{0,180}normalizeDebateModeratorTitle\(session\.moderatorTitle\)/u,
     );
     assert.doesNotMatch(
       source,
@@ -1972,6 +2326,20 @@ describe("Debate experience", () => {
     assert.match(
       page,
       /const usePlayerVoice = utterance\.player \|\| utterance\.playerVoice/u,
+    );
+    assert.match(
+      page,
+      /voicePerformanceTextFromActionCues\(utterance\.spokenText\)/u,
+    );
+    assert.match(page, /buildBundledActionSfxPlan\(utterance\.spokenText\)/u);
+    assert.match(
+      page,
+      /playDebatePlayerActionSfx\(playerActionSfxPlan\.kind\)/u,
+    );
+    assert.match(page, /elevenLabsText:\s*message\.voicePerformanceText/u);
+    assert.doesNotMatch(
+      page,
+      /elevenLabsText:\s*voiceSpokenText\(message\.voicePerformanceText\)/u,
     );
     assert.match(page, /frozenVoiceProfile:\s*usePlayerVoice\s*\?\s*null/u);
     assert.match(

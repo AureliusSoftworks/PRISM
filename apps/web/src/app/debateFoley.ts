@@ -4,9 +4,37 @@ import {
 } from "./session-atmosphere-audio.ts";
 import type { DebateEventV1, DebateFormatId } from "@localai/shared";
 import type { DebateForumRole } from "./DebateForumScene.tsx";
+import {
+  debateGalleryReactingIndices,
+  debateGalleryReaction,
+  type DebateGalleryReaction,
+} from "./debatePresentation.ts";
 
 export type DebateModeratorGavelCueKind = "attention" | "order";
-export type DebateAudienceReactionKind = "session" | "order";
+export type DebateAudienceReactionKind =
+  | "session"
+  | "order"
+  | "objection"
+  | "evidence"
+  | "question"
+  | "concession"
+  | "ruling";
+
+export type DebateAudienceBeatKind =
+  | "attentive"
+  | "contention"
+  | "question"
+  | "evidence"
+  | "concession"
+  | "objection"
+  | "ruling";
+
+export interface DebateAudienceBeat {
+  kind: DebateAudienceBeatKind;
+  listenerReaction: DebateGalleryReaction;
+  seatIndices: number[];
+  foleyCue: DebateAudienceReactionKind | null;
+}
 
 export interface DebateModeratorGavelCue {
   eventId: string;
@@ -35,10 +63,111 @@ export const DEBATE_AUDIENCE_REACTIONS = {
     durationMs: 2_300,
     trim: 0.42,
   },
+  objection: {
+    url: "/audio/debate/courtroom-audience-order-hush.mp3",
+    durationMs: 2_300,
+    trim: 0.24,
+  },
+  evidence: {
+    url: "/audio/debate/courtroom-paper-shuffle.mp3",
+    durationMs: 1_100,
+    trim: 0.34,
+  },
+  question: {
+    url: "/audio/debate/courtroom-chair-shift.mp3",
+    durationMs: 1_100,
+    trim: 0.26,
+  },
+  concession: {
+    url: "/audio/debate/courtroom-audience-session-settle.mp3",
+    durationMs: 3_000,
+    trim: 0.28,
+  },
+  ruling: {
+    url: "/audio/debate/courtroom-audience-order-hush.mp3",
+    durationMs: 2_300,
+    trim: 0.34,
+  },
 } as const satisfies Record<
   DebateAudienceReactionKind,
   { url: string; durationMs: number; trim: number }
 >;
+
+const DEBATE_AUDIENCE_REACTIVE_EVENT_KINDS = new Set<DebateEventV1["kind"]>([
+  "speech",
+  "testimony",
+  "press",
+  "objection",
+  "evidence",
+  "revelation",
+  "player_turn",
+  "interjection",
+  "moderator_ruling",
+  "verdict",
+  "jury_verdict",
+]);
+
+export function debateAudienceBeatForEvent(args: {
+  event: DebateEventV1 | null;
+  publicContent: string;
+  seatCount: number;
+}): DebateAudienceBeat | null {
+  const { event } = args;
+  const publicContent = args.publicContent.trim();
+  const seatCount = Math.max(0, Math.floor(args.seatCount));
+  if (
+    !event ||
+    !publicContent ||
+    seatCount === 0 ||
+    !DEBATE_AUDIENCE_REACTIVE_EVENT_KINDS.has(event.kind) ||
+    event.speakerKind === "system" ||
+    (event.speakerKind === "juror" && event.kind !== "jury_verdict")
+  ) {
+    return null;
+  }
+
+  let listenerReaction = debateGalleryReaction(publicContent);
+  let kind: DebateAudienceBeatKind =
+    listenerReaction === "divided" ? "contention" : listenerReaction;
+
+  if (event.kind === "objection" || event.kind === "interjection") {
+    kind = "objection";
+    listenerReaction = "divided";
+  } else if (event.kind === "evidence" || event.kind === "revelation") {
+    kind = "evidence";
+    listenerReaction = "evidence";
+  } else if (
+    event.kind === "moderator_ruling" ||
+    event.kind === "verdict" ||
+    event.kind === "jury_verdict"
+  ) {
+    kind = "ruling";
+  }
+
+  const reactingIndices = debateGalleryReactingIndices(
+    event.content || publicContent,
+    event.sequence,
+    seatCount,
+  );
+  const seatIndices =
+    kind === "attentive"
+      ? reactingIndices.slice(0, 1)
+      : reactingIndices.slice(0, 2);
+  const foleyCue: DebateAudienceReactionKind | null =
+    kind === "objection"
+      ? "objection"
+      : kind === "evidence"
+        ? "evidence"
+        : kind === "question"
+          ? "question"
+          : kind === "concession"
+            ? "concession"
+            : kind === "ruling"
+              ? "ruling"
+              : null;
+
+  return { kind, listenerReaction, seatIndices, foleyCue };
+}
 
 export const DEBATE_GAVEL_FOLEY_URLS = {
   attention: "/audio/debate/gavel-attention-v3.wav",

@@ -11,6 +11,7 @@ import {
   DEBATE_GAVEL_FOLEY_URLS,
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
   DEBATE_GAVEL_VISUAL_IMPACT_MS,
+  debateAudienceBeatForEvent,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -182,6 +183,111 @@ describe("Debate vocal Foley", () => {
       }),
       null,
     );
+  });
+});
+
+describe("Debate audience beats", () => {
+  it("selects one or two stable reacting seats from public event truth", () => {
+    const objection = debateEvent("objection", {
+      sequence: 7,
+      speakerKind: "advocate",
+      speakerBotId: "against",
+      sideId: "against",
+      content: "Objection! That conclusion ignores the heard premise.",
+    });
+    const beginning = debateAudienceBeatForEvent({
+      event: objection,
+      publicContent: "Objection!",
+      seatCount: 8,
+    });
+    const complete = debateAudienceBeatForEvent({
+      event: objection,
+      publicContent: objection.content,
+      seatCount: 8,
+    });
+
+    assert.equal(complete?.kind, "objection");
+    assert.equal(complete?.listenerReaction, "divided");
+    assert.equal(complete?.foleyCue, "objection");
+    assert.deepEqual(beginning?.seatIndices, complete?.seatIndices);
+    assert.ok((complete?.seatIndices.length ?? 0) >= 1);
+    assert.ok((complete?.seatIndices.length ?? 0) <= 2);
+    assert.ok(complete?.seatIndices.every((index) => index >= 0 && index < 8));
+  });
+
+  it("maps evidence, questions, concessions, and rulings to bounded cues", () => {
+    const cases = [
+      {
+        event: debateEvent("evidence", {
+          speakerKind: "advocate",
+          content: "The frozen record confirms it. [[source:frozen-1]]",
+        }),
+        kind: "evidence",
+        foleyCue: "evidence",
+      },
+      {
+        event: debateEvent("speech", {
+          speakerKind: "advocate",
+          content: "Does that answer the actual harm?",
+        }),
+        kind: "question",
+        foleyCue: "question",
+      },
+      {
+        event: debateEvent("speech", {
+          speakerKind: "advocate",
+          content: "I concede that premise.",
+        }),
+        kind: "concession",
+        foleyCue: "concession",
+      },
+      {
+        event: debateEvent("moderator_ruling", {
+          speakerKind: "moderator",
+          content: "Overruled. Finish the point.",
+        }),
+        kind: "ruling",
+        foleyCue: "ruling",
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      const beat = debateAudienceBeatForEvent({
+        event: entry.event,
+        publicContent: entry.event.content,
+        seatCount: 7,
+      });
+      assert.equal(beat?.kind, entry.kind);
+      assert.equal(beat?.foleyCue, entry.foleyCue);
+      assert.ok((beat?.seatIndices.length ?? 0) >= 1);
+      assert.ok((beat?.seatIndices.length ?? 0) <= 2);
+    }
+  });
+
+  it("does not turn private, silent, or system-only state into a gallery cue", () => {
+    for (const event of [
+      debateEvent("silence", {
+        speakerKind: "advocate",
+        content: "...",
+      }),
+      debateEvent("phase", {
+        speakerKind: "system",
+        content: "Private transition.",
+      }),
+      debateEvent("jury_deliberation", {
+        speakerKind: "juror",
+        content: "Private deliberation.",
+      }),
+    ]) {
+      assert.equal(
+        debateAudienceBeatForEvent({
+          event,
+          publicContent: event.content,
+          seatCount: 8,
+        }),
+        null,
+      );
+    }
   });
 });
 
@@ -430,6 +536,31 @@ describe("Debate moderator gavel", () => {
         url: "/audio/debate/courtroom-audience-order-hush.mp3",
         durationMs: 2_300,
         trim: 0.42,
+      },
+      objection: {
+        url: "/audio/debate/courtroom-audience-order-hush.mp3",
+        durationMs: 2_300,
+        trim: 0.24,
+      },
+      evidence: {
+        url: "/audio/debate/courtroom-paper-shuffle.mp3",
+        durationMs: 1_100,
+        trim: 0.34,
+      },
+      question: {
+        url: "/audio/debate/courtroom-chair-shift.mp3",
+        durationMs: 1_100,
+        trim: 0.26,
+      },
+      concession: {
+        url: "/audio/debate/courtroom-audience-session-settle.mp3",
+        durationMs: 3_000,
+        trim: 0.28,
+      },
+      ruling: {
+        url: "/audio/debate/courtroom-audience-order-hush.mp3",
+        durationMs: 2_300,
+        trim: 0.34,
       },
     });
 

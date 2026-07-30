@@ -192,6 +192,8 @@ import {
   getDebateSession,
   listDebateSessions,
   pauseDebateSession,
+  raiseDebateParticipantObjection,
+  resolveDebateParticipantObjection,
   resumeDebateSession,
   skipDebateJuryDeliberation,
   submitDebateInterjection,
@@ -13055,6 +13057,8 @@ function buildRoutes(): RouteDefinition[] {
               motion: body.motion,
               forAdvocateBotId: body.forAdvocateBotId,
               againstAdvocateBotId: body.againstAdvocateBotId,
+              playerRole: body.playerRole,
+              playerSideId: body.playerSideId,
             },
             runtime,
           ),
@@ -13163,6 +13167,57 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/participant-objection", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const session = raiseDebateParticipantObjection(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof raiseDebateParticipantObjection>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route(
+      "POST",
+      "/api/debates/:id/participant-objection/resolve",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const frozen = getDebateSession(db, userId, ctx.params.id);
+        const runtime = debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozen.model,
+          frozen.responseMode,
+          frozen.generationChain,
+        );
+        const session = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "debate",
+            surface: "debate",
+          },
+          () =>
+            resolveDebateParticipantObjection(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<
+                typeof resolveDebateParticipantObjection
+              >[3],
+              runtime,
+            ),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      },
+    ),
     route("POST", "/api/debates/:id/judge-gavel", async (ctx) => {
       const userId = requireAuth(ctx);
       const session = swingDebateJudgeGavel(

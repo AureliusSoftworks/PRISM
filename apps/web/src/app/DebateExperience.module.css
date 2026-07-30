@@ -133,7 +133,7 @@
 .exitButton,
 .deleteButton,
 .setupActions button,
-.liveControls button,
+.proceedingControlActions button,
 .sectionHeading button,
 .sourceDrawer button,
 .sourceDrawer a,
@@ -1366,13 +1366,13 @@
   font-size: clamp(18px, 2.5vw, 30px);
 }
 
-.liveControls {
+.proceedingControlActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.liveControls .judgeGavelButton {
+.proceedingControlActions .judgeGavelButton {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -1383,7 +1383,7 @@
     color-mix(in srgb, var(--debate-moderator-color) 8%, transparent);
 }
 
-.liveControls .judgeGavelButton kbd {
+.proceedingControlActions .judgeGavelButton kbd {
   border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
   border-radius: 4px;
   padding: 1px 4px;
@@ -1393,33 +1393,33 @@
   opacity: 0.7;
 }
 
-.liveControls .judgeGavelButton[data-overtime="true"] {
+.proceedingControlActions .judgeGavelButton[data-overtime="true"] {
   border-color: color-mix(in srgb, #ff735f 66%, #5c3940);
   color: #ffd3c9;
   background: color-mix(in srgb, #7c3028 38%, #171421);
   animation: debate-judge-gavel-ready 1.35s ease-in-out infinite;
 }
 
-.liveControls .judgeGavelButton[data-cue="true"] {
+.proceedingControlActions .judgeGavelButton[data-cue="true"] {
   border-color: color-mix(in srgb, var(--debate-moderator-color) 78%, white);
   color: #fff;
   background: color-mix(in srgb, var(--debate-moderator-color) 34%, #171421);
   animation: debate-judge-gavel-ready 720ms ease-in-out infinite;
 }
 
-.liveControls .judgeGavelButton[data-cooling="true"] {
+.proceedingControlActions .judgeGavelButton[data-cooling="true"] {
   color: color-mix(in srgb, currentColor 62%, transparent);
   animation: none;
 }
 
-.live[data-theme="light"] .liveControls .judgeGavelButton {
+.live[data-theme="light"] .proceedingControlActions .judgeGavelButton {
   border-color: color-mix(in srgb, var(--debate-moderator-color) 38%, #c8c0ce);
   color: color-mix(in srgb, var(--debate-moderator-color) 58%, #392f42);
   background: color-mix(in srgb, var(--debate-moderator-color) 12%, #fff);
 }
 
 .live[data-theme="light"]
-  .liveControls
+  .proceedingControlActions
   .judgeGavelButton[data-overtime="true"] {
   border-color: color-mix(in srgb, #b74635 54%, #d8c5c3);
   color: #81362b;
@@ -1679,6 +1679,47 @@
   transform-origin: 50% 58%;
   animation: debate-audience-mouth-crosstalk 760ms steps(2, end)
     var(--debate-audience-talk-delay) infinite;
+}
+
+.debateAudienceBotPortrait[data-live-reacting="true"] {
+  filter: brightness(0.94) saturate(0.96);
+  opacity: 0.96;
+  animation: debate-audience-live-reaction 780ms
+    cubic-bezier(0.22, 0.72, 0.2, 1) both;
+}
+
+.debateAudienceBotPortrait[data-audience-beat="objection"],
+.debateAudienceBotPortrait[data-audience-beat="contention"] {
+  box-shadow: 0 -8px 26px color-mix(in srgb, #ff896f 24%, transparent);
+}
+
+.debateAudienceBotPortrait[data-audience-beat="evidence"],
+.debateAudienceBotPortrait[data-audience-beat="concession"] {
+  box-shadow: 0 -8px 26px color-mix(in srgb, #82d9b4 22%, transparent);
+}
+
+.debateAudienceBotPortrait[data-audience-beat="question"] {
+  box-shadow: 0 -8px 24px
+    color-mix(in srgb, var(--debate-active-color) 20%, transparent);
+}
+
+.debateAudienceBotPortrait[data-audience-beat="ruling"] {
+  box-shadow: 0 -8px 26px
+    color-mix(in srgb, var(--debate-moderator-color) 24%, transparent);
+}
+
+@keyframes debate-audience-live-reaction {
+  0% {
+    transform: translateY(14%) scale(var(--debate-audience-depth));
+  }
+
+  48% {
+    transform: translateY(7%) scale(var(--debate-audience-depth));
+  }
+
+  100% {
+    transform: translateY(10%) scale(var(--debate-audience-depth));
+  }
 }
 
 @keyframes debate-audience-mouth-crosstalk {
@@ -2229,7 +2270,7 @@
   opacity: 0.58;
 }
 
-.cameraControls[data-forced-auto="true"] button[data-selected="true"] {
+.cameraControls[data-judge-camera="true"] button[data-selected="true"] {
   cursor: default;
   opacity: 1;
 }
@@ -2804,10 +2845,6 @@
   top: calc(63.5% + var(--debate-moderator-view-nameplate-offset-y, 0%));
 }
 
-.forumCamera[data-camera-view="moderator"] .playerPresence {
-  opacity: 0;
-}
-
 .botIdentityPosition[data-visibility="hidden"],
 .botIdentityPosition[data-visibility="speaking_only"]:not(
     [data-speaking="true"]
@@ -3194,6 +3231,34 @@
   justify-self: center;
 }
 
+.judgeChoiceDock[data-kind="objection"]:focus {
+  outline: 2px solid
+    color-mix(in srgb, var(--debate-moderator-color) 74%, white);
+  outline-offset: 8px;
+}
+
+.judgeObjectionChoices > button > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.judgeObjectionChoices kbd {
+  flex: 0 0 auto;
+  min-width: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 5px;
+  padding: 2px 5px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: 0 1px rgba(255, 255, 255, 0.08);
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  text-align: center;
+}
+
 .judgeObjectionChoices > button[data-ruling="sustained"] {
   border-color: color-mix(in srgb, #57e59b 52%, transparent);
 }
@@ -3345,28 +3410,80 @@
   }
 }
 
-.playerPresence {
-  position: absolute;
-  z-index: 7;
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 999px;
-  padding: 7px 11px;
-  color: #d8d1e5;
-  background: rgba(20, 17, 25, 0.8);
-  font-size: 11px;
+.botStagePresence[data-participant-proxy="true"][data-cut-in="true"] {
+  animation: debate-participant-cut-in 620ms ease-out both;
 }
 
-.playerPresence[data-role="participant"][data-side="for"] {
-  bottom: 13%;
-  left: 27%;
+.botStagePresence[data-participant-proxy="true"][data-objecting="true"] {
+  filter: drop-shadow(0 0 25px color-mix(in srgb, #ff735e 66%, transparent))
+    drop-shadow(0 26px 30px rgba(0, 0, 0, 0.44));
+  animation: debate-participant-objection 720ms cubic-bezier(0.2, 0.8, 0.2, 1)
+    both;
 }
 
-.playerPresence[data-role="participant"][data-side="against"] {
-  right: 27%;
-  bottom: 13%;
+.botIdentityPosition[data-participant-proxy="true"] .botIdentityPlate {
+  border-color: color-mix(in srgb, #2fd3e3 58%, transparent);
+  color: #e9fdff;
+  background: color-mix(in srgb, #091217 88%, transparent);
+  box-shadow:
+    0 10px 24px rgba(0, 0, 0, 0.34),
+    0 0 22px color-mix(in srgb, #2fd3e3 22%, transparent);
+}
+
+.botIdentityPosition[data-participant-proxy="true"] .botIdentityPlate small {
+  color: color-mix(in srgb, #2fd3e3 66%, white);
+}
+
+.botIdentityPosition[data-participant-proxy="true"][data-cut-in="true"]
+  .botIdentityPlate,
+.botIdentityPosition[data-participant-proxy="true"][data-objecting="true"]
+  .botIdentityPlate {
+  border-color: color-mix(in srgb, #ffb09a 88%, white);
+  color: #fff8f5;
+  background: color-mix(in srgb, #cc4f39 54%, rgba(20, 17, 25, 0.96));
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.4),
+    0 0 36px color-mix(in srgb, #ff735e 58%, transparent);
+}
+
+.podiumGlyphPosition[data-participant-proxy="true"] .podiumGlyphScreen {
+  border-color: color-mix(in srgb, #2fd3e3 64%, #d9dde7 18%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset -4px -6px 9px rgba(0, 0, 0, 0.48),
+    0 0 18px color-mix(in srgb, #2fd3e3 22%, transparent);
+}
+
+@keyframes debate-participant-cut-in {
+  0% {
+    transform: translateY(2px) scale(0.92);
+  }
+
+  58% {
+    transform: translateY(-5px) scale(1.08);
+  }
+
+  100% {
+    transform: translateY(-3px) scale(1.045);
+  }
+}
+
+@keyframes debate-participant-objection {
+  0% {
+    transform: translateY(4px) scale(0.88);
+  }
+
+  52% {
+    transform: translateY(-7px) scale(1.12);
+  }
+
+  72% {
+    transform: translateY(-2px) scale(1.025);
+  }
+
+  100% {
+    transform: translateY(-3px) scale(1.06);
+  }
 }
 
 .caseBoard,
@@ -3437,6 +3554,20 @@
 .caseColumns li[data-status="challenged"],
 .caseColumns li[data-status="conceded"] {
   opacity: 0.68;
+}
+
+.caseBoard .caseColumns section[data-side="for"] li[data-active="true"] {
+  border-left-color: var(--debate-for-color);
+  background: color-mix(in srgb, var(--debate-for-color) 10%, transparent);
+  box-shadow: inset 7px 0 18px
+    color-mix(in srgb, var(--debate-for-color) 8%, transparent);
+}
+
+.caseBoard .caseColumns section[data-side="against"] li[data-active="true"] {
+  border-left-color: var(--debate-against-color);
+  background: color-mix(in srgb, var(--debate-against-color) 10%, transparent);
+  box-shadow: inset 7px 0 18px
+    color-mix(in srgb, var(--debate-against-color) 8%, transparent);
 }
 
 .caseColumns li > span {
@@ -4813,7 +4944,7 @@
 
 .juryRosterSeats {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 4px;
   padding: 13px 10px 7px;
 }
@@ -4834,6 +4965,11 @@
 .juryRosterSeats > span[data-speaking="true"] {
   opacity: 1;
   filter: drop-shadow(0 0 12px var(--gallery-prism-color));
+}
+
+.juryRosterSeats > span[data-anonymous="true"] {
+  filter: none;
+  opacity: 0.48;
 }
 
 .juryRosterSeats small {
@@ -4953,8 +5089,8 @@
 
 .juryChamberSeat {
   position: absolute;
-  width: clamp(92px, 9.2vw, 132px);
-  height: clamp(122px, 12.2vw, 176px);
+  width: clamp(150px, 14vw, 220px);
+  height: clamp(200px, 18.7vw, 294px);
   transform: translate(-50%, -50%);
   color: var(--jury-seat-color);
   filter: saturate(0.82) brightness(0.86);
@@ -5047,29 +5183,29 @@
 
 .juryChamberSeat[data-seat="0"] {
   left: 50%;
-  top: 53%;
-  width: clamp(80px, 8vw, 115px);
-  height: clamp(106px, 10.6vw, 153px);
+  top: 50%;
+  width: clamp(138px, 12.8vw, 200px);
+  height: clamp(184px, 17.1vw, 267px);
 }
 .juryChamberSeat[data-seat="1"] {
   left: 27%;
-  top: 58%;
-  width: clamp(86px, 8.6vw, 123px);
-  height: clamp(114px, 11.4vw, 164px);
+  top: 56%;
+  width: clamp(146px, 13.5vw, 210px);
+  height: clamp(194px, 18vw, 280px);
 }
 .juryChamberSeat[data-seat="2"] {
   left: 73%;
-  top: 58%;
-  width: clamp(86px, 8.6vw, 123px);
-  height: clamp(114px, 11.4vw, 164px);
+  top: 56%;
+  width: clamp(146px, 13.5vw, 210px);
+  height: clamp(194px, 18vw, 280px);
 }
 .juryChamberSeat[data-seat="3"] {
-  left: 17%;
-  top: 65%;
+  left: 13%;
+  top: 64%;
 }
 .juryChamberSeat[data-seat="4"] {
-  left: 83%;
-  top: 65%;
+  left: 87%;
+  top: 64%;
 }
 
 .juryChamberAvatar {
@@ -5425,8 +5561,8 @@
 
 @media (max-width: 1360px) {
   .juryChamberSeat {
-    width: clamp(82px, 8.8vw, 116px);
-    height: clamp(108px, 11.7vw, 154px);
+    width: clamp(128px, 13vw, 176px);
+    height: clamp(170px, 17.3vw, 235px);
   }
 
   .juryCenterTranscript {
@@ -7304,7 +7440,7 @@
 .liveHeader {
   min-height: 58px;
   box-sizing: border-box;
-  grid-template-columns: 114px minmax(0, 1fr) auto;
+  grid-template-columns: 114px minmax(0, 1fr) 114px;
   align-items: center;
   gap: 16px;
   padding: 8px 16px;
@@ -7324,26 +7460,26 @@
 }
 
 .liveHeader .exitButton,
-.liveControls button {
+.proceedingControlActions button {
   border-radius: 7px;
   padding: 8px 11px;
   font-size: 11px;
 }
 
 .live[data-theme="light"] .liveHeader .exitButton,
-.live[data-theme="light"] .liveControls button {
+.live[data-theme="light"] .proceedingControlActions button {
   border-color: #c8c0ce;
   color: #3b3343;
   background: rgba(255, 255, 255, 0.78);
 }
 
-.liveControls .endEarlyButton {
+.proceedingControlActions .endEarlyButton {
   border-color: color-mix(in srgb, #e8a26d 48%, #3a3548);
   color: #edc8ad;
   background: color-mix(in srgb, #5d3425 30%, #171421);
 }
 
-.live[data-theme="light"] .liveControls .endEarlyButton {
+.live[data-theme="light"] .proceedingControlActions .endEarlyButton {
   border-color: color-mix(in srgb, #a86137 38%, #cfc7d5);
   color: #7c4628;
   background: color-mix(in srgb, #f8e9dc 68%, #ffffff);
@@ -7722,6 +7858,7 @@
   }
 
   .debateAudienceBotPortrait[data-talking="true"],
+  .debateAudienceBotPortrait[data-live-reacting="true"],
   .debateAudienceBotPortrait[data-talking="true"]
     [data-coffee-plate-emoji-part="mouth"],
   .debateAudienceChatterChip {
@@ -7867,6 +8004,125 @@
   background: color-mix(in srgb, #f3f1f5 96%, transparent);
 }
 
+.proceedingControls {
+  display: grid;
+  gap: 8px;
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--debate-moderator-color) 22%, transparent);
+  padding: 10px 12px 11px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--debate-moderator-color) 8%, #15111a),
+    color-mix(in srgb, #0d0b11 94%, transparent)
+  );
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.proceedingControls > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.proceedingControls > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.proceedingControls > header .eyebrow {
+  color: color-mix(in srgb, var(--debate-moderator-color) 74%, #d9d2df);
+  font-size: 8px;
+  letter-spacing: 0.13em;
+}
+
+.proceedingControls > header strong {
+  overflow: hidden;
+  color: #eee9f2;
+  font-size: 11px;
+  font-weight: 690;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proceedingControls > header > span {
+  flex: 0 0 auto;
+  border: 1px solid
+    color-mix(in srgb, var(--debate-moderator-color) 28%, transparent);
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: color-mix(in srgb, var(--debate-moderator-color) 54%, #d3cbd9);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 8px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.proceedingControlActions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 6px;
+}
+
+.proceedingControlActions button {
+  min-width: 0;
+  border-radius: 7px;
+  padding: 7px 8px;
+  font-size: 9px;
+  font-weight: 720;
+  line-height: 1.1;
+}
+
+.proceedingControlActions button[data-primary="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 62%,
+    rgba(255, 255, 255, 0.22)
+  );
+  color: #fff;
+  background: color-mix(in srgb, var(--debate-moderator-color) 28%, #171421);
+  box-shadow: 0 0 18px
+    color-mix(in srgb, var(--debate-moderator-color) 10%, transparent);
+}
+
+.proceedingControlActions button:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--debate-moderator-color) 72%, white);
+  outline-offset: 2px;
+}
+
+.proceedingControlActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.live[data-theme="light"] .proceedingControls {
+  border-bottom-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 20%,
+    #d6cfd9
+  );
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--debate-moderator-color) 7%, #fff),
+    rgba(249, 247, 250, 0.96)
+  );
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.94);
+}
+
+.live[data-theme="light"] .proceedingControls > header strong {
+  color: #332b39;
+}
+
+.live[data-theme="light"] .proceedingControls > header > span {
+  color: #5f5269;
+  background: rgba(82, 62, 94, 0.045);
+}
+
 .debateRail[data-player-window-active="true"] {
   display: block;
   height: auto;
@@ -7876,7 +8132,7 @@
 .transcript,
 .debateRail[data-player-window-active="true"] .transcript {
   min-height: 560px;
-  height: calc(100dvh - 124px);
+  height: calc(100dvh - 214px);
   max-height: none;
   border: 0;
   border-radius: 0;
@@ -7907,8 +8163,16 @@
 }
 
 .transcriptFeed article header strong {
-  color: color-mix(in srgb, var(--debate-active-color) 72%, currentColor);
+  color: color-mix(in srgb, var(--debate-moderator-color) 72%, currentColor);
   font-size: 12px;
+}
+
+.transcriptFeed article[data-side="for"] header strong {
+  color: color-mix(in srgb, var(--debate-for-color) 72%, currentColor);
+}
+
+.transcriptFeed article[data-side="against"] header strong {
+  color: color-mix(in srgb, var(--debate-against-color) 72%, currentColor);
 }
 
 .transcriptFeed article header span {
@@ -8202,6 +8466,226 @@
   background: rgba(7, 6, 9, 0.72);
 }
 
+.participantFloorRail {
+  display: grid;
+  width: min(760px, 100%);
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 18px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, #ff9878 38%, rgba(255, 255, 255, 0.12));
+  border-radius: 13px;
+  padding: 11px 12px 11px 16px;
+  color: #eeeaf4;
+  background: linear-gradient(
+    120deg,
+    rgba(18, 15, 24, 0.97),
+    color-mix(in srgb, #ff735e 8%, rgba(13, 11, 17, 0.98))
+  );
+  box-shadow:
+    0 22px 72px rgba(0, 0, 0, 0.52),
+    0 0 32px color-mix(in srgb, #ff735e 9%, transparent);
+  backdrop-filter: blur(20px) saturate(1.12);
+  pointer-events: auto;
+}
+
+.liveCommandDeck[data-kind="participant-floor"] {
+  gap: 8px;
+}
+
+.participantFloorRail > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.participantFloorRailHint {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  margin: 0;
+  color: #d7cfdd;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.participantFloorRailHint strong {
+  overflow: hidden;
+  color: #fff6f2;
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.participantFloorRailHint span {
+  color: #9f96a9;
+}
+
+.participantFloorActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.participantFloorActions button {
+  min-height: 44px;
+  border-radius: 999px;
+  padding: 9px 15px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 690;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.participantFloorActions button:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.participantInterjectButton {
+  border: 1px solid color-mix(in srgb, #a995ff 34%, #3a3548);
+  color: #d9d1e5;
+  background: rgba(36, 31, 45, 0.78);
+}
+
+.participantObjectionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, #ffd0c4 50%, #ad422f);
+  color: #fff9f7;
+  background: linear-gradient(145deg, #c9513a, #8f3328);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.18),
+    0 7px 20px rgba(119, 36, 27, 0.28);
+}
+
+.participantObjectionButton:not(:disabled):hover {
+  border-color: #ffd9cf;
+  background: linear-gradient(145deg, #dd6046, #a43b2d);
+}
+
+.participantObjectionButton kbd {
+  min-width: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 5px;
+  padding: 2px 5px;
+  color: inherit;
+  background: rgba(0, 0, 0, 0.18);
+  font: inherit;
+  font-size: 9px;
+  line-height: 1.25;
+}
+
+.liveCommandDeck .participantObjectionDock {
+  display: grid;
+  width: min(960px, 100%);
+  box-sizing: border-box;
+  grid-template-columns: minmax(210px, 0.75fr) minmax(360px, 1.45fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px 22px;
+  border-color: color-mix(in srgb, #ff9878 62%, rgba(255, 255, 255, 0.16));
+  border-style: solid;
+  border-width: 1px;
+  border-radius: 12px;
+  padding: 18px 20px;
+  color: #eeeaf4;
+  background: linear-gradient(
+    125deg,
+    color-mix(in srgb, #cc4f39 16%, rgba(18, 15, 24, 0.98)),
+    rgba(13, 11, 17, 0.99)
+  );
+  box-shadow:
+    0 28px 90px rgba(0, 0, 0, 0.58),
+    0 0 48px color-mix(in srgb, #ff735e 16%, transparent),
+    inset 0 1px rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px) saturate(1.15);
+  clip-path: polygon(
+    12px 0,
+    100% 0,
+    100% calc(100% - 12px),
+    calc(100% - 12px) 100%,
+    0 100%,
+    0 12px
+  );
+}
+
+.participantObjectionDock > div:first-child {
+  display: grid;
+  grid-column: 1;
+  grid-row: 1;
+  align-content: start;
+  gap: 4px;
+}
+
+.participantObjectionDock h2 {
+  margin: 0;
+  font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
+  font-size: 22px;
+  font-weight: 390;
+  letter-spacing: -0.025em;
+}
+
+.participantObjectionDock textarea {
+  min-height: 104px;
+  grid-column: 2;
+  grid-row: 1 / 3;
+  resize: none;
+  border: 1px solid color-mix(in srgb, #ff9878 32%, #3f394b);
+  border-radius: 8px;
+  padding: 11px 12px;
+  color: inherit;
+  background: rgba(7, 6, 9, 0.72);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.participantObjectionContext {
+  display: grid;
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  gap: 4px;
+  margin: 5px 0 0;
+  border-left: 2px solid color-mix(in srgb, #ff9878 64%, transparent);
+  padding-left: 10px;
+  color: #b8adbd;
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.participantObjectionContext strong {
+  color: #ffb7a5;
+  font-family: var(--font-ui-sans, ui-sans-serif);
+  font-size: 9px;
+  font-weight: 740;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.participantObjectionContext span {
+  color: #eee5f0;
+}
+
+.participantObjectionActions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 3px;
+}
+
+.participantObjectionActions button {
+  min-height: 44px;
+}
+
 .live[data-theme="light"] .liveCommandDeck .playerWindow,
 .live[data-theme="light"] .liveCommandDeck .interjectionBar {
   color: #29232f;
@@ -8214,6 +8698,57 @@
     ),
     rgba(241, 239, 244, 0.98)
   );
+}
+
+.live[data-theme="light"] .participantFloorRail {
+  color: #29232f;
+  background: linear-gradient(
+    120deg,
+    rgba(250, 249, 252, 0.98),
+    color-mix(in srgb, #ff735e 8%, rgba(241, 239, 244, 0.98))
+  );
+}
+
+.live[data-theme="light"] .participantFloorRailHint {
+  color: #4d4352;
+}
+
+.live[data-theme="light"] .participantFloorRailHint strong {
+  color: #582d27;
+}
+
+.live[data-theme="light"] .participantFloorRailHint span {
+  color: #746a79;
+}
+
+.live[data-theme="light"] .participantInterjectButton {
+  color: #4d4352;
+  background: rgba(234, 230, 239, 0.92);
+}
+
+.live[data-theme="light"] .liveCommandDeck .participantObjectionDock {
+  background: linear-gradient(
+    125deg,
+    color-mix(in srgb, #ff735e 10%, rgba(250, 249, 252, 0.99)),
+    rgba(241, 239, 244, 0.99)
+  );
+}
+
+.live[data-theme="light"] .participantObjectionContext {
+  color: #685e6e;
+}
+
+.live[data-theme="light"] .participantObjectionContext strong {
+  color: #9c3e30;
+}
+
+.live[data-theme="light"] .participantObjectionContext span {
+  color: #3b323f;
+}
+
+.live[data-theme="light"] .participantObjectionDock textarea {
+  color: #29232f;
+  background: rgba(255, 255, 255, 0.66);
 }
 
 .live[data-session-status="waiting_for_player"] .liveWorkspace {
@@ -8236,10 +8771,18 @@
 
   .liveCommandDeck .playerWindow,
   .liveCommandDeck .interjectionBar,
+  .liveCommandDeck .participantObjectionDock,
+  .participantFloorRail,
   .stageStateOverlay {
     border: 2px solid CanvasText;
     background: Canvas;
     color: CanvasText;
+  }
+
+  .participantObjectionButton {
+    border: 2px solid Highlight;
+    background: Highlight;
+    color: HighlightText;
   }
 }
 
@@ -8251,7 +8794,10 @@
   .turnClock,
   .turnClock > i > b,
   .judgeGavelButton,
-  .liveCaption {
+  .liveCaption,
+  .botStagePresence[data-participant-proxy="true"][data-objecting="true"],
+  .participantFloorRail,
+  .participantObjectionButton {
     animation: none;
     transition: none;
   }
@@ -8313,5 +8859,41 @@
   .liveCaption {
     bottom: 3%;
     width: min(88%, 720px);
+  }
+}
+
+@media (max-width: 900px) {
+  .liveCommandDeck {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    left: max(12px, env(safe-area-inset-left));
+  }
+
+  .participantFloorRail {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+    padding: 12px;
+  }
+
+  .participantFloorActions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+  }
+
+  .participantFloorActions button {
+    width: 100%;
+  }
+
+  .liveCommandDeck .participantObjectionDock {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+
+  .participantObjectionDock > div:first-child,
+  .liveCommandDeck .participantObjectionDock > textarea,
+  .participantObjectionContext,
+  .participantObjectionActions {
+    grid-column: 1;
+    grid-row: auto;
   }
 }

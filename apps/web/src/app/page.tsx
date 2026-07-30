@@ -1462,6 +1462,7 @@ import {
   playPreparedCoffeeActionSfx,
   prefetchCoffeeActionSfx,
   stopCoffeeActionSfx,
+  type BundledCoffeeActionSfxKind,
   type CoffeeActionReactionKind,
   type CoffeeActionSfxGateState,
   type CoffeeActionSfxKind,
@@ -47216,6 +47217,10 @@ function HomeContent(): React.JSX.Element {
     lastPlayedAtMs: null,
     lastPlayedAtMsByKind: {},
   });
+  const debatePlayerActionSfxGateRef = useRef<CoffeeActionSfxGateState>({
+    lastPlayedAtMs: null,
+    lastPlayedAtMsByKind: {},
+  });
   const botImportInputRef = useRef<HTMLInputElement | null>(null);
   const accountImportInputRef = useRef<HTMLInputElement | null>(null);
   const [accountBackupBusy, setAccountBackupBusy] = useState(false);
@@ -62290,7 +62295,7 @@ function HomeContent(): React.JSX.Element {
             ...(ephemeralSoundcheck ? { explicitVoicePreview: true } : {}),
             ...(signalOnlineVoiceEnabled && message.voicePerformanceText
               ? {
-                  elevenLabsText: voiceSpokenText(message.voicePerformanceText),
+                  elevenLabsText: message.voicePerformanceText,
                 }
               : {}),
             mode: "english",
@@ -62464,6 +62469,38 @@ function HomeContent(): React.JSX.Element {
         if (played) return;
         if (signalActionSfxGateRef.current === decision.state) {
           signalActionSfxGateRef.current = previousGateState;
+        }
+      });
+    },
+    [settings],
+  );
+  const playDebatePlayerActionSfx = useCallback(
+    (kind: BundledCoffeeActionSfxKind): void => {
+      if (
+        !settings ||
+        !bundledActionSfxIsEligible({
+          voiceMode: voicePlaybackSelectionRef.current.voiceMode,
+          voiceEffectsEnabled: settings.voiceEffectsEnabled !== false,
+          voiceVolume: settings.voiceVolume,
+        })
+      ) {
+        return;
+      }
+      const previousGateState = debatePlayerActionSfxGateRef.current;
+      const decision = coffeeActionSfxGate({
+        kind,
+        nowMs: Date.now(),
+        state: previousGateState,
+      });
+      if (!decision.allowed) return;
+      debatePlayerActionSfxGateRef.current = decision.state;
+      void playPreparedCoffeeActionSfx({
+        kind,
+        voiceVolume: settings.voiceVolume,
+      }).then((played) => {
+        if (played) return;
+        if (debatePlayerActionSfxGateRef.current === decision.state) {
+          debatePlayerActionSfxGateRef.current = previousGateState;
         }
       });
     },
@@ -129378,6 +129415,56 @@ function HomeContent(): React.JSX.Element {
       utterance: DebateUtterance,
     ): Promise<boolean> => {
       const usePlayerVoice = utterance.player || utterance.playerVoice;
+      const debateVoicePerformanceText =
+        utterance.voicePerformanceText ??
+        (usePlayerVoice
+          ? voicePerformanceTextFromActionCues(utterance.spokenText)
+          : null);
+      const playerActionSfxPlan = usePlayerVoice
+        ? buildBundledActionSfxPlan(utterance.spokenText)
+        : null;
+      const playerSpokenLength = Array.from(
+        voiceSpokenText(utterance.spokenText),
+      ).length;
+      let playerActionSfxQueued = false;
+      const queuePlayerActionSfx = (visibleLength: number): void => {
+        if (
+          playerActionSfxQueued ||
+          !playerActionSfxPlan ||
+          visibleLength < playerActionSfxPlan.revealAtDisplayLength
+        ) {
+          return;
+        }
+        playerActionSfxQueued = true;
+        playDebatePlayerActionSfx(playerActionSfxPlan.kind);
+      };
+      const playerLifecycle = playerActionSfxPlan
+        ? {
+            ...utterance.lifecycle,
+            onStart: (
+              durationMs: number | null,
+              alignment?: VoicePlaybackCharacterAlignment | null,
+            ) => {
+              queuePlayerActionSfx(0);
+              utterance.lifecycle?.onStart?.(durationMs, alignment);
+            },
+            onProgress: (elapsedMs: number, durationMs: number) => {
+              const progress =
+                durationMs > 0
+                  ? Math.max(0, Math.min(1, elapsedMs / durationMs))
+                  : 0;
+              queuePlayerActionSfx(Math.round(playerSpokenLength * progress));
+              utterance.lifecycle?.onProgress?.(elapsedMs, durationMs);
+            },
+            onEnd: () => {
+              queuePlayerActionSfx(Number.POSITIVE_INFINITY);
+              utterance.lifecycle?.onEnd?.();
+            },
+            onCancel: () => {
+              utterance.lifecycle?.onCancel?.();
+            },
+          }
+        : (utterance.lifecycle ?? {});
       const speakerBot = utterance.speaker
         ? bots.find((candidate) => candidate.id === utterance.speaker?.id)
         : null;
@@ -129391,7 +129478,7 @@ function HomeContent(): React.JSX.Element {
         (usePlayerVoice ? "__debate_player__" : "__debate_prism_juror__");
       const usePrismDefaultVoice =
         usePlayerVoice || (!speakerBot && utterance.speaker !== null);
-      return playBotcastUtterance(
+      const played = await playBotcastUtterance(
         {
           id: utterance.event.id,
           episodeId: utterance.sessionId,
@@ -129399,7 +129486,7 @@ function HomeContent(): React.JSX.Element {
           botId: speakerId,
           content: utterance.spokenText,
           stageActionText: null,
-          voicePerformanceText: null,
+          voicePerformanceText: debateVoicePerformanceText,
           moodKey: debateJudgeGavelVoiceMood(utterance.event),
           createdAt: utterance.event.createdAt,
         },
@@ -129415,7 +129502,9 @@ function HomeContent(): React.JSX.Element {
           glyph: speakerBot?.glyph ?? utterance.speaker?.glyph ?? "◇",
           online_enabled: voiceBot?.online_enabled ?? 1,
           muted: botPowerIsMutedV1(speakerPowers),
-          voiceGainMultiplier: botPowerVoiceGainMultiplierV1(speakerPowers),
+          voiceGainMultiplier:
+            botPowerVoiceGainMultiplierV1(speakerPowers) *
+            (utterance.event.kind === "objection" ? 1.14 : 1),
           voicePresence: botPowerVoicePresenceModeV1(speakerPowers),
           personaTemperament: signalPersonaTemperamentFor(
             utterance.speaker?.systemPrompt ?? speakerBot?.system_prompt ?? "",
@@ -129427,7 +129516,7 @@ function HomeContent(): React.JSX.Element {
         } as BotcastBotSummary & {
           frozenVoiceProfile?: BotAudioVoiceProfileV1 | null;
         },
-        utterance.lifecycle ?? {},
+        playerLifecycle,
         1,
         utterance.event.sideId === "for"
           ? -0.36
@@ -129437,6 +129526,8 @@ function HomeContent(): React.JSX.Element {
         "debate",
         utterance.format,
       );
+      if (!played) queuePlayerActionSfx(Number.POSITIVE_INFINITY);
+      return played;
     };
     return (
       <main

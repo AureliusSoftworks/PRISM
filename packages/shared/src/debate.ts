@@ -15,6 +15,8 @@ import type { LlmProviderName } from "./index.js";
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
 export const DEBATE_PLAYER_JUDGE_BOT_ID = "prism:player-judge" as const;
+export const DEBATE_PLAYER_PARTICIPANT_BOT_ID =
+  "prism:player-participant" as const;
 export const DEBATE_JUDGE_GAVEL_COOLDOWN_MS = 8_000;
 export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
 export const DEBATE_OBJECTION_RULING_TIMEOUT_MS = 8_000;
@@ -548,6 +550,17 @@ export interface DebateObjectionRulingStateV1 {
   resumeStepKey: string;
 }
 
+export interface DebateParticipantObjectionStateV1 {
+  version: typeof DEBATE_SCHEMA_VERSION;
+  status: "awaiting_reason";
+  interruptedEventId: string;
+  objectionEventId: string;
+  interruptedBotId: string;
+  resumeStatus: DebateStatus;
+  resumePhase: DebatePhase;
+  resumeStepKey: string;
+}
+
 export interface DebateBallotV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   voterBotId: string;
@@ -633,6 +646,8 @@ export interface DebateSessionV1 {
   judgeGavelCooldownUntil?: string | null;
   /** Active after a bot objection until the human Judge rules. */
   objectionRuling?: DebateObjectionRulingStateV1 | null;
+  /** Active after a Participant shouts Objection and before they state why. */
+  participantObjection?: DebateParticipantObjectionStateV1 | null;
   events: DebateEventV1[];
   error: string | null;
   createdAt: string;
@@ -667,8 +682,12 @@ export interface DebateRoleChecksRequest {
   format?: DebateFormatId;
   formality?: DebateFormalityId;
   motion: DebateMotionSlateV1;
-  forAdvocateBotId: string;
-  againstAdvocateBotId: string;
+  /** Optional on the human-owned side in Participant mode. */
+  forAdvocateBotId?: string;
+  /** Optional on the human-owned side in Participant mode. */
+  againstAdvocateBotId?: string;
+  playerRole?: DebatePlayerRole;
+  playerSideId?: DebateSideId | null;
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
   responseMode?: ResponseMode;
@@ -691,8 +710,10 @@ export interface DebateSessionCreateRequest {
   moderatorTitle?: string;
   moderatorBotId: string;
   playerJudgeUsesPrism?: boolean;
-  forAdvocateBotId: string;
-  againstAdvocateBotId: string;
+  /** Optional on the human-owned side in Participant mode. */
+  forAdvocateBotId?: string;
+  /** Optional on the human-owned side in Participant mode. */
+  againstAdvocateBotId?: string;
   playerRole: DebatePlayerRole;
   playerSideId?: DebateSideId | null;
   advocacyConsent: DebateAdvocacyConsent[];
@@ -727,6 +748,16 @@ export interface DebateInterjectionRequest extends DebateMutationRequest {
   eventId: string;
   heardCharacterCount: number;
   content: string;
+}
+
+export interface DebateParticipantObjectionRaiseRequest extends DebateMutationRequest {
+  eventId: string;
+  heardCharacterCount: number;
+}
+
+export interface DebateParticipantObjectionResolveRequest extends DebateMutationRequest {
+  content?: string;
+  withdraw?: boolean;
 }
 
 export interface DebateJudgeGavelRequest extends DebateMutationRequest {

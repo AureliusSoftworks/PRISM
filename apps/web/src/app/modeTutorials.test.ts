@@ -75,6 +75,33 @@ describe("mode tutorials", () => {
     assert.match(copy, /own saved Persona/u);
     assert.match(copy, /one short in-character vocal reaction/u);
     assert.match(copy, /not a new argument, vote, role change/u);
+    assert.match(copy, /PRISM is the complete selected-side advocate/u);
+    assert.match(copy, /Participant is Forum-only/u);
+    assert.match(copy, /PRISM becomes that entire advocate/u);
+    assert.match(
+      copy,
+      /exactly you, the bot Moderator\/Judge, and one bot opponent/u,
+    );
+    assert.match(
+      copy,
+      /carries your thinking, speaking, interjection, and objection states/u,
+    );
+    assert.match(copy, /labels the live line “PRISM · You”/u);
+    assert.match(copy, /saved event remains player-authored/u);
+    assert.match(
+      copy,
+      /Participant's bot Moderator\/Judge decides the result without inventing a PRISM ballot/u,
+    );
+    assert.match(copy, /PRISM never invents a human reaction/u);
+    assert.doesNotMatch(copy, /neutral floor marker/u);
+    assert.match(
+      copy,
+      /recognized asterisk cue such as \*yells\*[\s\S]*ElevenLabs performance direction/u,
+    );
+    assert.match(
+      copy,
+      /fart, burp, and cough actions play their bundled Foley/u,
+    );
     assert.match(copy, /one strike calls attention at every phase change/u);
     assert.match(copy, /two restore order for moderator rulings and verdicts/u);
     assert.match(copy, /objections carry no predictive gavel cue/u);
@@ -85,14 +112,14 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /human-Judge session has no automatic moderator ceremony or camera claim/u,
+      /human-Judge session automatically activates the center seat for its neutral introduction/u,
     );
-    assert.match(copy, /Judge \/ Moderator seat, Auto is forced/u);
     assert.match(
       copy,
-      /manual camera choices and Participate entry to the Jury are unavailable/u,
+      /Judge \/ Moderator seat, the public floor stays on Auto/u,
     );
-    assert.match(copy, /every forced gavel shot returns directly to Auto/u);
+    assert.match(copy, /Jury becomes the Judge’s one additional camera/u);
+    assert.match(copy, /Watch Jury enters the live advisory chamber/u);
     assert.match(
       copy,
       /Forum and Turnabout keep the procedural rhythm for bot-moderated roles/u,
@@ -117,26 +144,36 @@ describe("mode tutorials", () => {
     assert.match(copy, /territory dice remains available/u);
     assert.match(
       copy,
-      /Resume has the moderator or Judge call the proceeding back to order with a saved gavel action/u,
+      /in-room Judge console keeps Gavel, Pause or Resume, and End Debate together/u,
     );
+    assert.match(copy, /Participant and Spectator sessions use the same/u);
+    assert.match(copy, /Pause takes effect immediately/u);
+    assert.match(copy, /never asked for a second Space press or gavel click/u);
+    assert.match(copy, /Resume works the same way/u);
     assert.match(copy, /preserves the exact next juror, discussion turn/u);
     assert.match(
       copy,
       /neither housekeeping beat enters the readable proceedings or copied transcript/u,
     );
-    assert.match(copy, /context gavel or Pause becomes available again/u);
-    assert.match(copy, /bot-moderated roles may Pause again immediately/u);
-    assert.match(copy, /End early skips the remaining rounds/u);
+    assert.match(
+      copy,
+      /gavel cooldown still governs separate Judge interventions/u,
+    );
+    assert.match(copy, /End Debate skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
     assert.match(copy, /timed choice appears over the current camera/u);
     assert.match(copy, /Auto is the default/u);
-    assert.match(copy, /Participate manually enters the chamber/u);
-    assert.match(copy, /Skipping remains available after discussion starts/u);
+    assert.match(copy, /Spectators and human Judges can choose Watch Jury/u);
+    assert.doesNotMatch(copy, /choose Participate/u);
+    assert.match(
+      copy,
+      /Skipping remains available after discussion starts—even during a juror’s current statement/u,
+    );
     assert.match(copy, /all five final ballots/u);
     assert.match(copy, /full five-ballot Jury result/u);
     assert.match(
       copy,
-      /Spectators can open the five-seat Jury camera manually at any point/u,
+      /Spectators and human Judges can open the five-seat Jury camera manually/u,
     );
     assert.match(copy, /trade short reactions between public-floor turns/u);
     assert.match(copy, /ellipsis beside a juror means a thought is waiting/u);
@@ -145,6 +182,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /seats bot faces and frames around/u);
     assert.match(copy, /Each audible juror reads the same final reason/u);
     assert.match(copy, /canonically silent juror still casts/u);
+    assert.match(copy, /chamber is live and named but remains advisory/u);
     assert.match(copy, /separate timestamped Jury record/u);
     assert.match(copy, /own copy action/u);
     assert.match(
@@ -152,11 +190,18 @@ describe("mode tutorials", () => {
       /Jury transcript remains directly copyable from its eligible Proceeding archive entry/u,
     );
     assert.match(copy, /anonymous mark slides/u);
-    assert.match(copy, /both advocates’ public reactions/u);
-    assert.match(copy, /human Judge’s ruling closes Judge sessions/u);
+    assert.match(copy, /only the bot opponent may react/u);
     assert.match(
       copy,
-      /bot Moderator then closes Spectator and Participant sessions/u,
+      /Spectator verdicts still let both bot advocates react/u,
+    );
+    assert.match(
+      copy,
+      /In Judge sessions, the human ruling is followed by both advocates’ reactions and an automatic neutral center close/u,
+    );
+    assert.match(
+      copy,
+      /After a Participant verdict, only the bot opponent may react before the bot Moderator\/Judge closes/u,
     );
     assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
     assert.match(copy, /fallback chain saved in Settings/u);
@@ -164,28 +209,44 @@ describe("mode tutorials", () => {
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
     assert.match(copy, /Start freezes that ordered chain/u);
+    assert.match(copy, /instead of in the app chrome/u);
+    assert.match(copy, /traditional three-bot majority/u);
     assert.match(
       copy,
-      /Live Pause first calls the room to order with the moderator’s gavel and announcement/u,
-    );
-    assert.match(copy, /traditional three-cast majority/u);
-    assert.match(
-      copy,
-      /no Judge-originated public event appears until you act/u,
+      /Participant's bot Moderator\/Judge decides the result without inventing a PRISM ballot/u,
     );
     assert.match(
       copy,
-      /center seat stays publicly silent and inactive until you act/u,
+      /frozen center authority always opens and closes the Debate/u,
     );
     assert.match(
       copy,
-      /never invents a phase announcement, fallback challenge, overtime correction, interruption ruling, ballot, or gavel strike/u,
+      /center seat automatically gives the neutral introduction, then stays publicly silent and inactive until you act/u,
     );
-    assert.match(copy, /Gavel stays available throughout/u);
+    assert.match(
+      copy,
+      /final ruling comes from that same center seat; the gavel locks, both advocates react once, and Prism gives only the neutral procedural close/u,
+    );
+    assert.match(
+      copy,
+      /never invents a later phase announcement, fallback challenge, overtime correction, interruption ruling, ballot, verdict, or gavel strike/u,
+    );
+    assert.match(
+      copy,
+      /Gavel stays available throughout the rest of the public-floor/u,
+    );
     assert.match(copy, /Space swings it/u);
+    assert.match(copy, /press S for Sustained or O for Overruled/u);
+    assert.match(copy, /ordinary gavel and Space shortcut stay locked/u);
     assert.match(
       copy,
-      /human-Judge session has no automatic moderator ceremony or camera claim/u,
+      /Once Jury deliberation begins, the Jury owns the floor/u,
+    );
+    assert.match(copy, /Space cannot strike it/u);
+    assert.match(copy, /Skip deliberation remains available instead/u);
+    assert.match(
+      copy,
+      /human-Judge session automatically activates the center seat for its neutral introduction/u,
     );
     assert.match(copy, /ceremonial cue waits for your strike/u);
     assert.match(
@@ -198,14 +259,17 @@ describe("mode tutorials", () => {
       /advocate’s overtime, the first strike stops the speaker/u,
     );
     assert.match(copy, /opens the Judge’s choice deck/u);
-    assert.match(copy, /End Debate closes the floor/u);
+    assert.match(
+      copy,
+      /Pause, Resume, and End Debate stay together in the in-room Judge console/u,
+    );
     assert.match(copy, /answer-seeking prompts/u);
     assert.match(copy, /resume the exact interrupted schedule/u);
     assert.match(copy, /dice to draft editable Judge prose/u);
     assert.match(copy, /deliberately quiet nevermind choice/u);
     assert.match(copy, /without adding Judge prose or a public Pass event/u);
     assert.match(copy, /without fabricating an advocate rebuttal/u);
-    assert.match(copy, /without moderator or advocate bot ballots/u);
+    assert.match(copy, /without inventing a PRISM ballot/u);
     assert.match(copy, /Final rulings stay one-tap/u);
     assert.match(copy, /still require a side/u);
     assert.match(copy, /two seconds after an ordinary intervention strike/u);
@@ -216,20 +280,49 @@ describe("mode tutorials", () => {
     assert.match(copy, /extra smashes are pure showmanship/u);
     assert.match(copy, /not a procedural overtime call/u);
     assert.match(copy, /Public prose arrives with the live voice/u);
-    assert.match(copy, /actual animated bot behind an authored side podium/u);
-    assert.match(copy, /Each visible podium carries its bot's glyph/u);
+    assert.match(copy, /Bot advocates use their actual animated bot/u);
+    assert.match(copy, /Each visible podium carries its floor holder's glyph/u);
     assert.match(copy, /follows floor ownership rather than speech or prose/u);
     assert.match(
       copy,
-      /Participant and Turnabout actions still rise in a full-width command deck/u,
+      /Participant Forum actions and Turnabout actions rise in a full-width command deck/u,
     );
     assert.match(copy, /Auto is the quiet default camera/u);
     assert.match(copy, /cuts instantly/u);
     assert.match(copy, /never enters the Jury chamber/u);
     assert.match(copy, /Choose a manual view to hold the shot/u);
-    assert.match(copy, /only the heard fragment remains public/u);
+    assert.match(copy, /only the heard fragment remains public/iu);
     assert.match(copy, /safe Markdown/u);
     assert.match(copy, /Copy verbose transcript/u);
+  });
+
+  it("teaches ordinary Participant interjections and shout-first objections as distinct floor breaks", () => {
+    const caseBoardCopy =
+      MODE_TUTORIALS.debate.steps.find(
+        (step) =>
+          step.targetSelector === '[data-tutorial-target="debate-case-board"]',
+      )?.body ?? "";
+
+    assert.match(caseBoardCopy, /two distinct ways to break/u);
+    assert.match(
+      caseBoardCopy,
+      /Ordinary Interject sends the point already typed as one complete cut-in/u,
+    );
+    assert.match(caseBoardCopy, /press O or choose Objection!/u);
+    assert.match(caseBoardCopy, /literally shout “Objection!” first/u);
+    assert.match(caseBoardCopy, /reason dock then waits for the grounds/u);
+    assert.match(
+      caseBoardCopy,
+      /bot Moderator\/Judge rules Sustained or Overruled/u,
+    );
+    assert.match(
+      caseBoardCopy,
+      /Sustained leaves the cutoff in place, while Overruled returns the opponent's floor/u,
+    );
+    assert.match(
+      caseBoardCopy,
+      /Withdraw objection also returns the floor, records the withdrawal instead of a ruling, and lets the opponent finish/u,
+    );
   });
 
   it("teaches Judge authority and the silent missed-gavel performance", () => {
@@ -244,7 +337,10 @@ describe("mode tutorials", () => {
       /interface stays clear while Auto silently cuts to one advocate and then the moderator/u,
     );
     assert.doesNotMatch(gavelCopy, /room hangs for an awkward beat/u);
-    assert.match(gavelCopy, /End Debate closes the floor/u);
+    assert.match(
+      gavelCopy,
+      /Pause, Resume, and End Debate stay together in the in-room Judge console/u,
+    );
     assert.match(gavelCopy, /without fabricating an advocate rebuttal/u);
     assert.match(gavelCopy, /literally shouts “Objection!”/u);
     assert.match(gavelCopy, /timed Sustained \/ Overruled choice/u);
@@ -256,7 +352,7 @@ describe("mode tutorials", () => {
           step.targetSelector ===
           '[data-tutorial-target="debate-copy-transcript"]',
       )?.body ?? "";
-    assert.match(recordCopy, /without moderator or advocate bot ballots/u);
+    assert.match(recordCopy, /without inventing a PRISM ballot/u);
   });
 
   it("teaches Debate's role-aware actor casting", () => {
@@ -267,8 +363,15 @@ describe("mode tutorials", () => {
       )?.body ?? "";
     assert.match(castCopy, /Random actors/u);
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
-    assert.match(castCopy, /stays publicly silent and inactive until you act/u);
-    assert.match(castCopy, /Prism never invents a Judge action/u);
+    assert.match(castCopy, /automatic neutral introduction/u);
+    assert.match(
+      castCopy,
+      /both advocates react once before Prism gives the automatic neutral procedural close/u,
+    );
+    assert.match(
+      castCopy,
+      /never invents a Judge action or changes your result/u,
+    );
     assert.match(castCopy, /choose the two advocates/u);
     assert.match(castCopy, /Participant and Spectator roles/u);
   });

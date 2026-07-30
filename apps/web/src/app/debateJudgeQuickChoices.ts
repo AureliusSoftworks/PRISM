@@ -6,7 +6,22 @@ export interface DebateJudgeQuickChoice {
   label: string;
   detail: string;
   content: string | null;
-  action: "submit" | "compose" | "dismiss" | "end";
+  action: "submit" | "compose" | "dismiss";
+}
+
+export type DebateJudgeObjectionRuling = "sustained" | "overruled";
+
+export function debateJudgeObjectionRulingShortcut(args: {
+  active: boolean;
+  editableTarget: boolean;
+  hasModifier: boolean;
+  key: string;
+}): DebateJudgeObjectionRuling | null {
+  if (!args.active || args.editableTarget || args.hasModifier) return null;
+  const key = args.key.toLocaleLowerCase();
+  if (key === "s") return "sustained";
+  if (key === "o") return "overruled";
+  return null;
 }
 
 export function debateJudgeGuidedStepKind(args: {
@@ -58,13 +73,6 @@ const NEVERMIND_JUDGE_CHOICE: DebateJudgeQuickChoice = {
 };
 
 const JUDGE_GAVEL_CHOICES: readonly DebateJudgeQuickChoice[] = [
-  {
-    id: "end-debate",
-    label: "End Debate",
-    detail: "Close the floor and deliver your ruling",
-    content: null,
-    action: "end",
-  },
   {
     id: "clarify",
     label: "Clarify the claim",

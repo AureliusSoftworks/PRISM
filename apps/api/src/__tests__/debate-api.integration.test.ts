@@ -3,6 +3,7 @@ import { createServer, type AddressInfo } from "node:http";
 import { after, describe, it } from "node:test";
 import { getAppConfig } from "@localai/config";
 import {
+  DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   type DebateSessionV1,
 } from "@localai/shared";
@@ -88,6 +89,13 @@ class DebateApiProvider implements LlmProvider {
     if (text.includes("Ask one concise, difficult")) {
       return JSON.stringify({
         content: "Which implementation cost most threatens this position?",
+      });
+    }
+    if (text.includes("Participant objection adjudication")) {
+      return JSON.stringify({
+        ruling: "overruled",
+        reason:
+          "The objection disputes the position but does not identify a defect in the heard claim.",
       });
     }
     if (text.includes("Distill a scoreless public debate case board")) {
@@ -329,7 +337,11 @@ describe("Debate API", () => {
           preferredProvider: "local",
         }),
       );
-      assert.equal(advanced.status, 200, JSON.stringify(await payload(advanced.clone())));
+      assert.equal(
+        advanced.status,
+        200,
+        JSON.stringify(await payload(advanced.clone())),
+      );
       session = (await payload(advanced)).session as DebateSessionV1;
     }
     assert.equal(session.ballots.length, 3);
@@ -358,7 +370,10 @@ describe("Debate API", () => {
     const deleteRun = (await payload(deleted)).actionRun;
     assert.equal(deleteRun.capabilityId, "debate.session.delete");
     assert.equal(deleteRun.undoAvailable, true);
-    assert.deepEqual((await payload(await owner.request("/api/debates"))).sessions, []);
+    assert.deepEqual(
+      (await payload(await owner.request("/api/debates"))).sessions,
+      [],
+    );
 
     const undone = await owner.request(
       "/api/prism/actions/undo",
@@ -374,6 +389,28 @@ describe("Debate API", () => {
     session = (await payload(restoredResponse)).session as DebateSessionV1;
     assert.equal(session.status, "completed");
 
+    const participantRoleChecksResponse = await owner.request(
+      "/api/debates/role-checks",
+      jsonInit({
+        motion,
+        forAdvocateBotId: "for",
+        playerRole: "participant",
+        playerSideId: "against",
+        preferredProvider: "local",
+        modelOverride: "debate-navbar-override",
+      }),
+    );
+    assert.equal(participantRoleChecksResponse.status, 200);
+    const participantChecks = (await payload(participantRoleChecksResponse))
+      .checks;
+    assert.deepEqual(
+      participantChecks.map((check: { botId: string; sideId: string }) => [
+        check.botId,
+        check.sideId,
+      ]),
+      [["for", "for"]],
+    );
+
     for (const role of ["judge", "participant"] as const) {
       const created = await owner.request(
         "/api/debates",
@@ -387,10 +424,10 @@ describe("Debate API", () => {
           },
           moderatorBotId: "moderator",
           forAdvocateBotId: "for",
-          againstAdvocateBotId: "against",
+          ...(role === "judge" ? { againstAdvocateBotId: "against" } : {}),
           playerRole: role,
           playerSideId: role === "participant" ? "against" : null,
-          advocacyConsent: checks,
+          advocacyConsent: role === "participant" ? participantChecks : checks,
           preferredProvider: "local",
           modelOverride: "debate-navbar-override",
           theme: "light",
@@ -399,7 +436,18 @@ describe("Debate API", () => {
       );
       assert.equal(created.status, 201);
       let roleSession = (await payload(created)).session as DebateSessionV1;
+      if (role === "participant") {
+        assert.equal(
+          roleSession.againstAdvocate.id,
+          DEBATE_PLAYER_PARTICIPANT_BOT_ID,
+        );
+        assert.deepEqual(
+          roleSession.advocacyConsent.map((consent) => consent.botId),
+          ["for"],
+        );
+      }
       let roleTurn = 0;
+      let participantObjectionResolved = false;
       if (role === "participant") {
         for (const [index, label] of ["intro", "opening"].entries()) {
           const advanced = await owner.request(
@@ -435,17 +483,184 @@ describe("Debate API", () => {
           }),
         );
         assert.equal(interjected.status, 200);
-        roleSession = (await payload(interjected))
-          .session as DebateSessionV1;
+        roleSession = (await payload(interjected)).session as DebateSessionV1;
+        assert.ok(
+          roleSession.events.some((event) => event.kind === "moderator_ruling"),
+        );
         assert.ok(
           roleSession.events.some(
-            (event) => event.kind === "moderator_ruling",
+            (event) =>
+              event.kind === "interjection" &&
+              event.speakerKind === "player" &&
+              event.parentEventId === opposingOpening.id,
           ),
         );
       }
       while (roleSession.status !== "completed") {
         roleTurn += 1;
         assert.ok(roleTurn < 40);
+        if (
+          role === "participant" &&
+          !participantObjectionResolved &&
+          roleSession.status === "live"
+        ) {
+          const objectionTarget = [...roleSession.events]
+            .reverse()
+            .find((event) => event.kind !== "case_board");
+          if (
+            objectionTarget?.kind === "speech" &&
+            objectionTarget.speakerKind === "advocate" &&
+            objectionTarget.sideId === "for" &&
+            objectionTarget.interrupted !== true &&
+            objectionTarget.content.length > 24
+          ) {
+            const raisedResponse = await owner.request(
+              `/api/debates/${roleSession.id}/participant-objection`,
+              jsonInit({
+                expectedRevision: roleSession.revision,
+                idempotencyKey: "api:participant:objection:raise",
+                eventId: objectionTarget.id,
+                heardCharacterCount: Math.min(
+                  objectionTarget.content.length - 1,
+                  Math.max(
+                    24,
+                    Math.floor(objectionTarget.content.length * 0.58),
+                  ),
+                ),
+              }),
+            );
+            assert.equal(raisedResponse.status, 200);
+            roleSession = (await payload(raisedResponse))
+              .session as DebateSessionV1;
+            const raisedObjection = roleSession.events.find(
+              (event) =>
+                event.id ===
+                  roleSession.participantObjection?.objectionEventId &&
+                event.kind === "objection" &&
+                event.parentEventId === objectionTarget.id,
+            );
+            const revisedTarget = roleSession.events.find(
+              (event) => event.id === objectionTarget.id,
+            );
+            assert.ok(raisedObjection);
+            assert.equal(raisedObjection.speakerKind, "player");
+            assert.equal(
+              raisedObjection.speakerBotId,
+              DEBATE_PLAYER_PARTICIPANT_BOT_ID,
+            );
+            assert.equal(raisedObjection.sideId, "against");
+            assert.equal(raisedObjection.content, "Objection!");
+            assert.equal(raisedObjection.phase, objectionTarget.phase);
+            assert.equal(raisedObjection.stepKey, objectionTarget.stepKey);
+            assert.equal(revisedTarget?.interrupted, true);
+            assert.equal(revisedTarget?.interruptedBy, "player");
+            assert.equal(roleSession.status, "waiting_for_player");
+            assert.equal(roleSession.stepKey, "participant_objection_reason");
+            assert.partialDeepStrictEqual(roleSession.participantObjection, {
+              status: "awaiting_reason",
+              interruptedEventId: objectionTarget.id,
+              objectionEventId: raisedObjection.id,
+              interruptedBotId: objectionTarget.speakerBotId,
+            });
+
+            const persistedRaiseResponse = await owner.request(
+              `/api/debates/${roleSession.id}`,
+            );
+            assert.equal(persistedRaiseResponse.status, 200);
+            const persistedRaise = (await payload(persistedRaiseResponse))
+              .session as DebateSessionV1;
+            assert.deepEqual(
+              persistedRaise.participantObjection,
+              roleSession.participantObjection,
+            );
+            assert.equal(
+              persistedRaise.events.find(
+                (event) => event.id === raisedObjection.id,
+              )?.content,
+              "Objection!",
+            );
+
+            const resolvedResponse = await owner.request(
+              `/api/debates/${roleSession.id}/participant-objection/resolve`,
+              jsonInit({
+                expectedRevision: persistedRaise.revision,
+                idempotencyKey: "api:participant:objection:resolve",
+                content:
+                  "The heard claim treats the proposal itself as proof of the promised result.",
+              }),
+            );
+            assert.equal(resolvedResponse.status, 200);
+            roleSession = (await payload(resolvedResponse))
+              .session as DebateSessionV1;
+            const objectionReason = roleSession.events.find(
+              (event) =>
+                event.kind === "player_turn" &&
+                event.stepKey === "participant_objection_reason" &&
+                event.parentEventId === raisedObjection.id,
+            );
+            const objectionRuling = roleSession.events.find(
+              (event) =>
+                event.kind === "moderator_ruling" &&
+                event.stepKey === "participant_objection_ruling" &&
+                event.parentEventId === objectionReason?.id,
+            );
+            assert.ok(objectionReason);
+            assert.equal(
+              objectionReason.content,
+              "The heard claim treats the proposal itself as proof of the promised result.",
+            );
+            assert.ok(
+              objectionRuling?.ruling === "sustained" ||
+                objectionRuling?.ruling === "overruled",
+            );
+            assert.match(
+              objectionRuling.content,
+              objectionRuling.ruling === "sustained"
+                ? /^Sustained\./u
+                : /^Overruled\./u,
+            );
+            const continuation = roleSession.events.find(
+              (event) =>
+                event.stepKey === "participant_objection_continuation" &&
+                event.parentEventId === objectionRuling.id,
+            );
+            assert.equal(
+              Boolean(continuation),
+              objectionRuling.ruling === "overruled",
+            );
+            if (continuation) {
+              assert.equal(
+                continuation.speakerBotId,
+                objectionTarget.speakerBotId,
+              );
+              assert.equal(continuation.sideId, objectionTarget.sideId);
+            }
+            assert.equal(roleSession.participantObjection, null);
+
+            const persistedResolveResponse = await owner.request(
+              `/api/debates/${roleSession.id}`,
+            );
+            assert.equal(persistedResolveResponse.status, 200);
+            roleSession = (await payload(persistedResolveResponse))
+              .session as DebateSessionV1;
+            assert.equal(roleSession.participantObjection, null);
+            assert.equal(
+              roleSession.events.find(
+                (event) => event.id === objectionRuling.id,
+              )?.ruling,
+              objectionRuling.ruling,
+            );
+            assert.equal(
+              roleSession.events.some(
+                (event) =>
+                  event.stepKey === "participant_objection_continuation" &&
+                  event.parentEventId === objectionRuling.id,
+              ),
+              objectionRuling.ruling === "overruled",
+            );
+            participantObjectionResolved = true;
+          }
+        }
         let response: Response;
         if (roleSession.stepKey === "verdict_player") {
           response = await owner.request(
@@ -482,14 +697,47 @@ describe("Debate API", () => {
         assert.equal(response.status, 200);
         roleSession = (await payload(response)).session as DebateSessionV1;
       }
-      assert.equal(roleSession.ballots.length, 3);
+      assert.equal(roleSession.ballots.length, role === "judge" ? 0 : 1);
       assert.equal(
-        roleSession.events.filter((event) => event.kind === "player_turn").length,
-        role === "participant" ? 2 : 1,
+        roleSession.events.filter(
+          (event) =>
+            event.kind === "player_turn" &&
+            event.stepKey !== "participant_objection_reason",
+        ).length,
+        role === "participant" ? 4 : 1,
+      );
+      assert.equal(participantObjectionResolved, role === "participant");
+      assert.equal(
+        roleSession.events.filter(
+          (event) =>
+            event.kind === "player_turn" &&
+            event.stepKey === "participant_objection_reason",
+        ).length,
+        role === "participant" ? 1 : 0,
       );
       assert.equal(
         roleSession.winnerSideId,
         role === "judge" ? "against" : "for",
+      );
+      if (role === "participant") {
+        assert.deepEqual(
+          roleSession.events
+            .filter(
+              (event) =>
+                event.kind === "reaction" &&
+                event.stepKey === "participant_aftermath_opponent",
+            )
+            .map((event) => event.speakerBotId),
+          ["for"],
+        );
+      }
+      assert.equal(
+        roleSession.events.at(0)?.speakerBotId,
+        roleSession.moderator.id,
+      );
+      assert.equal(
+        roleSession.events.at(-1)?.speakerBotId,
+        roleSession.moderator.id,
       );
     }
 
@@ -506,11 +754,10 @@ describe("Debate API", () => {
         },
         moderatorBotId: "moderator",
         forAdvocateBotId: "for",
-        againstAdvocateBotId: "against",
         playerRole: "participant",
         playerSideId: "against",
         jury: { enabled: true, cadence: "natural-five" },
-        advocacyConsent: checks,
+        advocacyConsent: participantChecks,
         preferredProvider: "local",
         modelOverride: "debate-navbar-override",
         theme: "dark",
@@ -589,15 +836,30 @@ describe("Debate API", () => {
     }
     assert.equal(juryParticipant.jury.forVotes, 5);
     assert.equal(juryParticipant.jury.againstVotes, 0);
-    const juryParticipantGet = (await payload(
-      await owner.request(`/api/debates/${juryParticipant.id}`),
-    )).session as DebateSessionV1;
+    const juryParticipantGet = (
+      await payload(await owner.request(`/api/debates/${juryParticipant.id}`))
+    ).session as DebateSessionV1;
     assert.deepEqual(juryParticipantGet.jury.finalBallots, []);
     assert.equal(
-      juryParticipantGet.events.some(
-        (event) => event.speakerKind === "juror",
-      ),
+      juryParticipantGet.events.some((event) => event.speakerKind === "juror"),
       false,
+    );
+
+    const participantTurnaboutRoleChecks = await owner.request(
+      "/api/debates/role-checks",
+      jsonInit({
+        format: "turnabout",
+        motion,
+        forAdvocateBotId: "for",
+        playerRole: "participant",
+        playerSideId: "against",
+        preferredProvider: "local",
+      }),
+    );
+    assert.equal(participantTurnaboutRoleChecks.status, 400);
+    assert.match(
+      String((await payload(participantTurnaboutRoleChecks)).error),
+      /Participant mode currently supports Forum only/u,
     );
 
     const turnaboutRoleChecks = await owner.request(
@@ -697,9 +959,7 @@ describe("Debate API", () => {
     ).run(
       JSON.stringify({
         v: 1,
-        fallbacks: [
-          { provider: "openai", model: "debate-online-fallback" },
-        ],
+        fallbacks: [{ provider: "openai", model: "debate-online-fallback" }],
       }),
       userId,
     );

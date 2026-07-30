@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   debateJudgeGuidedStepKind,
+  debateJudgeObjectionRulingShortcut,
   debateJudgeQuickChoices,
 } from "./debateJudgeQuickChoices.ts";
 
@@ -59,27 +60,24 @@ describe("Debate Judge quick choices", () => {
     );
   });
 
-  it("gives the gavel an explicit End Debate action", () => {
+  it("keeps gavel interventions separate from lifecycle controls", () => {
     const choices = debateJudgeQuickChoices("gavel");
-    assert.equal(choices.length, 6);
-    assert.deepEqual(choices[0], {
-      id: "end-debate",
-      label: "End Debate",
-      detail: "Close the floor and deliver your ruling",
-      content: null,
-      action: "end",
-    });
+    assert.equal(choices.length, 5);
+    assert.equal(
+      choices.some((choice) => choice.id === "end-debate"),
+      false,
+    );
     assert.equal(
       choices
-        .slice(1, 4)
+        .slice(0, 3)
         .every(
           (choice) =>
             choice.action === "submit" && Boolean(choice.content?.trim()),
         ),
       true,
     );
-    assert.equal(choices[4]?.action, "compose");
-    assert.equal(choices[5]?.action, "dismiss");
+    assert.equal(choices[3]?.action, "compose");
+    assert.equal(choices[4]?.action, "dismiss");
   });
 
   it("keeps questions to three direct prompts, custom prose, or dismissal", () => {
@@ -102,5 +100,49 @@ describe("Debate Judge quick choices", () => {
 
   it("reserves objection rulings for the timed Sustained / Overruled dock", () => {
     assert.deepEqual(debateJudgeQuickChoices("objection"), []);
+  });
+
+  it("maps S and O to objection rulings without stealing editable input", () => {
+    const base = {
+      active: true,
+      editableTarget: false,
+      hasModifier: false,
+    };
+    assert.equal(
+      debateJudgeObjectionRulingShortcut({ ...base, key: "s" }),
+      "sustained",
+    );
+    assert.equal(
+      debateJudgeObjectionRulingShortcut({ ...base, key: "O" }),
+      "overruled",
+    );
+    assert.equal(
+      debateJudgeObjectionRulingShortcut({
+        ...base,
+        editableTarget: true,
+        key: "s",
+      }),
+      null,
+    );
+    assert.equal(
+      debateJudgeObjectionRulingShortcut({
+        ...base,
+        hasModifier: true,
+        key: "o",
+      }),
+      null,
+    );
+    assert.equal(
+      debateJudgeObjectionRulingShortcut({
+        ...base,
+        active: false,
+        key: "s",
+      }),
+      null,
+    );
+    assert.equal(
+      debateJudgeObjectionRulingShortcut({ ...base, key: "Enter" }),
+      null,
+    );
   });
 });
