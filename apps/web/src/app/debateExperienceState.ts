@@ -28,13 +28,25 @@ export function debatePrefilledCast(
   };
 }
 
-export function randomDebateCast(
-  availableBotIds: readonly string[],
-  random: () => number = Math.random,
-): DebateCastSelection | null {
-  const shuffledIds = [...new Set(availableBotIds.filter(Boolean))];
-  if (shuffledIds.length < 3) return null;
+export function debatePlayerJudgePrefilledCast(
+  initialBotIds: readonly string[] | undefined,
+): DebateCastSelection {
+  const ids = [...new Set((initialBotIds ?? []).filter(Boolean))];
+  if (ids.length > 2) {
+    return { moderator: "", forAdvocate: "", againstAdvocate: "" };
+  }
+  return {
+    moderator: "",
+    forAdvocate: ids[0] ?? "",
+    againstAdvocate: ids[1] ?? "",
+  };
+}
 
+function shuffledUniqueBotIds(
+  availableBotIds: readonly string[],
+  random: () => number,
+): string[] {
+  const shuffledIds = [...new Set(availableBotIds.filter(Boolean))];
   for (let index = shuffledIds.length - 1; index > 0; index -= 1) {
     const sample = random();
     const normalizedSample = Number.isFinite(sample)
@@ -46,11 +58,33 @@ export function randomDebateCast(
       shuffledIds[index]!,
     ];
   }
+  return shuffledIds;
+}
+
+export function randomDebateCast(
+  availableBotIds: readonly string[],
+  random: () => number = Math.random,
+): DebateCastSelection | null {
+  const shuffledIds = shuffledUniqueBotIds(availableBotIds, random);
+  if (shuffledIds.length < 3) return null;
 
   return {
     moderator: shuffledIds[0]!,
     forAdvocate: shuffledIds[1]!,
     againstAdvocate: shuffledIds[2]!,
+  };
+}
+
+export function randomDebatePlayerJudgeCast(
+  availableBotIds: readonly string[],
+  random: () => number = Math.random,
+): DebateCastSelection | null {
+  const shuffledIds = shuffledUniqueBotIds(availableBotIds, random);
+  if (shuffledIds.length < 2) return null;
+  return {
+    moderator: "",
+    forAdvocate: shuffledIds[0]!,
+    againstAdvocate: shuffledIds[1]!,
   };
 }
 

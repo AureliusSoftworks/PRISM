@@ -20,12 +20,9 @@ describe("mode tutorials", () => {
       tutorial.steps.map((step) => step.targetSelector),
       [
         '[data-tutorial-target="debate-new"]',
-        '[data-tutorial-target="debate-presets"]',
-        '[data-tutorial-target="debate-formality"]',
-        '[data-tutorial-target="debate-format"]',
+        '[data-tutorial-target="debate-setup-mode"]',
         '[data-tutorial-target="debate-synthesize"]',
         '[data-tutorial-target="debate-cast"]',
-        '[data-tutorial-target="debate-jury"]',
         '[data-tutorial-target="debate-consent"]',
         '[data-tutorial-target="debate-evidence"]',
         '[data-tutorial-target="debate-readiness"]',
@@ -37,66 +34,59 @@ describe("mode tutorials", () => {
       ],
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
-    assert.match(copy, /one non-gated console/u);
+    assert.match(copy, /Basic setup is the welcoming default/u);
+    assert.match(copy, /Basic asks only for the debate idea and two debaters/u);
+    assert.match(
+      copy,
+      /writes the balanced motion and both private side briefs/u,
+    );
+    assert.match(copy, /uses a Plainspoken Forum/u);
+    assert.match(copy, /leaves the final call to you/u);
+    assert.match(copy, /Advanced preserves the full studio/u);
+    assert.match(copy, /five formality levels/u);
+    assert.match(copy, /Forum or Turnabout/u);
+    assert.match(copy, /without deleting your topic, cast, or sources/u);
+    assert.match(copy, /briefs you should not have to author/u);
+    assert.match(copy, /Try another version/u);
+    assert.match(copy, /Make sure they’re willing/u);
+    assert.match(copy, /private LLM check/u);
+    assert.match(copy, /Sources are optional/u);
+    assert.match(copy, /Find sources for me/u);
+    assert.match(copy, /LOCAL blocks research before network access/u);
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
-    assert.match(
-      copy,
-      /hard-muted moderator contributes visible canonical silence/u,
-    );
-    assert.match(copy, /durable hidden turn/u);
-    assert.match(copy, /empty, silent podium/u);
-    assert.match(
-      copy,
-      /matching observer such as Light alone receives Ryuk’s words/u,
-    );
-    assert.match(copy, /Microscopic moderator remains unseen but audible/u);
     assert.match(copy, /inaccessible speech never enters captions, voice/u);
     assert.match(copy, /shared case board, or listener-facing ballot reasons/u);
-    assert.match(copy, /one strike calls attention and two restore order/u);
+    assert.match(copy, /one strike calls attention at every phase change/u);
+    assert.match(
+      copy,
+      /two restore order for live interruptions, rulings, and verdicts/u,
+    );
+    assert.match(
+      copy,
+      /first impact begins on the current shot and Auto lands on Moderator before the second/u,
+    );
+    assert.match(copy, /Forum and Turnabout both keep this procedural rhythm/u);
     assert.match(
       copy,
       /canonically silent moderator can use that visible signal/u,
     );
     assert.match(copy, /gavel is visible only in Moderator view/u);
     assert.doesNotMatch(copy, /hard-muted bot cannot moderate/u);
-    assert.match(copy, /Forum is the backward-compatible default/u);
-    assert.match(copy, /five-stop Formality slider/u);
-    assert.match(copy, /Parliamentary is the backward-compatible default/u);
-    assert.match(copy, /Each preset chooses its matching formality/u);
     assert.match(
       copy,
-      /University Union, Daytime Showdown, Crossfire, Town Hall, and Bench Trial/u,
+      /Press asks for clarification; Object opens[\s\S]*Present Evidence sends/u,
     );
-    assert.match(copy, /different format, not a theme/u);
-    assert.match(copy, /Press, Object, and Present Evidence/u);
-    assert.match(
-      copy,
-      /one statement and one evidence item frozen before Start/u,
-    );
-    assert.match(copy, /Spectators receive a moderator-led examination/u);
-    assert.match(copy, /without turning setup into a wizard/u);
     assert.match(copy, /Devil’s Advocate/u);
-    assert.match(copy, /immutable prep packet/u);
-    assert.match(copy, /Generate evidence/u);
-    assert.match(copy, /real-source query/u);
     assert.match(copy, /never fabricates sources/u);
-    assert.match(
-      copy,
-      /grounded statement excerpt and frozen-evidence excerpt/u,
-    );
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(
       copy,
-      /At Parliamentary formality those formats speak as the Assembly Chamber and Court of Record/u,
+      /Changing the motion, cast, format, or formality clears/u,
     );
-    assert.match(copy, /lower levels use direct, ordinary language/u);
-    assert.match(copy, /Changing format or formality clears advocacy consent/u);
-    assert.match(copy, /Flyting and Cypher are visible as coming-later/u);
-    assert.match(copy, /cannot be selected or sent to the server/u);
-    assert.match(copy, /use its dice for a fresh editable seed/u);
+    assert.match(copy, /territory dice remains available/u);
     assert.match(
       copy,
-      /pause and resume the exact next juror, discussion turn, or ballot/u,
+      /Resume preserves the exact next juror, discussion turn, ballot, or interrupted line/u,
     );
     assert.match(copy, /End early skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
@@ -108,12 +98,25 @@ describe("mode tutorials", () => {
     assert.match(copy, /trade short reactions between public-floor turns/u);
     assert.match(copy, /another camera lets them resolve immediately/u);
     assert.match(copy, /anonymous ballot slides/u);
+    assert.match(copy, /both advocates’ reactions/u);
+    assert.match(
+      copy,
+      /Moderator closes, or before the human Judge delivers the final ruling/u,
+    );
+    assert.match(
+      copy,
+      /bot Moderator then closes Spectator and Participant sessions/u,
+    );
     assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
     assert.match(copy, /fallback chain saved in Settings/u);
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
     assert.match(copy, /Start freezes that ordered chain/u);
+    assert.match(
+      copy,
+      /Live Pause first calls the room to order with the moderator’s gavel and announcement/u,
+    );
     assert.match(copy, /traditional three-cast majority/u);
     assert.match(copy, /Public prose arrives with the live voice/u);
     assert.match(copy, /actual animated bot behind an authored side podium/u);
@@ -128,15 +131,17 @@ describe("mode tutorials", () => {
     assert.match(copy, /Copy verbose transcript/u);
   });
 
-  it("teaches Debate's one-click random actor casting", () => {
+  it("teaches Debate's role-aware actor casting", () => {
     const castCopy =
       MODE_TUTORIALS.debate.steps.find(
         (step) =>
           step.targetSelector === '[data-tutorial-target="debate-cast"]',
       )?.body ?? "";
     assert.match(castCopy, /Random actors/u);
-    assert.match(castCopy, /roll all three unique seats/u);
-    assert.match(castCopy, /full Library/u);
+    assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
+    assert.match(castCopy, /procedural moderator lines in your player voice/u);
+    assert.match(castCopy, /choose the two advocates/u);
+    assert.match(castCopy, /Participant and Spectator roles/u);
   });
 
   it("teaches the non-blocking Coffee Group identity synthesis flow", () => {

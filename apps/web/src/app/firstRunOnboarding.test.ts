@@ -28,7 +28,7 @@ describe("first-run onboarding", () => {
         "online-model",
         "auto-models",
         "ready",
-      ]
+      ],
     );
   });
 
@@ -56,7 +56,7 @@ describe("first-run onboarding", () => {
     ]) {
       assert.equal(
         FIRST_RUN_SETUP_STEPS.find((step) => step.id === stepId)?.optional,
-        true
+        true,
       );
     }
   });
@@ -68,16 +68,17 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /at least one fallback in\s*Settings/u);
   });
 
-  it("introduces Debate formats without turning setup into a gate", () => {
+  it("introduces Basic Debate before the advanced production controls", () => {
     assert.match(
       pageSource,
-      /Debate begins in Forum and can become Turnabout when you want\s*pressable testimony/u,
+      /Debate begins in Basic setup: name the idea, choose two\s*debaters/u,
     );
-    assert.match(pageSource, /frozen-evidence objections/u);
     assert.match(
       pageSource,
-      /room walkthrough teaches the\s*difference before Start/u,
+      /Prism prepare the balanced motion and side\s*briefs/u,
     );
+    assert.match(pageSource, /Advanced keeps Forum, Turnabout, formality/u);
+    assert.match(pageSource, /Jury controls available/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {
@@ -85,7 +86,10 @@ describe("first-run onboarding", () => {
       (step) => step.id === "provider",
     );
     assert.equal(providerStep?.title, "Choose your chat home base");
-    assert.match(pageSource, /Image generation has its own LOCAL\/ONLINE choice/u);
+    assert.match(
+      pageSource,
+      /Image generation has its own LOCAL\/ONLINE choice/u,
+    );
     assert.match(
       pageSource,
       /English always uses each bot(?:&apos;|’)s local\s*PRISM or optional operating-system voice without ElevenLabs\s*credits\. Premium uses its ElevenLabs identity for AUTO and\s*ONLINE speech, then falls back locally/u,
@@ -98,7 +102,10 @@ describe("first-run onboarding", () => {
       pageSource,
       /English remains local and uses no ElevenLabs credits/u,
     );
-    assert.match(pageSource, /assigns stable Premium defaults from the collection you choose in Voice Settings/u);
+    assert.match(
+      pageSource,
+      /assigns stable Premium defaults from the collection you choose in Voice Settings/u,
+    );
   });
 
   it("clamps restored progress and reaches a full final bar", () => {

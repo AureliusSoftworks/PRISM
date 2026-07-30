@@ -25832,6 +25832,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
+/* The Moderator camera magnifies the rotated punctuation face much more than
+   the Wide shot. Lower the stock eye mark inside that close-up without
+   rewriting the bot's authored face geometry on any other surface. */
+.debateBotPresencePlate[data-debate-role="moderator"]:not(
+    [data-debate-compact="true"]
+  )
+  .coffeeSeatPlateEmoji:not([data-face-eye-character]) {
+  --zen-live-bot-eye-local-x: 0.5;
+}
+
 .debateBotPresencePlate[data-debate-compact="true"] {
   --bot-ambient-hover-amplitude: 0.5px;
 }

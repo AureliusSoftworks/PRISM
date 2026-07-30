@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import {
+  DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   botPowerSourceHashV1,
   serializeBotAudioVoiceProfileV1,
@@ -50,10 +51,12 @@ const debateSource = readFileSync(
 const MOTION: DebateMotionSlateV1 = {
   version: DEBATE_SCHEMA_VERSION,
   id: "housing-motion",
-  motion: "This city should legalize six-story apartments near every rail station.",
+  motion:
+    "This city should legalize six-story apartments near every rail station.",
   forSide: {
     label: "Build Near Rail",
-    brief: "Defend broad six-story zoning as a fair response to housing scarcity.",
+    brief:
+      "Defend broad six-story zoning as a fair response to housing scarcity.",
   },
   againstSide: {
     label: "Plan With Limits",
@@ -95,12 +98,53 @@ class DebateProviderStub implements LlmProvider {
   }
 }
 
-class JuryProvider extends DebateProviderStub {
+class OvertimeProvider extends DebateProviderStub {
+  public openingPrompt = "";
+  public correctionPrompt = "";
+
   public override async generateResponse(
     messages: ProviderMessage[],
     options?: GenerateOptions,
   ): Promise<string> {
     const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("beyond the allotted floor time")) {
+      this.correctionPrompt = text;
+      return JSON.stringify({
+        content:
+          "Time, Avery. Yield the floor so the scheduled order can resume.",
+      });
+    }
+    if (
+      text.includes("Give the Build Near Rail opening address") ||
+      text.includes("Give the Build Near Rail opening argument")
+    ) {
+      this.openingPrompt = text;
+      return JSON.stringify({
+        content: Array.from(
+          { length: 78 },
+          (_, index) => `grounded${index + 1}`,
+        ).join(" "),
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class JuryProvider extends DebateProviderStub {
+  public aftermathPrompts: string[] = [];
+  public closingPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("immediate public reaction")) {
+      this.aftermathPrompts.push(text);
+    }
+    if (text.includes("Close the proceeding formally")) {
+      this.closingPrompt = text;
+    }
     if (
       text.includes("Form a private initial leaning") ||
       text.includes("Cast your final independent Jury ballot")
@@ -142,6 +186,38 @@ class PersonaVoicePromptProvider extends DebateProviderStub {
     if (text.includes("Vote independently")) this.ballotPrompt = text;
     else if (!text.includes("private advocacy consent check")) {
       this.speechPrompt = text;
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class DaytimeShowdownProvider extends DebateProviderStub {
+  public advocatePrompt = "";
+  public moderatorPrompt = "";
+  public rulingPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("private advocacy consent check")) {
+      return super.generateResponse(messages, options);
+    }
+    if (text.includes("Cut off Basil now")) {
+      return JSON.stringify({
+        content: "Basil, you dodge harder than your argument lands.",
+      });
+    }
+    if (text.includes("just talked over Basil")) {
+      this.rulingPrompt = text;
+      return JSON.stringify({
+        content: "Avery, enough. Basil had the floor, and Basil gets it back.",
+      });
+    }
+    if (text.includes("Open Daytime Showdown")) this.moderatorPrompt = text;
+    if (text.includes("Give the Build Near Rail opening argument")) {
+      this.advocatePrompt = text;
     }
     return super.generateResponse(messages, options);
   }
@@ -457,8 +533,13 @@ class SilentModeratorEncounterProvider extends DebateProviderStub {
     if (text.includes("unexpectedly open floor")) {
       this.openingPrompt = text;
       return JSON.stringify({
-        content:
+        content: [
           "Well. No opening bell, then. The housing shortage still requires a direct answer.",
+          Array.from(
+            { length: 70 },
+            (_, index) => `continued${index + 1}`,
+          ).join(" "),
+        ].join(" "),
       });
     }
     if (
@@ -491,8 +572,7 @@ class PerceptibilityAwareModeratorProvider extends DebateProviderStub {
     }
     if (text.includes("Call the Assembly Chamber to order")) {
       return JSON.stringify({
-        content:
-          "MODERATOR OPENING SENTINEL: The chamber is called to order.",
+        content: "MODERATOR OPENING SENTINEL: The chamber is called to order.",
       });
     }
     if (text.includes("Ask one concise, difficult")) {
@@ -505,10 +585,9 @@ class PerceptibilityAwareModeratorProvider extends DebateProviderStub {
       if (text.includes("SpongeBob is")) this.spongeBobOpeningPrompt = text;
       if (text.includes("Light Yagami is")) this.spongeBobOpeningPrompt = text;
       return JSON.stringify({
-        content:
-          text.includes("empty and no opening words")
-            ? "An empty podium? Okay! Homes near trains still help people reach work because more neighbors can live by reliable transit."
-            : "Homes near trains help people reach work because more neighbors can live by reliable transit.",
+        content: text.includes("empty and no opening words")
+          ? "An empty podium? Okay! Homes near trains still help people reach work because more neighbors can live by reliable transit."
+          : "Homes near trains help people reach work because more neighbors can live by reliable transit.",
       });
     }
     if (text.includes("Respond with the Plan With Limits opening address")) {
@@ -617,18 +696,13 @@ function readyPower(
 
 function ryukInvisiblePowers(): BotPowerV1[] {
   return [
-    readyPower(
-      "invisible",
-      "Invisible",
-      "Only Light Yagami can see Ryuk.",
-      [
-        {
-          type: "awareness",
-          allowed: [{ kind: "bot", name: "Light Yagami" }],
-        },
-        { type: "avatar_visibility", mode: "translucent" },
-      ],
-    ),
+    readyPower("invisible", "Invisible", "Only Light Yagami can see Ryuk.", [
+      {
+        type: "awareness",
+        allowed: [{ kind: "bot", name: "Light Yagami" }],
+      },
+      { type: "avatar_visibility", mode: "translucent" },
+    ]),
     readyPower(
       "heard-by-light",
       "Private Voice",
@@ -691,6 +765,7 @@ async function createJudgeDebate(
     forSystemPrompt?: string;
     formality?: "free_for_all" | "plainspoken";
     consentFormality?: "free_for_all" | "plainspoken";
+    playerJudgeUsesPrism?: boolean;
   } = {},
 ) {
   seedBot(db, "moderator", "Mira");
@@ -734,6 +809,7 @@ async function createJudgeDebate(
         frozenAt: null,
       },
       moderatorBotId: "moderator",
+      playerJudgeUsesPrism: options.playerJudgeUsesPrism,
       forAdvocateBotId: "for",
       againstAdvocateBotId: "against",
       playerRole: "judge",
@@ -788,6 +864,7 @@ async function createJuryDebateForRole(
   db: DatabaseSync,
   role: "judge" | "participant" | "spectator",
   extraLibraryBots = 0,
+  format: "forum" | "turnabout" = "forum",
 ) {
   const provider = new JuryProvider();
   const debateRuntime = runtimeWith(provider);
@@ -813,6 +890,7 @@ async function createJuryDebateForRole(
     db,
     "user-1",
     {
+      format,
       motion: MOTION,
       formality,
       forAdvocateBotId: "for",
@@ -822,12 +900,13 @@ async function createJuryDebateForRole(
   );
   const request = {
     presetId:
-      role === "judge"
+      format === "turnabout" || role === "judge"
         ? ("custom" as const)
         : role === "participant"
           ? ("take-the-floor" as const)
           : ("public-forum" as const),
     formality,
+    format,
     motion: MOTION,
     evidence: {
       version: 1 as const,
@@ -844,9 +923,10 @@ async function createJuryDebateForRole(
     advocacyConsent: checks,
     preferredProvider: "local" as const,
     theme: "dark" as const,
-    idempotencyKey: `create:jury:${role}:0001`,
+    idempotencyKey: `create:jury:${format}:${role}:0001`,
   };
   return {
+    provider,
     runtime: debateRuntime,
     request,
     session: createDebateSession(db, "user-1", request, debateRuntime),
@@ -934,11 +1014,13 @@ describe("Debate engine", () => {
       assert.equal(session.jury.enabled, true);
       assert.equal(session.jury.phase, "waiting");
       assert.equal(session.jury.jurors.length, 5);
-      assert.equal(new Set(session.jury.jurors.map((juror) => juror.id)).size, 5);
+      assert.equal(
+        new Set(session.jury.jurors.map((juror) => juror.id)).size,
+        5,
+      );
       assert.ok(
         session.jury.jurors.every(
-          (juror) =>
-            !["moderator", "for", "against"].includes(juror.id),
+          (juror) => !["moderator", "for", "against"].includes(juror.id),
         ),
       );
       assert.equal(
@@ -968,12 +1050,7 @@ describe("Debate engine", () => {
           baseVoiceId: "voice-2",
         }),
       );
-      const replay = createDebateSession(
-        db,
-        "user-1",
-        request,
-        debateRuntime,
-      );
+      const replay = createDebateSession(db, "user-1", request, debateRuntime);
       assert.deepEqual(
         replay.jury.jurors.map((juror) => juror.id),
         session.jury.jurors.map((juror) => juror.id),
@@ -1048,9 +1125,7 @@ describe("Debate engine", () => {
       assert.equal(sidebar?.kind, "jury_deliberation");
       assert.equal(sidebar?.speakerKind, "juror");
       assert.ok(
-        session.jury.jurors.some(
-          (juror) => juror.id === sidebar?.speakerBotId,
-        ),
+        session.jury.jurors.some((juror) => juror.id === sidebar?.speakerBotId),
       );
       assert.ok(sidebar?.parentEventId);
       assert.equal(session.jury.phase, "waiting");
@@ -1077,15 +1152,10 @@ describe("Debate engine", () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
-      let session = endDebateSessionEarly(
-        db,
-        "user-1",
-        created.session.id,
-        {
-          expectedRevision: created.session.revision,
-          idempotencyKey: "jury:end-early:0001",
-        },
-      );
+      let session = endDebateSessionEarly(db, "user-1", created.session.id, {
+        expectedRevision: created.session.revision,
+        idempotencyKey: "jury:end-early:0001",
+      });
       assert.equal(session.stepKey, "jury_initial_0");
       assert.equal(session.jury.discussionTurnTarget, 3);
       let mutation = 0;
@@ -1120,9 +1190,8 @@ describe("Debate engine", () => {
       );
       assert.equal(session.jury.discussionTurnCount, 1);
       assert.equal(
-        session.events.filter(
-          (event) => event.kind === "jury_deliberation",
-        ).length,
+        session.events.filter((event) => event.kind === "jury_deliberation")
+          .length,
         1,
       );
 
@@ -1133,6 +1202,7 @@ describe("Debate engine", () => {
       assert.equal(session.stepKey, "jury_final_0");
       assert.ok(session.jury.calledVoteAt);
 
+      let sawVerdictHandoff = false;
       while (session.status !== "completed") {
         mutation += 1;
         session = await advanceDebateSession(
@@ -1145,8 +1215,15 @@ describe("Debate engine", () => {
           },
           created.runtime,
         );
+        if (session.events.at(-1)?.kind === "jury_verdict") {
+          sawVerdictHandoff = true;
+          assert.equal(session.status, "live");
+          assert.equal(session.stepKey, "jury_aftermath_for");
+          assert.equal(session.completedAt, null);
+        }
         assert.ok(mutation < 24);
       }
+      assert.equal(sawVerdictHandoff, true);
       assert.equal(session.jury.finalBallots.length, 5);
       assert.equal(session.jury.forVotes, 5);
       assert.equal(session.jury.againstVotes, 0);
@@ -1154,10 +1231,39 @@ describe("Debate engine", () => {
       assert.equal(session.winnerSideId, "for");
       assert.equal(
         session.events.filter(
-          (event) =>
-            event.kind === "ballot" && event.speakerKind === "juror",
+          (event) => event.kind === "ballot" && event.speakerKind === "juror",
         ).length,
         5,
+      );
+      const verdictSequence = session.events.find(
+        (event) => event.kind === "jury_verdict",
+      )?.sequence;
+      const aftermath = session.events.filter(
+        (event) =>
+          event.stepKey === "jury_aftermath_for" ||
+          event.stepKey === "jury_aftermath_against" ||
+          event.stepKey === "jury_closing_moderator",
+      );
+      assert.deepEqual(
+        aftermath.map((event) => [
+          event.stepKey,
+          event.kind,
+          event.speakerBotId,
+        ]),
+        [
+          ["jury_aftermath_for", "reaction", "for"],
+          ["jury_aftermath_against", "reaction", "against"],
+          ["jury_closing_moderator", "phase", "moderator"],
+        ],
+      );
+      assert.ok(
+        verdictSequence &&
+          aftermath.every((event) => event.sequence > verdictSequence),
+      );
+      assert.equal(session.events.at(-1)?.speakerBotId, "moderator");
+      assert.match(
+        created.provider.closingPrompt,
+        /declare the debate closed/u,
       );
 
       const participant = debateSessionForPlayer({
@@ -1182,6 +1288,97 @@ describe("Debate engine", () => {
       assert.equal(aggregate?.speakerKind, "system");
       assert.equal(aggregate?.speakerBotId, null);
       assert.match(aggregate?.content ?? "", /5–0/u);
+      assert.equal(
+        participant.events.filter((event) => event.kind === "reaction").length,
+        2,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps participant Jury aftermath aggregate-only before the moderator closes", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createJuryDebateForRole(db, "participant", 5);
+      let session = endDebateSessionEarly(db, "user-1", created.session.id, {
+        expectedRevision: created.session.revision,
+        idempotencyKey: "jury:participant:end-early:0001",
+      });
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `jury:participant:advance:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 24);
+      }
+      assert.equal(created.provider.aftermathPrompts.length, 2);
+      assert.ok(
+        created.provider.aftermathPrompts.every(
+          (prompt) =>
+            prompt.includes("sealed Jury") &&
+            prompt.includes("aggregate winning side and split") &&
+            prompt.includes("Never mention or imply any juror identity"),
+        ),
+      );
+      const visible = debateSessionForPlayer(session);
+      assert.equal(
+        visible.events.filter((event) => event.kind === "reaction").length,
+        2,
+      );
+      assert.equal(visible.events.at(-1)?.speakerKind, "moderator");
+      assert.equal(visible.events.at(-1)?.kind, "phase");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns a Jury Turnabout to both advocates before its moderator closes", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "turnabout",
+      );
+      let session = endDebateSessionEarly(db, "user-1", created.session.id, {
+        expectedRevision: created.session.revision,
+        idempotencyKey: "jury:turnabout:end-early:0001",
+      });
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `jury:turnabout:advance:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 24);
+      }
+      assert.equal(session.formatState.format, "turnabout");
+      assert.equal(session.formatState.phase, "resolution");
+      assert.equal(session.formatState.floorOwnerBotId, null);
+      assert.deepEqual(
+        session.events
+          .filter((event) => event.kind === "reaction")
+          .map((event) => event.speakerBotId),
+        ["for", "against"],
+      );
+      assert.equal(session.events.at(-1)?.speakerBotId, "moderator");
     } finally {
       db.close();
     }
@@ -1307,15 +1504,10 @@ describe("Debate engine", () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "judge", 0);
-      let session = endDebateSessionEarly(
-        db,
-        "user-1",
-        created.session.id,
-        {
-          expectedRevision: created.session.revision,
-          idempotencyKey: "jury:judge:end-early:0001",
-        },
-      );
+      let session = endDebateSessionEarly(db, "user-1", created.session.id, {
+        expectedRevision: created.session.revision,
+        idempotencyKey: "jury:judge:end-early:0001",
+      });
       let mutation = 0;
       while (session.status !== "waiting_for_player") {
         mutation += 1;
@@ -1331,10 +1523,25 @@ describe("Debate engine", () => {
         );
         assert.ok(mutation < 24);
       }
-      assert.equal(session.jury.jurors.every((juror) => juror.source === "generic"), true);
+      assert.equal(
+        session.jury.jurors.every((juror) => juror.source === "generic"),
+        true,
+      );
       assert.equal(session.jury.majoritySideId, "for");
       assert.equal(session.winnerSideId, null);
       assert.equal(session.stepKey, "verdict_player");
+      assert.deepEqual(
+        session.events
+          .filter((event) => event.kind === "reaction")
+          .map((event) => event.speakerBotId),
+        ["for", "against"],
+      );
+      assert.equal(
+        session.events.some(
+          (event) => event.stepKey === "jury_closing_moderator",
+        ),
+        false,
+      );
 
       session = submitDebateVerdict(db, "user-1", session.id, {
         expectedRevision: session.revision,
@@ -1346,6 +1553,38 @@ describe("Debate engine", () => {
       assert.equal(session.winnerSideId, "against");
       assert.equal(session.ballots.length, 0);
       assert.equal(session.jury.finalBallots.length, 5);
+      assert.equal(session.events.at(-1)?.kind, "verdict");
+      assert.equal(session.events.at(-1)?.speakerKind, "player");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("freezes default Prism as the player Judge's procedural moderator", async () => {
+    const db = createTestDb();
+    try {
+      const session = await createJudgeDebate(db, runtime(), {
+        playerJudgeUsesPrism: true,
+      });
+      assert.equal(session.moderator.id, DEBATE_PLAYER_JUDGE_BOT_ID);
+      assert.equal(session.moderator.name, "Prism");
+      assert.equal(session.moderator.role, "moderator");
+      assert.equal(session.moderator.sideId, null);
+      assert.deepEqual(session.moderator.powers, []);
+      assert.match(
+        session.moderator.systemPrompt,
+        /neutral procedural proxy for the human Judge/u,
+      );
+      assert.match(
+        session.moderator.systemPrompt,
+        /human Judge alone supplies player turns and the binding verdict/u,
+      );
+      assert.equal(session.forAdvocate.id, "for");
+      assert.equal(session.againstAdvocate.id, "against");
+      assert.equal(
+        session.powerPlan.bots[DEBATE_PLAYER_JUDGE_BOT_ID]?.hardMuted,
+        false,
+      );
     } finally {
       db.close();
     }
@@ -1367,11 +1606,72 @@ describe("Debate engine", () => {
         runtimeWith(provider),
       );
       assert.match(provider.speechPrompt, /Persona voice is binding/);
-      assert.match(provider.speechPrompt, /generic polished-debater, corporate, academic, or assistant language/);
-      assert.match(provider.speechPrompt, /formal Debate role changes the structure of a turn, not the persona's vocabulary or fluency/);
+      assert.match(
+        provider.speechPrompt,
+        /generic polished-debater, corporate, academic, or assistant language/,
+      );
+      assert.match(
+        provider.speechPrompt,
+        /formal Debate role changes the structure of a turn, not the persona's vocabulary or fluency/,
+      );
       // A neutral ballot is generated only at normal completion; direct coverage
       // of the shared prompt text is pinned by its exported source contract below.
       assert.match(debateSource, /personaVoicePrompt\(voter\)/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records advocate overtime and requires a linked moderator correction before advancing", async () => {
+    const db = createTestDb();
+    const provider = new OvertimeProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime);
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:overtime-intro:0001",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:overtime-opening:0001",
+        },
+        debateRuntime,
+      );
+
+      const opening = session.events.find(
+        (event) =>
+          event.stepKey === "opening_for" &&
+          event.kind === "speech" &&
+          event.speakerBotId === session.forAdvocate.id,
+      );
+      assert.equal(opening?.timing?.limitMs, 20_000);
+      assert.equal(opening?.timing?.status, "overtime");
+      assert.ok((opening?.timing?.overtimeMs ?? 0) > 0);
+      const correction = session.events.find(
+        (event) =>
+          event.kind === "moderator_ruling" &&
+          event.parentEventId === opening?.id,
+      );
+      assert.equal(correction?.speakerBotId, session.moderator.id);
+      assert.ok((correction?.sequence ?? 0) > (opening?.sequence ?? 0));
+      assert.equal(session.stepKey, "opening_against");
+      assert.match(
+        provider.openingPrompt,
+        /audible floor clock gives you 20 seconds/u,
+      );
+      assert.match(provider.correctionPrompt, /restore the scheduled order/u);
+      assert.doesNotMatch(provider.correctionPrompt, /Vote independently/u);
     } finally {
       db.close();
     }
@@ -1427,7 +1727,8 @@ describe("Debate engine", () => {
         .reverse()
         .find(
           (event) =>
-            event.kind === "speech" && event.speakerBotId === session.forAdvocate.id,
+            event.kind === "speech" &&
+            event.speakerBotId === session.forAdvocate.id,
         );
       assert.equal(
         opening?.content,
@@ -1479,10 +1780,7 @@ describe("Debate engine", () => {
     const forumDb = createTestDb();
     try {
       const forumProvider = new PersonaVoicePromptProvider();
-      let forum = await createJudgeDebate(
-        forumDb,
-        runtimeWith(forumProvider),
-      );
+      let forum = await createJudgeDebate(forumDb, runtimeWith(forumProvider));
       forum = await advanceDebateSession(
         forumDb,
         "user-1",
@@ -1493,11 +1791,17 @@ describe("Debate engine", () => {
         },
         runtimeWith(forumProvider),
       );
-      assert.match(forumProvider.speechPrompt, /Production voice — Assembly Chamber/u);
+      assert.match(
+        forumProvider.speechPrompt,
+        /Production voice — Assembly Chamber/u,
+      );
       assert.match(forumProvider.speechPrompt, /live parliamentary forum/u);
       assert.match(forumProvider.speechPrompt, /neutral chair/u);
       assert.match(forumProvider.speechPrompt, /motion before the chamber/u);
-      assert.doesNotMatch(forumProvider.speechPrompt, /Production voice — Court of Record/u);
+      assert.doesNotMatch(
+        forumProvider.speechPrompt,
+        /Production voice — Court of Record/u,
+      );
     } finally {
       forumDb.close();
     }
@@ -1520,11 +1824,23 @@ describe("Debate engine", () => {
         },
         runtimeWith(turnaboutProvider),
       );
-      assert.match(turnaboutProvider.speechPrompt, /Production voice — Court of Record/u);
-      assert.match(turnaboutProvider.speechPrompt, /heightened courtroom examination/u);
+      assert.match(
+        turnaboutProvider.speechPrompt,
+        /Production voice — Court of Record/u,
+      );
+      assert.match(
+        turnaboutProvider.speechPrompt,
+        /heightened courtroom examination/u,
+      );
       assert.match(turnaboutProvider.speechPrompt, /neutral presiding judge/u);
-      assert.match(turnaboutProvider.speechPrompt, /sustained or overruled only for an actual recorded ruling/u);
-      assert.doesNotMatch(turnaboutProvider.speechPrompt, /Production voice — Assembly Chamber/u);
+      assert.match(
+        turnaboutProvider.speechPrompt,
+        /sustained or overruled only for an actual recorded ruling/u,
+      );
+      assert.doesNotMatch(
+        turnaboutProvider.speechPrompt,
+        /Production voice — Assembly Chamber/u,
+      );
 
       assert.match(
         debateSource,
@@ -1548,7 +1864,10 @@ describe("Debate engine", () => {
         formality: "plainspoken",
       });
       assert.equal(session.formality, "plainspoken");
-      assert.equal(listDebateSessions(db, "user-1")[0]?.formality, "plainspoken");
+      assert.equal(
+        listDebateSessions(db, "user-1")[0]?.formality,
+        "plainspoken",
+      );
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -1560,19 +1879,23 @@ describe("Debate engine", () => {
         runtimeWith(provider),
       );
       assert.match(provider.speechPrompt, /Frozen formality — Plainspoken/u);
-      assert.match(provider.speechPrompt, /Avoid canned parliamentary or court phrasing/u);
+      assert.match(
+        provider.speechPrompt,
+        /Avoid canned parliamentary or court phrasing/u,
+      );
       assert.match(provider.speechPrompt, /Production voice — Debate floor/u);
       assert.doesNotMatch(provider.speechPrompt, /live parliamentary forum/u);
-      assert.match(debateSource, /debateFormalityGuidance\(session\.formality\)/u);
-      assert.match(debateSource, /synthesizeDebateSlates\([\s\S]*formalityRaw/u);
-      assert.doesNotMatch(
+      assert.doesNotMatch(provider.speechPrompt, /Daytime Showdown contract/u);
+      assert.match(
         debateSource,
-        /motions for a short formal debate/u,
+        /debateFormalityGuidance\(session\.formality\)/u,
       );
       assert.match(
         debateSource,
-        /Do not default to “This House believes/u,
+        /synthesizeDebateSlates\([\s\S]*formalityRaw/u,
       );
+      assert.doesNotMatch(debateSource, /motions for a short formal debate/u);
+      assert.match(debateSource, /Do not default to “This House believes/u);
     } finally {
       db.close();
     }
@@ -1598,15 +1921,153 @@ describe("Debate engine", () => {
         },
         runtimeWith(provider),
       );
-      assert.match(provider.speechPrompt, /Production voice — Turnabout floor/u);
+      assert.match(
+        provider.speechPrompt,
+        /Production voice — Turnabout floor/u,
+      );
       assert.match(provider.speechPrompt, /Get this Turnabout started/u);
       assert.match(provider.speechPrompt, /without courtroom boilerplate/u);
-      assert.doesNotMatch(provider.speechPrompt, /Production voice — Court of Record/u);
+      assert.doesNotMatch(
+        provider.speechPrompt,
+        /Production voice — Court of Record/u,
+      );
       assert.doesNotMatch(
         provider.speechPrompt,
         /refer naturally to the court, the record/u,
       );
       assert.doesNotMatch(provider.speechPrompt, /Call the Court of Record/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("makes Daytime Showdown a personal, interrupt-heavy confrontation with moderator control", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new DaytimeShowdownProvider();
+      const debateRuntime = runtimeWith(provider);
+      seedBot(db, "moderator", "Mira");
+      seedBot(db, "for", "Avery");
+      seedBot(db, "against", "Basil");
+      const checks = await checkDebateAdvocacyRoles(
+        db,
+        "user-1",
+        {
+          format: "forum",
+          motion: MOTION,
+          formality: "free_for_all",
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+        },
+        debateRuntime,
+      );
+      let session = createDebateSession(
+        db,
+        "user-1",
+        {
+          presetId: "daytime-showdown",
+          format: "forum",
+          formality: "free_for_all",
+          motion: MOTION,
+          evidence: {
+            version: 1,
+            notes: "",
+            sources: [
+              {
+                id: "housing-1",
+                title: "Housing report",
+                url: "https://example.com/housing",
+                snippet: "A frozen housing source.",
+                publishedAt: "2026-01-01",
+              },
+            ],
+            frozenAt: null,
+          },
+          moderatorBotId: "moderator",
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+          playerRole: "spectator",
+          playerSideId: null,
+          jury: { enabled: true, cadence: "natural-five" },
+          advocacyConsent: checks,
+          preferredProvider: "local",
+          theme: "dark",
+          idempotencyKey: "create:daytime-showdown:0001",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.setupPresetId, "daytime-showdown");
+
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "daytime-showdown:intro:0001",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "daytime-showdown:opening-for:0001",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "daytime-showdown:opening-against:0001",
+        },
+        debateRuntime,
+      );
+
+      assert.match(
+        provider.moderatorPrompt,
+        /volatile live daytime confrontation show/u,
+      );
+      assert.match(provider.moderatorPrompt, /sharp, neutral traffic cop/u);
+      assert.match(provider.advocatePrompt, /full-contact verbal sparring/u);
+      assert.match(
+        provider.advocatePrompt,
+        /accusations of hypocrisy or evasion/u,
+      );
+      assert.match(
+        provider.advocatePrompt,
+        /No threats, slurs, dehumanization/u,
+      );
+      const interruptedSpeech = session.events.find(
+        (event) =>
+          event.stepKey === "opening_against" &&
+          event.kind === "speech" &&
+          event.speakerBotId === "against",
+      );
+      const interjection = session.events.find(
+        (event) =>
+          event.stepKey === "opening_against" && event.kind === "interjection",
+      );
+      const ruling = session.events.find(
+        (event) =>
+          event.stepKey === "opening_against" &&
+          event.kind === "moderator_ruling",
+      );
+      assert.equal(interruptedSpeech?.interrupted, true);
+      assert.equal(interruptedSpeech?.interruptedBy, "bot");
+      assert.equal(interjection?.speakerBotId, "for");
+      assert.equal(interjection?.parentEventId, interruptedSpeech?.id);
+      assert.equal(ruling?.speakerBotId, "moderator");
+      assert.equal(ruling?.parentEventId, interjection?.id);
+      assert.match(
+        provider.rulingPrompt,
+        /Avery: Basil, you dodge harder than your argument lands/u,
+      );
     } finally {
       db.close();
     }
@@ -1682,7 +2143,10 @@ describe("Debate engine", () => {
       assert.equal(restored.endedEarlyAt, null);
       assert.equal(listDebateSessions(db, "user-1")[0]?.format, "forum");
       assert.equal(restored.formality, "parliamentary");
-      assert.equal(listDebateSessions(db, "user-1")[0]?.formality, "parliamentary");
+      assert.equal(
+        listDebateSessions(db, "user-1")[0]?.formality,
+        "parliamentary",
+      );
     } finally {
       db.close();
     }
@@ -1707,12 +2171,7 @@ describe("Debate engine", () => {
         idempotencyKey: "early-judge:conclude:0001",
       };
       session = endDebateSessionEarly(db, "user-1", session.id, request);
-      const replay = endDebateSessionEarly(
-        db,
-        "user-1",
-        session.id,
-        request,
-      );
+      const replay = endDebateSessionEarly(db, "user-1", session.id, request);
 
       assert.equal(replay.revision, session.revision);
       assert.equal(session.phase, "verdict");
@@ -1885,11 +2344,7 @@ describe("Debate engine", () => {
     const db = createTestDb();
     const debateRuntime = runtimeWith(new TurnaboutProvider());
     try {
-      let session = await createTurnaboutForRole(
-        db,
-        "judge",
-        debateRuntime,
-      );
+      let session = await createTurnaboutForRole(db, "judge", debateRuntime);
       assert.equal(session.format, "turnabout");
       assert.equal(session.stepKey, "turnabout_intro");
       assert.ok(session.evidence.frozenAt);
@@ -1915,8 +2370,7 @@ describe("Debate engine", () => {
       }
       assert.equal(session.formatState.statements.length, 4);
       const first = session.formatState.statements.find(
-        (statement) =>
-          statement.id === session.formatState.activeStatementId,
+        (statement) => statement.id === session.formatState.activeStatementId,
       );
       assert.ok(first);
       assert.equal(session.formatState.floorOwnerBotId, first.speakerBotId);
@@ -1953,10 +2407,7 @@ describe("Debate engine", () => {
         debateRuntime,
       );
       assert.equal(replay.revision, session.revision);
-      assert.equal(
-        session.events.at(-1)?.kind,
-        "moderator_ruling",
-      );
+      assert.equal(session.events.at(-1)?.kind, "moderator_ruling");
       assert.equal(session.formatState.format, "turnabout");
       if (session.formatState.format !== "turnabout") {
         assert.fail("Turnabout state should stay discriminated.");
@@ -2098,11 +2549,7 @@ describe("Debate engine", () => {
     const db = createTestDb();
     const debateRuntime = runtimeWith(new UngroundedTurnaboutProvider());
     try {
-      let session = await createTurnaboutForRole(
-        db,
-        "judge",
-        debateRuntime,
-      );
+      let session = await createTurnaboutForRole(db, "judge", debateRuntime);
       let mutation = 0;
       while (session.stepKey !== "turnabout_action") {
         mutation += 1;
@@ -2178,11 +2625,7 @@ describe("Debate engine", () => {
     const provider = new FabricatedTurnaboutTestimonyProvider();
     const debateRuntime = runtimeWith(provider);
     try {
-      let session = await createTurnaboutForRole(
-        db,
-        "judge",
-        debateRuntime,
-      );
+      let session = await createTurnaboutForRole(db, "judge", debateRuntime);
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -2234,11 +2677,7 @@ describe("Debate engine", () => {
       const db = createTestDb();
       const debateRuntime = runtimeWith(new TurnaboutProvider());
       try {
-        let session = await createTurnaboutForRole(
-          db,
-          role,
-          debateRuntime,
-        );
+        let session = await createTurnaboutForRole(db, role, debateRuntime);
         let mutation = 0;
         while (session.status !== "completed") {
           mutation += 1;
@@ -2311,7 +2750,10 @@ describe("Debate engine", () => {
       let mutation = 0;
       while (session.status !== "completed") {
         mutation += 1;
-        assert.ok(mutation < 40, "Debate should complete within a bounded turn count.");
+        assert.ok(
+          mutation < 40,
+          "Debate should complete within a bounded turn count.",
+        );
         if (session.stepKey === "challenge_judge_question") {
           session = submitDebatePlayerTurn(db, "user-1", session.id, {
             expectedRevision: session.revision,
@@ -2356,7 +2798,8 @@ describe("Debate engine", () => {
         session.caseBoard.filter((card) => card.sideId === "for").length <= 4,
       );
       assert.ok(
-        session.caseBoard.filter((card) => card.sideId === "against").length <= 4,
+        session.caseBoard.filter((card) => card.sideId === "against").length <=
+          4,
       );
       assert.ok(
         session.events.some((event) => event.kind === "case_board"),
@@ -2437,6 +2880,14 @@ describe("Debate engine", () => {
       });
       assert.equal(paused.status, "paused");
       assert.equal(paused.stepKey, first.stepKey);
+      assert.equal(paused.events.length, first.events.length + 1);
+      assert.partialDeepStrictEqual(paused.events.at(-1), {
+        kind: "moderator_ruling",
+        speakerKind: "moderator",
+        speakerBotId: paused.moderator.id,
+        stepKey: "pause",
+        content: "This debate is now paused.",
+      });
       const resumed = resumeDebateSession(db, "user-1", created.id, {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:stable:0001",
@@ -2529,7 +2980,8 @@ describe("Debate engine", () => {
           24,
           Math.floor(target.content.length * 0.58),
         ),
-        content: "Point of order: that conclusion does not follow from the premise.",
+        content:
+          "Point of order: that conclusion does not follow from the premise.",
       };
       const interjected = await submitDebateInterjection(
         db,
@@ -2608,7 +3060,9 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.ok(checks.every((check) => check.motionHash === debateMotionHash(MOTION)));
+      assert.ok(
+        checks.every((check) => check.motionHash === debateMotionHash(MOTION)),
+      );
       let session = createDebateSession(
         db,
         "user-1",
@@ -2625,7 +3079,10 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.equal(session.powerPlan.bots[session.moderator.id]?.hardMuted, true);
+      assert.equal(
+        session.powerPlan.bots[session.moderator.id]?.hardMuted,
+        true,
+      );
 
       session = await advanceDebateSession(
         db,
@@ -2657,10 +3114,19 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.match(provider.openingPrompt, /opened with only visible canonical silence/u);
+      assert.match(
+        provider.openingPrompt,
+        /opened with only visible canonical silence/u,
+      );
       assert.match(provider.openingPrompt, /Never name a hidden Power/u);
-      assert.match(provider.openingPrompt, /reaction must not consume the turn/u);
-      assert.match(provider.openingPrompt, /at least two substantive sentences/u);
+      assert.match(
+        provider.openingPrompt,
+        /reaction must not consume the turn/u,
+      );
+      assert.match(
+        provider.openingPrompt,
+        /at least two substantive sentences/u,
+      );
       const opening = [...session.events]
         .reverse()
         .find(
@@ -2668,9 +3134,15 @@ describe("Debate engine", () => {
             event.kind === "speech" &&
             event.speakerBotId === session.forAdvocate.id,
         );
-      assert.match(
-        opening?.content ?? "",
-        /No opening bell, then/u,
+      assert.match(opening?.content ?? "", /No opening bell, then/u);
+      assert.equal(opening?.timing?.status, "overtime");
+      assert.ok(
+        session.events.some(
+          (event) =>
+            event.kind === "silence" &&
+            event.speakerBotId === session.moderator.id &&
+            event.parentEventId === opening?.id,
+        ),
       );
 
       session = await advanceDebateSession(
@@ -2716,8 +3188,14 @@ describe("Debate engine", () => {
         debateRuntime,
       );
       assert.equal(session.stepKey, "challenge_against_prompt");
-      assert.match(provider.challengePrompt, /Do not invent, quote, or answer a question/u);
-      assert.match(provider.challengePrompt, /one serious vulnerability in your own public case/u);
+      assert.match(
+        provider.challengePrompt,
+        /Do not invent, quote, or answer a question/u,
+      );
+      assert.match(
+        provider.challengePrompt,
+        /one serious vulnerability in your own public case/u,
+      );
 
       const reloaded = getDebateSession(db, "user-1", session.id);
       assert.equal(reloaded.stepKey, "challenge_against_prompt");
@@ -2728,8 +3206,19 @@ describe("Debate engine", () => {
             event.kind === "silence" &&
             event.content === "...",
         ).length,
-        2,
+        3,
       );
+      const paused = pauseDebateSession(db, "user-1", reloaded.id, {
+        expectedRevision: reloaded.revision,
+        idempotencyKey: "pause:muted:0001",
+      });
+      assert.partialDeepStrictEqual(paused.events.at(-1), {
+        kind: "silence",
+        speakerKind: "moderator",
+        speakerBotId: paused.moderator.id,
+        stepKey: "pause",
+        content: "...",
+      });
     } finally {
       db.close();
     }
@@ -2792,10 +3281,7 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.deepEqual(
-        session.powerPlan.bots.moderator?.visibleToBotIds,
-        [],
-      );
+      assert.deepEqual(session.powerPlan.bots.moderator?.visibleToBotIds, []);
       assert.deepEqual(
         session.powerPlan.bots.moderator?.speechAudienceBotIds,
         [],
@@ -2828,15 +3314,11 @@ describe("Debate engine", () => {
         projectedOpening?.content ?? "",
         /MODERATOR OPENING SENTINEL/u,
       );
-      const replayOpening = debateSessionForPlayer(
-        session,
-        "replay",
-      ).events.at(-1);
-      assert.equal(replayOpening?.speakerKind, "moderator");
-      assert.match(
-        replayOpening?.content ?? "",
-        /MODERATOR OPENING SENTINEL/u,
+      const replayOpening = debateSessionForPlayer(session, "replay").events.at(
+        -1,
       );
+      assert.equal(replayOpening?.speakerKind, "moderator");
+      assert.match(replayOpening?.content ?? "", /MODERATOR OPENING SENTINEL/u);
       const withModeratorBallot = {
         ...session,
         ballots: [
@@ -2850,14 +3332,11 @@ describe("Debate engine", () => {
           },
         ],
       };
-      assert.deepEqual(
-        debateSessionForPlayer(withModeratorBallot).ballots[0],
-        {
-          ...withModeratorBallot.ballots[0],
-          reason: null,
-          privateReason: true,
-        },
-      );
+      assert.deepEqual(debateSessionForPlayer(withModeratorBallot).ballots[0], {
+        ...withModeratorBallot.ballots[0],
+        reason: null,
+        privateReason: true,
+      });
       assert.equal(
         debateSessionForPlayer(withModeratorBallot, "replay").ballots[0]
           ?.reason,
@@ -2878,18 +3357,14 @@ describe("Debate engine", () => {
         provider.spongeBobOpeningPrompt,
         /podium appeared empty and no opening words were perceptible/u,
       );
-      assert.match(
-        provider.spongeBobOpeningPrompt,
-        /unexpectedly open floor/u,
-      );
+      assert.match(provider.spongeBobOpeningPrompt, /unexpectedly open floor/u);
       assert.doesNotMatch(
         provider.spongeBobOpeningPrompt,
         /MODERATOR OPENING SENTINEL/u,
       );
       assert.match(
         session.events.find(
-          (event) =>
-            event.kind === "speech" && event.speakerBotId === "for",
+          (event) => event.kind === "speech" && event.speakerBotId === "for",
         )?.content ?? "",
         /An empty podium\?/u,
       );
@@ -3012,10 +3487,9 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.deepEqual(
-        session.powerPlan.bots.moderator?.speechAudienceBotIds,
-        ["for"],
-      );
+      assert.deepEqual(session.powerPlan.bots.moderator?.speechAudienceBotIds, [
+        "for",
+      ]);
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -3127,10 +3601,7 @@ describe("Debate engine", () => {
       );
       const playerOpening = debateSessionForPlayer(session).events.at(-1);
       assert.equal(playerOpening?.speakerKind, "moderator");
-      assert.match(
-        playerOpening?.content ?? "",
-        /MODERATOR OPENING SENTINEL/u,
-      );
+      assert.match(playerOpening?.content ?? "", /MODERATOR OPENING SENTINEL/u);
       session = await advanceDebateSession(
         db,
         "user-1",
@@ -3171,9 +3642,7 @@ describe("Debate engine", () => {
         },
         devilRuntime,
       );
-      assert.ok(
-        checks.every((check) => check.status === "devils_advocate"),
-      );
+      assert.ok(checks.every((check) => check.status === "devils_advocate"));
       const created = createDebateSession(
         db,
         "user-1",
@@ -3333,6 +3802,13 @@ describe("Debate engine", () => {
         failed.events.filter((event) => event.kind === "speech").length,
         0,
       );
+      assert.partialDeepStrictEqual(failed.events.at(-1), {
+        kind: "moderator_ruling",
+        speakerKind: "moderator",
+        speakerBotId: failed.moderator.id,
+        stepKey: "pause",
+        content: "This debate is now paused.",
+      });
       const skipped = await advanceDebateSession(
         db,
         "user-1",
@@ -3395,10 +3871,7 @@ describe("Debate engine", () => {
           expectedRevision: recovered.revision,
           idempotencyKey: "advance:auto:exhausted",
         },
-        autoRuntime(
-          new FailingDebateProvider(),
-          new FailingDebateProvider(),
-        ),
+        autoRuntime(new FailingDebateProvider(), new FailingDebateProvider()),
       );
       assert.equal(exhausted.status, "paused");
       assert.match(exhausted.error ?? "", /All configured Auto models failed/u);
@@ -3406,6 +3879,13 @@ describe("Debate engine", () => {
         exhausted.events.filter((event) => event.kind === "speech").length,
         recovered.events.filter((event) => event.kind === "speech").length,
       );
+      assert.partialDeepStrictEqual(exhausted.events.at(-1), {
+        kind: "moderator_ruling",
+        speakerKind: "moderator",
+        speakerBotId: exhausted.moderator.id,
+        stepKey: "pause",
+        content: "This debate is now paused.",
+      });
     } finally {
       db.close();
     }
@@ -3489,8 +3969,7 @@ describe("Debate engine", () => {
       );
       const ruling = session.events.find(
         (event) =>
-          event.stepKey === "opening_for" &&
-          event.kind === "moderator_ruling",
+          event.stepKey === "opening_for" && event.kind === "moderator_ruling",
       );
       assert.equal(interruptedSpeech?.interrupted, true);
       assert.equal(interruptedSpeech?.interruptedBy, "bot");
@@ -3652,15 +4131,13 @@ describe("Debate engine", () => {
       );
       const refined = getDebateSession(db, "user-1", opening.id);
       assert.equal(
-        refined.caseBoard.find(
-          (card) => card.createdEventId === sourceEvent.id,
-        )?.summary,
+        refined.caseBoard.find((card) => card.createdEventId === sourceEvent.id)
+          ?.summary,
         "Transit zoning directly addresses scarce rail-adjacent land.",
       );
       assert.equal(
-        refined.events
-          .filter((event) => event.kind === "case_board")
-          .at(-1)?.parentEventId,
+        refined.events.filter((event) => event.kind === "case_board").at(-1)
+          ?.parentEventId,
         sourceEvent.id,
       );
       assert.ok(
@@ -3806,9 +4283,8 @@ describe("Debate engine", () => {
         "conceded",
       );
       assert.equal(
-        stored.events
-          .filter((event) => event.kind === "case_board")
-          .at(-1)?.parentEventId,
+        stored.events.filter((event) => event.kind === "case_board").at(-1)
+          ?.parentEventId,
         sourceEvent.id,
       );
     } finally {
@@ -3847,7 +4323,9 @@ describe("Debate engine", () => {
       assert.equal(
         (
           db
-            .prepare("SELECT COUNT(*) AS count FROM debate_events WHERE user_id = ?")
+            .prepare(
+              "SELECT COUNT(*) AS count FROM debate_events WHERE user_id = ?",
+            )
             .get("user-2") as { count: number }
         ).count,
         0,

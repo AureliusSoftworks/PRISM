@@ -9,6 +9,7 @@ import {
   debateRevealDurationMs,
   debateSourceFromMarkdownHref,
   debateTranscriptIsAtLive,
+  debateTurnClockState,
   debateTurnOwnerBotId,
   debateVisibleContentAtProgress,
 } from "./debatePresentation.ts";
@@ -44,6 +45,51 @@ describe("Debate live presentation", () => {
       ),
       60_000,
     );
+  });
+
+  it("maps the public floor clock onto actual speech presentation progress", () => {
+    const event = {
+      version: 1 as const,
+      id: "timed-speech",
+      sequence: 2,
+      phase: "opening" as const,
+      stepKey: "opening_for",
+      kind: "speech" as const,
+      speakerKind: "advocate" as const,
+      speakerBotId: "for",
+      sideId: "for" as const,
+      content: "A deliberately long opening.",
+      sourceIds: [],
+      timing: {
+        limitMs: 20_000,
+        estimatedDurationMs: 25_000,
+        overtimeMs: 5_000,
+        status: "overtime" as const,
+      },
+      createdAt: "2026-07-29T00:00:00.000Z",
+    };
+    assert.deepEqual(
+      debateTurnClockState(event, {
+        elapsedMs: 4_000,
+        durationMs: 5_000,
+      }),
+      {
+        elapsedMs: 20_000,
+        limitMs: 20_000,
+        progress: 1,
+        remainingMs: 0,
+        status: "running",
+        timing: event.timing,
+      },
+    );
+    assert.equal(
+      debateTurnClockState(event, {
+        elapsedMs: 4_500,
+        durationMs: 5_000,
+      })?.status,
+      "overtime",
+    );
+    assert.equal(debateTurnClockState({ ...event, timing: undefined }, null), null);
   });
 
   it("keeps Debate audio independent from optional voice effects", () => {

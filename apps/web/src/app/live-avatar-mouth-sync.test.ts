@@ -73,6 +73,14 @@ describe("live avatar mouth synchronization", () => {
     assert.match(debateAvatar, /avatarState\.foleyMouthShape/u);
     assert.match(
       debateAvatar,
+      /const debateMouthShape =\s+avatarState\.thinking\s+\? "closed"/u,
+    );
+    assert.match(
+      debateAvatar,
+      /const debateMouthActive =\s+!avatarState\.thinking &&\s+\(avatarState\.talking \|\| debateMouthShape !== "closed"\)/u,
+    );
+    assert.match(
+      debateAvatar,
       /bottishMouthShapeAtAlignedElapsedMs\(\{/u,
     );
     assert.match(debateAvatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);

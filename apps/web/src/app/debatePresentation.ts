@@ -1,7 +1,10 @@
 import type {
+  DebateEventV1,
   DebateEvidencePacketV1,
   DebateEvidenceSourceV1,
+  DebateTurnTimingV1,
 } from "@localai/shared";
+import { debateEstimatedSpeechDurationMs } from "@localai/shared";
 
 export const DEBATE_SOURCE_LINK_PREFIX = "prism-debate-source:";
 
@@ -9,14 +12,39 @@ const SOURCE_MARKER =
   /\[\[source:([a-z0-9][a-z0-9_-]{0,47})\]\]/giu;
 
 export function debateRevealDurationMs(spokenText: string): number {
-  const normalized = spokenText.replace(/\s+/gu, " ").trim();
-  if (!normalized) return 0;
-  const wordCount = normalized.split(" ").length;
-  const pauseCount = normalized.match(/[,.!?;:—]/gu)?.length ?? 0;
-  return Math.min(
-    60_000,
-    Math.max(1_400, Math.round(wordCount * 330 + pauseCount * 75)),
-  );
+  return debateEstimatedSpeechDurationMs(spokenText);
+}
+
+export interface DebateTurnClockState {
+  elapsedMs: number;
+  limitMs: number;
+  progress: number;
+  remainingMs: number;
+  status: "running" | "overtime";
+  timing: DebateTurnTimingV1;
+}
+
+export function debateTurnClockState(
+  event: DebateEventV1 | null,
+  speechTiming: { elapsedMs: number; durationMs: number } | null,
+): DebateTurnClockState | null {
+  if (!event?.timing) return null;
+  const playbackProgress = speechTiming
+    ? Math.max(
+        0,
+        Math.min(1, speechTiming.elapsedMs / Math.max(1, speechTiming.durationMs)),
+      )
+    : 0;
+  const elapsedMs = event.timing.estimatedDurationMs * playbackProgress;
+  const remainingMs = event.timing.limitMs - elapsedMs;
+  return {
+    elapsedMs,
+    limitMs: event.timing.limitMs,
+    progress: Math.max(0, Math.min(1, elapsedMs / event.timing.limitMs)),
+    remainingMs,
+    status: remainingMs < 0 ? "overtime" : "running",
+    timing: event.timing,
+  };
 }
 
 export function debateAudioEnabled(args: {

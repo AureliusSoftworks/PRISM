@@ -22,6 +22,8 @@ export const DEBATE_GAVEL_VISUAL_IMPACT_MS = {
   order: 272,
 } as const satisfies Record<DebateModeratorGavelCueKind, number>;
 
+export const DEBATE_GAVEL_ORDER_CAMERA_CUT_MS = 420;
+
 export function debateModeratorGavelSpeechLeadMs(
   kind: DebateModeratorGavelCueKind,
 ): number {
@@ -39,6 +41,9 @@ export function debateModeratorGavelCue(args: {
   if (event.kind === "moderator_ruling") {
     return { eventId: event.id, kind: "order" };
   }
+  if (event.kind === "interjection") {
+    return { eventId: event.id, kind: "order" };
+  }
   if (event.kind === "verdict" && event.speakerKind !== "player") {
     return { eventId: event.id, kind: "order" };
   }
@@ -47,16 +52,17 @@ export function debateModeratorGavelCue(args: {
     (event.speakerBotId === args.moderatorBotId ||
       event.speakerKind === "moderator")
   ) {
-    return { eventId: event.id, kind: "attention" };
+    return {
+      eventId: event.id,
+      kind: event.stepKey === "pause" ? "order" : "attention",
+    };
   }
-  if (event.kind === "intro") {
+  if (event.kind === "intro" || event.kind === "phase") {
     return { eventId: event.id, kind: "attention" };
   }
   if (
     args.format === "turnabout" &&
-    (event.kind === "phase" ||
-      event.kind === "objection" ||
-      event.kind === "revelation")
+    (event.kind === "objection" || event.kind === "revelation")
   ) {
     return { eventId: event.id, kind: "attention" };
   }

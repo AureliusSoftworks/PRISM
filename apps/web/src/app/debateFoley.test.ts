@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "@localai/shared";
 import {
   DEBATE_GAVEL_FOLEY_URLS,
+  DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
   DEBATE_GAVEL_VISUAL_IMPACT_MS,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
@@ -28,7 +29,7 @@ function readPcmWav(relativeUrl: string): PcmWav {
   let channelCount = 0;
   let sampleRate = 0;
   let data = Buffer.alloc(0);
-  for (let offset = 12; offset + 8 <= bytes.length; ) {
+  for (let offset = 12; offset + 8 <= bytes.length;) {
     const id = bytes.toString("ascii", offset, offset + 4);
     const size = bytes.readUInt32LE(offset + 4);
     const bodyStart = offset + 8;
@@ -48,11 +49,7 @@ function readPcmWav(relativeUrl: string): PcmWav {
   return { channelCount, data, sampleRate };
 }
 
-function loudestFrameMs(
-  wav: PcmWav,
-  startMs: number,
-  endMs: number,
-): number {
+function loudestFrameMs(wav: PcmWav, startMs: number, endMs: number): number {
   const bytesPerFrame = wav.channelCount * 2;
   const firstFrame = Math.floor((startMs / 1_000) * wav.sampleRate);
   const lastFrame = Math.min(
@@ -66,9 +63,7 @@ function loudestFrameMs(
     for (let channel = 0; channel < wav.channelCount; channel += 1) {
       amplitude = Math.max(
         amplitude,
-        Math.abs(
-          wav.data.readInt16LE(frame * bytesPerFrame + channel * 2),
-        ),
+        Math.abs(wav.data.readInt16LE(frame * bytesPerFrame + channel * 2)),
       );
     }
     if (amplitude > loudestAmplitude) {
@@ -212,18 +207,48 @@ describe("Debate moderator gavel", () => {
       }),
       { eventId: "event:silence", kind: "attention" },
     );
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: debateEvent("silence", {
+          speakerKind: "moderator",
+          speakerBotId: "moderator",
+          stepKey: "pause",
+        }),
+        moderatorBotId: "moderator",
+      }),
+      { eventId: "event:silence", kind: "order" },
+    );
   });
 
-  it("uses the gavel more often for Turnabout procedure", () => {
-    for (const kind of ["phase", "objection", "revelation"] as const) {
-      assert.equal(
+  it("marks phase changes in either format", () => {
+    for (const format of ["forum", "turnabout"] as const) {
+      assert.deepEqual(
         debateModeratorGavelCue({
-          format: "forum",
-          event: debateEvent(kind),
+          format,
+          event: debateEvent("phase"),
           moderatorBotId: "moderator",
         }),
-        null,
+        { eventId: "event:phase", kind: "attention" },
       );
+    }
+  });
+
+  it("calls for order when either format is interrupted", () => {
+    for (const format of ["forum", "turnabout"] as const) {
+      assert.deepEqual(
+        debateModeratorGavelCue({
+          format,
+          event: debateEvent("interjection"),
+          moderatorBotId: "moderator",
+        }),
+        { eventId: "event:interjection", kind: "order" },
+      );
+    }
+  });
+
+  it("adds extra procedural strikes around Turnabout challenges", () => {
+    for (const kind of ["objection", "revelation"] as const) {
       assert.deepEqual(
         debateModeratorGavelCue({
           format: "turnabout",
@@ -231,6 +256,14 @@ describe("Debate moderator gavel", () => {
           moderatorBotId: "moderator",
         }),
         { eventId: `event:${kind}`, kind: "attention" },
+      );
+      assert.equal(
+        debateModeratorGavelCue({
+          format: "forum",
+          event: debateEvent(kind),
+          moderatorBotId: "moderator",
+        }),
+        null,
       );
     }
   });
@@ -321,5 +354,9 @@ describe("Debate moderator gavel", () => {
     assert.ok(Math.abs(orderSecondPeakMs - orderFirstPeakMs - 697) < 2);
     assert.equal(DEBATE_GAVEL_VISUAL_IMPACT_MS.attention, 220);
     assert.equal(DEBATE_GAVEL_VISUAL_IMPACT_MS.order, 272);
+    assert.ok(
+      DEBATE_GAVEL_ORDER_CAMERA_CUT_MS > DEBATE_GAVEL_VISUAL_IMPACT_MS.order,
+    );
+    assert.ok(DEBATE_GAVEL_ORDER_CAMERA_CUT_MS < orderSecondPeakMs);
   });
 });

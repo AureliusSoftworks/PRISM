@@ -87,6 +87,10 @@ test("publishes five flavor-first Debate setup presets across the formality spec
   );
   assert.equal(normalizeDebateSetupPresetId("jury-trial"), "jury-trial");
   assert.equal(normalizeDebateSetupPresetId("unknown"), "custom");
+  assert.match(
+    DEBATE_SETUP_PRESETS[0]?.summary ?? "",
+    /personal jabs, cut-ins, moderator warnings/u,
+  );
 });
 
 test("publishes a stable five-stop Debate formality spectrum with parliamentary legacy default", () => {
