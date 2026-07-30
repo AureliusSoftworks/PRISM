@@ -58,7 +58,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /session\.events\s*\.filter\(\(event\) => !debateEventIsTranscriptHousekeeping\(event\)\)\s*\.flatMap/u,
+      /session\.events[\s\S]{0,180}!debateEventIsTranscriptHousekeeping\(event\)[\s\S]{0,100}!debateEventIsJuryComment\(event\)/u,
     );
     assert.match(
       source,
@@ -933,7 +933,7 @@ describe("Debate experience", () => {
     assert.match(source, /session\.jury\.jurors\.map/u);
     assert.match(
       source,
-      /renderJuryChamber\(session, activeEvent, thinkingBotId\)/u,
+      /renderJuryChamber\(session, activeEvent, juryThinkingBotId\)/u,
     );
     assert.match(
       source,
@@ -1025,6 +1025,24 @@ describe("Debate experience", () => {
       ),
       true,
     );
+  });
+
+  it("queues the latest juror thought and keeps Jury comments out of Proceedings", () => {
+    assert.match(source, /debateLatestPendingJuryComment/u);
+    assert.match(source, /className=\{styles\.juryThoughtChip\}/u);
+    assert.match(
+      source,
+      /markJuryCommentPlayed\(pendingJuryComment\.id\)[\s\S]{0,700}consumeNewEvents\(beforeComment, throughComment, runId\)/u,
+    );
+    assert.match(
+      source,
+      /!debateEventIsJuryComment\(event\)[\s\S]{0,180}transcriptVisibleThroughSequence/u,
+    );
+    assert.match(source, /data-tutorial-target="debate-jury-record"/u);
+    assert.match(source, /Timestamped · separate from proceedings/u);
+    assert.match(source, /Copy Jury record/u);
+    assert.match(css, /\.juryThoughtChip/u);
+    assert.match(css, /\.juryRecord/u);
   });
 
   it("crops the live Forum and Jury chamber to the same cinematic viewport", () => {
@@ -1374,7 +1392,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const juryCameraActive = debateJuryCameraIsActive\(cameraMode, session\)/u,
+      /const juryCameraActive = activeSession[\s\S]{0,100}debateJuryCameraIsActive\(cameraMode, activeSession\)/u,
     );
     assert.match(
       source,

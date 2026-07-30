@@ -3500,6 +3500,68 @@
   color: #978fa4;
 }
 
+.juryRecord {
+  margin: 20px 0 16px;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  padding-top: 16px;
+}
+
+.juryRecord > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.juryRecord > header span {
+  color: #978fa4;
+  font-size: 9px;
+}
+
+.juryRecord > header button {
+  flex: 0 0 auto;
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: #bdb3c8;
+  background: transparent;
+  font-size: 9px;
+}
+
+.juryRecord ol {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resultCard .juryRecord li {
+  display: block;
+  border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+  border-radius: 10px;
+  padding: 10px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+
+.juryRecord li header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.juryRecord li time,
+.juryRecord li small {
+  color: #978fa4;
+  font-size: 8px;
+}
+
+.resultCard .juryRecord li p {
+  margin-top: 7px;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .debateRail[data-completed="true"] .resultCard {
   max-height: min(34dvh, 360px);
   overflow-y: auto;
@@ -4447,6 +4509,7 @@
 }
 
 .juryRosterSeats > span {
+  position: relative;
   display: grid;
   min-width: 0;
   justify-items: center;
@@ -4470,6 +4533,62 @@
   font-size: 7px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.juryThoughtChip {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  width: 22px;
+  height: 15px;
+  place-items: center;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--gallery-prism-color, var(--jury-seat-color)) 48%,
+      transparent
+    );
+  border-radius: 999px;
+  color: color-mix(
+    in srgb,
+    var(--gallery-prism-color, var(--jury-seat-color)) 72%,
+    #f5effa
+  );
+  background: color-mix(in srgb, #100d15 88%, transparent);
+  box-shadow: 0 0 10px
+    color-mix(
+      in srgb,
+      var(--gallery-prism-color, var(--jury-seat-color)) 22%,
+      transparent
+    );
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1;
+  animation: debate-jury-thought 1.8s ease-in-out infinite;
+}
+
+.juryRosterSeats > span .juryThoughtChip {
+  top: -9px;
+  right: 2px;
+}
+
+.juryChamberSeat .juryThoughtChip {
+  top: -22px;
+  right: 7px;
+  --gallery-prism-color: var(--jury-seat-color);
+}
+
+@keyframes debate-jury-thought {
+  0%,
+  100% {
+    opacity: 0.62;
+    transform: translateY(1px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
 }
 
 .juryChamber {
@@ -4974,7 +5093,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .juryBallotSlip {
+  .juryBallotSlip,
+  .juryThoughtChip {
     animation-duration: 1ms;
   }
 }

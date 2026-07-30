@@ -66,6 +66,16 @@ import {
   randomDebatePlayerJudgeCast,
   type DebateCastSelection,
 } from "./debateExperienceState";
+import {
+  debateEventIsJuryComment,
+  debateEventIsJurySidebarComment,
+  debateJuryCommentClockLabel,
+  debateJuryCommentEvents,
+  debateJuryCommentKindLabel,
+  debateJuryCommentSpeakerName,
+  debateLatestPendingJuryComment,
+  formatDebateJuryRecord,
+} from "./debateJuryRecord";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
   debateJudgeGuidedStepKind,
@@ -1038,7 +1048,11 @@ export function formatDebateVerboseTranscript(
     "## Event stream",
     "",
     ...session.events
-      .filter((event) => !debateEventIsTranscriptHousekeeping(event))
+      .filter(
+        (event) =>
+          !debateEventIsTranscriptHousekeeping(event) &&
+          !debateEventIsJuryComment(event),
+      )
       .flatMap((event) => [
         `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
         "",
@@ -1371,6 +1385,11 @@ export function DebateExperience(
   const [sourceDrawerId, setSourceDrawerId] = useState<string | null>(null);
   const [transcriptCopyState, setTranscriptCopyState] =
     useState<DebateClipboardState>("idle");
+  const [juryRecordCopyState, setJuryRecordCopyState] =
+    useState<DebateClipboardState>("idle");
+  const [playedJuryCommentIds, setPlayedJuryCommentIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const [pendingDeleteSession, setPendingDeleteSession] =
     useState<DebateSessionListItemV1 | null>(null);
   const [earlyEndOpen, setEarlyEndOpen] = useState(false);
@@ -1451,6 +1470,10 @@ export function DebateExperience(
   const transcriptCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
+  const juryRecordCopyResetTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const playedJuryCommentIdsRef = useRef<ReadonlySet<string>>(new Set());
   const stageAlignmentCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -1631,6 +1654,10 @@ export function DebateExperience(
         clearTimeout(transcriptCopyResetTimerRef.current);
         transcriptCopyResetTimerRef.current = null;
       }
+      if (juryRecordCopyResetTimerRef.current) {
+        clearTimeout(juryRecordCopyResetTimerRef.current);
+        juryRecordCopyResetTimerRef.current = null;
+      }
       if (stageAlignmentCopyResetTimerRef.current) {
         clearTimeout(stageAlignmentCopyResetTimerRef.current);
         stageAlignmentCopyResetTimerRef.current = null;
@@ -1782,6 +1809,19 @@ export function DebateExperience(
   }, [sourceDrawerId]);
   const activeSessionId = activeSession?.id ?? null;
   const activeSessionEventCount = activeSession?.events.length ?? 0;
+  const pendingJuryComment = activeSession
+    ? debateLatestPendingJuryComment(activeSession, playedJuryCommentIds)
+    : null;
+  const pendingJuryThoughtBotId = pendingJuryComment?.speakerBotId ?? null;
+  const juryCameraActive = activeSession
+    ? debateJuryCameraIsActive(cameraMode, activeSession)
+    : false;
+  useEffect(() => {
+    const empty = new Set<string>();
+    playedJuryCommentIdsRef.current = empty;
+    setPlayedJuryCommentIds(empty);
+    setJuryRecordCopyState("idle");
+  }, [activeSessionId]);
   const clampTranscriptToLive = useCallback((): void => {
     const feed = transcriptFeedRef.current;
     if (!feed) return;
@@ -1882,6 +1922,31 @@ export function DebateExperience(
       transcriptCopyResetTimerRef.current = null;
     }, 1_800);
   }, [activeSession, transcriptCopyState]);
+
+  const copyJuryRecord = useCallback(async (): Promise<void> => {
+    if (
+      !activeSession ||
+      activeSession.playerRole === "participant" ||
+      juryRecordCopyState === "copying"
+    ) {
+      return;
+    }
+    if (juryRecordCopyResetTimerRef.current) {
+      clearTimeout(juryRecordCopyResetTimerRef.current);
+      juryRecordCopyResetTimerRef.current = null;
+    }
+    setJuryRecordCopyState("copying");
+    try {
+      await writeDebateClipboardText(formatDebateJuryRecord(activeSession));
+      setJuryRecordCopyState("copied");
+    } catch {
+      setJuryRecordCopyState("failed");
+    }
+    juryRecordCopyResetTimerRef.current = setTimeout(() => {
+      setJuryRecordCopyState("idle");
+      juryRecordCopyResetTimerRef.current = null;
+    }, 1_800);
+  }, [activeSession, juryRecordCopyState]);
 
   const moderatorBot =
     playerRole === "judge"
@@ -2656,6 +2721,14 @@ export function DebateExperience(
     [],
   );
 
+  const markJuryCommentPlayed = useCallback((eventId: string): void => {
+    if (playedJuryCommentIdsRef.current.has(eventId)) return;
+    const next = new Set(playedJuryCommentIdsRef.current);
+    next.add(eventId);
+    playedJuryCommentIdsRef.current = next;
+    setPlayedJuryCommentIds(next);
+  }, []);
+
   const consumeNewEvents = useCallback(
     async (
       previous: DebateSessionV1 | null,
@@ -2679,6 +2752,9 @@ export function DebateExperience(
       }
       for (const event of fresh) {
         if (presentationRunRef.current !== runId) return;
+        if (debateEventIsJurySidebarComment(event)) {
+          markJuryCommentPlayed(event.id);
+        }
         setTranscriptVisibleThroughSequence(event.sequence);
         const suppressGavelCue =
           event.kind === "judge_gavel" &&
@@ -2879,8 +2955,55 @@ export function DebateExperience(
       setLiveReveal(null);
       setTranscriptVisibleThroughSequence(null);
     },
-    [bots, cameraMode, onUtterance, revealEventSilently],
+    [
+      bots,
+      cameraMode,
+      markJuryCommentPlayed,
+      onUtterance,
+      revealEventSilently,
+    ],
   );
+
+  useEffect(() => {
+    if (
+      !juryCameraActive ||
+      !activeSession ||
+      !pendingJuryComment ||
+      busy ||
+      presenting
+    ) {
+      return;
+    }
+
+    markJuryCommentPlayed(pendingJuryComment.id);
+    const runId = presentationRunRef.current + 1;
+    presentationRunRef.current = runId;
+    const beforeComment = {
+      ...activeSession,
+      events: activeSession.events.filter(
+        (event) => event.sequence < pendingJuryComment.sequence,
+      ),
+    };
+    const throughComment = {
+      ...activeSession,
+      events: activeSession.events.filter(
+        (event) => event.sequence <= pendingJuryComment.sequence,
+      ),
+    };
+    setPresenting(true);
+    void consumeNewEvents(beforeComment, throughComment, runId).finally(() => {
+      if (presentationRunRef.current !== runId) return;
+      setPresenting(false);
+    });
+  }, [
+    activeSession,
+    busy,
+    consumeNewEvents,
+    juryCameraActive,
+    markJuryCommentPlayed,
+    pendingJuryComment,
+    presenting,
+  ]);
 
   const adoptSession = useCallback(
     async (
@@ -5962,6 +6085,7 @@ export function DebateExperience(
                     event.kind === "ballot" &&
                     event.speakerKind === "juror")) &&
                 !debateEventIsTranscriptHousekeeping(event) &&
+                !debateEventIsJuryComment(event) &&
                 (transcriptVisibleThroughSequence === null ||
                   event.sequence <= transcriptVisibleThroughSequence),
             )
@@ -6027,6 +6151,66 @@ export function DebateExperience(
     </section>
   );
 
+  const renderJuryRecord = (
+    session: DebateSessionV1,
+  ): React.JSX.Element | null => {
+    if (
+      !session.jury.enabled ||
+      session.playerRole === "participant" ||
+      session.status !== "completed"
+    ) {
+      return null;
+    }
+    const comments = debateJuryCommentEvents(session);
+    return (
+      <section
+        className={styles.juryRecord}
+        aria-label="Timestamped Jury comments"
+        data-tutorial-target="debate-jury-record"
+      >
+        <header>
+          <div>
+            <p className={styles.eyebrow}>Jury record</p>
+            <span>Timestamped · separate from proceedings</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void copyJuryRecord()}
+            disabled={juryRecordCopyState === "copying"}
+          >
+            {juryRecordCopyState === "copying"
+              ? "Copying…"
+              : juryRecordCopyState === "copied"
+                ? "Copied"
+                : juryRecordCopyState === "failed"
+                  ? "Copy failed"
+                  : "Copy Jury record"}
+          </button>
+        </header>
+        {comments.length > 0 ? (
+          <ol>
+            {comments.map((event) => (
+              <li key={event.id}>
+                <header>
+                  <strong>
+                    {debateJuryCommentSpeakerName(session, event)}
+                  </strong>
+                  <time dateTime={event.createdAt}>
+                    {debateJuryCommentClockLabel(event.createdAt)}
+                  </time>
+                </header>
+                <small>{debateJuryCommentKindLabel(event)}</small>
+                <p>{event.content}</p>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p>The Jury reached its result without public commentary.</p>
+        )}
+      </section>
+    );
+  };
+
   const renderGallery = (session: DebateSessionV1): React.JSX.Element => {
     if (session.jury.enabled) {
       const activeJurorId = presentationEventId
@@ -6066,13 +6250,21 @@ export function DebateExperience(
                   size: 20,
                   strokeWidth: 1.45,
                 })}
+                {pendingJuryThoughtBotId === juror.id ? (
+                  <i
+                    className={styles.juryThoughtChip}
+                    aria-label={`${juror.name} is considering the debate`}
+                  >
+                    …
+                  </i>
+                ) : null}
                 <small>{juror.name}</small>
               </span>
             ))}
           </div>
           <p>
             {session.jury.phase === "waiting"
-              ? "The frozen roster follows the floor and talks between turns."
+              ? "The frozen roster follows the public floor; an ellipsis marks a thought you can hear in Jury view."
               : session.playerRole === "participant"
                 ? "The chamber is sealed until the aggregate verdict."
                 : session.jury.phase === "complete"
@@ -6276,6 +6468,14 @@ export function DebateExperience(
                     </span>
                   )}
                 </div>
+                {pendingJuryThoughtBotId === juror.id ? (
+                  <i
+                    className={styles.juryThoughtChip}
+                    aria-label={`${juror.name} has a thought`}
+                  >
+                    …
+                  </i>
+                ) : null}
                 <small>
                   {index === 0 ? "Foreperson · " : ""}
                   {presentation.displayName}
@@ -7397,10 +7597,14 @@ export function DebateExperience(
       stepKey: session.stepKey,
       judgeGavelStatus: session.judgeGavel?.status,
     });
-    const juryCameraActive = debateJuryCameraIsActive(cameraMode, session);
+    const presentedEvent = presentationEventId
+      ? (session.events.find((event) => event.id === presentationEventId) ??
+        null)
+      : null;
     const activeEvent =
-      (presentationEventId
-        ? session.events.find((event) => event.id === presentationEventId)
+      (presentedEvent &&
+      (!debateEventIsJuryComment(presentedEvent) || juryCameraActive)
+        ? presentedEvent
         : null) ??
       [...session.events]
         .reverse()
@@ -7584,6 +7788,7 @@ export function DebateExperience(
       busy && !presenting && session.status === "live"
         ? debateExpectedBotId(session)
         : null;
+    const juryThinkingBotId = pendingJuryThoughtBotId ?? thinkingBotId;
     const juryChamberVisible = juryCameraActive;
     const juryDeliberating =
       session.jury.enabled && session.stepKey.startsWith("jury_deliberation_");
@@ -7881,7 +8086,7 @@ export function DebateExperience(
             <div className={styles.stageColumn}>
               <div className={styles.forum} data-debate-stage-viewport="live">
                 {juryChamberVisible ? (
-                  renderJuryChamber(session, activeEvent, thinkingBotId)
+                  renderJuryChamber(session, activeEvent, juryThinkingBotId)
                 ) : (
                   <div
                     className={styles.forumCamera}
@@ -8384,6 +8589,7 @@ export function DebateExperience(
                             );
                           })}
                   </ul>
+                  {renderJuryRecord(session)}
                   <button type="button" onClick={() => setView("dashboard")}>
                     Return to studio
                   </button>

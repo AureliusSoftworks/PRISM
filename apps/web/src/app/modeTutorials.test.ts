@@ -110,7 +110,11 @@ describe("mode tutorials", () => {
     assert.match(copy, /full five-ballot Jury result/u);
     assert.match(copy, /open the five-seat Jury camera at any point/u);
     assert.match(copy, /trade short reactions between public-floor turns/u);
+    assert.match(copy, /ellipsis beside a juror means a thought is waiting/u);
+    assert.match(copy, /enter the Jury camera before the next thought/u);
     assert.match(copy, /another camera lets them resolve immediately/u);
+    assert.match(copy, /separate timestamped Jury record/u);
+    assert.match(copy, /own copy action/u);
     assert.match(copy, /anonymous ballot slides/u);
     assert.match(copy, /both advocates’ reactions/u);
     assert.match(
