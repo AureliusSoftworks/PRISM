@@ -11684,6 +11684,17 @@
   padding-inline-end: calc(14px + env(safe-area-inset-right, 0px));
 }
 
+.sharedAppletNavbarBrand {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.sharedAppletNavbarBrand .sidebarWordmarkButton {
+  margin: 0;
+}
+
 .sharedAppletHeader::after {
   content: "";
   position: absolute;

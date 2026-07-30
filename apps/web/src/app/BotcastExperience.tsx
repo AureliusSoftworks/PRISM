@@ -556,6 +556,7 @@ export interface BotcastExperienceProps {
   accountDefaultModel: string | null;
   responseMode: BotcastEpisodeResponseMode;
   theme?: "light" | "dark";
+  liveConversationPanelExpanded?: boolean;
   renderBotGlyph: BotPickerGlyphRenderer;
   renderAvatar?: (
     bot: BotcastBotSummary,
@@ -1789,6 +1790,7 @@ export function BotcastExperience({
   accountDefaultModel,
   responseMode,
   theme = "dark",
+  liveConversationPanelExpanded = false,
   renderBotGlyph,
   renderAvatar,
   renderMug,
@@ -8203,6 +8205,31 @@ export function BotcastExperience({
         : args.activeMessage?.speakerRole === "guest"
           ? (args.guest?.name ?? "Guest")
           : null;
+    const producerGuestHostPromptMessage =
+      !args.replay &&
+      !liveConversationPanelExpanded &&
+      args.currentEpisode.guestKind === "producer" &&
+      args.currentEpisode.status === "live" &&
+      args.activeMessage === null &&
+      thinkingRole === "guest"
+        ? args.currentEpisode.messages.findLast(
+            (message) =>
+              message.speakerRole === "host" &&
+              botcastMessageIsAudibleToAudienceV1(message) &&
+              !socialSilenceMessageIsMarkedV1({
+                content: message.content,
+                marker: message.socialSilence,
+                mode: "signal",
+              }) &&
+              signalVoicePerformanceTranscriptText(message).trim() !== "" &&
+              signalVoicePerformanceTranscriptText(message).trim() !== "...",
+          )
+        : undefined;
+    const producerGuestHostPromptText = producerGuestHostPromptMessage
+      ? signalVoicePerformanceTranscriptText(
+          producerGuestHostPromptMessage,
+        ).trim()
+      : "";
     const speechElapsedMs = args.replay
       ? Math.max(0, replayInterviewFootageElapsedMs - replayMessageStartMs)
       : (speechReveal?.elapsedMs ?? 0);
@@ -9005,6 +9032,19 @@ export function BotcastExperience({
                   : delayedLiveCaptionSpeaker}
             </strong>
             <span>{delayedLiveCaption}</span>
+          </div>
+        ) : producerGuestHostPromptMessage &&
+          producerGuestHostPromptText ? (
+          <div
+            className={styles.liveCaption}
+            data-signal-producer-host-prompt="true"
+            data-signal-transcript-panel-state="collapsed"
+            data-message-id={producerGuestHostPromptMessage.id}
+            data-speaker-role="host"
+            aria-live="off"
+          >
+            <strong>{stagePublicName(args.host, "Host")}</strong>
+            <span>{producerGuestHostPromptText}</span>
           </div>
         ) : null}
         {!args.replay && signalModelWarmup ? (

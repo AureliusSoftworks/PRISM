@@ -24,7 +24,7 @@ const slateCss = readFileSync(
   "utf8",
 );
 
-test("Slate and Signal consume one shared PRISM navbar contract", () => {
+test("Slate, Signal, and Debate consume one shared PRISM navbar contract", () => {
   const sidebarHelper = pageSource.slice(
     pageSource.indexOf("const renderSharedAppletSidebarHeader"),
     pageSource.indexOf("const renderSharedAppletNavbar"),
@@ -58,6 +58,10 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   );
   assert.match(navbarHelper, /data-shared-app-navbar="true"/);
   assert.match(navbarHelper, /data-live-session-locked=/);
+  assert.match(
+    navbarHelper,
+    /options\.brandAppletId[\s\S]*renderSharedAppletSidebarHeader\(options\.brandAppletId\)/u,
+  );
 
   for (const appletId of ["botcast", "slate"]) {
     assert.match(
@@ -81,6 +85,10 @@ test("Slate and Signal consume one shared PRISM navbar contract", () => {
   assert.match(
     pageSource,
     /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
+  );
+  assert.match(
+    pageSource,
+    /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*brandAppletId:\s*"debate"[\s\S]*showVoiceSelector:\s*true/u,
   );
   assert.match(
     pageSource,

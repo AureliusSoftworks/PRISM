@@ -1901,6 +1901,26 @@ describe("Signal experience shell", () => {
     );
   });
 
+  it("keeps the latest host prompt visible while a Producer guest is answering", () => {
+    assert.match(
+      source,
+      /!liveConversationPanelExpanded[\s\S]{0,160}args\.currentEpisode\.guestKind === "producer"[\s\S]{0,160}args\.currentEpisode\.status === "live"[\s\S]{0,160}args\.activeMessage === null[\s\S]{0,120}thinkingRole === "guest"/u,
+    );
+    assert.match(
+      source,
+      /messages\.findLast\([\s\S]{0,360}message\.speakerRole === "host"[\s\S]{0,260}botcastMessageIsAudibleToAudienceV1\(message\)[\s\S]{0,320}signalVoicePerformanceTranscriptText\(message\)/u,
+    );
+    assert.match(source, /data-signal-producer-host-prompt="true"/u);
+    assert.match(
+      source,
+      /data-signal-transcript-panel-state="collapsed"/u,
+    );
+    assert.match(
+      css,
+      /\.liveCaption\[data-signal-producer-host-prompt="true"\] span\s*\{[^}]*-webkit-line-clamp:\s*3;[^}]*line-clamp:\s*3;/u,
+    );
+  });
+
   it("keeps hard-muted Signal lines visible but silent with a closed speaking mouth", () => {
     assert.match(source, /botPowerResponseIsSilentV1\(message\.content\)/u);
     assert.match(

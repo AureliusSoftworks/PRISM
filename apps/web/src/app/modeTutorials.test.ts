@@ -1616,6 +1616,16 @@ describe("mode tutorials", () => {
     );
   });
 
+  it("teaches the persistent host prompt for an interviewed Producer", () => {
+    const controlRoom = MODE_TUTORIALS.botcast.steps.find(
+      (step) => step.heading === "Produce from the control room",
+    );
+    assert.match(
+      controlRoom?.body ?? "",
+      /Producer guest[^.]*conversation panel is collapsed[^.]*latest prompt remains on stage[^.]*three lines/u,
+    );
+  });
+
   it("teaches exact speech-copy Powers in every active bot-speaking lane", () => {
     assert.match(
       MODE_TUTORIALS.zen.steps[0]?.body ?? "",

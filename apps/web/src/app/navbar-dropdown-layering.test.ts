@@ -41,6 +41,11 @@ test("navbar dropdowns escape header stacking contexts through body portals", ()
   for (const source of [voiceSelector, appSwitcher, headerTools]) {
     assert.match(source, /<PrismMenuSurface/u);
   }
+  assert.match(appSwitcher, /data-prism-menu-owner=\{menuId\}/u);
+  assert.doesNotMatch(
+    pageSource,
+    /if \(!appSwitcherOpen\) return;[\s\S]{0,800}document\.addEventListener\("pointerdown"/u,
+  );
 });
 
 test("portaled picker layers stay above the shared navbar", () => {

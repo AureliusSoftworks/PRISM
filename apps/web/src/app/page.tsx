@@ -42853,27 +42853,6 @@ function HomeContent(): React.JSX.Element {
     pendingPrivateExitOnChatHomeRef.current = false;
   }, [view, viewSwitchOverlayPhase, viewSwitchTarget]);
   useEffect(() => clearViewSwitchOverlayTimers, [clearViewSwitchOverlayTimers]);
-  useEffect(() => {
-    if (!appSwitcherOpen) return;
-    const handlePointerDown = (event: PointerEvent): void => {
-      const root = appSwitcherRef.current;
-      if (!root) return;
-      const target = event.target;
-      if (target instanceof Node && root.contains(target)) return;
-      setAppSwitcherOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        setAppSwitcherOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [appSwitcherOpen]);
   const viewSwitchOverlayLabel = useMemo(() => {
     if (viewSwitchTarget === "chat") return "Opening Zen";
     if (viewSwitchTarget === "sandbox") return "Opening Chat";
@@ -99142,6 +99121,7 @@ function HomeContent(): React.JSX.Element {
       <div
         className={styles.appSwitcher}
         ref={appSwitcherRef}
+        data-prism-menu-owner={menuId}
         data-open={!disabled && appSwitcherOpen ? "true" : undefined}
         data-disabled={disabled ? "true" : undefined}
       >
@@ -99552,6 +99532,7 @@ function HomeContent(): React.JSX.Element {
         onClick: () => void;
       };
       modelControls?: React.ReactNode;
+      brandAppletId?: PrismAppletId;
       voiceLocalPremiumFallback?: boolean;
       liveSessionName?: LiveSessionChromeName;
       voiceTutorialTarget?: string;
@@ -99578,6 +99559,11 @@ function HomeContent(): React.JSX.Element {
         data-dev-panel-safe-area="top"
       >
         <div className={styles.chatHeaderIdentityGroup}>
+          {options.brandAppletId ? (
+            <span className={styles.sharedAppletNavbarBrand}>
+              {renderSharedAppletSidebarHeader(options.brandAppletId)}
+            </span>
+          ) : null}
           {options.liveSessionActive && options.liveSessionExit ? (
             <button
               type="button"
@@ -129578,6 +129564,7 @@ function HomeContent(): React.JSX.Element {
       >
         <section className={styles.debateMain}>
           {renderSharedAppletNavbar("Debate tools", {
+            brandAppletId: "debate",
             showVoiceSelector: true,
             liveSessionActive: debateLiveSessionActive,
             liveSessionName: "Debate",

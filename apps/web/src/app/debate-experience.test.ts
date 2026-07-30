@@ -2549,7 +2549,11 @@ describe("Debate experience", () => {
     assert.match(page, /data-debate-shell="true"/u);
     assert.match(
       page,
-      /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*showVoiceSelector:\s*true[\s\S]*liveSessionName:\s*"Debate"[\s\S]*\(\["local", "auto", "online"\] as const\)\.map[\s\S]*<ComposerModelPicker/u,
+      /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*brandAppletId:\s*"debate"[\s\S]*showVoiceSelector:\s*true[\s\S]*liveSessionName:\s*"Debate"[\s\S]*\(\["local", "auto", "online"\] as const\)\.map[\s\S]*<ComposerModelPicker/u,
+    );
+    assert.match(
+      page,
+      /options\.brandAppletId[\s\S]*renderSharedAppletSidebarHeader\(options\.brandAppletId\)/u,
     );
     assert.match(page, /data-response-mode=\{debateResponseMode\}/u);
     assert.match(page, /responseMode=\{debateResponseMode\}/u);
