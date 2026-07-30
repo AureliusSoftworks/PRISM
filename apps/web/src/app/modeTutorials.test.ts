@@ -14,6 +14,16 @@ describe("mode tutorials", () => {
     }
   });
 
+  it("teaches the Zen Atmosphere button as generation, not visibility", () => {
+    const step = MODE_TUTORIALS.zen.steps.find(
+      (candidate) =>
+        candidate.targetSelector === '[data-tutorial-target="zen-atmosphere"]',
+    );
+    assert.ok(step);
+    assert.match(step.body, /same action as \/atmosphere/u);
+    assert.match(step.body, /on or off from the canvas tools/u);
+  });
+
   it("teaches the complete Debate contract with stable targets", () => {
     const tutorial = MODE_TUTORIALS.debate;
     assert.deepEqual(

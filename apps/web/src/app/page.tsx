@@ -18716,7 +18716,7 @@ function SlashCommandGlyph(): React.ReactElement {
   );
 }
 
-/** Zen Atmosphere toggle: layered horizon mark for generated ambient wallpaper. */
+/** Zen Atmosphere action: layered horizon mark for generated ambient wallpaper. */
 function AtmosphereGlyph(): React.ReactElement {
   return (
     <svg
@@ -99318,6 +99318,9 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereHasConversation = Boolean(
       detail && detail.mode === "zen" && selectedId,
     );
+    const zenAtmosphereHasMessages = Boolean(
+      zenAtmosphereHasConversation && detail && detail.messages.length > 0,
+    );
     const zenAtmosphereBusy = Boolean(
       detail &&
       (zenWallpaperBusyConversationId === detail.id ||
@@ -99331,37 +99334,21 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereDisabled =
       actionDisabled("atmosphere") ||
       zenAtmosphereBusy ||
-      !zenAtmosphereHasConversation;
+      !zenAtmosphereHasMessages;
     const zenAtmosphereTooltip = !zenAtmosphereHasConversation
-      ? "Send a Zen message before enabling Atmosphere"
-      : zenAtmosphereBusy
-        ? "Generating Zen Atmosphere"
-        : zenAtmosphereError
-          ? `Atmosphere failed: ${zenAtmosphereError}`
-          : zenAtmosphereEnabled
-            ? "Turn off Zen Atmosphere"
-            : "Turn on Zen Atmosphere";
+      ? "Open a saved Zen conversation to generate Atmosphere"
+      : !zenAtmosphereHasMessages
+        ? "Send a Zen message before generating Atmosphere"
+        : zenAtmosphereBusy
+          ? "Generating Zen Atmosphere"
+          : zenAtmosphereError
+            ? `Atmosphere failed: ${zenAtmosphereError}`
+            : "Generate a fresh Zen Atmosphere";
     const zenAtmosphereState = zenAtmosphereBusy
       ? "generating"
       : zenAtmosphereEnabled
         ? "on"
         : "off";
-    const toggleZenAtmosphere = (): void => {
-      if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
-      const nextEnabled = !zenAtmosphereEnabled;
-      if (nextEnabled) {
-        zenWallpaperToggleAutoGenerationSuppressedRef.current.set(
-          detail.id,
-          detail.messages.length,
-        );
-      } else {
-        zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
-      }
-      void requestZenWallpaperUpdate(detail.id, {
-        enabled: nextEnabled,
-        generate: false,
-      });
-    };
     const themeAriaLabel =
       effectiveThemeMode === "system"
         ? `Theme: Auto, currently ${THEME_LABEL[resolvedTheme]}. Click to switch to ${THEME_LABEL[nextThemeMode(effectiveThemeMode)]}.`
@@ -99450,9 +99437,10 @@ function HomeContent(): React.JSX.Element {
             type="button"
             className={`${styles.headerIconButton} ${styles.atmosphereHeaderButton}`}
             data-tutorial-target="zen-atmosphere"
-            onClick={() => runAction(toggleZenAtmosphere)}
+            onClick={() =>
+              runAsyncAction(generateAtmosphereFromSlashCommand)
+            }
             aria-label={zenAtmosphereTooltip}
-            aria-pressed={zenAtmosphereEnabled}
             data-glyph-tooltip={zenAtmosphereTooltip}
             data-atmosphere-state={zenAtmosphereState}
             disabled={zenAtmosphereDisabled}
@@ -99739,12 +99727,14 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereHasConversation = Boolean(
       detail && detail.mode === "zen" && selectedId,
     );
+    const zenAtmosphereHasMessages = Boolean(
+      zenAtmosphereHasConversation && detail && detail.messages.length > 0,
+    );
     const zenAtmosphereBusy = Boolean(
       detail &&
       (zenWallpaperBusyConversationId === detail.id ||
         zenWallpaper?.status === "generating"),
     );
-    const zenAtmosphereEnabled = Boolean(zenWallpaper?.enabled);
     const zenAtmosphereError =
       zenWallpaper?.status === "error" && zenWallpaperError
         ? zenWallpaperError
@@ -99752,32 +99742,16 @@ function HomeContent(): React.JSX.Element {
     const zenAtmosphereDisabled =
       headerActionsDisabled ||
       zenAtmosphereBusy ||
-      !zenAtmosphereHasConversation;
+      !zenAtmosphereHasMessages;
     const zenAtmosphereTooltip = !zenAtmosphereHasConversation
-      ? "Send a Zen message before enabling Atmosphere"
-      : zenAtmosphereBusy
-        ? "Generating Zen Atmosphere"
-        : zenAtmosphereError
-          ? `Atmosphere failed: ${zenAtmosphereError}`
-          : zenAtmosphereEnabled
-            ? "Turn off Zen Atmosphere"
-            : "Turn on Zen Atmosphere";
-    const toggleZenAtmosphere = () => {
-      if (!detail || detail.mode !== "zen" || zenAtmosphereDisabled) return;
-      const nextEnabled = !zenAtmosphereEnabled;
-      if (nextEnabled) {
-        zenWallpaperToggleAutoGenerationSuppressedRef.current.set(
-          detail.id,
-          detail.messages.length,
-        );
-      } else {
-        zenWallpaperToggleAutoGenerationSuppressedRef.current.delete(detail.id);
-      }
-      void requestZenWallpaperUpdate(detail.id, {
-        enabled: nextEnabled,
-        generate: false,
-      });
-    };
+      ? "Open a saved Zen conversation to generate Atmosphere"
+      : !zenAtmosphereHasMessages
+        ? "Send a Zen message before generating Atmosphere"
+        : zenAtmosphereBusy
+          ? "Generating Zen Atmosphere"
+          : zenAtmosphereError
+            ? `Atmosphere failed: ${zenAtmosphereError}`
+            : "Generate a fresh Zen Atmosphere";
 
     const handleSettings = () => {
       closeMenu();
@@ -99971,15 +99945,13 @@ function HomeContent(): React.JSX.Element {
     if (showZenAtmosphereButton && !hubAtmosphereSurface) {
       overflowEntries.push({
         id: "atmosphere",
-        kind: "toggle",
         icon: <Waves />,
         label: zenAtmosphereBusy ? "Generating Atmosphere" : "Atmosphere",
-        checked: zenAtmosphereEnabled,
         disabled: zenAtmosphereDisabled,
         disabledReason: zenAtmosphereDisabled
           ? zenAtmosphereTooltip
           : undefined,
-        onSelect: toggleZenAtmosphere,
+        onSelect: generateAtmosphereFromSlashCommand,
       });
     }
     if (showToolbarMemoriesButton) {

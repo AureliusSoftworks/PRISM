@@ -89,7 +89,21 @@ describe("Home atmosphere integration", () => {
     );
     assert.doesNotMatch(pageSource, /Reveal Home Atmosphere/u);
     assert.doesNotMatch(pageSource, /Hide Home Atmosphere/u);
-    assert.match(pageSource, /Turn on Zen Atmosphere/u);
+    assert.doesNotMatch(pageSource, /Turn on Zen Atmosphere/u);
+    assert.doesNotMatch(pageSource, /Turn off Zen Atmosphere/u);
+    assert.match(pageSource, /Generate a fresh Zen Atmosphere/u);
+    assert.match(
+      pageSource,
+      /onClick=\{\(\) =>\s*runAsyncAction\(generateAtmosphereFromSlashCommand\)\s*\}/u,
+    );
+    assert.match(
+      pageSource,
+      /id: "atmosphere",[\s\S]{0,320}onSelect: generateAtmosphereFromSlashCommand/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /id: "atmosphere",[\s\S]{0,180}kind: "toggle"[\s\S]{0,180}onSelect: generateAtmosphereFromSlashCommand/u,
+    );
   });
 
   it("protects the selected Home image from generated-image cleanup", () => {

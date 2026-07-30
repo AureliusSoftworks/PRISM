@@ -57,7 +57,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Use Atmosphere gently",
-        body: "Turn Atmosphere on from the header when you want the conversation backdrop to evolve.",
+        body: "Use the horizon icon to generate a fresh conversation backdrop—the same action as /atmosphere. Turn the current Zen Atmosphere on or off from the canvas tools.",
         clickLabel: "the horizon icon in the top toolbar",
         targetSelector: '[data-tutorial-target="zen-atmosphere"]',
       },
