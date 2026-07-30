@@ -5127,6 +5127,24 @@ test.describe("PRISM desktop smoke", () => {
       },
       caseBoard: [],
       ballots: [],
+      jury: {
+        version: 1,
+        enabled: false,
+        cadence: "natural-five",
+        phase: "disabled",
+        jurors: [],
+        forepersonBotId: null,
+        initialBallots: [],
+        finalBallots: [],
+        discussionTurnTarget: 0,
+        discussionTurnCount: 0,
+        speakerCounts: {},
+        majoritySideId: null,
+        forVotes: 0,
+        againstVotes: 0,
+        calledVoteAt: null,
+        completedAt: null,
+      },
       playerVerdict: null,
       winnerSideId: null,
       events: [],
@@ -5224,17 +5242,19 @@ test.describe("PRISM desktop smoke", () => {
     const studioNavigation = dashboard.getByRole("navigation", {
       name: "Debate Studio",
     });
-    await studioNavigation.getByRole("button", { name: /Cast/u }).click();
+    await studioNavigation.getByRole("button", { name: /Debaters/u }).click();
     await expect(
-      dashboard.getByRole("heading", { name: "Seat every voice" }),
+      dashboard.getByRole("heading", { name: "Who should argue?" }),
     ).toBeVisible();
     await page.screenshot({
       path: ".codex/output/debate-studio-cast.png",
       animations: "disabled",
     });
-    await studioNavigation.getByRole("button", { name: /Evidence/u }).click();
+    await studioNavigation.getByRole("button", { name: /Sources/u }).click();
     await expect(
-      dashboard.getByRole("heading", { name: "Choose what enters the room" }),
+      dashboard.getByRole("heading", {
+        name: "Want to give them anything else?",
+      }),
     ).toBeVisible();
     await page.screenshot({
       path: ".codex/output/debate-studio-evidence.png",
@@ -5250,7 +5270,7 @@ test.describe("PRISM desktop smoke", () => {
     });
     await themeButton.click();
     await expect(dashboard).toHaveAttribute("data-theme", "dark");
-    await studioNavigation.getByRole("button", { name: /Motion/u }).click();
+    await studioNavigation.getByRole("button", { name: /Topic/u }).click();
     await dashboard
       .getByRole("button", { name: "Align stage", exact: true })
       .click();
@@ -5266,9 +5286,7 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       dashboardAlignment.locator('[data-debate-bot-avatar="true"]'),
     ).toHaveCount(3);
-    await expect(dashboardAlignment).toContainText(
-      "empty roles use temporary Library stand-ins",
-    );
+    await expect(dashboardAlignment).toContainText("fresh random Library cast");
     const alignmentCameraToggle = dashboardAlignment.getByRole("group", {
       name: "Debate alignment preview camera",
     });
@@ -5296,7 +5314,9 @@ test.describe("PRISM desktop smoke", () => {
       ),
     ).not.toHaveAttribute("data-debate-compact", "true");
     await expect(
-      dashboardAlignment.locator('[class*="alignmentTunerRole"]'),
+      dashboardAlignment.locator(
+        '[class*="alignmentTunerRole"]:not([class*="Actions"])',
+      ),
     ).toHaveCount(1);
     const moderatorHorizontal = dashboardAlignment.getByRole("slider", {
       name: "Moderator Bot horizontal position",
@@ -5309,7 +5329,9 @@ test.describe("PRISM desktop smoke", () => {
       .getByRole("button", { name: "Copy alignment data", exact: true })
       .click();
     await expect(
-      dashboardAlignment.getByRole("button", { name: "Copied", exact: true }),
+      dashboardAlignment.locator(
+        '[data-debate-stage-alignment-copy="true"][data-copy-state="copied"]',
+      ),
     ).toBeVisible();
     const copiedAlignment = JSON.parse(
       (await page.evaluate(() =>
@@ -5457,6 +5479,23 @@ test.describe("PRISM desktop smoke", () => {
     await page.getByRole("button", { name: "Wide", exact: true }).click();
     const forumCamera = live.locator('[class*="forumCamera"]');
     await expect(forumCamera).toHaveAttribute("data-camera-view", "wide");
+    const audienceRow = live.locator('[data-debate-audience="true"]');
+    await expect(audienceRow).toBeVisible();
+    await expect(audienceRow).toHaveAttribute(
+      "data-audience-placement",
+      "below-screen",
+    );
+    await expect(audienceRow).toHaveAttribute("data-audience-count", "8");
+    await expect(audienceRow).toHaveAttribute(
+      "data-audience-murmuring",
+      "false",
+    );
+    await expect(
+      audienceRow.locator('[data-audience-source="generated"]'),
+    ).toHaveCount(8);
+    await expect(audienceRow.locator('[data-talking="true"]')).toHaveCount(0);
+    const wideAudienceBox = await audienceRow.boundingBox();
+    expect(wideAudienceBox).not.toBeNull();
     await forumCamera.evaluate((element) => {
       for (const animation of element.getAnimations()) animation.finish();
     });
@@ -5560,6 +5599,11 @@ test.describe("PRISM desktop smoke", () => {
         "data-camera-view",
         camera.toLowerCase(),
       );
+      await expect(audienceRow).toBeVisible();
+      const audienceBox = await audienceRow.boundingBox();
+      expect(audienceBox).not.toBeNull();
+      expect(audienceBox!.x).toBeCloseTo(wideAudienceBox!.x, 0);
+      expect(audienceBox!.y).toBeCloseTo(wideAudienceBox!.y, 0);
       await expect(moderatorAvatar).toHaveAttribute(
         "data-debate-compact",
         "true",
@@ -5572,6 +5616,11 @@ test.describe("PRISM desktop smoke", () => {
 
     await page.getByRole("button", { name: "Moderator", exact: true }).click();
     await expect(forumCamera).toHaveAttribute("data-camera-view", "moderator");
+    await expect(audienceRow).toBeVisible();
+    const moderatorAudienceBox = await audienceRow.boundingBox();
+    expect(moderatorAudienceBox).not.toBeNull();
+    expect(moderatorAudienceBox!.x).toBeCloseTo(wideAudienceBox!.x, 0);
+    expect(moderatorAudienceBox!.y).toBeCloseTo(wideAudienceBox!.y, 0);
     await expect(moderatorAvatar).toBeVisible();
     await expect(moderatorAvatar).not.toHaveAttribute(
       "data-debate-compact",

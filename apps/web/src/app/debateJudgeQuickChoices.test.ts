@@ -50,16 +50,26 @@ describe("Debate Judge quick choices", () => {
     );
   });
 
-  it("offers three direct responses and a fourth custom path", () => {
+  it("offers three direct responses, a custom path, and a quiet dismissal", () => {
     for (const kind of ["gavel", "question"] as const) {
       const choices = debateJudgeQuickChoices(kind);
-      assert.equal(choices.length, 4);
+      assert.equal(choices.length, 5);
       assert.equal(
-        choices.slice(0, 3).every((choice) => Boolean(choice.content?.trim())),
+        choices
+          .slice(0, 3)
+          .every(
+            (choice) =>
+              choice.action === "submit" && Boolean(choice.content?.trim()),
+          ),
         true,
       );
       assert.equal(choices[3]?.id, "custom");
+      assert.equal(choices[3]?.action, "compose");
       assert.equal(choices[3]?.content, null);
+      assert.equal(choices[4]?.id, "nevermind");
+      assert.equal(choices[4]?.label, "nevermind");
+      assert.equal(choices[4]?.action, "dismiss");
+      assert.equal(choices[4]?.content, null);
     }
   });
 });

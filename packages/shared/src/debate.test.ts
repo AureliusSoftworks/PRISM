@@ -7,6 +7,7 @@ import {
   DEBATE_FORMALITY_SPECTRUM,
   DEBATE_FORMAT_SCHEMA_VERSION,
   DEBATE_JURY_DISCUSSION_TURNS,
+  DEBATE_MODERATOR_TITLE_MAX_LENGTH,
   DEBATE_MOTION_MAX_LENGTH,
   DEBATE_SETUP_PRESETS,
   defaultDebateJuryStateV1,
@@ -21,6 +22,7 @@ import {
   normalizeDebateFormatStateV1,
   normalizeDebateIdempotencyKey,
   normalizeDebateJuryStateV1,
+  normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
   normalizeDebateSetupPresetId,
   sanitizeDebateStatementSources,
@@ -113,6 +115,21 @@ test("defaults legacy Debate sessions to a disabled Jury", () => {
     ...defaultDebateJuryStateV1(),
     discussionTurnTarget: DEBATE_JURY_DISCUSSION_TURNS,
   });
+});
+
+test("normalizes a frozen moderator title with a safe legacy default", () => {
+  assert.equal(normalizeDebateModeratorTitle(undefined), "Moderator");
+  assert.equal(normalizeDebateModeratorTitle("   "), "Moderator");
+  assert.equal(
+    normalizeDebateModeratorTitle("  The Lord,   Your God  "),
+    "The Lord, Your God",
+  );
+  assert.equal(
+    normalizeDebateModeratorTitle(
+      "T".repeat(DEBATE_MODERATOR_TITLE_MAX_LENGTH + 20),
+    ).length,
+    DEBATE_MODERATOR_TITLE_MAX_LENGTH,
+  );
 });
 
 test("migrates seven-seat Jury records to the first five jurors and their ballots", () => {

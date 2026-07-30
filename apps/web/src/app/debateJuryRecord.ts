@@ -1,9 +1,28 @@
-import type { DebateEventV1, DebateSessionV1 } from "@localai/shared";
+import type {
+  DebateEventV1,
+  DebateSessionListItemV1,
+  DebateSessionV1,
+} from "@localai/shared";
 
 type DebateJuryRecordSession = Pick<
   DebateSessionV1,
   "id" | "motion" | "playerRole" | "jury" | "events"
 >;
+
+type DebateArchivedJuryRecord = Pick<
+  DebateSessionListItemV1,
+  "status" | "juryEnabled" | "playerRole"
+>;
+
+export function debateArchivedJuryRecordIsCopyable(
+  session: DebateArchivedJuryRecord,
+): boolean {
+  return (
+    session.status === "completed" &&
+    session.juryEnabled &&
+    session.playerRole !== "participant"
+  );
+}
 
 export function debateEventIsJuryComment(event: DebateEventV1): boolean {
   return (
@@ -12,9 +31,7 @@ export function debateEventIsJuryComment(event: DebateEventV1): boolean {
   );
 }
 
-export function debateEventIsJurySidebarComment(
-  event: DebateEventV1,
-): boolean {
+export function debateEventIsJurySidebarComment(event: DebateEventV1): boolean {
   return (
     debateEventIsJuryComment(event) &&
     event.kind === "jury_deliberation" &&

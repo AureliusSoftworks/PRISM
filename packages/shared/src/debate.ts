@@ -17,6 +17,7 @@ export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
 export const DEBATE_PLAYER_JUDGE_BOT_ID = "prism:player-judge" as const;
 export const DEBATE_JUDGE_GAVEL_COOLDOWN_MS = 8_000;
 export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
+export const DEBATE_MODERATOR_TITLE_MAX_LENGTH = 72;
 export const DEBATE_MOTION_MAX_LENGTH = 320;
 export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
 export const DEBATE_SIDE_BRIEF_MAX_LENGTH = 1_200;
@@ -480,6 +481,7 @@ export type DebateSpeakerKind =
 
 export type DebateTurnTimingStatus = "within_limit" | "overtime";
 export type DebateJudgeGavelReason = "intervention" | "overtime" | "resume";
+export type DebateJudgeGavelDemeanor = "measured" | "firm" | "aggravated";
 
 export interface DebateTurnTimingV1 {
   limitMs: number;
@@ -510,6 +512,8 @@ export interface DebateEventV1 {
   evidenceSourceId?: string | null;
   ruling?: DebateTurnaboutRuling | null;
   gavelReason?: DebateJudgeGavelReason;
+  gavelStrikeCount?: number;
+  gavelDemeanor?: DebateJudgeGavelDemeanor;
   timing?: DebateTurnTimingV1;
   createdAt: string;
 }
@@ -599,6 +603,8 @@ export interface DebateSessionV1 {
   playerSideId: DebateSideId | null;
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
+  /** Frozen public authority label; the moderator bot ID remains canonical. */
+  moderatorTitle: string;
   moderator: DebateBotSnapshotV1;
   forAdvocate: DebateBotSnapshotV1;
   againstAdvocate: DebateBotSnapshotV1;
@@ -667,6 +673,7 @@ export interface DebateSessionCreateRequest {
   };
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
+  moderatorTitle?: string;
   moderatorBotId: string;
   playerJudgeUsesPrism?: boolean;
   forAdvocateBotId: string;
@@ -711,6 +718,7 @@ export interface DebateJudgeGavelRequest extends DebateMutationRequest {
   eventId?: string | null;
   heardCharacterCount?: number;
   overtime?: boolean;
+  strikeCount?: number;
 }
 
 export interface DebateJudgeGavelMessageRequest extends DebateMutationRequest {
@@ -732,6 +740,7 @@ export interface DebateSessionListItemV1 {
   status: DebateStatus;
   phase: DebatePhase;
   motion: string;
+  moderatorTitle: string;
   setupPresetId: DebateSetupPresetId | "custom";
   formality: DebateFormalityId;
   juryEnabled: boolean;
@@ -751,6 +760,12 @@ function normalizedMultilineText(value: unknown, maxLength: number): string {
   return typeof value === "string"
     ? value.replace(/\r\n?/gu, "\n").trim().slice(0, maxLength)
     : "";
+}
+
+export function normalizeDebateModeratorTitle(value: unknown): string {
+  return (
+    normalizedText(value, DEBATE_MODERATOR_TITLE_MAX_LENGTH) || "Moderator"
+  );
 }
 
 export function normalizeDebateSideLabel(

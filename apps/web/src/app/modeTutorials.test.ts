@@ -21,6 +21,7 @@ describe("mode tutorials", () => {
       [
         '[data-tutorial-target="debate-new"]',
         '[data-tutorial-target="debate-setup-mode"]',
+        '[data-tutorial-target="debate-moderator-title"]',
         '[data-tutorial-target="debate-synthesize"]',
         '[data-tutorial-target="debate-cast"]',
         '[data-tutorial-target="debate-consent"]',
@@ -46,7 +47,18 @@ describe("mode tutorials", () => {
     assert.match(copy, /Advanced preserves the full studio/u);
     assert.match(copy, /five formality levels/u);
     assert.match(copy, /Forum or Turnabout/u);
+    assert.match(
+      copy,
+      /Daytime Showdown keeps its confrontation-show energy when you take the Judge role/u,
+    );
+    assert.match(
+      copy,
+      /Custom records the role change without turning Free-for-all into a polite panel/u,
+    );
     assert.match(copy, /without deleting your topic, cast, or sources/u);
+    assert.match(copy, /exact public authority for this proceeding/u);
+    assert.match(copy, /freezes with the saved Debate for replay/u);
+    assert.match(copy, /never changes the moderator bot’s identity/u);
     assert.match(copy, /briefs you should not have to author/u);
     assert.match(copy, /Try another version/u);
     assert.match(copy, /Make sure they’re willing/u);
@@ -113,9 +125,16 @@ describe("mode tutorials", () => {
     assert.match(copy, /ellipsis beside a juror means a thought is waiting/u);
     assert.match(copy, /enter the Jury camera before the next thought/u);
     assert.match(copy, /another camera lets them resolve immediately/u);
+    assert.match(copy, /seats bot faces and frames around/u);
+    assert.match(copy, /Each audible juror reads the same final reason/u);
+    assert.match(copy, /canonically silent juror still casts/u);
     assert.match(copy, /separate timestamped Jury record/u);
     assert.match(copy, /own copy action/u);
-    assert.match(copy, /anonymous ballot slides/u);
+    assert.match(
+      copy,
+      /Jury transcript remains directly copyable from its eligible Proceeding archive entry/u,
+    );
+    assert.match(copy, /anonymous mark slides/u);
     assert.match(copy, /both advocates’ reactions/u);
     assert.match(
       copy,
@@ -138,16 +157,37 @@ describe("mode tutorials", () => {
     assert.match(copy, /traditional three-cast majority/u);
     assert.match(copy, /Gavel stays available throughout/u);
     assert.match(copy, /Space swings it/u);
-    assert.match(copy, /advocate’s overtime it calls time/u);
+    assert.match(copy, /Gavel cue asks you to perform the strike yourself/u);
+    assert.match(copy, /saved event and speaking order are already set/u);
+    assert.match(copy, /no automatic gavel is faked/u);
+    assert.match(copy, /room hangs for an awkward beat/u);
+    assert.match(
+      copy,
+      /human Judge performs those scheduled strikes during the visible cue window/u,
+    );
+    assert.match(
+      copy,
+      /advocate’s overtime, the first strike stops the speaker/u,
+    );
     assert.match(copy, /opens one message to both advocates/u);
     assert.match(copy, /resumes the exact interrupted schedule/u);
     assert.match(copy, /three one-tap responses/u);
     assert.match(copy, /fourth Write my own choice/u);
     assert.match(copy, /dice to draft editable Judge prose/u);
+    assert.match(copy, /deliberately quiet fifth nevermind choice/u);
+    assert.match(
+      copy,
+      /passes the question or resumes the interrupted schedule/u,
+    );
     assert.match(copy, /Final rulings stay one-tap/u);
-    assert.match(copy, /two seconds after the first strike/u);
+    assert.match(copy, /still require a side/u);
+    assert.match(copy, /two seconds after an ordinary intervention strike/u);
+    assert.match(copy, /two-second procedural burst/u);
+    assert.match(copy, /two or three make Prism firmer/u);
+    assert.match(copy, /four or more make the Judge sound aggravated/u);
+    assert.match(copy, /without starting, extending, or erasing/u);
     assert.match(copy, /extra smashes are pure showmanship/u);
-    assert.match(copy, /eight-second server cooldown/u);
+    assert.match(copy, /not a procedural overtime call/u);
     assert.match(copy, /Public prose arrives with the live voice/u);
     assert.match(copy, /actual animated bot behind an authored side podium/u);
     assert.match(copy, /Each visible podium carries its bot's glyph/u);

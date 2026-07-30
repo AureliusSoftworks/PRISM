@@ -21,6 +21,7 @@ import {
   sessionAmbientBotVocalizationTargetId,
   sessionAmbientFoleyDelayMs,
   sessionAmbientFoleyUrl,
+  sessionAmbientFoleyUrlFrom,
   sessionAtmosphereBusVolume,
   sessionAtmosphereLoopEndTime,
   signalAtmosphereMixLevelFromRelative,
@@ -118,6 +119,19 @@ test("session atmosphere foley is deterministic and tactfully spaced", () => {
     sessionAmbientFoleyUrl("session-a", 2),
     /^\/audio\/session-atmosphere\//u,
   );
+  const courtroomFoley = ["/court/chair.mp3", "/court/cough.mp3"] as const;
+  const selected = sessionAmbientFoleyUrlFrom("session-a", 2, courtroomFoley);
+  assert.ok(
+    courtroomFoley.includes(selected as (typeof courtroomFoley)[number]),
+  );
+  assert.equal(
+    selected,
+    sessionAmbientFoleyUrlFrom("session-a", 2, courtroomFoley),
+  );
+  assert.match(
+    sessionAmbientFoleyUrlFrom("session-a", 2, ["", "  "]),
+    /^\/audio\/session-atmosphere\//u,
+  );
 });
 
 test("ambient bot vocalizations are sparse bundled recordings with deterministic targets", () => {
@@ -130,20 +144,13 @@ test("ambient bot vocalizations are sparse bundled recordings with deterministic
     sessionAmbientBotVocalizationDelayMs("session-a", 2),
     sessionAmbientBotVocalizationDelayMs("session-a", 2),
   );
-  assert.ok(
-    sessionAmbientBotVocalizationDelayMs("session-a", 2) >= 34_000,
-  );
-  assert.ok(
-    sessionAmbientBotVocalizationDelayMs("session-a", 2) <= 76_000,
-  );
+  assert.ok(sessionAmbientBotVocalizationDelayMs("session-a", 2) >= 34_000);
+  assert.ok(sessionAmbientBotVocalizationDelayMs("session-a", 2) <= 76_000);
   assert.equal(
     sessionAmbientBotVocalizationTargetId("session-a", 2, ["", "a", "b"]),
     sessionAmbientBotVocalizationTargetId("session-a", 2, ["", "a", "b"]),
   );
-  assert.equal(
-    sessionAmbientBotVocalizationTargetId("session-a", 2, []),
-    null,
-  );
+  assert.equal(sessionAmbientBotVocalizationTargetId("session-a", 2, []), null);
 
   const kinds = new Set<string>();
   for (let index = 0; index < 200; index += 1) {
@@ -398,10 +405,7 @@ test("cup foley emits exactly once for each sip and return transition", () => {
   assert.equal(coffeeCupFoleyCueForTransition(false, false), null);
   assert.equal(coffeeCupFoleyCueForTransition(false, true), "coffeeSip");
   assert.equal(coffeeCupFoleyCueForTransition(true, true), null);
-  assert.equal(
-    coffeeCupFoleyCueForTransition(true, false),
-    "coffeeCupPlace",
-  );
+  assert.equal(coffeeCupFoleyCueForTransition(true, false), "coffeeCupPlace");
 });
 
 test("session atmosphere buses keep their own calibrated and clamped gains", () => {
@@ -536,9 +540,9 @@ test("atmosphere loops crossfade into a periodic, sample-continuous buffer", () 
 
   const sampleRate = 8;
   const decoded = new FakeAudioBuffer(1, 32, sampleRate);
-  decoded.getChannelData(0).set(
-    Float32Array.from({ length: decoded.length }, (_, index) => index),
-  );
+  decoded
+    .getChannelData(0)
+    .set(Float32Array.from({ length: decoded.length }, (_, index) => index));
   const context = {
     createBuffer(numberOfChannels: number, length: number, rate: number) {
       return new FakeAudioBuffer(numberOfChannels, length, rate);
@@ -572,6 +576,7 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
   const sources: FakeBufferSource[] = [];
   const contexts: FakeAudioContext[] = [];
   const fetched: string[] = [];
+  const gainRamps: Array<{ value: number; endTime: number }> = [];
 
   class FakeAudioBuffer {
     readonly duration: number;
@@ -600,6 +605,11 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       value: 1,
       setValueAtTime: (value: number): void => {
         this.gain.value = value;
+      },
+      cancelScheduledValues: (): void => {},
+      linearRampToValueAtTime: (value: number, endTime: number): void => {
+        this.gain.value = value;
+        gainRamps.push({ value, endTime });
       },
     };
   }
@@ -693,6 +703,16 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
     assert.ok(sources.every((source) => source.loop));
     assert.ok(sources.every((source) => source.loopStart === 0));
     assert.ok(sources.every((source) => source.loopEnd === 2.25));
+
+    controller.setMix({
+      volume: 0.5,
+      mix: { background: 0.2, grain: 0.1, foley: 1 },
+      transitionMs: 320,
+    });
+    assert.deepEqual(gainRamps, [
+      { value: 0.1, endTime: 0.32 },
+      { value: 0.05, endTime: 0.32 },
+    ]);
 
     controller.stop();
     assert.ok(sources.every((source) => source.stopped));

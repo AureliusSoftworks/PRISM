@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DebateEventV1, DebateSessionV1 } from "@localai/shared";
 import {
+  debateArchivedJuryRecordIsCopyable,
   debateEventIsJuryComment,
   debateJuryCommentEvents,
   debateLatestPendingJuryComment,
@@ -41,9 +42,7 @@ const publicSpeech = {
   speakerBotId: "for",
 } as DebateEventV1;
 
-function session(
-  overrides: Partial<DebateSessionV1> = {},
-): DebateSessionV1 {
+function session(overrides: Partial<DebateSessionV1> = {}): DebateSessionV1 {
   return {
     id: "debate-1",
     playerRole: "spectator",
@@ -63,6 +62,49 @@ function session(
 }
 
 describe("Debate Jury record", () => {
+  it("keeps completed Judge and Spectator Jury records copyable from the archive", () => {
+    assert.equal(
+      debateArchivedJuryRecordIsCopyable({
+        status: "completed",
+        juryEnabled: true,
+        playerRole: "judge",
+      }),
+      true,
+    );
+    assert.equal(
+      debateArchivedJuryRecordIsCopyable({
+        status: "completed",
+        juryEnabled: true,
+        playerRole: "spectator",
+      }),
+      true,
+    );
+    assert.equal(
+      debateArchivedJuryRecordIsCopyable({
+        status: "completed",
+        juryEnabled: true,
+        playerRole: "participant",
+      }),
+      false,
+    );
+    assert.equal(
+      debateArchivedJuryRecordIsCopyable({
+        status: "live",
+        juryEnabled: true,
+        playerRole: "judge",
+      }),
+      false,
+    );
+    assert.equal(
+      debateArchivedJuryRecordIsCopyable({
+        status: "completed",
+        juryEnabled: false,
+        playerRole: "judge",
+      }),
+      false,
+    );
+  });
+
   it("separates juror comments from public-floor events", () => {
     assert.equal(debateEventIsJuryComment(sidebarComment), true);
     assert.equal(debateEventIsJuryComment(publicSpeech), false);
@@ -79,10 +121,7 @@ describe("Debate Jury record", () => {
       "jury-thought-1",
     );
     assert.equal(
-      debateLatestPendingJuryComment(
-        current,
-        new Set(["jury-thought-1"]),
-      ),
+      debateLatestPendingJuryComment(current, new Set(["jury-thought-1"])),
       null,
     );
     assert.equal(

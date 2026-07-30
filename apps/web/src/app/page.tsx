@@ -146,6 +146,7 @@ import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { CoffeeAtmosphereScene } from "./CoffeeAtmosphereScene";
 import { DebateExperience, type DebateUtterance } from "./DebateExperience";
+import { debateJudgeGavelVoiceMood } from "./debateJudgeGavel";
 import { debateAudioEnabled } from "./debatePresentation";
 import { BotPickerGrid, BotPickerTile } from "./BotPicker";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
@@ -647,6 +648,10 @@ import {
 } from "lucide-react";
 import styles from "./page.module.css";
 import { BotcastExperience, type BotcastBotSummary } from "./BotcastExperience";
+import {
+  debateAudienceBotIsGenerated,
+  debateAudienceRandom,
+} from "./debateAudience";
 import { REPLAY_RECORDING_CHANGED_EVENT } from "./ReplayRenderCoordinator";
 import {
   buildCoffeeReplayManifestV2,
@@ -848,6 +853,7 @@ import {
   botPowerSigilForPowerV1,
   parseStoredBotFaceThinkingFrames,
   parseBotAvatarDetailsV1,
+  randomBotFaceStyle,
   randomBotProfile,
   resolveBotFaceStyle,
   PRISM_EULA_VERSION,
@@ -94665,9 +94671,10 @@ function HomeContent(): React.JSX.Element {
                 </p>
                 <p>
                   Debate begins in Basic setup: name the idea, choose two
-                  debaters, and let Prism prepare the balanced motion and side
-                  briefs. Advanced keeps Forum, Turnabout, formality, roles, and
-                  Jury controls available whenever you want them.
+                  debaters, optionally title the presiding voice, and let Prism
+                  prepare the balanced motion and side briefs. Advanced keeps
+                  Forum, Turnabout, formality, roles, and Jury controls
+                  available whenever you want them.
                 </p>
                 <div>
                   <span>
@@ -129006,7 +129013,7 @@ function HomeContent(): React.JSX.Element {
           content: utterance.spokenText,
           stageActionText: null,
           voicePerformanceText: null,
-          moodKey: "neutral",
+          moodKey: debateJudgeGavelVoiceMood(utterance.event),
           createdAt: utterance.event.createdAt,
         },
         {
@@ -129214,6 +129221,8 @@ function HomeContent(): React.JSX.Element {
               renderBotAvatar={(botSnapshot, avatarState) => {
                 const playerJudgePrism =
                   botSnapshot.id === DEBATE_PLAYER_JUDGE_BOT_ID;
+                const generatedAudienceBot =
+                  debateAudienceBotIsGenerated(botSnapshot);
                 const liveBot =
                   (playerJudgePrism
                     ? null
@@ -129227,11 +129236,15 @@ function HomeContent(): React.JSX.Element {
                     : DEFAULT_BOT_GLYPH;
                 const faceStyle = playerJudgePrism
                   ? zenDefaultPrismFaceStyle
-                  : resolveBotFaceStyleForBot(
-                      liveBot ?? {
-                        systemPrompt: botSnapshot.systemPrompt,
-                      },
-                    );
+                  : generatedAudienceBot
+                    ? randomBotFaceStyle(
+                        debateAudienceRandom(`face:${botSnapshot.id}`),
+                      )
+                    : resolveBotFaceStyleForBot(
+                        liveBot ?? {
+                          systemPrompt: botSnapshot.systemPrompt,
+                        },
+                      );
                 const moderatorLookAtRole =
                   avatarState.role === "moderator"
                     ? avatarState.lookAtRole
@@ -129341,7 +129354,9 @@ function HomeContent(): React.JSX.Element {
                         moodHint={debateMoodHint}
                         scheduleKey={`debate-${avatarState.role}-${botSnapshot.id}`}
                         thinkingScheduleKey={`debate-${avatarState.role}-${botSnapshot.id}-thinking`}
-                        showThinkingSpinner={avatarState.thinking}
+                        showThinkingSpinner={
+                          avatarState.thinking && !avatarState.compact
+                        }
                         detailLevel={avatarState.compact ? "reduced" : "full"}
                         eyeAttentionState={
                           avatarState.thinking

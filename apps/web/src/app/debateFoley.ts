@@ -6,16 +6,49 @@ import type { DebateEventV1, DebateFormatId } from "@localai/shared";
 import type { DebateForumRole } from "./DebateForumScene.tsx";
 
 export type DebateModeratorGavelCueKind = "attention" | "order";
+export type DebateAudienceReactionKind = "session" | "order";
 
 export interface DebateModeratorGavelCue {
   eventId: string;
   kind: DebateModeratorGavelCueKind;
+  audienceReaction?: DebateAudienceReactionKind;
 }
+
+export const DEBATE_AUDIENCE_MURMUR_URL =
+  "/audio/debate/courtroom-audience-murmur-loop.mp3";
+
+export const DEBATE_AUDIENCE_FOLEY_URLS = [
+  "/audio/debate/courtroom-chair-shift.mp3",
+  "/audio/debate/courtroom-paper-shuffle.mp3",
+  "/audio/debate/courtroom-cough-01.mp3",
+  "/audio/debate/courtroom-cough-02.mp3",
+] as const;
+
+export const DEBATE_AUDIENCE_REACTIONS = {
+  session: {
+    url: "/audio/debate/courtroom-audience-session-settle.mp3",
+    durationMs: 3_000,
+    trim: 0.82,
+  },
+  order: {
+    url: "/audio/debate/courtroom-audience-order-hush.mp3",
+    durationMs: 2_300,
+    trim: 0.42,
+  },
+} as const satisfies Record<
+  DebateAudienceReactionKind,
+  { url: string; durationMs: number; trim: number }
+>;
 
 export const DEBATE_GAVEL_FOLEY_URLS = {
   attention: "/audio/debate/gavel-attention-v3.wav",
   order: "/audio/debate/gavel-order-v3.wav",
 } as const satisfies Record<DebateModeratorGavelCueKind, string>;
+
+export const DEBATE_GAVEL_FOLEY_TRIM = {
+  attention: 0.86,
+  order: 0.92,
+} as const satisfies Record<DebateModeratorGavelCueKind, number>;
 
 export const DEBATE_GAVEL_VISUAL_IMPACT_MS = {
   attention: 220,
@@ -42,17 +75,25 @@ export function debateModeratorGavelCue(args: {
     return {
       eventId: event.id,
       kind:
-        event.gavelReason === "intervention" ||
-        event.gavelReason === "resume"
+        event.gavelReason === "intervention" || event.gavelReason === "resume"
           ? "order"
           : "attention",
+      audienceReaction: "order",
     };
   }
   if (event.kind === "moderator_ruling") {
-    return { eventId: event.id, kind: "order" };
+    return {
+      eventId: event.id,
+      kind: "order",
+      audienceReaction: "order",
+    };
   }
   if (event.kind === "interjection") {
-    return { eventId: event.id, kind: "order" };
+    return {
+      eventId: event.id,
+      kind: "order",
+      audienceReaction: "order",
+    };
   }
   if (event.kind === "verdict" && event.speakerKind !== "player") {
     return { eventId: event.id, kind: "order" };
@@ -68,7 +109,13 @@ export function debateModeratorGavelCue(args: {
     };
   }
   if (event.kind === "intro" || event.kind === "phase") {
-    return { eventId: event.id, kind: "attention" };
+    return {
+      eventId: event.id,
+      kind: "attention",
+      ...(event.kind === "intro"
+        ? { audienceReaction: "session" as const }
+        : {}),
+    };
   }
   if (
     args.format === "turnabout" &&

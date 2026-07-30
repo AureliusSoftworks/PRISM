@@ -73,12 +73,13 @@ describe("first-run onboarding", () => {
       pageSource,
       /Debate begins in Basic setup: name the idea, choose two\s*debaters/u,
     );
+    assert.match(pageSource, /optionally title the presiding voice/u);
     assert.match(
       pageSource,
-      /Prism prepare the balanced motion and side\s*briefs/u,
+      /Prism\s*prepare the balanced motion and side\s*briefs/u,
     );
-    assert.match(pageSource, /Advanced keeps Forum, Turnabout, formality/u);
-    assert.match(pageSource, /Jury controls available/u);
+    assert.match(pageSource, /Advanced keeps\s*Forum, Turnabout, formality/u);
+    assert.match(pageSource, /Jury controls\s*available/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {

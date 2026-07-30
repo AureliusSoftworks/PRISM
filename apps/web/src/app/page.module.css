@@ -25904,6 +25904,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-ambient-hover-amplitude: 0.5px;
 }
 
+.debateBotPresencePlate[data-debate-role="audience"] {
+  --bot-ambient-hover-amplitude: 0.35px;
+  --zen-live-bot-avatar-size: 100%;
+  --zen-live-bot-avatar-body-size: 94%;
+}
+
 :global([data-debate-stage-compact="true"])
   > .debateBotPresencePlate[data-debate-compact="true"] {
   position: absolute;

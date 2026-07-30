@@ -4,6 +4,10 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "@localai/shared";
 import {
+  DEBATE_AUDIENCE_FOLEY_URLS,
+  DEBATE_AUDIENCE_MURMUR_URL,
+  DEBATE_AUDIENCE_REACTIONS,
+  DEBATE_GAVEL_FOLEY_TRIM,
   DEBATE_GAVEL_FOLEY_URLS,
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
   DEBATE_GAVEL_VISUAL_IMPACT_MS,
@@ -190,7 +194,11 @@ describe("Debate moderator gavel", () => {
           event: debateEvent("intro"),
           moderatorBotId: "moderator",
         }),
-        { eventId: "event:intro", kind: "attention" },
+        {
+          eventId: "event:intro",
+          kind: "attention",
+          audienceReaction: "session",
+        },
       );
     }
   });
@@ -242,7 +250,11 @@ describe("Debate moderator gavel", () => {
           event: debateEvent("interjection"),
           moderatorBotId: "moderator",
         }),
-        { eventId: "event:interjection", kind: "order" },
+        {
+          eventId: "event:interjection",
+          kind: "order",
+          audienceReaction: "order",
+        },
       );
     }
   });
@@ -258,7 +270,11 @@ describe("Debate moderator gavel", () => {
         }),
         moderatorBotId: "prism:player-judge",
       }),
-      { eventId: "event:judge_gavel", kind: "attention" },
+      {
+        eventId: "event:judge_gavel",
+        kind: "attention",
+        audienceReaction: "order",
+      },
     );
     assert.deepEqual(
       debateModeratorGavelCue({
@@ -270,7 +286,11 @@ describe("Debate moderator gavel", () => {
         }),
         moderatorBotId: "prism:player-judge",
       }),
-      { eventId: "event:judge_gavel", kind: "order" },
+      {
+        eventId: "event:judge_gavel",
+        kind: "order",
+        audienceReaction: "order",
+      },
     );
   });
 
@@ -285,7 +305,11 @@ describe("Debate moderator gavel", () => {
         }),
         moderatorBotId: "moderator",
       }),
-      { eventId: "event:judge_gavel", kind: "order" },
+      {
+        eventId: "event:judge_gavel",
+        kind: "order",
+        audienceReaction: "order",
+      },
     );
   });
 
@@ -311,22 +335,31 @@ describe("Debate moderator gavel", () => {
   });
 
   it("calls the room to order for moderator rulings and bot verdicts", () => {
-    for (const event of [
-      debateEvent("moderator_ruling", {
-        speakerKind: "moderator",
-        speakerBotId: "moderator",
+    const ruling = debateEvent("moderator_ruling", {
+      speakerKind: "moderator",
+      speakerBotId: "moderator",
+    });
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: ruling,
+        moderatorBotId: "moderator",
       }),
-      debateEvent("verdict"),
-    ]) {
-      assert.deepEqual(
-        debateModeratorGavelCue({
-          format: "forum",
-          event,
-          moderatorBotId: "moderator",
-        }),
-        { eventId: event.id, kind: "order" },
-      );
-    }
+      {
+        eventId: ruling.id,
+        kind: "order",
+        audienceReaction: "order",
+      },
+    );
+    const verdict = debateEvent("verdict");
+    assert.deepEqual(
+      debateModeratorGavelCue({
+        format: "forum",
+        event: verdict,
+        moderatorBotId: "moderator",
+      }),
+      { eventId: verdict.id, kind: "order" },
+    );
     assert.equal(
       debateModeratorGavelCue({
         format: "turnabout",
@@ -361,6 +394,44 @@ describe("Debate moderator gavel", () => {
       DEBATE_GAVEL_FOLEY_URLS.order,
       "/audio/debate/gavel-order-v3.wav",
     );
+    assert.deepEqual(DEBATE_GAVEL_FOLEY_TRIM, {
+      attention: 0.86,
+      order: 0.92,
+    });
+  });
+
+  it("bundles the courtroom murmur, sparse Foley, and synchronized reactions", () => {
+    assert.equal(
+      DEBATE_AUDIENCE_MURMUR_URL,
+      "/audio/debate/courtroom-audience-murmur-loop.mp3",
+    );
+    assert.deepEqual(DEBATE_AUDIENCE_REACTIONS, {
+      session: {
+        url: "/audio/debate/courtroom-audience-session-settle.mp3",
+        durationMs: 3_000,
+        trim: 0.82,
+      },
+      order: {
+        url: "/audio/debate/courtroom-audience-order-hush.mp3",
+        durationMs: 2_300,
+        trim: 0.42,
+      },
+    });
+
+    const urls = [
+      DEBATE_AUDIENCE_MURMUR_URL,
+      ...DEBATE_AUDIENCE_FOLEY_URLS,
+      ...Object.values(DEBATE_AUDIENCE_REACTIONS).map(
+        (reaction) => reaction.url,
+      ),
+    ];
+    for (const url of urls) {
+      const bytes = readFileSync(
+        fileURLToPath(new URL(`../../public${url}`, import.meta.url)),
+      );
+      assert.equal(bytes.toString("ascii", 0, 3), "ID3");
+      assert.ok(bytes.length > 10_000, `${url} should contain bundled audio`);
+    }
   });
 
   it("keeps both active gavel cues available in the sound bench", () => {

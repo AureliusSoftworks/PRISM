@@ -49,11 +49,7 @@ export const DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE = {
 } as const satisfies SessionAmbientFoleyProfile;
 
 export type SessionAmbientBotVocalizationKind =
-  | "throat-clear"
-  | "mouth-sound"
-  | "lip-smack"
-  | "soft-sigh"
-  | "soft-inhale";
+  "throat-clear" | "mouth-sound" | "lip-smack" | "soft-sigh" | "soft-inhale";
 
 export interface SessionAmbientBotVocalizationCue {
   kind: SessionAmbientBotVocalizationKind;
@@ -84,11 +80,9 @@ export function signalSessionAtmosphereActive(args: {
 }): boolean {
   return Boolean(
     args.audioEnabled &&
-      args.hasSelectedShow &&
-      !args.preRollActive &&
-      (args.episodePresent ||
-        args.replayPlaying ||
-        args.studioLayoutEditorOpen),
+    args.hasSelectedShow &&
+    !args.preRollActive &&
+    (args.episodePresent || args.replayPlaying || args.studioLayoutEditorOpen),
   );
 }
 
@@ -186,32 +180,36 @@ export function sessionAmbientFoleyDelayMs(
 }
 
 export function sessionAmbientFoleyUrl(seed: string, index: number): string {
-  return GENERAL_FOLEY_URLS[
-    stableHash(`${seed}:foley:${index}`) % GENERAL_FOLEY_URLS.length
-  ]!;
+  return sessionAmbientFoleyUrlFrom(seed, index, GENERAL_FOLEY_URLS);
+}
+
+export function sessionAmbientFoleyUrlFrom(
+  seed: string,
+  index: number,
+  urls: readonly string[],
+): string {
+  const eligible = urls.filter((url) => url.trim().length > 0);
+  const candidates = eligible.length > 0 ? eligible : [...GENERAL_FOLEY_URLS];
+  return candidates[stableHash(`${seed}:foley:${index}`) % candidates.length]!;
 }
 
 export function sessionAmbientBotVocalizationDelayMs(
   seed: string,
   index: number,
-  profile: SessionAmbientFoleyProfile =
-    DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
+  profile: SessionAmbientFoleyProfile = DEFAULT_SESSION_AMBIENT_BOT_VOCALIZATION_PROFILE,
 ): number {
-  return sessionAmbientFoleyDelayMs(
-    `${seed}:bot-vocalization`,
-    index,
-    profile,
-  );
+  return sessionAmbientFoleyDelayMs(`${seed}:bot-vocalization`, index, profile);
 }
 
 export function sessionAmbientBotVocalizationCue(
   seed: string,
   index: number,
 ): SessionAmbientBotVocalizationCue {
-  const cue = AMBIENT_BOT_VOCALIZATIONS[
-    stableHash(`${seed}:bot-vocalization:cue:${index}`) %
-      AMBIENT_BOT_VOCALIZATIONS.length
-  ]!;
+  const cue =
+    AMBIENT_BOT_VOCALIZATIONS[
+      stableHash(`${seed}:bot-vocalization:cue:${index}`) %
+        AMBIENT_BOT_VOCALIZATIONS.length
+    ]!;
   return {
     ...cue,
     index,
@@ -239,7 +237,11 @@ export interface SessionAtmosphereController {
     options?: SessionAtmosphereFoleyPlaybackOptions,
   ): boolean;
   stopFoley(tag: string, fadeMs?: number): void;
-  setMix(args: { volume: number; mix?: SessionAtmosphereMix }): void;
+  setMix(args: {
+    volume: number;
+    mix?: SessionAtmosphereMix;
+    transitionMs?: number;
+  }): void;
   stop(): void;
 }
 
@@ -292,7 +294,7 @@ function levelSessionAtmosphereNode(
   normalizeLoop: boolean,
   bus: SessionAtmosphereBus,
   backgroundTone: SessionAtmosphereBackgroundTone,
-  foleyRoomAcoustics?: RoomAcousticsSend,
+  roomAcoustics?: RoomAcousticsSend,
   oneShotOptions?: Pick<
     SessionAtmosphereFoleyPlaybackOptions,
     "lowCutHz" | "highCutHz" | "stereoPan"
@@ -328,7 +330,7 @@ function levelSessionAtmosphereNode(
       context,
       input: busGain,
       destination: prismAudioOutputNode(context),
-      send: bus === "foley" ? foleyRoomAcoustics : null,
+      send: bus === "foley" ? roomAcoustics : null,
       stereoPan: oneShotOptions?.stereoPan,
     });
     return {
@@ -366,7 +368,12 @@ function levelSessionAtmosphereNode(
     compressor.connect(lowShelf);
     lowShelf.connect(highShelf);
     highShelf.connect(busGain);
-    busGain.connect(prismAudioOutputNode(context));
+    const roomConnection = connectRoomAcoustics({
+      context,
+      input: busGain,
+      destination: prismAudioOutputNode(context),
+      send: bus === "background" ? roomAcoustics : null,
+    });
     return {
       busGain,
       disconnect() {
@@ -375,19 +382,24 @@ function levelSessionAtmosphereNode(
         compressor.disconnect();
         lowShelf.disconnect();
         highShelf.disconnect();
-        busGain.disconnect();
+        roomConnection.disconnect();
       },
     };
   }
   compressor.connect(busGain);
-  busGain.connect(prismAudioOutputNode(context));
+  const roomConnection = connectRoomAcoustics({
+    context,
+    input: busGain,
+    destination: prismAudioOutputNode(context),
+    send: bus === "background" ? roomAcoustics : null,
+  });
   return {
     busGain,
     disconnect() {
       source.disconnect();
       preGain.disconnect();
       compressor.disconnect();
-      busGain.disconnect();
+      roomConnection.disconnect();
     },
   };
 }
@@ -397,7 +409,7 @@ function levelSessionAtmosphereSource(
   normalizeLoop: boolean,
   bus: SessionAtmosphereBus,
   backgroundTone: SessionAtmosphereBackgroundTone,
-  foleyRoomAcoustics?: RoomAcousticsSend,
+  roomAcoustics?: RoomAcousticsSend,
   oneShotOptions?: Pick<
     SessionAtmosphereFoleyPlaybackOptions,
     "lowCutHz" | "highCutHz" | "stereoPan"
@@ -412,7 +424,7 @@ function levelSessionAtmosphereSource(
       normalizeLoop,
       bus,
       backgroundTone,
-      foleyRoomAcoustics,
+      roomAcoustics,
       oneShotOptions,
     );
   } catch {
@@ -570,16 +582,16 @@ export function startSessionAtmosphere(args: {
   mix?: SessionAtmosphereMix;
   backgroundTone?: SessionAtmosphereBackgroundTone;
   foleyRoomAcoustics?: RoomAcousticsSend;
+  backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
   shouldDeferFoley?: () => boolean;
   shouldDeferBotVocalization?: () => boolean;
   ambientFoley?: boolean;
   ambientFoleyProfile?: SessionAmbientFoleyProfile;
+  ambientFoleyUrls?: readonly string[];
   ambientBotVocalizations?: boolean;
   ambientBotVocalizationProfile?: SessionAmbientFoleyProfile;
-  onAmbientBotVocalization?: (
-    cue: SessionAmbientBotVocalizationCue,
-  ) => boolean;
+  onAmbientBotVocalization?: (cue: SessionAmbientBotVocalizationCue) => boolean;
   onPlaybackError?: (error: unknown) => void;
 }): SessionAtmosphereController {
   let volume = clampAudioLevel(args.volume);
@@ -618,6 +630,7 @@ export function startSessionAtmosphere(args: {
       trim: number;
       leveler: SessionAtmosphereSourceLeveler | null;
     },
+    transitionMs = 0,
   ): void => {
     const target = sessionAtmosphereBusGain({
       volume,
@@ -627,7 +640,19 @@ export function startSessionAtmosphere(args: {
     });
     if (source.leveler) {
       audio.volume = 1;
-      source.leveler.busGain.gain.value = target;
+      const gain = source.leveler.busGain.gain;
+      const context = source.leveler.busGain.context;
+      const transitionSeconds = Math.max(0, transitionMs) / 1_000;
+      if (transitionSeconds > 0) {
+        gain.cancelScheduledValues(context.currentTime);
+        gain.setValueAtTime(gain.value, context.currentTime);
+        gain.linearRampToValueAtTime(
+          target,
+          context.currentTime + transitionSeconds,
+        );
+      } else {
+        gain.value = target;
+      }
     } else {
       audio.volume = clampAudioLevel(target);
     }
@@ -677,7 +702,9 @@ export function startSessionAtmosphere(args: {
         loop,
         bus,
         args.backgroundTone ?? "neutral",
-        args.foleyRoomAcoustics,
+        loop && bus === "background"
+          ? args.backgroundRoomAcoustics
+          : args.foleyRoomAcoustics,
         options,
       ),
     } satisfies SessionAtmosphereActiveSource;
@@ -722,7 +749,9 @@ export function startSessionAtmosphere(args: {
           signal: loadController.signal,
         });
         if (!response.ok) {
-          throw new Error(`Unable to load atmosphere loop (${response.status})`);
+          throw new Error(
+            `Unable to load atmosphere loop (${response.status})`,
+          );
         }
         const decoded = await context.decodeAudioData(
           await response.arrayBuffer(),
@@ -746,6 +775,7 @@ export function startSessionAtmosphere(args: {
             true,
             bus,
             args.backgroundTone ?? "neutral",
+            args.backgroundRoomAcoustics,
           ),
         };
         const target = sessionAtmosphereBusGain({ volume, mix, bus, trim });
@@ -781,7 +811,11 @@ export function startSessionAtmosphere(args: {
           return;
         }
         play(
-          sessionAmbientFoleyUrl(args.seed, index),
+          sessionAmbientFoleyUrlFrom(
+            args.seed,
+            index,
+            args.ambientFoleyUrls ?? GENERAL_FOLEY_URLS,
+          ),
           "foley",
           { trim: Math.max(0, ambientFoleyProfile.trim) },
         );
@@ -800,9 +834,7 @@ export function startSessionAtmosphere(args: {
       () => {
         botVocalizationTimer = null;
         if (stopped) return;
-        if (
-          (args.shouldDeferBotVocalization ?? args.shouldDeferFoley)?.()
-        ) {
+        if ((args.shouldDeferBotVocalization ?? args.shouldDeferFoley)?.()) {
           botVocalizationTimer = window.setTimeout(
             scheduleBotVocalization,
             4_000,
@@ -817,11 +849,9 @@ export function startSessionAtmosphere(args: {
           accepted = false;
         }
         if (accepted) {
-          play(
-            cue.url,
-            "foley",
-            { trim: Math.max(0, ambientBotVocalizationProfile.trim) },
-          );
+          play(cue.url, "foley", {
+            trim: Math.max(0, ambientBotVocalizationProfile.trim),
+          });
         }
         botVocalizationIndex += 1;
         scheduleBotVocalization();
@@ -837,11 +867,9 @@ export function startSessionAtmosphere(args: {
 
   return {
     playCue(cue) {
-      play(
-        SESSION_FOLEY_URLS[cue],
-        "foley",
-        { trim: cue === "coffeeSip" ? 1.25 : 1.0625 },
-      );
+      play(SESSION_FOLEY_URLS[cue], "foley", {
+        trim: cue === "coffeeSip" ? 1.25 : 1.0625,
+      });
     },
     preloadFoley(urls) {
       for (const url of new Set(urls)) primeFoley(url);
@@ -879,18 +907,28 @@ export function startSessionAtmosphere(args: {
       volume = clampAudioLevel(next.volume);
       mix = normalizeSessionAtmosphereMix(next.mix);
       for (const [audio, source] of activeAudio) {
-        applySourceVolume(audio, source);
+        applySourceVolume(audio, source, next.transitionMs);
       }
       for (const source of activeLoops) {
-        source.leveler?.busGain.gain.setValueAtTime(
-          sessionAtmosphereBusGain({
-            volume,
-            mix,
-            bus: source.bus,
-            trim: source.trim,
-          }),
-          source.source.context.currentTime,
-        );
+        const gain = source.leveler.busGain.gain;
+        const context = source.source.context;
+        const target = sessionAtmosphereBusGain({
+          volume,
+          mix,
+          bus: source.bus,
+          trim: source.trim,
+        });
+        const transitionSeconds = Math.max(0, next.transitionMs ?? 0) / 1_000;
+        gain.cancelScheduledValues(context.currentTime);
+        gain.setValueAtTime(gain.value, context.currentTime);
+        if (transitionSeconds > 0) {
+          gain.linearRampToValueAtTime(
+            target,
+            context.currentTime + transitionSeconds,
+          );
+        } else {
+          gain.value = target;
+        }
       }
     },
     stop() {

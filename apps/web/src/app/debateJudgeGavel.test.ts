@@ -2,11 +2,53 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  DEBATE_JUDGE_GAVEL_CUE_WINDOW_MS,
+  DEBATE_JUDGE_GAVEL_MISSED_BEAT_MS,
   DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS,
+  debateJudgeGavelCooldownBlocks,
   debateJudgeGavelSpaceAction,
+  debateJudgeGavelVoiceMood,
 } from "./debateJudgeGavel.ts";
 
 describe("player Judge gavel keyboard control", () => {
+  it("keeps overtime procedural through cooldown and scales its voice mood", () => {
+    assert.equal(
+      debateJudgeGavelCooldownBlocks({
+        overtime: false,
+        cooldownRemainingMs: 4_000,
+      }),
+      true,
+    );
+    assert.equal(
+      debateJudgeGavelCooldownBlocks({
+        overtime: true,
+        cooldownRemainingMs: 4_000,
+      }),
+      false,
+    );
+    assert.equal(
+      debateJudgeGavelVoiceMood({
+        gavelReason: "overtime",
+        gavelDemeanor: "measured",
+      }),
+      "neutral",
+    );
+    assert.equal(
+      debateJudgeGavelVoiceMood({
+        gavelReason: "overtime",
+        gavelDemeanor: "firm",
+      }),
+      "guarded",
+    );
+    assert.equal(
+      debateJudgeGavelVoiceMood({
+        gavelReason: "overtime",
+        gavelDemeanor: "aggravated",
+      }),
+      "strained",
+    );
+  });
+
   it("starts one deliberation, then treats every Space inside two seconds as showmanship", () => {
     const startedAt = 10_000;
     const smashUntilMs = startedAt + DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS;
@@ -15,6 +57,7 @@ describe("player Judge gavel keyboard control", () => {
         code: "Space",
         hasModifier: false,
         editableTarget: false,
+        ceremonialAvailable: false,
         liveJudge: true,
         semanticAvailable: true,
         nowMs: startedAt,
@@ -28,6 +71,7 @@ describe("player Judge gavel keyboard control", () => {
           code: "Space",
           hasModifier: false,
           editableTarget: false,
+          ceremonialAvailable: false,
           liveJudge: true,
           semanticAvailable: false,
           nowMs,
@@ -41,6 +85,7 @@ describe("player Judge gavel keyboard control", () => {
         code: "Space",
         hasModifier: false,
         editableTarget: false,
+        ceremonialAvailable: false,
         liveJudge: true,
         semanticAvailable: false,
         nowMs: smashUntilMs,
@@ -50,11 +95,30 @@ describe("player Judge gavel keyboard control", () => {
     );
   });
 
+  it("reserves Space for a presentation-only cue before any procedural action", () => {
+    assert.equal(DEBATE_JUDGE_GAVEL_CUE_WINDOW_MS, 2_800);
+    assert.equal(DEBATE_JUDGE_GAVEL_MISSED_BEAT_MS, 900);
+    assert.equal(
+      debateJudgeGavelSpaceAction({
+        code: "Space",
+        hasModifier: false,
+        editableTarget: false,
+        ceremonialAvailable: true,
+        liveJudge: false,
+        semanticAvailable: false,
+        nowMs: 10_000,
+        smashUntilMs: 0,
+      }),
+      "cue",
+    );
+  });
+
   it("leaves typing, controls, modifiers, non-Judges, and other keys alone", () => {
     const base = {
       code: "Space",
       hasModifier: false,
       editableTarget: false,
+      ceremonialAvailable: false,
       liveJudge: true,
       semanticAvailable: true,
       nowMs: 1,

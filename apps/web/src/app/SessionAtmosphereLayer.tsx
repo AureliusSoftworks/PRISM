@@ -22,16 +22,17 @@ export interface SessionAtmosphereLayerProps {
   mix?: SessionAtmosphereMix;
   backgroundTone?: SessionAtmosphereBackgroundTone;
   foleyRoomAcoustics?: RoomAcousticsSend;
+  backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
+  mixTransitionMs?: number;
   ambientFoley?: boolean;
   deferFoley?: boolean;
   deferBotVocalization?: boolean;
   ambientFoleyProfile?: SessionAmbientFoleyProfile;
+  ambientFoleyUrls?: readonly string[];
   ambientBotVocalizations?: boolean;
   ambientBotVocalizationProfile?: SessionAmbientFoleyProfile;
-  onAmbientBotVocalization?: (
-    cue: SessionAmbientBotVocalizationCue,
-  ) => boolean;
+  onAmbientBotVocalization?: (cue: SessionAmbientBotVocalizationCue) => boolean;
   onCoffeeCupFoley?: (
     cue: "coffeeSip" | "coffeeCupPlace",
     cup: HTMLElement,
@@ -50,11 +51,14 @@ export function SessionAtmosphereLayer({
   mix,
   backgroundTone = "neutral",
   foleyRoomAcoustics,
+  backgroundRoomAcoustics,
   allowMixBoost = false,
+  mixTransitionMs = 0,
   ambientFoley = true,
   deferFoley = false,
   deferBotVocalization = deferFoley,
   ambientFoleyProfile,
+  ambientFoleyUrls,
   ambientBotVocalizations = false,
   ambientBotVocalizationProfile,
   onAmbientBotVocalization,
@@ -84,8 +88,12 @@ export function SessionAtmosphereLayer({
   useEffect(() => {
     volumeRef.current = volume;
     mixRef.current = mix;
-    controllerRef.current?.setMix({ volume, mix });
-  }, [mix, volume]);
+    controllerRef.current?.setMix({
+      volume,
+      mix,
+      transitionMs: mixTransitionMs,
+    });
+  }, [mix, mixTransitionMs, volume]);
 
   useEffect(() => {
     if (!active) return;
@@ -97,11 +105,12 @@ export function SessionAtmosphereLayer({
       mix: mixRef.current,
       backgroundTone,
       foleyRoomAcoustics,
+      backgroundRoomAcoustics,
       allowMixBoost,
       ambientFoley,
+      ambientFoleyUrls,
       shouldDeferFoley: () => deferFoleyRef.current,
-      shouldDeferBotVocalization: () =>
-        deferBotVocalizationRef.current,
+      shouldDeferBotVocalization: () => deferBotVocalizationRef.current,
       ambientFoleyProfile,
       ambientBotVocalizations,
       ambientBotVocalizationProfile,
@@ -112,10 +121,8 @@ export function SessionAtmosphereLayer({
     controllerRef.current = controller;
     if (controllerHandleRef) controllerHandleRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
-      ? attachCoffeeCupFoley(
-          coffeeCupRootRef.current,
-          controller,
-          (cue, cup) => coffeeCupFoleyRef.current?.(cue, cup),
+      ? attachCoffeeCupFoley(coffeeCupRootRef.current, controller, (cue, cup) =>
+          coffeeCupFoleyRef.current?.(cue, cup),
         )
       : null;
     return () => {
@@ -131,9 +138,11 @@ export function SessionAtmosphereLayer({
     allowMixBoost,
     ambientFoley,
     ambientFoleyProfile,
+    ambientFoleyUrls,
     ambientBotVocalizations,
     ambientBotVocalizationProfile,
     backgroundTone,
+    backgroundRoomAcoustics,
     backgroundUrl,
     coffeeCupRootRef,
     controllerHandleRef,
