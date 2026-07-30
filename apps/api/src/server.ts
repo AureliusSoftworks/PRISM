@@ -312,6 +312,9 @@ import type {
   ReplayRecordingStatusV1,
   ReplaySurfaceV1,
   ReplayVoiceTakeV1,
+  SlateClarificationAnswerRequest,
+  SlateDirectionIntentPatch,
+  SlateLockedRange,
 } from "@localai/shared";
 import {
   SIGNAL_STUDIO_LIGHTING_RECEIVER_EDIT_PROMPT,
@@ -369,6 +372,7 @@ import {
   acceptSlateRevision,
   deleteSlateProject,
   draftSlateStructureItem,
+  generateSlateStructureItemProposal,
   generateSlateShape,
   getSlateProject,
   listSlateProjects,
@@ -435,17 +439,22 @@ import {
 } from "./living-shell-progress.ts";
 import { resolveSlateDeliberationModelOverride } from "./slate-deliberation-routing.ts";
 import {
+  applyAcceptedSlateRevisionWithinTransaction,
   SlateSectionAiWriteConflictError,
   SlateSectionRevisionConflictError,
+  ensureSlateProjectSections,
   getSlateContinuityStatus,
   getSlateManuscriptPage,
   getSlateProjectSection,
   getSlateSeries,
   listSlateProjectSections,
   listSlateSeries,
+  replaceSlateSectionWithAiProse,
   saveSlateProjectSection,
+  slateSectionProjectionSpans,
 } from "./slate-continuity.ts";
 import {
+  compileSlateDraftContinuityContext,
   processSlateContinuityAuxiliaryModelJob,
   processSlateContinuityJobDeterministically,
 } from "./slate-continuity-processing.ts";
@@ -491,6 +500,74 @@ import {
   slateRevisionRequestForContinuityConcern,
   SlateContinuityReconciliationError,
 } from "./slate-continuity-reconciliation.ts";
+import {
+  createSlateSectionAnnotation,
+  listSlateSectionAnnotations,
+  updateSlateSectionAnnotation,
+} from "./slate-section-documents.ts";
+import {
+  createSlateReviewExport,
+  recordSlateDeveloperEvent,
+  slateReviewExportMarkdown,
+} from "./slate-developer-events.ts";
+import { projectActiveSlateStoryBible } from "./slate-story-bible-projection.ts";
+import {
+  auditSlateProposalContinuity,
+  selectSlateProposalContinuityEvidence,
+  type SlateContinuityEvidenceExcerpt,
+  type SlateContinuityEvidenceSection,
+  type SlateProposalContinuityAudit,
+} from "./slate-proposal-continuity.ts";
+import {
+  createSlateSourceShelfItem,
+  deleteSlateSourceShelfItem,
+  getSlateReviewCircleSession,
+  listSlateReviewCircleSessions,
+  listSlateSourceShelfItems,
+  listSlateVisualReferences,
+  promoteSlateSourceShelfItem,
+  recordSlateVisualStudy,
+  resolveSlateVisualReference,
+  runSlateReviewCircle,
+  updateSlateSourceShelfItem,
+} from "./slate-creative-studios.ts";
+import {
+  setSlateCharacterProfileFieldLock,
+  updateSlateCharacterIntendedArc,
+  updateSlateCharacterProfileField,
+  type SlateCharacterProfileFieldName,
+  type SlateWriterIntendedArcBeatInput,
+} from "./slate-character-studio.ts";
+import {
+  SlateMirrorError,
+  bindSlateMirrorToProject,
+  createSlateMirrorProfile,
+  getSlateMirrorProfile,
+  getSlateMirrorProjectBinding,
+  listSlateMirrorProfileVersions,
+  listSlateMirrorProfiles,
+  normalizeSlateMirrorVoiceCard,
+  publishSlateMirrorProfileVersion,
+  setSlateMirrorProfileFrozen,
+  slateMirrorEligibleSamplesForSynthesis,
+  type SlateMirrorSampleInput,
+} from "./slate-mirror.ts";
+import {
+  SlateWritingOperationError,
+  answerSlateClarification,
+  applySlateWritingOperationProposal,
+  continueSlateWritingOperation,
+  createSlateWritingOperation,
+  failSlateWritingOperation,
+  getSlateWritingOperation,
+  interruptUnfinishedSlateWritingOperations,
+  pauseSlateWritingOperationForContinuityConflict,
+  redirectSlateWritingOperation,
+  resolveSlateWritingOperationProposal,
+  setSlateWritingOperationProposal,
+  stopSlateWritingOperation,
+  type SlateWritingOperationView,
+} from "./slate-writing-operations.ts";
 import {
   composeBotSystemPrompt,
   deleteAllBots,
@@ -715,6 +792,8 @@ import {
   normalizeResponseMode,
   normalizePrismStartupPreference,
   resolveImageProviderName,
+  slateSha256,
+  transformSlateLockedRangesForTextEdit,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredToolPayload,
@@ -3097,6 +3176,1614 @@ function slateAiForUser(
   };
 }
 
+const slateWritingAbortControllers = new Map<string, AbortController>();
+const slateWritingLifecycleRuns = new Map<
+  string,
+  Promise<SlateWritingOperationView>
+>();
+
+function slateWritingAbortKey(
+  userId: string,
+  projectId: string,
+  operationId: string,
+): string {
+  return `${userId}:${projectId}:${operationId}`;
+}
+
+function cleanSlateCockpitProse(value: string): string {
+  let prose = value.trim();
+  const fenced = prose.match(/^```(?:text|markdown|md)?\s*\n([\s\S]*?)\n```$/iu);
+  if (fenced) prose = fenced[1]!.trim();
+  if (!prose) throw new Error("Slate returned no proposal prose.");
+  return prose;
+}
+
+function parseSlateDirectionPatch(value: string): SlateDirectionIntentPatch {
+  const match = value.match(/\{[\s\S]*\}/u);
+  if (!match) return {};
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    const patch: SlateDirectionIntentPatch = {};
+    if (typeof parsed.direction === "string" && parsed.direction.trim()) {
+      patch.direction = parsed.direction.trim().slice(0, 8_000);
+    }
+    if (
+      parsed.scope === "beat" ||
+      parsed.scope === "passage" ||
+      parsed.scope === "scene"
+    ) {
+      patch.scope = parsed.scope;
+    }
+    if (typeof parsed.pacing === "string") {
+      patch.pacing = parsed.pacing.trim().slice(0, 240) || null;
+    }
+    if (typeof parsed.sceneObjective === "string") {
+      patch.sceneObjective =
+        parsed.sceneObjective.trim().slice(0, 1_000) || null;
+    }
+    for (const key of ["constraints", "mustInclude", "mustAvoid"] as const) {
+      if (Array.isArray(parsed[key])) {
+        patch[key] = parsed[key]
+          .filter((item): item is string => typeof item === "string")
+          .map((item) => item.trim().slice(0, 1_000))
+          .filter(Boolean)
+          .slice(0, 24);
+      }
+    }
+    return patch;
+  } catch {
+    return {};
+  }
+}
+
+async function compileSlateCustomVibe(
+  userId: string,
+  projectId: string,
+  operation: SlateWritingOperationView["operation"],
+  vibe: string,
+): Promise<SlateDirectionIntentPatch> {
+  const ai = slateAiForUser(userId, projectId);
+  const raw = await runWithUsageSession(
+    {
+      db,
+      userId,
+      privacyScope: "normal",
+      mode: "slate",
+      surface: "slate",
+    },
+    () =>
+      ai.provider.generateResponse(
+        [
+          {
+            role: "system",
+            content:
+              "Translate a fiction writer's vibe into a small structured direction patch. Return one JSON object only. Never write manuscript prose.",
+          },
+          {
+            role: "user",
+            content: [
+              `Current operation: ${operation.intent.operation}`,
+              `Current direction: ${operation.intent.direction}`,
+              `Current scope: ${operation.intent.scope}`,
+              `Writer's vibe: ${vibe}`,
+              'Return JSON with optional keys: "direction", "scope" ("beat" | "passage" | "scene"), "pacing", "sceneObjective", "constraints", "mustInclude", "mustAvoid".',
+            ].join("\n"),
+          },
+        ],
+        {
+          model: ai.model,
+          temperature: 0.25,
+          maxTokens: 500,
+          usagePurpose: "slate_deliberation",
+        },
+      ),
+  );
+  const patch = parseSlateDirectionPatch(raw);
+  return Object.keys(patch).length > 0
+    ? patch
+    : {
+        direction: `Shape the continuation around this requested vibe: ${vibe}`,
+        scope: operation.intent.scope,
+  };
+}
+
+interface SlateComposerMirrorBrief {
+  profileVersionId: string;
+  projectOverlayId: string | null;
+  povOverlayId: string | null;
+  sourceFingerprint: string;
+  renderedBrief: string;
+}
+
+function slateComposerMirrorBrief(
+  userId: string,
+  projectId: string,
+  requestedPov: string | null,
+): SlateComposerMirrorBrief | null {
+  const row = db
+    .prepare(
+      `SELECT bindings.profile_version_id, bindings.project_overlay_json,
+              bindings.pov_overlays_json, versions.voice_card_json
+         FROM slate_project_mirror_bindings bindings
+         JOIN slate_mirror_profile_versions versions
+           ON versions.id = bindings.profile_version_id
+          AND versions.user_id = bindings.user_id
+        WHERE bindings.project_id = ? AND bindings.user_id = ?`,
+    )
+    .get(projectId, userId) as
+    | {
+        profile_version_id: string;
+        project_overlay_json: string;
+        pov_overlays_json: string;
+        voice_card_json: string;
+      }
+    | undefined;
+  if (!row) return null;
+  const parseObject = (value: string): Record<string, unknown> => {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  };
+  const voice = parseObject(row.voice_card_json);
+  const projectOverlay = parseObject(row.project_overlay_json);
+  const rawPov = (() => {
+    try {
+      return JSON.parse(row.pov_overlays_json) as unknown;
+    } catch {
+      return {};
+    }
+  })();
+  const povCandidates = Array.isArray(rawPov)
+    ? rawPov
+    : rawPov && typeof rawPov === "object"
+      ? Object.values(rawPov)
+      : [];
+  const povOverlay = povCandidates.find(
+    (candidate) =>
+      candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate) &&
+      requestedPov &&
+      (String((candidate as Record<string, unknown>).label ?? "") ===
+        requestedPov ||
+        String(
+          (candidate as Record<string, unknown>).povCharacterId ?? "",
+        ) === requestedPov),
+  ) as Record<string, unknown> | undefined;
+  const list = (key: string): string => {
+    const value = voice[key];
+    return Array.isArray(value)
+      ? value
+          .filter((item): item is string => typeof item === "string")
+          .slice(0, 12)
+          .join(", ")
+      : "";
+  };
+  const lines = [
+    typeof voice.narrativeDistance === "string"
+      ? `Narrative distance: ${voice.narrativeDistance}`
+      : "",
+    list("diction") ? `Diction: ${list("diction")}` : "",
+    list("rhythm") ? `Rhythm: ${list("rhythm")}` : "",
+    list("imagery") ? `Imagery: ${list("imagery")}` : "",
+    list("dialogueHabits")
+      ? `Dialogue habits: ${list("dialogueHabits")}`
+      : "",
+    list("density") ? `Density: ${list("density")}` : "",
+    list("preferences") ? `Preferences: ${list("preferences")}` : "",
+    list("avoidances") ? `Avoid: ${list("avoidances")}` : "",
+    typeof projectOverlay.direction === "string" &&
+    projectOverlay.direction.trim()
+      ? `Project overlay: ${projectOverlay.direction.trim()}`
+      : "",
+    typeof povOverlay?.direction === "string" &&
+    povOverlay.direction.trim()
+      ? `POV overlay: ${povOverlay.direction.trim()}`
+      : "",
+  ].filter(Boolean);
+  return {
+    profileVersionId: row.profile_version_id,
+    projectOverlayId:
+      typeof projectOverlay.id === "string" ? projectOverlay.id : null,
+    povOverlayId:
+      typeof povOverlay?.id === "string" ? povOverlay.id : null,
+    sourceFingerprint: slateSha256(
+      [
+        row.profile_version_id,
+        row.voice_card_json,
+        row.project_overlay_json,
+        row.pov_overlays_json,
+        requestedPov ?? "",
+      ].join("\0"),
+    ),
+    renderedBrief: lines.join("\n"),
+  };
+}
+
+function slateAcceptedContinuitySections(
+  userId: string,
+  projectId: string,
+): SlateContinuityEvidenceSection[] {
+  return db
+    .prepare(
+      `SELECT id, title, ordinal, revision, prose
+         FROM slate_sections
+        WHERE user_id = ? AND project_id = ? AND TRIM(prose) <> ''
+        ORDER BY ordinal ASC, id ASC`,
+    )
+    .all(userId, projectId) as unknown as SlateContinuityEvidenceSection[];
+}
+
+function slateRelevantContinuityEvidence(args: {
+  userId: string;
+  projectId: string;
+  sectionId: string;
+  candidateText: string;
+  direction?: string;
+  focusedReplacementRange?: { start: number; end: number } | null;
+}): SlateContinuityEvidenceExcerpt[] {
+  const evidence = selectSlateProposalContinuityEvidence({
+    sections: slateAcceptedContinuitySections(args.userId, args.projectId),
+    focusedSectionId: args.sectionId,
+    focusedReplacementRange: args.focusedReplacementRange,
+    candidateText: args.candidateText,
+    direction: args.direction,
+  });
+  return evidence.some((item) => item.score >= 2) ? evidence : [];
+}
+
+function slateContinuityEvidenceSourceIds(
+  userId: string,
+  projectId: string,
+  evidence: SlateContinuityEvidenceExcerpt[],
+): string[] {
+  const sourceIds = new Set<string>();
+  const findSource = db.prepare(
+    `SELECT id
+       FROM slate_continuity_sources
+      WHERE user_id = ? AND project_id = ? AND section_id = ?
+        AND source_revision <= ?
+      ORDER BY source_revision DESC, created_at DESC
+      LIMIT 1`,
+  );
+  for (const item of evidence) {
+    const source = findSource.get(
+      userId,
+      projectId,
+      item.sectionId,
+      item.sectionRevision,
+    ) as { id: string } | undefined;
+    if (source?.id) sourceIds.add(source.id);
+  }
+  return [...sourceIds];
+}
+
+async function preflightSlateWritingDirection(
+  userId: string,
+  projectId: string,
+  view: SlateWritingOperationView,
+  signal?: AbortSignal,
+): Promise<SlateWritingOperationView> {
+  const operation = view.operation;
+  if (operation.status !== "generating") return view;
+  const candidateText = [
+    operation.intent.direction,
+    operation.intent.sceneObjective,
+    ...operation.intent.constraints,
+    ...operation.intent.mustInclude,
+    ...operation.intent.mustAvoid.map((item) => `Avoid: ${item}`),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const evidence = slateRelevantContinuityEvidence({
+    userId,
+    projectId,
+    sectionId: operation.sectionId,
+    candidateText,
+    focusedReplacementRange: operation.intent.target.selection,
+  });
+  if (evidence.length === 0) return view;
+  const ai = slateAiForUser(userId, projectId);
+  let audit: SlateProposalContinuityAudit;
+  try {
+    audit = await runWithUsageSession(
+      {
+        db,
+        userId,
+        privacyScope: "normal",
+        mode: "slate",
+        surface: "slate",
+      },
+      () =>
+        auditSlateProposalContinuity({
+          provider: ai.provider,
+          model: ai.model,
+          candidateKind: "writer_direction",
+          candidateText,
+          evidence,
+          signal,
+        }),
+    );
+  } catch (error) {
+    if (signal?.aborted) {
+      return getSlateWritingOperation(
+        db,
+        userId,
+        projectId,
+        operation.id,
+      );
+    }
+    recordSlateDeveloperEvent(db, {
+      userId,
+      projectId,
+      sectionId: operation.sectionId,
+      sectionRevision: operation.revisionFingerprint.sectionRevision,
+      stage: "preflight",
+      kind: "semantic_preflight_unavailable",
+      summary:
+        "Continuity could not complete the bounded semantic direction check; indexed safeguards remain active.",
+      detail: {
+        outcome: "unavailable",
+        failureCode: "semantic_preflight_unavailable",
+      },
+      sourceIds: slateContinuityEvidenceSourceIds(
+        userId,
+        projectId,
+        evidence,
+      ),
+      operationId: operation.id,
+      provider: ai.providerName,
+      model: ai.model,
+      continuityGeneration:
+        operation.revisionFingerprint.continuityGeneration,
+    });
+    return view;
+  }
+  const sourceIds = slateContinuityEvidenceSourceIds(
+    userId,
+    projectId,
+    evidence,
+  );
+  if (audit.status === "clear") {
+    recordSlateDeveloperEvent(db, {
+      userId,
+      projectId,
+      sectionId: operation.sectionId,
+      sectionRevision: operation.revisionFingerprint.sectionRevision,
+      stage: "preflight",
+      kind: "semantic_direction_preflight_clear",
+      summary:
+        "Grounded semantic preflight found no material conflict in the writer's direction.",
+      detail: {
+        outcome: "clear",
+        evidenceCount: evidence.length,
+      },
+      sourceIds,
+      operationId: operation.id,
+      provider: ai.providerName,
+      model: ai.model,
+      continuityGeneration:
+        operation.revisionFingerprint.continuityGeneration,
+    });
+    return view;
+  }
+  const conflict = audit.conflicts[0]!;
+  const anchors = audit.conflicts.map((item) => {
+    const quoteOffset = item.evidence.quote.indexOf(item.acceptedQuote);
+    const start =
+      item.evidence.start + Math.max(0, quoteOffset);
+    const source = db
+      .prepare(
+        `SELECT id, source_revision FROM slate_continuity_sources
+          WHERE user_id = ? AND project_id = ? AND section_id = ?
+            AND source_revision <= ?
+          ORDER BY source_revision DESC, created_at DESC LIMIT 1`,
+      )
+      .get(
+        userId,
+        projectId,
+        item.evidence.sectionId,
+        item.evidence.sectionRevision,
+      ) as { id: string; source_revision: number } | undefined;
+    return {
+      sourceId: source?.id ?? null,
+      sectionId: item.evidence.sectionId,
+      sectionRevision:
+        source?.source_revision ?? item.evidence.sectionRevision,
+      start,
+      end: start + item.acceptedQuote.length,
+      quoteHash: slateSha256(item.acceptedQuote),
+      acceptedQuote: item.acceptedQuote,
+      directionQuote: item.proposalQuote,
+      confidence: item.confidence,
+    };
+  });
+  return pauseSlateWritingOperationForContinuityConflict(
+    db,
+    userId,
+    projectId,
+    operation.id,
+    {
+      id: `semantic-direction-${slateSha256(
+        `${operation.id}\0${conflict.acceptedQuote}\0${conflict.proposalQuote}`,
+      ).slice(0, 32)}`,
+      summary: conflict.summary,
+      explanation: conflict.explanation,
+      anchors,
+    },
+  );
+}
+
+async function auditAndRepairSlateComposerProposal(args: {
+  userId: string;
+  projectId: string;
+  operation: SlateWritingOperationView["operation"];
+  prose: string;
+  ai: ReturnType<typeof slateAiForUser>;
+  mirrorBrief: string | null;
+  signal: AbortSignal;
+}): Promise<string> {
+  const evidence = slateRelevantContinuityEvidence({
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+    candidateText: args.prose,
+    direction: args.operation.intent.direction,
+    focusedReplacementRange: args.operation.intent.target.selection,
+  });
+  if (evidence.length === 0) return args.prose;
+  const audit = await runWithUsageSession(
+    {
+      db,
+      userId: args.userId,
+      privacyScope: "normal",
+      mode: "slate",
+      surface: "slate",
+    },
+    () =>
+      auditSlateProposalContinuity({
+        provider: args.ai.provider,
+        model: args.ai.model,
+        candidateKind: "composer_proposal",
+        candidateText: args.prose,
+        evidence,
+        signal: args.signal,
+      }),
+  );
+  const sourceIds = slateContinuityEvidenceSourceIds(
+    args.userId,
+    args.projectId,
+    evidence,
+  );
+  recordSlateDeveloperEvent(db, {
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+    sectionRevision: args.operation.revisionFingerprint.sectionRevision,
+    stage: "proposal",
+    kind:
+      audit.status === "clear"
+        ? "proposal_continuity_validated"
+        : "proposal_continuity_conflict_detected",
+    summary:
+      audit.status === "clear"
+        ? "Continuity validated the candidate against relevant accepted prose."
+        : "Continuity withheld a candidate that contradicted accepted prose.",
+    detail: {
+      outcome: audit.status,
+      evidenceCount: evidence.length,
+      conflicts: audit.conflicts.map((conflict) => ({
+        summary: conflict.summary,
+        acceptedQuote: conflict.acceptedQuote,
+        proposalQuote: conflict.proposalQuote,
+        confidence: conflict.confidence,
+        sectionId: conflict.evidence.sectionId,
+        sectionRevision: conflict.evidence.sectionRevision,
+      })),
+    },
+    sourceIds,
+    operationId: args.operation.id,
+    provider: args.ai.providerName,
+    model: args.ai.model,
+    continuityGeneration:
+      args.operation.revisionFingerprint.continuityGeneration,
+  });
+  if (audit.status === "clear") return args.prose;
+
+  const repairedRaw = await runWithUsageSession(
+    {
+      db,
+      userId: args.userId,
+      privacyScope: "normal",
+      mode: "slate",
+      surface: "slate",
+    },
+    () =>
+      args.ai.provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: [
+              "You are Slate repairing a fiction proposal before the writer sees it.",
+              "Preserve the scene objective, voice, pacing, and all coherent prose.",
+              "Repair every grounded continuity conflict through an explicit causal bridge or a compatible mechanism.",
+              "Do not mention the audit. Return complete manuscript prose only.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: [
+              `Writer direction: ${args.operation.intent.direction}`,
+              args.mirrorBrief
+                ? `Pinned Mirror brief:\n${args.mirrorBrief}`
+                : "",
+              `Grounded conflicts:\n${JSON.stringify(
+                audit.conflicts.map((conflict) => ({
+                  summary: conflict.summary,
+                  explanation: conflict.explanation,
+                  acceptedQuote: conflict.acceptedQuote,
+                  proposalQuote: conflict.proposalQuote,
+                })),
+              )}`,
+              `Accepted evidence:\n${evidence
+                .map(
+                  (item) =>
+                    `[${item.sectionTitle} @ revision ${item.sectionRevision}] ${item.quote}`,
+                )
+                .join("\n\n")}`,
+              `Candidate to repair:\n${args.prose}`,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+        ],
+        {
+          model: args.ai.model,
+          temperature: 0.45,
+          maxTokens: Math.max(
+            800,
+            Math.min(
+              8_000,
+              Math.ceil(args.operation.intent.wordTarget * 2.2),
+            ),
+          ),
+          usagePurpose: "slate_revision",
+          signal: args.signal,
+        },
+      ),
+  );
+  const repaired = cleanSlateCockpitProse(repairedRaw);
+  const verification = await runWithUsageSession(
+    {
+      db,
+      userId: args.userId,
+      privacyScope: "normal",
+      mode: "slate",
+      surface: "slate",
+    },
+    () =>
+      auditSlateProposalContinuity({
+        provider: args.ai.provider,
+        model: args.ai.model,
+        candidateKind: "composer_proposal",
+        candidateText: repaired,
+        evidence: slateRelevantContinuityEvidence({
+          userId: args.userId,
+          projectId: args.projectId,
+          sectionId: args.operation.sectionId,
+          candidateText: repaired,
+          direction: args.operation.intent.direction,
+          focusedReplacementRange:
+            args.operation.intent.target.selection,
+        }),
+        signal: args.signal,
+      }),
+  );
+  recordSlateDeveloperEvent(db, {
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+    sectionRevision: args.operation.revisionFingerprint.sectionRevision,
+    stage: "reconciliation",
+    kind:
+      verification.status === "clear"
+        ? "proposal_continuity_repaired"
+        : "proposal_continuity_repair_failed",
+    summary:
+      verification.status === "clear"
+        ? "Slate repaired the AI-introduced conflict before exposing the proposal."
+        : "Slate withheld a proposal because one grounded repair pass did not resolve its conflict.",
+    detail: {
+      outcome: verification.status,
+      repairedConflictCount: audit.conflicts.length,
+      remainingConflictCount: verification.conflicts.length,
+      automaticRepairAttempts: 1,
+    },
+    sourceIds,
+    operationId: args.operation.id,
+    provider: args.ai.providerName,
+    model: args.ai.model,
+    continuityGeneration:
+      args.operation.revisionFingerprint.continuityGeneration,
+  });
+  if (verification.status !== "clear") {
+    throw new Error(
+      "Continuity withheld this proposal after its grounded repair remained inconsistent. Redirect the operation or adjust the direction.",
+    );
+  }
+  return repaired;
+}
+
+function slateProseWordCount(value: string): number {
+  return value.trim() ? value.trim().split(/\s+/u).length : 0;
+}
+
+async function fitSlateComposerProposalLength(args: {
+  userId: string;
+  projectId: string;
+  operation: SlateWritingOperationView["operation"];
+  prose: string;
+  ai: ReturnType<typeof slateAiForUser>;
+  mirrorBrief: string | null;
+  signal: AbortSignal;
+}): Promise<string> {
+  if (args.operation.intent.wordTargetSource !== "explicit") {
+    return args.prose;
+  }
+  const target = args.operation.intent.wordTarget;
+  const tolerance = Math.max(30, Math.round(target * 0.2));
+  const originalWords = slateProseWordCount(args.prose);
+  if (
+    originalWords >= target - tolerance &&
+    originalWords <= target + tolerance
+  ) {
+    return args.prose;
+  }
+  const requestedMinimum = Math.max(25, Math.round(target * 0.9));
+  const requestedMaximum = Math.max(
+    requestedMinimum,
+    Math.round(target * 1.1),
+  );
+  const raw = await runWithUsageSession(
+    {
+      db,
+      userId: args.userId,
+      privacyScope: "normal",
+      mode: "slate",
+      surface: "slate",
+    },
+    () =>
+      args.ai.provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: [
+              "You are Slate fitting finished fiction prose to the writer's explicit length.",
+              "Preserve causality, established facts, scene objective, POV, voice, ending, and every must-include constraint.",
+              "Compress or expand through meaningful scene craft, never summary notes or commentary.",
+              "Return complete manuscript prose only.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: [
+              `Explicit target: ${target} words.`,
+              `Required range: ${requestedMinimum}-${requestedMaximum} words.`,
+              `Current length: ${originalWords} words.`,
+              `Writer direction: ${args.operation.intent.direction}`,
+              args.mirrorBrief
+                ? `Pinned Mirror brief:\n${args.mirrorBrief}`
+                : "",
+              `Prose to refit:\n${args.prose}`,
+            ]
+              .filter(Boolean)
+              .join("\n\n"),
+          },
+        ],
+        {
+          model: args.ai.model,
+          temperature: 0.4,
+          maxTokens: Math.max(
+            800,
+            Math.min(8_000, Math.ceil(target * 2.2)),
+          ),
+          usagePurpose: "slate_revision",
+          signal: args.signal,
+        },
+      ),
+  );
+  const fitted = cleanSlateCockpitProse(raw);
+  const fittedWords = slateProseWordCount(fitted);
+  if (
+    fittedWords < target - tolerance ||
+    fittedWords > target + tolerance
+  ) {
+    throw new Error(
+      `Slate could not honor the explicit ${target}-word target within a ${tolerance}-word tolerance.`,
+    );
+  }
+  const evidence = slateRelevantContinuityEvidence({
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+    candidateText: fitted,
+    direction: args.operation.intent.direction,
+    focusedReplacementRange: args.operation.intent.target.selection,
+  });
+  if (evidence.length > 0) {
+    const audit = await runWithUsageSession(
+      {
+        db,
+        userId: args.userId,
+        privacyScope: "normal",
+        mode: "slate",
+        surface: "slate",
+      },
+      () =>
+        auditSlateProposalContinuity({
+          provider: args.ai.provider,
+          model: args.ai.model,
+          candidateKind: "composer_proposal",
+          candidateText: fitted,
+          evidence,
+          signal: args.signal,
+        }),
+    );
+    if (audit.status !== "clear") {
+      throw new Error(
+        "Continuity withheld the length-fitted proposal because it reintroduced an accepted-story conflict.",
+      );
+    }
+  }
+  recordSlateDeveloperEvent(db, {
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+    sectionRevision: args.operation.revisionFingerprint.sectionRevision,
+    stage: "proposal",
+    kind: "proposal_length_rebalanced",
+    summary:
+      "Slate refit the proposal to the writer's explicit length before exposing it.",
+    detail: {
+      outcome: "within_tolerance",
+      explicitTarget: target,
+      tolerance,
+      originalWords,
+      fittedWords,
+    },
+    sourceIds: slateContinuityEvidenceSourceIds(
+      args.userId,
+      args.projectId,
+      evidence,
+    ),
+    operationId: args.operation.id,
+    provider: args.ai.providerName,
+    model: args.ai.model,
+    continuityGeneration:
+      args.operation.revisionFingerprint.continuityGeneration,
+  });
+  return fitted;
+}
+
+function renderSlateStoryBibleComposerBrief(
+  projection: ReturnType<typeof projectActiveSlateStoryBible>,
+): string {
+  const storyBible = projection.storyBible;
+  const lines = [
+    `Active Story Bible generation: ${projection.activeGeneration}`,
+  ];
+  if (storyBible.characters.length > 0) {
+    lines.push(
+      "Character Studio:",
+      ...storyBible.characters.slice(0, 8).map((character) => {
+        const details = [
+          character.roles.value.length
+            ? `roles=${character.roles.value.join(", ")}`
+            : "",
+          character.wants.value.length
+            ? `wants=${character.wants.value.join(", ")}`
+            : "",
+          character.privatePressure.value
+            ? `pressure=${character.privatePressure.value}`
+            : "",
+          character.currentState.value
+            ? `state=${character.currentState.value}`
+            : "",
+        ].filter(Boolean);
+        return `- ${character.identity.value || character.entityId}${
+          details.length ? ` — ${details.join("; ")}` : ""
+        }`;
+      }),
+    );
+  }
+  if (storyBible.arcs.length > 0) {
+    lines.push(
+      "Character arcs (intended and observed remain distinct):",
+      ...storyBible.arcs.slice(0, 8).map((arc) => {
+        const bridges = arc.bridgeSuggestions
+          .filter((bridge) => !bridge.adopted)
+          .slice(0, 2)
+          .map((bridge) => bridge.summary)
+          .join(" | ");
+        return [
+          `- ${arc.characterEntityId}`,
+          `intended: ${arc.intended.startState || "unspecified"} → ${
+            arc.intended.destinationState || "unspecified"
+          }`,
+          `observed: ${arc.observed.startState || "unspecified"} → ${
+            arc.observed.destinationState || "unspecified"
+          }`,
+          bridges ? `missing bridge: ${bridges}` : "",
+        ]
+          .filter(Boolean)
+          .join("; ");
+      }),
+    );
+  }
+  if (storyBible.threads.length > 0) {
+    lines.push(
+      "Narrative threads:",
+      ...storyBible.threads
+        .filter(
+          (thread) =>
+            thread.status === "open" ||
+            thread.status === "due" ||
+            thread.status === "missed" ||
+            thread.status === "deferred",
+        )
+        .slice(0, 10)
+        .map(
+          (thread) =>
+            `- [${thread.kind}/${thread.status}] ${thread.label}${
+              thread.description ? ` — ${thread.description}` : ""
+            }`,
+        ),
+    );
+  }
+  const blockingConcerns = storyBible.concerns
+    .filter(
+      (concern) =>
+        concern.status === "open" &&
+        (concern.severity === "critical" ||
+          concern.severity === "important"),
+    )
+    .slice(0, 8);
+  if (blockingConcerns.length > 0) {
+    lines.push(
+      "Open source-linked concerns:",
+      ...blockingConcerns.map(
+        (concern) =>
+          `- [${concern.severity}] ${concern.summary}`,
+      ),
+    );
+  }
+  if (storyBible.causalEdges.length > 0) {
+    lines.push(
+      "Causal requirements:",
+      ...storyBible.causalEdges
+        .slice(0, 10)
+        .map(
+          (edge) =>
+            `- ${edge.from.kind}:${edge.from.id} ${edge.kind} ${edge.to.kind}:${edge.to.id}`,
+        ),
+    );
+  }
+  if (storyBible.world.length > 0) {
+    lines.push(
+      "World:",
+      ...storyBible.world
+        .slice(0, 8)
+        .map(
+          (item) =>
+            `- ${item.label}${item.description ? ` — ${item.description}` : ""}`,
+        ),
+    );
+  }
+  return lines.join("\n").slice(0, 12_000);
+}
+
+function compileSlateComposerInputs(args: {
+  userId: string;
+  projectId: string;
+  operation: SlateWritingOperationView["operation"];
+  structureItemId: string | null;
+}): {
+  directionIntent: string;
+  continuityBrief: string;
+  momentumTarget: string;
+} {
+  const projection = projectActiveSlateStoryBible(db, {
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+  });
+  const indexedBrief = args.structureItemId
+    ? compileSlateDraftContinuityContext(
+        db,
+        args.userId,
+        args.projectId,
+        args.structureItemId,
+        args.operation.intent.direction,
+      )
+    : null;
+  const curatedBrief = renderSlateStoryBibleComposerBrief(projection);
+  const continuityBrief = [
+    indexedBrief?.renderedBrief ?? "Slate Continuity brief",
+    "Curated Story Bible projection:",
+    curatedBrief,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 36_000);
+  const momentumTarget = [
+    projection.momentum.liveWire
+      ? `Live Wire [${projection.momentum.liveWire.kind}] ${projection.momentum.liveWire.label}: ${projection.momentum.liveWire.summary}`
+      : "Live Wire: none selected.",
+    projection.momentum.litMatch
+      ? `Lit match: ${projection.momentum.litMatch.intention} Pressure: ${projection.momentum.litMatch.unfinishedPressure}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const sourceIds = [
+    ...new Set(
+      projection.diagnostics.flatMap(
+        (diagnostic) => diagnostic.sourceIds,
+      ),
+    ),
+  ];
+  const sourceFingerprint = slateSha256(
+    JSON.stringify([
+      indexedBrief?.sourceFingerprint ?? null,
+      projection.momentum.sourceFingerprint,
+      projection.activeGeneration,
+      curatedBrief,
+    ]),
+  );
+  recordSlateDeveloperEvent(db, {
+    userId: args.userId,
+    projectId: args.projectId,
+    sectionId: args.operation.sectionId,
+    sectionRevision:
+      args.operation.revisionFingerprint.sectionRevision,
+    stage: "brief",
+    kind: "composition_brief_compiled",
+    summary:
+      "Compiled Direction Intent, Continuity Brief, Mirror Brief binding, and Momentum Target before prose generation.",
+    detail: {
+      sourceFingerprint,
+      sourceIds,
+      tokenEstimate: Math.ceil(continuityBrief.length / 4),
+      renderedBrief: continuityBrief,
+      continuitySummary: `${projection.storyBible.characters.length} characters, ${projection.storyBible.arcs.length} arcs, ${projection.storyBible.threads.length} threads, ${projection.storyBible.concerns.length} concerns; ${momentumTarget}`,
+    },
+    sourceIds,
+    operationId: args.operation.id,
+    continuityGeneration:
+      args.operation.revisionFingerprint.continuityGeneration,
+  });
+  return {
+    directionIntent: JSON.stringify(args.operation.intent, null, 2),
+    continuityBrief,
+    momentumTarget,
+  };
+}
+
+async function generateSlateWritingOperation(
+  userId: string,
+  projectId: string,
+  view: SlateWritingOperationView,
+  activeController?: AbortController,
+): Promise<SlateWritingOperationView> {
+  const operation = view.operation;
+  if (operation.status !== "generating") return view;
+  const abortKey = slateWritingAbortKey(userId, projectId, operation.id);
+  const controller = activeController ?? new AbortController();
+  if (!activeController) {
+    slateWritingAbortControllers.set(abortKey, controller);
+  }
+  const ai = slateAiForUser(userId, projectId);
+  const mirror = slateComposerMirrorBrief(
+    userId,
+    projectId,
+    operation.intent.pov,
+  );
+  const section = getSlateProjectSection(
+    db,
+    userId,
+    projectId,
+    operation.sectionId,
+  );
+  const structureItemId = section.structureItemId;
+  const composerInputs = compileSlateComposerInputs({
+    userId,
+    projectId,
+    operation,
+    structureItemId,
+  });
+  if (mirror) {
+    recordSlateDeveloperEvent(db, {
+      userId,
+      projectId,
+      sectionId: operation.sectionId,
+      sectionRevision: operation.revisionFingerprint.sectionRevision,
+      stage: "mirror",
+      kind: "pinned_mirror_bound",
+      summary:
+        "Bound the project's immutable Mirror version to prose style, not output length.",
+      detail: {
+        profileVersionId: mirror.profileVersionId,
+        projectOverlayId: mirror.projectOverlayId,
+        povOverlayId: mirror.povOverlayId,
+        sourceFingerprint: mirror.sourceFingerprint,
+        summary:
+          "Pinned Voice Card and selected overlays were compiled as style guidance.",
+      },
+      operationId: operation.id,
+      provider: ai.providerName,
+      model: ai.model,
+      continuityGeneration:
+        operation.revisionFingerprint.continuityGeneration,
+    });
+  }
+  recordSlateDeveloperEvent(db, {
+    userId,
+    projectId,
+    sectionId: operation.sectionId,
+    sectionRevision: operation.revisionFingerprint.sectionRevision,
+    stage: "generation",
+    kind: "generation_started",
+    summary: "Started the composer against the validated manuscript snapshot.",
+    detail: {
+      transition: "started",
+      requestHash: operation.revisionFingerprint.value,
+      outputHash: null,
+      receiptId: null,
+      durationMs: null,
+      failureCode: null,
+    },
+    operationId: operation.id,
+    provider: ai.providerName,
+    model: ai.model,
+    continuityGeneration:
+      operation.revisionFingerprint.continuityGeneration,
+  });
+  try {
+    if (!section.prose && structureItemId) {
+      const proposal = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "slate",
+          surface: "slate",
+        },
+        () =>
+          generateSlateStructureItemProposal(
+            db,
+            userId,
+            projectId,
+            structureItemId,
+            operation.intent.direction,
+            ai,
+            controller.signal,
+            {
+              directionIntent: composerInputs.directionIntent,
+              continuityBrief: composerInputs.continuityBrief,
+              mirrorBrief: mirror?.renderedBrief ?? null,
+              momentumTarget: composerInputs.momentumTarget,
+            },
+          ),
+      );
+      const validatedProse = await auditAndRepairSlateComposerProposal({
+        userId,
+        projectId,
+        operation,
+        prose: proposal.prose,
+        ai,
+        mirrorBrief: mirror?.renderedBrief ?? null,
+        signal: controller.signal,
+      });
+      const fittedProse = await fitSlateComposerProposalLength({
+        userId,
+        projectId,
+        operation,
+        prose: validatedProse,
+        ai,
+        mirrorBrief: mirror?.renderedBrief ?? null,
+        signal: controller.signal,
+      });
+      return setSlateWritingOperationProposal(
+        db,
+        userId,
+        projectId,
+        operation.id,
+        {
+          prose: fittedProse,
+          provider: proposal.provider,
+          model: proposal.model,
+          validatedSnapshotPatch: {
+            applicationKind: "draft",
+            structureItemId: proposal.structureItemId,
+            expectedSectionId: proposal.sectionId,
+            expectedSectionRevision: proposal.expectedSectionRevision,
+            expectedSectionContentHash:
+              proposal.expectedSectionContentHash,
+            expectedStructureJson: proposal.expectedStructureJson,
+          },
+        },
+      );
+    }
+
+    const project = getSlateProject(db, userId, projectId);
+    const anchor = operation.intent.target.selection;
+    const hasSelection =
+      anchor &&
+      anchor.sectionId === operation.sectionId &&
+      Number.isInteger(anchor.start) &&
+      Number.isInteger(anchor.end) &&
+      anchor.start >= 0 &&
+      anchor.end > anchor.start &&
+      anchor.end <= section.prose.length;
+    const targetText = hasSelection
+      ? section.prose.slice(anchor.start, anchor.end)
+      : section.prose;
+    const operationInstruction =
+      operation.intent.operation === "continue"
+        ? "Return the complete section, preserving the existing prose and continuing it naturally."
+        : hasSelection
+          ? "Return only the complete replacement for the selected passage."
+          : "Return the complete revised section prose.";
+    const raw = await runWithUsageSession(
+      {
+        db,
+        userId,
+        privacyScope: "normal",
+        mode: "slate",
+        surface: "slate",
+      },
+      () =>
+        ai.provider.generateResponse(
+          [
+            {
+              role: "system",
+              content:
+                "You are Slate, a fiction composition engine. Follow the writer's direction while preserving established facts, voice, and intent. Return manuscript prose only.",
+            },
+            {
+              role: "user",
+              content: [
+                `Project: ${project.title}`,
+                `Premise: ${project.premise || project.spark}`,
+                "Composition Orchestrator · Direction Intent",
+                composerInputs.directionIntent,
+                "Composition Orchestrator · Continuity Brief",
+                composerInputs.continuityBrief,
+                mirror?.renderedBrief
+                  ? `Composition Orchestrator · Mirror Brief (style and density only; never length)\n${mirror.renderedBrief}`
+                  : "Composition Orchestrator · Mirror Brief\nNo pinned Mirror profile; preserve the project's established prose.",
+                "Composition Orchestrator · Momentum Target",
+                composerInputs.momentumTarget,
+                `Operation: ${operation.intent.operation}`,
+                `Scope: ${operation.intent.scope}`,
+                `Approximate target: ${operation.intent.wordTarget} words`,
+                `Direction: ${operation.intent.direction}`,
+                operation.intent.pov ? `POV: ${operation.intent.pov}` : "",
+                operation.intent.tense
+                  ? `Tense: ${operation.intent.tense}`
+                  : "",
+                operation.intent.pacing
+                  ? `Pacing: ${operation.intent.pacing}`
+                  : "",
+                operation.intent.sceneObjective
+                  ? `Scene objective: ${operation.intent.sceneObjective}`
+                  : "",
+                operation.intent.constraints.length
+                  ? `Constraints: ${operation.intent.constraints.join("; ")}`
+                  : "",
+                operation.intent.mustInclude.length
+                  ? `Must include: ${operation.intent.mustInclude.join("; ")}`
+                  : "",
+                operation.intent.mustAvoid.length
+                  ? `Must avoid: ${operation.intent.mustAvoid.join("; ")}`
+                  : "",
+                operationInstruction,
+                "Current prose:",
+                targetText,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            },
+          ],
+          {
+            model: ai.model,
+            temperature: 0.76,
+            maxTokens: Math.max(
+              800,
+              Math.min(8_000, Math.ceil(operation.intent.wordTarget * 2.2)),
+            ),
+            usagePurpose: "slate_revision",
+            signal: controller.signal,
+          },
+        ),
+    );
+    const spans = slateSectionProjectionSpans(db, userId, projectId);
+    const span = spans.find(
+      (candidate) => candidate.sectionId === operation.sectionId,
+    );
+    if (!span) throw new Error("Slate could not locate the focused section.");
+    const candidateProse = cleanSlateCockpitProse(raw);
+    const validatedProse = await auditAndRepairSlateComposerProposal({
+      userId,
+      projectId,
+      operation,
+      prose: candidateProse,
+      ai,
+      mirrorBrief: mirror?.renderedBrief ?? null,
+      signal: controller.signal,
+    });
+    const fittedProse = await fitSlateComposerProposalLength({
+      userId,
+      projectId,
+      operation,
+      prose: validatedProse,
+      ai,
+      mirrorBrief: mirror?.renderedBrief ?? null,
+      signal: controller.signal,
+    });
+    return setSlateWritingOperationProposal(
+      db,
+      userId,
+      projectId,
+      operation.id,
+      {
+        prose: fittedProse,
+        provider: ai.providerName,
+        model: ai.model,
+        validatedSnapshotPatch: {
+          applicationKind: "revision",
+          structureItemId: hasSelection ? null : structureItemId,
+          selectionStart: hasSelection
+            ? span.bodyStart + anchor.start
+            : null,
+          selectionEnd: hasSelection ? span.bodyStart + anchor.end : null,
+          originalText: targetText,
+        },
+      },
+    );
+  } catch (error) {
+    const current = getSlateWritingOperation(
+      db,
+      userId,
+      projectId,
+      operation.id,
+    );
+    if (slateWritingAbortControllers.get(abortKey) !== controller) {
+      return current;
+    }
+    if (
+      current.operation.status === "interrupted" ||
+      current.operation.status === "cancelled"
+    ) {
+      return current;
+    }
+    return failSlateWritingOperation(
+      db,
+      userId,
+      projectId,
+      operation.id,
+      error,
+    );
+  } finally {
+    if (slateWritingAbortControllers.get(abortKey) === controller) {
+      slateWritingAbortControllers.delete(abortKey);
+    }
+  }
+}
+
+function runSlateWritingOperationLifecycle(
+  userId: string,
+  projectId: string,
+  operationId: string,
+): Promise<SlateWritingOperationView> {
+  const abortKey = slateWritingAbortKey(userId, projectId, operationId);
+  const existing = slateWritingLifecycleRuns.get(abortKey);
+  if (existing) return existing;
+  const controller = new AbortController();
+  slateWritingAbortControllers.set(abortKey, controller);
+
+  const run = (async () => {
+    let view = getSlateWritingOperation(
+      db,
+      userId,
+      projectId,
+      operationId,
+    );
+    if (view.operation.status === "generating") {
+      view = await preflightSlateWritingDirection(
+        userId,
+        projectId,
+        view,
+        controller.signal,
+      );
+    }
+    if (
+      controller.signal.aborted ||
+      slateWritingAbortControllers.get(abortKey) !== controller
+    ) {
+      return getSlateWritingOperation(
+        db,
+        userId,
+        projectId,
+        operationId,
+      );
+    }
+    view = getSlateWritingOperation(
+      db,
+      userId,
+      projectId,
+      operationId,
+    );
+    if (view.operation.status === "generating") {
+      view = await generateSlateWritingOperation(
+        userId,
+        projectId,
+        view,
+        controller,
+      );
+    }
+    return view;
+  })()
+    .catch((error): SlateWritingOperationView => {
+      if (
+        controller.signal.aborted ||
+        slateWritingAbortControllers.get(abortKey) !== controller
+      ) {
+        return getSlateWritingOperation(
+          db,
+          userId,
+          projectId,
+          operationId,
+        );
+      }
+      const current = getSlateWritingOperation(
+        db,
+        userId,
+        projectId,
+        operationId,
+      );
+      if (current.operation.status === "generating") {
+        return failSlateWritingOperation(
+          db,
+          userId,
+          projectId,
+          operationId,
+          error,
+        );
+      }
+      return current;
+    })
+    .finally(() => {
+      if (slateWritingAbortControllers.get(abortKey) === controller) {
+        slateWritingAbortControllers.delete(abortKey);
+      }
+      slateWritingLifecycleRuns.delete(abortKey);
+    });
+  slateWritingLifecycleRuns.set(abortKey, run);
+  return run;
+}
+
+function respondWithSlateWritingOperationError(
+  res: ServerResponse,
+  error: unknown,
+): boolean {
+  if (!(error instanceof SlateWritingOperationError)) return false;
+  json(res, error.status, {
+    ok: false,
+    code: error.code,
+    error: error.message,
+    detail: error.detail,
+  });
+  return true;
+}
+
+function respondWithSlateMirrorError(
+  res: ServerResponse,
+  error: unknown,
+): boolean {
+  if (!(error instanceof SlateMirrorError)) return false;
+  json(res, error.status, {
+    ok: false,
+    code: error.code,
+    error: error.message,
+  });
+  return true;
+}
+
+const SLATE_CHARACTER_PROFILE_FIELDS =
+  new Set<SlateCharacterProfileFieldName>([
+    "identity",
+    "aliases",
+    "roles",
+    "publicPersona",
+    "privatePressure",
+    "wants",
+    "needs",
+    "fears",
+    "wounds",
+    "beliefs",
+    "values",
+    "secrets",
+    "contradictions",
+    "dialogueMarkers",
+    "competencies",
+    "limitations",
+    "appearance",
+    "currentState",
+  ]);
+
+function readSlateCharacterProfileField(
+  value: string,
+): SlateCharacterProfileFieldName {
+  if (
+    SLATE_CHARACTER_PROFILE_FIELDS.has(
+      value as SlateCharacterProfileFieldName,
+    )
+  ) {
+    return value as SlateCharacterProfileFieldName;
+  }
+  throw new Error("Slate character profile field is invalid.");
+}
+
+function parseSlateMirrorVoiceCardResponse(
+  raw: string,
+): ReturnType<typeof normalizeSlateMirrorVoiceCard> {
+  const trimmed = raw.trim();
+  const unfenced =
+    trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/iu)?.[1]?.trim() ??
+    trimmed;
+  const candidates = [
+    unfenced,
+    unfenced.match(/\{[\s\S]*\}/u)?.[0] ?? "",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      return normalizeSlateMirrorVoiceCard(JSON.parse(candidate) as unknown);
+    } catch {
+      // Try the next bounded JSON candidate.
+    }
+  }
+  throw new SlateMirrorError(
+    "Mirror returned an invalid Voice Card. Try the quick setup again.",
+    502,
+    "slate_mirror_invalid_voice_card",
+  );
+}
+
+async function synthesizeSlateMirrorVoiceCard(
+  userId: string,
+  projectId: string | undefined,
+  samples: readonly SlateMirrorSampleInput[],
+): Promise<ReturnType<typeof normalizeSlateMirrorVoiceCard>> {
+  const eligible = slateMirrorEligibleSamplesForSynthesis(db, userId, samples);
+  let remainingCharacters = 42_000;
+  const sampleText = eligible
+    .map((sample, index) => {
+      const text = sample.text.slice(0, Math.max(0, remainingCharacters));
+      remainingCharacters -= text.length;
+      return [
+        `SAMPLE ${index + 1} · ${sample.sourceKind}`,
+        text,
+      ].join("\n");
+    })
+    .filter((sample) => sample.length > 0)
+    .join("\n\n---\n\n");
+  const ai = slateAiForUser(userId, projectId);
+  const raw = await runWithUsageSession(
+    {
+      db,
+      userId,
+      privacyScope: "normal",
+      mode: "slate",
+      surface: "slate",
+    },
+    () =>
+      ai.provider.generateResponse(
+        [
+          {
+            role: "system",
+            content: [
+              "You are Mirror, Slate's inspectable fiction voice analyst.",
+              "Infer prose style and density from writer-owned samples only.",
+              "Do not prescribe word count, output length, scene scope, plot, or subject matter.",
+              "Return one JSON object only, with no markdown or explanation.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: [
+              "Build a concise Voice Card from these authorized samples.",
+              "Return exactly these keys:",
+              '"narrativeDistance" (string), "diction", "rhythm", "imagery", "dialogueHabits", "exposition", "humor", "density", "preferences", "avoidances", and "exemplars" (arrays of short strings).',
+              "Exemplars must be brief phrases from the supplied writing, not newly generated prose.",
+              "Describe patterns concretely enough for a composition model to follow without imitating any named author.",
+              sampleText,
+            ].join("\n\n"),
+          },
+        ],
+        {
+          model: ai.model,
+          temperature: 0.2,
+          maxTokens: 1_600,
+          jsonMode: true,
+          usagePurpose: "slate_deliberation",
+        },
+      ),
+  );
+  return parseSlateMirrorVoiceCardResponse(raw);
+}
+
+function recordSlateStoryBibleDiagnosticsForOperation(
+  userId: string,
+  projectId: string,
+  sectionId: string,
+  operationId: string,
+): void {
+  const section = db
+    .prepare(
+      `SELECT revision FROM slate_sections
+        WHERE id = ? AND project_id = ? AND user_id = ?`,
+    )
+    .get(sectionId, projectId, userId) as
+    | { revision: number }
+    | undefined;
+  if (!section) return;
+  const projection = projectActiveSlateStoryBible(db, {
+    userId,
+    projectId,
+    sectionId,
+  });
+  for (const diagnostic of projection.diagnostics) {
+    const exists = db
+      .prepare(
+        `SELECT 1 AS present
+           FROM slate_continuity_developer_events
+          WHERE user_id = ? AND project_id = ? AND section_id = ?
+            AND section_revision = ? AND operation_id = ?
+            AND stage = ? AND kind = ?
+          LIMIT 1`,
+      )
+      .get(
+        userId,
+        projectId,
+        sectionId,
+        Number(section.revision),
+        operationId,
+        diagnostic.stage,
+        diagnostic.kind,
+      ) as { present: number } | undefined;
+    if (exists) continue;
+    recordSlateDeveloperEvent(db, {
+      userId,
+      projectId,
+      sectionId,
+      sectionRevision: Number(section.revision),
+      stage: diagnostic.stage,
+      kind: diagnostic.kind,
+      summary: diagnostic.summary,
+      detail: diagnostic.detail,
+      sourceIds: diagnostic.sourceIds,
+      operationId,
+      continuityGeneration: diagnostic.continuityGeneration,
+    });
+  }
+}
+
 function getElevenLabsApiKeyForUser(
   userId: string,
   userKey: Buffer,
@@ -5066,6 +6753,7 @@ async function generateAndPersistStandaloneImageAsset(args: {
   userId: string;
   prompt: string;
   preferredProvider: ImageProviderName;
+  offlineOnly?: boolean;
   signal: AbortSignal;
   size: "1536x1024" | "1024x1536";
   origin: ImageOrigin;
@@ -5077,7 +6765,7 @@ async function generateAndPersistStandaloneImageAsset(args: {
   const effectiveProvider = resolveImageProviderName({
     savedProvider: user.preferred_image_provider,
     requestedProvider: args.preferredProvider,
-    offlineOnly: false,
+    offlineOnly: args.offlineOnly === true,
   });
   const preferredLocalImageModel =
     user.preferred_local_image_model?.trim() ?? "";
@@ -5285,6 +6973,7 @@ async function generateAndPersistSlateCoverAsset(args: {
   userId: string;
   prompt: string;
   preferredProvider: ImageProviderName;
+  offlineOnly: boolean;
   signal: AbortSignal;
 }): Promise<SignalArtworkGeneratedAsset> {
   return generateAndPersistStandaloneImageAsset({
@@ -6105,10 +7794,423 @@ function buildRoutes(): RouteDefinition[] {
         series: getSlateSeries(db, userId, ctx.params.id),
       });
     }),
+    route("GET", "/api/slate/mirror/profiles", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        profiles: listSlateMirrorProfiles(db, userId),
+      });
+    }),
+    route("POST", "/api/slate/mirror/profiles", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 201, {
+          ok: true,
+          profile: createSlateMirrorProfile(
+            db,
+            userId,
+            ctx.body as { name: unknown; penName?: unknown },
+          ),
+        });
+      } catch (error) {
+        if (respondWithSlateMirrorError(ctx.res, error)) return;
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/mirror/profiles/:profileId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          profile: getSlateMirrorProfile(db, userId, ctx.params.profileId),
+          versions: listSlateMirrorProfileVersions(
+            db,
+            userId,
+            ctx.params.profileId,
+          ),
+        });
+      } catch (error) {
+        if (respondWithSlateMirrorError(ctx.res, error)) return;
+        throw error;
+      }
+    }),
+    route("PATCH", "/api/slate/mirror/profiles/:profileId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.frozen !== "boolean") {
+        throw new HttpError(400, "frozen (boolean) is required.");
+      }
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          profile: setSlateMirrorProfileFrozen(
+            db,
+            userId,
+            ctx.params.profileId,
+            body.frozen,
+          ),
+        });
+      } catch (error) {
+        if (respondWithSlateMirrorError(ctx.res, error)) return;
+        throw error;
+      }
+    }),
+    route(
+      "POST",
+      "/api/slate/mirror/profiles/:profileId/versions",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        if (!Array.isArray(body.samples)) {
+          throw new HttpError(400, "Mirror samples are required.");
+        }
+        try {
+          const samples = body.samples as SlateMirrorSampleInput[];
+          const projectId = readOptionalString(body.projectId);
+          const voiceCard = await synthesizeSlateMirrorVoiceCard(
+            userId,
+            projectId ?? undefined,
+            samples,
+          );
+          json(ctx.res, 201, {
+            ok: true,
+            ...publishSlateMirrorProfileVersion(
+              db,
+              userId,
+              ctx.params.profileId,
+              { voiceCard, samples },
+            ),
+          });
+        } catch (error) {
+          if (respondWithSlateMirrorError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
     route("GET", "/api/slate/projects", async (ctx) => {
       const userId = requireAuth(ctx);
       json(ctx.res, 200, { ok: true, projects: listSlateProjects(db, userId) });
     }),
+    route("GET", "/api/slate/projects/:id/mirror", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const detail = getSlateMirrorProjectBinding(
+          db,
+          userId,
+          ctx.params.id,
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          ...(detail ?? { binding: null }),
+        });
+      } catch (error) {
+        if (respondWithSlateMirrorError(ctx.res, error)) return;
+        throw error;
+      }
+    }),
+    route("PATCH", "/api/slate/projects/:id/mirror", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          ...bindSlateMirrorToProject(db, userId, ctx.params.id, {
+            profileVersionId: body.profileVersionId,
+            projectOverlay: body.projectOverlay as never,
+            povOverlays: body.povOverlays as never,
+            repin: body.repin,
+            expectedCurrentVersionId: body.expectedCurrentVersionId,
+          }),
+        });
+      } catch (error) {
+        if (respondWithSlateMirrorError(ctx.res, error)) return;
+        throw error;
+      }
+    }),
+    route("GET", "/api/slate/projects/:id/sources", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        sources: listSlateSourceShelfItems(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/slate/projects/:id/sources", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 201, {
+        ok: true,
+        source: createSlateSourceShelfItem(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as {
+            title: unknown;
+            kind: unknown;
+            content?: unknown;
+            metadata?: unknown;
+          },
+        ),
+      });
+    }),
+    route(
+      "PATCH",
+      "/api/slate/projects/:id/sources/:sourceId",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          source: updateSlateSourceShelfItem(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sourceId,
+            ctx.body as {
+              title?: unknown;
+              kind?: unknown;
+              content?: unknown;
+              metadata?: unknown;
+            },
+          ),
+        });
+      },
+    ),
+    route(
+      "DELETE",
+      "/api/slate/projects/:id/sources/:sourceId",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        deleteSlateSourceShelfItem(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.params.sourceId,
+        );
+        json(ctx.res, 200, { ok: true });
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/sources/:sourceId/promote",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          source: promoteSlateSourceShelfItem(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sourceId,
+          ),
+        });
+      },
+    ),
+    route("GET", "/api/slate/projects/:id/visual-references", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        visuals: listSlateVisualReferences(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/slate/projects/:id/visual-references", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = getSlateProject(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const validKinds = new Set([
+        "character_study",
+        "expression",
+        "costume",
+        "location",
+        "prop",
+        "motif",
+        "scene_keyframe",
+        "blocking",
+      ]);
+      if (typeof body.kind !== "string" || !validKinds.has(body.kind)) {
+        throw new HttpError(400, "Choose a valid Visual Bible study kind.");
+      }
+      const prompt = readString(body.prompt, "prompt");
+      const user = getUserRow(userId);
+      const offlineOnly = project.proseMode === "offline";
+      const preferredProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider: body.preferredProvider,
+        offlineOnly,
+      });
+      const acquired = await tryAcquireImageSlot({
+        userId,
+        conversationId: null,
+        botId: null,
+        mode: "sandbox",
+        incognito: false,
+        captionPrompt: "Slate Visual Bible study",
+        userMessage: `[Slate] Visual study: ${prompt.slice(0, 220)}`,
+        source: "slate_visual_bible",
+        requestedSize: "1536x1024",
+      });
+      if (!acquired.ok) {
+        throw new HttpError(
+          503,
+          "Another image is generating right now. Slate kept the current studies.",
+        );
+      }
+      try {
+        const asset = await generateAndPersistStandaloneImageAsset({
+          userId,
+          prompt,
+          preferredProvider,
+          offlineOnly,
+          signal: acquired.job.abortController.signal,
+          size: "1536x1024",
+          origin: "slate_visual_bible",
+          purpose: "slate_visual_bible",
+          featureLabel: "a Visual Bible study",
+        });
+        const generated = db
+          .prepare(
+            `SELECT provider, model FROM images
+              WHERE id = ? AND user_id = ?`,
+          )
+          .get(asset.imageId, userId) as
+          | { provider: string; model: string }
+          | undefined;
+        if (!generated) {
+          throw new Error("Visual Bible image provenance was not saved.");
+        }
+        const provider =
+          generated.provider === "openai"
+            ? "openai"
+            : generated.provider === "comfyui"
+              ? "comfyui"
+              : "local";
+        json(ctx.res, 201, {
+          ok: true,
+          visual: recordSlateVisualStudy(db, userId, ctx.params.id, {
+            imageId: asset.imageId,
+            sectionId: body.sectionId,
+            kind: body.kind,
+            prompt,
+            negativePrompt: body.negativePrompt,
+            referenceAssetIds: body.referenceAssetIds,
+            passageAnchor: body.passageAnchor,
+            entityStates: body.entityStates,
+            visualStyleVersionId: body.visualStyleVersionId,
+            provider,
+            model: generated.model,
+            seed: body.seed,
+          }),
+        });
+      } finally {
+        await releaseImageSlotIfOwned(userId, acquired.job.id);
+      }
+    }),
+    route(
+      "POST",
+      "/api/slate/projects/:id/visual-references/:referenceId/pin",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          visual: resolveSlateVisualReference(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.referenceId,
+            "pin",
+          ),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/visual-references/:referenceId/reject",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          visual: resolveSlateVisualReference(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.referenceId,
+            "reject",
+          ),
+        });
+      },
+    ),
+    route(
+      "GET",
+      "/api/slate/projects/:id/review-circle/reviewers",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        getSlateProject(db, userId, ctx.params.id);
+        const reviewers = db
+          .prepare(
+            `SELECT id, name FROM bots
+              WHERE user_id = ? AND chat_enabled = 1
+              ORDER BY updated_at DESC, created_at DESC`,
+          )
+          .all(userId) as unknown as Array<{ id: string; name: string }>;
+        json(ctx.res, 200, { ok: true, reviewers });
+      },
+    ),
+    route("GET", "/api/slate/projects/:id/review-circle", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        rooms: listSlateReviewCircleSessions(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/slate/projects/:id/review-circle", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.sectionId !== "string" || !body.sectionId.trim()) {
+        throw new HttpError(400, "Review Circle section is required.");
+      }
+      if (!Array.isArray(body.reviewerBotIds)) {
+        throw new HttpError(400, "Review Circle reviewers are required.");
+      }
+      const reviewerBotIds = body.reviewerBotIds.filter(
+        (item): item is string => typeof item === "string",
+      );
+      const guest =
+        body.guest && typeof body.guest === "object" && !Array.isArray(body.guest)
+          ? (body.guest as { name: string; readerBrief: string })
+          : null;
+      const ai = slateAiForUser(userId, ctx.params.id);
+      const room = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "slate",
+          surface: "slate",
+        },
+        () =>
+          runSlateReviewCircle(db, userId, ctx.params.id, {
+            sectionId: body.sectionId as string,
+            reviewerBotIds,
+            guest,
+            provider: ai.provider,
+            model: ai.model,
+          }),
+      );
+      json(ctx.res, 201, { ok: true, room });
+    }),
+    route(
+      "GET",
+      "/api/slate/projects/:id/review-circle/:roomId",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          room: getSlateReviewCircleSession(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.roomId,
+          ),
+        });
+      },
+    ),
     route("POST", "/api/slate/wildcards/resolve", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -6245,11 +8347,12 @@ function buildRoutes(): RouteDefinition[] {
       const project = getSlateProject(db, userId, ctx.params.id);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
-      const preferredProvider: ImageProviderName =
-        body.preferredProvider === "local" ||
-        body.preferredProvider === "openai"
-          ? body.preferredProvider
-          : user.preferred_image_provider;
+      const offlineOnly = project.proseMode === "offline";
+      const preferredProvider = resolveImageProviderName({
+        savedProvider: user.preferred_image_provider,
+        requestedProvider: body.preferredProvider,
+        offlineOnly,
+      });
       const prompt = composeSlateProjectCoverPrompt(project);
       const acquired = await tryAcquireImageSlot({
         userId,
@@ -6282,6 +8385,7 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           prompt,
           preferredProvider,
+          offlineOnly,
           signal: acquired.job.abortController.signal,
         });
         const updated = setSlateProjectCover(db, userId, project.id, {
@@ -6550,6 +8654,634 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+      },
+    ),
+    route(
+      "GET",
+      "/api/slate/projects/:id/sections/:sectionId/annotations",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          annotations: listSlateSectionAnnotations(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sectionId,
+          ),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/sections/:sectionId/annotations",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 201, {
+          ok: true,
+          annotation: createSlateSectionAnnotation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sectionId,
+            ctx.body as Record<string, unknown>,
+          ),
+        });
+      },
+    ),
+    route(
+      "PATCH",
+      "/api/slate/projects/:id/sections/:sectionId/annotations/:annotationId",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        json(ctx.res, 200, {
+          ok: true,
+          annotation: updateSlateSectionAnnotation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.sectionId,
+            ctx.params.annotationId,
+            ctx.body as Record<string, unknown>,
+          ),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          ensureSlateProjectSections(db, userId, ctx.params.id);
+          const view = createSlateWritingOperation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Record<string, unknown>,
+          );
+          json(
+            ctx.res,
+            view.operation.status === "generating" ? 202 : 201,
+            { ok: true, ...view },
+          );
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "GET",
+      "/api/slate/projects/:id/writing-operations/:operationId",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          json(ctx.res, 200, {
+            ok: true,
+            ...getSlateWritingOperation(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.params.operationId,
+            ),
+          });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations/:operationId/run",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          const body = ctx.body as Record<string, unknown>;
+          const revisionFingerprint = readString(
+            body.revisionFingerprint,
+            "revisionFingerprint",
+          );
+          readString(body.idempotencyKey, "idempotencyKey");
+          const current = getSlateWritingOperation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.operationId,
+          );
+          if (
+            current.operation.revisionFingerprint.value !==
+            revisionFingerprint
+          ) {
+            throw new SlateWritingOperationError(
+              "This run targets a different Slate writing snapshot.",
+              409,
+              "slate_writing_fingerprint_mismatch",
+            );
+          }
+          const view =
+            current.operation.status === "generating"
+              ? await runSlateWritingOperationLifecycle(
+                  userId,
+                  ctx.params.id,
+                  ctx.params.operationId,
+                )
+              : current;
+          json(ctx.res, 200, { ok: true, ...view });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/clarifications/:clarificationId/answer",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        try {
+          const clarification = db
+            .prepare(
+              `SELECT operation_id, status, answer_idempotency_key
+                 FROM slate_clarification_requests
+                WHERE id = ? AND project_id = ? AND user_id = ?`,
+            )
+            .get(ctx.params.clarificationId, ctx.params.id, userId) as
+            | {
+                operation_id: string;
+                status: string;
+                answer_idempotency_key: string | null;
+              }
+            | undefined;
+          if (!clarification) {
+            throw new SlateWritingOperationError(
+              "Slate clarification not found.",
+              404,
+              "slate_clarification_not_found",
+            );
+          }
+          if (
+            clarification.status === "answered" &&
+            clarification.answer_idempotency_key === body.idempotencyKey
+          ) {
+            const view = getSlateWritingOperation(
+              db,
+              userId,
+              ctx.params.id,
+              clarification.operation_id,
+            );
+            json(ctx.res, view.operation.status === "generating" ? 202 : 200, {
+              ok: true,
+              ...view,
+            });
+            return;
+          }
+          const answer =
+            body.answer &&
+            typeof body.answer === "object" &&
+            !Array.isArray(body.answer)
+              ? (body.answer as Record<string, unknown>)
+              : null;
+          let compiledPatch: SlateDirectionIntentPatch | undefined;
+          if (answer?.kind === "custom_vibe") {
+            const vibe = readString(answer.vibe, "vibe");
+            const current = getSlateWritingOperation(
+              db,
+              userId,
+              ctx.params.id,
+              clarification.operation_id,
+            );
+            compiledPatch = await compileSlateCustomVibe(
+              userId,
+              ctx.params.id,
+              current.operation,
+              vibe,
+            );
+          }
+          const view = answerSlateClarification(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.clarificationId,
+            body as unknown as SlateClarificationAnswerRequest,
+            compiledPatch,
+          );
+          json(
+            ctx.res,
+            view.operation.status === "generating" ? 202 : 200,
+            { ok: true, ...view },
+          );
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations/:operationId/stop",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          const view = stopSlateWritingOperation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.operationId,
+            ctx.body as Record<string, unknown>,
+          );
+          slateWritingAbortControllers
+            .get(
+              slateWritingAbortKey(
+                userId,
+                ctx.params.id,
+                ctx.params.operationId,
+              ),
+            )
+            ?.abort();
+          json(ctx.res, 200, { ok: true, ...view });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations/:operationId/continue",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          const view = continueSlateWritingOperation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.operationId,
+            ctx.body as Record<string, unknown>,
+          );
+          json(ctx.res, 202, { ok: true, ...view });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations/:operationId/redirect",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          const view = redirectSlateWritingOperation(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.operationId,
+            ctx.body as Record<string, unknown>,
+          );
+          slateWritingAbortControllers
+            .get(
+              slateWritingAbortKey(
+                userId,
+                ctx.params.id,
+                ctx.params.operationId,
+              ),
+            )
+            ?.abort();
+          json(ctx.res, 202, { ok: true, ...view });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations/:operationId/accept",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          const view = applySlateWritingOperationProposal(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.operationId,
+            ctx.body as Record<string, unknown>,
+            (application) => {
+              const snapshot = application.validatedSnapshot;
+              if (snapshot.applicationKind === "draft") {
+                const structureItemId =
+                  typeof snapshot.structureItemId === "string"
+                    ? snapshot.structureItemId
+                    : "";
+                if (!structureItemId) {
+                  throw new Error(
+                    "Slate proposal lost its structure item snapshot.",
+                  );
+                }
+                replaceSlateSectionWithAiProse(
+                  db,
+                  userId,
+                  ctx.params.id,
+                  structureItemId,
+                  {
+                    prose: application.prose,
+                    status: "drafted",
+                    sourceKind: "ai_draft",
+                    provider: application.provider,
+                    model: application.model,
+                    expectedSectionId: application.sectionId,
+                    expectedRevision: Number(
+                      snapshot.expectedSectionRevision,
+                    ),
+                    expectedContentHash: String(
+                      snapshot.expectedSectionContentHash,
+                    ),
+                    expectedStructureJson: String(
+                      snapshot.expectedStructureJson,
+                    ),
+                    transactionOwner: false,
+                  },
+                );
+                return {};
+              }
+              const projectBefore = db
+                .prepare(
+                  `SELECT manuscript, locked_ranges_json
+                     FROM slate_projects WHERE id = ? AND user_id = ?`,
+                )
+                .get(ctx.params.id, userId) as {
+                manuscript: string;
+                locked_ranges_json: string;
+              };
+              const nextManuscript =
+                applyAcceptedSlateRevisionWithinTransaction(db, {
+                  userId,
+                  projectId: ctx.params.id,
+                  structureItemId:
+                    typeof snapshot.structureItemId === "string"
+                      ? snapshot.structureItemId
+                      : null,
+                  selectionStart:
+                    typeof snapshot.selectionStart === "number"
+                      ? snapshot.selectionStart
+                      : null,
+                  selectionEnd:
+                    typeof snapshot.selectionEnd === "number"
+                      ? snapshot.selectionEnd
+                      : null,
+                  originalText:
+                    typeof snapshot.originalText === "string"
+                      ? snapshot.originalText
+                      : "",
+                  proposedText: application.prose,
+                  provider: application.provider,
+                  model: application.model,
+                  reason: "Before accepted cockpit proposal",
+                  now: new Date().toISOString(),
+                });
+              let lockedRanges: SlateLockedRange[] = [];
+              try {
+                lockedRanges = JSON.parse(
+                  projectBefore.locked_ranges_json,
+                ) as SlateLockedRange[];
+              } catch {
+                lockedRanges = [];
+              }
+              const nextLockedRanges =
+                transformSlateLockedRangesForTextEdit(
+                  projectBefore.manuscript,
+                  nextManuscript,
+                  lockedRanges,
+                );
+              db.prepare(
+                `UPDATE slate_projects
+                    SET manuscript = ?, locked_ranges_json = ?,
+                        phase = 'refine', last_provider = ?, last_model = ?,
+                        updated_at = ?
+                  WHERE id = ? AND user_id = ?`,
+              ).run(
+                nextManuscript,
+                JSON.stringify(nextLockedRanges),
+                application.provider,
+                application.model,
+                new Date().toISOString(),
+                ctx.params.id,
+                userId,
+              );
+              return {};
+            },
+          );
+          recordSlateStoryBibleDiagnosticsForOperation(
+            userId,
+            ctx.params.id,
+            view.operation.sectionId,
+            view.operation.id,
+          );
+          json(ctx.res, 200, {
+            ok: true,
+            ...view,
+            section: getSlateProjectSection(
+              db,
+              userId,
+              ctx.params.id,
+              view.operation.sectionId,
+            ),
+          });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          if (error instanceof SlateSectionAiWriteConflictError) {
+            json(ctx.res, 409, {
+              ok: false,
+              code: error.code,
+              error: error.message,
+              reason: error.reason,
+              sectionId: error.sectionId,
+              currentRevision: error.currentRevision,
+              currentContentHash: error.currentContentHash,
+            });
+            return;
+          }
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/writing-operations/:operationId/reject",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        try {
+          const view = resolveSlateWritingOperationProposal(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.params.operationId,
+            "rejected",
+            ctx.body as Record<string, unknown>,
+          );
+          json(ctx.res, 200, { ok: true, ...view });
+        } catch (error) {
+          if (respondWithSlateWritingOperationError(ctx.res, error)) return;
+          throw error;
+        }
+      },
+    ),
+    route(
+      "POST",
+      "/api/slate/projects/:id/review-export",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const sectionId = readString(body.sectionId, "sectionId");
+        const envelope = createSlateReviewExport(
+          db,
+          userId,
+          ctx.params.id,
+          sectionId,
+        );
+        const sectionName = envelope.sections[0]?.section.title || "slate-section";
+        const safeSectionName =
+          sectionName
+            .normalize("NFKD")
+            .replace(/[^a-zA-Z0-9._-]+/gu, "-")
+            .replace(/^-+|-+$/gu, "")
+            .slice(0, 120) || "slate-section";
+        if (body.format === "markdown") {
+          const markdown = slateReviewExportMarkdown(envelope);
+          ctx.res.statusCode = 200;
+          ctx.res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+          ctx.res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${safeSectionName}-review.md"`,
+          );
+          ctx.res.setHeader(
+            "Content-Length",
+            String(Buffer.byteLength(markdown, "utf8")),
+          );
+          ctx.res.setHeader("Cache-Control", "private, no-store");
+          ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+          ctx.res.end(markdown);
+          return;
+        }
+        const payload = JSON.stringify(envelope, null, 2);
+        ctx.res.statusCode = 200;
+        ctx.res.setHeader("Content-Type", "application/json; charset=utf-8");
+        ctx.res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${safeSectionName}-review.json"`,
+        );
+        ctx.res.setHeader(
+          "Content-Length",
+          String(Buffer.byteLength(payload, "utf8")),
+        );
+        ctx.res.setHeader("Cache-Control", "private, no-store");
+        ctx.res.setHeader("X-Content-Type-Options", "nosniff");
+        ctx.res.end(payload);
+      },
+    ),
+    route(
+      "GET",
+      "/api/slate/projects/:id/story-bible",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const sectionId = readString(
+          ctx.query.get("sectionId"),
+          "sectionId",
+        );
+        const projection = projectActiveSlateStoryBible(db, {
+          userId,
+          projectId: ctx.params.id,
+          sectionId,
+        });
+        json(ctx.res, 200, {
+          ok: true,
+          projectId: projection.projectId,
+          seriesId: projection.seriesId,
+          activeGeneration: projection.activeGeneration,
+          storyBible: projection.storyBible,
+          momentum: projection.momentum,
+        });
+      },
+    ),
+    route(
+      "PATCH",
+      "/api/slate/projects/:id/characters/:profileId/fields/:field",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const value =
+          typeof body.value === "string" ||
+          (Array.isArray(body.value) &&
+            body.value.every((item) => typeof item === "string"))
+            ? (body.value as string | string[])
+            : (() => {
+                throw new Error(
+                  "Character field value must be text or a text list.",
+                );
+              })();
+        const result = updateSlateCharacterProfileField(db, {
+          userId,
+          projectId: ctx.params.id,
+          profileId: ctx.params.profileId,
+          field: readSlateCharacterProfileField(ctx.params.field),
+          value,
+          writerLocked: body.writerLocked === true,
+          mutationId: readString(body.mutationId, "mutationId"),
+        });
+        json(ctx.res, 200, { ok: true, result });
+      },
+    ),
+    route(
+      "PATCH",
+      "/api/slate/projects/:id/characters/:profileId/fields/:field/lock",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        if (typeof body.writerLocked !== "boolean") {
+          throw new Error("writerLocked must be a boolean.");
+        }
+        const result = setSlateCharacterProfileFieldLock(db, {
+          userId,
+          projectId: ctx.params.id,
+          profileId: ctx.params.profileId,
+          field: readSlateCharacterProfileField(ctx.params.field),
+          writerLocked: body.writerLocked,
+          mutationId: readString(body.mutationId, "mutationId"),
+        });
+        json(ctx.res, 200, { ok: true, result });
+      },
+    ),
+    route(
+      "PATCH",
+      "/api/slate/projects/:id/characters/:profileId/intended-arc",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        const result = updateSlateCharacterIntendedArc(db, {
+          userId,
+          projectId: ctx.params.id,
+          profileId: ctx.params.profileId,
+          mutationId: readString(body.mutationId, "mutationId"),
+          startState:
+            typeof body.startState === "string"
+              ? body.startState
+              : undefined,
+          destinationState:
+            typeof body.destinationState === "string"
+              ? body.destinationState
+              : undefined,
+          writerLocked:
+            typeof body.writerLocked === "boolean"
+              ? body.writerLocked
+              : undefined,
+          beats: Array.isArray(body.beats)
+            ? (body.beats as SlateWriterIntendedArcBeatInput[])
+            : undefined,
+        });
+        json(ctx.res, 200, { ok: true, result });
       },
     ),
     route("GET", "/api/slate/projects/:id/manuscript", async (ctx) => {
@@ -21050,6 +23782,7 @@ export function createPrismRequestHandler(
   req: IncomingMessage,
   res: ServerResponse<IncomingMessage>,
 ) => Promise<void> {
+  interruptUnfinishedSlateWritingOperations(options.db ?? db);
   return async (req, res) => {
     const previousDb = db;
     const previousConfig = config;

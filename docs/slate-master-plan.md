@@ -12,9 +12,16 @@ the source of truth for implementation status.
 
 - Continuity privately maintains saga-scale canon, chronology, knowledge,
   relationships, locations, objects, promises, and unresolved threads.
-- Continuity warns but never blocks. Human edits, locks, and approvals remain
-  authoritative.
-- The writer sees one contextual decision at a time, never a wiki or ribbon.
+- Direct writing, autosave, opening, and export never block on Continuity.
+  Before an AI composition call, a material high-confidence conflict may pause
+  that operation for one writer decision; soft concerns never interrupt.
+- The writer sees one contextual decision at a time. Cast, Arcs, Threads,
+  Timeline, and World are curated source-linked projections, never a raw ledger
+  or ribbon.
+- The manuscript remains visually primary inside a collapsible Story Map,
+  dominant canvas, one adaptive inspector, and one Director bar.
+- Mirror separates the writer's voice from their directions through immutable
+  account profile versions pinned and optionally adapted by each project.
 - Personas join only as invited subjective reviewers in a Review Circle.
 - Return sessions lead with a grounded synopsis and one next action.
 - Atmosphere begins as local story-reactive ambience; illustrations are later,
@@ -28,8 +35,9 @@ the source of truth for implementation status.
 ### Long-form manuscript
 
 - SQLite stores stable ordered act, chapter, scene, and imported-manuscript
-  sections. Each section owns prose, private direction, locks, status, content
-  hash, and optimistic revision number.
+  sections. Each section owns a versioned rich document with stable block IDs,
+  a deterministic prose projection, separate document/prose hashes, private
+  direction, locks, status, and optimistic revision number.
 - The focused section is the editing unit. Full-book reading is a separate,
   paginated or virtualized projection; it must not rebuild one giant editable
   document in the browser.
@@ -42,6 +50,9 @@ the source of truth for implementation status.
 - Existing monolithic projects receive an exact version checkpoint before
   migration. Split only at unambiguous headings; otherwise preserve every byte
   in one `Imported manuscript` section.
+- Existing plain-text sections lazily acquire rich-document records. Offset
+  anchors remain readable while new block-relative anchors make selections,
+  locks, and comments resilient to surrounding edits.
 - Stale autosaves, model results, and background jobs fail under compare-and-
   swap instead of overwriting newer human work. Multi-section changes are
   versioned and atomic.
@@ -58,6 +69,12 @@ the source of truth for implementation status.
 - Every derived record points to exact source evidence and records the
   Continuity capability version plus its schema, extraction, reconciliation,
   context, recap, and Atmosphere producer versions.
+- Every derived record belongs to a ledger generation. Active reads resolve
+  through the series generation; project generation fields remain compatibility
+  projections until migration is complete.
+- Character profiles expose writer-locked intent beside source-derived observed
+  state. Planned arc beats, AI interpretations, and accepted manuscript evidence
+  remain distinct.
 - A rebuildable semantic index may accelerate recall later, but SQLite IDs,
   hashes, ordering, provenance, and constraints remain sufficient for correct
   operation.
@@ -74,6 +91,31 @@ Processing order is fixed:
 5. Compile a bounded scene brief containing the focused section, adjacent
    structure, relevant cross-book canon, character knowledge, locks, voice,
    due threads, and current direction.
+6. Before prose generation, preflight the structured direction against hard
+   constraints. A conflict returns exactly three grounded choices plus one
+   writer-populated `Describe the vibe...` path, then resumes idempotently.
+
+### Composition orchestrator
+
+- One persisted writing operation composes structured direction, the bounded
+  Continuity brief, the project's pinned Mirror brief, and one momentum target.
+- Natural-language directions infer an editable Beat, Passage, or Scene scope.
+  Explicit length wins, followed by that scope and project rhythm; direction
+  verbosity never substitutes for prose style.
+- Drafts and revisions are proposals until accepted or deliberately incorporated
+  through human editing. Stop, Continue, and Redirect are explicit operation
+  transitions, and stale results never overwrite newer human work.
+- Character Studio projects source-linked character fields, observed arc beats,
+  and causal edges from accepted prose. Writer curation creates an explicit
+  writer-authority source; field locks and the intended arc never rewrite the
+  observed track.
+- Continuity records an append-only, tenant-scoped developer transcript of safe
+  operational provenance for each synthesized section: intent, brief,
+  preflight, clarification, generation, acceptance, extraction, concern, and
+  promotion summaries. It never records hidden chain-of-thought or secrets.
+- A focused History action exports the accepted prose and its ordered transcript
+  as `prism-slate-review-v1` JSON plus a human-readable Markdown rendering for
+  recursive `$slate-review` diagnosis.
 
 The baseline context budget is 8,192 tokens. Routine work stays usable with
 `llama3.2`; stronger models improve nuance and prose rather than unlock memory,
@@ -185,16 +227,19 @@ writer-selected mirror is secondary; mirror failure never prevents the local
 snapshot, and repeated failure is the only reason to interrupt the writer.
 Normal success appears as quiet `Protected · <time>` status.
 
-The versioned `prism-slate-project-v1` ZIP contains series/project metadata,
-structure and prose sections, locks and non-negotiables, version history,
-pending revisions, authoritative Continuity sources/canon/generation metadata,
-available Story/Review/visual provenance, a Markdown fallback, and per-file
-hashes. It excludes credentials, API keys, rejected generated assets, temporary
-jobs, caches, vector indexes, and every sibling book's prose or Continuity
-evidence. Cross-book entities referenced by the backed-up project may survive
-only as metadata-only identity stubs. Import rejects cross-project rows,
-previews first, and restores as a copy; replacement is a separately confirmed
-future operation protected by a snapshot.
+The versioned `prism-slate-project-v2` ZIP contains series/project metadata,
+authoritative rich section documents and their deterministic prose projections,
+block-relative annotations, locks and non-negotiables, version history,
+writing-operation and clarification state, safe developer provenance,
+authoritative Continuity sources/canon/generation metadata, a Markdown
+fallback, and per-file hashes. It excludes credentials, API keys, idempotency
+keys, rejected generated assets, temporary jobs, caches, vector indexes, raw
+provider internals, and every sibling book's prose or Continuity evidence.
+Cross-book entities referenced by the backed-up project may survive only as
+metadata-only identity stubs. Import continues to preview and restore V1
+archives through exact lazy migration, rejects cross-project rows, and restores
+as a copy; replacement is a separately confirmed future operation protected by
+a snapshot.
 
 Clean manuscript export supports selection, scene, chapter, act, or book in
 DOCX, Markdown, and text. Output is deterministic prose with title, structural
@@ -213,6 +258,10 @@ canon correction/deletion, producer versions and rollback, recovery cadence and
 corruption fallback, archive traversal/future-version/no-secret checks,
 restore-as-copy, deterministic valid exports, one-card return sessions, shared
 navbar/theme behavior, tutorials, and wildcard/draft/revision/reopen flows.
+The product acceptance artifact is a complete AI-authored short story created
+through persisted Slate operations, with at least one grounded Continuity
+clarification, one custom-vibe direction, a visible arc update, a paid-off
+thread, and a section-scoped Slate Review export.
 
 Compact multi-book fixtures run in normal CI. A separate target-scale evaluation
 must exercise roughly seven books and two million words, large casts, recurring

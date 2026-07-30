@@ -519,6 +519,7 @@ export type SlateContinuitySourceKind =
   | "import"
   | "story_snapshot"
   | "rehearsal_discovery"
+  | "source_shelf"
   | "review_direction";
 export type SlateContinuityAuthority = "human" | "ai" | "procedural";
 export type SlateContinuityEpistemicStatus =

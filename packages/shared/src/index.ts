@@ -1053,6 +1053,13 @@ export {
   type SlateVersionSummary,
 } from "./slate.js";
 
+export * from "./slateComposition.js";
+export * from "./slateCreativeStudios.js";
+export * from "./slateDocument.js";
+export * from "./slateMirror.js";
+export * from "./slateReviewExport.js";
+export * from "./slateStoryBible.js";
+
 export {
   ACCENT_LUMINANCE_MAX_LIGHT,
   ACCENT_LUMINANCE_MAX_LIGHT_YELLOW,

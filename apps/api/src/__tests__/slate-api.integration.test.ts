@@ -916,7 +916,7 @@ describe("Slate API", () => {
       "application/vnd.prism.slate+zip",
     );
     assert.match(downloaded.headers.get("content-disposition") ?? "", /\.slate"$/u);
-    assert.equal(downloaded.headers.get("x-prism-slate-version"), "1");
+    assert.equal(downloaded.headers.get("x-prism-slate-version"), "2");
     const archive = new Uint8Array(await downloaded.arrayBuffer());
     assert.equal(Buffer.from(archive.subarray(0, 4)).toString("hex"), "504b0304");
     const projectsBeforePreview = db.prepare("SELECT COUNT(*) AS count FROM slate_projects")

@@ -4,6 +4,7 @@ export type ImageOrigin =
   | "sandbox_chat"
   | "botcast"
   | "slate_cover"
+  | "slate_visual_bible"
   | "bot_group_room"
   | "bot_group_room_import"
   | "hub_atmosphere"

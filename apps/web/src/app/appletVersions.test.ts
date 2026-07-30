@@ -70,7 +70,7 @@ describe("applet version helpers", () => {
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.29");
     assert.equal(PRISM_APPLETS.story.status, "planned");
-    assert.equal(PRISM_APPLETS.slate.version, "0.7");
+    assert.equal(PRISM_APPLETS.slate.version, "0.8");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
     assert.equal(prismAppletVersionLabel("chat"), "v1.35");
     assert.equal(prismAppletVersionLabel("zen"), "v1.33");
@@ -78,7 +78,7 @@ describe("applet version helpers", () => {
     assert.equal(prismAppletVersionLabel("debate"), "v0.2");
     assert.equal(prismAppletVersionLabel("botcast"), "v1.40");
     assert.equal(prismAppletVersionLabel("story"), "v0.29");
-    assert.equal(prismAppletVersionLabel("slate"), "v0.7");
+    assert.equal(prismAppletVersionLabel("slate"), "v0.8");
   });
 
   it("declares holder-scoped bot-naming support for every applet", () => {

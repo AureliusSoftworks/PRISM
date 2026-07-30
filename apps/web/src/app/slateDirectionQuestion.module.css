@@ -1,0 +1,193 @@
+.card {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  margin: 18px 0;
+  padding: clamp(16px, 2.5vw, 24px);
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--slate-m) 34%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--slate-m) 10%, transparent), transparent 46%),
+    color-mix(in srgb, var(--bg-surface, #151311) 96%, var(--bg));
+}
+
+.card[data-kind="continuity"] {
+  border-color: color-mix(in srgb, var(--slate-r) 42%, var(--line));
+  background:
+    radial-gradient(circle at 100% 0, color-mix(in srgb, var(--slate-r) 10%, transparent), transparent 46%),
+    color-mix(in srgb, var(--bg-surface, #151311) 96%, var(--bg));
+}
+
+.card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--slate-p),
+    var(--slate-r),
+    var(--slate-i),
+    var(--slate-s),
+    var(--slate-m)
+  );
+  content: "";
+  opacity: 0.72;
+}
+
+.card header {
+  display: grid;
+  gap: 5px;
+}
+
+.card header > span {
+  color: color-mix(in srgb, var(--slate-s) 68%, var(--fg));
+  font-size: 0.58rem;
+  font-weight: 780;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.card[data-kind="continuity"] header > span {
+  color: color-mix(in srgb, var(--slate-r) 72%, var(--fg));
+}
+
+.card h2,
+.card p {
+  margin: 0;
+}
+
+.card h2 {
+  font: 500 1.12rem/1.24 Georgia, "Times New Roman", serif;
+}
+
+.card p {
+  max-width: 760px;
+  color: var(--fg-muted, #938b82);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+.choices {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.choices > button {
+  min-width: 0;
+  min-height: 112px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-content: start;
+  gap: 4px 7px;
+  border: 1px solid var(--line, #25211e);
+  border-radius: 10px;
+  color: var(--fg, #edf3f8);
+  background: color-mix(in srgb, var(--bg, #0b0a09) 82%, transparent);
+  padding: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.choices > button:hover {
+  border-color: color-mix(in srgb, var(--slate-s) 38%, var(--line));
+  background: color-mix(in srgb, var(--slate-s) 6%, var(--bg));
+}
+
+.choices > button > span {
+  grid-row: 1 / 3;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--fg-subtle, #625b53);
+  background: var(--bg-hover, #211e1b);
+  font-size: 0.57rem;
+}
+
+.choices strong {
+  align-self: center;
+  font: 600 0.74rem/1.25 Georgia, "Times New Roman", serif;
+}
+
+.choices small {
+  grid-column: 2;
+  color: var(--fg-subtle, #625b53);
+  font-size: 0.61rem;
+  line-height: 1.42;
+}
+
+.choices .vibeChoice {
+  border-style: dashed;
+}
+
+.vibeForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.vibeForm label {
+  display: grid;
+  gap: 5px;
+}
+
+.vibeForm label > span {
+  color: var(--fg-subtle, #625b53);
+  font-size: 0.57rem;
+  font-weight: 740;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.vibeForm textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  border: 1px solid var(--line-strong, #342f2a);
+  border-radius: 9px;
+  color: var(--fg, #edf3f8);
+  background: var(--bg, #0b0a09);
+  padding: 9px 10px;
+  outline: none;
+  line-height: 1.45;
+}
+
+.vibeForm button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 9px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--slate-m), #486ee8);
+  padding: 9px 13px;
+  font-size: 0.69rem;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.dismiss {
+  justify-self: center;
+  border: 0;
+  color: var(--fg-subtle, #625b53);
+  background: transparent;
+  padding: 3px 7px;
+  font-size: 0.64rem;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .choices {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .choices,
+  .vibeForm {
+    grid-template-columns: 1fr;
+  }
+}

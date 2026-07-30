@@ -46,18 +46,21 @@ export class SlateContinuityCurrentCanonResolver {
   private readonly latestDescendantStatement: ReturnType<DatabaseSync["prepare"]>;
   private readonly userId: string;
   private readonly seriesId: string;
+  private readonly generation: number;
 
   constructor(
     db: DatabaseSync,
     userId: string,
     seriesId: string,
+    generation: number,
   ) {
     this.userId = userId;
     this.seriesId = seriesId;
+    this.generation = generation;
     this.sourceStatement = db.prepare(
       `SELECT id, section_id, source_revision, content
          FROM slate_continuity_sources
-        WHERE id = ? AND user_id = ? AND series_id = ?`,
+        WHERE id = ? AND user_id = ? AND series_id = ? AND generation = ?`,
     );
     this.latestDescendantStatement = db.prepare(
       `WITH RECURSIVE descendants(
@@ -65,7 +68,7 @@ export class SlateContinuityCurrentCanonResolver {
        ) AS (
          SELECT id, section_id, source_revision, content, created_at
            FROM slate_continuity_sources
-          WHERE id = ? AND user_id = ? AND series_id = ?
+          WHERE id = ? AND user_id = ? AND series_id = ? AND generation = ?
          UNION
          SELECT newer.id, newer.section_id, newer.source_revision,
                 newer.content, newer.created_at
@@ -73,6 +76,7 @@ export class SlateContinuityCurrentCanonResolver {
            JOIN descendants AS prior
              ON newer.supersedes_source_id = prior.id
           WHERE newer.user_id = ? AND newer.series_id = ?
+            AND newer.generation = ?
        )
        SELECT id, section_id, source_revision, content
          FROM descendants
@@ -185,6 +189,7 @@ export class SlateContinuityCurrentCanonResolver {
       sourceId,
       this.userId,
       this.seriesId,
+      this.generation,
     ) as SourceEvidenceRow | undefined;
     const resolved = row ?? null;
     this.sourceById.set(sourceId, resolved);
@@ -199,8 +204,10 @@ export class SlateContinuityCurrentCanonResolver {
       sourceId,
       this.userId,
       this.seriesId,
+      this.generation,
       this.userId,
       this.seriesId,
+      this.generation,
     ) as SourceEvidenceRow | undefined;
     const resolved = row ?? null;
     this.latestSourceBySource.set(sourceId, resolved);

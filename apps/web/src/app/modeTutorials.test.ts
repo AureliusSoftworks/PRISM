@@ -295,114 +295,41 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(headings, [
       "Begin with pages or a spark",
-      "Shape before drafting",
-      "Choose the prose engine",
-      "Direct the structure",
-      "Let Slate carry the draft",
-      "Keep your hands on the prose",
+      "Find the scene in Story Map",
+      "Write in the manuscript",
+      "Direct one move",
+      "Keep one Inspector in view",
+      "Open tools only when needed",
       "Talk beside the document",
-      "Think in two hemispheres",
-      "Approve revisions deliberately",
     ]);
     assert.deepEqual(selectors, [
       '[data-tutorial-target="slate-create-project"]',
-      '[data-tutorial-target="slate-shape"]',
-      '[data-tutorial-target="slate-ai-controls"]',
       '[data-tutorial-target="slate-structure"]',
-      '[data-tutorial-target="slate-draft"]',
       '[data-tutorial-target="slate-manuscript"]',
+      '[data-tutorial-target="slate-direction"]',
+      '[data-tutorial-target="slate-inspector"]',
+      '[data-tutorial-target="slate-project-tools"]',
       '[data-tutorial-target="prism-companion"]',
-      '[data-tutorial-target="slate-deliberation"]',
-      '[data-tutorial-target="slate-revision"]',
     ]);
-    assert.match(
-      MODE_TUTORIALS.slate.steps[6]?.body ?? "",
-      /Voice on[\s\S]*pace of its voice[\s\S]*mute the widget/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[6]?.body ?? "",
-      /Type \/ for Prompt Center prompts and ! for wildcard decks in the companion composer/u,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /\{wildcards\}/i);
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /creative spark or pages/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /replaces the spark controls/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /prose model to generate/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /visible title checkpoint/i,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /never renames/i);
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /waits for your confirmation or another try/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /privacy-matched book cover/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /regenerate either title or cover/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[0]?.body ?? "",
-      /project shelf becomes home/i,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps[0]?.body ?? "", /story-so-far/i);
-    assert.match(
-      MODE_TUTORIALS.slate.steps[2]?.body ?? "",
-      /OFFLINE, AUTO, or ONLINE/,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps[7]?.body ?? "", /Lux and Umbra/u);
-    assert.match(MODE_TUTORIALS.slate.steps[7]?.body ?? "", /Slate Settings/u);
-    assert.match(
-      MODE_TUTORIALS.slate.steps[7]?.body ?? "",
-      /own allowed model and creative lens/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[7]?.body ?? "",
-      /stop at any point/u,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps[7]?.body ?? "",
-      /never edits prose/u,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps[2]?.body ?? "", /receipt/i);
-    assert.match(
-      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
-      /never edits prose/i,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "", /last three/i);
-    assert.match(
-      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
-      /newest two messages remain readable/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
-      /app softens behind the open panel/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
-      /glides to a stop/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps.at(-3)?.body ?? "",
-      /not remembered history/i,
-    );
-    assert.match(
-      MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "",
-      /accept or reject/i,
-    );
-    assert.match(MODE_TUTORIALS.slate.steps.at(-1)?.body ?? "", /Continuity/i);
+    const copy = MODE_TUTORIALS.slate.steps
+      .map((step) => step.body)
+      .join(" ");
+    assert.match(copy, /\{wildcards\}/u);
+    assert.match(copy, /Mirror setup is never required/u);
+    assert.match(copy, /acts, chapters, and scenes as a hierarchy/u);
+    assert.match(copy, /TipTap section canvas/u);
+    assert.match(copy, /Human prose autosaves without waiting for AI/u);
+    assert.match(copy, /Beat, Passage, or Scene/u);
+    assert.match(copy, /three canon-grounded paths plus Describe the vibe/u);
+    assert.match(copy, /exactly three concrete choices plus Describe the vibe/u);
+    assert.match(copy, /direct writing never blocks/u);
+    assert.match(copy, /writer-approved canon/u);
+    assert.match(copy, /lock it against inference/u);
+    assert.match(copy, /Observed track remains accepted-prose evidence/u);
+    assert.match(copy, /OFFLINE, AUTO, and ONLINE/u);
+    assert.match(copy, /Slate Review export/u);
+    assert.match(copy, /never hidden reasoning/u);
+    assert.match(copy, /it never edits the document/u);
   });
 
   it("teaches Zen navigation as relationship-specific Homes", () => {
@@ -658,7 +585,7 @@ describe("mode tutorials", () => {
     );
     assert.equal(
       modeTutorialStep("slate", 99).heading,
-      "Approve revisions deliberately",
+      "Talk beside the document",
     );
   });
 

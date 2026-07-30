@@ -274,6 +274,46 @@ describe("Slate workspace state", () => {
     assert.equal(merged.proseLength, 16);
   });
 
+  it("treats rich-document formatting as autosave state without changing prose", () => {
+    const base = {
+      id: "section",
+      prose: "A quiet line.",
+      lockedRanges: [],
+      document: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "block-1" },
+            content: [{ type: "text", text: "A quiet line." }],
+          },
+        ],
+      },
+    };
+    const emphasized = {
+      ...base,
+      document: {
+        ...base.document,
+        content: [
+          {
+            ...base.document.content[0],
+            content: [
+              {
+                type: "text",
+                text: "A quiet line.",
+                marks: [{ type: "italic" }],
+              },
+            ],
+          },
+        ],
+      },
+    };
+    assert.notEqual(
+      slateSectionEditableFingerprint(base),
+      slateSectionEditableFingerprint(emphasized),
+    );
+  });
+
   it("translates focused-section selections to legacy manuscript offsets", () => {
     const section = (id: string, prose: string): SlateSectionDetail => ({
       id,

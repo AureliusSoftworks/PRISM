@@ -162,10 +162,10 @@ describe("Slate .slate ZIP transport", () => {
       manifest.contentOffset,
       manifest.contentOffset + manifest.contentLength,
     );
-    const versionMarker = new TextEncoder().encode('"version":1');
+    const versionMarker = new TextEncoder().encode('"version":2');
     const markerOffset = Buffer.from(content).indexOf(versionMarker);
     assert.ok(markerOffset >= 0, "Expected manifest version marker.");
-    content[markerOffset + versionMarker.byteLength - 1] = "2".charCodeAt(0);
+    content[markerOffset + versionMarker.byteLength - 1] = "3".charCodeAt(0);
     const checksum = slateArchiveCrc32(content);
     writeUint32(archive, manifest.localOffset + 14, checksum);
     writeUint32(archive, manifest.centralOffset + 16, checksum);
