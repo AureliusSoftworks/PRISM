@@ -4,6 +4,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-07-31 · [UX]
+**Trigger**: Request to enable sentence-case by default in the Composer on desktop.
+**Lesson**: HTML `autocapitalize="sentences"` is ignored on desktop Electron. Live TipTap/textarea insertion must capitalize via `applyComposerSentenceCaseInsertion`, and send-time `applyComposerSendAutoCorrect` should also sentence-case safely (skip `@/#/!/?/` tokens and `example.com`-style periods). Coffee/Signal keep spellcheck off but can still enable sentence capitalization when the account writing-assist setting is on.
+**Applies to**: ComposerInput, DesktopMarkdownComposer, composerSentenceCase, composerSendAutoCorrect
+
 ### 2026-07-30 · [UX]
 **Trigger**: Wanted Default Prism back as the Coffee replay player body without undoing pot-only live Coffee.
 **Lesson**: Restore the replay-only `coffeeReplayPlayerSeat` (Prism mannequin + nameplate pot dock) under `coffeeReplayActive && playerPresent`. Keep participant id `coffee-player` for audio-master direction; flip manifest to `third-person-prism` / `visible: true`. Do not revive barista, player mug, or live on-camera player.

@@ -13,6 +13,8 @@
  * and backtick code spans are left verbatim.
  */
 
+import { applyComposerSentenceCaseToDraft } from "./composerSentenceCase.ts";
+
 const COMPOSER_SEND_AUTOCORRECT_WORDS: ReadonlyMap<string, string> = new Map([
   ["teh", "the"],
   ["hte", "the"],
@@ -90,16 +92,19 @@ function correctSegment(segment: string): string {
 
 /**
  * Apply the conservative typo/capitalization pass to outgoing composer text.
- * Backtick code spans are preserved verbatim.
+ * Backtick code spans are preserved verbatim. Sentence starts are capitalized
+ * so desktop composers (which ignore HTML autocapitalize) still ship clean prose.
  */
 export function applyComposerSendAutoCorrect(text: string): string {
   if (text.length === 0) return text;
-  if (!text.includes("`")) return correctSegment(text);
-  return text
-    .split("`")
-    .map((segment, index) =>
-      // Odd-indexed segments live inside backtick pairs; leave them alone.
-      index % 2 === 0 ? correctSegment(segment) : segment,
-    )
-    .join("`");
+  const typoFixed = !text.includes("`")
+    ? correctSegment(text)
+    : text
+        .split("`")
+        .map((segment, index) =>
+          // Odd-indexed segments live inside backtick pairs; leave them alone.
+          index % 2 === 0 ? correctSegment(segment) : segment,
+        )
+        .join("`");
+  return applyComposerSentenceCaseToDraft(typoFixed);
 }

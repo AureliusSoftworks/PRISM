@@ -66107,6 +66107,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border-radius: 50%;
   clip-path: circle(50% at 50% 50%);
   pointer-events: none;
+  color: var(--bot-face-frame-led-resolved-color);
   /* Color the LED/flask mask with the bot accent so Zen/Chat match Avatar
      Studio and Debate, instead of leaving the white PNG un-tinted. */
   background: var(--bot-face-frame-led-resolved-color);
@@ -66132,6 +66133,18 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     var(--coffee-seat-mood-frame-raster-opacity, 1)
   );
   transition: opacity 280ms ease;
+}
+
+/* Keep identity color in WebKit's normal image paint tree. The authored alpha
+   rasters arrive pre-colored, so the fixed live plate no longer depends on mask
+   compositing (which WebKit could drop while Avatar Studio stayed fine). */
+.botFaceFrameIdentityRaster {
+  background-color: transparent;
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
 .botFaceFrameMetalLight {

@@ -7,7 +7,7 @@ describe("composer send-time autocorrect", () => {
   it("fixes unambiguous typos and contractions", () => {
     assert.equal(
       applyComposerSendAutoCorrect("teh bots dont beleive me"),
-      "the bots don't believe me",
+      "The bots don't believe me",
     );
     assert.equal(
       applyComposerSendAutoCorrect("i think im right becuase of taht"),
@@ -15,7 +15,14 @@ describe("composer send-time autocorrect", () => {
     );
     assert.equal(
       applyComposerSendAutoCorrect("alot of noise"),
-      "a lot of noise",
+      "A lot of noise",
+    );
+  });
+
+  it("sentence-cases draft starts while preserving typo fixes", () => {
+    assert.equal(
+      applyComposerSendAutoCorrect("hello there. what now?"),
+      "Hello there. What now?",
     );
   });
 
@@ -31,7 +38,7 @@ describe("composer send-time autocorrect", () => {
     assert.equal(applyComposerSendAutoCorrect("#im tag"), "#im tag");
     assert.equal(
       applyComposerSendAutoCorrect("see example.com/im now"),
-      "see example.com/im now",
+      "See example.com/im now",
     );
     assert.equal(
       applyComposerSendAutoCorrect("/clear teh line"),
@@ -42,7 +49,7 @@ describe("composer send-time autocorrect", () => {
   it("leaves backtick code spans verbatim", () => {
     assert.equal(
       applyComposerSendAutoCorrect("run `im teh var` becuase i said so"),
-      "run `im teh var` because I said so",
+      "Run `im teh var` because I said so",
     );
   });
 
@@ -60,8 +67,8 @@ describe("composer send-time autocorrect", () => {
   });
 
   it("does not touch real words that merely contain typo keys", () => {
-    assert.equal(applyComposerSendAutoCorrect("impressive"), "impressive");
-    assert.equal(applyComposerSendAutoCorrect("island"), "island");
-    assert.equal(applyComposerSendAutoCorrect("wonton"), "wonton");
+    assert.equal(applyComposerSendAutoCorrect("impressive"), "Impressive");
+    assert.equal(applyComposerSendAutoCorrect("island"), "Island");
+    assert.equal(applyComposerSendAutoCorrect("wonton"), "Wonton");
   });
 });

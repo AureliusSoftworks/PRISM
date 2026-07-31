@@ -323,7 +323,41 @@ function changedFaceArchiveFields(bot, sourceValues) {
   return fields;
 }
 
-function heardLibraryVoiceProfile(row) {
+function portableAvatarSfx(avatarSfx) {
+  if (!avatarSfx || typeof avatarSfx !== "object") return undefined;
+  const next = { ...avatarSfx };
+  // Keep play flags / volume / source metadata, but do not ship multi-MB
+  // personal thinking-loop blobs into Marketplace bundles.
+  if ("audioDataUrl" in next) delete next.audioDataUrl;
+  return next;
+}
+
+function publicElevenLabsDirectionOk(value) {
+  const parts = String(value || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return (
+    parts.length >= 2 &&
+    parts.length <= 3 &&
+    parts.every((part) => part.length > 0 && part.length <= 48)
+  );
+}
+
+function resolvePublicElevenLabsDirection(heard, market, authored) {
+  if (publicElevenLabsDirectionOk(heard?.elevenLabsDirection)) {
+    return heard.elevenLabsDirection;
+  }
+  if (publicElevenLabsDirectionOk(market?.elevenLabsDirection)) {
+    return market.elevenLabsDirection;
+  }
+  if (publicElevenLabsDirectionOk(authored?.elevenLabsDirection)) {
+    return authored.elevenLabsDirection;
+  }
+  return "natural, conversational";
+}
+
+function heardLibraryVoiceProfile(row, marketAuthored, botName) {
   let authored = null;
   let override = null;
   try {
@@ -342,7 +376,14 @@ function heardLibraryVoiceProfile(row) {
   }
   const source = override ?? authored;
   const heard = normalizeBotAudioVoiceProfileV1(source);
+  const authoredNormalized = normalizeBotAudioVoiceProfileV1(authored);
+  const marketNormalized = normalizeBotAudioVoiceProfileV1(marketAuthored);
   const elId = resolveElevenLabsVoiceId(heard);
+  const strippedSfx = portableAvatarSfx(heard.avatarSfx);
+  // Public Marketplace catalog pins chorus (resonance only for Vader names).
+  const catalogEffect = /^(?:darth\s+)?vader$/iu.test(String(botName || ""))
+    ? "resonance"
+    : "chorus";
   const portable = normalizeBotAudioVoiceProfileV1({
     ...heard,
     elevenLabsVoiceId: null,
@@ -350,6 +391,14 @@ function heardLibraryVoiceProfile(row) {
     elevenLabsVoiceInitialized: elId
       ? true
       : heard.elevenLabsVoiceInitialized,
+    elevenLabsDirection: resolvePublicElevenLabsDirection(
+      heard,
+      marketNormalized,
+      authoredNormalized,
+    ),
+    elevenLabsEffect: catalogEffect,
+    voiceEffectExplicit: true,
+    ...(strippedSfx ? { avatarSfx: strippedSfx } : { avatarSfx: undefined }),
   });
   return {
     fromOverride: Boolean(override),
@@ -464,7 +513,11 @@ for (const entry of manifest.bots) {
     field.startsWith("faceThinking"),
   );
 
-  const voiceInfo = heardLibraryVoiceProfile(row);
+  const voiceInfo = heardLibraryVoiceProfile(
+    row,
+    bot.authoredAudioVoiceProfile,
+    entry.name,
+  );
   let resolvedVoice = null;
   if (voiceInfo.elId) {
     resolvedVoice = catalogById.get(voiceInfo.elId) ?? null;

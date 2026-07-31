@@ -1457,6 +1457,7 @@ import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { parseCoffeeDevCommand } from "./coffeeDevCommand";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
+import { applyComposerSentenceCaseInsertion } from "./composerSentenceCase";
 import {
   composerShortcutInsertionText,
   normalizeComposerShortcutQuery,
@@ -18188,10 +18189,109 @@ function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
   }
 }
 
+type BotFaceFrameIdentityRasterKind = "tint" | "led";
+
+const BOT_FACE_FRAME_IDENTITY_RASTER_ASSET: Record<
+  BotFaceFrameIdentityRasterKind,
+  string
+> = {
+  tint: "/bot-frame/bot-frame-tint-mask.png?v=1000",
+  led: "/bot-frame/bot-frame-led.png?v=1000",
+};
+
+const botFaceFrameIdentityRasterCache = new Map<string, string>();
+
+function useBotFaceFrameIdentityRaster(
+  kind: BotFaceFrameIdentityRasterKind,
+  identityColor: string | null,
+): string | null {
+  const cacheKey = identityColor ? `${kind}:${identityColor}` : null;
+  const [renderedRaster, setRenderedRaster] = useState<{
+    key: string;
+    dataUrl: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!cacheKey || !identityColor) return;
+    let cancelled = false;
+    const cached = botFaceFrameIdentityRasterCache.get(cacheKey);
+    if (cached) {
+      window.queueMicrotask(() => {
+        if (!cancelled) setRenderedRaster({ key: cacheKey, dataUrl: cached });
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      if (cancelled) return;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      context.drawImage(image, 0, 0);
+      context.globalCompositeOperation = "source-in";
+      context.fillStyle = identityColor;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/png");
+      botFaceFrameIdentityRasterCache.set(cacheKey, dataUrl);
+      if (!cancelled) setRenderedRaster({ key: cacheKey, dataUrl });
+    };
+    image.src = BOT_FACE_FRAME_IDENTITY_RASTER_ASSET[kind];
+    return () => {
+      cancelled = true;
+      image.onload = null;
+    };
+  }, [cacheKey, identityColor, kind]);
+
+  return renderedRaster?.key === cacheKey ? renderedRaster.dataUrl : null;
+}
+
+/**
+ * Pre-color persona alpha rasters once, then display them as ordinary images.
+ * WebKit intermittently drops mask composition below a fixed Zen plate even
+ * though Avatar Studio renders it, while a normal RGBA background is stable.
+ */
+function BotFaceFrameIdentityRaster({
+  kind,
+  identityColor,
+}: {
+  kind: BotFaceFrameIdentityRasterKind;
+  identityColor: string | null;
+}): React.JSX.Element {
+  const layerClassName =
+    kind === "tint" ? styles.botFaceFrameTint : styles.botFaceFrameLed;
+  const renderedRaster = useBotFaceFrameIdentityRaster(kind, identityColor);
+  const identityRasterStyle = renderedRaster
+    ? ({ backgroundImage: `url("${renderedRaster}")` } as CSSProperties)
+    : undefined;
+
+  return (
+    <span
+      className={
+        identityColor
+          ? `${layerClassName} ${styles.botFaceFrameIdentityRaster}`
+          : layerClassName
+      }
+      data-frame-identity-raster={kind}
+      data-frame-identity-raster-ready={renderedRaster ? "true" : undefined}
+      data-frame-material-layer={kind === "led" ? "led" : undefined}
+      style={identityRasterStyle}
+      aria-hidden="true"
+    />
+  );
+}
+
 function BotFaceFrame({
   metalMaterialStyle,
+  identityColor = null,
 }: {
   metalMaterialStyle?: CSSProperties;
+  identityColor?: string | null;
 } = {}): React.JSX.Element {
   return (
     <>
@@ -18201,7 +18301,10 @@ function BotFaceFrame({
         style={metalMaterialStyle}
         aria-hidden="true"
       >
-        <span className={styles.botFaceFrameTint} />
+        <BotFaceFrameIdentityRaster
+          kind="tint"
+          identityColor={identityColor}
+        />
         <span
           className={styles.botFaceFrameWearLayer}
           data-frame-material-layer="wear"
@@ -18226,10 +18329,9 @@ function BotFaceFrame({
         data-frame-material-layer="paint"
         aria-hidden="true"
       />
-      <span
-        className={styles.botFaceFrameLed}
-        data-frame-material-layer="led"
-        aria-hidden="true"
+      <BotFaceFrameIdentityRaster
+        kind="led"
+        identityColor={identityColor}
       />
     </>
   );
@@ -27299,6 +27401,12 @@ interface ComposerInputProps {
   value: string;
   placeholder: string;
   writingAssistEnabled: boolean;
+  /**
+   * Capitalize sentence starts while typing. Defaults to writingAssistEnabled.
+   * Coffee/Signal keep spellcheck off but can still enable this when the
+   * account writing-assist setting is on.
+   */
+  sentenceCapitalizeEnabled?: boolean;
   generatingRandomPrompt?: boolean;
   submitDisabled: boolean;
   submitLabel: React.ReactNode;
@@ -29407,6 +29515,7 @@ interface ZenLiveBotMannequinProps {
   frameMaterialSeed?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   avatarDetailsColor?: string | null;
+  frameIdentityColor?: string | null;
   inkOffsetY?: string;
   detailLevel?: "full" | "reduced" | "audience" | "debate";
   eyeAttentionState?: import("./botFaceEyeMovement").BotFaceAttentionState;
@@ -29497,6 +29606,7 @@ function ZenLiveBotMannequin({
   frameMaterialSeed,
   avatarDetails = null,
   avatarDetailsColor = null,
+  frameIdentityColor = null,
   inkOffsetY,
   detailLevel = "full",
   eyeAttentionState = showThinkingSpinner
@@ -29592,6 +29702,7 @@ function ZenLiveBotMannequin({
   const frameMetalMaterialStyle = botFrameMetalMaterialStyle(
     frameMaterialSeed ?? `fallback:${scheduleKey}`,
   );
+  const resolvedFrameIdentityColor = frameIdentityColor ?? avatarDetailsColor;
   const [avatarDetailsBlinkState, setAvatarDetailsBlinkState] = useState<{
     key: string;
     phase: "open" | "closed";
@@ -29665,12 +29776,14 @@ function ZenLiveBotMannequin({
             style={frameMetalMaterialStyle}
             aria-hidden="true"
           >
-            <span className={styles.botFaceFrameTint} />
+            <BotFaceFrameIdentityRaster
+              kind="tint"
+              identityColor={resolvedFrameIdentityColor}
+            />
           </span>
-          <span
-            className={styles.botFaceFrameLed}
-            data-frame-material-layer="led"
-            aria-hidden="true"
+          <BotFaceFrameIdentityRaster
+            kind="led"
+            identityColor={resolvedFrameIdentityColor}
           />
         </span>
         <span
@@ -29804,7 +29917,10 @@ function ZenLiveBotMannequin({
           data-zen-live-bot-body-hit-target="true"
           aria-hidden="true"
         />
-        <BotFaceFrame metalMaterialStyle={frameMetalMaterialStyle} />
+        <BotFaceFrame
+          metalMaterialStyle={frameMetalMaterialStyle}
+          identityColor={resolvedFrameIdentityColor}
+        />
       </span>
       <span
         className={styles.zenLiveBotPresenceFaceEmissionMask}
@@ -30909,6 +31025,16 @@ function ZenLiveBotPresencePlate({
           frameMaterialSeed={frameMaterialSeed}
           avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
           inkOffsetY={ZEN_LIVE_BOT_FACE_INK_OFFSET_Y}
+          frameIdentityColor={
+            bot
+              ? privateModeActive
+                ? "#e8eee8"
+                : normalizeAccentForTheme(
+                    bot.color ?? PRISM_DEFAULT_ACCENT,
+                    resolvedTheme,
+                  )
+              : null
+          }
           avatarDetailsColor={
             bot
               ? normalizeAccentForTheme(
@@ -32119,6 +32245,7 @@ interface DesktopMarkdownComposerProps {
   value: string;
   placeholder: string;
   writingAssistEnabled: boolean;
+  sentenceCapitalizeEnabled?: boolean;
   onValueChange: (value: string) => void;
   onInputActivity?: () => void;
   onFocus: () => void;
@@ -32172,6 +32299,7 @@ const DesktopMarkdownComposer = forwardRef<
     value,
     placeholder,
     writingAssistEnabled,
+    sentenceCapitalizeEnabled = writingAssistEnabled,
     onValueChange,
     onInputActivity,
     onFocus,
@@ -32206,6 +32334,7 @@ const DesktopMarkdownComposer = forwardRef<
   const onInputActivityRef = useRef(onInputActivity);
   const onFocusRef = useRef(onFocus);
   const writingAssistEnabledRef = useRef(writingAssistEnabled);
+  const sentenceCapitalizeEnabledRef = useRef(sentenceCapitalizeEnabled);
   // TipTap recreates the editor when useEditor deps change by identity. Parent
   // helpers like resolveShortcutPickToText are often inline and would remount
   // the rich surface (and steal focus) on every draft sync — keep them in refs.
@@ -32277,6 +32406,7 @@ const DesktopMarkdownComposer = forwardRef<
   }, [wildcardPicks]);
   useLayoutEffect(() => {
     writingAssistEnabledRef.current = writingAssistEnabled;
+    sentenceCapitalizeEnabledRef.current = sentenceCapitalizeEnabled;
     const ed = editorRef.current;
     if (!ed || ed.isDestroyed) return;
     try {
@@ -32286,7 +32416,7 @@ const DesktopMarkdownComposer = forwardRef<
     } catch {
       // The editor can be mid-teardown while settings are changing.
     }
-  }, [writingAssistEnabled]);
+  }, [writingAssistEnabled, sentenceCapitalizeEnabled]);
   useLayoutEffect(() => {
     mentionUiRef.current = mentionUi;
   }, [mentionUi]);
@@ -32774,7 +32904,7 @@ const DesktopMarkdownComposer = forwardRef<
           class: styles.markdownTiptapContent,
           spellcheck: writingAssistEnabled ? "true" : "false",
           autocorrect: writingAssistEnabled ? "on" : "off",
-          autocapitalize: writingAssistEnabled ? "sentences" : "none",
+          autocapitalize: sentenceCapitalizeEnabled ? "sentences" : "none",
           enterkeyhint: "send",
           lang: "en",
           role: "textbox",
@@ -32823,6 +32953,26 @@ const DesktopMarkdownComposer = forwardRef<
             )
           ) {
             return true;
+          }
+          if (
+            sentenceCapitalizeEnabledRef.current &&
+            text.length > 0
+          ) {
+            const $from = view.state.doc.resolve(from);
+            const beforeInBlock = $from.parent.textBetween(
+              0,
+              $from.parentOffset,
+              "\n",
+              "\n",
+            );
+            const cased = applyComposerSentenceCaseInsertion(
+              beforeInBlock,
+              text,
+            );
+            if (cased !== text) {
+              view.dispatch(view.state.tr.insertText(cased, from, to));
+              return true;
+            }
           }
           return false;
         },
@@ -33441,10 +33591,10 @@ const DesktopMarkdownComposer = forwardRef<
     root.setAttribute("autocorrect", writingAssistEnabled ? "on" : "off");
     root.setAttribute(
       "autocapitalize",
-      writingAssistEnabled ? "sentences" : "none",
+      sentenceCapitalizeEnabled ? "sentences" : "none",
     );
     root.setAttribute("data-placeholder", placeholder);
-  }, [editor, placeholder, writingAssistEnabled]);
+  }, [editor, placeholder, writingAssistEnabled, sentenceCapitalizeEnabled]);
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return;
@@ -33702,6 +33852,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
       value,
       placeholder,
       writingAssistEnabled,
+      sentenceCapitalizeEnabled = writingAssistEnabled,
       generatingRandomPrompt = false,
       submitDisabled,
       submitLabel,
@@ -34778,7 +34929,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                 aria-label="Action"
                 spellCheck={writingAssistEnabled}
                 autoCorrect={writingAssistEnabled ? "on" : "off"}
-                autoCapitalize={writingAssistEnabled ? "sentences" : "none"}
+                autoCapitalize={
+                  sentenceCapitalizeEnabled ? "sentences" : "none"
+                }
                 data-composer-action-input="true"
                 onChange={(event) => {
                   const normalizedAction = normalizeComposerAction(
@@ -34820,6 +34973,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
             value={visibleValue}
             placeholder={effectivePlaceholder}
             writingAssistEnabled={writingAssistEnabled}
+            sentenceCapitalizeEnabled={sentenceCapitalizeEnabled}
             onValueChange={onValueChange}
             onInputActivity={onInputActivity}
             onGenerateWildcardSlotValue={onGenerateWildcardSlotValue}
@@ -34889,13 +35043,45 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                     textareaChipActivationRef.current = null;
                     pendingTextareaSelectionRef.current = null;
                     setTextareaSelectedWildcardSlotRange(null);
-                    textareaValueRef.current = event.currentTarget.value;
-                    setTextareaLocalValue(event.currentTarget.value);
-                    syncTextareaSelectionState(event.currentTarget);
+                    const el = event.currentTarget;
+                    const prev = textareaValueRef.current;
+                    let nextValue = el.value;
+                    let caret = el.selectionStart ?? nextValue.length;
+                    if (
+                      sentenceCapitalizeEnabled &&
+                      nextValue.length > prev.length &&
+                      caret >= nextValue.length - prev.length
+                    ) {
+                      const insertLen = nextValue.length - prev.length;
+                      const insertAt = caret - insertLen;
+                      if (
+                        insertAt >= 0 &&
+                        prev ===
+                          `${nextValue.slice(0, insertAt)}${nextValue.slice(caret)}`
+                      ) {
+                        const inserted = nextValue.slice(insertAt, caret);
+                        const cased = applyComposerSentenceCaseInsertion(
+                          nextValue.slice(0, insertAt),
+                          inserted,
+                        );
+                        if (cased !== inserted) {
+                          nextValue = `${nextValue.slice(0, insertAt)}${cased}${nextValue.slice(caret)}`;
+                          caret = insertAt + cased.length;
+                          pendingTextareaCaretRef.current = caret;
+                        }
+                      }
+                    }
+                    textareaValueRef.current = nextValue;
+                    setTextareaLocalValue(nextValue);
+                    if (el.value !== nextValue) {
+                      el.value = nextValue;
+                      el.setSelectionRange(caret, caret);
+                    }
+                    syncTextareaSelectionState(el);
                     onInputActivity?.();
-                    onValueChange(event.currentTarget.value);
-                    resizeTextareaToContent(event.currentTarget);
-                    syncTextareaOverlayScroll(event.currentTarget);
+                    onValueChange(nextValue);
+                    resizeTextareaToContent(el);
+                    syncTextareaOverlayScroll(el);
                     scheduleTextareaMentionSync();
                   }}
                   onSelect={(event) => {
@@ -35551,7 +35737,9 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
                   placeholder={effectivePlaceholder}
                   spellCheck={writingAssistEnabled}
                   autoCorrect={writingAssistEnabled ? "on" : "off"}
-                  autoCapitalize={writingAssistEnabled ? "sentences" : "none"}
+                  autoCapitalize={
+                    sentenceCapitalizeEnabled ? "sentences" : "none"
+                  }
                   enterKeyHint="send"
                   lang="en"
                 />
@@ -79789,6 +79977,11 @@ function HomeContent(): React.JSX.Element {
           // Live spell-correct stays a Chat/Zen/Judge writing affordance.
           // Coffee and Signal composers apply corrections at send time.
           (variant === "chat" || variant === "debate") &&
+          settings?.composerWritingAssist !== false
+        }
+        sentenceCapitalizeEnabled={
+          // Desktop ignores HTML autocapitalize; sentence case stays on by
+          // default whenever the account writing-assist setting is enabled.
           settings?.composerWritingAssist !== false
         }
         generatingRandomPrompt={generatingRandomPrompt}

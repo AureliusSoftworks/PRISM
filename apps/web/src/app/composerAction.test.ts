@@ -194,7 +194,11 @@ describe("shared composer actions", () => {
     );
     assert.match(
       pageSource,
-      /autoCapitalize=\{writingAssistEnabled \? "sentences" : "none"\}/u,
+      /autoCapitalize=\{\s*sentenceCapitalizeEnabled \? "sentences" : "none"\s*\}/u,
+    );
+    assert.match(
+      pageSource,
+      /autocapitalize:\s*sentenceCapitalizeEnabled \? "sentences" : "none"/u,
     );
   });
 

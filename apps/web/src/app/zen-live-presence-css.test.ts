@@ -1232,18 +1232,19 @@ describe("Zen live presence CSS", () => {
       botFaceFrameEnd,
     );
     assert.equal(
-      botFaceFrameSource.match(/className=\{styles\.botFaceFrameLed\}/g)
-        ?.length,
+      botFaceFrameSource.match(
+        /<BotFaceFrameIdentityRaster kind="led" identityColor=\{identityColor\} \/>/g,
+      )?.length,
       1,
       "one top-level LED layer in the shared frame",
     );
     assert.match(
       pageSource,
-      /function BotFaceFrame\(\{[\s\S]*metalMaterialStyle[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\} style=\{metalMaterialStyle\}[\s\S]*botFaceFrameTint[\s\S]*botFaceFrameWearLayer[\s\S]*data-frame-material-layer="wear"[\s\S]*botFaceFrameMetalScratchLayer[\s\S]*data-frame-material-layer="scratches"[\s\S]*className=\{styles\.botFaceFrameMetalLight\}[\s\S]*botFaceFramePaintLayer[\s\S]*style=\{metalMaterialStyle\}[\s\S]*data-frame-material-layer="paint"[\s\S]*botFaceFrameLed/
+      /function BotFaceFrame\(\{[\s\S]*metalMaterialStyle[\s\S]*identityColor[\s\S]*<BotFaceScreenFill \/>[\s\S]*className=\{styles\.botFaceFrame\} style=\{metalMaterialStyle\}[\s\S]*<BotFaceFrameIdentityRaster kind="tint" identityColor=\{identityColor\} \/>[\s\S]*botFaceFrameWearLayer[\s\S]*data-frame-material-layer="wear"[\s\S]*botFaceFrameMetalScratchLayer[\s\S]*data-frame-material-layer="scratches"[\s\S]*className=\{styles\.botFaceFrameMetalLight\}[\s\S]*botFaceFramePaintLayer[\s\S]*style=\{metalMaterialStyle\}[\s\S]*data-frame-material-layer="paint"[\s\S]*<BotFaceFrameIdentityRaster kind="led" identityColor=\{identityColor\} \/>/
     );
     assert.match(
       pageSource,
-      /<BotFaceFrame metalMaterialStyle=\{frameMetalMaterialStyle\} \/>/
+      /<BotFaceFrame metalMaterialStyle=\{frameMetalMaterialStyle\} identityColor=\{resolvedFrameIdentityColor\} \/>/
     );
 
     const scratchRule = ruleForExactSelector(".botFaceFrameMetalScratchLayer");
@@ -1458,6 +1459,10 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       ledRule,
+      /color:\s*var\(--bot-face-frame-led-resolved-color\)/,
+    );
+    assert.match(
+      ledRule,
       /mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)/,
     );
     assert.match(ledRule, /inset:\s*var\(--bot-face-frame-inset,\s*-7%\)\s*;/);
@@ -1471,6 +1476,42 @@ describe("Zen live presence CSS", () => {
     assert.match(
       ledRule,
       /drop-shadow\(\s*0 0 5px/,
+    );
+
+    assert.match(
+      pageSource,
+      /function useBotFaceFrameIdentityRaster\([\s\S]*context\.drawImage\(image, 0, 0\)[\s\S]*context\.globalCompositeOperation = "source-in"[\s\S]*context\.fillStyle = identityColor[\s\S]*canvas\.toDataURL\("image\/png"\)/,
+    );
+    assert.match(
+      pageSource,
+      /function BotFaceFrameIdentityRaster\(\{[\s\S]*useBotFaceFrameIdentityRaster\(kind, identityColor\)[\s\S]*backgroundImage: `url\("\$\{renderedRaster\}"\)`[\s\S]*data-frame-identity-raster=\{kind\}[\s\S]*data-frame-identity-raster-ready=\{renderedRaster \? "true" : undefined\}/,
+    );
+    assert.equal(
+      pageSource.match(
+        /<BotFaceFrameIdentityRaster kind="tint" identityColor=/g,
+      )?.length,
+      2,
+      "shared and optimized frames both use the pre-colored tint raster",
+    );
+    assert.equal(
+      pageSource.match(
+        /<BotFaceFrameIdentityRaster kind="led" identityColor=/g,
+      )?.length,
+      2,
+      "shared and optimized frames both use the pre-colored LED raster",
+    );
+    const identityRasterRule = ruleForSelectorNeedles(
+      ".botFaceFrameIdentityRaster",
+    );
+    assert.match(identityRasterRule, /background-color:\s*transparent\s*;/);
+    assert.match(identityRasterRule, /background-position:\s*center\s*;/);
+    assert.match(identityRasterRule, /background-size:\s*contain\s*;/);
+    assert.match(identityRasterRule, /background-repeat:\s*no-repeat\s*;/);
+    assert.match(identityRasterRule, /-webkit-mask-image:\s*none\s*;/);
+    assert.match(identityRasterRule, /mask-image:\s*none\s*;/);
+    assert.match(
+      pageSource,
+      /frameIdentityColor=\{ bot \? privateModeActive \? "#e8eee8" : normalizeAccentForTheme\(/,
     );
   });
 
