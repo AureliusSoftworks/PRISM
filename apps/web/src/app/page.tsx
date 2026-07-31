@@ -42615,6 +42615,7 @@ function HomeContent(): React.JSX.Element {
   // product Chat.
   const viewParam = searchParams.get("view");
   const view: View = prismSurfaceViewForRouteParam(viewParam);
+  const debateVoiceSurfaceActiveRef = useRef(view === "debate");
   const [appSwitcherOpen, setAppSwitcherOpen] = useState(false);
   const appSwitcherRef = useRef<HTMLDivElement | null>(null);
   const [pendingSlateHandoff, setPendingSlateHandoff] =
@@ -42808,6 +42809,9 @@ function HomeContent(): React.JSX.Element {
         setPanelNotice(COFFEE_CONFIGURATION_LOCK_MESSAGE);
         return;
       }
+      if (view === "debate") {
+        debateVoiceSurfaceActiveRef.current = false;
+      }
       stopPrismSceneAudio();
       triggerModeExitCompaction(view);
       clearViewSwitchOverlayTimers();
@@ -42822,6 +42826,9 @@ function HomeContent(): React.JSX.Element {
     },
     [clearViewSwitchOverlayTimers, router, view, triggerModeExitCompaction],
   );
+  useEffect(() => {
+    debateVoiceSurfaceActiveRef.current = view === "debate";
+  }, [view]);
   useEffect(() => {
     if (viewSwitchOverlayPhase !== "visible") return;
     if (viewSwitchTarget && view !== viewSwitchTarget) return;
@@ -129449,6 +129456,7 @@ function HomeContent(): React.JSX.Element {
     const prepareDebateUtterance = async (
       utterance: DebateUtterance,
     ): Promise<void> => {
+      if (!debateVoiceSurfaceActiveRef.current) return;
       if (voicePlaybackSelectionRef.current.voiceMode !== "english") return;
       const usePlayerVoice = utterance.player || utterance.playerVoice;
       const speakerBot = utterance.speaker
@@ -129514,6 +129522,7 @@ function HomeContent(): React.JSX.Element {
     const playDebateUtterance = async (
       utterance: DebateUtterance,
     ): Promise<boolean> => {
+      if (!debateVoiceSurfaceActiveRef.current) return false;
       const usePlayerVoice = utterance.player || utterance.playerVoice;
       const debateVoicePerformanceText =
         utterance.voicePerformanceText ??
@@ -130110,7 +130119,9 @@ function HomeContent(): React.JSX.Element {
                 })
               }
               onExit={() => {
+                debateVoiceSurfaceActiveRef.current = false;
                 stopBotcastUtterance();
+                stopPrismSceneAudio();
                 const origin = debateOriginLocationRef.current;
                 debateOriginLocationRef.current = null;
                 if (origin) {

@@ -112,6 +112,11 @@ import {
 } from "./debateJuryRecord";
 import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
+  debateUrlEvidenceSourceFromDraft,
+  emptyDebateUrlEvidenceDraft,
+  type DebateUrlEvidenceDraft,
+} from "./debateUrlEvidence";
+import {
   debateEvidenceEmojiForObject,
   debateEvidenceObjectFromPrismCandidate,
   nextDebateEvidenceExhibitId,
@@ -119,7 +124,6 @@ import {
   randomDebateEvidenceObject,
   type DebateEvidenceObjectDraft,
 } from "./debateEvidenceExhibits";
-import { openDesktopEmojiPicker } from "./desktopShell";
 import {
   debateJudgeGuidedStepKind,
   debateJudgeObjectionRulingShortcut,
@@ -1940,6 +1944,10 @@ export function DebateExperience(
     useState<DebateEvidencePacketV1>(EMPTY_EVIDENCE);
   const [researchQuery, setResearchQuery] = useState("");
   const [evidenceGenerating, setEvidenceGenerating] = useState(false);
+  const [urlEvidenceDraft, setUrlEvidenceDraft] =
+    useState<DebateUrlEvidenceDraft | null>(null);
+  const [urlEvidenceInspecting, setUrlEvidenceInspecting] = useState(false);
+  const [urlEvidenceError, setUrlEvidenceError] = useState<string | null>(null);
   const [evidenceObjectDraft, setEvidenceObjectDraft] =
     useState<DebateEvidenceObjectDraft | null>(null);
   const [evidenceObjectSuggestionBusy, setEvidenceObjectSuggestionBusy] =
@@ -1957,7 +1965,6 @@ export function DebateExperience(
     setEvidenceExhibitAssetsUnavailable,
   ] = useState(false);
   const evidenceExhibitAssetsRequestRef = useRef(0);
-  const evidenceExhibitEmojiRef = useRef<HTMLInputElement | null>(null);
   const evidenceExhibitUploadRef = useRef<HTMLInputElement | null>(null);
   const evidenceItemTotal = debateEvidenceItemCount(evidence);
   const evidenceItemLimitReached =
@@ -2137,6 +2144,7 @@ export function DebateExperience(
     ceremonialAvailable: false,
     liveJudge: false,
     orderAvailable: false,
+    blockedNotice: null as string | null,
   });
   const judgeGavelSmashRef = useRef<
     ((kind: DebateModeratorGavelCue["kind"]) => void) | null
@@ -2253,6 +2261,24 @@ export function DebateExperience(
     !judgeGavelJuryLocked &&
     activeSession.objectionRuling?.status !== "awaiting_ruling" &&
     !judgeGavelKeyboardBlocked;
+  const judgeGavelShortcutBlockedNotice =
+    view !== "live" ||
+    activeSession?.playerRole !== "judge" ||
+    judgeGavelKeyboardBlocked
+      ? null
+      : judgeGavelJuryLocked
+        ? "The gavel is unavailable while the Jury has the floor."
+        : activeSession.status === "paused"
+          ? "Resume the Debate before striking the gavel."
+          : activeSession.objectionRuling?.status === "awaiting_ruling"
+            ? "Rule Sustained or Overruled before striking the gavel again."
+            : activeSession.judgeGavel?.status === "awaiting_message"
+              ? "Finish or pass on the current Judge intervention first."
+              : busy ||
+                  audienceOrderSavingRef.current ||
+                  debateFloorMutationInFlightRef.current
+                ? "The gavel is resetting—try again in a moment."
+                : null;
   judgeGavelKeyboardContextRef.current = {
     ceremonialAvailable:
       !judgeGavelJuryLocked &&
@@ -2264,6 +2290,7 @@ export function DebateExperience(
       !busy &&
       !audienceOrderSavingRef.current &&
       activeSession?.judgeGavel?.status !== "awaiting_message",
+    blockedNotice: judgeGavelShortcutBlockedNotice,
   };
 
   useEffect(() => {
@@ -2316,7 +2343,21 @@ export function DebateExperience(
         nowMs,
         smashUntilMs: judgeGavelSmashUntilRef.current,
       });
-      if (!action) return;
+      if (!action) {
+        if (
+          event.code === "Space" &&
+          !event.altKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.shiftKey &&
+          !editableTarget &&
+          context.blockedNotice
+        ) {
+          event.preventDefault();
+          setAutoRecoveryNotice(context.blockedNotice);
+        }
+        return;
+      }
       event.preventDefault();
       gavelShortcutTarget?.blur();
       if (action === "cue") {
@@ -3803,6 +3844,80 @@ export function DebateExperience(
     await research(query, true);
   };
 
+  const inspectUrlEvidence = async (): Promise<void> => {
+    const draft = urlEvidenceDraft;
+    if (!draft?.url.trim() || urlEvidenceInspecting) return;
+    setUrlEvidenceInspecting(true);
+    setUrlEvidenceError(null);
+    try {
+      const result = await props.request<{
+        source: Omit<DebateEvidenceSourceV1, "id">;
+        fetched: boolean;
+      }>(
+        "/api/debates/sources/inspect",
+        requestBody({
+          url: draft.url,
+          preferredProvider: props.preferredProvider,
+          responseMode: props.responseMode,
+        }),
+      );
+      setUrlEvidenceDraft((current) =>
+        current
+          ? {
+              url: result.source.url,
+              title: result.source.title,
+              snippet: result.source.snippet,
+              publishedAt: result.source.publishedAt,
+              fetched: result.fetched,
+            }
+          : null,
+      );
+      if (!result.fetched) {
+        setUrlEvidenceError(
+          "LOCAL did not access this page. Add a title and summarize what the debaters should use.",
+        );
+      }
+    } catch (caught) {
+      setUrlEvidenceError(
+        caught instanceof Error
+          ? caught.message
+          : "PRISM could not read this source. You can enter its details manually.",
+      );
+    } finally {
+      setUrlEvidenceInspecting(false);
+    }
+  };
+
+  const commitUrlEvidence = (): void => {
+    if (!urlEvidenceDraft) return;
+    const result = debateUrlEvidenceSourceFromDraft({
+      draft: urlEvidenceDraft,
+      current: evidence.sources,
+      itemLimitReached: evidenceItemLimitReached,
+    });
+    if (!result.source) {
+      setUrlEvidenceError(result.error);
+      return;
+    }
+    setEvidence((current) => ({
+      ...current,
+      sources: mergeDebateEvidenceSources(current.sources, [result.source]),
+    }));
+    setUrlEvidenceDraft(null);
+    setUrlEvidenceError(null);
+  };
+
+  const openUrlEvidenceEditor = (): void => {
+    setUrlEvidenceDraft((current) => current ?? emptyDebateUrlEvidenceDraft());
+    setUrlEvidenceError(null);
+  };
+
+  const closeUrlEvidenceEditor = (): void => {
+    if (urlEvidenceInspecting) return;
+    setUrlEvidenceDraft(null);
+    setUrlEvidenceError(null);
+  };
+
   const loadEvidenceExhibitAssets = useCallback(async (): Promise<void> => {
     const requestId = evidenceExhibitAssetsRequestRef.current + 1;
     evidenceExhibitAssetsRequestRef.current = requestId;
@@ -3907,12 +4022,22 @@ export function DebateExperience(
     });
   };
 
-  const openEvidenceObjectEmojiPicker = (): void => {
-    const input = evidenceExhibitEmojiRef.current;
-    if (!input || evidenceObjectVisualBusy) return;
-    input.focus({ preventScroll: true });
-    input.select();
-    void openDesktopEmojiPicker();
+  const suggestEvidenceObjectEmoji = (): void => {
+    if (evidenceObjectVisualBusy) return;
+    setEvidenceObjectDraft((current) =>
+      current
+        ? {
+            ...current,
+            emoji: debateEvidenceEmojiForObject(
+              current.object,
+              current.adjective,
+            ),
+            emojiCustomized: false,
+            visualKind: "emoji",
+            imageId: null,
+          }
+        : current,
+    );
   };
 
   const uploadEvidenceObjectImage = async (file: File): Promise<void> => {
@@ -7780,6 +7905,18 @@ export function DebateExperience(
                   <span aria-hidden="true">◇</span>
                   {evidenceGenerating ? "Generating…" : "Add generated search"}
                 </button>
+                <button
+                  type="button"
+                  onClick={openUrlEvidenceEditor}
+                  disabled={evidenceItemLimitReached}
+                  title={
+                    evidenceItemLimitReached
+                      ? "Remove an evidence item before adding a URL"
+                      : undefined
+                  }
+                >
+                  Add URL
+                </button>
               </div>
             </>
           ) : (
@@ -7848,6 +7985,23 @@ export function DebateExperience(
                   <small>Search the public web</small>
                 </span>
               </button>
+              <button
+                type="button"
+                className={styles.addUrlEvidenceButton}
+                onClick={openUrlEvidenceEditor}
+                disabled={evidenceItemLimitReached}
+                title={
+                  evidenceItemLimitReached
+                    ? "Remove an evidence item before adding a URL"
+                    : undefined
+                }
+              >
+                <span aria-hidden="true">↗</span>
+                <span>
+                  <strong>Add URL</strong>
+                  <small>Bring your own public source</small>
+                </span>
+              </button>
             </div>
           )}
           {setupMode === "advanced" ? (
@@ -7889,10 +8043,137 @@ export function DebateExperience(
           ) : null}
           <p className={styles.evidenceToolNote}>
             {props.responseMode === "local"
-              ? "LOCAL keeps public search off. Notes, object exhibits, emoji, uploads, and local image synthesis remain available."
+              ? "LOCAL keeps public search and page reading off. You can still add a URL with your own title and summary; PRISM will not access it."
               : "Everything added here is shared with both sides and frozen when the Debate begins. Exhibit suggestions stay fully editable."}
           </p>
         </div>
+        {urlEvidenceDraft ? (
+          <section
+            className={styles.urlEvidenceEditor}
+            aria-label="Add a source URL"
+            data-tutorial-target="debate-add-url"
+            onKeyDown={(event) => {
+              if (event.key !== "Escape" || urlEvidenceInspecting) return;
+              event.stopPropagation();
+              closeUrlEvidenceEditor();
+            }}
+          >
+            <header>
+              <div>
+                <span>Public source</span>
+                <strong>Add your own URL</strong>
+              </div>
+              <button
+                type="button"
+                onClick={closeUrlEvidenceEditor}
+                disabled={urlEvidenceInspecting}
+                aria-label="Cancel adding source URL"
+              >
+                ×
+              </button>
+            </header>
+            <label className={styles.fieldWide}>
+              <span>URL</span>
+              <input
+                type="url"
+                inputMode="url"
+                autoComplete="url"
+                autoFocus
+                value={urlEvidenceDraft.url}
+                placeholder="https://example.com/report"
+                onChange={(event) => {
+                  const url = event.currentTarget.value;
+                  setUrlEvidenceDraft((current) =>
+                    current ? { ...current, url, fetched: false } : current,
+                  );
+                  setUrlEvidenceError(null);
+                }}
+                disabled={urlEvidenceInspecting}
+              />
+            </label>
+            <div className={styles.urlEvidenceInspectRow}>
+              <button
+                type="button"
+                onClick={() => void inspectUrlEvidence()}
+                disabled={
+                  !urlEvidenceDraft.url.trim() || urlEvidenceInspecting
+                }
+              >
+                {urlEvidenceInspecting
+                  ? "Reading…"
+                  : props.responseMode === "local"
+                    ? "Prepare URL"
+                    : "Read URL"}
+              </button>
+              <small>
+                {props.responseMode === "local"
+                  ? "No network access. You provide the evidence summary."
+                  : "PRISM reads a bounded title and excerpt. Review both before adding."}
+              </small>
+            </div>
+            <label className={styles.fieldWide}>
+              <span>Source title</span>
+              <input
+                value={urlEvidenceDraft.title}
+                maxLength={240}
+                placeholder="Name this source"
+                onChange={(event) => {
+                  const title = event.currentTarget.value;
+                  setUrlEvidenceDraft((current) =>
+                    current ? { ...current, title } : current,
+                  );
+                  setUrlEvidenceError(null);
+                }}
+                disabled={urlEvidenceInspecting}
+              />
+            </label>
+            <label className={styles.fieldWide}>
+              <span>What should debaters take from this source?</span>
+              <textarea
+                value={urlEvidenceDraft.snippet}
+                maxLength={800}
+                rows={4}
+                placeholder="Summarize the specific fact, finding, or context that belongs in the shared record."
+                onChange={(event) => {
+                  const snippet = event.currentTarget.value;
+                  setUrlEvidenceDraft((current) =>
+                    current ? { ...current, snippet } : current,
+                  );
+                  setUrlEvidenceError(null);
+                }}
+                disabled={urlEvidenceInspecting}
+              />
+            </label>
+            {urlEvidenceDraft.fetched ? (
+              <p className={styles.urlEvidenceStatus} role="status">
+                Page details loaded. Review the title and summary before
+                freezing them into the Debate.
+              </p>
+            ) : null}
+            {urlEvidenceError ? (
+              <p className={styles.urlEvidenceError} role="alert">
+                {urlEvidenceError}
+              </p>
+            ) : null}
+            <div className={styles.urlEvidenceCommitActions}>
+              <button
+                type="button"
+                onClick={closeUrlEvidenceEditor}
+                disabled={urlEvidenceInspecting}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={commitUrlEvidence}
+                disabled={urlEvidenceInspecting || evidenceItemLimitReached}
+              >
+                Add to evidence
+              </button>
+            </div>
+          </section>
+        ) : null}
         {evidenceObjectDraft && objectPreview ? (
           <section
             className={styles.evidenceObjectEditor}
@@ -8036,18 +8317,11 @@ export function DebateExperience(
               <legend>Exhibit emoji</legend>
               <div>
                 <input
-                  ref={evidenceExhibitEmojiRef}
                   aria-label="Exhibit emoji"
                   aria-describedby="debate-evidence-emoji-help"
                   value={evidenceObjectDraft.emoji}
                   autoComplete="off"
                   spellCheck={false}
-                  onClick={openEvidenceObjectEmojiPicker}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter") return;
-                    event.preventDefault();
-                    openEvidenceObjectEmojiPicker();
-                  }}
                   onChange={(event) => {
                     const value = event.currentTarget.value;
                     setEvidenceObjectDraft((current) =>
@@ -8067,13 +8341,16 @@ export function DebateExperience(
                 />
                 <button
                   type="button"
-                  onClick={openEvidenceObjectEmojiPicker}
-                  disabled={evidenceObjectVisualBusy !== null}
+                  onClick={suggestEvidenceObjectEmoji}
+                  disabled={
+                    evidenceObjectVisualBusy !== null ||
+                    !evidenceObjectDraft.object.trim()
+                  }
                 >
-                  <strong>Choose any emoji</strong>
+                  <strong>Suggest from exhibit name</strong>
                   <small id="debate-evidence-emoji-help">
-                    Opens your system emoji picker. You can also type or paste
-                    one.
+                    Uses the most relevant term in the object name. You can
+                    still type or paste any emoji.
                   </small>
                 </button>
               </div>
@@ -12061,11 +12338,22 @@ export function DebateExperience(
                         }
                       >
                         {judgeGavelOnCooldown
-                          ? `${judgeGavelCooldownSeconds}s`
+                          ? `Cooling · ${judgeGavelCooldownSeconds}s`
                           : judgeCanCallTime
                             ? "Call time"
                             : "Intervene"}
                       </button>
+                    ) : null}
+                    {judgeGavelOnCooldown ? (
+                      <span
+                        className={styles.judgeGavelCooldownStatus}
+                        role="status"
+                        aria-label={`Judge intervention cooling down. Ready in ${judgeGavelCooldownSeconds} seconds. Space still restores audience order.`}
+                      >
+                        <strong>Intervention cooling</strong>
+                        <span>{judgeGavelCooldownSeconds}s</span>
+                        <small>Space still restores order</small>
+                      </span>
                     ) : null}
                     <button
                       type="button"

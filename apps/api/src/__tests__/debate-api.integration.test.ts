@@ -207,6 +207,20 @@ after(async () => {
 describe("Debate API", () => {
   it("runs authenticated Judge, Participant, and Spectator Duels with zero LOCAL network calls", async () => {
     const owner = createClient();
+    const unauthorizedInspection = await owner.request(
+      "/api/debates/sources/inspect",
+      jsonInit({
+        url: "https://example.com/private",
+        preferredProvider: "online",
+        responseMode: "online",
+      }),
+    );
+    assert.equal(unauthorizedInspection.status, 400);
+    assert.match(
+      String((await payload(unauthorizedInspection)).error),
+      /Authentication required/u,
+    );
+    assert.equal(fetchRecorder.calls.length, 0);
     const registration = await owner.request(
       "/api/auth/register",
       jsonInit({
@@ -241,6 +255,51 @@ describe("Debate API", () => {
     );
     assert.equal(blockedResearch.status, 409);
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+
+    const localUrlDraft = await owner.request(
+      "/api/debates/sources/inspect",
+      jsonInit({
+        url: "https://www.example.com/report#finding",
+        preferredProvider: "local",
+        responseMode: "local",
+      }),
+    );
+    assert.equal(localUrlDraft.status, 200);
+    assert.deepEqual(await payload(localUrlDraft), {
+      ok: true,
+      fetched: false,
+      source: {
+        title: "example.com",
+        url: "https://www.example.com/report",
+        snippet: "",
+        publishedAt: null,
+      },
+    });
+    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'local',
+              auto_switch_model = 0
+        WHERE id = ?`,
+    ).run(userId);
+    const accountBlockedUrlDraft = await owner.request(
+      "/api/debates/sources/inspect",
+      jsonInit({
+        url: "https://example.org/account-local",
+        preferredProvider: "openai",
+        responseMode: "online",
+      }),
+    );
+    assert.equal(accountBlockedUrlDraft.status, 200);
+    assert.equal((await payload(accountBlockedUrlDraft)).fetched, false);
+    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+    db.prepare(
+      `UPDATE users
+          SET preferred_provider = 'openai',
+              auto_switch_model = 0
+        WHERE id = ?`,
+    ).run(userId);
 
     const accountDefaultSynthesis = await owner.request(
       "/api/debates/synthesize",

@@ -209,6 +209,10 @@ import {
   type DebateAiRuntime,
 } from "./debate.ts";
 import {
+  DebateSourceInspectionError,
+  inspectDebateSourceUrl,
+} from "./debate-source-inspection.ts";
+import {
   SignalOnlineTurnError,
   advanceBotcastEpisode,
   botcastEpisodePowerSnapshotForRole,
@@ -13024,6 +13028,30 @@ function buildRoutes(): RouteDefinition[] {
           publishedAt: result.publishedAt ?? null,
         })),
       });
+    }),
+    route("POST", "/api/debates/sources/inspect", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const requestedResponseMode = normalizeResponseMode(
+        body.responseMode,
+        body.preferredProvider === "local" ? "local" : "online",
+      );
+      const allowNetwork =
+        requestedResponseMode !== "local" &&
+        !userBlocksOnlineCapabilities(user);
+      try {
+        const result = await inspectDebateSourceUrl(
+          typeof body.url === "string" ? body.url : "",
+          { allowNetwork },
+        );
+        json(ctx.res, 200, { ok: true, ...result });
+      } catch (error) {
+        if (error instanceof DebateSourceInspectionError) {
+          throw new HttpError(error.statusCode, error.message);
+        }
+        throw error;
+      }
     }),
     route("POST", "/api/debates/exhibits/upload", async (ctx) => {
       const userId = requireAuth(ctx);

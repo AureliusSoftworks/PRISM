@@ -45,6 +45,10 @@ describe("Debate evidence object generator", () => {
     assert.equal(debateEvidenceEmojiForObject("potato", "Old"), "🥔");
     assert.equal(debateEvidenceEmojiForObject("freight train", "Chubby"), "🚂");
     assert.equal(debateEvidenceEmojiForObject("orangutan", "Red"), "🦧");
+    assert.equal(debateEvidenceEmojiForObject("green glove", "Velvet"), "🧤");
+    assert.equal(debateEvidenceEmojiForObject("transit map", "Weathered"), "🗺️");
+    assert.equal(debateEvidenceEmojiForObject("toy rocket", "Tin"), "🚀");
+    assert.equal(debateEvidenceEmojiForObject("coffee mug", "Cracked"), "☕");
   });
 
   it("turns one contextual Prism pair into an editable evidence draft", () => {
@@ -54,7 +58,7 @@ describe("Debate evidence object generator", () => {
         adjective: "Weathered",
         object: "transit map",
         observation: "Weathered transit map.",
-        emoji: "🧾",
+        emoji: "🗺️",
         emojiCustomized: false,
         createdBy: "prism",
         visualKind: "emoji",

@@ -97,18 +97,25 @@ describe("mode tutorials", () => {
     assert.match(copy, /private LLM check/u);
     assert.match(copy, /Evidence is optional/u);
     assert.match(copy, /Find sources for me/u);
+    assert.match(copy, /Add URL accepts your own public HTTP or HTTPS/u);
+    assert.match(copy, /LOCAL never accesses the page/u);
+    assert.match(copy, /duplicate URLs are rejected/u);
     assert.match(
       copy,
       /Add evidence asks Prism for one surprising contextual.*ADJECTIVE.*OBJECT.*built-in object deck is only a reliable fallback/u,
     );
     assert.doesNotMatch(copy, /Generate object/u);
-    assert.match(copy, /open your system picker/u);
-    assert.match(copy, /type and paste any emoji you want/u);
+    assert.match(copy, /exhibit emoji follows the object name automatically/u);
+    assert.match(copy, /Suggest from exhibit name restores/u);
+    assert.match(copy, /type or paste any emoji/u);
     assert.match(copy, /upload a PNG, JPEG, or WebP/u);
     assert.match(copy, /visual adds no facts/u);
     assert.match(copy, /later searches add distinct sources/u);
     assert.match(copy, /up to 12/u);
-    assert.match(copy, /LOCAL blocks research before network access/u);
+    assert.match(
+      copy,
+      /LOCAL blocks research and page reading before network access/u,
+    );
     assert.match(copy, /Powers never make a bot ineligible for a role/u);
     assert.match(copy, /inaccessible speech never enters captions, voice/u);
     assert.match(copy, /shared case board, or listener-facing ballot reasons/u);
@@ -374,6 +381,8 @@ describe("mode tutorials", () => {
     assert.match(gavelCopy, /without stopping the speaker or reveal/u);
     assert.match(gavelCopy, /Space serves that ceremonial cue first/u);
     assert.match(gavelCopy, /Intervene is the separate speaker-cutoff control/u);
+    assert.match(gavelCopy, /cooldown appears as an amber countdown/u);
+    assert.match(gavelCopy, /chamber explains why instead of failing silently/u);
     assert.match(gavelCopy, /becomes Call time/u);
     assert.match(gavelCopy, /literally shouts “Objection!”/u);
     assert.match(gavelCopy, /timed Sustained \/ Overruled choice/u);

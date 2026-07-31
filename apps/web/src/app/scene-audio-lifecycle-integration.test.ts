@@ -59,6 +59,25 @@ describe("scene audio lifecycle wiring", () => {
     assert.match(lifecycle, /stopAudioForStateExit\(\)/u);
   });
 
+  it("invalidates stale Debate voice work before every exit path", () => {
+    assert.match(
+      pageSource,
+      /if \(view === "debate"\) \{\s*debateVoiceSurfaceActiveRef\.current = false;\s*\}[\s\S]{0,80}stopPrismSceneAudio\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const prepareDebateUtterance = async[\s\S]{0,180}!debateVoiceSurfaceActiveRef\.current/u,
+    );
+    assert.match(
+      pageSource,
+      /const playDebateUtterance = async[\s\S]{0,180}!debateVoiceSurfaceActiveRef\.current/u,
+    );
+    assert.match(
+      pageSource,
+      /onExit=\{\(\) => \{\s*debateVoiceSurfaceActiveRef\.current = false;\s*stopBotcastUtterance\(\);\s*stopPrismSceneAudio\(\)/u,
+    );
+  });
+
   it("stops Coffee speech before returning to the group overview", () => {
     const coffeeVoice = sourceSlice(
       pageSource,

@@ -355,10 +355,12 @@ describe("Debate experience", () => {
     assert.match(source, /selectEvidenceExhibitAsset\(asset\)/u);
     assert.match(css, /\.evidenceExhibitAssetRail/u);
     assert.match(source, /The text record is evidence/u);
-    assert.match(source, /openDesktopEmojiPicker\(\)/u);
+    assert.doesNotMatch(source, /openDesktopEmojiPicker\(\)/u);
     assert.match(source, /aria-label="Exhibit emoji"/u);
     assert.match(source, /normalizeDebateEvidenceEmojiChoice/u);
-    assert.doesNotMatch(source, /Choose an emoji fallback/u);
+    assert.match(source, /Suggest from exhibit name/u);
+    assert.match(source, /Uses the most relevant term in the object name/u);
+    assert.match(source, /suggestEvidenceObjectEmoji/u);
     assert.match(
       css,
       /\.evidenceObjectPreview > \.evidenceExhibitVisual\s*\{[^}]*font-size:\s*52px/u,
@@ -418,9 +420,23 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, />\s*Generate object\s*</u);
     assert.match(source, /className=\{styles\.evidenceToolHeader\}/u);
     assert.match(source, /className=\{styles\.evidenceCapacity\}/u);
+    assert.match(source, />Add URL</u);
+    assert.match(source, /\/api\/debates\/sources\/inspect/u);
+    assert.match(source, /What should debaters take from this source\?/u);
+    assert.match(source, /LOCAL did not access this page/u);
+    assert.match(source, /debateUrlEvidenceSourceFromDraft/u);
+    assert.match(source, /data-tutorial-target="debate-add-url"/u);
+    assert.match(source, /autoFocus/u);
+    assert.match(source, /aria-label="Cancel adding source URL"/u);
+    assert.match(source, /event\.key !== "Escape"/u);
+    assert.equal(
+      (source.match(/onClick=\{openUrlEvidenceEditor\}/gu) ?? []).length,
+      2,
+    );
+    assert.match(css, /\.urlEvidenceEditor\s*\{/u);
     assert.match(
       css,
-      /\.dashboard \.basicResearchBox \.evidenceObjectActions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/u,
+      /\.dashboard \.basicResearchBox \.evidenceObjectActions\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/u,
     );
   });
 
@@ -1292,8 +1308,20 @@ describe("Debate experience", () => {
     assert.match(source, /overtime: judgeCanCallTime/u);
     assert.match(source, /debateJudgeGavelSpaceAction/u);
     assert.match(source, /orderAvailable:\s*context\.orderAvailable/u);
+    assert.match(source, /blockedNotice:\s*judgeGavelShortcutBlockedNotice/u);
+    assert.match(
+      source,
+      /setAutoRecoveryNotice\(context\.blockedNotice\)/u,
+    );
     assert.match(source, /data-space-shortcut="true"/u);
     assert.match(source, /gavelShortcutTarget\?\.blur\(\)/u);
+    assert.match(source, /Intervention cooling/u);
+    assert.match(source, /Space still restores order/u);
+    assert.match(css, /\.judgeGavelCooldownStatus\s*\{/u);
+    assert.match(
+      css,
+      /\.judgeInterveneButton\[data-cooling="true"\]:disabled\s*\{[^}]*opacity:\s*1/u,
+    );
     assert.match(
       source,
       /const debateFloorMutationInFlightRef = useRef\(false\)/u,
