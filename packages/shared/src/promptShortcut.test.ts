@@ -2,15 +2,19 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   BUILT_IN_PROMPT_WILDCARD_SLOTS,
+  applyPromptShortcutVarPassthrough,
   formatBuiltInPromptWildcardToday,
   getBuiltInPromptWildcardSlot,
   isDisabledPromptWildcardToken,
+  isPassthroughBuiltInPromptWildcardKey,
   normalizeBuiltInPromptWildcardSlotKey,
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
   parseStoredPromptShortcutPayload,
   parseStoredPromptWildcardPayload,
   parseStoredPsychicThoughtPayload,
+  normalizePromptShortcutMetadata,
+  promptContainsPassthroughBuiltInPromptWildcards,
   resolveContextualBuiltInPromptWildcards,
   serializePromptShortcutPayload,
   serializePromptToolPayload,
@@ -36,6 +40,8 @@ describe("built-in prompt wildcard slots", () => {
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("{TODAY}"), "TODAY");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("current-date"), "TODAY");
     assert.equal(normalizeBuiltInPromptWildcardSlotKey("date"), "TODAY");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("{VAR}"), "VAR");
+    assert.equal(normalizeBuiltInPromptWildcardSlotKey("var"), "VAR");
   });
 
   it("rejects unsupported built-in wildcard keys", () => {
@@ -100,6 +106,7 @@ describe("built-in prompt wildcard slots", () => {
       "COLOR",
       "TIME",
       "TODAY",
+      "VAR",
       "PROBLEM",
     ]);
     assert.equal(getBuiltInPromptWildcardSlot("CONTAINER")?.pickerVisibility, "searchable");
@@ -167,9 +174,87 @@ describe("built-in prompt wildcard slots", () => {
     assert.match(slot.generationHint, /integer from 1 to 10/iu);
     assert.match(slot.generationHint, /digits only/iu);
   });
+
+  it("fills {VAR} from prompt passthrough text without inventing values", () => {
+    assert.equal(isPassthroughBuiltInPromptWildcardKey("VAR"), true);
+    assert.equal(isPassthroughBuiltInPromptWildcardKey("TODAY"), false);
+    assert.equal(getBuiltInPromptWildcardSlot("VAR")?.pickerVisibility, "primary");
+    assert.match(
+      getBuiltInPromptWildcardSlot("VAR")?.title ?? "",
+      /typed after the \/prompt/iu,
+    );
+    assert.match(
+      getBuiltInPromptWildcardSlot("VAR")?.title ?? "",
+      /no A\/B\/C letter links/iu,
+    );
+
+    const template =
+      'Say nothing other than the text following this prompt:\n\n"{VAR}"';
+    assert.equal(promptContainsPassthroughBuiltInPromptWildcards(template), true);
+
+    const filled = applyPromptShortcutVarPassthrough(template, "hello world!");
+    assert.equal(
+      filled.prompt,
+      'Say nothing other than the text following this prompt:\n\n"hello world!"',
+    );
+    assert.equal(filled.replaced, true);
+    assert.deepEqual(
+      filled.replacements.map(({ key, value, source }) => ({ key, value, source })),
+      [{ key: "VAR", value: "hello world!", source: "wildcard" }],
+    );
+
+    const repeated = applyPromptShortcutVarPassthrough(
+      'Echo: "{var}" and again "{VAR}"',
+      "same blob",
+    );
+    assert.equal(repeated.prompt, 'Echo: "same blob" and again "same blob"');
+    assert.equal(repeated.replaced, true);
+
+    // Numbered forms collapse to the same shared capture (no A/B/C links).
+    assert.deepEqual(parseBuiltInPromptWildcardReference("VAR1"), {
+      slot: getBuiltInPromptWildcardSlot("VAR"),
+      key: "VAR",
+      reference: null,
+    });
+    assert.deepEqual(parseBuiltInPromptWildcardReference("{VAR2}"), {
+      slot: getBuiltInPromptWildcardSlot("VAR"),
+      key: "VAR",
+      reference: null,
+    });
+    const legacyNumbered = applyPromptShortcutVarPassthrough(
+      'Echo: "{VAR1}" and "{VAR2}"',
+      "shared",
+    );
+    assert.equal(legacyNumbered.prompt, 'Echo: "shared" and "shared"');
+
+    const empty = applyPromptShortcutVarPassthrough('Echo: "{var}"', "");
+    assert.equal(empty.prompt, 'Echo: ""');
+    assert.equal(empty.replaced, true);
+
+    const untouched = applyPromptShortcutVarPassthrough("No slots here.", "ignored");
+    assert.equal(untouched.replaced, false);
+    assert.equal(untouched.prompt, "No slots here.");
+  });
 });
 
 describe("prompt shortcut payloads", () => {
+  it("preserves trailing newlines in resolved prompt bodies", () => {
+    const normalized = normalizePromptShortcutMetadata({
+      v: 1,
+      commandId: "cmd-echo",
+      name: "echo",
+      invocation: "/echo",
+      template: "/echo",
+      flags: [],
+      resolvedPrompt:
+        "Say nothing other than the text following this prompt:\n\n",
+    });
+    assert.equal(
+      normalized?.resolvedPrompt,
+      "Say nothing other than the text following this prompt:\n\n",
+    );
+  });
+
   it("round-trips persisted prompt shortcut metadata", () => {
     const serialized = serializePromptShortcutPayload({
       v: 1,

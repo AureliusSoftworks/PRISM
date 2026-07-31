@@ -1,5 +1,6 @@
 import {
   isDisabledPromptWildcardToken,
+  isPassthroughBuiltInPromptWildcardKey,
   parseBuiltInPromptWildcardReference,
   resolveContextualBuiltInPromptWildcards,
   type PromptShortcutWildcardReplacement,
@@ -50,6 +51,19 @@ export function promptInsertionStartsSentence(before: string): boolean {
   return /[.!?]["')\]]*$/u.test(trimmed);
 }
 
+/**
+ * Preserve intentional trailing newlines/spaces from Prompt Center bodies.
+ * Only strip accidental outer leading whitespace and trailing spaces/tabs.
+ */
+export function preservePromptBodyWhitespace(value: string): string {
+  return value.replace(/^\s+/u, "").replace(/[ \t]+$/u, "");
+}
+
+/** Trim trailing spaces/tabs without removing intentional newlines. */
+export function trimEndHorizontalWhitespace(value: string): string {
+  return value.replace(/[ \t\f\v]+$/u, "");
+}
+
 export function withSentenceCasedPromptInsertion(value: string, before: string): string {
   const shouldStartSentence = promptInsertionStartsSentence(before);
   const chars = Array.from(value);
@@ -98,10 +112,12 @@ export function formatPromptShortcutInsertion(
   before: string,
   after: string
 ): string {
-  const cased = withInlinePromptShortcutCasing(value, before).trimEnd();
+  const cased = trimEndHorizontalWhitespace(
+    withInlinePromptShortcutCasing(value, before),
+  );
   const following = promptShortcutFollowingPunctuation(after);
   if (!/^[,.;:!?]$/u.test(following)) return cased;
-  return cased.replace(/[.!?,;:]+$/u, "").trimEnd();
+  return trimEndHorizontalWhitespace(cased.replace(/[.!?,;:]+$/u, ""));
 }
 
 export function splitPromptRandomizationOptions(source: string): string[] {
@@ -147,7 +163,9 @@ const NOUN_PLURAL_SHORTHAND_RE = /\{NOUN(\d*)\}s\b/g;
 
 function isModelFilledWildcardName(name: string): boolean {
   if (isDisabledPromptWildcardToken(name)) return false;
-  if (parseBuiltInPromptWildcardReference(name)) return true;
+  const parsed = parseBuiltInPromptWildcardReference(name);
+  if (parsed && isPassthroughBuiltInPromptWildcardKey(parsed.key)) return false;
+  if (parsed) return true;
   return /^[A-Z][A-Z0-9_ ]{1,63}$/u.test(name.trim());
 }
 

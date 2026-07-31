@@ -14,14 +14,17 @@ describe("mode tutorials", () => {
     }
   });
 
-  it("teaches the Zen Atmosphere button as generation, not visibility", () => {
+  it("teaches Zen Atmosphere from Settings, on by default with gradient fallback", () => {
     const step = MODE_TUTORIALS.zen.steps.find(
       (candidate) =>
         candidate.targetSelector === '[data-tutorial-target="zen-atmosphere"]',
     );
     assert.ok(step);
-    assert.match(step.body, /same action as \/atmosphere/u);
-    assert.match(step.body, /on or off from the canvas tools/u);
+    assert.match(step.body, /Atmosphere starts on/u);
+    assert.match(step.body, /Blank bot gradients/u);
+    assert.match(step.body, /Open Settings/u);
+    assert.match(step.body, /\/atmosphere/u);
+    assert.match(step.clickLabel, /Settings/u);
   });
 
   it("teaches the complete Debate contract with stable targets", () => {
@@ -187,7 +190,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /never fabricates sources/u);
     assert.match(
       copy,
-      /previously synthesized Debate sprite without spending more image-generation tokens/u,
+      /previously synthesized Debate sprite to restore the naming options that created it without spending more image-generation tokens/u,
     );
     assert.match(copy, /tool-specific shelf instead of mixing into the general Images panel/u);
     assert.match(
@@ -202,7 +205,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /territory dice remains available/u);
     assert.match(copy, /Prompt Center prompts insert as ordinary editable text/u);
     assert.match(copy, /wildcard rolls stay as chips until you Build or Refract/u);
-    assert.match(copy, /Command Center powers as Signal setup/u);
+    assert.match(copy, /A `\{VAR\}` inside a Prompt Center body/u);
+    assert.match(copy, /only one shared capture and no A\/B\/C letter links/u);
     assert.match(copy, /floating Prism remains available throughout setup/u);
     assert.match(copy, /bounded, unsaved workbench draft/u);
     assert.match(copy, /Wield Prism into a glowing setup field/u);
@@ -471,12 +475,13 @@ describe("mode tutorials", () => {
     assert.match(joinCopy, /sparse mic-ready breath/u);
   });
 
-  it("teaches pot-only Coffee without retired service or a player mug", () => {
+  it("teaches pot-only live Coffee and Default Prism on replay", () => {
     const copy = MODE_TUTORIALS.coffee.steps
       .map((step) => `${step.heading} ${step.body}`)
       .join(" ");
-    assert.match(copy, /remain off camera/u);
+    assert.match(copy, /remain off camera during the live table/u);
     assert.match(copy, /no player avatar or mug/u);
+    assert.match(copy, /Replay seats you as Default Prism/u);
     assert.match(copy, /Drag the pot/u);
     assert.match(copy, /no waiter, barista, or service bot/u);
     assert.match(copy, /two or three table replies/u);
@@ -802,7 +807,7 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("explains Coffee's off-camera player and bot-only replay departures", () => {
+  it("explains Coffee's live off-camera player and Default Prism replay seat", () => {
     const joinStep = MODE_TUTORIALS.coffee.steps.find(
       (step) => step.heading === "Join the conversation",
     );
@@ -812,7 +817,9 @@ describe("mode tutorials", () => {
       /clear table goodbye ends the session naturally/u,
     );
     assert.match(joinStep?.body ?? "", /Review stays quiet/u);
-    assert.match(joinStep?.body ?? "", /remain off camera/u);
+    assert.match(joinStep?.body ?? "", /remain off camera during the live table/u);
+    assert.match(joinStep?.body ?? "", /Replay seats you as Default Prism/u);
+    assert.match(joinStep?.body ?? "", /your Default Prism seat/u);
     assert.doesNotMatch(joinStep?.body ?? "", /Prism leave first/u);
     assert.match(joinStep?.body ?? "", /each bot physically depart/u);
   });
@@ -1287,7 +1294,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /Signal represents you on stage with your configured face and glyph; Coffee keeps you off camera with the pot/u,
+      /Signal represents you on stage with your configured face and glyph; Coffee keeps you off camera with the pot during the live table, then seats you as Default Prism for replay/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

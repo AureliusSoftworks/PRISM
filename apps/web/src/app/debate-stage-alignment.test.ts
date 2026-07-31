@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
+  DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+  DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+  DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
   DEBATE_STAGE_GAVEL_POSITION_MAX,
   DEBATE_STAGE_GAVEL_POSITION_MIN,
   DEBATE_STAGE_GAVEL_ROTATION_MAX,
@@ -14,10 +17,12 @@ import {
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
   formatDebateStageAlignmentClipboard,
+  formatDebateStageEvidenceTableClipboard,
   formatDebateStageGavelClipboard,
   normalizeDebateStageAlignment,
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
+  updateDebateStageEvidenceTable,
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
@@ -30,22 +35,22 @@ describe("Debate stage alignment", () => {
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
   });
 
-  it("uses the approved version-six stage composition as its canonical default", () => {
+  it("uses the approved version-eight stage composition as its canonical default", () => {
     const expected = {
-      version: 6,
+      version: 8,
       wide: {
         for: {
-          bot: { x: 0.01, y: -3.47 },
+          bot: { x: 0.01, y: -2 },
           nameplate: { x: 3, y: -4 },
           glyph: { x: 2.5, y: -6.5 },
         },
         moderator: {
-          bot: { x: -0.02, y: -3.5 },
-          nameplate: { x: -0.02, y: -10.5 },
-          glyph: { x: 0, y: 2.5 },
+          bot: { x: -0.02, y: -4 },
+          nameplate: { x: -0.02, y: -11 },
+          glyph: { x: 0, y: 1.5 },
         },
         against: {
-          bot: { x: -0.03, y: -3.5 },
+          bot: { x: -0.03, y: -2 },
           nameplate: { x: -3, y: -4 },
           glyph: { x: -2.5, y: -6.5 },
         },
@@ -58,6 +63,10 @@ describe("Debate stage alignment", () => {
       gavel: {
         lowered: { x: -138.5, y: 12.5, rotation: -131, size: 75 },
         raised: { x: -130.5, y: -4.5, rotation: -77, size: 90 },
+      },
+      evidenceTable: {
+        wide: { x: 0, y: 106, size: 100 },
+        moderator: { x: 0, y: 106, size: 100 },
       },
       lightBlendModes: {
         dark: "hard-light",
@@ -111,9 +120,10 @@ describe("Debate stage alignment", () => {
           dark: -20,
           light: 72.5,
         },
+        evidenceTable: { x: -999, y: 999, size: 12 },
       }),
       {
-        version: 6,
+        version: 8,
         wide: {
           for: {
             bot: { x: -12, y: 2.13 },
@@ -150,6 +160,18 @@ describe("Debate stage alignment", () => {
             size: DEBATE_STAGE_GAVEL_SIZE_MAX,
           },
         },
+        evidenceTable: {
+          wide: {
+            x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+            y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+            size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+          },
+          moderator: {
+            x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+            y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+            size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+          },
+        },
         lightBlendModes: {
           dark: "overlay",
           light: "screen",
@@ -172,7 +194,7 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v6:user-1",
+      "prism_debate_stage_alignment_v8:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
@@ -219,6 +241,10 @@ describe("Debate stage alignment", () => {
     assert.deepEqual(migrated.moderator.glyph, { x: 0, y: 0 });
     assert.deepEqual(migrated.gavel, DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel);
     assert.deepEqual(
+      migrated.evidenceTable,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable,
+    );
+    assert.deepEqual(
       migrated.lightMaskOpacities,
       DEFAULT_DEBATE_STAGE_ALIGNMENT.lightMaskOpacities,
     );
@@ -249,7 +275,7 @@ describe("Debate stage alignment", () => {
       raised: { x: 11, y: -28, rotation: -18, size: 135 },
     });
     writeDebateStageAlignment(storage, "user-1", {
-      version: 6,
+      version: 7,
       wide: {
         for: {
           bot: { x: 1, y: -2 },
@@ -276,6 +302,7 @@ describe("Debate stage alignment", () => {
         lowered: { x: 2, y: -3, rotation: 12, size: 125 },
         raised: { x: 10, y: -27, rotation: -34, size: 140 },
       },
+      evidenceTable: { x: 8, y: -12, size: 115 },
       lightBlendModes: {
         dark: "overlay",
         light: "screen",
@@ -289,11 +316,15 @@ describe("Debate stage alignment", () => {
       readDebateStageAlignment(storage, "user-1").moderator.glyph,
       { x: 4, y: -2 },
     );
+    assert.deepEqual(readDebateStageAlignment(storage, "user-1").evidenceTable, {
+      wide: { x: 8, y: -12, size: 115 },
+      moderator: { x: 8, y: -12, size: 115 },
+    });
   });
 
   it("maps individual Wide and Moderator items into live forum CSS variables", () => {
     const alignment = normalizeDebateStageAlignment({
-      version: 6,
+      version: 7,
       wide: {
         for: {
           bot: { x: 1, y: -2 },
@@ -310,6 +341,7 @@ describe("Debate stage alignment", () => {
         lowered: { x: 2.5, y: -4, rotation: 11, size: 135 },
         raised: { x: 14, y: -31.5, rotation: -28, size: 80 },
       },
+      evidenceTable: { x: 7.5, y: -9, size: 120 },
       lightBlendModes: {
         dark: "overlay",
         light: "screen",
@@ -337,6 +369,12 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-gavel-raised-offset-y"], "-31.5%");
     assert.equal(style["--debate-gavel-raised-rotation"], "-28deg");
     assert.equal(style["--debate-gavel-raised-scale"], "0.8");
+    assert.equal(style["--debate-evidence-offset-x"], "7.5%");
+    assert.equal(style["--debate-evidence-offset-y"], "-9%");
+    assert.equal(style["--debate-evidence-scale"], "1.2");
+    assert.equal(style["--debate-moderator-evidence-offset-x"], "7.5%");
+    assert.equal(style["--debate-moderator-evidence-offset-y"], "-9%");
+    assert.equal(style["--debate-moderator-evidence-scale"], "1.2");
     assert.equal(style["--debate-light-blend-mode-dark"], "overlay");
     assert.equal(style["--debate-light-blend-mode-light"], "screen");
     assert.equal(style["--debate-light-mask-opacity-dark"], "65%");
@@ -359,7 +397,7 @@ describe("Debate stage alignment", () => {
         updated,
         debateStageAlignmentTarget("moderator", "bot", "wide"),
       ),
-      { x: -0.02, y: -3.5 },
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.wide.moderator.bot,
     );
     assert.deepEqual(
       debateStageAlignmentOffset(
@@ -512,5 +550,50 @@ describe("Debate stage alignment", () => {
       size: 100,
     });
     assert.deepEqual(independent.gavel.raised, linked.gavel.raised);
+  });
+
+  it("places and scales evidence independently per camera view", () => {
+    const tunedWide = updateDebateStageEvidenceTable(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      "wide",
+      {
+        x: 18.5,
+        y: -22,
+        size: 12,
+      },
+    );
+    assert.deepEqual(tunedWide.evidenceTable.wide, {
+      x: 18.5,
+      y: -22,
+      size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+    });
+    assert.deepEqual(
+      tunedWide.evidenceTable.moderator,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable.moderator,
+    );
+    const tunedModerator = updateDebateStageEvidenceTable(
+      tunedWide,
+      "moderator",
+      { x: -40, y: 12, size: 150 },
+    );
+    assert.deepEqual(tunedModerator.evidenceTable.moderator, {
+      x: -40,
+      y: 12,
+      size: 150,
+    });
+    assert.deepEqual(
+      tunedModerator.evidenceTable.wide,
+      tunedWide.evidenceTable.wide,
+    );
+    assert.deepEqual(
+      tunedModerator.gavel,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel,
+    );
+    assert.deepEqual(
+      JSON.parse(
+        formatDebateStageEvidenceTableClipboard(tunedModerator.evidenceTable),
+      ),
+      tunedModerator.evidenceTable,
+    );
   });
 });

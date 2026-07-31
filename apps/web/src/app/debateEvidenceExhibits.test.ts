@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
+  applyDebateEvidenceObjectNameEdit,
+  debateEvidenceObjectDraftFromStoredExhibitAsset,
   debateEvidenceObjectFromPrismCandidate,
   debateEvidenceEmojiForObject,
+  debateEvidenceExhibitTitleFromStoredPrompt,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
   searchDebateEvidenceEmojis,
@@ -59,13 +62,36 @@ describe("Debate evidence object generator", () => {
   it("ranks exactly three live search previews by relevant terms", () => {
     assert.deepEqual(
       searchDebateEvidenceEmojis("glove").map(({ emoji }) => emoji),
-      ["🧤", "✋", "🥊"],
+      ["🧤", "🥊", "✋"],
     );
-    assert.deepEqual(
-      searchDebateEvidenceEmojis("public transportation").map(
-        ({ emoji }) => emoji,
+    const transit = searchDebateEvidenceEmojis("public transportation").map(
+      ({ emoji }) => emoji,
+    );
+    assert.equal(transit.length, 3);
+    assert.ok(
+      transit.includes("🚂") || transit.includes("🚆"),
+      `expected a train in transit results, got ${transit.join(" ")}`,
+    );
+    assert.ok(
+      transit.some((emoji) => ["🚌", "🚗", "🚎", "🚐", "🚇"].includes(emoji)),
+      `expected a road/transit vehicle, got ${transit.join(" ")}`,
+    );
+    const celebrate = searchDebateEvidenceEmojis("Celebrate").map(
+      ({ emoji }) => emoji,
+    );
+    assert.ok(
+      celebrate.includes("🎉"),
+      `expected party popper in celebrate results, got ${celebrate.join(" ")}`,
+    );
+    assert.equal(celebrate.length, 3);
+    assert.equal(
+      celebrate.every((emoji) =>
+        ["🎉", "🎊", "🥳", "🎈", "🎂", "🎆", "🎇", "🍾", "🥂", "🍻", "🎁", "🪅"].includes(
+          emoji,
+        ),
       ),
-      ["🚂", "🚗", "🚌"],
+      true,
+      `celebrate results should be festive symbols, got ${celebrate.join(" ")}`,
     );
     const unknown = searchDebateEvidenceEmojis("uncategorizable artifact");
     assert.equal(unknown.length, 3);
@@ -91,6 +117,96 @@ describe("Debate evidence object generator", () => {
       debateEvidenceObjectFromPrismCandidate("Weathered transit map."),
       null,
     );
+  });
+
+  it("restores an evidence draft from a stored exhibit sprite prompt", () => {
+    const synthesizePrompt = [
+      'Create one evidence exhibit sprite depicting exactly: "Rusty spoon".',
+      "PRISM evidence-exhibit house style: one tactile premium miniature.",
+    ].join(" ");
+    assert.equal(
+      debateEvidenceExhibitTitleFromStoredPrompt(synthesizePrompt),
+      "Rusty spoon",
+    );
+    assert.equal(
+      debateEvidenceExhibitTitleFromStoredPrompt(
+        "[Debate exhibit upload] Weathered transit map",
+      ),
+      "Weathered transit map",
+    );
+    assert.equal(
+      debateEvidenceExhibitTitleFromStoredPrompt("unrelated image prompt"),
+      null,
+    );
+    assert.deepEqual(
+      debateEvidenceObjectDraftFromStoredExhibitAsset({
+        id: "img-rusty-spoon",
+        prompt: synthesizePrompt,
+      }),
+      {
+        adjective: "Rusty",
+        object: "spoon",
+        observation: "Rusty spoon.",
+        emoji: debateEvidenceEmojiForObject("spoon", "Rusty"),
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "synthesized",
+        imageId: "img-rusty-spoon",
+      },
+    );
+  });
+
+  it("keeps a synthesized sprite when renaming adjective/object", () => {
+    const withSprite = applyDebateEvidenceObjectNameEdit(
+      {
+        adjective: "Mobile",
+        object: "Phone",
+        observation: "Mobile Phone.",
+        emoji: "📱",
+        emojiCustomized: false,
+        createdBy: "user",
+        visualKind: "synthesized",
+        imageId: "img-mobile-phone",
+      },
+      "adjective",
+      "Victim's",
+    );
+    assert.equal(withSprite.adjective, "Victim's");
+    assert.equal(withSprite.object, "Phone");
+    assert.equal(withSprite.observation, "Victim's Phone.");
+    assert.equal(withSprite.visualKind, "synthesized");
+    assert.equal(withSprite.imageId, "img-mobile-phone");
+    assert.equal(withSprite.emoji, "📱");
+
+    const renamedObject = applyDebateEvidenceObjectNameEdit(
+      withSprite,
+      "object",
+      "Mobile Phone",
+    );
+    assert.equal(renamedObject.object, "Mobile Phone");
+    assert.equal(renamedObject.observation, "Victim's Mobile Phone.");
+    assert.equal(renamedObject.visualKind, "synthesized");
+    assert.equal(renamedObject.imageId, "img-mobile-phone");
+  });
+
+  it("still auto-picks emoji when renaming before a sprite exists", () => {
+    const next = applyDebateEvidenceObjectNameEdit(
+      {
+        adjective: "Rusty",
+        object: "key",
+        observation: "Rusty key.",
+        emoji: "🔑",
+        emojiCustomized: false,
+        createdBy: "user",
+        visualKind: "emoji",
+        imageId: null,
+      },
+      "object",
+      "spoon",
+    );
+    assert.equal(next.emoji, "🥄");
+    assert.equal(next.visualKind, "emoji");
+    assert.equal(next.imageId, null);
   });
 
   it("keeps one complete user-selected emoji grapheme", () => {

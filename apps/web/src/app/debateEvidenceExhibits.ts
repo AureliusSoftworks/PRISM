@@ -3,6 +3,10 @@ import {
   type DebateEvidencePacketV1,
   type DebateEvidenceExhibitV1,
 } from "@localai/shared";
+import {
+  DEBATE_EVIDENCE_EMOJI_CATALOG as RAW_DEBATE_EVIDENCE_EMOJI_CATALOG,
+  type DebateEvidenceEmojiCatalogEntry,
+} from "./debateEvidenceEmojiCatalog.ts";
 
 const DEBATE_EXHIBIT_ADJECTIVES = [
   "Ancient",
@@ -95,32 +99,44 @@ const DEBATE_EXHIBIT_OBJECTS = [
   "whistle",
 ] as const;
 
-export const DEBATE_EVIDENCE_EMOJI_CHOICES = [
-  "📦",
-  "🧾",
-  "📜",
-  "🔑",
-  "🕰️",
-  "🧭",
-  "🔦",
-  "📷",
-  "🪞",
-  "🧸",
-  "🧤",
-  "👞",
-  "💍",
-  "🥄",
-  "🥔",
-  "🚂",
-  "🦧",
-  "🍎",
-  "☂️",
-  "🪶",
-  "🔨",
-  "🕯️",
-  "📻",
-  "🎫",
-] as const;
+function dedupeDebateEvidenceEmojiCatalog(
+  entries: readonly DebateEvidenceEmojiCatalogEntry[],
+): DebateEvidenceEmojiCatalogEntry[] {
+  const byEmoji = new Map<string, DebateEvidenceEmojiCatalogEntry>();
+  for (const entry of entries) {
+    const emoji = entry.emoji.trim();
+    if (!emoji || !/\p{Extended_Pictographic}/u.test(emoji)) continue;
+    const existing = byEmoji.get(emoji);
+    if (!existing) {
+      byEmoji.set(emoji, {
+        emoji,
+        label: entry.label.trim() || emoji,
+        keywords: [...entry.keywords],
+      });
+      continue;
+    }
+    const keywords = new Set<string>([
+      ...existing.keywords,
+      ...entry.keywords,
+      existing.label,
+      entry.label,
+    ]);
+    byEmoji.set(emoji, {
+      emoji,
+      label: existing.label,
+      keywords: [...keywords].filter(Boolean),
+    });
+  }
+  return [...byEmoji.values()];
+}
+
+const DEBATE_EVIDENCE_EMOJI_CATALOG = dedupeDebateEvidenceEmojiCatalog(
+  RAW_DEBATE_EVIDENCE_EMOJI_CATALOG,
+);
+
+export const DEBATE_EVIDENCE_EMOJI_CHOICES = DEBATE_EVIDENCE_EMOJI_CATALOG.map(
+  (entry) => entry.emoji,
+) as readonly string[];
 
 export interface DebateEvidenceObjectDraft {
   adjective: string;
@@ -155,141 +171,10 @@ function stableHash(value: string): number {
   return hash;
 }
 
-interface DebateEvidenceEmojiCatalogEntry {
-  emoji: string;
-  label: string;
-  keywords: readonly string[];
-}
-
 export interface DebateEvidenceEmojiSearchResult {
   emoji: string;
   label: string;
 }
-
-const DEBATE_EVIDENCE_EMOJI_CATALOG: readonly DebateEvidenceEmojiCatalogEntry[] =
-  [
-    { emoji: "📦", label: "box", keywords: ["package", "container", "object"] },
-    {
-      emoji: "🧾",
-      label: "receipt",
-      keywords: ["invoice", "proof", "evidence"],
-    },
-    { emoji: "📜", label: "scroll", keywords: ["history", "law", "decree"] },
-    { emoji: "🔑", label: "key", keywords: ["access", "lock", "unlock"] },
-    { emoji: "⏰", label: "alarm clock", keywords: ["alarm", "time", "clock"] },
-    { emoji: "🕰️", label: "watch", keywords: ["clock", "time", "hourglass"] },
-    { emoji: "🧭", label: "compass", keywords: ["direction", "navigation"] },
-    { emoji: "🔦", label: "flashlight", keywords: ["torch", "light"] },
-    {
-      emoji: "📷",
-      label: "camera",
-      keywords: ["photo", "photograph", "picture"],
-    },
-    { emoji: "🪞", label: "mirror", keywords: ["reflection", "glass"] },
-    { emoji: "🧸", label: "toy", keywords: ["teddy", "childhood", "plush"] },
-    { emoji: "🧤", label: "glove", keywords: ["hand", "mitten"] },
-    { emoji: "✋", label: "hand", keywords: ["glove", "palm", "stop"] },
-    {
-      emoji: "🥊",
-      label: "boxing glove",
-      keywords: ["glove", "punch", "sport"],
-    },
-    { emoji: "👞", label: "shoe", keywords: ["boot", "footwear"] },
-    { emoji: "💍", label: "ring", keywords: ["jewelry", "locket", "wedding"] },
-    { emoji: "🥄", label: "spoon", keywords: ["utensil", "silverware"] },
-    { emoji: "🥔", label: "potato", keywords: ["vegetable", "food"] },
-    {
-      emoji: "🚂",
-      label: "train",
-      keywords: ["rail", "transit", "transportation"],
-    },
-    { emoji: "🦧", label: "orangutan", keywords: ["ape", "animal", "primate"] },
-    { emoji: "🍎", label: "apple", keywords: ["fruit", "food"] },
-    { emoji: "☂️", label: "umbrella", keywords: ["rain", "weather"] },
-    { emoji: "🪶", label: "feather", keywords: ["bird", "quill"] },
-    {
-      emoji: "🔨",
-      label: "hammer",
-      keywords: ["tool", "build", "construction"],
-    },
-    { emoji: "🕯️", label: "candle", keywords: ["flame", "light", "wax"] },
-    { emoji: "📻", label: "radio", keywords: ["broadcast", "audio", "news"] },
-    {
-      emoji: "🎫",
-      label: "ticket",
-      keywords: ["admission", "pass", "receipt"],
-    },
-    { emoji: "✉️", label: "letter", keywords: ["mail", "envelope", "message"] },
-    { emoji: "📓", label: "notebook", keywords: ["diary", "journal", "notes"] },
-    { emoji: "🗺️", label: "map", keywords: ["route", "geography", "transit"] },
-    {
-      emoji: "💼",
-      label: "briefcase",
-      keywords: ["suitcase", "luggage", "work"],
-    },
-    { emoji: "🔘", label: "button", keywords: ["switch", "control"] },
-    { emoji: "🔧", label: "crowbar", keywords: ["wrench", "tool", "pry"] },
-    { emoji: "🎩", label: "hat", keywords: ["cap", "clothing"] },
-    { emoji: "🏮", label: "lantern", keywords: ["lamp", "light"] },
-    { emoji: "🔵", label: "marble", keywords: ["ball", "blue", "round"] },
-    {
-      emoji: "🎭",
-      label: "mask",
-      keywords: ["theater", "disguise", "persona"],
-    },
-    { emoji: "🔥", label: "matchbook", keywords: ["fire", "burn", "flame"] },
-    { emoji: "🏅", label: "medal", keywords: ["award", "prize", "honor"] },
-    { emoji: "☕", label: "mug", keywords: ["teacup", "coffee", "drink"] },
-    { emoji: "🖌️", label: "paintbrush", keywords: ["brush", "paint", "art"] },
-    { emoji: "🐦", label: "paper crane", keywords: ["origami", "bird"] },
-    { emoji: "💿", label: "record", keywords: ["album", "disc", "music"] },
-    { emoji: "🪢", label: "rope", keywords: ["knot", "cord"] },
-    { emoji: "🚀", label: "rocket", keywords: ["space", "toy", "launch"] },
-    { emoji: "👛", label: "wallet", keywords: ["purse", "money"] },
-    {
-      emoji: "📣",
-      label: "whistle",
-      keywords: ["megaphone", "sound", "warning"],
-    },
-    { emoji: "⚖️", label: "scales", keywords: ["law", "justice", "balance"] },
-    { emoji: "🏛️", label: "institution", keywords: ["government", "court"] },
-    {
-      emoji: "💡",
-      label: "idea",
-      keywords: ["insight", "innovation", "light"],
-    },
-    { emoji: "🔬", label: "microscope", keywords: ["science", "research"] },
-    {
-      emoji: "🧪",
-      label: "experiment",
-      keywords: ["chemistry", "science", "test"],
-    },
-    { emoji: "📊", label: "chart", keywords: ["data", "statistics", "graph"] },
-    { emoji: "💰", label: "money", keywords: ["finance", "wealth", "economy"] },
-    { emoji: "🏠", label: "house", keywords: ["home", "housing", "property"] },
-    { emoji: "🚗", label: "car", keywords: ["vehicle", "transportation"] },
-    { emoji: "🚌", label: "bus", keywords: ["transit", "transportation"] },
-    { emoji: "✈️", label: "plane", keywords: ["travel", "flight", "airplane"] },
-    { emoji: "🌎", label: "earth", keywords: ["world", "climate", "planet"] },
-    {
-      emoji: "🌱",
-      label: "plant",
-      keywords: ["environment", "growth", "nature"],
-    },
-    {
-      emoji: "🧠",
-      label: "brain",
-      keywords: ["mind", "psychology", "thought"],
-    },
-    {
-      emoji: "🩺",
-      label: "medicine",
-      keywords: ["health", "doctor", "medical"],
-    },
-    { emoji: "💻", label: "computer", keywords: ["technology", "software"] },
-    { emoji: "🔒", label: "lock", keywords: ["security", "privacy", "safe"] },
-    { emoji: "⚠️", label: "warning", keywords: ["risk", "danger", "caution"] },
-  ];
 
 function normalizedEmojiSearchText(value: string): string {
   return value
@@ -298,28 +183,109 @@ function normalizedEmojiSearchText(value: string): string {
     .trim();
 }
 
+function softStemToken(value: string): string {
+  const token = normalizedEmojiSearchText(value);
+  if (token.length <= 4) return token;
+  if (token.endsWith("ation") && token.length > 7) {
+    return token.slice(0, -5);
+  }
+  if (token.endsWith("tion") && token.length > 6) {
+    return token.slice(0, -4);
+  }
+  if (token.endsWith("ies") && token.length > 5) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (token.endsWith("ing") && token.length > 5) {
+    return token.slice(0, -3);
+  }
+  if (token.endsWith("ers") && token.length > 5) {
+    return token.slice(0, -1);
+  }
+  if (
+    (token.endsWith("es") || token.endsWith("ed")) &&
+    token.length > 5
+  ) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith("s") && token.length > 4 && !token.endsWith("ss")) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function phraseMatchesTerm(phrase: string, term: string): boolean {
+  if (!phrase || !term || term.length < 2) return false;
+  if (phrase === term) return true;
+  // Prefer word-ish prefix matches; avoid "glove" ↔ "love" character traps.
+  if (phrase.startsWith(term) && term.length >= 3) return true;
+  if (term.startsWith(phrase) && phrase.length >= 4) return true;
+  if (phrase.includes(` ${term}`) || phrase.includes(`${term} `)) return true;
+  const phraseStem = softStemToken(phrase);
+  const termStem = softStemToken(term);
+  if (!phraseStem || !termStem) return false;
+  if (phraseStem === termStem) return true;
+  if (phraseStem.startsWith(termStem) || termStem.startsWith(phraseStem)) {
+    return Math.min(phraseStem.length, termStem.length) >= 4;
+  }
+  return false;
+}
+
+function queryContainsPhrase(query: string, phrase: string): boolean {
+  if (!query || !phrase || phrase.length < 3) return false;
+  if (query === phrase) return true;
+  return ` ${query} `.includes(` ${phrase} `);
+}
+
 export function searchDebateEvidenceEmojis(
   query: string,
   limit = 3,
 ): DebateEvidenceEmojiSearchResult[] {
   const normalizedQuery = normalizedEmojiSearchText(query);
   const queryTerms = normalizedQuery.split(" ").filter(Boolean);
+  const queryStem = softStemToken(normalizedQuery);
   const ranked = DEBATE_EVIDENCE_EMOJI_CATALOG.map((entry, index) => {
     const label = normalizedEmojiSearchText(entry.label);
     const keywords = entry.keywords.map(normalizedEmojiSearchText);
     const phrases = [label, ...keywords];
+    const labelTokens = label.split(" ").filter(Boolean);
     let score = 0;
     if (normalizedQuery) {
       if (label === normalizedQuery) score += 1_000;
       if (keywords.includes(normalizedQuery)) score += 900;
-      if (phrases.some((phrase) => normalizedQuery.includes(phrase))) {
+      if (queryStem && softStemToken(label) === queryStem) score += 850;
+      if (keywords.some((keyword) => softStemToken(keyword) === queryStem)) {
+        score += 780;
+      }
+      if (phrases.some((phrase) => queryContainsPhrase(normalizedQuery, phrase))) {
         score += 420;
       }
       for (const term of queryTerms) {
         if (label === term) score += 180;
         if (keywords.includes(term)) score += 150;
-        if (phrases.some((phrase) => phrase.startsWith(term))) score += 80;
-        if (phrases.some((phrase) => phrase.includes(term))) score += 35;
+        // Prefer the entry's primary meaning when the first keyword matches.
+        if (keywords[0] === term) score += 220;
+        if (keywords[0] && softStemToken(keywords[0]) === softStemToken(term)) {
+          score += 140;
+        }
+        if (labelTokens[0] === term) score += 200;
+        if (phrases.some((phrase) => phraseMatchesTerm(phrase, term))) {
+          score += 95;
+        }
+        if (phrases.some((phrase) => phrase.startsWith(term) && term.length >= 3)) {
+          score += 80;
+        }
+        if (
+          phrases.some(
+            (phrase) =>
+              term.length >= 3 &&
+              (phrase === term ||
+                phrase.startsWith(`${term} `) ||
+                phrase.endsWith(` ${term}`) ||
+                phrase.includes(` ${term} `)),
+          )
+        ) {
+          score += 35;
+        }
       }
     }
     return { entry, index, score };
@@ -474,5 +440,87 @@ export function debateEvidenceObjectFromPrismCandidate(
     createdBy: "prism",
     visualKind: "emoji",
     imageId: null,
+  };
+}
+
+/**
+ * Recover the `{ADJECTIVE} {OBJECT}` title baked into Debate exhibit image
+ * prompts (synthesize art-bible or upload label).
+ */
+export function debateEvidenceExhibitTitleFromStoredPrompt(
+  prompt: string,
+): string | null {
+  const text = prompt.replace(/\s+/gu, " ").trim();
+  if (!text) return null;
+  const synthesizeMatch = text.match(
+    /depicting exactly:\s*"([^"]+)"/iu,
+  );
+  if (synthesizeMatch?.[1]?.trim()) {
+    return synthesizeMatch[1].trim();
+  }
+  const uploadMatch = text.match(
+    /^\[Debate exhibit upload\]\s*(.+)$/iu,
+  );
+  if (uploadMatch?.[1]?.trim()) {
+    return uploadMatch[1].trim();
+  }
+  return null;
+}
+
+/**
+ * Rebuild the object-editor draft from a previously generated exhibit sprite
+ * so reusing it also restores the naming choices that created it.
+ */
+export function debateEvidenceObjectDraftFromStoredExhibitAsset(asset: {
+  id: string;
+  prompt: string;
+}): DebateEvidenceObjectDraft | null {
+  const title = debateEvidenceExhibitTitleFromStoredPrompt(asset.prompt);
+  if (!title) return null;
+  const draft = debateEvidenceObjectFromPrismCandidate(title);
+  if (!draft) return null;
+  return {
+    ...draft,
+    visualKind: "synthesized",
+    imageId: asset.id,
+  };
+}
+
+function debateEvidenceObjectDraftHasLockedVisual(
+  draft: DebateEvidenceObjectDraft,
+): boolean {
+  if (!draft.imageId) return false;
+  return draft.visualKind === "synthesized" || draft.visualKind === "upload";
+}
+
+/**
+ * Update adjective/object naming while preserving an attached exhibit sprite
+ * (or customized emoji). Auto emoji lookup only runs when there is no locked
+ * visual yet.
+ */
+export function applyDebateEvidenceObjectNameEdit(
+  current: DebateEvidenceObjectDraft,
+  field: "adjective" | "object",
+  value: string,
+): DebateEvidenceObjectDraft {
+  const previousTitle = debateEvidenceExhibitTitle(current);
+  const next = { ...current, [field]: value };
+  const nextTitle = debateEvidenceExhibitTitle(next);
+  const hasLockedVisual = debateEvidenceObjectDraftHasLockedVisual(current);
+  return {
+    ...next,
+    observation:
+      !current.observation.trim() ||
+      current.observation.trim() === `${previousTitle}.`
+        ? nextTitle
+          ? `${nextTitle}.`
+          : ""
+        : current.observation,
+    emoji:
+      current.emojiCustomized || hasLockedVisual
+        ? current.emoji
+        : debateEvidenceEmojiForObject(next.object, next.adjective),
+    visualKind: hasLockedVisual ? current.visualKind : "emoji",
+    imageId: hasLockedVisual ? current.imageId : null,
   };
 }

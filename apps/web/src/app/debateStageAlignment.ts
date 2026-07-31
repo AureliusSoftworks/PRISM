@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export const DEBATE_STAGE_ALIGNMENT_VERSION = 6 as const;
+export const DEBATE_STAGE_ALIGNMENT_VERSION = 8 as const;
 export const DEBATE_STAGE_ALIGNMENT_MIN = -12;
 export const DEBATE_STAGE_ALIGNMENT_MAX = 12;
 export const DEBATE_STAGE_ALIGNMENT_STEP = 0.5;
@@ -13,6 +13,12 @@ export const DEBATE_STAGE_GAVEL_ROTATION_STEP = 1;
 export const DEBATE_STAGE_GAVEL_SIZE_MIN = 50;
 export const DEBATE_STAGE_GAVEL_SIZE_MAX = 200;
 export const DEBATE_STAGE_GAVEL_SIZE_STEP = 5;
+export const DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN = -300;
+export const DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX = 300;
+export const DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP = 0.5;
+export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN = 40;
+export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX = 220;
+export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_STEP = 5;
 export const DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN = 0;
 export const DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX = 100;
 export const DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP = 5;
@@ -81,35 +87,52 @@ export interface DebateStageGavelV3 {
   raised: DebateStageGavelPoseV3;
 }
 
-export interface DebateStageAlignmentV6 {
+/** Shared place/size for the exhibit table that uses the Jury coffee-table raster. */
+export interface DebateStageEvidenceTableV1 extends DebateStageOffsetV1 {
+  size: number;
+}
+
+/** Per-camera evidence placement — wide/left/right vs moderator close-up. */
+export interface DebateStageEvidenceTablesV8 {
+  wide: DebateStageEvidenceTableV1;
+  moderator: DebateStageEvidenceTableV1;
+}
+
+export interface DebateStageAlignmentV8 {
   version: typeof DEBATE_STAGE_ALIGNMENT_VERSION;
   wide: DebateStageAlignmentWideV4;
   moderator: DebateStageRolePlacementV4;
   gavel: DebateStageGavelV3;
+  evidenceTable: DebateStageEvidenceTablesV8;
   lightBlendModes: DebateStageLightBlendModesV1;
   lightMaskOpacities: DebateStageLightMaskOpacitiesV1;
 }
+
+/** @deprecated Prefer DebateStageAlignmentV8 — kept as a stable import alias. */
+export type DebateStageAlignmentV7 = DebateStageAlignmentV8;
+/** @deprecated Prefer DebateStageAlignmentV8 — kept as a stable import alias. */
+export type DebateStageAlignmentV6 = DebateStageAlignmentV8;
 
 export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
   ["for", "moderator", "against"];
 export const DEBATE_STAGE_ALIGNMENT_ITEMS: readonly DebateStageAlignmentItem[] =
   ["bot", "nameplate", "glyph"];
 
-export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV6 = {
+export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV8 = {
   version: DEBATE_STAGE_ALIGNMENT_VERSION,
   wide: {
     for: {
-      bot: { x: 0.01, y: -3.47 },
+      bot: { x: 0.01, y: -2 },
       nameplate: { x: 3, y: -4 },
       glyph: { x: 2.5, y: -6.5 },
     },
     moderator: {
-      bot: { x: -0.02, y: -3.5 },
-      nameplate: { x: -0.02, y: -10.5 },
-      glyph: { x: 0, y: 2.5 },
+      bot: { x: -0.02, y: -4 },
+      nameplate: { x: -0.02, y: -11 },
+      glyph: { x: 0, y: 1.5 },
     },
     against: {
-      bot: { x: -0.03, y: -3.5 },
+      bot: { x: -0.03, y: -2 },
       nameplate: { x: -3, y: -4 },
       glyph: { x: -2.5, y: -6.5 },
     },
@@ -122,6 +145,10 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV6 = {
   gavel: {
     lowered: { x: -138.5, y: 12.5, rotation: -131, size: 75 },
     raised: { x: -130.5, y: -4.5, rotation: -77, size: 90 },
+  },
+  evidenceTable: {
+    wide: { x: 0, y: 106, size: 100 },
+    moderator: { x: 0, y: 106, size: 100 },
   },
   lightBlendModes: {
     dark: "hard-light",
@@ -180,6 +207,27 @@ function normalizedGavelRotation(value: unknown, fallback: number): number {
   );
 }
 
+function normalizedEvidenceTableSize(value: unknown, fallback: number): number {
+  return normalizedNumber(
+    value,
+    DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+    DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX,
+    fallback,
+  );
+}
+
+function normalizedEvidenceTablePosition(
+  value: unknown,
+  fallback: number,
+): number {
+  return normalizedNumber(
+    value,
+    DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+    DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+    fallback,
+  );
+}
+
 function normalizedLightMaskOpacity(value: unknown): number {
   return normalizedNumber(
     value,
@@ -219,6 +267,49 @@ function normalizeGavelPose(
     y: normalizedGavelPosition(candidate.y, fallback.y),
     rotation: normalizedGavelRotation(candidate.rotation, fallback.rotation),
     size: normalizedGavelSize(candidate.size, fallback.size),
+  };
+}
+
+function normalizeEvidenceTable(
+  value: unknown,
+  fallback: DebateStageEvidenceTableV1,
+): DebateStageEvidenceTableV1 {
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    x: normalizedEvidenceTablePosition(candidate.x, fallback.x),
+    y: normalizedEvidenceTablePosition(candidate.y, fallback.y),
+    size: normalizedEvidenceTableSize(candidate.size, fallback.size),
+  };
+}
+
+function isLegacyFlatEvidenceTable(value: unknown): boolean {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    ("x" in candidate || "y" in candidate || "size" in candidate) &&
+    !("wide" in candidate) &&
+    !("moderator" in candidate)
+  );
+}
+
+function normalizeEvidenceTables(
+  value: unknown,
+  fallback: DebateStageEvidenceTablesV8,
+): DebateStageEvidenceTablesV8 {
+  if (isLegacyFlatEvidenceTable(value)) {
+    const shared = normalizeEvidenceTable(value, fallback.wide);
+    return { wide: shared, moderator: { ...shared } };
+  }
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    wide: normalizeEvidenceTable(candidate.wide, fallback.wide),
+    moderator: normalizeEvidenceTable(candidate.moderator, fallback.moderator),
   };
 }
 
@@ -346,6 +437,10 @@ export function normalizeDebateStageAlignment(
       lowered: normalizeGavelPose(gavel.lowered, loweredFallback),
       raised: normalizeGavelPose(gavel.raised, raisedFallback),
     },
+    evidenceTable: normalizeEvidenceTables(
+      candidate.evidenceTable,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable,
+    ),
     lightBlendModes: {
       dark: normalizeLightBlendMode(
         lightBlendModes.dark,
@@ -504,7 +599,33 @@ export function updateDebateStageGavelPose(
   });
 }
 
+export function updateDebateStageEvidenceTable(
+  alignment: DebateStageAlignmentV6,
+  view: DebateStageAlignmentView,
+  update: Partial<DebateStageEvidenceTableV1>,
+): DebateStageAlignmentV6 {
+  const normalized = normalizeDebateStageAlignment(alignment);
+  return normalizeDebateStageAlignment({
+    ...normalized,
+    evidenceTable: {
+      ...normalized.evidenceTable,
+      [view]: {
+        ...normalized.evidenceTable[view],
+        ...update,
+      },
+    },
+  });
+}
+
 export function debateStageAlignmentStorageKey(scopeId: string): string {
+  return `prism_debate_stage_alignment_v8:${scopeId}`;
+}
+
+function v7DebateStageAlignmentStorageKey(scopeId: string): string {
+  return `prism_debate_stage_alignment_v7:${scopeId}`;
+}
+
+function v6DebateStageAlignmentStorageKey(scopeId: string): string {
   return `prism_debate_stage_alignment_v6:${scopeId}`;
 }
 
@@ -535,6 +656,8 @@ export function readDebateStageAlignment(
   try {
     const serialized =
       storage.getItem(debateStageAlignmentStorageKey(scopeId)) ??
+      storage.getItem(v7DebateStageAlignmentStorageKey(scopeId)) ??
+      storage.getItem(v6DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v5DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v4DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v3DebateStageAlignmentStorageKey(scopeId)) ??
@@ -596,6 +719,12 @@ export function debateStageAlignmentStyle(
     "--debate-gavel-raised-offset-y": `${normalized.gavel.raised.y}%`,
     "--debate-gavel-raised-rotation": `${normalized.gavel.raised.rotation}deg`,
     "--debate-gavel-raised-scale": `${normalized.gavel.raised.size / 100}`,
+    "--debate-evidence-offset-x": `${normalized.evidenceTable.wide.x}%`,
+    "--debate-evidence-offset-y": `${normalized.evidenceTable.wide.y}%`,
+    "--debate-evidence-scale": `${normalized.evidenceTable.wide.size / 100}`,
+    "--debate-moderator-evidence-offset-x": `${normalized.evidenceTable.moderator.x}%`,
+    "--debate-moderator-evidence-offset-y": `${normalized.evidenceTable.moderator.y}%`,
+    "--debate-moderator-evidence-scale": `${normalized.evidenceTable.moderator.size / 100}`,
     "--debate-light-blend-mode-dark": normalized.lightBlendModes.dark,
     "--debate-light-blend-mode-light": normalized.lightBlendModes.light,
     "--debate-light-mask-opacity-dark": `${normalized.lightMaskOpacities.dark}%`,
@@ -614,6 +743,16 @@ export function formatDebateStageGavelClipboard(
 ): string {
   return JSON.stringify(
     normalizeDebateStageAlignment({ gavel }).gavel,
+    null,
+    2,
+  );
+}
+
+export function formatDebateStageEvidenceTableClipboard(
+  evidenceTable: DebateStageEvidenceTablesV8 | DebateStageEvidenceTableV1,
+): string {
+  return JSON.stringify(
+    normalizeDebateStageAlignment({ evidenceTable }).evidenceTable,
     null,
     2,
   );

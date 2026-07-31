@@ -82,6 +82,31 @@ describe("prompt wildcard resolution", () => {
     );
   });
 
+  it("clears leftover {VAR} without calling the provider", async () => {
+    let providerCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        providerCalls += 1;
+        throw new Error("provider should not be called for VAR");
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const result = await resolvePromptWildcardsWithModel({
+      prompt: 'Echo leftover "{VAR}" here.',
+      provider,
+      generationOverrides: {},
+    });
+
+    assert.equal(providerCalls, 0);
+    assert.equal(result.prompt, 'Echo leftover "" here.');
+    assert.equal(result.replacements[0]?.key, "VAR");
+    assert.equal(result.replacements[0]?.value, "");
+  });
+
   it("resolves built-in wildcard slots without calling the provider", async () => {
     let providerCalls = 0;
     const provider: LlmProvider = {

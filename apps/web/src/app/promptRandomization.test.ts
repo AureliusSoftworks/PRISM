@@ -6,6 +6,7 @@ import {
   maskBuiltInWildcardSlotsForPending,
   maskModelFilledWildcardSlotsForPending,
   pendingCleanupOptimisticMessageContent,
+  preservePromptBodyWhitespace,
   promptContainsBuiltInWildcardSlots,
   promptContainsModelFilledWildcardSlots,
   promptInsertionStartsSentence,
@@ -137,6 +138,23 @@ describe("formatPromptShortcutInsertion", () => {
     assert.equal(formatPromptShortcutInsertion("say hello.", "", ""), "Say hello.");
     assert.equal(formatPromptShortcutInsertion("PRISM memory", "ask ", ""), "PRISM memory");
     assert.equal(formatPromptShortcutInsertion("I remember this", "and ", ""), "I remember this");
+  });
+
+  it("keeps intentional trailing newlines from Prompt Center bodies", () => {
+    assert.equal(
+      formatPromptShortcutInsertion(
+        "Say nothing other than the text following this prompt:\n\n",
+        "",
+        "hello",
+      ),
+      "Say nothing other than the text following this prompt:\n\n",
+    );
+    assert.equal(
+      preservePromptBodyWhitespace(
+        "  Say nothing other than the text following this prompt:\n\n  ",
+      ),
+      "Say nothing other than the text following this prompt:\n\n",
+    );
   });
 });
 
@@ -480,6 +498,8 @@ describe("pending built-in wildcard slot masking", () => {
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {number1}."), true);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Make it {CHARACTER1}."), false);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {VAR}."), false);
+    assert.equal(promptContainsModelFilledWildcardSlots("Make it {var}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Pick {red|green}."), false);
     assert.equal(promptContainsModelFilledWildcardSlots("Keep {word} literal."), false);
   });

@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import {
   getBuiltInPromptWildcardSlot,
   isDisabledPromptWildcardToken,
+  isPassthroughBuiltInPromptWildcardKey,
   parseBuiltInPromptWildcardReference,
   contextualBuiltInPromptWildcardValue,
   type PromptShortcutWildcardReplacement,
@@ -451,6 +452,11 @@ function scriptedPromptWildcardValuesForOccurrences(
   for (const occurrence of occurrences) {
     if (values.has(occurrence.requestKey)) continue;
     if (!getBuiltInPromptWildcardSlot(occurrence.key)) continue;
+    if (isPassthroughBuiltInPromptWildcardKey(occurrence.key)) {
+      // Leftover `{VAR}` must never reach the model; treat as empty capture.
+      values.set(occurrence.requestKey, "");
+      continue;
+    }
     if (occurrence.reference && isNounPairWildcardKey(occurrence.key)) {
       let pairIndex = nounPairIndexesByReference.get(occurrence.reference);
       if (pairIndex === undefined) {
@@ -648,14 +654,14 @@ export function applyPromptWildcardValues(
     resolved += prompt.slice(segmentStart, segmentEnd);
     preserveSegmentReplacements(segmentStart, segmentEnd, resolvedSegmentStart);
     const value = values.get(occurrence.requestKey);
-    if (value) {
+    if (values.has(occurrence.requestKey)) {
       const start = resolved.length;
-      resolved += value;
+      resolved += value ?? "";
       replacements.push({
         key: occurrence.key,
-        value,
+        value: value ?? "",
         start,
-        end: start + value.length,
+        end: start + (value ?? "").length,
         source: "wildcard",
       });
     } else {

@@ -38,6 +38,13 @@ describe("wildcard reference badges", () => {
     assert.equal(rewriteWildcardSlotTokenReference("{number}", "up"), "{#1}");
   });
 
+  it("does not letter-link VAR into A/B/C variants", () => {
+    assert.equal(rewriteWildcardSlotTokenReference("{VAR}", "up"), null);
+    assert.equal(rewriteWildcardSlotTokenReference("{var}", "up"), null);
+    assert.equal(rewriteWildcardSlotTokenReference("{VAR1}", "up"), null);
+    assert.equal(rewriteWildcardSlotTokenReference("{VAR}", "down"), null);
+  });
+
   it("ignores bang deck syntax and unsupported brace tokens", () => {
     assert.equal(rewriteWildcardSlotTokenReference("!person", "up"), null);
     assert.equal(rewriteWildcardSlotTokenReference("{MOOD}", "up"), null);
