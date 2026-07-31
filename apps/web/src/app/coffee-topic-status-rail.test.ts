@@ -39,7 +39,7 @@ test("the selected Coffee topic stays framed under the navbar", () => {
   );
   assert.match(
     pageSource,
-    /coffeeSessionSurfaceActive &&[\s\S]*coffeeConversation\?\.coffeeTopic\?\.trim\(\)/,
+    /coffeeSessionSurfaceActive &&[\s\S]*!\([\s\S]*coffeeSessionPhase === "finished" && !coffeeReplayActive[\s\S]*\) &&[\s\S]*coffeeConversation\?\.coffeeTopic\?\.trim\(\)/,
   );
   assert.match(
     pageSource,
@@ -58,6 +58,21 @@ test("the selected Coffee topic stays framed under the navbar", () => {
   assert.match(
     css,
     /\.coffeeMain\s*\{[\s\S]*grid-template-rows:\s*auto minmax\(0, 1fr\) auto;/,
+  );
+});
+
+test("finished Coffee review hides the redundant topic frame under the navbar", () => {
+  assert.match(
+    pageSource,
+    /coffeeSessionPhase === "finished" && !coffeeReplayActive/,
+  );
+  assert.match(
+    pageSource,
+    /className=\{`\$\{styles\.coffeeStageHeader\} \$\{styles\.coffeeReviewHeader\}`\}/,
+  );
+  assert.match(
+    pageSource,
+    /<span className=\{styles\.sectionLabel\}>Session complete<\/span>/,
   );
 });
 

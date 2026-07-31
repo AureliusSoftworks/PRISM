@@ -231,3 +231,44 @@ export function applyDebateSetupPreset<
         : [],
   };
 }
+
+/** Studio screens that must be opened once before Start unlocks. */
+export const DEBATE_REQUIRED_SETUP_SCREENS = [
+  "motion",
+  "cast",
+  "evidence",
+] as const;
+
+export type DebateRequiredSetupScreen =
+  (typeof DEBATE_REQUIRED_SETUP_SCREENS)[number];
+
+export function isDebateRequiredSetupScreen(
+  panel: string,
+): panel is DebateRequiredSetupScreen {
+  return (DEBATE_REQUIRED_SETUP_SCREENS as readonly string[]).includes(panel);
+}
+
+/**
+ * Start stays locked until Topic/Motion, Debaters/Cast, and Evidence have each
+ * been opened at least once. Navigation itself stays free.
+ */
+export function debateSetupScreensVisited(
+  visited: ReadonlySet<string> | readonly string[],
+): boolean {
+  const set = visited instanceof Set ? visited : new Set(visited);
+  return DEBATE_REQUIRED_SETUP_SCREENS.every((screen) => set.has(screen));
+}
+
+export function withDebateSetupScreenVisited(
+  visited: ReadonlySet<DebateRequiredSetupScreen>,
+  panel: string,
+): ReadonlySet<DebateRequiredSetupScreen> {
+  if (!isDebateRequiredSetupScreen(panel) || visited.has(panel)) return visited;
+  const next = new Set(visited);
+  next.add(panel);
+  return next;
+}
+
+export function initialDebateSetupScreensVisited(): ReadonlySet<DebateRequiredSetupScreen> {
+  return new Set<DebateRequiredSetupScreen>(["motion"]);
+}

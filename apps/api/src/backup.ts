@@ -40,6 +40,9 @@ import {
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   parseStoredBotFaceThinkingFrames,
   serializeBotFaceThinkingFrames,
   serializeBotAvatarDetailsV1,
@@ -235,6 +238,9 @@ export interface BackupBotSnapshot {
   faceBlinkOffsetY?: number | null;
   faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | null;
+  faceThinkingScale?: number | null;
+  faceThinkingOffsetX?: number | null;
+  faceThinkingOffsetY?: number | null;
   chatEnabled: boolean;
   visibility: "private" | "public";
   createdAt: string;
@@ -1902,6 +1908,9 @@ export function exportUserSnapshot(
          face_blink_offset_y,
          face_blink_rotation_deg,
          face_thinking_frames,
+         face_thinking_scale,
+         face_thinking_offset_x,
+         face_thinking_offset_y,
          authored_audio_voice_profile,
          audio_voice_profile_override,
          chat_enabled,
@@ -1961,6 +1970,9 @@ export function exportUserSnapshot(
     face_blink_offset_y: number | null;
     face_blink_rotation_deg: number | null;
     face_thinking_frames: string | null;
+    face_thinking_scale: number | null;
+    face_thinking_offset_x: number | null;
+    face_thinking_offset_y: number | null;
     authored_audio_voice_profile: string | null;
     audio_voice_profile_override: string | null;
     chat_enabled: number;
@@ -2407,6 +2419,9 @@ export function exportUserSnapshot(
         faceBlinkRotationDeg:
           normalizeBotFaceBlinkRotationDeg(bot.face_blink_rotation_deg) ??
           DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
+        faceThinkingScale: normalizeBotFaceThinkingScale(bot.face_thinking_scale),
+        faceThinkingOffsetX: normalizeBotFaceThinkingOffsetX(bot.face_thinking_offset_x),
+        faceThinkingOffsetY: normalizeBotFaceThinkingOffsetY(bot.face_thinking_offset_y),
         faceThinkingFrames:
           parseStoredBotFaceThinkingFrames(bot.face_thinking_frames) ??
           DEFAULT_BOT_FACE_THINKING_FRAMES,
@@ -3310,13 +3325,16 @@ function importUserSnapshotWithinTransaction(
         face_blink_offset_y,
         face_blink_rotation_deg,
         face_thinking_frames,
+        face_thinking_scale,
+        face_thinking_offset_x,
+        face_thinking_offset_y,
         authored_audio_voice_profile,
         audio_voice_profile_override,
         chat_enabled,
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
@@ -3406,6 +3424,9 @@ function importUserSnapshotWithinTransaction(
         normalizeBotFaceBlinkRotationDeg(bot.faceBlinkRotationDeg) ??
           DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
         serializeBotFaceThinkingFrames(bot.faceThinkingFrames),
+        normalizeBotFaceThinkingScale(bot.faceThinkingScale),
+        normalizeBotFaceThinkingOffsetX(bot.faceThinkingOffsetX),
+        normalizeBotFaceThinkingOffsetY(bot.faceThinkingOffsetY),
         serializeBotAudioVoiceProfileV1(bot.authoredAudioVoiceProfile),
         bot.audioVoiceProfileOverride === null ||
           bot.audioVoiceProfileOverride === undefined

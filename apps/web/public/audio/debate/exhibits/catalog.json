@@ -1,0 +1,268 @@
+{
+  "version": 1,
+  "setId": "material-impacts-v1",
+  "createdAt": "2026-07-30T20:00:00-07:00",
+  "provider": "elevenlabs",
+  "model": "eleven_text_to_sound_v2",
+  "format": "mp3_44100_128",
+  "mode": "live",
+  "notes": "Prototype impact library only. Listen before any app integration. Not added to shipping asset catalogs.",
+  "lookupHints": {
+    "byMaterial": "match tags.material",
+    "byHardness": "match tags.hardness: soft | medium | hard | brittle",
+    "byPitch": "match tags.pitch: low | mid | high",
+    "byEvent": "match tags.events[] for contextual UI/gameplay cues"
+  },
+  "sounds": [
+    {
+      "id": "impact-wood",
+      "file": "impact-wood.mp3",
+      "durationSec": 0.55,
+      "label": "Wood impact",
+      "description": "Warm hardwood block strike with a short room tail.",
+      "tags": {
+        "family": "impact",
+        "material": "wood",
+        "materials": ["wood", "hardwood", "timber"],
+        "hardness": "medium",
+        "pitch": "mid",
+        "transient": "rounded",
+        "resonance": "warm",
+        "weight": "medium",
+        "events": [
+          "object_place",
+          "panel_close",
+          "token_drop",
+          "furniture_tap",
+          "confirm_solid"
+        ],
+        "mood": ["earthy", "stable", "organic"]
+      }
+    },
+    {
+      "id": "impact-glass",
+      "file": "impact-glass.mp3",
+      "durationSec": 0.5,
+      "label": "Glass impact",
+      "description": "Thin glass tap with a clear high sparkle ring.",
+      "tags": {
+        "family": "impact",
+        "material": "glass",
+        "materials": ["glass", "crystal", "pane"],
+        "hardness": "brittle",
+        "pitch": "high",
+        "transient": "sharp",
+        "resonance": "ringing",
+        "weight": "light",
+        "events": [
+          "fragile_contact",
+          "ui_focus_chime",
+          "prism_refract",
+          "delicate_select",
+          "shatter_warning_soft"
+        ],
+        "mood": ["clear", "fragile", "bright"]
+      }
+    },
+    {
+      "id": "impact-metal",
+      "file": "impact-metal.mp3",
+      "durationSec": 0.55,
+      "label": "Metal impact",
+      "description": "Light steel plate strike with a short metallic ping.",
+      "tags": {
+        "family": "impact",
+        "material": "metal",
+        "materials": ["metal", "steel", "iron"],
+        "hardness": "hard",
+        "pitch": "high",
+        "transient": "sharp",
+        "resonance": "metallic",
+        "weight": "medium",
+        "events": [
+          "tool_strike",
+          "latch_engage",
+          "machine_tick",
+          "armor_tap",
+          "error_hard"
+        ],
+        "mood": ["precise", "industrial", "alert"]
+      }
+    },
+    {
+      "id": "impact-ceramic",
+      "file": "impact-ceramic.mp3",
+      "durationSec": 0.5,
+      "label": "Ceramic impact",
+      "description": "Porcelain rim clink with a dry hollow edge.",
+      "tags": {
+        "family": "impact",
+        "material": "ceramic",
+        "materials": ["ceramic", "porcelain", "china"],
+        "hardness": "brittle",
+        "pitch": "high",
+        "transient": "crisp",
+        "resonance": "hollow",
+        "weight": "light",
+        "events": [
+          "cup_set_down",
+          "coffee_table_tap",
+          "dish_contact",
+          "ritual_place",
+          "delicate_confirm"
+        ],
+        "mood": ["domestic", "refined", "brittle"]
+      }
+    },
+    {
+      "id": "impact-plastic",
+      "file": "impact-plastic.mp3",
+      "durationSec": 0.5,
+      "label": "Plastic impact",
+      "description": "Hollow ABS shell tap with muted mid-body resonance.",
+      "tags": {
+        "family": "impact",
+        "material": "plastic",
+        "materials": ["plastic", "abs", "polymer"],
+        "hardness": "medium",
+        "pitch": "mid",
+        "transient": "clicky",
+        "resonance": "hollow",
+        "weight": "light",
+        "events": [
+          "ui_toggle",
+          "case_close",
+          "toy_tap",
+          "controller_click",
+          "cheap_confirm"
+        ],
+        "mood": ["synthetic", "light", "everyday"]
+      }
+    },
+    {
+      "id": "impact-rubber",
+      "file": "impact-rubber.mp3",
+      "durationSec": 0.55,
+      "label": "Rubber impact",
+      "description": "Dense rubber mallet thud with a soft bounce feel.",
+      "tags": {
+        "family": "impact",
+        "material": "rubber",
+        "materials": ["rubber", "elastomer", "silicone"],
+        "hardness": "soft",
+        "pitch": "low",
+        "transient": "rounded",
+        "resonance": "damped",
+        "weight": "medium",
+        "events": [
+          "soft_land",
+          "bounce",
+          "mute_hit",
+          "safe_drop",
+          "cushioned_confirm"
+        ],
+        "mood": ["soft", "safe", "playful"]
+      }
+    },
+    {
+      "id": "impact-stone",
+      "file": "impact-stone.mp3",
+      "durationSec": 0.55,
+      "label": "Stone impact",
+      "description": "Dense marble/granite knock with dry mineral texture.",
+      "tags": {
+        "family": "impact",
+        "material": "stone",
+        "materials": ["stone", "marble", "granite", "rock"],
+        "hardness": "hard",
+        "pitch": "low",
+        "transient": "dense",
+        "resonance": "dry",
+        "weight": "heavy",
+        "events": [
+          "heavy_place",
+          "monument_tap",
+          "board_token_hard",
+          "weighty_confirm",
+          "impact_heavy"
+        ],
+        "mood": ["weighty", "ancient", "solid"]
+      }
+    },
+    {
+      "id": "impact-cardboard",
+      "file": "impact-cardboard.mp3",
+      "durationSec": 0.5,
+      "label": "Cardboard impact",
+      "description": "Corrugated box tap with papery hollow fiber texture.",
+      "tags": {
+        "family": "impact",
+        "material": "cardboard",
+        "materials": ["cardboard", "paperboard", "corrugated"],
+        "hardness": "soft",
+        "pitch": "mid",
+        "transient": "papery",
+        "resonance": "hollow",
+        "weight": "light",
+        "events": [
+          "package_tap",
+          "box_close",
+          "inventory_drop_light",
+          "draft_discard",
+          "temporary_place"
+        ],
+        "mood": ["temporary", "crafty", "light"]
+      }
+    },
+    {
+      "id": "impact-fabric",
+      "file": "impact-fabric.mp3",
+      "durationSec": 0.5,
+      "label": "Fabric impact",
+      "description": "Thick cloth/canvas slap with muted low-mid body.",
+      "tags": {
+        "family": "impact",
+        "material": "fabric",
+        "materials": ["fabric", "cloth", "canvas", "textile"],
+        "hardness": "soft",
+        "pitch": "low",
+        "transient": "muffled",
+        "resonance": "damped",
+        "weight": "light",
+        "events": [
+          "soft_close",
+          "curtain_tap",
+          "bag_drop",
+          "cushion_hit",
+          "quiet_confirm"
+        ],
+        "mood": ["quiet", "soft", "intimate"]
+      }
+    },
+    {
+      "id": "impact-ice",
+      "file": "impact-ice.mp3",
+      "durationSec": 0.55,
+      "label": "Ice impact",
+      "description": "Brittle ice shard crack-tap with crystalline sparkle.",
+      "tags": {
+        "family": "impact",
+        "material": "ice",
+        "materials": ["ice", "frost", "crystal"],
+        "hardness": "brittle",
+        "pitch": "high",
+        "transient": "crackly",
+        "resonance": "crystalline",
+        "weight": "light",
+        "events": [
+          "freeze_hit",
+          "cold_snap",
+          "fragile_break_soft",
+          "winter_select",
+          "crystal_tap"
+        ],
+        "mood": ["cold", "fragile", "sparkling"]
+      }
+    }
+  ]
+}

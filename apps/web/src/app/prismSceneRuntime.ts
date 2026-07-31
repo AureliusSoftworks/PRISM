@@ -252,11 +252,33 @@ export class PrismAdaptiveQualityController {
   private badWindowCount = 0;
   private goodWindowCount = 0;
   private lastTierChangeMs = Number.NEGATIVE_INFINITY;
+  private readonly badWindowsBeforeDrop: number;
+  private readonly tierCooldownMs: number;
 
-  constructor(nowMs = 0, ceiling: PrismSceneQuality = "full") {
+  constructor(
+    nowMs = 0,
+    ceiling: PrismSceneQuality = "full",
+    options: {
+      initialQuality?: PrismSceneQuality;
+      badWindowsBeforeDrop?: number;
+      tierCooldownMs?: number;
+    } = {},
+  ) {
     this.ceilingValue = ceiling;
-    this.qualityValue = ceiling;
+    const ceilingIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(ceiling);
+    const initial = options.initialQuality ?? ceiling;
+    const initialIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(initial);
+    this.qualityValue =
+      initialIndex >= ceilingIndex ? initial : ceiling;
     this.ignoredUntilMs = nowMs + PRISM_SCENE_SAMPLE_WARMUP_MS;
+    this.badWindowsBeforeDrop = Math.max(
+      1,
+      options.badWindowsBeforeDrop ?? 2,
+    );
+    this.tierCooldownMs = Math.max(
+      0,
+      options.tierCooldownMs ?? PRISM_SCENE_TIER_COOLDOWN_MS,
+    );
   }
 
   get quality(): PrismSceneQuality {
@@ -322,7 +344,7 @@ export class PrismAdaptiveQualityController {
     if (window.bad) {
       this.badWindowCount += 1;
       this.goodWindowCount = 0;
-      if (this.badWindowCount >= 2) {
+      if (this.badWindowCount >= this.badWindowsBeforeDrop) {
         qualityChanged = this.changeTier(1, sample.nowMs);
         this.badWindowCount = 0;
       }
@@ -349,7 +371,7 @@ export class PrismAdaptiveQualityController {
     direction: -1 | 1,
     nowMs: number,
   ): PrismSceneQuality | undefined {
-    if (nowMs - this.lastTierChangeMs < PRISM_SCENE_TIER_COOLDOWN_MS) {
+    if (nowMs - this.lastTierChangeMs < this.tierCooldownMs) {
       return undefined;
     }
     const currentIndex = PRISM_SCENE_QUALITY_ORDER.indexOf(this.qualityValue);

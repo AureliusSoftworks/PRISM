@@ -1171,10 +1171,12 @@ export type UsagePurpose =
   | "botcast_show_chat"
   | "botcast_review"
   | "botcast_turn"
+  | "bot_generation"
   | "coffee_turn"
   | "coffee_router"
   | "coffee_summary"
   | "composer_cleanup"
+  | "debate_generation"
   | "embedding"
   | "image_generation"
   | "bot_profile_picture"
@@ -3123,3 +3125,4 @@ export * from "./livingShell.js";
 export * from "./livingShellProgress.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
+export * from "./debateAudiencePressure.js";

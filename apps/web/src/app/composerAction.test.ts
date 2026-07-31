@@ -87,6 +87,21 @@ describe("shared composer actions", () => {
     );
   });
 
+  it("keeps a local Action buffer so deferred parent draft sync cannot reset keystrokes", () => {
+    assert.match(pageSource, /const \[actionLocalValue, setActionLocalValue\] = useState\(actionValue\);/u);
+    assert.match(pageSource, /const lastEmittedActionRef = useRef\(actionValue\);/u);
+    assert.match(pageSource, /value=\{actionLocalValue\}/u);
+    assert.match(pageSource, /setActionLocalValue\(normalizedAction\)/u);
+    assert.match(
+      pageSource,
+      /Action is a plain controlled input[\s\S]{0,280}reset keystrokes mid-type/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(actionValue === lastEmittedActionRef\.current\) return;/u,
+    );
+  });
+
   it("activates action focus only for the exact two-asterisk trigger", () => {
     assert.equal(composerMainValueActivatesActionInput("**"), true);
     assert.equal(composerMainValueActivatesActionInput(" **"), false);

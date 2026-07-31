@@ -5,6 +5,21 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-07-30 · [UX]
+**Trigger**: Wanted Default Prism back as the Coffee replay player body without undoing pot-only live Coffee.
+**Lesson**: Restore the replay-only `coffeeReplayPlayerSeat` (Prism mannequin + nameplate pot dock) under `coffeeReplayActive && playerPresent`. Keep participant id `coffee-player` for audio-master direction; flip manifest to `third-person-prism` / `visible: true`. Do not revive barista, player mug, or live on-camera player.
+**Applies to**: `page.tsx` Coffee review stage, `page.module.css`, `replayManifest.ts`, Coffee tutorials.
+
+### 2026-07-30 · [UX]
+**Trigger**: Coffee Send waited for player TTS `onStart` before any table typewriter, so Premium synth left blank “thinking” dead air.
+**Lesson**: On Send, enter `userTableTyping` and stream the player line immediately; start voice in parallel. Register the settle waiter before awaiting voice so a fast provisional typewriter cannot miss its resolve. Hold settle until `coffeePlayerVoiceRevealReadyRef` is true and the active delivery (provisional or voice-locked) finishes; when audio arrives late, floor visible length so the stream never jumps backward. Bot `runCoffeeTurnJob` still starts only after settle.
+**Applies to**: `sendCoffeeTurn`, player typewriter RAF, `startCoffeePlayerVoiceForReveal` in `page.tsx`.
+
+### 2026-07-30 · [perf]
+**Trigger**: Coffee Action field felt laggy while the live table kept moving.
+**Lesson**: Speech TipTap already buffers local edits against deferred `coffeeDraft` sync; the Action `<input>` must do the same with local state + a last-emitted guard. Never bind Action directly to parent `value` and never overwrite `actionValueRef` from props on every render — live Coffee re-renders will fight keystrokes and can drop mid-type action text before the 240ms parent flush.
+**Applies to**: `ComposerInput` Action rail in `page.tsx`, Coffee/Signal/Zen shared action field.
+
+### 2026-07-30 · [UX]
 **Trigger**: Debate Territory needed Command Center prompts and wildcard decks.
 **Lesson**: Attach setup seed fields with `renderPickAwareComposer`. Prompt Center picks expand to body text on insert via `resolveComposerPromptPickToPlainText`; wildcard decks and `{SLOT}` chips stay literal until Build/start/send. Expand decks/`{a|b}`/`{TODAY}` only into the outbound payload; fill `{NAME}`-style slots on the server then. Never rewrite the composer draft with resolved wildcard prose, and never expand on every companion-draft render (that would re-roll randomness). Keep catalog dice separate from Command Center deck rolls. Do not put pick-aware composers in Bot Profile Builder.
 **Applies to**: `DebateExperience` Territory / Your idea, `expandComposerDraft`, Signal setup + on-air, Coffee send, Slate companion.
@@ -53,6 +68,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 **Trigger**: Coffee/Signal/Zen needed frequent `*actions*` without a second model wait, while still allowing occasional persona/prop beats.
 **Lesson**: Plan stage actions before the existing speaker call (80% Director / 20% persona invite). Persist one canonical action metadata field per lane (`coffeeStageAction`, Signal `stage_action_text`, `zenStageAction`), strip actions from spoken content, and keep legacy inline/`coffeeAmbientAction` reads as fallbacks so live/reload/replay never double-render. Yield to social silence, crosstalk reclaim, Powers, departures, listener reactions, and Zen live-action ownership.
 **Applies to**: `packages/shared/src/stageActionDirector.ts`, Coffee/Signal/Zen speaker paths, replay manifests.
+
+### 2026-07-30 · [UX]
+**Trigger**: Material impact prototypes needed a Debate test path for sealed packet add and table presentation.
+**Lesson**: Map exhibit adjective/object text to a material impact library (`debateExhibitImpactSfx`), play a lighter one-shot on packet add (direct audio, setup has no atmosphere bus), and play a fuller Foley hit when `DebateEvidencePedestal` mounts live. Keep audience paper-shuffle as room reaction; object impact is separate.
+**Applies to**: `debateExhibitImpactSfx.ts`, `DebateExperience.tsx` `addEvidenceObject` + pedestal, `public/audio/debate/exhibits/`.
 
 ### 2026-07-23 · [UX]
 **Trigger**: Coffee seat action badges rendered stage directions in all caps (“EXTENDS A HAND…”).

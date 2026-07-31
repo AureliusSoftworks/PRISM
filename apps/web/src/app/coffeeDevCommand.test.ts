@@ -89,11 +89,22 @@ describe("parseCoffeeDevCommand", () => {
     }
   });
 
-  it("returns an error when no quoted message is provided", () => {
+  it("parses unquoted prose after /echo", () => {
     const out = parseCoffeeDevCommand("/echo hello");
-    assert.equal(out.kind, "error");
-    if (out.kind === "error") {
-      assert.match(out.error, /Use `\/echo/i);
+    assert.equal(out.kind, "ok");
+    if (out.kind === "ok") {
+      assert.equal(out.message, "hello");
+      assert.equal(out.waitSeconds, 0);
+    }
+  });
+
+  it("parses /echo with a leading addressed mention chip", () => {
+    const out = parseCoffeeDevCommand(
+      '[Riven](prism-bot://bot-riven) /echo Speak clearly.',
+    );
+    assert.equal(out.kind, "ok");
+    if (out.kind === "ok") {
+      assert.equal(out.message, "Speak clearly.");
     }
   });
 

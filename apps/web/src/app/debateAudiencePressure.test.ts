@@ -6,10 +6,12 @@ import {
   type DebateFormalityId,
 } from "@localai/shared";
 import {
+  DEBATE_AUDIENCE_MIX_BED_CEILING,
   debateAudiencePressureBand,
   debateAudiencePressureMix,
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
+  debateAudienceVisualPressureBand,
 } from "./debateAudiencePressure.ts";
 
 function event(
@@ -45,10 +47,22 @@ describe("Debate audience pressure", () => {
     assert.equal(debateAudiencePressureBand(70), "disruptive");
     assert.equal(debateAudiencePressureBand(100), "disruptive");
     assert.deepEqual(debateAudiencePressureMix("disruptive"), {
-      background: 0.68,
-      grain: 0.92,
-      foley: 0.34,
+      background: 0.3,
+      grain: 0.4,
+      foley: 0.3,
     });
+    for (const band of [
+      "settled",
+      "murmuring",
+      "restless",
+      "disruptive",
+    ] as const) {
+      const mix = debateAudiencePressureMix(band);
+      assert.ok(
+        mix.background + mix.grain <= DEBATE_AUDIENCE_MIX_BED_CEILING,
+      );
+      assert.ok(mix.background + mix.grain + mix.foley <= 1);
+    }
   });
 
   it("orders event heat by the frozen Rowdiness choice", () => {
@@ -74,26 +88,31 @@ describe("Debate audience pressure", () => {
     assert.ok(new Set(scores).size === scores.length);
   });
 
-  it("ramps heat only across the middle of the live reveal", () => {
+  it("keeps the gallery quiet through most of a live monologue, then murmurs near the end", () => {
     const speech = event("ramping", 1);
+    const prior = event("prior", 0, {
+      content: "Earlier argument that already heated the room.",
+    });
     const scoreAt = (visibleCharacterCount: number): number =>
       debateAudiencePressureScore({
-        events: [speech],
+        events: [prior, speech],
         formality: "heated",
         playerRole: "judge",
         activeEventId: speech.id,
         visibleCharacterCount,
       });
-    assert.equal(scoreAt(0), 12);
-    assert.equal(scoreAt(Math.floor(speech.content.length * 0.35)), 12);
+    // Prior heat is fully suppressed while the current bot is still talking.
+    assert.equal(scoreAt(0), 0);
+    assert.equal(scoreAt(Math.floor(speech.content.length * 0.5)), 0);
+    assert.equal(scoreAt(Math.floor(speech.content.length * 0.74)), 0);
     assert.ok(
-      scoreAt(Math.floor(speech.content.length * 0.6)) >
-        scoreAt(Math.floor(speech.content.length * 0.35)),
+      scoreAt(Math.floor(speech.content.length * 0.85)) >
+        scoreAt(Math.floor(speech.content.length * 0.75)),
     );
     assert.equal(
       scoreAt(speech.content.length),
       debateAudiencePressureScore({
-        events: [speech],
+        events: [prior, speech],
         formality: "heated",
         playerRole: "judge",
       }),
@@ -179,6 +198,25 @@ describe("Debate audience pressure", () => {
         seed: "session-1",
       }).length,
       14,
+    );
+  });
+
+  it("caps visual pressure under reduced material quality", () => {
+    assert.equal(
+      debateAudienceVisualPressureBand("disruptive", "full"),
+      "disruptive",
+    );
+    assert.equal(
+      debateAudienceVisualPressureBand("disruptive", "balanced"),
+      "murmuring",
+    );
+    assert.equal(
+      debateAudienceVisualPressureBand("restless", "minimal"),
+      "murmuring",
+    );
+    assert.equal(
+      debateAudienceVisualPressureBand("settled", "minimal"),
+      "settled",
     );
   });
 });

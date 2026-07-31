@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   VOICE_PLAYBACK_CHOICES,
+  PREMIUM_LOCAL_FALLBACK_NOTICE,
   conversationEnglishVoiceEngine,
   effectiveVoicePlaybackChoice,
+  premiumLocalFallbackNotice,
   voicePlaybackChoice,
   voiceModeDrivesCanvasReveal,
   voiceModeDisplayName,
@@ -68,6 +70,33 @@ describe("global voice selector", () => {
     assert.equal(
       conversationEnglishVoiceEngine("elevenlabs", null),
       "elevenlabs",
+    );
+  });
+
+  it("explains when Premium stays on-device for a LOCAL reply", () => {
+    assert.equal(
+      premiumLocalFallbackNotice({
+        requestedEngine: "elevenlabs",
+        effectiveEngine: "builtin",
+        messageProvider: "local",
+      }),
+      PREMIUM_LOCAL_FALLBACK_NOTICE,
+    );
+    assert.equal(
+      premiumLocalFallbackNotice({
+        requestedEngine: "elevenlabs",
+        effectiveEngine: "elevenlabs",
+        engineUsedHeader: "builtin-local-fallback",
+      }),
+      PREMIUM_LOCAL_FALLBACK_NOTICE,
+    );
+    assert.equal(
+      premiumLocalFallbackNotice({
+        requestedEngine: "elevenlabs",
+        effectiveEngine: "elevenlabs",
+        messageProvider: "openai",
+      }),
+      null,
     );
   });
 

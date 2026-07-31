@@ -51,6 +51,9 @@ export interface BotCustomizerSavePristine {
   faceBlinkOffsetY: number;
   faceBlinkRotationDeg: number;
   faceThinkingFrames: readonly string[];
+  faceThinkingScale: number;
+  faceThinkingOffsetX: number;
+  faceThinkingOffsetY: number;
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
   audioVoiceProfile: BotAudioVoiceProfileV1;
@@ -104,6 +107,9 @@ export interface BotCustomizerSaveCurrent {
   faceBlinkOffsetY: number;
   faceBlinkRotationDeg: number;
   faceThinkingFrames: readonly string[];
+  faceThinkingScale: number;
+  faceThinkingOffsetX: number;
+  faceThinkingOffsetY: number;
   avatarDetails: BotAvatarDetailsV1 | null;
   profilePictureImageId: string | null;
   audioVoiceProfile: BotAudioVoiceProfileV1;
@@ -148,6 +154,9 @@ export interface BotCustomizerSavePatch {
   faceBlinkOffsetY?: number;
   faceBlinkRotationDeg?: number;
   faceThinkingFrames?: readonly string[];
+  faceThinkingScale?: number;
+  faceThinkingOffsetX?: number;
+  faceThinkingOffsetY?: number;
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
   audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
@@ -210,6 +219,9 @@ export function buildBotCustomizerSavePatch(
       faceBlinkOffsetY: current.faceBlinkOffsetY,
       faceBlinkRotationDeg: current.faceBlinkRotationDeg,
       faceThinkingFrames: current.faceThinkingFrames,
+      faceThinkingScale: current.faceThinkingScale,
+      faceThinkingOffsetX: current.faceThinkingOffsetX,
+      faceThinkingOffsetY: current.faceThinkingOffsetY,
       avatarDetails: current.avatarDetails,
       profilePictureImageId: current.profilePictureImageId,
       audioVoiceProfileOverride: current.audioVoiceProfile,
@@ -331,6 +343,15 @@ export function buildBotCustomizerSavePatch(
   }
   if (!thinkingFramesEqual(current.faceThinkingFrames, pristine.faceThinkingFrames)) {
     patch.faceThinkingFrames = current.faceThinkingFrames;
+  }
+  if (current.faceThinkingScale !== pristine.faceThinkingScale) {
+    patch.faceThinkingScale = current.faceThinkingScale;
+  }
+  if (current.faceThinkingOffsetX !== pristine.faceThinkingOffsetX) {
+    patch.faceThinkingOffsetX = current.faceThinkingOffsetX;
+  }
+  if (current.faceThinkingOffsetY !== pristine.faceThinkingOffsetY) {
+    patch.faceThinkingOffsetY = current.faceThinkingOffsetY;
   }
   if (avatarDetailsKey(current.avatarDetails) !== avatarDetailsKey(pristine.avatarDetails)) {
     patch.avatarDetails = current.avatarDetails;

@@ -35,7 +35,7 @@ describe("composer send-time autocorrect", () => {
     );
     assert.equal(
       applyComposerSendAutoCorrect("/echo teh line"),
-      "/echo the line",
+      "/echo teh line",
     );
   });
 

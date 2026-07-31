@@ -423,6 +423,9 @@ export interface CoffeeBotProfile {
   faceBlinkOffsetY?: number | null;
   faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: string | null;
+  faceThinkingScale?: number | null;
+  faceThinkingOffsetX?: number | null;
+  faceThinkingOffsetY?: number | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   profilePictureImageId?: string | null;
   authoredAudioVoiceProfile?: string | null;
@@ -6663,6 +6666,9 @@ type CoffeeBotProfileRow = {
   face_blink_offset_y: number | null;
   face_blink_rotation_deg: number | null;
   face_thinking_frames: string | null;
+  face_thinking_scale: number | null;
+  face_thinking_offset_x: number | null;
+  face_thinking_offset_y: number | null;
   avatar_details_json: string | null;
   profile_picture_image_id: string | null;
   authored_audio_voice_profile: string | null;
@@ -6727,6 +6733,9 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
         ? row.face_blink_rotation_deg
         : null,
     faceThinkingFrames: row.face_thinking_frames ?? null,
+    faceThinkingScale: typeof row.face_thinking_scale === "number" ? row.face_thinking_scale : null,
+    faceThinkingOffsetX: typeof row.face_thinking_offset_x === "number" ? row.face_thinking_offset_x : null,
+    faceThinkingOffsetY: typeof row.face_thinking_offset_y === "number" ? row.face_thinking_offset_y : null,
     avatarDetails: parseStoredBotAvatarDetailsV1(row.avatar_details_json),
     profilePictureImageId: row.profile_picture_image_id ?? null,
     authoredAudioVoiceProfile: row.authored_audio_voice_profile ?? null,
@@ -6788,6 +6797,9 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_blink_offset_y")},
               ${selectOptionalBotColumn("face_blink_rotation_deg")},
               ${selectOptionalBotColumn("face_thinking_frames")},
+              ${selectOptionalBotColumn("face_thinking_scale")},
+              ${selectOptionalBotColumn("face_thinking_offset_x")},
+              ${selectOptionalBotColumn("face_thinking_offset_y")},
               ${selectOptionalBotColumn("avatar_details_json")},
               ${selectOptionalBotColumn("profile_picture_image_id")},
               ${selectOptionalBotColumn("authored_audio_voice_profile")},

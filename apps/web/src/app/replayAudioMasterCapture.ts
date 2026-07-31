@@ -69,6 +69,7 @@ type ReplayThinkingPresentation = {
 let sharedAudioContext: AudioContext | null = null;
 let sharedAudioContextConstructor: typeof AudioContext | null = null;
 let sharedWorldOutput: GainNode | null = null;
+let sharedLocalOnlyOutput: GainNode | null = null;
 let activeCapture: ReplayAudioMasterCaptureSession | null = null;
 
 function nowMs(): number {
@@ -94,6 +95,7 @@ export function prismAudioContext(): AudioContext | null {
     sharedAudioContext = new window.AudioContext({ latencyHint: "interactive" });
     sharedAudioContextConstructor = window.AudioContext;
     sharedWorldOutput = null;
+    sharedLocalOnlyOutput = null;
   }
   return sharedAudioContext;
 }
@@ -106,6 +108,17 @@ function worldOutputForSharedContext(): GainNode | null {
     sharedWorldOutput.connect(context.destination);
   }
   return sharedWorldOutput;
+}
+
+function localOnlyOutputForSharedContext(): GainNode | null {
+  const context = prismAudioContext();
+  if (!context) return null;
+  if (!sharedLocalOnlyOutput) {
+    sharedLocalOnlyOutput = context.createGain();
+    // Speakers only — never connected to the faithful-master capture tap.
+    sharedLocalOnlyOutput.connect(context.destination);
+  }
+  return sharedLocalOnlyOutput;
 }
 
 /**
@@ -126,6 +139,22 @@ export function prismAudioOutputNode(context: AudioContext): AudioNode {
   }
   const output = worldOutputForSharedContext();
   if (!output) throw new Error("PRISM in-world audio is unavailable.");
+  return output;
+}
+
+/**
+ * Local-only QoL beds (Coffee Jazz) hear on device speakers but never enter
+ * the faithful audio-master capture tap on {@link prismAudioOutputNode}.
+ */
+export function prismLocalOnlyAudioOutputNode(context: AudioContext): AudioNode {
+  const shared = prismAudioContext();
+  if (!shared || context !== shared) {
+    const compatibilityOutput = context.createGain();
+    compatibilityOutput.connect(context.destination);
+    return compatibilityOutput;
+  }
+  const output = localOnlyOutputForSharedContext();
+  if (!output) throw new Error("PRISM local-only audio is unavailable.");
   return output;
 }
 

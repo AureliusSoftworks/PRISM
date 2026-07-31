@@ -40,7 +40,7 @@ describe("Coffee player response UI wiring", () => {
   it("requests the bot response immediately after the player line settles", () => {
     assert.match(
       pageSource,
-      /await waitForCoffeeUserRevealToSettle\(\);[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?const presentBotIds =[\s\S]*?runCoffeeTurnJob\(/,
+      /await userRevealSettlePromise;[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?const presentBotIds =[\s\S]*?runCoffeeTurnJob\(/,
     );
     assert.doesNotMatch(pageSource, /coffeePlayerResponseBeatMs/);
     assert.match(
@@ -124,7 +124,11 @@ describe("Coffee player response UI wiring", () => {
   it("starts the speaking reveal only from real voice playback start", () => {
     assert.match(
       pageSource,
-      /onStart:[\s\S]*?const resolvedDurationMs = coffeeVoiceStartedDurationMs\([\s\S]{0,120}durationMs,[\s\S]{0,80}fallbackDuration,[\s\S]{0,120}\)[\s\S]{0,900}settle\(resolvedDurationMs\)/,
+      /const resolvedDurationMs =\s*coffeeVoiceStartedDurationMs\(durationMs, fallbackDuration\) \?\?\s*Math\.max\(1, fallbackDuration\);/,
+    );
+    assert.match(
+      pageSource,
+      /setCoffeeLiveAvatarSpeech\(\{[\s\S]*?durationMs: resolvedDurationMs,[\s\S]*?\}\);[\s\S]*?settle\(resolvedDurationMs\)/,
     );
     assert.match(
       pageSource,
@@ -140,6 +144,21 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /persistedUserMessageVisible:[\s\S]*?coffeePersistedUserLineOwnsPendingReveal\(\{[\s\S]*?messages:\s*centerFeedSourceMessages,[\s\S]*?userRevealText:\s*coffeeUserRevealText/,
+    );
+  });
+
+  it("streams the player line to the table before voice preparation finishes", () => {
+    assert.match(
+      pageSource,
+      /setCoffeeUserRevealText\(trimmed\);[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\);[\s\S]*?waitForCoffeeUserRevealToSettle\(\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed\)/,
+    );
+    assert.match(
+      pageSource,
+      /coffeePlayerVoiceRevealReadyRef\.current = false;[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\)/,
+    );
+    assert.match(
+      pageSource,
+      /!deliveryComplete \|\| !coffeePlayerVoiceRevealReadyRef\.current/,
     );
   });
 

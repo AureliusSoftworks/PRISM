@@ -27,7 +27,7 @@ import styles from "./avatar-details-mask.module.css";
 export interface AvatarDetailsMaskProps {
   details: AvatarDetailsV1 | null | undefined;
   color: string | null | undefined;
-  detailLevel?: "full" | "reduced";
+  detailLevel?: "full" | "reduced" | "audience";
   faceGeometry?: Partial<AvatarDetailsFaceGeometry> | null;
   blinkPhase?: "open" | "closed";
   talking?: boolean;
@@ -42,7 +42,7 @@ type AvatarDetailsSpeechMotion = Exclude<BotFaceGlyphAnimation, "none">;
 interface AvatarDetailsEmissionPlanesProps {
   pixels: Uint8ClampedArray;
   normalizedColor: string;
-  detailLevel: "full" | "reduced";
+  detailLevel: "full" | "reduced" | "audience";
   depth: Exclude<AvatarDetailsFaceDepth, "all">;
   inkRole: "visible" | "speech";
   motion?: AvatarDetailsSpeechMotion | null;
@@ -71,16 +71,17 @@ function AvatarDetailsEmissionPlanes({
     const coreCanvas = coreCanvasRef.current;
     if (
       !hasPixels ||
-      !bloomCanvas ||
       !coreCanvas ||
-      (detailLevel === "full" && !haloCanvas)
+      (detailLevel === "full" && (!haloCanvas || !bloomCanvas)) ||
+      (detailLevel === "reduced" && !bloomCanvas)
     ) {
       return;
     }
     const haloContext = haloCanvas?.getContext("2d", { alpha: true }) ?? null;
-    const bloomContext = bloomCanvas.getContext("2d", { alpha: true });
+    const bloomContext =
+      bloomCanvas?.getContext("2d", { alpha: true }) ?? null;
     const coreContext = coreCanvas.getContext("2d", { alpha: true });
-    if (!bloomContext || !coreContext) {
+    if (!coreContext || (detailLevel !== "audience" && !bloomContext)) {
       return;
     }
     const glowImageData = coreContext.createImageData(
@@ -135,12 +136,14 @@ function AvatarDetailsEmissionPlanes({
           {...sharedProps}
         />
       ) : null}
-      <canvas
-        ref={bloomCanvasRef}
-        className={`${styles.layer} ${depthClassName} ${styles.bloom}${motionClassName}`}
-        data-avatar-details-emission="bloom"
-        {...sharedProps}
-      />
+      {detailLevel !== "audience" ? (
+        <canvas
+          ref={bloomCanvasRef}
+          className={`${styles.layer} ${depthClassName} ${styles.bloom}${motionClassName}`}
+          data-avatar-details-emission="bloom"
+          {...sharedProps}
+        />
+      ) : null}
       <canvas
         ref={coreCanvasRef}
         className={`${styles.layer} ${depthClassName} ${styles.core}${motionClassName}`}

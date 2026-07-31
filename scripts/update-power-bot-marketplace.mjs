@@ -127,7 +127,7 @@ const RECIPES = [
       eyeOffsetY: 0,
       mouthFont: "playful",
       mouthScale: 0.7,
-      mouthOffsetY: -0.18,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["·", "·", "·", "·"],
     }),
     voice: voice({
@@ -209,7 +209,7 @@ const RECIPES = [
       eyeOffsetY: -0.04,
       mouthFont: "neutral",
       mouthScale: 0.7,
-      mouthOffsetY: 0.06,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["·", ".", ":", "."],
     }),
     voice: voice({
@@ -261,7 +261,7 @@ const RECIPES = [
       eyeOffsetY: -0.02,
       mouthFont: "playful",
       mouthScale: 1.25,
-      mouthOffsetY: 0.04,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["!", "/", "!", "|"],
     }),
     voice: voice({
@@ -317,7 +317,7 @@ const RECIPES = [
       eyeOffsetY: 0,
       mouthFont: "neutral",
       mouthScale: 1.5,
-      mouthOffsetY: -0.04,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["c", "C", "c", "C"],
     }),
     voice: voice({
@@ -358,7 +358,7 @@ const RECIPES = [
       eyeOffsetY: 0,
       mouthFont: "neutral",
       mouthScale: 0.7,
-      mouthOffsetY: 0.06,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["e", "E", "e", "E"],
     }),
     voice: voice({
@@ -459,7 +459,7 @@ const RECIPES = [
       eyeOffsetY: 0.02,
       mouthFont: "neutral",
       mouthScale: 1.15,
-      mouthOffsetY: 0.08,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["m", "r", "m", "b"],
     }),
     voice: voice({
@@ -500,7 +500,7 @@ const RECIPES = [
       eyeOffsetY: -0.02,
       mouthFont: "warm",
       mouthScale: 1.25,
-      mouthOffsetY: 0.04,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["☆", "✦", "★", "✧"],
     }),
     voice: voice({
@@ -551,7 +551,7 @@ const RECIPES = [
       eyeOffsetY: -0.02,
       mouthFont: "formal",
       mouthScale: 1.05,
-      mouthOffsetY: 0.08,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["I", "?", "I", "!"],
     }),
     voice: voice({
@@ -601,7 +601,7 @@ const RECIPES = [
       eyeOffsetY: 0.06,
       mouthFont: "formal",
       mouthScale: 1.1,
-      mouthOffsetY: 0.12,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["s", "i", "g", "h"],
     }),
     voice: voice({
@@ -653,7 +653,7 @@ const RECIPES = [
       eyeOffsetY: 0.02,
       mouthFont: "formal",
       mouthScale: 0.9,
-      mouthOffsetY: 0.1,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["h", "e", "l", "o"],
     }),
     voice: voice({
@@ -704,7 +704,7 @@ const RECIPES = [
       eyeOffsetY: -0.04,
       mouthFont: "warm",
       mouthScale: 1.05,
-      mouthOffsetY: 0.1,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["?", "o", "~", "?"],
     }),
     voice: voice({
@@ -757,7 +757,7 @@ const RECIPES = [
       eyeOffsetY: -0.02,
       mouthFont: "playful",
       mouthScale: 1.1,
-      mouthOffsetY: 0.1,
+      mouthOffsetY: 0.18,
       thinkingFrames: ["~", "o", "O", "∞"],
     }),
     voice: voice({

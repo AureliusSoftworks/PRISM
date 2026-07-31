@@ -5485,67 +5485,14 @@ test.describe("PRISM desktop smoke", () => {
       await expect(
         live.locator('[data-debate-audience="true"]'),
       ).toHaveAttribute("data-audience-count", "15");
-      const performanceProbe = process.env.PRISM_DEBATE_PERF_PROBE;
-      if (performanceProbe === "paint") {
+      if (process.env.PRISM_DEBATE_PERF_PROBE === "audience") {
         await page.addStyleTag({
-          content:
-            '[data-debate-surface="live"], [data-debate-surface="live"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; box-shadow: none !important; text-shadow: none !important; mix-blend-mode: normal !important; }',
+          content: '[data-debate-audience="true"] { display: none !important; }',
         });
-      } else if (performanceProbe === "audience") {
+      } else if (process.env.PRISM_DEBATE_PERF_PROBE === "avatars") {
         await page.addStyleTag({
-          content:
-            '[data-debate-audience="true"] { display: none !important; }',
+          content: '[data-debate-bot-avatar="true"] { display: none !important; }',
         });
-      } else if (performanceProbe === "avatars") {
-        await page.addStyleTag({
-          content:
-            '[data-debate-bot-avatar="true"] { display: none !important; }',
-        });
-      } else if (performanceProbe === "avatar-paint") {
-        await page.addStyleTag({
-          content:
-            '[data-debate-bot-avatar="true"], [data-debate-bot-avatar="true"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; box-shadow: none !important; text-shadow: none !important; mix-blend-mode: normal !important; }',
-        });
-      } else if (performanceProbe === "avatar-contain") {
-        await page.addStyleTag({
-          content:
-            '[data-debate-bot-avatar="true"] { contain: layout paint style !important; }',
-        });
-      } else if (performanceProbe === "avatar-layers") {
-        await page
-          .locator(
-            '[data-debate-bot-avatar="true"] [data-crt-material-layer], [data-debate-bot-avatar="true"] [data-frame-material-layer="wear"], [data-debate-bot-avatar="true"] [data-frame-material-layer="scratches"], [data-debate-bot-avatar="true"] [data-frame-material-layer="light"], [data-debate-bot-avatar="true"] [data-screen-material-layer="glass"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="halo"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="bloom"]',
-          )
-          .evaluateAll((elements) => {
-            for (const element of elements) element.remove();
-          });
-        await page.addStyleTag({
-          content:
-            '[data-debate-bot-avatar="true"], [data-debate-bot-avatar="true"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; mix-blend-mode: normal !important; }',
-        });
-      } else if (performanceProbe === "crt-clones") {
-        await page.addStyleTag({
-          content:
-            '[data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::before, [data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::after { content: none !important; display: none !important; } [data-debate-bot-avatar="true"] [data-avatar-details-emission] { animation: none !important; filter: none !important; }',
-        });
-      } else if (performanceProbe === "single-pass") {
-        await page
-          .locator(
-            '[data-debate-bot-avatar="true"] [data-crt-material-layer], [data-debate-bot-avatar="true"] [data-frame-material-layer="wear"], [data-debate-bot-avatar="true"] [data-frame-material-layer="scratches"], [data-debate-bot-avatar="true"] [data-frame-material-layer="light"], [data-debate-bot-avatar="true"] [data-screen-material-layer="glass"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="halo"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="bloom"]',
-          )
-          .evaluateAll((elements) => {
-            for (const element of elements) element.remove();
-          });
-        await page.addStyleTag({
-          content:
-            '[data-debate-bot-avatar="true"], [data-debate-bot-avatar="true"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; mix-blend-mode: normal !important; } [data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::before, [data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::after { content: none !important; display: none !important; }',
-        });
-      } else if (performanceProbe === "transcript") {
-        await page
-          .getByRole("region", { name: "Debate transcript" })
-          .evaluate((element) => {
-            (element as HTMLElement).style.display = "none";
-          });
       }
       const metrics = await page.evaluate(async () => {
         const intervals: number[] = [];
@@ -5596,6 +5543,13 @@ test.describe("PRISM desktop smoke", () => {
           await expect(
             live.locator('[data-tutorial-target="debate-jury-chamber"]'),
           ).toBeVisible();
+        } else {
+          await expect(
+            live.locator('[aria-label^="Presented evidence:"]'),
+          ).toHaveAttribute(
+            "data-evidence-view",
+            camera === "Moderator" ? "moderator" : "wide",
+          );
         }
       }
     }

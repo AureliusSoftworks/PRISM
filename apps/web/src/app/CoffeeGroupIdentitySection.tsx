@@ -13,6 +13,7 @@ import {
   coffeeGroupSynthesisStatusLabel,
   type CoffeeGroupIdentitySnapshot,
 } from "./coffeeGroupIdentity";
+import { useRevealSynthesizedAssetContextMenu } from "./revealSynthesizedAssetInFinder";
 import styles from "./page.module.css";
 
 interface CoffeeGroupIdentitySectionProps {
@@ -49,6 +50,10 @@ const COFFEE_GROUP_SYNTHESIS_LABELS: Record<
 export function CoffeeGroupIdentitySection(
   props: CoffeeGroupIdentitySectionProps,
 ): React.JSX.Element {
+  const {
+    revealSynthesizedAssetContextMenuEnabled,
+    onRevealSynthesizedAssetContextMenu,
+  } = useRevealSynthesizedAssetContextMenu();
   const atmosphere = props.group.atmosphere ?? null;
   const atmosphereReady =
     coffeeGroupAtmosphereIsReady(props.group) &&
@@ -133,7 +138,20 @@ export function CoffeeGroupIdentitySection(
                   </small>
                 </label>
               ) : (
-                <div className={styles.coffeeGroupAtmospherePreview}>
+                <div
+                  className={styles.coffeeGroupAtmospherePreview}
+                  onContextMenu={
+                    revealSynthesizedAssetContextMenuEnabled &&
+                    atmosphereReady &&
+                    atmosphere
+                      ? (event) =>
+                          onRevealSynthesizedAssetContextMenu(
+                            event,
+                            atmosphere.imageId,
+                          )
+                      : undefined
+                  }
+                >
                   {atmosphereReady && atmosphere ? (
                     // The authenticated image endpoint is intentionally not sent through Next's optimizer.
                     // eslint-disable-next-line @next/next/no-img-element

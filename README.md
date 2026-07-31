@@ -58,9 +58,10 @@ desktop release version. See the full registry and roadmap in
 
 ## Zen
 
-Zen lets a conversation breathe. Atmosphere can turn the current exchange into
-a generated visual room while the dialogue, persona presence, and controls stay
-quietly in reach.
+Zen lets a conversation breathe. Atmosphere starts on for every conversation:
+blank bot gradients hold the room until a wallpaper arrives, and Settings can
+turn it off or generate a fresh backdrop while the dialogue and persona
+presence stay quietly in reach.
 
 ![A PRISM Zen conversation over a rainy city Atmosphere wallpaper](docs/images/readme/prism-zen-atmosphere-dark.png)
 

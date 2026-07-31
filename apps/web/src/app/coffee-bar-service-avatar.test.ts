@@ -15,11 +15,12 @@ describe("retired Coffee service", () => {
     assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
     assert.doesNotMatch(pageSource, /player-cup\/sip/u);
     assert.doesNotMatch(pageSource, /drinkReaction/u);
-    assert.doesNotMatch(pageSource, /coffeeReplayPlayerSeat/u);
+    assert.match(pageSource, /coffeeReplayPlayerSeat/u);
     assert.doesNotMatch(
       pageCss,
-      /\.coffee(?:Bar|Waiter|PlayerCup|ReplayPlayer(?:Seat|Avatar|Nameplate|Glyph))/u,
+      /\.coffee(?:Bar|Waiter|PlayerCup)\b/u,
     );
+    assert.match(pageCss, /\.coffeeReplayPlayerSeat\s*\{/u);
   });
 
   it("starts new and resumed sessions at topic or arrivals", () => {
@@ -72,7 +73,8 @@ describe("retired Coffee service", () => {
     const coffeeStart = tutorialSource.indexOf("coffee: {");
     const coffeeEnd = tutorialSource.indexOf("botcast: {", coffeeStart);
     const coffeeTutorial = tutorialSource.slice(coffeeStart, coffeeEnd);
-    assert.match(coffeeTutorial, /You remain off camera/u);
+    assert.match(coffeeTutorial, /You remain off camera during the live table/u);
+    assert.match(coffeeTutorial, /Replay seats you as Default Prism/u);
     assert.match(coffeeTutorial, /Drag the pot/u);
     assert.match(coffeeTutorial, /faithful audio master/u);
     assert.doesNotMatch(coffeeTutorial, /Stop at the bar|Receive your drink/u);

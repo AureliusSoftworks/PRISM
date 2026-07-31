@@ -1,6 +1,10 @@
 import { createHash, randomInt, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
+  endDebatePerfSpan,
+  startDebatePerfSpan,
+} from "./debatePerfTiming.ts";
+import {
   BOT_POWER_CANONICAL_SILENCE_V1,
   DEBATE_CASE_CARDS_PER_SIDE,
   DEBATE_FORMAT_SCHEMA_VERSION,
@@ -15,11 +19,14 @@ import {
   DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
   DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
+  applyDebateAudienceDeliveryCue,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerObserverProjectionFromEffectsV1,
+  botPowerVoicePresenceModeFromEffectsV1,
+  debateAudiencePressureScore,
   debateEventIsTranscriptHousekeeping,
   debateEvidenceItemById,
   debateEvidenceItemCount,
@@ -766,7 +773,7 @@ async function generateJsonOnLane(
         topP: options.topP,
         topK: options.topK,
         repetitionPenalty: options.repetitionPenalty,
-        usagePurpose: "system_unlabeled",
+        usagePurpose: "debate_generation",
         jsonMode: true,
         signal,
       });
@@ -3222,6 +3229,7 @@ async function generateSpeech(
       silent: true,
     };
   }
+  const speechSpan = startDebatePerfSpan("advance.speech");
   let deliveryGeneration = await generateJson(
     lanesForSession(runtime, session),
     [
@@ -3275,7 +3283,9 @@ async function generateSpeech(
   const result = deliveryGeneration.value;
   let intended = multilineText(result.content, 6_000);
   if (!intended) throw new Error("The bot returned an empty debate turn.");
+  let didCapabilityRepair = false;
   if (debatePersonaSpeechExceedsCapability(snapshot, intended)) {
+    const repairSpan = startDebatePerfSpan("advance.speech.repair");
     const repaired = await repairPersonaCapabilityText(
       session,
       snapshot,
@@ -3283,6 +3293,11 @@ async function generateSpeech(
       runtime,
       "speech",
     );
+    endDebatePerfSpan(repairSpan, {
+      botId: snapshot.id,
+      repaired: Boolean(repaired),
+    });
+    didCapabilityRepair = true;
     if (repaired) {
       intended = repaired.content;
       deliveryGeneration = repaired.generation;
@@ -3306,7 +3321,26 @@ async function generateSpeech(
     intended = applyBotPowerMumbledResponseV1(intended);
   }
   if (powerBot?.hardMuted) intended = applyBotPowerMuteResponseV1(intended);
+  if (
+    session.playerRole === "judge" &&
+    snapshot.role === "advocate" &&
+    botPowerVoicePresenceModeFromEffectsV1(effects) !== "quiet"
+  ) {
+    intended = applyDebateAudienceDeliveryCue(
+      intended,
+      debateAudiencePressureScore({
+        events: session.events,
+        formality: session.formality,
+        playerRole: session.playerRole,
+      }),
+    );
+  }
   const sanitized = sanitizeDebateStatementSources(intended, session.evidence);
+  endDebatePerfSpan(speechSpan, {
+    botId: snapshot.id,
+    silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
+    repaired: didCapabilityRepair,
+  });
   return {
     content: sanitized.content,
     sourceIds: sanitized.sourceIds,
@@ -4415,6 +4449,7 @@ async function withPersonaSurpriseReaction(
   const events = [...newEvents];
   const trigger = personaSurpriseTrigger(events);
   if (!trigger) return events;
+  const surpriseSpan = startDebatePerfSpan("advance.surprise");
   const reactionContext: DebateSessionV1 = {
     ...next,
     events: [...previous.events, ...events],
@@ -4426,7 +4461,9 @@ async function withPersonaSurpriseReaction(
       runtime,
     );
     if (reaction) events.push(reaction);
+    endDebatePerfSpan(surpriseSpan, { reacted: Boolean(reaction) });
   } catch {
+    endDebatePerfSpan(surpriseSpan, { reacted: false, error: true });
     // Persona Foley is atmospheric. It must never pause the floor.
   }
   return events;
@@ -4596,6 +4633,7 @@ async function botFloorBreak(
     ...session,
     events: [...session.events, interruptedEvent],
   };
+  const floorBreakSpan = startDebatePerfSpan("advance.floor_break");
   try {
     const interjection = await generateSpeech(
       interruptedSession,
@@ -4612,7 +4650,10 @@ async function botFloorBreak(
         : `Break the floor now and cut off ${speaker.name}. Begin with the exact shouted word "Objection!" Then state one forceful, specific objection to the heard public fragment below. Do not introduce an unrelated argument.\n\nHeard fragment:\n${cutoff}`,
       runtime,
     );
-    if (interjection.silent) return null;
+    if (interjection.silent) {
+      endDebatePerfSpan(floorBreakSpan, { broke: false, silent: true });
+      return null;
+    }
     const interjectionEvent = makeEvent(interruptedSession, {
       kind: "objection",
       speakerKind: interrupter.role,
@@ -4626,6 +4667,7 @@ async function botFloorBreak(
       autoRecovery: interjection.autoRecovery,
     });
     if (humanJudgeOwnsModeratorActions(session)) {
+      endDebatePerfSpan(floorBreakSpan, { broke: true, ruling: false });
       return {
         speechEvent: interruptedEvent,
         interjectionEvent,
@@ -4656,12 +4698,14 @@ async function botFloorBreak(
       model: ruling.model,
       autoRecovery: ruling.autoRecovery,
     });
+    endDebatePerfSpan(floorBreakSpan, { broke: true, ruling: true });
     return {
       speechEvent: interruptedEvent,
       interjectionEvent,
       rulingEvent,
     };
   } catch {
+    endDebatePerfSpan(floorBreakSpan, { broke: false, error: true });
     return null;
   }
 }
@@ -5713,11 +5757,13 @@ async function judgeAdvocateReactionTransition(
   }
   const verdict = playerJudgeVerdictEvent(session);
   const advocate = botForSide(session, sideId);
+  const moderatorTitle = moderatorAuthorityTitle(session);
   const reaction = await generateSpeech(
     session,
     advocate,
     [
-      `The human Judge has just ruled for ${sideLabel(session, session.playerVerdict)}.`,
+      `The presiding authority's frozen public title is exactly ${JSON.stringify(moderatorTitle)}. Refer to it by that exact title, never as "The Judge".`,
+      `${moderatorTitle} has just ruled for ${sideLabel(session, session.playerVerdict)}.`,
       `The exact public ruling was: ${JSON.stringify(verdict.content)}`,
       `Give ${advocate.name}'s immediate public reaction in one or two concise sentences.`,
       sideId === session.playerVerdict
@@ -5727,7 +5773,7 @@ async function judgeAdvocateReactionTransition(
         : debateUsesFreeForAllPerformance(session)
           ? "Take the loss in character. Frustration, disbelief, bruised pride, or grudging respect are welcome, but do not appeal or relitigate the case."
           : "Acknowledge the loss honestly without appealing or relitigating the case.",
-      "React to the Judge's actual ruling, not an earlier Jury recommendation.",
+      `React to ${moderatorTitle}'s actual ruling, not an earlier Jury recommendation.`,
       "Stay in persona. Add no new evidence, source, major argument, ruling, or procedural instruction.",
     ].join(" "),
     runtime,
@@ -5774,11 +5820,11 @@ async function judgeModeratorClosingTransition(
     await moderatorBookendEvent(
       session,
       [
-        `The human Judge ruled for ${sideLabel(session, session.playerVerdict)}, and both advocates have now reacted.`,
+        `${moderatorAuthorityTitle(session)} ruled for ${sideLabel(session, session.playerVerdict)}, and both advocates have now reacted.`,
         debateUsesFreeForAllPerformance(session)
           ? "Give one punchy, neutral procedural closing beat and cut the show off cleanly."
           : "Formally close the proceeding in one or two concise, neutral sentences.",
-        "Preserve the Judge's exact result. Do not invent or reinterpret the Judge's reasoning.",
+        `Preserve ${moderatorAuthorityTitle(session)}'s exact result. Do not invent or reinterpret its reasoning.`,
         "Add no new argument, evidence, ballot detail, ruling, or invitation to continue.",
       ].join(" "),
       runtime,
@@ -6464,11 +6510,11 @@ async function advanceJuryStep(
               ? `The Jury goes ${split.forVotes}–${split.againstVotes} for ${sideLabel(
                   session,
                   split.majoritySideId,
-                )}. Judge, the last word is yours.`
+                )}. ${moderatorAuthorityTitle(session)}, the last word is yours.`
               : `The Jury advises ${split.forVotes}–${split.againstVotes} for ${sideLabel(
                   session,
                   split.majoritySideId,
-                )}. The final ruling remains with the Judge.`
+                )}. The final ruling remains with ${moderatorAuthorityTitle(session)}.`
             : debateUsesFreeForAllPerformance(session)
               ? `The Jury has spoken: ${split.forVotes}–${split.againstVotes}, and ${sideLabel(
                   session,
@@ -6677,8 +6723,8 @@ async function advanceTurnaboutStep(
           content:
             session.playerRole === "judge"
               ? debateUsesInstitutionalRegister(session.formality)
-                ? `From the public record, the Court finds for ${sideLabel(session, winnerSideId)}. The Judge's ruling resolves the Turnabout; bot ballots remain an agreement-and-dissent epilogue.`
-                : `${sideLabel(session, winnerSideId)} wins the Judge's decision. The bot ballots remain an agreement-and-dissent epilogue.`
+                ? `From the public record, ${moderatorAuthorityTitle(session)} finds for ${sideLabel(session, winnerSideId)}. Its ruling resolves the Turnabout; bot ballots remain an agreement-and-dissent epilogue.`
+                : `${sideLabel(session, winnerSideId)} wins ${moderatorAuthorityTitle(session)}'s decision. The bot ballots remain an agreement-and-dissent epilogue.`
               : debateUsesInstitutionalRegister(session.formality)
                 ? `On the public record, ${sideLabel(session, winnerSideId)} carries the Turnabout by the three-bot majority.`
                 : `${sideLabel(session, winnerSideId)} takes the Turnabout by the three-bot majority.`,
@@ -7043,7 +7089,7 @@ async function advanceStep(
         session,
         botForSide(session, sideId),
         sideId,
-        "Answer the Judge's latest question directly and concisely.",
+        `Answer ${moderatorAuthorityTitle(session)}'s latest question directly and concisely.`,
         runtime,
         (next) => enterRebuttal(next, "against"),
       );
@@ -7260,8 +7306,8 @@ async function advanceStep(
           content:
             session.playerRole === "judge"
               ? debateUsesInstitutionalRegister(session.formality)
-                ? `The chair records the Judge's decision for ${sideLabel(session, winnerSideId)}. Bot ballots remain an agreement-and-dissent epilogue only.`
-                : `${sideLabel(session, winnerSideId)} wins the Judge's decision. Bot ballots remain an agreement-and-dissent epilogue only.`
+                ? `The chair records ${moderatorAuthorityTitle(session)}'s decision for ${sideLabel(session, winnerSideId)}. Bot ballots remain an agreement-and-dissent epilogue only.`
+                : `${sideLabel(session, winnerSideId)} wins ${moderatorAuthorityTitle(session)}'s decision. Bot ballots remain an agreement-and-dissent epilogue only.`
               : debateUsesInstitutionalRegister(session.formality)
                 ? `${sideLabel(session, winnerSideId)} carries the motion by the three-bot majority.`
                 : `${sideLabel(session, winnerSideId)} wins by the three-bot majority.`,
@@ -7371,35 +7417,57 @@ export async function advanceDebateSession(
     );
   }
   try {
+    const advanceSpan = startDebatePerfSpan("advance.total");
     const active = { ...session, status: "live" as const, error: null };
+    const stepSpan = startDebatePerfSpan("advance.step");
     const transitioned = isJudgeAftermathStep(session.stepKey)
       ? await advanceJudgeAftermathStep(active, runtime)
       : session.format === "turnabout"
         ? await advanceTurnaboutStep(active, runtime)
         : await advanceStep(active, runtime);
-    const events = await withPersonaSurpriseReaction(
+    endDebatePerfSpan(stepSpan, {
+      stepKey: session.stepKey,
+      eventCount: transitioned.events.length,
+    });
+    // Overlap atmospheric surprise + jury sidebar so the floor waits once.
+    const surprisePromise = withPersonaSurpriseReaction(
       session,
       transitioned.session,
       transitioned.events,
       runtime,
     );
-    const trigger = jurySidebarTrigger(
+    const juryTrigger = jurySidebarTrigger(
       transitioned.session,
       transitioned.events,
     );
-    if (trigger) {
-      const juryContext: DebateSessionV1 = {
-        ...transitioned.session,
-        events: [...session.events, ...events],
-      };
-      try {
-        events.push(
-          await generateJurySidebarTurn(juryContext, trigger, runtime),
-        );
-      } catch {
-        // A sidebar reaction is atmospheric. It must never pause the floor.
-      }
-    }
+    const juryPromise = juryTrigger
+      ? (async () => {
+          const jurySpan = startDebatePerfSpan("advance.jury_sidebar");
+          const juryContext: DebateSessionV1 = {
+            ...transitioned.session,
+            events: [...session.events, ...transitioned.events],
+          };
+          try {
+            const event = await generateJurySidebarTurn(
+              juryContext,
+              juryTrigger,
+              runtime,
+            );
+            endDebatePerfSpan(jurySpan, { generated: true });
+            return event;
+          } catch {
+            endDebatePerfSpan(jurySpan, { generated: false, error: true });
+            // A sidebar reaction is atmospheric. It must never pause the floor.
+            return null;
+          }
+        })()
+      : Promise.resolve(null);
+    const [events, jurySidebarEvent] = await Promise.all([
+      surprisePromise,
+      juryPromise,
+    ]);
+    if (jurySidebarEvent) events.push(jurySidebarEvent);
+    const commitSpan = startDebatePerfSpan("advance.commit");
     const committed = commitMutation(
       db,
       userId,
@@ -7408,6 +7476,12 @@ export async function advanceDebateSession(
       checked.idempotencyKey,
       events,
     );
+    endDebatePerfSpan(commitSpan, { revision: committed.revision });
+    endDebatePerfSpan(advanceSpan, {
+      stepKey: session.stepKey,
+      eventCount: events.length,
+      revision: committed.revision,
+    });
     if (session.format === "forum") {
       queueCaseBoardRefinement(
         db,
@@ -8735,7 +8809,7 @@ export function orderDebateAudience(
     speakerKind: "player",
     speakerBotId: session.moderator.id,
     sideId: target?.sideId ?? null,
-    content: "The Judge restores order.",
+    content: moderatorSelfReferenceClause(session, "restore order.", "restores order."),
     stepKey: "audience_order",
     parentEventId: target?.id ?? null,
     gavelReason: "audience_order",
@@ -8917,7 +8991,12 @@ export function swingDebateJudgeGavel(
       speakerBotId: session.moderator.id,
       sideId: target?.sideId ?? null,
       content:
-        overtimeDelivery?.content ?? "The Judge calls the room to order.",
+        overtimeDelivery?.content ??
+        moderatorSelfReferenceClause(
+          session,
+          "call the room to order.",
+          "calls the room to order.",
+        ),
       stepKey: overtime ? "judge_gavel_overtime" : "judge_gavel",
       parentEventId: target?.id ?? null,
       gavelReason,
@@ -9151,10 +9230,10 @@ export async function submitDebateJudgeGavelMessage(
     withMessage,
     respondent,
     [
-      "The human Judge struck the gavel outside the normal schedule and addressed both advocates.",
+      `The presiding authority, titled exactly ${JSON.stringify(moderatorAuthorityTitle(session))}, struck the gavel outside the normal schedule and addressed both advocates.`,
       `Judge message: ${publicMessage.content}`,
-      "Answer the Judge directly in one concise, substantive response from your assigned side.",
-      "The human Judge controls courtroom procedure. Do not argue with the Judge's procedural authority or reopen a ruling as though it were merely another advocate claim.",
+      `Answer ${moderatorAuthorityTitle(session)} directly in one concise, substantive response from your assigned side.`,
+      `${moderatorAuthorityTitle(session)} controls courtroom procedure. Do not argue with its procedural authority or reopen a ruling as though it were merely another advocate claim.`,
       "Do not treat this as a new formal round, speak for the other advocate, or invent evidence.",
       "After this answer, the previously scheduled Debate order resumes.",
     ].join("\n"),
@@ -9294,10 +9373,10 @@ export async function submitDebateObjectionRuling(
     withRuling,
     interruptedBot,
     [
-      `The human Judge overruled ${objectionEvent.speakerBotId === session.forAdvocate.id ? session.forAdvocate.name : session.againstAdvocate.name}'s objection and returned the floor to you.`,
+      `${moderatorAuthorityTitle(session)} overruled ${objectionEvent.speakerBotId === session.forAdvocate.id ? session.forAdvocate.name : session.againstAdvocate.name}'s objection and returned the floor to you.`,
       `Your heard statement stopped here: ${interruptedEvent.content}`,
       `The objection was: ${objectionEvent.content}`,
-      "Continue in one or two concise sentences. Finish the interrupted point and answer the objection directly without restarting your speech, inventing evidence, or disputing the Judge's authority.",
+      `Continue in one or two concise sentences. Finish the interrupted point and answer the objection directly without restarting your speech, inventing evidence, or disputing ${moderatorAuthorityTitle(session)}'s authority.`,
       "After this continuation, the previously scheduled Debate order resumes.",
     ].join("\n"),
     runtime,
@@ -9382,7 +9461,12 @@ export function submitDebateVerdict(
     speakerBotId: session.moderator.id,
     sideId: request.sideId,
     content:
-      reason || `The Judge rules for ${sideLabel(session, request.sideId)}.`,
+      reason ||
+        moderatorSelfReferenceClause(
+          session,
+          `rule for ${sideLabel(session, request.sideId)}.`,
+          `rules for ${sideLabel(session, request.sideId)}.`,
+        ),
   });
   let nextSession: DebateSessionV1 = {
     ...session,
@@ -9695,7 +9779,7 @@ export function endDebateSessionEarly(
       stepKey: "early_conclusion",
       content: `${earlyConclusionLead(nextSession)} ${
         session.playerRole === "judge"
-          ? `The Judge must decide which side made the stronger case from the limited ${debatePublicMaterialLabel(nextSession.formality)} so far.`
+          ? `${moderatorAuthorityTitle(nextSession)} must decide which side made the stronger case from the limited ${debatePublicMaterialLabel(nextSession.formality)} so far.`
           : `The panel will decide which side made the stronger case from the limited ${debatePublicMaterialLabel(nextSession.formality)} so far.`
       }`,
     },

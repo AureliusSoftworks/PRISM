@@ -9,6 +9,8 @@ import {
   BOT_FACE_FONT_WEIGHT_MIN,
   BOT_FACE_MOUTH_SCALE_MAX,
   BOT_FACE_MOUTH_SCALE_MIN,
+  BOT_FACE_THINKING_OFFSET_Y_MAX,
+  BOT_FACE_THINKING_SCALE_MIN,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
@@ -30,6 +32,12 @@ import {
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  DEFAULT_BOT_FACE_THINKING_SCALE,
+  DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+  DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
+  normalizeBotFaceThinkingScale,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
   DISABLED_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   normalizeBotFaceBlinkBar,
@@ -40,6 +48,7 @@ import {
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
   normalizeBotFaceEyeMovement,
+  botFaceEyeMovementIsActive,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeScale,
@@ -90,9 +99,15 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceGlyphAnimation(null), null);
   });
 
-  it("normalizes Natural and Still while migrating retired eye effects", () => {
+  it("normalizes Still, Natural, and the active gaze modes while migrating retired eye effects", () => {
     assert.equal(normalizeBotFaceEyeMovement("natural"), "natural");
     assert.equal(normalizeBotFaceEyeMovement("still"), "still");
+    assert.equal(normalizeBotFaceEyeMovement("nervous"), "nervous");
+    assert.equal(normalizeBotFaceEyeMovement("frantic"), "frantic");
+    assert.equal(normalizeBotFaceEyeMovement("paranoid"), "paranoid");
+    assert.equal(botFaceEyeMovementIsActive("still"), false);
+    assert.equal(botFaceEyeMovementIsActive("natural"), true);
+    assert.equal(botFaceEyeMovementIsActive("paranoid"), true);
     assert.equal(
       normalizeBotFaceEyeMovement("wobble"),
       DEFAULT_BOT_FACE_EYE_MOVEMENT,
@@ -176,6 +191,9 @@ describe("bot avatar face style", () => {
       blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
       blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
       thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
+      thinkingScale: DEFAULT_BOT_FACE_THINKING_SCALE,
+      thinkingOffsetX: DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+      thinkingOffsetY: DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
     });
     assert.deepEqual(resolveBotFaceStyle({}, null), {
       eyesFont: DEFAULT_BOT_FACE_FONT_ID,
@@ -201,6 +219,9 @@ describe("bot avatar face style", () => {
       blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
       blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
       thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
+      thinkingScale: DEFAULT_BOT_FACE_THINKING_SCALE,
+      thinkingOffsetX: DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+      thinkingOffsetY: DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
     });
   });
 
@@ -231,6 +252,9 @@ describe("bot avatar face style", () => {
           faceBlinkOffsetY: 0.071,
           faceBlinkRotationDeg: -47,
           faceThinkingFrames: ["·", "*", "✦", "*"],
+          faceThinkingScale: 1.18,
+          faceThinkingOffsetX: -0.071,
+          faceThinkingOffsetY: 0.071,
         },
         "formal"
       ),
@@ -258,8 +282,18 @@ describe("bot avatar face style", () => {
         blinkOffsetY: 0.08,
         blinkRotationDeg: -45,
         thinkingFrames: ["·", "*", "✦", "*"],
+        thinkingScale: 1.2,
+        thinkingOffsetX: -0.08,
+        thinkingOffsetY: 0.08,
       }
     );
+  });
+
+  it("clamps shared thinking glyph size and position", () => {
+    assert.equal(normalizeBotFaceThinkingScale(1.18), 1.2);
+    assert.equal(normalizeBotFaceThinkingScale(0.5), BOT_FACE_THINKING_SCALE_MIN);
+    assert.equal(normalizeBotFaceThinkingOffsetX(-0.071), -0.08);
+    assert.equal(normalizeBotFaceThinkingOffsetY(0.2), BOT_FACE_THINKING_OFFSET_Y_MAX);
   });
 
   it("defaults Coffee pucker on while preserving an explicit opt-out", () => {
@@ -483,6 +517,9 @@ describe("bot avatar face style", () => {
       DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
     );
     assert.deepEqual(style.thinkingFrames, DEFAULT_BOT_FACE_THINKING_FRAMES);
+    assert.equal(style.thinkingScale, DEFAULT_BOT_FACE_THINKING_SCALE);
+    assert.equal(style.thinkingOffsetX, DEFAULT_BOT_FACE_THINKING_OFFSET_X);
+    assert.equal(style.thinkingOffsetY, DEFAULT_BOT_FACE_THINKING_OFFSET_Y);
   });
 
   it("can randomize eye and mouth sizes to slider extremes without custom glyphs or placement", () => {

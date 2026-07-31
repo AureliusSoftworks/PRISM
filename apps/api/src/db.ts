@@ -252,6 +252,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_blink_offset_y REAL,
       prism_default_bot_face_blink_rotation_deg REAL,
       prism_default_bot_face_thinking_frames TEXT,
+      prism_default_bot_face_thinking_scale REAL,
+      prism_default_bot_face_thinking_offset_x REAL,
+      prism_default_bot_face_thinking_offset_y REAL,
       prism_default_bot_temperature REAL,
       prism_default_bot_max_tokens INTEGER,
       prism_default_bot_top_p REAL,
@@ -526,7 +529,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       coffee_meeting_summary_message_count INTEGER,
       coffee_meeting_summary_updated_at TEXT,
       coffee_power_plan_json TEXT,
-      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 0,
+      zen_wallpaper_enabled INTEGER NOT NULL DEFAULT 1,
       zen_wallpaper_image_id TEXT,
       zen_wallpaper_prompt_seed TEXT,
       zen_wallpaper_message_count INTEGER,
@@ -1569,6 +1572,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_blink_offset_y REAL,
       face_blink_rotation_deg REAL,
       face_thinking_frames TEXT,
+      face_thinking_scale REAL,
+      face_thinking_offset_x REAL,
+      face_thinking_offset_y REAL,
       authored_audio_voice_profile TEXT,
       audio_voice_profile_override TEXT,
       profile_picture_image_id TEXT,
@@ -2921,6 +2927,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_blink_offset_y", "REAL"],
     ["prism_default_bot_face_blink_rotation_deg", "REAL"],
     ["prism_default_bot_face_thinking_frames", "TEXT"],
+    ["prism_default_bot_face_thinking_scale", "REAL"],
+    ["prism_default_bot_face_thinking_offset_x", "REAL"],
+    ["prism_default_bot_face_thinking_offset_y", "REAL"],
     ["prism_default_bot_temperature", "REAL"],
     ["prism_default_bot_max_tokens", "INTEGER"],
     ["prism_default_bot_top_p", "REAL"],
@@ -3804,6 +3813,24 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceThinkingFramesColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_thinking_frames TEXT;");
+  }
+  const hasBotFaceThinkingScaleColumn = botColumns.some(
+    (column) => column.name === "face_thinking_scale",
+  );
+  if (!hasBotFaceThinkingScaleColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_thinking_scale REAL;");
+  }
+  const hasBotFaceThinkingOffsetXColumn = botColumns.some(
+    (column) => column.name === "face_thinking_offset_x",
+  );
+  if (!hasBotFaceThinkingOffsetXColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_thinking_offset_x REAL;");
+  }
+  const hasBotFaceThinkingOffsetYColumn = botColumns.some(
+    (column) => column.name === "face_thinking_offset_y",
+  );
+  if (!hasBotFaceThinkingOffsetYColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_thinking_offset_y REAL;");
   }
   const hasBotProfilePictureImageIdColumn = botColumns.some(
     (column) => column.name === "profile_picture_image_id",

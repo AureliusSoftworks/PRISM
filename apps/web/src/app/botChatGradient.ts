@@ -28,6 +28,13 @@ export const BOT_CHAT_PERSONA_FILL_FULL_AT_MESSAGES = 22;
  */
 export const BOT_CHAT_PERSONA_FILL_START_WHISPER = 0.06;
 
+/**
+ * Empty bot rooms need a readable identity wash immediately. A true zero fill
+ * made every persona look like the same neutral Prism shell until messages
+ * stacked up or a wallpaper arrived.
+ */
+export const BOT_CHAT_PERSONA_FILL_EMPTY_ROOM = 0.42;
+
 function stableUnitValue(seed: string): number {
   let hash = 2166136261;
   for (let index = 0; index < seed.length; index += 1) {
@@ -56,18 +63,20 @@ function hexWithAlpha(hex: string, alpha: number): string {
 
 /**
  * How strongly a Home conversation should carry the selected persona's color.
- * Starts near empty so early turns stay readable, then eases toward full wash.
+ * Empty rooms keep a clear identity wash; once messages exist the fill eases
+ * upward from that floor toward full presence (never dipping back to blank).
  */
 export function botChatPersonaFillProgress(messageCount: number): number {
   if (!Number.isFinite(messageCount) || messageCount <= 0) {
-    return 0;
+    return BOT_CHAT_PERSONA_FILL_EMPTY_ROOM;
   }
   const t = clamp(messageCount / BOT_CHAT_PERSONA_FILL_FULL_AT_MESSAGES, 0, 1);
-  // Smoothstep ease so the first few turns stay calm, then the room fills.
+  // Smoothstep ease so early turns stay calm relative to a full wash, then
+  // the room fills — always at least the empty-room identity floor.
   const eased = t * t * (3 - 2 * t);
   return clamp(
-    BOT_CHAT_PERSONA_FILL_START_WHISPER +
-      (1 - BOT_CHAT_PERSONA_FILL_START_WHISPER) * eased,
+    BOT_CHAT_PERSONA_FILL_EMPTY_ROOM +
+      (1 - BOT_CHAT_PERSONA_FILL_EMPTY_ROOM) * eased,
     0,
     1,
   );

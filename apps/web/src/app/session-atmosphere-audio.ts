@@ -10,6 +10,7 @@ import {
 import {
   prismAudioContext,
   prismAudioOutputNode,
+  prismLocalOnlyAudioOutputNode,
   replayAudioMasterCaptureActive,
 } from "./replayAudioMasterCapture.ts";
 
@@ -242,6 +243,11 @@ export interface SessionAtmosphereController {
     mix?: SessionAtmosphereMix;
     transitionMs?: number;
   }): void;
+  /**
+   * Soft-pause living presentation without tearing down loops. Ducks volume to
+   * zero and defers ambient foley / bot vocalizations until resumed.
+   */
+  setPresentationSuspended(suspended: boolean, transitionMs?: number): void;
   stop(): void;
 }
 
@@ -299,6 +305,7 @@ function levelSessionAtmosphereNode(
     SessionAtmosphereFoleyPlaybackOptions,
     "lowCutHz" | "highCutHz" | "stereoPan"
   >,
+  outputDestination: AudioNode = prismAudioOutputNode(context),
 ): SessionAtmosphereSourceLeveler {
   if (!normalizeLoop) {
     const busGain = context.createGain();
@@ -329,7 +336,7 @@ function levelSessionAtmosphereNode(
     const roomConnection = connectRoomAcoustics({
       context,
       input: busGain,
-      destination: prismAudioOutputNode(context),
+      destination: outputDestination,
       send: bus === "foley" ? roomAcoustics : null,
       stereoPan: oneShotOptions?.stereoPan,
     });
@@ -371,7 +378,7 @@ function levelSessionAtmosphereNode(
     const roomConnection = connectRoomAcoustics({
       context,
       input: busGain,
-      destination: prismAudioOutputNode(context),
+      destination: outputDestination,
       send: bus === "background" ? roomAcoustics : null,
     });
     return {
@@ -390,7 +397,7 @@ function levelSessionAtmosphereNode(
   const roomConnection = connectRoomAcoustics({
     context,
     input: busGain,
-    destination: prismAudioOutputNode(context),
+    destination: outputDestination,
     send: bus === "background" ? roomAcoustics : null,
   });
   return {
@@ -404,6 +411,17 @@ function levelSessionAtmosphereNode(
   };
 }
 
+function sessionAtmosphereOutputDestination(
+  context: AudioContext,
+  bus: SessionAtmosphereBus,
+  backgroundRecordable: boolean,
+): AudioNode {
+  if (bus === "background" && !backgroundRecordable) {
+    return prismLocalOnlyAudioOutputNode(context);
+  }
+  return prismAudioOutputNode(context);
+}
+
 function levelSessionAtmosphereSource(
   audio: HTMLAudioElement,
   normalizeLoop: boolean,
@@ -414,6 +432,7 @@ function levelSessionAtmosphereSource(
     SessionAtmosphereFoleyPlaybackOptions,
     "lowCutHz" | "highCutHz" | "stereoPan"
   >,
+  backgroundRecordable = true,
 ): SessionAtmosphereSourceLeveler | null {
   const context = sessionAtmosphereContext();
   if (!context) return null;
@@ -426,6 +445,11 @@ function levelSessionAtmosphereSource(
       backgroundTone,
       roomAcoustics,
       oneShotOptions,
+      sessionAtmosphereOutputDestination(
+        context,
+        bus,
+        backgroundRecordable,
+      ),
     );
   } catch {
     // Keep ordinary HTMLAudio playback as a compatibility fallback.
@@ -581,6 +605,8 @@ export function startSessionAtmosphere(args: {
   grainUrl?: string | null;
   mix?: SessionAtmosphereMix;
   backgroundTone?: SessionAtmosphereBackgroundTone;
+  /** When false, background beds stay on speakers only and skip the master tap. */
+  backgroundRecordable?: boolean;
   foleyRoomAcoustics?: RoomAcousticsSend;
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
@@ -596,6 +622,10 @@ export function startSessionAtmosphere(args: {
 }): SessionAtmosphereController {
   let volume = clampAudioLevel(args.volume);
   let mix = normalizeSessionAtmosphereMix(args.mix);
+  let presentationSuspended = false;
+  let restoredVolume = volume;
+  let restoredMix = mix;
+  const backgroundRecordable = args.backgroundRecordable !== false;
   const activeAudio = new Map<
     HTMLAudioElement,
     SessionAtmosphereActiveSource
@@ -608,6 +638,35 @@ export function startSessionAtmosphere(args: {
   let botVocalizationTimer: number | null = null;
   let foleyIndex = 0;
   let botVocalizationIndex = 0;
+  const applyLiveMix = (transitionMs = 0): void => {
+    for (const [audio, source] of activeAudio) {
+      applySourceVolume(audio, source, transitionMs);
+    }
+    for (const source of activeLoops) {
+      const gain = source.leveler.busGain.gain;
+      const context = source.source.context;
+      const target = sessionAtmosphereBusGain({
+        volume,
+        mix,
+        bus: source.bus,
+        trim: source.trim,
+      });
+      const transitionSeconds = Math.max(0, transitionMs) / 1_000;
+      gain.cancelScheduledValues(context.currentTime);
+      gain.setValueAtTime(gain.value, context.currentTime);
+      if (transitionSeconds > 0) {
+        gain.linearRampToValueAtTime(
+          target,
+          context.currentTime + transitionSeconds,
+        );
+      } else {
+        gain.value = target;
+      }
+    }
+  };
+
+  const presentationDeferred = (): boolean => presentationSuspended;
+
   const ambientFoleyProfile =
     args.ambientFoleyProfile ?? DEFAULT_SESSION_AMBIENT_FOLEY_PROFILE;
   const ambientBotVocalizationProfile =
@@ -706,9 +765,17 @@ export function startSessionAtmosphere(args: {
           ? args.backgroundRoomAcoustics
           : args.foleyRoomAcoustics,
         options,
+        backgroundRecordable,
       ),
     } satisfies SessionAtmosphereActiveSource;
-    if (!source.leveler && replayAudioMasterCaptureActive()) return null;
+    // Local-only background may still use HTMLAudio fallback during capture.
+    if (
+      !source.leveler &&
+      replayAudioMasterCaptureActive() &&
+      !(bus === "background" && !backgroundRecordable)
+    ) {
+      return null;
+    }
     activeAudio.set(audio, source);
     applySourceVolume(audio, source);
     if (!loop) {
@@ -776,6 +843,12 @@ export function startSessionAtmosphere(args: {
             bus,
             args.backgroundTone ?? "neutral",
             args.backgroundRoomAcoustics,
+            undefined,
+            sessionAtmosphereOutputDestination(
+              context,
+              bus,
+              backgroundRecordable,
+            ),
           ),
         };
         const target = sessionAtmosphereBusGain({ volume, mix, bus, trim });
@@ -806,7 +879,7 @@ export function startSessionAtmosphere(args: {
       () => {
         timer = null;
         if (stopped) return;
-        if (args.shouldDeferFoley?.()) {
+        if (args.shouldDeferFoley?.() || presentationDeferred()) {
           timer = window.setTimeout(scheduleFoley, 4_000);
           return;
         }
@@ -834,7 +907,10 @@ export function startSessionAtmosphere(args: {
       () => {
         botVocalizationTimer = null;
         if (stopped) return;
-        if ((args.shouldDeferBotVocalization ?? args.shouldDeferFoley)?.()) {
+        if (
+          presentationDeferred() ||
+          (args.shouldDeferBotVocalization ?? args.shouldDeferFoley)?.()
+        ) {
           botVocalizationTimer = window.setTimeout(
             scheduleBotVocalization,
             4_000,
@@ -867,6 +943,7 @@ export function startSessionAtmosphere(args: {
 
   return {
     playCue(cue) {
+      if (presentationSuspended) return;
       play(SESSION_FOLEY_URLS[cue], "foley", {
         trim: cue === "coffeeSip" ? 1.25 : 1.0625,
       });
@@ -875,6 +952,7 @@ export function startSessionAtmosphere(args: {
       for (const url of new Set(urls)) primeFoley(url);
     },
     playFoley(url, options = {}) {
+      if (presentationSuspended) return false;
       return play(url, "foley", options) !== null;
     },
     stopFoley(tag, fadeMs = 180) {
@@ -904,32 +982,30 @@ export function startSessionAtmosphere(args: {
       }
     },
     setMix(next) {
+      if (presentationSuspended) {
+        restoredVolume = clampAudioLevel(next.volume);
+        restoredMix = normalizeSessionAtmosphereMix(next.mix);
+        return;
+      }
       volume = clampAudioLevel(next.volume);
       mix = normalizeSessionAtmosphereMix(next.mix);
-      for (const [audio, source] of activeAudio) {
-        applySourceVolume(audio, source, next.transitionMs);
+      restoredVolume = volume;
+      restoredMix = mix;
+      applyLiveMix(next.transitionMs ?? 0);
+    },
+    setPresentationSuspended(suspended, transitionMs = 220) {
+      if (stopped || presentationSuspended === suspended) return;
+      presentationSuspended = suspended;
+      if (suspended) {
+        restoredVolume = volume;
+        restoredMix = mix;
+        volume = 0;
+        applyLiveMix(transitionMs);
+        return;
       }
-      for (const source of activeLoops) {
-        const gain = source.leveler.busGain.gain;
-        const context = source.source.context;
-        const target = sessionAtmosphereBusGain({
-          volume,
-          mix,
-          bus: source.bus,
-          trim: source.trim,
-        });
-        const transitionSeconds = Math.max(0, next.transitionMs ?? 0) / 1_000;
-        gain.cancelScheduledValues(context.currentTime);
-        gain.setValueAtTime(gain.value, context.currentTime);
-        if (transitionSeconds > 0) {
-          gain.linearRampToValueAtTime(
-            target,
-            context.currentTime + transitionSeconds,
-          );
-        } else {
-          gain.value = target;
-        }
-      }
+      volume = restoredVolume;
+      mix = restoredMix;
+      applyLiveMix(transitionMs);
     },
     stop() {
       stopped = true;

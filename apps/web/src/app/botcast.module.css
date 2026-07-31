@@ -517,6 +517,35 @@
 .contextualTextField input, .contextualTextField textarea { padding-right: 48px; }
 .pickAwareSetupField { min-width: 0; }
 .contextualTextField .pickAwareSetupField { padding-right: 44px; }
+
+/* Keep Prompt Center / wildcard chips readable against Signal's studio field. */
+.shell .pickAwareSetupField {
+  --fg: var(--botcast-ink);
+  --fg-subtle: var(--botcast-muted);
+  --fg-muted: var(--botcast-muted);
+  --compose-send-ink: var(--botcast-ink);
+  --bg-elevated: var(--botcast-panel);
+  --bg: var(--botcast-field);
+  --line: var(--botcast-line);
+  --wildcard-slot-chip-ink: var(--botcast-ink);
+  --wildcard-slot-chip-fill-a: color-mix(in srgb, var(--botcast-ink) 12%, var(--botcast-field));
+  --wildcard-slot-chip-fill-b: color-mix(in srgb, var(--botcast-accent) 16%, var(--botcast-field));
+  --wildcard-slot-chip-inset: color-mix(in srgb, var(--botcast-ink) 14%, transparent);
+  --wildcard-slot-chip-glow: color-mix(in srgb, var(--botcast-accent) 42%, transparent);
+  color: var(--botcast-ink);
+}
+
+.shell .pickAwareSetupField textarea {
+  color: var(--botcast-ink);
+  caret-color: var(--botcast-ink);
+}
+
+.shell .pickAwareSetupField textarea[data-rich-overlay="true"] {
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--botcast-ink);
+}
 .contextualDiceButton { position: absolute; top: 50%; right: 7px; width: 32px; height: 32px; display: grid; place-items: center; transform: translateY(-50%); border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 32%, var(--botcast-line)); border-radius: 8px; padding: 0; color: color-mix(in srgb, var(--botcast-host-accent) 58%, var(--botcast-ink)); background: color-mix(in srgb, var(--botcast-host-accent) 10%, var(--botcast-soft-panel)); box-shadow: 0 5px 14px color-mix(in srgb, var(--botcast-host-accent) 10%, transparent); cursor: pointer; }
 .contextualTextField[data-multiline="true"] .contextualDiceButton { top: 7px; transform: none; }
 .contextualDiceButton svg { width: 16px; height: 16px; stroke-width: 1.9; }
@@ -683,6 +712,9 @@
 .atmosphereMixer > small { grid-column: 1 / -1; margin-top: -6px; color: var(--botcast-muted); font-size: .58rem; }
 .stageScene { position: absolute; inset: 0; transform: translate(var(--botcast-camera-offset-x, 0%), var(--botcast-camera-offset-y, 0%)) scale(var(--botcast-camera-zoom, 1)); transform-origin: center 55%; transition: transform 900ms cubic-bezier(.22,.72,.2,1), filter 900ms ease; }
 .liveCaption { position: absolute; left: 50%; bottom: 6.5%; z-index: 18; width: min(76%, 780px); display: grid; justify-items: center; gap: 5px; transform: translateX(-50%); color: #fff; text-align: center; pointer-events: none; animation: signalVoiceActionIn 160ms ease-out both; }
+.captionControls { position: absolute; top: 12px; left: 12px; z-index: 20; display: flex; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.14); border-radius: 11px; padding: 5px; background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.08); box-shadow: 0 8px 22px rgba(0,0,0,.28); pointer-events: auto; }
+.captionControls button { min-width: 42px; border: 1px solid rgba(255,255,255,.14); border-radius: 7px; padding: 6px 9px; color: rgba(255,255,255,.72); background: rgba(255,255,255,.06); font: 760 .66rem/1 system-ui; letter-spacing: .08em; cursor: pointer; }
+.captionControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); box-shadow: 0 6px 18px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
 .liveCaption strong { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 8px; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.1); font: 820 clamp(.52rem, .9vw, .68rem)/1 system-ui; letter-spacing: .11em; text-transform: uppercase; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
 .liveCaption span { max-width: 100%; border-radius: 10px; padding: 7px 12px 8px; background: rgba(4,6,11,.76); backdrop-filter: blur(9px) saturate(1.08); font: 720 clamp(.72rem, 1.45vw, 1.05rem)/1.28 system-ui; letter-spacing: .004em; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
 .liveCaption[data-signal-producer-host-prompt="true"] span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }

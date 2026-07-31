@@ -61,6 +61,29 @@ export function conversationEnglishVoiceEngine(
   return persistedMessageProvider === "local" ? "builtin" : requestedEngine;
 }
 
+/**
+ * Player-facing copy when Premium is selected but the reply stayed on-device
+ * (LOCAL / AUTO with a local model). Keeps the privacy invariant obvious.
+ */
+export const PREMIUM_LOCAL_FALLBACK_NOTICE =
+  "Premium waits for ONLINE replies — this turn used the local voice pack.";
+
+export function premiumLocalFallbackNotice(args: {
+  requestedEngine: EnglishVoiceEngine;
+  effectiveEngine: EnglishVoiceEngine;
+  engineUsedHeader?: string | null;
+  messageProvider?: string | null;
+}): string | null {
+  if (args.requestedEngine !== "elevenlabs") return null;
+  if (
+    args.engineUsedHeader === "builtin-local-fallback" ||
+    (args.effectiveEngine === "builtin" && args.messageProvider === "local")
+  ) {
+    return PREMIUM_LOCAL_FALLBACK_NOTICE;
+  }
+  return null;
+}
+
 export function effectiveVoicePlaybackChoice(
   configuredChoice: VoicePlaybackChoice,
   localResponse: boolean,

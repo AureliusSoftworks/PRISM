@@ -2475,6 +2475,9 @@ describe("API request integration", () => {
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,
         faceBlinkRotationDeg: -40,
+        faceThinkingScale: 1.3,
+        faceThinkingOffsetX: -0.08,
+        faceThinkingOffsetY: 0.04,
       })
     );
     assert.equal(created.status, 201);
@@ -2489,6 +2492,9 @@ describe("API request integration", () => {
     assert.equal(createdPayload.bot.face_blink_offset_x, -0.08);
     assert.equal(createdPayload.bot.face_blink_offset_y, 0.06);
     assert.equal(createdPayload.bot.face_blink_rotation_deg, -40);
+    assert.equal(createdPayload.bot.face_thinking_scale, 1.3);
+    assert.equal(createdPayload.bot.face_thinking_offset_x, -0.08);
+    assert.equal(createdPayload.bot.face_thinking_offset_y, 0.04);
 
     const updated = await client.request(`/api/bots/${encodeURIComponent(botId)}`, {
       method: "PATCH",
@@ -2504,6 +2510,9 @@ describe("API request integration", () => {
         faceBlinkOffsetX: 0.1,
         faceBlinkOffsetY: -0.12,
         faceBlinkRotationDeg: 55,
+        faceThinkingScale: 0.9,
+        faceThinkingOffsetX: 0.1,
+        faceThinkingOffsetY: -0.06,
       }),
     });
     assert.equal(updated.status, 200);
@@ -2518,6 +2527,9 @@ describe("API request integration", () => {
     assert.equal(updatedPayload.bot.face_blink_offset_x, 0.1);
     assert.equal(updatedPayload.bot.face_blink_offset_y, -0.12);
     assert.equal(updatedPayload.bot.face_blink_rotation_deg, 55);
+    assert.equal(updatedPayload.bot.face_thinking_scale, 0.9);
+    assert.equal(updatedPayload.bot.face_thinking_offset_x, 0.1);
+    assert.equal(updatedPayload.bot.face_thinking_offset_y, -0.06);
 
     const invalidEyeCount = await client.request(
       `/api/bots/${encodeURIComponent(botId)}`,
@@ -2544,6 +2556,9 @@ describe("API request integration", () => {
         faceBlinkOffsetX: -0.06,
         faceBlinkOffsetY: 0.08,
         faceBlinkRotationDeg: -65,
+        faceThinkingScale: 1.2,
+        faceThinkingOffsetX: -0.04,
+        faceThinkingOffsetY: 0.08,
       }),
     });
     assert.equal(updatedDefault.status, 200);
@@ -2565,6 +2580,15 @@ describe("API request integration", () => {
     assert.equal(
       defaultPayload.defaultBot.prismDefaultBotFaceBlinkRotationDeg,
       -65,
+    );
+    assert.equal(defaultPayload.defaultBot.prismDefaultBotFaceThinkingScale, 1.2);
+    assert.equal(
+      defaultPayload.defaultBot.prismDefaultBotFaceThinkingOffsetX,
+      -0.04,
+    );
+    assert.equal(
+      defaultPayload.defaultBot.prismDefaultBotFaceThinkingOffsetY,
+      0.08,
     );
   });
 

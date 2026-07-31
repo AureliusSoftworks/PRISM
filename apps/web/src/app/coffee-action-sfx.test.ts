@@ -201,7 +201,7 @@ describe("Coffee action sound effects", () => {
     assert.match(pageSource, /coffeeActionSfxDrivesOhMouth/u);
     assert.match(pageSource, /seatFoleyOhMouth/u);
     assert.match(pageSource, /seatFoleyOhMouth\s*\?\s*"open-small"/u);
-    assert.doesNotMatch(
+    assert.match(
       pageSource,
       /coffeeAuthoredActionReaction\?\.actor === "player"/u,
     );
@@ -213,7 +213,7 @@ describe("Coffee action sound effects", () => {
     assert.match(cssSource, /coffeeAuthoredActionFart/u);
     assert.match(cssSource, /coffeeAuthoredActionBurp/u);
     assert.match(cssSource, /coffeeAuthoredActionCough/u);
-    assert.doesNotMatch(
+    assert.match(
       pageSource,
       /className=\{styles\.coffeeReplayPlayerSeat\}/u,
     );

@@ -107,6 +107,9 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "face.thinking.frame1": bounded("string"),
   "face.thinking.frame2": bounded("string"),
   "face.thinking.frame3": bounded("string"),
+  "face.thinking.scale": bounded("number"),
+  "face.thinking.offsetX": bounded("number"),
+  "face.thinking.offsetY": bounded("number"),
 
   "details.inkRecipe": bounded("string"),
   "details.stamp.id": excluded("Avatar detail stamps are manual-only and never generated."),

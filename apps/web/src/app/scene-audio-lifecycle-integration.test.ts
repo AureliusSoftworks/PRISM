@@ -35,6 +35,11 @@ describe("scene audio lifecycle wiring", () => {
       atmosphereLayerSource,
       /return \(\) => \{[\s\S]*controller\.stop\(\)/u,
     );
+    assert.match(
+      atmosphereLayerSource,
+      /setPresentationSuspended\(presentationSuspended\)/u,
+    );
+    assert.match(atmosphereLayerSource, /usePrismPresentationSuspended/u);
   });
 
   it("halts and invalidates audio when changing applets", () => {

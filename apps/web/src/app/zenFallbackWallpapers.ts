@@ -60,9 +60,12 @@ export function shouldShowZenFallbackWallpaper({
   hasRememberedWallpaper,
   hasConversationMessages,
 }: ZenFallbackWallpaperEligibilityArgs): boolean {
+  // Bot rooms use blank persona gradients as the Atmosphere fallback. Stock
+  // preset images only fill Prism-default Zen (no bot) while Atmosphere is on.
   return (
     chatSurface &&
-    (atmosphereEnabled || hasConversationBot) &&
+    atmosphereEnabled &&
+    !hasConversationBot &&
     hasConversationMessages &&
     !hasRememberedWallpaper
   );

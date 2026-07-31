@@ -16,6 +16,7 @@ import {
   debateStageAlignmentStorageKey,
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
+  debateStageEvidenceViewForCamera,
   formatDebateStageAlignmentClipboard,
   formatDebateStageEvidenceTableClipboard,
   formatDebateStageGavelClipboard,
@@ -30,6 +31,13 @@ import {
 } from "./debateStageAlignment.ts";
 
 describe("Debate stage alignment", () => {
+  it("switches evidence to its moderator composition with the moderator camera", () => {
+    assert.equal(debateStageEvidenceViewForCamera("moderator"), "moderator");
+    for (const camera of ["wide", "left", "right", "jury"] as const) {
+      assert.equal(debateStageEvidenceViewForCamera(camera), "wide");
+    }
+  });
+
   it("gives both gavel pose axes a generous six-hundred-percent span", () => {
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MIN, -300);
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
@@ -65,8 +73,8 @@ describe("Debate stage alignment", () => {
         raised: { x: -130.5, y: -4.5, rotation: -77, size: 90 },
       },
       evidenceTable: {
-        wide: { x: 0, y: 106, size: 100 },
-        moderator: { x: 0, y: 106, size: 100 },
+        wide: { x: 0, y: 111.5, size: 100 },
+        moderator: { x: 0, y: 174, size: 220 },
       },
       lightBlendModes: {
         dark: "hard-light",

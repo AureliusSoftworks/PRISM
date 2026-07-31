@@ -121,7 +121,12 @@ describe("Coffee player voice", () => {
     assert.doesNotMatch(livePlayerVoice, /settings\.voiceMode/);
     assert.match(
       source,
-      /await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?setCoffeeUserRevealText\(trimmed\)/
+      /setCoffeeUserRevealText\(trimmed\)[\s\S]*?setCoffeeTurnRhythmState\("userTableTyping"\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed\)/,
+    );
+    assert.match(source, /coffeePlayerVoiceRevealReadyRef\.current = false/);
+    assert.match(
+      source,
+      /waitForCoffeeUserRevealToSettle\(\)[\s\S]*?await startCoffeePlayerVoiceForReveal\(trimmed\)[\s\S]*?coffeePlayerVoiceRevealReadyRef\.current = true/,
     );
     assert.match(source, /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
     assert.match(source, /playerMessage[\s\S]*?coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/);
@@ -233,7 +238,7 @@ describe("Coffee player voice", () => {
     );
   });
 
-  it("keeps replay player voice and pot actions off camera", () => {
+  it("shows Default Prism on Coffee replay with the pot docked to that seat", () => {
     const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     const styles = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
     assert.match(
@@ -243,13 +248,17 @@ describe("Coffee player voice", () => {
     assert.match(source, /coffeeGlobalComposer[^\n]*coffeeReplayComposerControls/);
     assert.match(
       source,
-      /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayOffCameraPotDock\}/,
+      /coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)[\s\S]*?className=\{styles\.coffeeReplayPlayerSeat\}/,
     );
-    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerSeat\}/);
-    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerAvatar\}/);
+    assert.match(
+      source,
+      /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayPlayerPot\}/,
+    );
+    assert.match(source, /\$\{styles\.coffeeReplayPlayerAvatar\}/);
+    assert.match(source, /className=\{styles\.coffeeReplayPlayerName\}/);
+    assert.match(source, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
+    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayOffCameraPotDock\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeePlayerCup\}/);
-    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerName\}/);
-    assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPlayerGlyph\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayComposerPot\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPersona\}/);
     assert.doesNotMatch(source, /className=\{styles\.coffeeReplayPersonaGlyph\}/);
@@ -260,6 +269,10 @@ describe("Coffee player voice", () => {
     assert.match(
       styles,
       /\.coffeeReplayPlayerPotMotion\s*\{[\s\S]*?position:\s*fixed;/
+    );
+    assert.match(
+      styles,
+      /\.coffeeReplayPlayerSeat\s*\{[\s\S]*?pointer-events:\s*none;/,
     );
     assert.match(
       source,

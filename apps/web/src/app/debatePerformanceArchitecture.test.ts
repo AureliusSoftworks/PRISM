@@ -61,13 +61,42 @@ test("Retina-wide materials avoid live backdrop sampling and permanent camera pr
 });
 
 test("audience detail keeps avatars while removing hidden material passes and idle filters", () => {
-  assert.match(pageSource, /"full" \| "reduced" \| "audience"/u);
+  assert.match(
+    pageSource,
+    /"full" \| "reduced" \| "audience" \| "debate"/u,
+  );
   assert.match(pageSource, /staticAudiencePortrait[\s\S]*"audience"/u);
-  assert.match(pageSource, /detailLevel !== "audience"/u);
+  assert.match(pageSource, /data-debate-optimized-avatar="true"/u);
+  assert.match(pageSource, /detailLevel=\{avatarDetailsDetailLevel\}/u);
+  assert.match(pageCss, /debateOptimizedEmissionMask::before/u);
   assert.match(pageCss, /data-debate-role="audience"[\s\S]*animation: none/u);
 });
 
 test("performance adaptation adds no player-facing setting or tutorial step", () => {
   assert.doesNotMatch(debateSource, /debate-performance-toggle/u);
   assert.doesNotMatch(tutorialSource, /material quality|performance tier/iu);
+});
+
+test("audience effects throttle under reduced material quality", () => {
+  assert.match(debateSource, /debateAudienceMaxReactingSeats/u);
+  assert.match(debateSource, /debateAudienceAllowsFaceOpen/u);
+  assert.match(debateSource, /debateAudienceAllowsTransformBounce/u);
+  assert.match(debateSource, /debateAudienceVisualPressureBand/u);
+  assert.match(debateSource, /allowFaceOpen=\{allowFaceOpen\}/u);
+  assert.match(debateSource, /allowTransformBounce=\{allowTransformBounce\}/u);
+  assert.match(debateSource, /DebateLiveAudienceGallery/u);
+  assert.match(debateSource, /data-audience-bounce/u);
+  assert.match(
+    debateCss,
+    /\.live\[data-debate-material-quality="minimal"\][\s\S]*data-audience-bounce/u,
+  );
+  assert.match(debateSource, /DEBATE_AUTO_ADVANCE_DELAY_MS/u);
+  assert.match(debateSource, /DebateDeadlineCountdown/u);
+  assert.match(debateSource, /reuseDebateSessionEventPrefix/u);
+  assert.match(debateSource, /presentationSuspended/u);
+  assert.match(debateSource, /usePrismPresentationSuspended/u);
+  assert.doesNotMatch(
+    debateSource,
+    /setInterval\(\(\) => \{\s*const now = Date\.now\(\);\s*setJudgeGavelNowMs/u,
+  );
 });

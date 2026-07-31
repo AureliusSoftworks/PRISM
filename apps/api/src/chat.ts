@@ -7875,7 +7875,9 @@ export async function processChatMessage(
         now,
         now
       );
-    } else if (isZenMode(mode) && !incognitoForTurn && zenHomeBotId) {
+    } else if (isZenMode(mode) && !incognitoForTurn) {
+      // Atmosphere starts on for every Zen room; blank gradients are the
+      // fallback look until a wallpaper image exists.
       db.prepare(
         `INSERT INTO conversations (
           id, user_id, title, conversation_mode, bot_id, incognito,
@@ -7888,7 +7890,7 @@ export async function processChatMessage(
         conversationTitle,
         conversationMode,
         conversationBotId,
-        incognitoForTurn ? 1 : 0,
+        0,
         now,
         now
       );

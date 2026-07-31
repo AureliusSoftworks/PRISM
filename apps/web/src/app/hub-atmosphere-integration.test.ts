@@ -70,7 +70,7 @@ describe("Home atmosphere integration", () => {
     );
   });
 
-  it("generates only while enabled and keeps Home quick toggles out of navigation", () => {
+  it("keeps Home quick toggles out of navigation and Zen Atmosphere in Settings", () => {
     const requestStart = pageSource.indexOf(
       "const requestHubAtmosphereGeneration =",
     );
@@ -82,8 +82,8 @@ describe("Home atmosphere integration", () => {
       pageSource.slice(requestStart, requestEnd),
       /!settings\.hubAtmosphereEnabled/u,
     );
-    assert.match(pageSource, /showAtmosphere && !hubAtmosphereSurface/u);
-    assert.match(
+    assert.doesNotMatch(pageSource, /showAtmosphere && !hubAtmosphereSurface/u);
+    assert.doesNotMatch(
       pageSource,
       /showZenAtmosphereButton && !hubAtmosphereSurface/u,
     );
@@ -91,18 +91,18 @@ describe("Home atmosphere integration", () => {
     assert.doesNotMatch(pageSource, /Hide Home Atmosphere/u);
     assert.doesNotMatch(pageSource, /Turn on Zen Atmosphere/u);
     assert.doesNotMatch(pageSource, /Turn off Zen Atmosphere/u);
-    assert.match(pageSource, /Generate a fresh Zen Atmosphere/u);
     assert.match(
       pageSource,
-      /onClick=\{\(\) =>\s*runAsyncAction\(generateAtmosphereFromSlashCommand\)\s*\}/u,
+      /Enable Atmosphere for this conversation/u,
     );
+    assert.match(pageSource, /Generate Atmosphere now/u);
     assert.match(
       pageSource,
-      /id: "atmosphere",[\s\S]{0,320}onSelect: generateAtmosphereFromSlashCommand/u,
+      /data-tutorial-target=\{\s*view === "chat" \? "zen-atmosphere" : undefined\s*\}/u,
     );
     assert.doesNotMatch(
       pageSource,
-      /id: "atmosphere",[\s\S]{0,180}kind: "toggle"[\s\S]{0,180}onSelect: generateAtmosphereFromSlashCommand/u,
+      /id: "atmosphere",[\s\S]{0,180}kind: "toggle"/u,
     );
   });
 

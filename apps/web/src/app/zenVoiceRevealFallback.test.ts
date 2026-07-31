@@ -83,7 +83,7 @@ describe("Zen voice reveal fallback", () => {
     );
     assert.match(
       voiceEffect,
-      /includeAlignment: !requestStreamingEnglishVoice/,
+      /includeAlignment: !\([\s\S]*?requestLocalEnglishChunks[\s\S]*?playEnglishVoiceWhileStreaming[\s\S]*?elevenlabs/,
     );
     assert.match(
       voiceEffect,
@@ -184,6 +184,36 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
+  it("keeps progressive Zen Premium on the selected engine and retries after failure", () => {
+    const prepareStart = pageSource.indexOf(
+      "async function prepareZenProgressiveSegmentVoice",
+    );
+    const prepareEnd = pageSource.indexOf(
+      "\n  useEffect(() => {",
+      prepareStart,
+    );
+    const prepareSource = pageSource.slice(prepareStart, prepareEnd);
+    assert.match(
+      prepareSource,
+      /conversationEnglishVoiceEngine\([\s\S]*?voiceSelection\.englishVoiceEngine,[\s\S]*?event\.provider,/,
+    );
+    assert.match(
+      prepareSource,
+      /includeAlignment: engine === "elevenlabs" && !canStreamPremium/,
+    );
+    assert.match(
+      pageSource,
+      /voiceSeenAssistantMessageIdsRef\.current\.delete\(\s*event\.assistantMessageId,?\s*\)/,
+    );
+  });
+
+  it("sends speakerBotId and playback-selection engine for Chat Premium synthesize", () => {
+    assert.match(
+      pageSource,
+      /voiceSelection\.englishVoiceEngine,[\s\S]*?message\.provider,[\s\S]*?speakerBotId: messageBot\.id/,
+    );
+  });
+
   it("keeps Babble playback and replay independent from canonical text", () => {
     const effectStart = pageSource.indexOf(
       'const shouldRun =\n      view === "chat"',
@@ -260,9 +290,34 @@ describe("Zen voice reveal fallback", () => {
       handlerStart,
     );
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
+    // Shh must freeze progressive even when pendingReplyVisible is already false.
     assert.match(
       handlerSource,
-      /latestAssistant\?\.zenProgressive\?\.inProgress === true[\s\S]*?stopPendingReply\(\)/,
+      /if \(latestAssistant\?\.zenProgressive\?\.inProgress === true\) \{[\s\S]*?stopPendingReply\(\)/,
+    );
+    assert.doesNotMatch(
+      handlerSource,
+      /pendingReplyVisible &&\s*latestAssistant\?\.zenProgressive\?\.inProgress === true/,
+    );
+  });
+
+  it("does not re-arm voiceSeen after an abort/interrupt during progressive synth", () => {
+    const prepareStart = pageSource.indexOf(
+      "async function prepareZenProgressiveSegmentVoice",
+    );
+    // Find the progressive segment catch that retries settled-message voice.
+    const catchMarker =
+      "Progressive synthesis failed — allow the settled-message path";
+    const catchStart = pageSource.indexOf(catchMarker, prepareStart);
+    assert.ok(catchStart > prepareStart);
+    const catchWindow = pageSource.slice(catchStart - 480, catchStart + 420);
+    assert.match(
+      catchWindow,
+      /chatRequestController\.signal\.aborted[\s\S]*?isAbortLikeError\(error\)[\s\S]*?throw error/,
+    );
+    assert.match(
+      catchWindow,
+      /voiceSeenAssistantMessageIdsRef\.current\.delete/,
     );
   });
 });

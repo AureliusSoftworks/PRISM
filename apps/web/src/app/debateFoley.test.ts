@@ -217,6 +217,22 @@ describe("Debate audience beats", () => {
     assert.ok(complete?.seatIndices.every((index) => index >= 0 && index < 8));
   });
 
+  it("honors maxReactingSeats under load", () => {
+    const speech = debateEvent("speech", {
+      sequence: 3,
+      speakerKind: "advocate",
+      content:
+        "This heated contention splits the gallery into a divided reaction now.",
+    });
+    const capped = debateAudienceBeatForEvent({
+      event: speech,
+      publicContent: speech.content,
+      seatCount: 12,
+      maxReactingSeats: 1,
+    });
+    assert.equal(capped?.seatIndices.length, 1);
+  });
+
   it("maps evidence, questions, concessions, and rulings to bounded cues", () => {
     const cases = [
       {

@@ -31,7 +31,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Chat    | v1.35   | Active             | Full playground with independent saved conversations, six-tier size presentation, and player-safe Quiet/Loud behavior inside each PRISM or persona Home.                                                                                                                                                    |
 | Zen     | v1.33   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues.                                                                                                                                                                  |
-| Coffee  | v2.39   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, and faithful replay.                                                                                                                                                     |
+| Coffee  | v2.41   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                                                          |
 | Signal  | v1.52   | Active             | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                 |
 | Debate  | v0.3    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
@@ -158,6 +158,15 @@ now`; the saved outcome is silence rather than a disabled control or
   Devil's Advocate framing, immutable shared evidence, revisioned live turns,
   scoreless public case-board truth, independent ballots, resumable history,
   frozen Powers, live voices, and the authored Light/Dark Prismatic Forum.
+
+### 2026-07-30
+
+- Bumped `Coffee` to `v2.41` for local-only café Jazz atmosphere: five loopable
+  stations under Table feel, heard during live tables and replay viewing, kept
+  out of faithful audio masters and Coffee session settings exports.
+- Bumped `Coffee` to `v2.40` so faithful replay seats Default Prism at the
+  table with the pot. Live Coffee stays off-camera; the player mug/barista path
+  remains retired.
 
 ### 2026-07-26
 
@@ -657,7 +666,7 @@ Sanchez`, and unaffected speakers keep their own naming habits. Coffee and
 - Bumped `Signal` to `v0.6` and `Coffee` to `v1.6` for the shared quiet foley
   layer, cup-synchronized Coffee sounds, bundled Signal studio room tone, and
   one-click ElevenLabs ident plus custom ambience generation. Coffee also
-  exposes the intentionally inactive Jazz atmosphere control for its next pass.
+  staged the Jazz atmosphere control for a later local-only café radio pass.
 - Bumped `Chat` to `v1.4` and `Zen` to `v1.3` for the
   unified PRISM menu system, refined CRT face glyphs, and shared voice and
   avatar behavior.

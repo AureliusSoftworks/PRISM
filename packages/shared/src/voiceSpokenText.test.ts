@@ -76,6 +76,16 @@ describe("voice spoken text", () => {
       voiceSpokenText("Look *gasp* at *scream* me! *dance*"),
       "Look at me!",
     );
+    assert.equal(
+      voiceSpokenText("*speaks loudly* The record is clear."),
+      "The record is clear.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "*says loudly* The record is clear.",
+      ),
+      "[speaks loudly] The record is clear.",
+    );
   });
 
   it("performs physical actions without treating Markdown emphasis as a cue", () => {

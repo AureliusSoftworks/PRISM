@@ -11,6 +11,7 @@ import {
   recordDeveloperTranscriptEvent,
   recordImageUsage,
   recordTextUsage,
+  repairMisnormalizedUsagePurposes,
   runWithUsageSession,
 } from "../usage.ts";
 
@@ -417,6 +418,136 @@ describe("usage accounting", () => {
         .prepare("SELECT COUNT(*) AS count FROM usage_events WHERE user_id = ?")
         .get("user-1") as { count: number };
       assert.equal(remaining.count, 0);
+    });
+  });
+
+  it("keeps Signal / Botcast purposes instead of collapsing them to System Unlabeled", () => {
+    withUsageTestDb((db) => {
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "botcast",
+          surface: "signal",
+          conversationId: "conv-1",
+          requestId: "signal-purpose-request",
+        },
+        () => {
+          recordTextUsage({
+            provider: "openai",
+            model: "gpt-5",
+            purpose: "botcast_turn",
+            inputTokens: 120,
+            outputTokens: 80,
+            totalTokens: 200,
+            tokenCountSource: "provider_reported",
+          });
+        },
+      );
+
+      const stored = db
+        .prepare("SELECT purpose FROM usage_events WHERE request_id = ?")
+        .get("signal-purpose-request") as { purpose: string };
+      assert.equal(stored.purpose, "botcast_turn");
+
+      const report = getUsageReport({ db, userId: "user-1", range: "all" });
+      const signal = report.byPurpose.find((item) => item.purpose === "botcast_turn");
+      assert.ok(signal);
+      assert.equal(signal.label, "Signal Turn");
+      assert.equal(signal.totalTokens, 200);
+      assert.equal(
+        report.byPurpose.some((item) => item.purpose === "system_unlabeled"),
+        false,
+      );
+    });
+  });
+
+  it("repairs historical System Unlabeled rows using the request surface", () => {
+    withUsageTestDb((db) => {
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "botcast",
+          surface: "signal",
+          requestId: "legacy-signal",
+        },
+        () => {
+          recordTextUsage({
+            provider: "openai",
+            model: "gpt-5",
+            purpose: "system_unlabeled",
+            inputTokens: 50,
+            outputTokens: 25,
+            totalTokens: 75,
+            tokenCountSource: "provider_reported",
+          });
+        },
+      );
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "system",
+          surface: "bots",
+          requestId: "legacy-bots",
+        },
+        () => {
+          recordTextUsage({
+            provider: "local",
+            model: "llama3.2",
+            purpose: "system_unlabeled",
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+            tokenCountSource: "provider_reported",
+          });
+        },
+      );
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+          requestId: "legacy-debate",
+        },
+        () => {
+          recordTextUsage({
+            provider: "local",
+            model: "llama3.2",
+            purpose: "system_unlabeled",
+            inputTokens: 20,
+            outputTokens: 10,
+            totalTokens: 30,
+            tokenCountSource: "provider_reported",
+          });
+        },
+      );
+
+      assert.equal(repairMisnormalizedUsagePurposes(db), 3);
+
+      const purposes = (
+        db
+          .prepare(
+            "SELECT request_id, purpose FROM usage_events WHERE user_id = ? ORDER BY request_id",
+          )
+          .all("user-1") as Array<{ request_id: string; purpose: string }>
+      ).map((row) => ({ request_id: row.request_id, purpose: row.purpose }));
+      assert.deepEqual(purposes, [
+        { request_id: "legacy-bots", purpose: "bot_generation" },
+        { request_id: "legacy-debate", purpose: "debate_generation" },
+        { request_id: "legacy-signal", purpose: "botcast_turn" },
+      ]);
+
+      const report = getUsageReport({ db, userId: "user-1", range: "all" });
+      assert.ok(report.byPurpose.some((item) => item.label === "Signal Turn"));
+      assert.ok(report.byPurpose.some((item) => item.label === "Bot Generation"));
+      assert.ok(report.byPurpose.some((item) => item.label === "Debate Generation"));
     });
   });
 });

@@ -34,6 +34,8 @@ const ASTERISK_VOCAL_CUE_TAGS = [
   [/^(?:sniffs?|sniffing)\b/iu, "sniffs"],
   [/^(?:screams?|screaming|shrieks?|shrieking)\b/iu, "screams"],
   [/^(?:shouts?|shouting|yells?|yelling)\b/iu, "shouts"],
+  [/^(?:speaks?|speaking|says?|saying|talks?|talking)\s+loudly\b/iu, "speaks loudly"],
+  [/^(?:raises?|raising)\s+(?:his|her|their|its|the)?\s*voice\b/iu, "speaks loudly"],
   [/^(?:slurps?|slurping)\b/iu, "slurps"],
   [/^(?:smacks?|smacking)\s+(?:his|her|their|its)?\s*lips\b/iu, "smacks lips"],
   [/^(?:clicks?|clicking)\s+(?:his|her|their|its)?\s*tongue\b/iu, "clicks tongue"],

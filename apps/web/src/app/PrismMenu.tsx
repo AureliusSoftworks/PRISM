@@ -387,8 +387,13 @@ export function PrismMenuSurface({
       }
       return;
     }
-    if (entry.kind === "toggle") await entry.onSelect(!entry.checked);
-    else await entry.onSelect();
+    try {
+      if (entry.kind === "toggle") await entry.onSelect(!entry.checked);
+      else await entry.onSelect();
+    } catch {
+      // Keep the menu open when an action fails so the player can retry.
+      return;
+    }
     if (entry.kind === "action" && entry.feedback) {
       setFeedback(entry.feedback);
       window.setTimeout(() => onClose(), 520);

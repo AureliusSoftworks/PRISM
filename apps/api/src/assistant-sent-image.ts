@@ -291,6 +291,7 @@ async function inferImagePromptRepair(args: {
     const raw = await provider.generateResponse(messages, {
       temperature: 0.4,
       maxTokens: 220,
+      usagePurpose: "chat_boundary",
     });
     const repaired = raw.replace(/\s+/g, " ").trim();
     if (!repaired || repaired.length > 1600) return fallback;
@@ -338,6 +339,7 @@ async function inferImageBoundaryText(args: {
     const raw = await provider.generateResponse(messages, {
       temperature: 0.7,
       maxTokens: 90,
+      usagePurpose: "chat_boundary",
     });
     const line = raw.replace(/\s+/g, " ").trim();
     if (!line || line.length > 420) return IMAGE_DENIAL_BOUNDARY_FALLBACK;

@@ -115,6 +115,8 @@ export function debateAudienceBeatForEvent(args: {
   event: DebateEventV1 | null;
   publicContent: string;
   seatCount: number;
+  /** Cap concurrent visual reactors; defaults to the legacy attentive=1 / else=2. */
+  maxReactingSeats?: number;
 }): DebateAudienceBeat | null {
   const { event } = args;
   const publicContent = args.publicContent.trim();
@@ -153,10 +155,15 @@ export function debateAudienceBeatForEvent(args: {
     event.sequence,
     seatCount,
   );
-  const seatIndices =
-    kind === "attentive"
-      ? reactingIndices.slice(0, 1)
-      : reactingIndices.slice(0, 2);
+  const defaultMaxSeats = kind === "attentive" ? 1 : 2;
+  const maxReactingSeats = Math.max(
+    1,
+    Math.min(
+      defaultMaxSeats,
+      Math.floor(args.maxReactingSeats ?? defaultMaxSeats),
+    ),
+  );
+  const seatIndices = reactingIndices.slice(0, maxReactingSeats);
   const foleyCue: DebateAudienceReactionKind | null =
     kind === "objection"
       ? "objection"

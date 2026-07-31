@@ -12874,6 +12874,7 @@
 
 .zenAtmosphereBackdrop {
   --zen-atmosphere-color-amount: 0;
+  --zen-atmosphere-bot-tint-amount: 0;
   --zen-atmosphere-grayscale-amount: calc(
     1 - var(--zen-atmosphere-color-amount, 0)
   );
@@ -12883,6 +12884,7 @@
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
+  isolation: isolate;
   background:
     radial-gradient(
       ellipse 80% 62% at 50% 30%,
@@ -13026,7 +13028,14 @@
   opacity: calc(
     var(--zen-atmosphere-opacity, 0.28) * var(--zen-atmosphere-layer-opacity, 1)
   );
-  filter: saturate(0.72) contrast(0.92) brightness(0.78)
+  /* Private (color-amount 0): muted grayscale wash. Non-private: hard full color. */
+  filter: saturate(
+      calc(
+        0.72 + 0.48 * var(--zen-atmosphere-color-amount, 0)
+      )
+    )
+    contrast(calc(0.92 + 0.1 * var(--zen-atmosphere-color-amount, 0)))
+    brightness(calc(0.78 + 0.22 * var(--zen-atmosphere-color-amount, 0)))
     grayscale(var(--zen-atmosphere-grayscale-amount));
   transform: translate3d(0, var(--zen-atmosphere-parallax-y, 0px), 0)
     scale(1.02);
@@ -13065,7 +13074,11 @@
     var(--zen-atmosphere-opacity, 0.28) *
       var(--zen-atmosphere-layer-opacity, 1) * 2.35
   );
-  filter: saturate(0.86) contrast(1.04) brightness(0.98)
+  filter: saturate(
+      calc(0.86 + 0.34 * var(--zen-atmosphere-color-amount, 0))
+    )
+    contrast(calc(1.04 + 0.04 * var(--zen-atmosphere-color-amount, 0)))
+    brightness(calc(0.98 + 0.04 * var(--zen-atmosphere-color-amount, 0)))
     grayscale(var(--zen-atmosphere-grayscale-amount));
 }
 
@@ -13148,11 +13161,43 @@
   filter: blur(28px) saturate(0.66);
 }
 
+.zenAtmosphereBackdrop[data-persona-color="true"]::before {
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.28) * 0.92 *
+      var(--zen-atmosphere-bot-tint-amount, 0)
+  );
+  background:
+    radial-gradient(
+      ellipse 92% 74% at 50% 42%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 92%, transparent) 0%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 62%, transparent) 58%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 72%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 48%, transparent)
+    );
+  mix-blend-mode: color;
+  filter: blur(24px) saturate(1.08);
+}
+
+.themeLight .zenAtmosphereBackdrop[data-persona-color="true"]::before {
+  opacity: calc(
+    var(--zen-atmosphere-opacity, 0.28) * 0.72 *
+      var(--zen-atmosphere-bot-tint-amount, 0)
+  );
+  mix-blend-mode: color;
+  filter: blur(26px) saturate(0.96);
+}
+
 .zenAtmosphereBackdrop::after {
   content: "";
   position: absolute;
   inset: 0;
   z-index: 2;
+  /* Soften the readability veil when color is active so wallpapers keep hue. */
+  opacity: calc(1 - 0.42 * var(--zen-atmosphere-color-amount, 0));
   background:
     radial-gradient(
       ellipse 72% 54% at 50% 36%,
@@ -13174,6 +13219,8 @@
       transparent 82%,
       color-mix(in srgb, var(--bg-surface) 34%, transparent) 100%
     );
+  transition: opacity var(--zen-atmosphere-color-transition-duration)
+    cubic-bezier(0.18, 0.72, 0.22, 1);
 }
 
 .themeLight .zenAtmosphereBackdrop::after {
@@ -13202,6 +13249,8 @@
 }
 
 .zenPersonaStartupAtmosphere {
+  --zen-atmosphere-color-amount: 0;
+  --zen-atmosphere-grayscale-amount: 1;
   position: fixed;
   inset: 0;
   z-index: 1;
@@ -13230,7 +13279,7 @@
       color-mix(in srgb, var(--bg-surface) 58%, transparent) 44%,
       color-mix(in srgb, var(--bg) 92%, transparent) 100%
     );
-  filter: grayscale(1) saturate(0.34) contrast(0.96);
+  filter: contrast(0.96);
   opacity: 0.94;
 }
 
@@ -13255,7 +13304,8 @@
       color-mix(in srgb, var(--fg-muted) 24%, transparent) 0%,
       transparent 68%
     );
-  filter: blur(36px);
+  filter: grayscale(var(--zen-atmosphere-grayscale-amount)) saturate(0.34)
+    blur(36px);
   opacity: 0.78;
   transform: translate3d(0, 0, 0);
   animation: zenPersonaStartupAtmosphereDrift 16s ease-in-out infinite alternate;
@@ -13279,13 +13329,13 @@
       color-mix(in srgb, var(--bot-color, var(--accent)) 38%, transparent) 72%,
       color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent) 100%
     );
-  filter: blur(44px) saturate(1.25);
-  mix-blend-mode: multiply;
+  filter: blur(44px) saturate(1.1);
+  mix-blend-mode: color;
   opacity: 0.7;
 }
 
 .themeLight .zenPersonaStartupAtmosphere::after {
-  mix-blend-mode: screen;
+  mix-blend-mode: color;
   opacity: 0.62;
 }
 
@@ -24414,9 +24464,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-backdrop-filter: blur(7px) saturate(0.98);
 }
 
+/* Zen keeps the bottom veil seated over the composer (no downward shift),
+   and darkens the plate so wallpaper/prose cannot read through the input. */
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .messagesFrame[data-chat-focus="true"]::before {
-  transform: translateY(clamp(72px, 10dvh, 128px));
+  height: clamp(168px, 24dvh, 280px);
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, #000000 42%, transparent) 28%,
+    color-mix(in srgb, #000000 78%, transparent) 54%,
+    color-mix(in srgb, #000000 92%, var(--bg-deep) 8%) 76%,
+    #000000 100%
+  );
+  backdrop-filter: blur(18px) saturate(1.02);
+  -webkit-backdrop-filter: blur(18px) saturate(1.02);
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"].themeLight
+  .messagesFrame[data-chat-focus="true"]::before {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    color-mix(in srgb, #f8fbff 58%, transparent) 24%,
+    color-mix(in srgb, #f8fbff 92%, transparent) 48%,
+    color-mix(in srgb, #f8fbff 96%, #dceaf5 4%) 72%,
+    #f8fbff 100%
+  );
+  backdrop-filter: blur(16px) saturate(0.98);
+  -webkit-backdrop-filter: blur(16px) saturate(0.98);
 }
 
 .appLayout[data-chat-sidebar-hidden="true"][data-choice-composer-hidden="true"]
@@ -25825,6 +25901,32 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
+.zenLiveBotPresencePlate[data-bot-identity-color="true"] {
+  --zen-live-bot-frame-tint-color: var(--coffee-bot-color);
+  --bot-face-frame-led-color: var(--coffee-bot-color);
+  --bot-face-frame-tint-opacity: 0.32;
+  --bot-face-frame-tint-blend-mode: color;
+  --bot-face-frame-tint-filter: drop-shadow(
+      0 0 8px color-mix(in srgb, var(--coffee-bot-color) 58%, transparent)
+    )
+    saturate(1.32) contrast(1.04);
+  --zen-live-bot-face-phosphor-ink: var(--coffee-bot-color);
+  --zen-live-bot-face-ink: var(--coffee-bot-color);
+  --zen-live-bot-glyph-ink: var(--coffee-bot-color);
+  --crt-accent-rgb: var(--bot-color-rgb, 255 255 255);
+}
+
+.zenLiveBotPresencePlate[data-bot-identity-color="true"] .botFaceFrame {
+  /* The legacy tint mask only covers the tiny light catches. Color the full
+     metal silhouette, then let the original frame raster provide luminance. */
+  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-metal-mask.png?v=1000");
+}
+
+.zenLiveBotPresencePlate[data-bot-identity-color="true"]
+  .zenLiveBotPresenceFace {
+  --bot-face-metal-light-blend-mode: luminosity;
+}
+
 .zenLiveBotPresencePlate[data-floating="true"] {
   position: fixed;
   left: var(--zen-live-bot-avatar-x, 20px);
@@ -25999,6 +26101,43 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .debateBotPresencePlate[data-debate-role="audience"] .botFaceFrameLed {
   filter: brightness(1.02);
+}
+
+.debateOptimizedBotBody .debateOptimizedBotFace,
+.debateOptimizedBotBody .debateOptimizedEmissionMask {
+  isolation: isolate;
+}
+
+.debateOptimizedBotBody .debateOptimizedBotFrame {
+  filter: none;
+}
+
+.debateOptimizedBotBody .botFaceFrameTint,
+.debateOptimizedBotBody .botFaceFrameLed,
+.debateOptimizedBotBody [data-avatar-details-emission] {
+  animation: none !important;
+}
+
+.debateOptimizedBotBody .botFaceFrameTint {
+  filter: brightness(1.01) saturate(1.03);
+}
+
+.debateOptimizedBotBody .botFaceFrameLed {
+  filter: brightness(1.02);
+}
+
+.debateOptimizedBotBody .debateOptimizedEmissionMask::before,
+.debateOptimizedBotBody .debateOptimizedEmissionMask::after,
+.debateOptimizedBotBody [data-crt-glyph-layer="true"]::before,
+.debateOptimizedBotBody [data-crt-glyph-layer="true"]::after {
+  content: none;
+  display: none;
+}
+
+.debateOptimizedBotBody [data-crt-glyph-layer="true"] {
+  filter: none;
+  text-shadow: 0 0 0.08em
+    color-mix(in srgb, var(--crt-face-edge-color) 42%, transparent);
 }
 
 :global([data-debate-stage-compact="true"])
@@ -26326,7 +26465,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-vignette-strength: 0.2;
   --crt-fresnel-strength: 0.2;
   --crt-glare-strength: 0.24;
-  --crt-accent-rgb: 255 255 255;
+  --crt-accent-rgb: var(--bot-color-rgb, 255 255 255);
   --crt-phosphor-red-rgb: 255 75 90;
   --crt-phosphor-green-rgb: 164 255 178;
   --crt-phosphor-blue-rgb: 92 215 255;
@@ -27502,9 +27641,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-frame-inset: 0;
   --bot-face-frame-opacity: 1;
   --bot-face-metal-light-blend-mode: overlay;
-  --bot-face-metal-light-filter: grayscale(1) contrast(1.26) brightness(1.08)
-    saturate(0.86);
-  --bot-face-metal-light-opacity: 0.58;
+  /* Keep metal highlights readable without bleaching bot-colored tint/LEDs. */
+  --bot-face-metal-light-filter: contrast(1.2) brightness(1.05) saturate(0.94);
+  --bot-face-metal-light-opacity: 0.48;
   --bot-face-metal-light-raster-blend-mode: normal;
   --bot-face-metal-light-raster-opacity: 1;
   --bot-face-screen-left: 16.6%;
@@ -27753,6 +27892,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-ambient-glow-opacity: 0.74;
   --bot-face-ambient-glow-blur: clamp(32px, 22%, 68px);
   --bot-face-ambient-glow-spread: clamp(24px, 16%, 48px);
+  --bot-face-metal-light-filter: grayscale(1) contrast(1.26) brightness(1.08)
+    saturate(0.86);
+  --bot-face-metal-light-opacity: 0.58;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"],
@@ -27807,6 +27949,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-ambient-glow-opacity: 0.48;
   --bot-face-ambient-glow-blur: clamp(24px, 16%, 48px);
   --bot-face-ambient-glow-spread: clamp(18px, 12%, 36px);
+}
+
+.zenLiveBotPresencePlate[data-bot-identity-color="true"][data-private-mode="true"] {
+  --zen-live-bot-face-phosphor-ink: #e8eee8;
+  --zen-live-bot-face-ink: #e8eee8;
+  --zen-live-bot-glyph-ink: #e8eee8;
+  --bot-face-frame-led-color: #e8eee8;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] {
@@ -45732,6 +45881,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
+  padding-bottom: 36px;
+  scroll-padding-bottom: 36px;
   scrollbar-width: thin;
 }
 
@@ -46406,7 +46557,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   overflow-y: auto;
   overscroll-behavior-y: contain;
   padding-right: 6px;
-  padding-bottom: 2px;
+  padding-bottom: 36px;
+  scroll-padding-bottom: 36px;
   scrollbar-width: thin;
 }
 
@@ -62898,13 +63050,138 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   max-width: 32ch;
 }
 
-.coffeeReplayOffCameraPotDock {
+.coffeeReplayPlayerSeat {
+  --coffee-bot-color: var(--accent);
   position: absolute;
   left: 50%;
-  bottom: 4%;
-  width: 1px;
-  height: 1px;
+  bottom: clamp(-54px, -4.8vh, -32px);
+  z-index: 6;
+  display: grid;
+  justify-items: center;
+  width: min(268px, calc(100% - 32px));
   pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.coffeeReplayPlayerAvatar {
+  --zen-live-bot-avatar-size: var(
+    --coffee-seat-responsive-avatar-size,
+    clamp(148px, 12.6vw, 196px)
+  );
+  --zen-live-bot-avatar-body-size: var(--zen-live-bot-avatar-size);
+  --zen-live-bot-body-x: 50%;
+  --zen-live-bot-body-y: 50%;
+  --zen-live-bot-face-x: 50%;
+  --zen-live-bot-face-y: 43.8%;
+  --zen-live-bot-face-scale: 1.68;
+  --zen-live-bot-glyph-x-anchor: 0px;
+  --zen-live-bot-glyph-y-anchor: calc(
+    var(--zen-live-bot-avatar-body-size) * 0.37
+  );
+  margin: 0;
+}
+
+.coffeeReplayPlayerSeat[data-player-thinking="true"],
+.coffeeReplayPlayerSeat[data-table-speaking="true"] {
+  filter: drop-shadow(
+    0 0 22px color-mix(in srgb, var(--accent) 24%, transparent)
+  );
+}
+
+.coffeeReplayPlayerSeat[data-player-departing="true"] {
+  pointer-events: none;
+  animation: coffeeReplayPlayerWalkAway 1180ms
+    cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes coffeeReplayPlayerWalkAway {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 72vh));
+  }
+}
+
+.coffeeReplayPlayerNameplate {
+  --coffee-player-nameplate-width: clamp(232px, 21cqw, 268px);
+  position: relative;
+  z-index: 2;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr) 36px;
+  align-items: center;
+  width: var(--coffee-player-nameplate-width);
+  height: 46px;
+  min-height: 0;
+  margin-top: clamp(-41px, -3.2cqw, -30px);
+  padding: 5px 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--accent) 44%, rgba(255, 255, 255, 0.16));
+  border-radius: 13px;
+  background: color-mix(in srgb, #060608 80%, var(--accent) 20%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.48) inset,
+    0 0 28px color-mix(in srgb, var(--accent) 28%, transparent),
+    0 14px 30px rgba(0, 0, 0, 0.48);
+  color: color-mix(in srgb, var(--accent) 82%, #ffffff 18%);
+}
+
+.coffeeReplayPlayerPot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 42px;
+}
+
+.coffeeReplayPlayerPot img {
+  display: block;
+  width: 62px;
+  max-width: none;
+  height: auto;
+  transform: translateY(-5px);
+  filter: drop-shadow(0 8px 9px rgba(0, 0, 0, 0.56))
+    drop-shadow(0 0 9px rgba(255, 255, 255, 0.1));
+  transition:
+    opacity 140ms ease,
+    transform 180ms ease;
+}
+
+.coffeeReplayPlayerPot[data-pot-away="true"] img {
+  opacity: 0;
+  transform: translateY(-9px) scale(0.9);
+}
+
+.coffeeReplayPlayerName {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.82rem;
+  font-weight: 760;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--accent) 34%, transparent);
+  white-space: nowrap;
+}
+
+.coffeeReplayPlayerGlyph {
+  grid-column: 3;
+  grid-row: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid
+    color-mix(in srgb, var(--accent) 44%, rgba(255, 255, 255, 0.18));
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.24);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 .coffeeFinishedRecapControls {
@@ -64921,7 +65198,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   box-shadow: none;
 }
 
-.coffeeSeat {
+.coffeeSeat,
+.coffeeReplayPlayerAvatar {
   --coffee-speaker-gaze-body-shift-x: 0px;
   --coffee-speaker-gaze-body-shift-y: 0px;
   --coffee-speaker-gaze-body-rotation: 0deg;
@@ -64929,23 +65207,27 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --avatar-details-offset-x: var(--coffee-speaker-gaze-face-shift-x);
 }
 
-.coffeeSeat[data-gaze-direction="left"] {
+.coffeeSeat[data-gaze-direction="left"],
+.coffeeReplayPlayerAvatar[data-gaze-direction="left"] {
   --coffee-speaker-gaze-body-shift-x: -3px;
   --coffee-speaker-gaze-body-rotation: -1.4deg;
   --coffee-speaker-gaze-face-shift-x: -2px;
 }
 
-.coffeeSeat[data-gaze-direction="right"] {
+.coffeeSeat[data-gaze-direction="right"],
+.coffeeReplayPlayerAvatar[data-gaze-direction="right"] {
   --coffee-speaker-gaze-body-shift-x: 3px;
   --coffee-speaker-gaze-body-rotation: 1.4deg;
   --coffee-speaker-gaze-face-shift-x: 2px;
 }
 
-.coffeeSeat[data-gaze-direction="center"] {
+.coffeeSeat[data-gaze-direction="center"],
+.coffeeReplayPlayerAvatar[data-gaze-direction="center"] {
   --coffee-speaker-gaze-body-shift-y: -1px;
 }
 
-.coffeeSeat .zenLiveBotPresenceBody {
+.coffeeSeat .zenLiveBotPresenceBody,
+.coffeeReplayPlayerAvatar .zenLiveBotPresenceBody {
   transform: translateX(calc(var(--zen-live-bot-body-x, 50%) - 50%))
     translateY(calc(var(--zen-live-bot-body-y, 50%) - 50%))
     translateX(var(--coffee-speaker-gaze-body-shift-x))
@@ -64955,7 +65237,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: transform 380ms cubic-bezier(0.22, 0.72, 0.24, 1);
 }
 
-.coffeeSeat .zenLiveBotPresenceFaceRig {
+.coffeeSeat .zenLiveBotPresenceFaceRig,
+.coffeeReplayPlayerAvatar .zenLiveBotPresenceFaceRig {
   transform: translate(
       calc(-50% + var(--coffee-speaker-gaze-face-shift-x)),
       -50%
@@ -64967,7 +65250,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 @media (prefers-reduced-motion: reduce) {
   .coffeeSeat .zenLiveBotPresenceBody,
-  .coffeeSeat .zenLiveBotPresenceFaceRig {
+  .coffeeReplayPlayerAvatar .zenLiveBotPresenceBody,
+  .coffeeSeat .zenLiveBotPresenceFaceRig,
+  .coffeeReplayPlayerAvatar .zenLiveBotPresenceFaceRig {
     transition: none;
   }
 }
@@ -65282,6 +65567,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: block;
   color: var(--bot-face-frame-resolved-color);
   background: var(--bot-face-frame-tint-background, currentColor);
+  mix-blend-mode: var(--bot-face-frame-tint-blend-mode, normal);
   -webkit-mask-image: var(--bot-face-frame-tint-mask);
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
@@ -65459,6 +65745,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .botFaceFrameLed {
+  --bot-face-frame-led-resolved-color: var(
+    --bot-face-frame-led-color,
+    var(
+      --zen-live-bot-frame-tint-color,
+      var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
+    )
+  );
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
   z-index: var(--bot-face-frame-led-z, 8);
@@ -65467,9 +65760,26 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   border-radius: 50%;
   clip-path: circle(50% at 50% 50%);
   pointer-events: none;
-  background: url("/bot-frame/bot-frame-led.png?v=1000") center / contain
-    no-repeat;
-  mix-blend-mode: var(--bot-face-frame-led-blend-mode, plus-lighter);
+  /* Color the LED/flask mask with the bot accent so Zen/Chat match Avatar
+     Studio and Debate, instead of leaving the white PNG un-tinted. */
+  background: var(--bot-face-frame-led-resolved-color);
+  -webkit-mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mix-blend-mode: var(--bot-face-frame-led-blend-mode, normal);
+  filter: drop-shadow(
+    0 0 5px
+      color-mix(
+        in srgb,
+        var(--bot-face-frame-led-resolved-color) 62%,
+        transparent
+      )
+  );
   opacity: var(
     --bot-face-frame-led-opacity,
     var(--coffee-seat-mood-frame-raster-opacity, 1)
@@ -65751,7 +66061,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
         var(--crt-face-edge-color, currentColor) 44%,
         transparent
       );
-  transform: none;
+  transform: translate(
+    var(--bot-face-thinking-offset-x, 0em),
+    var(--bot-face-thinking-offset-y, 0em)
+  )
+    scale(var(--bot-face-thinking-scale, 1));
 }
 
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-part],
@@ -66582,9 +66896,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .coffeeSeatPlateEmoji [data-coffee-plate-emoji-blink-glyph="true"],
 .messageMoodCoffeeFace [data-coffee-plate-emoji-blink-glyph="true"],
 .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-blink-glyph="true"] {
+  /* Blink placement is authored separately — never inherit live eye gaze. */
   --bot-face-eye-scale: var(--bot-face-blink-scale, 1);
   --bot-face-eye-offset-x: var(--bot-face-blink-offset-x, 0em);
   --bot-face-eye-offset-y: var(--bot-face-blink-offset-y, 0em);
+  --bot-face-gaze-x: 0px;
+  --bot-face-gaze-y: 0px;
+  --zen-live-bot-eye-local-x: 0;
+  --zen-live-bot-eye-local-y: 0;
+  --bot-face-mood-eye-shift-y: 0em;
   justify-self: center;
   align-self: center;
   text-align: center;
@@ -67749,23 +68069,33 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   animation: coffeeListenerWarmth 980ms ease-in-out both;
 }
 
-.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster {
+.coffeeSeat[data-coffee-authored-action-reaction] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction]
+  .coffeeReplayPlayerAvatar {
   transform-origin: 50% 68%;
 }
 
-.coffeeSeat[data-coffee-authored-action-reaction="nod"] .coffeeSeatCluster {
+.coffeeSeat[data-coffee-authored-action-reaction="nod"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="nod"]
+  .coffeeReplayPlayerAvatar {
   animation: coffeeAuthoredActionNod 860ms ease-in-out both;
 }
 
-.coffeeSeat[data-coffee-authored-action-reaction="fart"] .coffeeSeatCluster {
+.coffeeSeat[data-coffee-authored-action-reaction="fart"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="fart"]
+  .coffeeReplayPlayerAvatar {
   animation: coffeeAuthoredActionFart 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.coffeeSeat[data-coffee-authored-action-reaction="burp"] .coffeeSeatCluster {
+.coffeeSeat[data-coffee-authored-action-reaction="burp"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="burp"]
+  .coffeeReplayPlayerAvatar {
   animation: coffeeAuthoredActionBurp 760ms ease-out both;
 }
 
-.coffeeSeat[data-coffee-authored-action-reaction="cough"] .coffeeSeatCluster {
+.coffeeSeat[data-coffee-authored-action-reaction="cough"] .coffeeSeatCluster,
+.coffeeReplayPlayerSeat[data-coffee-authored-action-reaction="cough"]
+  .coffeeReplayPlayerAvatar {
   animation: coffeeAuthoredActionCough 820ms ease-in-out both;
 }
 
@@ -72293,11 +72623,40 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: rgba(255, 240, 214, 0.88);
   font: 700 0.78rem/1 system-ui;
   letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.coffeeJazzButton[data-active="true"] {
+  border-color: rgba(232, 196, 128, 0.62);
+  background: linear-gradient(
+    135deg,
+    rgba(156, 112, 58, 0.58),
+    rgba(84, 58, 32, 0.62)
+  );
+  color: rgba(255, 246, 224, 0.96);
+  box-shadow: 0 0 0 1px rgba(232, 196, 128, 0.18);
 }
 
 .coffeeJazzButton:disabled {
   cursor: not-allowed;
   opacity: 0.72;
+}
+
+.coffeeJazzControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.coffeeJazzStationField {
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.coffeeJazzStationField .coffeeSettingsSelect:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .coffeeSettingsRange {
@@ -74351,6 +74710,17 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: rgba(75, 48, 21, 0.82);
 }
 
+.themeLight.coffeeShell .coffeeJazzButton[data-active="true"] {
+  border-color: rgba(115, 77, 32, 0.42);
+  background: linear-gradient(
+    135deg,
+    rgba(214, 178, 118, 0.7),
+    rgba(241, 224, 190, 0.9)
+  );
+  color: rgba(58, 36, 14, 0.92);
+  box-shadow: 0 0 0 1px rgba(115, 77, 32, 0.12);
+}
+
 .themeLight.coffeeShell .coffeeSettingsDivider {
   background: var(--coffee-line);
 }
@@ -74375,6 +74745,20 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     ),
     color-mix(in srgb, var(--line) 72%, transparent);
   border-color: var(--coffee-line);
+}
+
+.themeLight.coffeeShell .coffeeReplayPlayerNameplate {
+  border-color: color-mix(in srgb, var(--accent) 38%, rgba(95, 70, 45, 0.2));
+  background: color-mix(in srgb, #fbfdff 78%, var(--accent) 22%);
+  color: color-mix(in srgb, var(--accent) 64%, #2b2118 36%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.72) inset,
+    0 0 24px color-mix(in srgb, var(--accent) 16%, transparent),
+    0 14px 26px rgba(61, 44, 28, 0.14);
+}
+
+.themeLight.coffeeShell .coffeeReplayPlayerGlyph {
+  background: rgba(255, 255, 255, 0.5);
 }
 
 .themeLight.coffeeShell .coffeeReplayScrubber input::-webkit-slider-thumb,
@@ -77426,4 +77810,9 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   .prismHomeOrchestration {
     backdrop-filter: none;
   }
+}
+
+.botAvatarCustomGeometry[data-thinking-geometry="true"][data-disabled="true"] {
+  opacity: 0.45;
+  pointer-events: none;
 }

@@ -75,6 +75,9 @@ function faceFromRow(row: Record<string, unknown>): BotFaceStyle {
     faceBlinkOffsetY: row.face_blink_offset_y,
     faceBlinkRotationDeg: row.face_blink_rotation_deg,
     faceThinkingFrames: row.face_thinking_frames,
+    faceThinkingScale: row.face_thinking_scale,
+    faceThinkingOffsetX: row.face_thinking_offset_x,
+    faceThinkingOffsetY: row.face_thinking_offset_y,
   });
 }
 
@@ -191,6 +194,9 @@ function parseMarketplaceBotArchive(
         faceBlinkOffsetY: bot.faceBlinkOffsetY,
         faceBlinkRotationDeg: bot.faceBlinkRotationDeg,
         faceThinkingFrames: bot.faceThinkingFrames,
+        faceThinkingScale: bot.faceThinkingScale,
+        faceThinkingOffsetX: bot.faceThinkingOffsetX,
+        faceThinkingOffsetY: bot.faceThinkingOffsetY,
       }),
       avatarDetails: parseAvatarDetails(bot.avatarDetails),
       voice: resolveBotAudioVoiceProfileV1(

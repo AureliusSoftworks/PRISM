@@ -37,6 +37,12 @@
   animation: none !important;
 }
 
+.layer[data-avatar-details-render-detail="audience"] {
+  animation: none !important;
+  filter: none;
+  mix-blend-mode: normal;
+}
+
 .speechMotion {
   transition:
     transform 70ms ease-out,

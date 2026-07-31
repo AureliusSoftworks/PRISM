@@ -169,6 +169,7 @@ import {
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
+import { useRevealSynthesizedAssetContextMenu } from "./revealSynthesizedAssetInFinder";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
 import {
@@ -204,6 +205,11 @@ import {
   signalLiveCaptionText,
   signalSilentCaptionRevealDurationMs,
 } from "./signalLiveCaptions";
+import {
+  DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
+  readSignalLiveCaptionsEnabled,
+  writeSignalLiveCaptionsEnabled,
+} from "./signalLiveCaptionsPreference";
 import {
   readSignalCameraTransitionMode,
   signalCameraTransitionsShouldAnimate,
@@ -1855,6 +1861,13 @@ export function BotcastExperience({
     );
   }, [bots, initialCastBotIds]);
   const initialHostBotId = initialCast[0] ?? "";
+  const {
+    revealSynthesizedAssetContextMenuEnabled,
+    onRevealSynthesizedAssetContextMenu,
+  } = useRevealSynthesizedAssetContextMenu({
+    request,
+    theme,
+  });
   const botsById = useMemo(
     () => new Map(eligibleBots.map((bot) => [bot.id, bot])),
     [eligibleBots],
@@ -1990,6 +2003,9 @@ export function BotcastExperience({
   const [cameraSaving, setCameraSaving] = useState(false);
   const [cameraTransitionMode, setCameraTransitionMode] =
     useState<SignalCameraTransitionMode>("animated");
+  const [liveCaptionsEnabled, setLiveCaptionsEnabled] = useState(
+    DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
+  );
   const [liveCameraPostSpeechHoldShot, setLiveCameraPostSpeechHoldShot] =
     useState<SignalDirectedCameraShot | null>(null);
   const [replayElapsedMs, setReplayElapsedMs] = useState(0);
@@ -2187,6 +2203,7 @@ export function BotcastExperience({
 
   useEffect(() => {
     setCameraTransitionMode(readSignalCameraTransitionMode(window.localStorage));
+    setLiveCaptionsEnabled(readSignalLiveCaptionsEnabled(window.localStorage));
   }, []);
 
   useEffect(() => {
@@ -8797,6 +8814,24 @@ export function BotcastExperience({
         style={atmosphereStyle}
         aria-label={`Signal studio, ${args.shot} camera`}
       >
+        <div
+          className={styles.captionControls}
+          aria-label="Signal stage captions"
+        >
+          <button
+            type="button"
+            data-signal-captions-toggle="true"
+            data-selected={liveCaptionsEnabled ? "true" : undefined}
+            aria-pressed={liveCaptionsEnabled}
+            aria-label={
+              liveCaptionsEnabled ? "Hide captions" : "Show captions"
+            }
+            title={liveCaptionsEnabled ? "Hide captions" : "Show captions"}
+            onClick={toggleLiveCaptions}
+          >
+            CC
+          </button>
+        </div>
         <div className={styles.stageScene} data-signal-stage-scene="true">
           <div className={styles.atmosphere} aria-hidden="true">
             {!stageAtmosphere.imageUrl ? (
@@ -9124,7 +9159,10 @@ export function BotcastExperience({
             </strong>
           </div>
         </div>
-        {delayedLiveCaption && delayedLiveCaptionSpeaker && args.activeMessage ? (
+        {liveCaptionsEnabled &&
+        delayedLiveCaption &&
+        delayedLiveCaptionSpeaker &&
+        args.activeMessage ? (
           <div
             className={styles.liveCaption}
             data-signal-live-caption="true"
@@ -9141,7 +9179,8 @@ export function BotcastExperience({
             </strong>
             <span>{delayedLiveCaption}</span>
           </div>
-        ) : producerGuestHostPromptMessage &&
+        ) : liveCaptionsEnabled &&
+          producerGuestHostPromptMessage &&
           producerGuestHostPromptText ? (
           <div
             className={styles.liveCaption}
@@ -11181,6 +11220,13 @@ export function BotcastExperience({
     setCameraTransitionMode(nextMode);
     writeSignalCameraTransitionMode(window.localStorage, nextMode);
   };
+  const toggleLiveCaptions = (): void => {
+    setLiveCaptionsEnabled((current) => {
+      const next = !current;
+      writeSignalLiveCaptionsEnabled(window.localStorage, next);
+      return next;
+    });
+  };
   useEffect(() => {
     if (episode?.status !== "live") {
       liveCameraShiftAloneRef.current = false;
@@ -13065,6 +13111,15 @@ export function BotcastExperience({
                                               slot,
                                               asset,
                                             )
+                                          }
+                                          onContextMenu={
+                                            revealSynthesizedAssetContextMenuEnabled
+                                              ? (event) =>
+                                                  onRevealSynthesizedAssetContextMenu(
+                                                    event,
+                                                    asset.id,
+                                                  )
+                                              : undefined
                                           }
                                           disabled={
                                             busy ||

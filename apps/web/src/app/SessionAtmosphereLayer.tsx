@@ -11,6 +11,10 @@ import {
   type SessionAtmosphereMix,
 } from "./session-atmosphere-audio";
 import type { RoomAcousticsSend } from "./roomAcoustics";
+import {
+  getPrismPresentationSuspendedSnapshot,
+  usePrismPresentationSuspended,
+} from "./prismPresentationSuspend";
 
 export interface SessionAtmosphereLayerProps {
   active: boolean;
@@ -21,6 +25,8 @@ export interface SessionAtmosphereLayerProps {
   preloadFoleyUrls?: readonly string[];
   mix?: SessionAtmosphereMix;
   backgroundTone?: SessionAtmosphereBackgroundTone;
+  /** When false, background beds stay local-only and skip the audio master. */
+  backgroundRecordable?: boolean;
   foleyRoomAcoustics?: RoomAcousticsSend;
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
@@ -50,6 +56,7 @@ export function SessionAtmosphereLayer({
   preloadFoleyUrls,
   mix,
   backgroundTone = "neutral",
+  backgroundRecordable = true,
   foleyRoomAcoustics,
   backgroundRoomAcoustics,
   allowMixBoost = false,
@@ -66,6 +73,7 @@ export function SessionAtmosphereLayer({
   coffeeCupRootRef,
   controllerHandleRef,
 }: SessionAtmosphereLayerProps): null {
+  const presentationSuspended = usePrismPresentationSuspended();
   const deferFoleyRef = useRef(deferFoley);
   const deferBotVocalizationRef = useRef(deferBotVocalization);
   const controllerRef = useRef<SessionAtmosphereController | null>(null);
@@ -96,6 +104,10 @@ export function SessionAtmosphereLayer({
   }, [mix, mixTransitionMs, volume]);
 
   useEffect(() => {
+    controllerRef.current?.setPresentationSuspended(presentationSuspended);
+  }, [presentationSuspended]);
+
+  useEffect(() => {
     if (!active) return;
     const controller = startSessionAtmosphere({
       seed: sessionKey,
@@ -104,6 +116,7 @@ export function SessionAtmosphereLayer({
       grainUrl,
       mix: mixRef.current,
       backgroundTone,
+      backgroundRecordable,
       foleyRoomAcoustics,
       backgroundRoomAcoustics,
       allowMixBoost,
@@ -118,6 +131,10 @@ export function SessionAtmosphereLayer({
         ambientBotVocalizationRef.current?.(cue) === true,
     });
     controller.preloadFoley(preloadFoleyUrls ?? []);
+    controller.setPresentationSuspended(
+      getPrismPresentationSuspendedSnapshot(),
+      0,
+    );
     controllerRef.current = controller;
     if (controllerHandleRef) controllerHandleRef.current = controller;
     const detachCupFoley = coffeeCupRootRef?.current
@@ -141,6 +158,7 @@ export function SessionAtmosphereLayer({
     ambientFoleyUrls,
     ambientBotVocalizations,
     ambientBotVocalizationProfile,
+    backgroundRecordable,
     backgroundTone,
     backgroundRoomAcoustics,
     backgroundUrl,

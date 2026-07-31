@@ -189,7 +189,7 @@ class JudgeGavelProvider extends DebateProviderStub {
         reason: "The Judge requested a direct answer.",
       });
     }
-    if (text.includes("human Judge struck the gavel")) {
+    if (text.includes("presiding authority, titled exactly")) {
       this.responsePrompt = text;
       return JSON.stringify({
         content:
@@ -2129,7 +2129,7 @@ describe("Debate engine", () => {
           .slice(-2)
           .every(
             (prompt) =>
-              prompt.includes("human Judge has just ruled") &&
+              prompt.includes("Moderator has just ruled") &&
               prompt.includes(
                 "The Judge is not bound by the advisory split.",
               ) &&
@@ -2595,6 +2595,43 @@ describe("Debate engine", () => {
     }
   });
 
+  it("gives the next advocate a saved delivery cue when the Judge gallery is rowdy", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtimeWith(new JudgeGavelProvider());
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        formality: "free_for_all",
+        playerJudgeUsesPrism: true,
+      });
+      for (const idempotencyKey of [
+        "audience-delivery:intro",
+        "audience-delivery:opening-for",
+        "audience-delivery:opening-against",
+      ]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          { expectedRevision: session.revision, idempotencyKey },
+          debateRuntime,
+        );
+      }
+      const openingFor = session.events.find(
+        (event) => event.stepKey === "opening_for" && event.kind === "speech",
+      );
+      const openingAgainst = session.events.find(
+        (event) =>
+          event.stepKey === "opening_against" && event.kind === "speech",
+      );
+      assert.ok(openingFor);
+      assert.ok(openingAgainst);
+      assert.doesNotMatch(openingFor.content, /^\*speaks loudly\*/u);
+      assert.match(openingAgainst.content, /^\*speaks loudly\*/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("saves a non-interrupting audience-order gavel at the heard floor position", async () => {
     const db = createTestDb();
     const debateRuntime = runtimeWith(new JudgeGavelProvider());
@@ -2676,7 +2713,7 @@ describe("Debate engine", () => {
         gavelReason: "audience_order",
         gavelStrikeCount: 1,
         gavelHeardCharacterCount: heardCharacterCount,
-        content: "The Judge restores order.",
+          content: "I restore order.",
       });
 
       const replay = orderDebateAudience(db, "user-1", session.id, {
@@ -2806,7 +2843,7 @@ describe("Debate engine", () => {
         speakerBotId: DEBATE_PLAYER_JUDGE_BOT_ID,
         parentEventId: opening.id,
         gavelReason: "intervention",
-        content: "The Judge calls the room to order.",
+        content: "I call the room to order.",
       });
 
       const resumed = await submitDebateJudgeGavelMessage(
@@ -3475,6 +3512,62 @@ describe("Debate engine", () => {
       );
       assert.match(provider.ballotPrompt, /"I find\.\.\." or "I think\.\.\."/u);
       assert.doesNotMatch(provider.ballotPrompt, /"Moderator finds\.\.\."/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a custom moderator title in a human Judge verdict and advocate aftermath", async () => {
+    const db = createTestDb();
+    const provider = new PersonaVoicePromptProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createJudgeDebate(db, debateRuntime, {
+        moderatorTitle: "The Court",
+      });
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "moderator-title:judge:end-early",
+      });
+      let mutation = 0;
+      while (session.status !== "waiting_for_player") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `moderator-title:judge:advance:${mutation}`,
+          },
+          debateRuntime,
+        );
+        assert.ok(mutation < 24);
+      }
+
+      session = submitDebateVerdict(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "moderator-title:judge:verdict",
+        sideId: "for",
+      });
+      assert.equal(session.events.at(-1)?.content, "The Court rules for Build Near Rail.");
+
+      await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "moderator-title:judge:aftermath",
+        },
+        debateRuntime,
+      );
+      assert.match(
+        provider.speechPrompt,
+        /frozen public title is exactly "The Court"/u,
+      );
+      assert.match(provider.speechPrompt, /The Court has just ruled/u);
+      assert.match(provider.speechPrompt, /never as "The Judge"/u);
     } finally {
       db.close();
     }

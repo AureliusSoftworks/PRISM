@@ -24,10 +24,14 @@ import {
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
   normalizeBotFaceEyeMovement,
+  botFaceEyeMovementIsActive,
   normalizeBotFaceEyeOffsetX,
   normalizeBotFaceEyeOffsetY,
   normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceMouthCharacter,
   normalizeBotFaceMouthOffsetX,
@@ -54,6 +58,7 @@ import {
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
 import { coffeeSeatMouthRotationCssDeg } from "./coffee-seat-plate.ts";
 import {
+  botFaceEyeMovementLiveIntervalMs,
   resolveBotFaceGazeFrame,
   type BotFaceAttentionState,
   type BotFaceGazeDirection,
@@ -268,6 +273,9 @@ export type CoffeeSeatPlateEmojiProps = {
   faceBlinkOffsetY?: number | null;
   faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: BotFaceThinkingFrames | string[] | null;
+  faceThinkingScale?: number | null;
+  faceThinkingOffsetX?: number | null;
+  faceThinkingOffsetY?: number | null;
   forceBlinkPhase?: CoffeeSeatBlinkPhase | null;
   /** Reports the final displayed phase so adjacent persistent ink can follow it. */
   onBlinkPhaseChange?: (phase: CoffeeSeatBlinkPhase) => void;
@@ -350,6 +358,9 @@ export function CoffeeSeatPlateEmoji({
   faceBlinkOffsetY,
   faceBlinkRotationDeg,
   faceThinkingFrames,
+  faceThinkingScale,
+  faceThinkingOffsetX,
+  faceThinkingOffsetY,
   forceBlinkPhase,
   onBlinkPhaseChange,
   className,
@@ -430,10 +441,11 @@ export function CoffeeSeatPlateEmoji({
 
   const normalizedEyeMovement =
     normalizeBotFaceEyeMovement(faceEyeMovement) ?? "still";
+  const eyeMovementActive = botFaceEyeMovementIsActive(normalizedEyeMovement);
   useEffect(() => {
     if (
-      normalizedEyeMovement !== "natural" ||
-      eyeTimelineMs !== undefined && eyeTimelineMs !== null ||
+      !eyeMovementActive ||
+      (eyeTimelineMs !== undefined && eyeTimelineMs !== null) ||
       !enabled ||
       thinkingSpinnerActive ||
       questionGlyphActive
@@ -443,13 +455,15 @@ export function CoffeeSeatPlateEmoji({
     }
     const startedAt = performance.now();
     setLiveEyeTimelineMs(0);
+    const intervalMs = botFaceEyeMovementLiveIntervalMs(normalizedEyeMovement);
     const id = window.setInterval(() => {
       setLiveEyeTimelineMs(performance.now() - startedAt);
-    }, 250);
+    }, intervalMs);
     return () => window.clearInterval(id);
   }, [
     enabled,
     eyeAttentionState,
+    eyeMovementActive,
     eyeTargetDirection,
     eyeTimelineMs,
     normalizedEyeMovement,
@@ -591,7 +605,7 @@ export function CoffeeSeatPlateEmoji({
       : liveEyeTimelineMs;
   const resolvedGaze = useMemo(
     () =>
-      normalizedEyeMovement === "natural" &&
+      eyeMovementActive &&
       enabled &&
       !thinkingSpinnerActive &&
       !questionGlyphActive
@@ -604,11 +618,13 @@ export function CoffeeSeatPlateEmoji({
                 : 0,
             state: eyeAttentionState,
             targetDirection: eyeTargetDirection,
+            movement: normalizedEyeMovement,
           })
         : { xPx: 0, yPx: 0, transitionMs: 0 },
     [
       enabled,
       eyeAttentionState,
+      eyeMovementActive,
       eyeStateStartedAtMs,
       eyeTargetDirection,
       eyeTimeline,
@@ -709,6 +725,12 @@ export function CoffeeSeatPlateEmoji({
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
       : (normalizeBotFaceMouthRotationDeg(faceMouthRotationDeg) ?? undefined);
+  const normalizedFaceThinkingScale =
+    normalizeBotFaceThinkingScale(faceThinkingScale) ?? undefined;
+  const normalizedFaceThinkingOffsetX =
+    normalizeBotFaceThinkingOffsetX(faceThinkingOffsetX) ?? undefined;
+  const normalizedFaceThinkingOffsetY =
+    normalizeBotFaceThinkingOffsetY(faceThinkingOffsetY) ?? undefined;
   const faceMouthRotationCssDeg = coffeeSeatMouthRotationCssDeg({
     authoredRotationDeg: normalizedFaceMouthRotationDeg ?? 0,
     faceRotationDeg: rotateDeg,
@@ -775,7 +797,7 @@ export function CoffeeSeatPlateEmoji({
       }
       data-coffee-plate-emoji-blink-phase={displayBlinkPhase}
       data-face-eye-movement={
-        normalizedEyeMovement === "natural" ? "natural" : undefined
+        eyeMovementActive ? normalizedEyeMovement : undefined
       }
       data-face-eye-gaze-snap={gazeSnapsOpen ? "true" : undefined}
       data-voice-preset={voicePreset}
@@ -861,6 +883,15 @@ export function CoffeeSeatPlateEmoji({
               ? undefined
               : `${faceMouthRotationCssDeg}deg`,
           ["--bot-face-mouth-spin-turn-duration" as string]: `${ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
+          ["--bot-face-thinking-scale" as string]: normalizedFaceThinkingScale,
+          ["--bot-face-thinking-offset-x" as string]:
+            normalizedFaceThinkingOffsetX === undefined
+              ? undefined
+              : `${normalizedFaceThinkingOffsetX}em`,
+          ["--bot-face-thinking-offset-y" as string]:
+            normalizedFaceThinkingOffsetY === undefined
+              ? undefined
+              : `${normalizedFaceThinkingOffsetY}em`,
           transform: `translateX(${thinkingSpinnerActive || questionGlyphActive ? "0px" : "var(--coffee-plate-emoji-flip-anchor-x, 0px)"}) translateY(var(--coffee-plate-emoji-nudge-y, 0px)) rotate(${thinkingSpinnerActive || questionGlyphActive ? 0 : rotateDeg}deg) scale(var(--coffee-seat-emotion-face-scale, 1)) scaleY(${thinkingSpinnerActive || questionGlyphActive ? 1 : "var(--coffee-plate-emoji-face-scale-y, 1)"})`,
         } as CSSProperties
       }

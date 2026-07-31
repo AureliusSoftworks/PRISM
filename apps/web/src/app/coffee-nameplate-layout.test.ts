@@ -109,13 +109,17 @@ test("long bot names truncate safely in live and review layouts", () => {
   );
 });
 
-test("review keeps the player off camera and restores bot seats", () => {
-  assert.doesNotMatch(cssSource, /\.coffeeReplayPlayer(?:Seat|Avatar|Nameplate|Glyph)/u);
-  assert.doesNotMatch(pageSource, /styles\.coffeeReplayPlayer(?:Seat|Avatar|Nameplate|Glyph)/u);
+test("review seats Default Prism for replay and restores bot seats", () => {
+  assert.match(cssSource, /\.coffeeReplayPlayerSeat\s*\{/u);
+  assert.match(cssSource, /\.coffeeReplayPlayerAvatar\s*\{/u);
+  assert.match(cssSource, /\.coffeeReplayPlayerNameplate\s*\{/u);
+  assert.match(cssSource, /\.coffeeReplayPlayerGlyph\s*\{/u);
+  assert.match(pageSource, /styles\.coffeeReplayPlayerSeat/u);
   assert.match(
     pageSource,
-    /className=\{styles\.coffeeReplayOffCameraPotDock\}/u,
+    /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayPlayerPot\}/u,
   );
+  assert.doesNotMatch(pageSource, /coffeeReplayOffCameraPotDock/u);
   assert.match(
     css,
     /\.coffeeStage\[data-phase="finished"\]\[data-replay-active="true"\] \.coffeeSeat \{[\s\S]*?animation: none;[\s\S]*?var\(--coffee-seat-offset-x\)[\s\S]*?var\(--coffee-seat-offset-y\)/,

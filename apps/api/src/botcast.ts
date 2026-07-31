@@ -777,6 +777,9 @@ export type BotcastBotProfile = {
   faceBlinkOffsetY?: number | null;
   faceBlinkRotationDeg?: number | null;
   faceThinkingFrames?: string | null;
+  faceThinkingScale?: number | null;
+  faceThinkingOffsetX?: number | null;
+  faceThinkingOffsetY?: number | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   authoredAudioVoiceProfile?: string | null;
   audioVoiceProfileOverride?: string | null;
@@ -2612,7 +2615,7 @@ function loadBotProfile(
             face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x,
             face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
             face_blink_scale, face_blink_offset_x, face_blink_offset_y,
-            face_blink_rotation_deg, face_thinking_frames, avatar_details_json, authored_audio_voice_profile,
+            face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, avatar_details_json, authored_audio_voice_profile,
             audio_voice_profile_override, online_enabled, temperature, max_tokens, top_p,
             top_k, repetition_penalty
        FROM bots WHERE id = ? AND user_id = ? AND chat_enabled = 1`,
@@ -2648,6 +2651,9 @@ function loadBotProfile(
         face_blink_offset_y: number | null;
         face_blink_rotation_deg: number | null;
         face_thinking_frames: string | null;
+        face_thinking_scale: number | null;
+        face_thinking_offset_x: number | null;
+        face_thinking_offset_y: number | null;
         avatar_details_json: string | null;
         authored_audio_voice_profile: string | null;
         audio_voice_profile_override: string | null;
@@ -2691,6 +2697,9 @@ function loadBotProfile(
     faceBlinkOffsetY: row.face_blink_offset_y,
     faceBlinkRotationDeg: row.face_blink_rotation_deg,
     faceThinkingFrames: row.face_thinking_frames,
+    faceThinkingScale: row.face_thinking_scale,
+    faceThinkingOffsetX: row.face_thinking_offset_x,
+    faceThinkingOffsetY: row.face_thinking_offset_y,
     avatarDetails: parseStoredBotAvatarDetailsV1(row.avatar_details_json),
     authoredAudioVoiceProfile: row.authored_audio_voice_profile,
     audioVoiceProfileOverride: row.audio_voice_profile_override,

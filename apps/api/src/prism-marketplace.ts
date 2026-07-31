@@ -32,6 +32,9 @@ import {
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   normalizeBotNamePronunciation,
   normalizeBotPowersV1,
   normalizeBotSelfReferral,
@@ -113,6 +116,9 @@ interface MarketplaceArchiveBot {
   faceBlinkOffsetY?: unknown;
   faceBlinkRotationDeg?: unknown;
   faceThinkingFrames?: unknown;
+  faceThinkingScale?: unknown;
+  faceThinkingOffsetX?: unknown;
+  faceThinkingOffsetY?: unknown;
   onlineEnabled?: unknown;
   flirtEnabled?: unknown;
   chatEnabled?: unknown;
@@ -429,12 +435,13 @@ function insertMarketplaceBot(args: {
          face_eye_count, face_mouth_scale, face_mouth_offset_x,
          face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
          face_blink_scale, face_blink_offset_x, face_blink_offset_y,
-         face_blink_rotation_deg, face_thinking_frames,
+         face_blink_rotation_deg, face_thinking_frames, face_thinking_scale,
+         face_thinking_offset_x, face_thinking_offset_y,
          authored_audio_voice_profile, audio_voice_profile_override,
          chat_enabled, online_enabled, flirt_enabled, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-               ?, ?, ?, ?, ?, ?, ?)`,
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       botId,
@@ -483,6 +490,9 @@ function insertMarketplaceBot(args: {
       normalizeBotFaceBlinkRotationDeg(bot.faceBlinkRotationDeg) ??
         DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
       thinkingFrames ? JSON.stringify(thinkingFrames) : null,
+      normalizeBotFaceThinkingScale(bot.faceThinkingScale),
+      normalizeBotFaceThinkingOffsetX(bot.faceThinkingOffsetX),
+      normalizeBotFaceThinkingOffsetY(bot.faceThinkingOffsetY),
       serializeBotAudioVoiceProfileV1(
         normalizeBotAudioVoiceProfileV1(bot.authoredAudioVoiceProfile),
       ),

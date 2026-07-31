@@ -1206,8 +1206,10 @@ import {
 } from "./listenerReactionVoice";
 import {
   VOICE_PLAYBACK_CHOICES,
+  PREMIUM_LOCAL_FALLBACK_NOTICE,
   conversationEnglishVoiceEngine,
   effectiveVoicePlaybackChoice,
+  premiumLocalFallbackNotice,
   voicePlaybackChoice,
   voiceModeDisplayName,
   voiceModeDrivesCanvasReveal,
@@ -1573,6 +1575,7 @@ import {
 import { appShellTopNavHeightCssValue } from "./chatHeaderLayout";
 import {
   zenReadableAnchorMessageIds,
+  zenReadableAnchorViewportY,
   zenReadableGestureShouldDisarmFollow,
   zenReadableMaxScrollTop,
   zenRestoredViewportScrollTop,
@@ -6389,14 +6392,22 @@ function deriveThemedAccentTextTone(
 function botAccentStyle(
   rawHex: string | null | undefined,
   resolvedTheme: "light" | "dark",
+  privateMode = false,
 ): React.CSSProperties | undefined {
-  const raw = rawHex?.trim();
-  if (!raw) return undefined;
-  const accent = normalizeAccentForTheme(raw, resolvedTheme);
+  const accent = displayAccentForMode(rawHex, resolvedTheme, privateMode);
+  if (!accent) return undefined;
   const ink = ensureContrast(accent, THEME_SURFACE_BG[resolvedTheme], 4.5);
+  const clean = accent.replace(/^#/, "").trim();
+  const rgbChannels =
+    clean.length === 6 && /^[0-9a-fA-F]{6}$/.test(clean)
+      ? `${parseInt(clean.slice(0, 2), 16)} ${parseInt(clean.slice(2, 4), 16)} ${parseInt(clean.slice(4, 6), 16)}`
+      : null;
   return {
     ["--bot-color" as string]: accent,
     ["--bot-ink" as string]: ink,
+    ...(rgbChannels
+      ? { ["--bot-color-rgb" as string]: rgbChannels }
+      : {}),
   } as React.CSSProperties;
 }
 
@@ -9016,8 +9027,8 @@ const CHAT_MODE_NEW_TURN_START_RATIO = 0.48;
 const CHAT_MODE_ASSISTANT_AUTOSCROLL_ACTIVATE_RATIO = 0.56;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_TARGET_RATIO = 0.52;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_ACTIVATE_RATIO = 0.52;
-const ZEN_READABLE_LATEST_ANCHOR_TARGET_RATIO = 0.64;
-const ZEN_READABLE_LATEST_ANCHOR_MIN_PX = 320;
+// Readable-follow clearance/anchor ratios live in zenReadableScroll.ts so the
+// bottom veil height and scroll math stay one shared contract.
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MAX_STEP_PX = 14;
 const CHAT_MODE_ASSISTANT_LIVE_AUTOSCROLL_MIN_STEP_PX = 0.35;
 const CHAT_MODE_USER_TURN_SMOOTH_SCROLL_MS = 520;
@@ -18471,7 +18482,8 @@ function conversationEffectiveBotId(
     return c.hubBotId ?? null;
   }
   if (c.hubRole === "hub") return c.hubBotId ?? null;
-  if (c.mode === "zen") return c.botId ?? null;
+  // Zen API rows keep bot_id null; persona ownership lives on hubBotId.
+  if (c.mode === "zen") return c.hubBotId ?? c.botId ?? null;
   if (c.mode === "chat" && c.botId) return c.botId;
   return null;
 }
@@ -29346,6 +29358,7 @@ interface ZenLiveBotMannequinProps {
   glyph: BotGlyphName;
   faceStyle: BotFaceStyle;
   faceScaleY: string | number;
+  phosphorProfile?: "white" | "bot";
   voicePreset: BotVoicePreset;
   isTalking: boolean;
   avatarSfx?: BotAvatarSfxPlayback | null;
@@ -29374,7 +29387,7 @@ interface ZenLiveBotMannequinProps {
   avatarDetails?: BotAvatarDetailsV1 | null;
   avatarDetailsColor?: string | null;
   inkOffsetY?: string;
-  detailLevel?: "full" | "reduced" | "audience";
+  detailLevel?: "full" | "reduced" | "audience" | "debate";
   eyeAttentionState?: import("./botFaceEyeMovement").BotFaceAttentionState;
   eyeTargetDirection?: import("./botFaceEyeMovement").BotFaceGazeDirection;
   eyeTimelineMs?: number | null;
@@ -29442,6 +29455,7 @@ function ZenLiveBotMannequin({
   glyph,
   faceStyle,
   faceScaleY,
+  phosphorProfile = "white",
   voicePreset,
   isTalking,
   avatarSfx = null,
@@ -29582,7 +29596,9 @@ function ZenLiveBotMannequin({
     !botFaceThinkingSpinnerDisabled(faceStyle.thinkingFrames);
   const hasAvatarDetailsVisuals = avatarDetailsHasVisuals(avatarDetails);
   const avatarDetailsDetailLevel =
-    detailLevel === "audience" ? "reduced" : detailLevel;
+    detailLevel === "audience" || detailLevel === "debate"
+      ? "audience"
+      : detailLevel;
   const avatarDetailsFaceRegistrationStyle = hasAvatarDetailsVisuals
     ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
     : null;
@@ -29593,6 +29609,154 @@ function ZenLiveBotMannequin({
       ? { ["--zen-live-bot-ink-offset-y" as string]: inkOffsetY }
       : {}),
   } as CSSProperties;
+  if (detailLevel === "audience" || detailLevel === "debate") {
+    const optimizedFaceEnabled = detailLevel === "debate" || blinkEnabled;
+    return (
+      <span
+        className={`${styles.zenLiveBotPresenceBody} ${styles.debateOptimizedBotBody}`}
+        data-zen-live-bot-body-layer="true"
+        data-render-detail={detailLevel}
+        data-avatar-details-visuals={
+          hasAvatarDetailsVisuals ? "true" : undefined
+        }
+        data-debate-optimized-avatar="true"
+        style={presenceBodyStyle}
+      >
+        {runtimeEffectsEnabled ? (
+          <audio
+            ref={avatarSfxAudioRef}
+            preload="auto"
+            data-bot-avatar-sfx-runtime="true"
+          />
+        ) : null}
+        <span
+          className={`${styles.zenLiveBotPresenceFace} ${styles.debateOptimizedBotFace}`}
+          data-zen-live-bot-body-frame="true"
+          aria-hidden="true"
+        >
+          <span
+            className={styles.zenLiveBotPresenceHitTarget}
+            data-zen-live-bot-body-hit-target="true"
+            aria-hidden="true"
+          />
+          <span className={styles.botFaceScreenFill} aria-hidden="true" />
+          <span
+            className={`${styles.botFaceFrame} ${styles.debateOptimizedBotFrame}`}
+            style={frameMetalMaterialStyle}
+            aria-hidden="true"
+          >
+            <span className={styles.botFaceFrameTint} />
+          </span>
+          <span
+            className={styles.botFaceFrameLed}
+            data-frame-material-layer="led"
+            aria-hidden="true"
+          />
+        </span>
+        <span
+          className={`${styles.zenLiveBotPresenceFaceEmissionMask} ${styles.debateOptimizedEmissionMask}`}
+          data-crt-profile="clean"
+          data-crt-phosphor="white"
+          data-talking={isTalking ? "true" : undefined}
+          data-coffee-plate-mouth-shape={
+            isTalking ? displayedMouthShape : undefined
+          }
+          aria-hidden="true"
+        >
+          {!thinkingSpinnerActive && !showQuestionMark ? (
+            <AvatarDetailsMask
+              details={avatarDetails}
+              color={avatarDetailsColor}
+              detailLevel={avatarDetailsDetailLevel}
+              faceGeometry={faceStyle}
+              blinkPhase={avatarDetailsBlinkPhase}
+              talking={inkTalking ?? isTalking}
+              speechMotionActive={false}
+              mouthAnimation={faceStyle.mouthAnimation}
+              mouthShape={displayedMouthShape}
+              depth="behind-face"
+            />
+          ) : null}
+          <span
+            className={styles.zenLiveBotPresenceFaceRig}
+            data-zen-live-bot-face-rig="true"
+            style={
+              {
+                ["--coffee-plate-emoji-face-scale-y" as string]:
+                  BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+                ["--zen-live-bot-face-layer-scale-x" as string]:
+                  showQuestionMark
+                    ? "1"
+                    : "var(--avatar-details-facing-scale-x, 1)",
+              } as CSSProperties
+            }
+          >
+            <CoffeeSeatPlateEmoji
+              enabled={optimizedFaceEnabled}
+              isTalking={isTalking}
+              mouthShape={displayedMouthShape}
+              scheduleKey={scheduleKey}
+              showThinkingSpinner={thinkingSpinnerActive}
+              showQuestionMark={showQuestionMark}
+              baseText={displayPlateFace.text}
+              rotateDeg={displayPlateFace.rotateDeg}
+              voicePreset={voicePreset}
+              blinkWhileTalking={blinkWhileTalking}
+              faceEyesFont={faceStyle.eyesFont}
+              faceEyeCharacter={faceStyle.eyeCharacter}
+              faceEyeMovement="still"
+              eyeAttentionState={eyeAttentionState}
+              eyeTargetDirection={eyeTargetDirection}
+              eyeTimelineMs={eyeTimelineMs}
+              eyeStateStartedAtMs={eyeStateStartedAtMs}
+              faceMouthFont={faceStyle.mouthFont}
+              faceMouthCharacter={faceStyle.mouthCharacter}
+              faceMouthAnimation={faceStyle.mouthAnimation}
+              faceFontWeight={faceStyle.weight}
+              faceEyeScale={faceStyle.eyeScale}
+              faceEyeOffsetX={faceStyle.eyeOffsetX}
+              faceEyeOffsetY={faceStyle.eyeOffsetY}
+              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+              faceEyeCount={faceStyle.eyeCount}
+              faceMouthScale={faceStyle.mouthScale}
+              faceMouthOffsetX={faceStyle.mouthOffsetX}
+              faceMouthOffsetY={faceStyle.mouthOffsetY}
+              faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+              faceBlinkBar={faceStyle.blinkBar}
+              faceBlinkScale={faceStyle.blinkScale}
+              faceBlinkOffsetX={faceStyle.blinkOffsetX}
+              faceBlinkOffsetY={faceStyle.blinkOffsetY}
+              faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+              faceThinkingFrames={faceStyle.thinkingFrames}
+              forceBlinkPhase={forceBlinkPhase}
+              onBlinkPhaseChange={handleAvatarDetailsBlinkPhaseChange}
+              className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
+            />
+          </span>
+          {!thinkingSpinnerActive && !showQuestionMark ? (
+            <AvatarDetailsMask
+              details={avatarDetails}
+              color={avatarDetailsColor}
+              detailLevel={avatarDetailsDetailLevel}
+              faceGeometry={faceStyle}
+              blinkPhase={avatarDetailsBlinkPhase}
+              talking={inkTalking ?? isTalking}
+              speechMotionActive={false}
+              mouthAnimation={faceStyle.mouthAnimation}
+              mouthShape={displayedMouthShape}
+              depth="above-face"
+            />
+          ) : null}
+        </span>
+        <BotGlyph
+          name={glyph}
+          size={18}
+          strokeWidth={1.95}
+          className={styles.zenLiveBotPresenceBotGlyph}
+        />
+      </span>
+    );
+  }
   return (
     <span
       className={styles.zenLiveBotPresenceBody}
@@ -29623,7 +29787,7 @@ function ZenLiveBotMannequin({
       <span
         className={styles.zenLiveBotPresenceFaceEmissionMask}
         data-crt-profile="clean"
-        data-crt-phosphor="white"
+        data-crt-phosphor={phosphorProfile}
         data-talking={isTalking ? "true" : undefined}
         data-coffee-plate-mouth-shape={
           isTalking ? displayedMouthShape : undefined
@@ -29646,14 +29810,12 @@ function ZenLiveBotMannequin({
             />
           </>
         ) : null}
-        {detailLevel !== "audience" ? (
-          <span
-            className={styles.botFaceCrtGrimeLayer}
-            data-crt-material-layer="grime"
-            style={screenMaterialStyle}
-            aria-hidden="true"
-          />
-        ) : null}
+        <span
+          className={styles.botFaceCrtGrimeLayer}
+          data-crt-material-layer="grime"
+          style={screenMaterialStyle}
+          aria-hidden="true"
+        />
         {!thinkingSpinnerActive && !showQuestionMark ? (
           <AvatarDetailsMask
             details={avatarDetails}
@@ -29777,13 +29939,11 @@ function ZenLiveBotMannequin({
             />
           </span>
         )}
-        {detailLevel !== "audience" ? (
-          <span
-            className={styles.botFaceCrtPixelGridLayer}
-            data-crt-material-layer="pixel-grid"
-            aria-hidden="true"
-          />
-        ) : null}
+        <span
+          className={styles.botFaceCrtPixelGridLayer}
+          data-crt-material-layer="pixel-grid"
+          aria-hidden="true"
+        />
         {!thinkingSpinnerActive && !showQuestionMark ? (
           <AvatarDetailsMask
             details={avatarDetails}
@@ -29799,16 +29959,12 @@ function ZenLiveBotMannequin({
           />
         ) : null}
       </span>
-      {detailLevel !== "audience" ? (
-        <span
-          className={styles.zenLiveBotPresenceScreenGlassOverlay}
-          aria-hidden="true"
-        >
-          <BotFaceScreenGlass
-            className={styles.zenLiveBotPresenceScreenGlass}
-          />
-        </span>
-      ) : null}
+      <span
+        className={styles.zenLiveBotPresenceScreenGlassOverlay}
+        aria-hidden="true"
+      >
+        <BotFaceScreenGlass className={styles.zenLiveBotPresenceScreenGlass} />
+      </span>
       <BotGlyph
         name={glyph}
         size={18}
@@ -30583,6 +30739,7 @@ function ZenLiveBotPresencePlate({
   const botAccent = botAccentStyle(
     bot?.color ?? PRISM_DEFAULT_ACCENT,
     resolvedTheme,
+    privateModeActive,
   );
   const avatarStyle = {
     ...botAccent,
@@ -30632,6 +30789,7 @@ function ZenLiveBotPresencePlate({
       data-mood={moodHint}
       data-prism-mood={zenLiveActionMoodToBotMood(moodHint)}
       data-source={actionState?.source ?? (bot ? "persona" : "prism")}
+      data-bot-identity-color={bot ? "true" : undefined}
       data-prism-persona={defaultPrismPresence ? "true" : undefined}
       data-ghostly-presence={
         bot && botPowerAvatarVisibilityModeV1(bot.powers) === "speaking_only"
@@ -30708,6 +30866,7 @@ function ZenLiveBotPresencePlate({
           glyph={liveBotGlyphName}
           faceStyle={faceStyle}
           faceScaleY={faceScaleY}
+          phosphorProfile={bot ? "bot" : "white"}
           voicePreset={voicePreset}
           isTalking={faceTalking}
           avatarSfx={botAvatarSfxForBot(bot)}
@@ -32026,6 +32185,10 @@ const DesktopMarkdownComposer = forwardRef<
   const onInputActivityRef = useRef(onInputActivity);
   const onFocusRef = useRef(onFocus);
   const writingAssistEnabledRef = useRef(writingAssistEnabled);
+  // TipTap recreates the editor when useEditor deps change by identity. Parent
+  // helpers like resolveShortcutPickToText are often inline and would remount
+  // the rich surface (and steal focus) on every draft sync — keep them in refs.
+  const resolveShortcutPickToTextRef = useRef(resolveShortcutPickToText);
   const editorRef = useRef<Editor | null>(null);
   const markdownComposerSurfaceRef = useRef<HTMLDivElement | null>(null);
   const pendingValueRef = useRef<string | null>(null);
@@ -32472,10 +32635,10 @@ const DesktopMarkdownComposer = forwardRef<
         ed,
         command,
         scope,
-        resolveShortcutPickToText?.(command) ?? undefined,
+        resolveShortcutPickToTextRef.current?.(command) ?? undefined,
       );
     },
-    [resolveShortcutPickToText],
+    [],
   );
 
   const resolveEditorComposerChipActivation = useCallback(
@@ -32506,6 +32669,9 @@ const DesktopMarkdownComposer = forwardRef<
     onInputActivityRef.current = onInputActivity;
     onFocusRef.current = onFocus;
   }, [onFocus, onInputActivity, onValueChange]);
+  useLayoutEffect(() => {
+    resolveShortcutPickToTextRef.current = resolveShortcutPickToText;
+  }, [resolveShortcutPickToText]);
 
   const commandNamesForHighlight = useMemo(
     () =>
@@ -44941,8 +45107,18 @@ function HomeContent(): React.JSX.Element {
     ) {
       throw new Error("This progressive Zen segment is silent.");
     }
-    const engine: EnglishVoiceEngine =
-      event.provider === "local" ? "builtin" : "elevenlabs";
+    const voiceSelection = voicePlaybackSelectionRef.current;
+    const engine = conversationEnglishVoiceEngine(
+      voiceSelection.englishVoiceEngine,
+      event.provider,
+    );
+    const canStreamPremium =
+      engine === "elevenlabs" &&
+      englishVoiceProfileSupportsStreaming(
+        profile,
+        settings.voiceEffectsEnabled !== false,
+        event.moodKey,
+      );
     const response = await fetch(
       new URL("/api/voices/synthesize", window.location.origin),
       {
@@ -44960,7 +45136,9 @@ function HomeContent(): React.JSX.Element {
           engine,
           explicitOnlineContext: engine === "elevenlabs",
           streamChunks: engine === "builtin",
-          includeAlignment: false,
+          // Buffered Premium needs the JSON envelope; only stream MPEG when
+          // the authored identity can play through MediaSource cleanly.
+          includeAlignment: engine === "elevenlabs" && !canStreamPremium,
           moodKey: event.moodKey,
           profile,
         }),
@@ -45232,7 +45410,12 @@ function HomeContent(): React.JSX.Element {
                     explicitOnlineContext: input.engine === "elevenlabs",
                     streamChunks:
                       requestLocalEnglishChunks && input.engine === "builtin",
-                    includeAlignment: !requestStreamingEnglishVoice,
+                    includeAlignment: !(
+                      (requestLocalEnglishChunks &&
+                        input.engine === "builtin") ||
+                      (playEnglishVoiceWhileStreaming &&
+                        input.engine === "elevenlabs")
+                    ),
                     moodKey: message.moodKey,
                     profile,
                   }),
@@ -45270,18 +45453,20 @@ function HomeContent(): React.JSX.Element {
                 );
               }
               const engineUsed = response.headers.get("x-prism-voice-engine");
-              if (engineUsed === "builtin-local-fallback") {
-                setVoicePlaybackNotice("PRISM Voice Pack used for LOCAL mode.");
+              const premiumLocalNotice = premiumLocalFallbackNotice({
+                requestedEngine: voiceSelection.englishVoiceEngine,
+                effectiveEngine: input.engine,
+                engineUsedHeader: engineUsed,
+                messageProvider: message.provider,
+              });
+              if (premiumLocalNotice) {
+                setVoicePlaybackNotice(premiumLocalNotice);
               } else if (engineUsed === "builtin-provider-fallback") {
                 setVoicePlaybackNotice(
                   "ElevenLabs was unavailable, so Prism used its local voice pack.",
                 );
-              } else if (
-                input.engine === "builtin" &&
-                voiceSelection.englishVoiceEngine === "elevenlabs" &&
-                message.provider === "local"
-              ) {
-                setVoicePlaybackNotice("PRISM Voice Pack used for LOCAL mode.");
+              } else if (engineUsed === "builtin-local-fallback") {
+                setVoicePlaybackNotice(PREMIUM_LOCAL_FALLBACK_NOTICE);
               } else {
                 setVoicePlaybackNotice(null);
               }
@@ -45475,6 +45660,11 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       await prepareEnglishVoice();
+      const voiceSelection = voicePlaybackSelectionRef.current;
+      const effectiveEnglishEngine = conversationEnglishVoiceEngine(
+        voiceSelection.englishVoiceEngine,
+        message.provider,
+      );
       const response = await fetch(
         new URL("/api/voices/synthesize", window.location.origin),
         {
@@ -45487,9 +45677,10 @@ function HomeContent(): React.JSX.Element {
           },
           body: JSON.stringify({
             messageId: message.id,
+            ...(messageBot?.id ? { speakerBotId: messageBot.id } : {}),
             mode: "english",
-            engine: settings.englishVoiceEngine,
-            explicitOnlineContext: true,
+            engine: effectiveEnglishEngine,
+            explicitOnlineContext: effectiveEnglishEngine === "elevenlabs",
             moodKey: message.moodKey,
             profile,
           }),
@@ -45498,12 +45689,19 @@ function HomeContent(): React.JSX.Element {
       if (!response.ok)
         throw new Error(`Voice playback failed (${response.status}).`);
       const engineUsed = response.headers.get("x-prism-voice-engine");
+      const premiumLocalNotice = premiumLocalFallbackNotice({
+        requestedEngine: voiceSelection.englishVoiceEngine,
+        effectiveEngine: effectiveEnglishEngine,
+        engineUsedHeader: engineUsed,
+        messageProvider: message.provider,
+      });
       setVoicePlaybackNotice(
-        engineUsed === "builtin-local-fallback"
-          ? "PRISM Voice Pack used for LOCAL mode."
-          : engineUsed === "builtin-provider-fallback"
+        premiumLocalNotice ??
+          (engineUsed === "builtin-provider-fallback"
             ? "ElevenLabs was unavailable, so Prism used its local voice pack."
-            : null,
+            : engineUsed === "builtin-local-fallback"
+              ? PREMIUM_LOCAL_FALLBACK_NOTICE
+              : null),
       );
       const clip = await readEnglishVoiceSynthesisClip(response);
       await enqueueEnglishVoice(
@@ -56150,10 +56348,10 @@ function HomeContent(): React.JSX.Element {
             (message) => message.id === latestAssistantMessageId,
           ) ?? null)
         : null;
-    if (
-      pendingReplyVisible &&
-      latestAssistant?.zenProgressive?.inProgress === true
-    ) {
+    // Progressive Zen freezes at the current beat. Call stop regardless of
+    // pendingReplyVisible — mid-speech often has progressive inProgress with
+    // the pending flag already cleared, and Shh must not no-op there.
+    if (latestAssistant?.zenProgressive?.inProgress === true) {
       stopPendingReply();
       zenInitialStarterLiveEnvelopeRef.current = null;
       clearZenInitialStarterReplyCache();
@@ -67424,18 +67622,7 @@ function HomeContent(): React.JSX.Element {
   function resolveZenReadableAnchorViewportY(
     scrollRoot: HTMLDivElement,
   ): number {
-    const composerClearancePx = Math.max(
-      132,
-      Math.min(220, scrollRoot.clientHeight * 0.2),
-    );
-    const composerSafeViewportY = scrollRoot.clientHeight - composerClearancePx;
-    return Math.min(
-      composerSafeViewportY,
-      Math.max(
-        ZEN_READABLE_LATEST_ANCHOR_MIN_PX,
-        scrollRoot.clientHeight * ZEN_READABLE_LATEST_ANCHOR_TARGET_RATIO,
-      ),
-    );
+    return zenReadableAnchorViewportY(scrollRoot.clientHeight);
   }
 
   function clearZenReadableTailSpace(scrollRoot: HTMLDivElement): void {
@@ -73506,23 +73693,24 @@ function HomeContent(): React.JSX.Element {
    * Prompt Center picks expand to their body on insert. Wildcard decks and
    * `{SLOT}` chips stay literal so the surprise resolves at Build/start/send.
    */
-  function resolveComposerPromptPickToPlainText(
-    command: CommandCenterCommand,
-  ): string | null {
-    if (
-      isComposerWildcardDeckPick(command) ||
-      isComposerTrueWildcardSlotPick(command)
-    ) {
-      return null;
-    }
-    if (!isCommandCenterPromptShortcut(command)) {
-      return null;
-    }
-    const body = command.command;
-    if (!body.trim()) return null;
-    // Keep authored trailing newlines/spaces; only add a spacer when needed.
-    return /\s$/u.test(body) ? body : `${body} `;
-  }
+  const resolveComposerPromptPickToPlainText = useCallback(
+    (command: CommandCenterCommand): string | null => {
+      if (
+        isComposerWildcardDeckPick(command) ||
+        isComposerTrueWildcardSlotPick(command)
+      ) {
+        return null;
+      }
+      if (!isCommandCenterPromptShortcut(command)) {
+        return null;
+      }
+      const body = command.command;
+      if (!body.trim()) return null;
+      // Keep authored trailing newlines/spaces; only add a spacer when needed.
+      return /\s$/u.test(body) ? body : `${body} `;
+    },
+    [],
+  );
 
   type PickAwareComposerFieldState = {
     id?: string;
@@ -75512,8 +75700,15 @@ function HomeContent(): React.JSX.Element {
               chatRequestController.signal.aborted ||
               isAbortLikeError(error)
             ) {
+              // Interrupt/Shh aborts must not clear voiceSeen — that would
+              // restart Premium/English after the player already stopped it.
               throw error;
             }
+            // Progressive synthesis failed — allow the settled-message path to
+            // retry Premium/English once the final assistant row is visible.
+            voiceSeenAssistantMessageIdsRef.current.delete(
+              event.assistantMessageId,
+            );
             startDisplay(1, null, false);
             setVoicePlaybackNotice(
               error instanceof Error
@@ -130707,11 +130902,7 @@ function HomeContent(): React.JSX.Element {
                           avatarState.thinking && !avatarState.compact
                         }
                         detailLevel={
-                          staticAudiencePortrait
-                            ? "audience"
-                            : avatarState.compact
-                              ? "reduced"
-                              : "full"
+                          staticAudiencePortrait ? "audience" : "debate"
                         }
                         eyeAttentionState={
                           avatarState.thinking
@@ -131657,7 +131848,11 @@ function HomeContent(): React.JSX.Element {
       zenPersonaBotId !== null &&
       zenRememberedWallpaperPreview?.botId === zenPersonaBotId;
     const zenFallbackWallpaperBotId =
-      zenPersonaBotId ?? detail?.lastBotId ?? detail?.botId ?? null;
+      zenPersonaBotId ??
+      (detail ? conversationEffectiveBotId(detail) : null) ??
+      detail?.lastBotId ??
+      detail?.botId ??
+      null;
     const zenFallbackWallpaperConversationId =
       detail?.id && detail.id !== "pending"
         ? detail.id
@@ -131760,19 +131955,37 @@ function HomeContent(): React.JSX.Element {
           ZEN_ATMOSPHERE_READABILITY_OVERLAY_STRENGTH,
       ),
     } as React.CSSProperties;
+    // Persona startup wash must show whenever the empty bot room has no
+    // wallpaper image. Do not gate on selectedBotGradientActive — blank /
+    // near-empty gradients still flip that flag and were hiding bot color.
     const zenPersonaFallbackAtmosphereVisible =
       chatLikeSurface &&
       zenEmptyHeroVisible &&
       Boolean(zenPersonaBot) &&
+      !appWidePrivateMode &&
       !zenRememberedWallpaperVisible &&
       !zenFallbackWallpaperVisible &&
-      !selectedBotGradientActive;
+      !zenGeneratedAtmosphereVisible;
+    const zenPersonaAtmosphereAccentStyle = zenPersonaBot
+      ? botAccentStyle(
+          zenPersonaBot.color,
+          resolvedTheme,
+          appWidePrivateMode,
+        )
+      : undefined;
     const zenPersonaFallbackAtmosphereStyle = zenPersonaBot
-      ? botAccentStyle(zenPersonaBot.color, resolvedTheme)
+      ? ({
+          ...zenPersonaAtmosphereAccentStyle,
+          "--zen-atmosphere-grayscale-amount": "1",
+          "--zen-atmosphere-color-amount": "0",
+        } as React.CSSProperties)
       : undefined;
     const zenAtmospherePrismColorActive =
       chatLikeSurface && !appWidePrivateMode && composeBotAccentId === null;
+    const zenAtmosphereBotTintActive =
+      chatLikeSurface && !appWidePrivateMode && zenPersonaBot !== null;
     const zenAtmosphereBackdropStyle = {
+      ...zenPersonaAtmosphereAccentStyle,
       "--zen-atmosphere-opacity": String(
         normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity),
       ),
@@ -131780,6 +131993,9 @@ function HomeContent(): React.JSX.Element {
         composeBotAccentId !== null,
       ),
       "--zen-atmosphere-color-amount": zenAtmospherePrismColorActive
+        ? "1"
+        : "0",
+      "--zen-atmosphere-bot-tint-amount": zenAtmosphereBotTintActive
         ? "1"
         : "0",
     } as React.CSSProperties;
@@ -132343,6 +132559,7 @@ function HomeContent(): React.JSX.Element {
               <div
                 className={styles.zenAtmosphereBackdrop}
                 style={zenAtmosphereBackdropStyle}
+                data-persona-color={zenPersonaBot ? "true" : undefined}
                 aria-hidden="true"
               >
                 {zenFallbackWallpaperVariant ? (

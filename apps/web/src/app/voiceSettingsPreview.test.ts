@@ -610,7 +610,10 @@ describe("voice settings preview", () => {
       /const response = await requestEnglishResponse\(\{[\s\S]*?messageId: message\.id,[\s\S]*?const clip = await readEnglishVoiceSynthesisClip\(response\);[\s\S]*?await enqueueEnglishVoice\([\s\S]*?message\.id,/,
     );
     assert.doesNotMatch(pageSource, /startChatSpeechRevealPhrase\(/);
-    assert.match(pageSource, /includeAlignment: !requestStreamingEnglishVoice/);
+    assert.match(
+      pageSource,
+      /includeAlignment: !\([\s\S]*?requestLocalEnglishChunks[\s\S]*?playEnglishVoiceWhileStreaming[\s\S]*?elevenlabs/,
+    );
     assert.match(pageSource, /readEnglishVoiceSynthesisClip\(response\)/);
   });
 

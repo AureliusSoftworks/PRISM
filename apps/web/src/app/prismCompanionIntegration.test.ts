@@ -198,9 +198,11 @@ test("desaturates and pauses every app shell behind the open companion", () => {
   );
   assert.match(
     page,
-    /coffeeAutoplayPausedRef\.current =\s*coffeeAutoplayPaused \|\| prismSystemPaused/u,
+    /coffeeAutoplayPausedRef\.current =\s*coffeeAutoplayPaused \|\|\s*prismSystemPaused \|\|\s*prismPresentationSuspended/u,
   );
   assert.match(page, /const prismSystemPaused = useSyncExternalStore\(/u);
+  assert.match(page, /const prismPresentationSuspended = useSyncExternalStore\(/u);
+  assert.match(page, /prismPresentationSuspendedRef\.current/u);
   assert.match(page, /<PrismVisualLifecycleBridge \/>/u);
 });
 

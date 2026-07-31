@@ -51,6 +51,9 @@ const pristine: BotCustomizerSavePristine = {
   faceBlinkOffsetY: 0,
   faceBlinkRotationDeg: 0,
   faceThinkingFrames: ["|", "/", "-", "\\"],
+  faceThinkingScale: 1,
+  faceThinkingOffsetX: 0,
+  faceThinkingOffsetY: 0,
   avatarDetails: null,
   profilePictureImageId: null,
   audioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
@@ -106,6 +109,9 @@ const currentFromPristine = (
   faceBlinkOffsetY: pristine.faceBlinkOffsetY,
   faceBlinkRotationDeg: pristine.faceBlinkRotationDeg,
   faceThinkingFrames: pristine.faceThinkingFrames,
+  faceThinkingScale: pristine.faceThinkingScale,
+  faceThinkingOffsetX: pristine.faceThinkingOffsetX,
+  faceThinkingOffsetY: pristine.faceThinkingOffsetY,
   avatarDetails: pristine.avatarDetails,
   profilePictureImageId: pristine.profilePictureImageId,
   audioVoiceProfile: pristine.audioVoiceProfile,
@@ -346,6 +352,24 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceThinkingFrames: [".", "o", "O", "o"] }
+    );
+  });
+
+  it("patches shared thinking glyph size and position", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({
+          faceThinkingScale: 1.2,
+          faceThinkingOffsetX: -0.08,
+          faceThinkingOffsetY: 0.06,
+        }),
+        pristine
+      ),
+      {
+        faceThinkingScale: 1.2,
+        faceThinkingOffsetX: -0.08,
+        faceThinkingOffsetY: 0.06,
+      }
     );
   });
 

@@ -88,6 +88,32 @@ describe("Zen scroll experience", () => {
     );
   });
 
+  it("keeps the Zen bottom chrome fade seated over the composer", () => {
+    assert.doesNotMatch(
+      cssSource,
+      /data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\]\s*\.messagesFrame\[data-chat-focus="true"\]::before\s*\{[^}]*translateY\(clamp\(72px/u,
+    );
+    assert.match(
+      cssSource,
+      /\.appLayout\[data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\]\s*\.messagesFrame\[data-chat-focus="true"\]::before\s*\{[^}]*#000000 100%/u,
+    );
+    assert.match(
+      cssSource,
+      /\.appLayout\[data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\]\s*\.messagesFrame\[data-chat-focus="true"\]::before\s*\{[^}]*backdrop-filter:\s*blur\(18px\)/u,
+    );
+  });
+
+  it("uses shared Zen readable clearance for the bottom veil", () => {
+    assert.match(
+      pageSource,
+      /zenReadableAnchorViewportY\(scrollRoot\.clientHeight\)/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /Math\.min\(220, scrollRoot\.clientHeight \* 0\.2\)/,
+    );
+  });
+
   it("windows mounted history and reserves per-character rendering for the latest rich reply", () => {
     assert.equal(
       pageSource.match(/renderedDetailMessages\.map/g)?.length,

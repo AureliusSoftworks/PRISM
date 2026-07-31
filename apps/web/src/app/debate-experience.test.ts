@@ -17,10 +17,14 @@ import {
   debateMotionRevealState,
   debatePlayerJudgePrefilledCast,
   debatePrefilledCast,
+  debateSetupScreensVisited,
   derivedDebateSetupPresetId,
+  initialDebateSetupScreensVisited,
+  isDebateRequiredSetupScreen,
   mergeDebateEvidenceSources,
   randomDebateCast,
   randomDebatePlayerJudgeCast,
+  withDebateSetupScreenVisited,
 } from "./debateExperienceState.ts";
 
 const source = readFileSync(
@@ -624,6 +628,26 @@ describe("Debate experience", () => {
     );
   });
 
+  it("requires Topic, Debaters, and Evidence to be opened before Start unlocks", () => {
+    assert.equal(
+      debateSetupScreensVisited(initialDebateSetupScreensVisited()),
+      false,
+    );
+    assert.equal(isDebateRequiredSetupScreen("archive"), false);
+    assert.equal(isDebateRequiredSetupScreen("evidence"), true);
+    const afterCast = withDebateSetupScreenVisited(
+      initialDebateSetupScreensVisited(),
+      "cast",
+    );
+    assert.equal(debateSetupScreensVisited(afterCast), false);
+    const afterEvidence = withDebateSetupScreenVisited(afterCast, "evidence");
+    assert.equal(debateSetupScreensVisited(afterEvidence), true);
+    assert.equal(
+      withDebateSetupScreenVisited(afterEvidence, "archive"),
+      afterEvidence,
+    );
+  });
+
   it("keeps one five-stop behavior contract behind Advanced formality and Basic rowdiness", () => {
     assert.match(source, /useState<DebateFormalityId>\("plainspoken"\)/u);
     assert.match(source, /DEBATE_FORMALITY_SPECTRUM/u);
@@ -755,7 +779,7 @@ describe("Debate experience", () => {
     );
   });
 
-  it("keeps setup in one non-gated studio console with a persistent launch circuit", () => {
+  it("keeps setup in one studio console with free navigation and a visit-gated Start", () => {
     assert.match(source, /type DebateView = "dashboard" \| "live"/u);
     assert.match(
       source,
@@ -780,6 +804,36 @@ describe("Debate experience", () => {
     );
     assert.match(source, /\{renderForumReadout\(\)\}/u);
     assert.match(source, /\{renderReviewStep\(\)\}/u);
+    assert.match(source, /visitedSetupScreens/u);
+    assert.match(source, /setupScreensComplete/u);
+    assert.match(
+      source,
+      /debateCanStart =[\s\S]{0,220}setupScreensComplete/u,
+    );
+    assert.match(
+      source,
+      /withDebateSetupScreenVisited\(current, studioPanel\)/u,
+    );
+    assert.match(
+      source,
+      /setVisitedSetupScreens\(initialDebateSetupScreensVisited\(\)\)/u,
+    );
+    assert.match(
+      source,
+      /Open Topic, Debaters, and Evidence before Start\./u,
+    );
+    assert.match(source, /className=\{styles\.studioNavLaunch\}/u);
+    assert.match(
+      source,
+      /studioNavLaunch[\s\S]{0,220}data-tutorial-target="debate-start"/u,
+    );
+    assert.match(source, /className=\{styles\.packetSeal\}/u);
+    assert.match(
+      source,
+      /\{debateCanStart \? \([\s\S]{0,420}\? "Start Debate"/u,
+    );
+    assert.match(source, /canStart=\{debateCanStart\}/u);
+    assert.match(source, /onStart=\{\(\) => void startDebate\(\)\}/u);
     assert.match(source, /<BotPickerGrid/u);
     assert.match(source, /activeCastSlot/u);
     assert.match(source, /assignBotToCastSlot/u);
@@ -2102,7 +2156,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /detailLevel=\{\s*staticAudiencePortrait\s*\? "audience"\s*:\s*avatarState\.compact\s*\? "reduced"\s*:\s*"full"/u,
+      /detailLevel=\{\s*staticAudiencePortrait \? "audience" : "debate"\s*\}/u,
     );
     assert.match(
       source,
@@ -2180,15 +2234,15 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.podiumGlyphPosition\[data-turn-active="true"\]\s*\{[^}]*drop-shadow\(0 0 30px currentColor\)/u,
+      /\.podiumGlyphPosition\[data-turn-active="true"\]\s*\{[^}]*drop-shadow\(\s*0 0 18px color-mix\(in srgb, currentColor 38%, transparent\)\s*\)/u,
     );
     assert.match(
       css,
-      /\.podiumGlyphPosition\[data-turn-active="true"\]\s+\.podiumGlyphScreen\s*\{[^}]*0 0 52px color-mix/u,
+      /\.podiumGlyphPosition\[data-turn-active="true"\]\s+\.podiumGlyphScreen\s*\{[^}]*radial-gradient\([\s\S]*?currentColor 58%/u,
     );
     assert.match(
       css,
-      /\.podiumGlyphPosition\[data-turn-active="true"\]\s+\.podiumGlyphMark\s*\{[^}]*drop-shadow\(0 0 16px currentColor\)/u,
+      /\.podiumGlyphPosition\[data-turn-active="true"\]\s+\.podiumGlyphMark\s*\{[^}]*filter:\s*none/u,
     );
   });
 
@@ -2294,11 +2348,24 @@ describe("Debate experience", () => {
     );
   });
 
+  it("puts readable audience pressure and the Judge gavel on the gallery pit", () => {
+    assert.match(source, /className=\{styles\.debateAudienceStatus\}/u);
+    assert.match(source, /role="meter"/u);
+    assert.match(source, /aria-label="Audience rowdiness"/u);
+    assert.match(source, /data-tutorial-target="debate-judge-gavel"/u);
+    assert.match(source, /"Settle gallery"/u);
+    assert.match(source, /audiencePressureScore=\{currentAudiencePressureScore\}/u);
+    assert.match(css, /\.debateAudienceRow::before/u);
+    assert.match(css, /\.debateAudienceRow::after/u);
+    assert.match(css, /\.debateAudienceGavelButton/u);
+    assert.match(css, /pointer-events:\s*auto/u);
+  });
+
   it("shouts bot objections while keeping the visible transcript literal", () => {
     assert.match(source, /voicePerformanceText\?: string \| null/u);
     assert.match(
       source,
-      /voicePerformanceText:\s*event\.kind === "objection"\s*\?\s*`\[shouts\] \$\{spokenText\}`\s*:\s*null/u,
+      /voicePerformanceText:\s*event\.kind === "objection"\s*\?\s*`\[shouts\] \$\{spokenText\}`\s*:\s*voicePerformanceTextFromActionCues\(spokenText\)/u,
     );
     assert.match(source, /spokenText,\s*voicePerformanceText:/u);
     assert.match(
@@ -2449,12 +2516,31 @@ describe("Debate experience", () => {
       source,
       /forumPreparingNextTurn[\s\S]{0,80}activeEvidenceItem[\s\S]{0,80}\? "wide"[\s\S]{0,80}activeGavelCue[\s\S]{0,80}debateAutoCameraView\(activeRole\)/u,
     );
+    assert.match(source, /tableEvidenceStickyId/u);
+    assert.match(source, /resolveDebateTableEvidenceStickyId\(/u);
+    assert.match(source, /debateTableEvidenceItem\(/u);
+    assert.match(
+      source,
+      /<DebateEvidencePedestal[\s\S]{0,120}key=\{activeEvidenceItem\.value\.id\}/u,
+    );
     assert.match(source, /<DebateEvidencePedestal/u);
     assert.match(source, /data-debate-evidence-document="true"/u);
     assert.match(source, /item\.kind === "source"/u);
+    assert.match(
+      source,
+      /(?:evidencePedestalSprite|evidencePedestalDocument)[\s\S]{0,280}evidencePedestalLabel/u,
+    );
     assert.match(source, /Moderator view/u);
     assert.match(source, /Wide view/u);
     assert.match(source, /data-evidence-view=\{evidenceAlignmentView\}/u);
+    assert.match(
+      source,
+      /const evidenceView = debateStageEvidenceViewForCamera\(cameraView\)/u,
+    );
+    assert.match(
+      source,
+      /<DebateEvidencePedestal[\s\S]{0,180}view=\{evidenceView\}/u,
+    );
     assert.doesNotMatch(
       source,
       /className=\{styles\.evidencePedestalTable\}/u,
@@ -2473,7 +2559,10 @@ describe("Debate experience", () => {
       source,
       /tag: `debate-exhibit-place:\$\{exhibit\.id\}:\$\{impact\.material\}`/u,
     );
-    assert.match(source, /data-impact-material=\{resolveDebateExhibitImpactMaterial\(exhibit\)\}/u);
+    assert.match(
+      source,
+      /data-impact-material=\{\s*exhibit \? resolveDebateExhibitImpactMaterial\(exhibit\) : "paper"\s*\}/u,
+    );
     assert.match(
       source,
       /const judgeGavelCameraForced = judgeGavelSmashCue !== null/u,
@@ -2911,11 +3000,35 @@ describe("Debate experience", () => {
     assert.match(css, /\.evidencePedestal\s*\{[^}]*--debate-evidence-scale/u);
     assert.match(
       css,
-      /\.forumCamera\[data-camera-view="moderator"\]\s*\.evidencePedestal\s*\{[^}]*--debate-moderator-evidence-offset-x/u,
+      /\.evidencePedestal\[data-evidence-view="moderator"\]\s*\{[^}]*--debate-moderator-evidence-offset-x/u,
     );
     assert.match(css, /\.evidencePedestalDocument\s*\{/u);
     assert.match(css, /\.evidencePedestal\s*\{[^}]*drop-shadow/u);
     assert.match(css, /\.evidenceAlignmentPreviewEmoji\s*\{/u);
+    assert.match(
+      css,
+      /\.evidenceAlignmentPreviewEmoji\s*\{[^}]*transform:\s*translateY\(8%\)/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestal\s+\.evidencePedestalSprite\s*>\s*img\s*\{[^}]*object-position:\s*center\s+42%[^}]*transform:\s*translateY\(-8%\)[^}]*filter:\s*none/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestal\s*>\s*button\s*\{[^}]*display:\s*grid[^}]*place-items:\s*center/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestalLabel\s*\{[^}]*position:\s*absolute[^}]*top:\s*calc\(100%/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.evidencePedestalLabel\s*\{[^}]*margin-bottom:\s*clamp/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.evidencePedestalLabel\s*\{[^}]*margin-top:\s*clamp/u,
+    );
     assert.doesNotMatch(css, /\.evidencePedestalTable\s*\{/u);
     assert.match(source, /aria-label="Gavel pose to align"/u);
     assert.match(source, /data-debate-gavel-pose=\{pose\}/u);

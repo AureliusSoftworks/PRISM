@@ -1172,6 +1172,9 @@ const AvatarDetailsEditorSession = forwardRef<
                 faceBlinkOffsetY={faceStyle.blinkOffsetY}
                 faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
                 faceThinkingFrames={faceStyle.thinkingFrames}
+                faceThinkingScale={faceStyle.thinkingScale}
+                faceThinkingOffsetX={faceStyle.thinkingOffsetX}
+                faceThinkingOffsetY={faceStyle.thinkingOffsetY}
                 forceBlinkPhase="open"
                 className={`${pageStyles.coffeeSeatPlateEmoji} ${pageStyles.zenLiveBotPresenceFaceGlyph} ${styles.faceGuideGlyph}`}
               />

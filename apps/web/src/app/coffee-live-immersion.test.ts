@@ -9,13 +9,17 @@ const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
 const cssSource = readFileSync(join(appDir, "page.module.css"), "utf8");
 
 describe("Coffee live immersion", () => {
-  it("omits waiter presentation and the player avatar", () => {
+  it("omits waiter presentation and keeps the live player off camera", () => {
     assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
+    assert.match(
+      pageSource,
+      /coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)[\s\S]*?className=\{styles\.coffeeReplayPlayerSeat\}/u,
+    );
+    assert.doesNotMatch(pageSource, /coffeeReplayOffCameraPotDock/u);
     assert.doesNotMatch(
       pageSource,
-      /className=\{styles\.coffeeReplayPlayerSeat\}/u,
+      /coffeeSessionPhase === "live"[\s\S]{0,180}className=\{styles\.coffeeReplayPlayerSeat\}/u,
     );
-    assert.match(pageSource, /className=\{styles\.coffeeReplayOffCameraPotDock\}/u);
   });
 
   it("holds a live departing seat through the authored walk-away animation", () => {

@@ -1398,6 +1398,10 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.contextualTextField\[data-multiline="true"\]/u);
     assert.match(
       css,
+      /\.shell\s+\.pickAwareSetupField\s*\{[\s\S]*?--fg:\s*var\(--botcast-ink\)/u,
+    );
+    assert.match(
+      css,
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.contextualDiceButton/u,
     );
   });
@@ -1918,6 +1922,10 @@ describe("Signal experience shell", () => {
       /!args\.replay[\s\S]{0,180}speechReveal\?\.phase === "playing"/u,
     );
     assert.match(source, /data-signal-live-caption="true"/u);
+    assert.match(source, /data-signal-captions-toggle="true"/u);
+    assert.match(source, /liveCaptionsEnabled &&/u);
+    assert.match(source, /toggleLiveCaptions/u);
+    assert.match(source, /writeSignalLiveCaptionsEnabled/u);
     assert.match(source, /aria-live="off"/u);
     assert.match(
       source,
@@ -1932,6 +1940,7 @@ describe("Signal experience shell", () => {
       css,
       /\.liveCaption\s*\{[^}]*bottom:\s*6\.5%;[^}]*z-index:\s*18/iu,
     );
+    assert.match(css, /\.captionControls\s*\{[^}]*top:\s*12px/iu);
   });
 
   it("keeps the latest host prompt visible while a Producer guest is answering", () => {

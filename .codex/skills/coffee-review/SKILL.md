@@ -23,7 +23,7 @@ description: Review PRISM Coffee transcripts, replay events, and faithful-replay
 
 ## Coffee Rules
 
-- Preserve 2–5 seated bots, an off-camera player carrying the pot, player-only top-offs, and no active barista, waiter, player seat, player avatar, or player mug.
+- Preserve 2–5 seated bots, a live off-camera player carrying the pot, player-only top-offs, and no active barista, waiter, or player mug. Faithful replay may seat Default Prism at the table with the pot docked to that seat.
 - Treat the faithful audio master as replay authority. Do not reconstruct missing audio, generate video, or layer procedural voices/SFX over a master.
 - Keep actions in action metadata or single-asterisk beats and spoken words as plain dialogue. A bot may not emit another speaker's label.
 - Judge detours by whether they return to the topic's pressure point; generic table-wide advice is drift even if each line is individually grammatical.

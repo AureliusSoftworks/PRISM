@@ -6240,7 +6240,7 @@ describe("processChatMessage conversational memory cues", () => {
     ]);
   });
 
-  it("starts default Prism Zen conversations without remembered wallpaper metadata", async () => {
+  it("starts default Prism Zen conversations with Atmosphere enabled and no wallpaper image yet", async () => {
     const db = createChatTestDb();
     db.prepare(
       `INSERT INTO images (
@@ -6279,7 +6279,7 @@ describe("processChatMessage conversational memory cues", () => {
     );
 
     assert.equal(result.conversation.botId, null);
-    assert.equal(result.conversation.zenWallpaper?.enabled, false);
+    assert.equal(result.conversation.zenWallpaper?.enabled, true);
     assert.equal(result.conversation.zenWallpaper?.status, "idle");
     assert.equal(result.conversation.zenWallpaper?.imageId, null);
     assert.equal(result.conversation.zenWallpaper?.promptSeed, null);
@@ -6302,7 +6302,7 @@ describe("processChatMessage conversational memory cues", () => {
         zen_wallpaper_status: string;
         zen_wallpaper_history: string;
       };
-    assert.equal(conversationRow.zen_wallpaper_enabled, 0);
+    assert.equal(conversationRow.zen_wallpaper_enabled, 1);
     assert.equal(conversationRow.zen_wallpaper_image_id, null);
     assert.equal(conversationRow.zen_wallpaper_prompt_seed, null);
     assert.equal(conversationRow.zen_wallpaper_message_count, null);

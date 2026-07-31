@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import { hexToHsl } from "@localai/shared";
 
 import {
+  BOT_CHAT_PERSONA_FILL_EMPTY_ROOM,
   BOT_CHAT_PERSONA_FILL_FULL_AT_MESSAGES,
   BOT_CHAT_PERSONA_FILL_START_WHISPER,
   botChatGradientPalette,
@@ -92,12 +93,15 @@ describe("selected bot chat gradient", () => {
     assert.equal(variables["--bot-chat-persona-fill"], "0.420");
   });
 
-  it("eases persona fill from a whisper toward full over the conversation", () => {
-    assert.equal(botChatPersonaFillProgress(0), 0);
-    assert.ok(
-      botChatPersonaFillProgress(2) >= BOT_CHAT_PERSONA_FILL_START_WHISPER,
+  it("eases persona fill from an empty-room wash toward full over the conversation", () => {
+    assert.equal(
+      botChatPersonaFillProgress(0),
+      BOT_CHAT_PERSONA_FILL_EMPTY_ROOM,
     );
-    assert.ok(botChatPersonaFillProgress(2) < 0.2);
+    assert.ok(
+      botChatPersonaFillProgress(2) >= BOT_CHAT_PERSONA_FILL_EMPTY_ROOM,
+    );
+    assert.ok(botChatPersonaFillProgress(2) < 0.55);
     assert.ok(botChatPersonaFillProgress(8) > botChatPersonaFillProgress(2));
     assert.ok(botChatPersonaFillProgress(14) > botChatPersonaFillProgress(8));
     assert.equal(
@@ -122,9 +126,16 @@ describe("selected bot chat gradient", () => {
     const empty = maxAlphaInGradient(
       buildBotChatGradient("bot:echo", "#e92ca6", "light", { fillProgress: 0 }),
     );
+    const emptyRoom = maxAlphaInGradient(
+      buildBotChatGradient("bot:echo", "#e92ca6", "light", {
+        fillProgress: botChatPersonaFillProgress(0),
+      }),
+    );
 
     assert.equal(empty, 0);
-    assert.ok(early < full * 0.35);
+    assert.ok(emptyRoom > 0);
+    assert.ok(early >= emptyRoom);
+    assert.ok(early < full);
     assert.ok(full <= 0.12);
   });
 
@@ -150,6 +161,10 @@ describe("selected bot chat gradient", () => {
     );
     assert.match(
       pageSource,
+      /Blank \(near-empty\) persona gradients still count as active/u,
+    );
+    assert.match(
+      pageSource,
       /const selectedBotGradientActive = Boolean\([\s\S]{0,160}!appWidePrivateMode/,
     );
     assert.match(
@@ -158,7 +173,17 @@ describe("selected bot chat gradient", () => {
     );
     assert.match(
       pageSource,
-      /const zenPersonaFallbackAtmosphereVisible =[\s\S]{0,260}!selectedBotGradientActive/,
+      /const zenPersonaFallbackAtmosphereVisible =[\s\S]{0,360}!zenGeneratedAtmosphereVisible/,
+    );
+    // Zen API keeps bot_id null; wallpaper eligibility must still see the
+    // hub persona so stock Prism mist presets do not cover bot rooms.
+    assert.match(
+      pageSource,
+      /const zenFallbackWallpaperBotId =[\s\S]{0,220}conversationEffectiveBotId\(detail\)/,
+    );
+    assert.match(
+      pageSource,
+      /if \(c\.mode === "zen"\) return c\.hubBotId \?\? c\.botId \?\? null;/,
     );
   });
 

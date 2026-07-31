@@ -714,6 +714,9 @@ import {
   DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
   DEFAULT_BOT_FACE_MOUTH_SCALE,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
+  DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+  DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
+  DEFAULT_BOT_FACE_THINKING_SCALE,
   DEFAULT_OPENAI_IMAGE_MODEL_ID,
   PRISM_ACTION_UNDO_RETENTION_MS,
   PRISM_ORCHESTRATION_VERSION,
@@ -748,6 +751,9 @@ import {
   normalizeBotFaceMouthOffsetY,
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
+  normalizeBotFaceThinkingOffsetX,
+  normalizeBotFaceThinkingOffsetY,
+  normalizeBotFaceThinkingScale,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotFaceThinkingFrames,
   serializeBotAvatarDetailsV1,
@@ -919,7 +925,10 @@ import {
   removeAssetCleanupTrashDirectoryForUser,
   tryUnlinkGeneratedImageFile,
   writeGeneratedImageBytes,
+  resolveAbsoluteUnderDataRoot,
 } from "./image-storage.ts";
+import { prismBranchIsDev } from "./prism-branch.ts";
+import { revealLocalFileInFolder } from "./reveal-local-file.ts";
 import {
   readOrCreateThumbBytes,
   tryGenerateThumbAfterPngWrite,
@@ -2129,6 +2138,9 @@ interface UserDbRow {
   prism_default_bot_face_blink_offset_y: number | null;
   prism_default_bot_face_blink_rotation_deg: number | null;
   prism_default_bot_face_thinking_frames: string | null;
+  prism_default_bot_face_thinking_scale: number | null;
+  prism_default_bot_face_thinking_offset_x: number | null;
+  prism_default_bot_face_thinking_offset_y: number | null;
   prism_default_bot_temperature: number | null;
   prism_default_bot_max_tokens: number | null;
   prism_default_bot_top_p: number | null;
@@ -2426,7 +2438,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -5827,6 +5839,18 @@ function readBotFaceBlinkRotationDegForStorage(value: unknown): number | null {
   return normalizeBotFaceBlinkRotationDeg(value);
 }
 
+function readBotFaceThinkingScaleForStorage(value: unknown): number | null {
+  return normalizeBotFaceThinkingScale(value);
+}
+
+function readBotFaceThinkingOffsetXForStorage(value: unknown): number | null {
+  return normalizeBotFaceThinkingOffsetX(value);
+}
+
+function readBotFaceThinkingOffsetYForStorage(value: unknown): number | null {
+  return normalizeBotFaceThinkingOffsetY(value);
+}
+
 function readBotFaceThinkingFramesForStorage(value: unknown): string | null {
   return serializeBotFaceThinkingFrames(value);
 }
@@ -5979,6 +6003,18 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
     prismDefaultBotFaceThinkingFrames: readBotFaceThinkingFramesForResponse(
       user.prism_default_bot_face_thinking_frames,
     ),
+    prismDefaultBotFaceThinkingScale:
+      normalizeBotFaceThinkingScale(
+        user.prism_default_bot_face_thinking_scale,
+      ) ?? DEFAULT_BOT_FACE_THINKING_SCALE,
+    prismDefaultBotFaceThinkingOffsetX:
+      normalizeBotFaceThinkingOffsetX(
+        user.prism_default_bot_face_thinking_offset_x,
+      ) ?? DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+    prismDefaultBotFaceThinkingOffsetY:
+      normalizeBotFaceThinkingOffsetY(
+        user.prism_default_bot_face_thinking_offset_y,
+      ) ?? DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
     prismDefaultBotAudioVoiceProfile:
       parseStoredBotAudioVoiceProfileV1(
         user.prism_default_bot_audio_voice_profile,
@@ -19256,11 +19292,11 @@ function buildRoutes(): RouteDefinition[] {
       // New per-bot selections win. Legacy account mappings remain a
       // compatibility fallback so installing the PRISM pack cannot silently
       // replace existing ElevenLabs or operating-system identities.
+      const resolvedElevenLabsVoiceId =
+        resolveElevenLabsVoiceId(requestedProfile) ?? legacyElevenLabsVoiceId;
       const profile = normalizeBotAudioVoiceProfileV1({
         ...requestedProfile,
-        elevenLabsVoiceId: resolveElevenLabsVoiceId(requestedProfile)
-          ? requestedProfile.elevenLabsVoiceId
-          : legacyElevenLabsVoiceId,
+        elevenLabsVoiceId: resolvedElevenLabsVoiceId,
         systemVoiceName:
           requestedProfile.systemVoiceName ?? user.default_system_voice_name,
       });
@@ -21962,6 +21998,52 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("cache-control", "private, max-age=3600");
       ctx.res.end(bytes);
     }),
+    route("POST", "/api/images/:id/reveal-in-finder", async (ctx) => {
+      // Dev-branch-only developer aid: never expose absolute paths to clients.
+      if (!prismBranchIsDev()) {
+        throw new HttpError(404, "Not found.");
+      }
+      const userId = requireAuth(ctx);
+      const imageId = ctx.params.id;
+      const row = db
+        .prepare(
+          "SELECT user_id, local_rel_path, provider FROM images WHERE id = ?",
+        )
+        .get(imageId) as
+        | {
+            user_id: string;
+            local_rel_path: string | null;
+            provider: string | null;
+          }
+        | undefined;
+      if (!row || row.user_id !== userId) {
+        throw new HttpError(404, "Image not found.");
+      }
+      if ((row.provider ?? "").trim().toLowerCase() === "upload") {
+        throw new HttpError(400, "Only synthesized assets can be revealed.");
+      }
+      const rel = row.local_rel_path?.trim();
+      if (!rel) {
+        throw new HttpError(404, "Image file not available.");
+      }
+      let absolutePath: string;
+      try {
+        absolutePath = resolveAbsoluteUnderDataRoot(rel);
+      } catch {
+        throw new HttpError(404, "Image file not found.");
+      }
+      const result = revealLocalFileInFolder(absolutePath);
+      if (!result.ok) {
+        if (result.reason === "missing") {
+          throw new HttpError(404, "Image file not found.");
+        }
+        throw new HttpError(
+          500,
+          "Could not open the asset in your file manager.",
+        );
+      }
+      json(ctx.res, 200, { ok: true });
+    }),
     route("DELETE", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
       const filterBotId = readOptionalString(ctx.query.get("botId"));
@@ -22104,7 +22186,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -22568,6 +22650,15 @@ function buildRoutes(): RouteDefinition[] {
           throw new Error("Invalid face thinking frames.");
         }
       }
+      const faceThinkingScale = readBotFaceThinkingScaleForStorage(
+        body.faceThinkingScale,
+      );
+      const faceThinkingOffsetX = readBotFaceThinkingOffsetXForStorage(
+        body.faceThinkingOffsetX,
+      );
+      const faceThinkingOffsetY = readBotFaceThinkingOffsetYForStorage(
+        body.faceThinkingOffsetY,
+      );
       const exportHash = resolveBotExportHashForCreate({
         incomingHash: body.exportHash,
         hasExistingHash: (hash) => {
@@ -22674,6 +22765,15 @@ function buildRoutes(): RouteDefinition[] {
         "UPDATE bots SET face_blink_rotation_deg = ? WHERE id = ? AND user_id = ?",
       ).run(faceBlinkRotationDeg, botId, userId);
       db.prepare(
+        "UPDATE bots SET face_thinking_scale = ?, face_thinking_offset_x = ?, face_thinking_offset_y = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        faceThinkingScale,
+        faceThinkingOffsetX,
+        faceThinkingOffsetY,
+        botId,
+        userId,
+      );
+      db.prepare(
         "UPDATE bots SET name_pronunciation = ? WHERE id = ? AND user_id = ?",
       ).run(namePronunciation, botId, userId);
       db.prepare(
@@ -22742,6 +22842,9 @@ function buildRoutes(): RouteDefinition[] {
           face_blink_offset_y: faceBlinkOffsetY,
           face_blink_rotation_deg: faceBlinkRotationDeg,
           face_thinking_frames: faceThinkingFrames,
+          face_thinking_scale: faceThinkingScale,
+          face_thinking_offset_x: faceThinkingOffsetX,
+          face_thinking_offset_y: faceThinkingOffsetY,
           authored_audio_voice_profile: authoredAudioVoiceProfile,
           audio_voice_profile_override: audioVoiceProfileOverride,
           profile_picture_image_id: null,
@@ -22755,7 +22858,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rows = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
         )
         .all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
@@ -22903,7 +23006,7 @@ function buildRoutes(): RouteDefinition[] {
         result.ids.length > 0
           ? (db
               .prepare(
-                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
+                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
               )
               .all(userId, ...result.ids) as Record<string, unknown>[])
           : [];
@@ -22961,7 +23064,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         const updatedBot = db
           .prepare(
-            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
           )
           .get(botId, userId) as Record<string, unknown>;
         json(ctx.res, 200, {
@@ -23328,6 +23431,51 @@ function buildRoutes(): RouteDefinition[] {
           values.push(normalizedFaceThinkingFrames);
         }
       }
+      if (body.faceThinkingScale !== undefined) {
+        if (body.faceThinkingScale === null) {
+          fields.push("face_thinking_scale = ?");
+          values.push(null);
+        } else {
+          const normalized = readBotFaceThinkingScaleForStorage(
+            body.faceThinkingScale,
+          );
+          if (normalized === null) {
+            throw new Error("Invalid face thinking scale.");
+          }
+          fields.push("face_thinking_scale = ?");
+          values.push(normalized);
+        }
+      }
+      if (body.faceThinkingOffsetX !== undefined) {
+        if (body.faceThinkingOffsetX === null) {
+          fields.push("face_thinking_offset_x = ?");
+          values.push(null);
+        } else {
+          const normalized = readBotFaceThinkingOffsetXForStorage(
+            body.faceThinkingOffsetX,
+          );
+          if (normalized === null) {
+            throw new Error("Invalid face thinking horizontal offset.");
+          }
+          fields.push("face_thinking_offset_x = ?");
+          values.push(normalized);
+        }
+      }
+      if (body.faceThinkingOffsetY !== undefined) {
+        if (body.faceThinkingOffsetY === null) {
+          fields.push("face_thinking_offset_y = ?");
+          values.push(null);
+        } else {
+          const normalized = readBotFaceThinkingOffsetYForStorage(
+            body.faceThinkingOffsetY,
+          );
+          if (normalized === null) {
+            throw new Error("Invalid face thinking vertical offset.");
+          }
+          fields.push("face_thinking_offset_y = ?");
+          values.push(normalized);
+        }
+      }
       if (body.avatarDetails !== undefined) {
         fields.push("avatar_details_json = ?");
         values.push(
@@ -23457,7 +23605,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });

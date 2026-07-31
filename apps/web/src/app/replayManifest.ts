@@ -335,14 +335,13 @@ export function buildCoffeeReplayManifestV1(args: {
     {
       id: "coffee-player",
       name: args.playerName,
-      kind: "player",
+      kind: "prism",
       role: "player",
-      color: null,
-      glyph: null,
-      seatIndex: null,
-      visible: false,
+      color: args.prismColor,
+      glyph: args.prismGlyph ?? "prism",
+      seatIndex: seatBotIds.length,
+      visible: true,
       metadata: {
-        offCamera: true,
         carriesCoffeePot: true,
       },
     },
@@ -489,7 +488,7 @@ export function buildCoffeeReplayManifestV1(args: {
       accentColor: args.prismColor,
       atmosphereImageUrl: null,
       metadata: {
-        playerPerspective: "off-camera-pot",
+        playerPerspective: "third-person-prism",
         renderContract: COFFEE_REPLAY_RENDER_CONTRACT,
       },
     },

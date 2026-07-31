@@ -50,14 +50,25 @@ export function useDebateDomPerformance(options: {
   const ceiling = prismSceneQualityCeilingForGraphicsQuality(
     options.graphicsQuality,
   );
-  const controller = useMemo(
-    () => new PrismAdaptiveQualityController(0, ceiling),
-    [ceiling],
-  );
+  const controller = useMemo(() => {
+    const retina =
+      typeof window !== "undefined" && window.devicePixelRatio >= 2;
+    return new PrismAdaptiveQualityController(0, ceiling, {
+      // Retina Debate starts one tier softer so dual light masks drop sooner.
+      initialQuality:
+        retina && ceiling === "full"
+          ? "balanced"
+          : retina && ceiling === "balanced"
+            ? "minimal"
+            : ceiling,
+      badWindowsBeforeDrop: 1,
+      tierCooldownMs: 6_000,
+    });
+  }, [ceiling]);
   const [qualityState, setQualityState] = useState<{
     ceiling: PrismSceneQuality;
     quality: PrismSceneQuality;
-  }>(() => ({ ceiling, quality: ceiling }));
+  }>(() => ({ ceiling, quality: controller.quality }));
   const quality =
     qualityState.ceiling === ceiling ? qualityState.quality : ceiling;
 

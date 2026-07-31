@@ -44,6 +44,11 @@ export const DEBATE_STAGE_LIGHT_BLEND_MODES = [
 export type DebateStageAlignmentRole = "for" | "moderator" | "against";
 export type DebateStageAlignmentItem = "bot" | "nameplate" | "glyph";
 export type DebateStageAlignmentView = "wide" | "moderator";
+export type DebateStageCameraView =
+  | DebateStageAlignmentView
+  | "left"
+  | "right"
+  | "jury";
 export type DebateStageLightBlendMode =
   (typeof DEBATE_STAGE_LIGHT_BLEND_MODES)[number];
 export type DebateStageAlignmentTarget =
@@ -53,6 +58,13 @@ export type DebateStageAlignmentTarget =
 export interface DebateStageOffsetV1 {
   x: number;
   y: number;
+}
+
+/** Evidence has a dedicated close-up composition only in Moderator camera. */
+export function debateStageEvidenceViewForCamera(
+  cameraView: DebateStageCameraView,
+): DebateStageAlignmentView {
+  return cameraView === "moderator" ? "moderator" : "wide";
 }
 
 export interface DebateStageRolePlacementV4 {
@@ -147,8 +159,8 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV8 = {
     raised: { x: -130.5, y: -4.5, rotation: -77, size: 90 },
   },
   evidenceTable: {
-    wide: { x: 0, y: 106, size: 100 },
-    moderator: { x: 0, y: 106, size: 100 },
+    wide: { x: 0, y: 111.5, size: 100 },
+    moderator: { x: 0, y: 174, size: 220 },
   },
   lightBlendModes: {
     dark: "hard-light",

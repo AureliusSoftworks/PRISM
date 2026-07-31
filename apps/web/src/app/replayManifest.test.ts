@@ -17,7 +17,7 @@ import {
 } from "./replayManifest.ts";
 
 describe("replay manifests", () => {
-  it("keeps the Coffee player off camera with the pot", () => {
+  it("seats the Coffee player as Default Prism with the pot", () => {
     const manifest = buildCoffeeReplayManifestV1({
       conversation: {
         id: "coffee-1",
@@ -86,7 +86,7 @@ describe("replay manifests", () => {
       ],
     });
     assert.equal(manifest.surface, "coffee");
-    assert.equal(manifest.visual.metadata?.playerPerspective, "off-camera-pot");
+    assert.equal(manifest.visual.metadata?.playerPerspective, "third-person-prism");
     assert.equal(
       manifest.visual.metadata?.renderContract,
       COFFEE_REPLAY_RENDER_CONTRACT,
@@ -100,14 +100,17 @@ describe("replay manifests", () => {
     );
     assert.equal(
       manifest.participants.find((participant) => participant.id === "coffee-player")?.kind,
-      "player",
+      "prism",
     );
     const player = manifest.participants.find(
       (participant) => participant.id === "coffee-player",
     );
-    assert.equal(player?.visible, false);
-    assert.equal(player?.seatIndex, null);
+    assert.equal(player?.visible, true);
+    assert.equal(player?.seatIndex, 1);
+    assert.equal(player?.color, "#55ddff");
+    assert.equal(player?.glyph, "△");
     assert.equal(player?.metadata?.carriesCoffeePot, true);
+    assert.equal(player?.metadata?.offCamera, undefined);
     assert.equal(manifest.utterances[0]?.speakerId, "coffee-player");
     assert.equal(manifest.utterances.length, 2);
     assert.equal(

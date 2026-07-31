@@ -28,9 +28,22 @@ export const BOT_FACE_GLYPH_ANIMATIONS = [
 ] as const;
 export type BotFaceGlyphAnimation = (typeof BOT_FACE_GLYPH_ANIMATIONS)[number];
 export const DEFAULT_BOT_FACE_GLYPH_ANIMATION: BotFaceGlyphAnimation = "none";
-export const BOT_FACE_EYE_MOVEMENTS = ["still", "natural"] as const;
+export const BOT_FACE_EYE_MOVEMENTS = [
+  "still",
+  "natural",
+  "nervous",
+  "frantic",
+  "paranoid",
+] as const;
 export type BotFaceEyeMovement = (typeof BOT_FACE_EYE_MOVEMENTS)[number];
 export const DEFAULT_BOT_FACE_EYE_MOVEMENT: BotFaceEyeMovement = "natural";
+
+/** True when authored eye attention should animate (anything but Still). */
+export function botFaceEyeMovementIsActive(
+  value: BotFaceEyeMovement | null | undefined,
+): value is Exclude<BotFaceEyeMovement, "still"> {
+  return value != null && value !== "still";
+}
 export const DEFAULT_BOT_FACE_EYE_CHARACTER: string | null = null;
 export const BOT_FACE_EYE_COUNTS = [1, 2] as const;
 export type BotFaceEyeCount = (typeof BOT_FACE_EYE_COUNTS)[number];
@@ -70,7 +83,7 @@ export const DEFAULT_BOT_FACE_MOUTH_OFFSET_X = 0;
 export const BOT_FACE_MOUTH_OFFSET_X_MIN = -0.18;
 export const BOT_FACE_MOUTH_OFFSET_X_MAX = 0.18;
 export const BOT_FACE_MOUTH_OFFSET_X_STEP = 0.02;
-export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0;
+export const DEFAULT_BOT_FACE_MOUTH_OFFSET_Y = 0.18;
 export const BOT_FACE_MOUTH_OFFSET_Y_MIN = -0.18;
 export const BOT_FACE_MOUTH_OFFSET_Y_MAX = 0.18;
 export const BOT_FACE_MOUTH_OFFSET_Y_STEP = 0.02;
@@ -111,6 +124,19 @@ export const DISABLED_BOT_FACE_THINKING_FRAMES: BotFaceThinkingFrames = [
   "",
   "",
 ];
+/** Shared size for every thinking/loading glyph recipe (including Custom). */
+export const DEFAULT_BOT_FACE_THINKING_SCALE = 1;
+export const BOT_FACE_THINKING_SCALE_MIN = 0.7;
+export const BOT_FACE_THINKING_SCALE_MAX = 1.3;
+export const BOT_FACE_THINKING_SCALE_STEP = 0.05;
+export const DEFAULT_BOT_FACE_THINKING_OFFSET_X = 0;
+export const BOT_FACE_THINKING_OFFSET_X_MIN = -0.18;
+export const BOT_FACE_THINKING_OFFSET_X_MAX = 0.18;
+export const BOT_FACE_THINKING_OFFSET_X_STEP = 0.02;
+export const DEFAULT_BOT_FACE_THINKING_OFFSET_Y = 0;
+export const BOT_FACE_THINKING_OFFSET_Y_MIN = -0.18;
+export const BOT_FACE_THINKING_OFFSET_Y_MAX = 0.18;
+export const BOT_FACE_THINKING_OFFSET_Y_STEP = 0.02;
 
 export interface BotFaceStyle {
   eyesFont: BotFaceFontId;
@@ -137,6 +163,9 @@ export interface BotFaceStyle {
   blinkOffsetY: number;
   blinkRotationDeg: number;
   thinkingFrames: BotFaceThinkingFrames;
+  thinkingScale: number;
+  thinkingOffsetX: number;
+  thinkingOffsetY: number;
 }
 
 export interface BotFaceStyleInput {
@@ -163,6 +192,9 @@ export interface BotFaceStyleInput {
   faceBlinkOffsetY?: unknown;
   faceBlinkRotationDeg?: unknown;
   faceThinkingFrames?: unknown;
+  faceThinkingScale?: unknown;
+  faceThinkingOffsetX?: unknown;
+  faceThinkingOffsetY?: unknown;
 }
 
 export function isBotFaceFontId(value: unknown): value is BotFaceFontId {
@@ -381,6 +413,33 @@ export function normalizeBotFaceBlinkRotationDeg(value: unknown): number | null 
   );
 }
 
+export function normalizeBotFaceThinkingScale(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_THINKING_SCALE_MIN,
+    BOT_FACE_THINKING_SCALE_MAX,
+    BOT_FACE_THINKING_SCALE_STEP
+  );
+}
+
+export function normalizeBotFaceThinkingOffsetX(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_THINKING_OFFSET_X_MIN,
+    BOT_FACE_THINKING_OFFSET_X_MAX,
+    BOT_FACE_THINKING_OFFSET_X_STEP
+  );
+}
+
+export function normalizeBotFaceThinkingOffsetY(value: unknown): number | null {
+  return normalizeSteppedBotFaceFloat(
+    value,
+    BOT_FACE_THINKING_OFFSET_Y_MIN,
+    BOT_FACE_THINKING_OFFSET_Y_MAX,
+    BOT_FACE_THINKING_OFFSET_Y_STEP
+  );
+}
+
 type BotFaceGraphemeSegment = {
   segment: string;
 };
@@ -555,6 +614,15 @@ export function resolveBotFaceStyle(
     thinkingFrames:
       normalizeBotFaceThinkingFrames(input.faceThinkingFrames) ??
       DEFAULT_BOT_FACE_THINKING_FRAMES,
+    thinkingScale:
+      normalizeBotFaceThinkingScale(input.faceThinkingScale) ??
+      DEFAULT_BOT_FACE_THINKING_SCALE,
+    thinkingOffsetX:
+      normalizeBotFaceThinkingOffsetX(input.faceThinkingOffsetX) ??
+      DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+    thinkingOffsetY:
+      normalizeBotFaceThinkingOffsetY(input.faceThinkingOffsetY) ??
+      DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
   };
 }
 
@@ -614,5 +682,8 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
     blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
     thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
+    thinkingScale: DEFAULT_BOT_FACE_THINKING_SCALE,
+    thinkingOffsetX: DEFAULT_BOT_FACE_THINKING_OFFSET_X,
+    thinkingOffsetY: DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
   };
 }

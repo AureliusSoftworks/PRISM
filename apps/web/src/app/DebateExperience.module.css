@@ -1769,11 +1769,12 @@
   z-index: 1;
   display: block;
   width: 100%;
-  height: clamp(138px, 11.8vw, 184px);
+  height: clamp(112px, 9.4vw, 150px);
   box-sizing: border-box;
   flex: 0 0 auto;
   overflow: hidden;
-  border-bottom: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+  border-top: 1px solid color-mix(in srgb, currentColor 9%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, currentColor 14%, transparent);
   background: linear-gradient(
     0deg,
     rgba(2, 2, 4, 0.98) 0%,
@@ -1789,6 +1790,190 @@
   transition:
     background 900ms ease,
     box-shadow 900ms ease;
+}
+
+.debateAudienceRow::before {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 8px;
+  border-radius: 0 0 50% 50%;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.08),
+    rgba(13, 11, 16, 0.94) 42%,
+    rgba(3, 3, 5, 0.8)
+  );
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.45);
+  content: "";
+}
+
+.debateAudienceRow::after {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 17%;
+  background: linear-gradient(
+    180deg,
+    rgba(8, 7, 10, 0.08),
+    rgba(3, 3, 5, 0.86) 60%,
+    rgba(1, 1, 2, 0.98)
+  );
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+  content: "";
+}
+
+.debateAudienceStatus {
+  position: absolute;
+  z-index: 6;
+  top: 12px;
+  right: clamp(10px, 1.2vw, 20px);
+  left: clamp(10px, 1.2vw, 20px);
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.debateAudienceIdentity {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 999px;
+  color: rgba(238, 234, 242, 0.68);
+  background: rgba(8, 7, 11, 0.68);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.62rem;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.debateAudienceIdentity strong {
+  color: rgba(255, 253, 255, 0.92);
+  font-size: 0.66rem;
+  font-weight: 760;
+}
+
+.debateAudienceMeter {
+  display: flex;
+  width: 48px;
+  height: 14px;
+  align-items: flex-end;
+  gap: 3px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 999px;
+  background: rgba(8, 7, 11, 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.debateAudienceMeter i {
+  display: block;
+  width: 7px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  transition:
+    height 320ms ease,
+    background 320ms ease,
+    box-shadow 320ms ease;
+}
+
+.debateAudienceMeter i:nth-child(2) {
+  height: 6px;
+}
+
+.debateAudienceMeter i:nth-child(3) {
+  height: 8px;
+}
+
+.debateAudienceMeter i:nth-child(4) {
+  height: 10px;
+}
+
+.debateAudienceMeter i[data-active="true"] {
+  background: color-mix(in srgb, var(--debate-active-color) 62%, #f5ebff);
+  box-shadow: 0 0 7px
+    color-mix(in srgb, var(--debate-active-color) 42%, transparent);
+}
+
+.debateAudienceGavelButton {
+  display: inline-flex;
+  min-height: 30px;
+  margin-left: auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px 5px 11px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+  color: rgba(255, 253, 255, 0.9);
+  background: rgba(12, 10, 15, 0.82);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(9px);
+  cursor: pointer;
+  pointer-events: auto;
+  font: 720 0.68rem/1 ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.025em;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    transform 140ms ease;
+}
+
+.debateAudienceGavelButton kbd {
+  padding: 3px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.06);
+  font: 650 0.56rem/1 ui-sans-serif, system-ui, sans-serif;
+}
+
+.debateAudienceGavelButton:hover:not(:disabled),
+.debateAudienceGavelButton:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 58%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 16%,
+    rgba(12, 10, 15, 0.92)
+  );
+}
+
+.debateAudienceGavelButton:active:not(:disabled) {
+  transform: translateY(1px) scale(0.98);
+}
+
+.debateAudienceGavelButton[data-energized="true"],
+.debateAudienceGavelButton[data-cue="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 58%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 18%,
+    rgba(12, 10, 15, 0.9)
+  );
+}
+
+.debateAudienceGavelButton:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .debateAudienceRow[data-audience-pressure="restless"] {
@@ -1822,7 +2007,7 @@
   left: 0;
   z-index: 2;
   display: flex;
-  height: 100%;
+  height: calc(100% - 8px);
   box-sizing: border-box;
   align-items: flex-end;
   justify-content: space-between;
@@ -1834,7 +2019,7 @@
 }
 
 .debateAudienceLayer[data-depth-row="rear"] {
-  bottom: 21%;
+  bottom: 16%;
   z-index: 1;
   padding-inline: clamp(34px, 6vw, 126px);
   opacity: 0.5;
@@ -1850,12 +2035,49 @@
   );
 }
 
+.live[data-theme="light"] .debateAudienceIdentity,
+.live[data-theme="light"] .debateAudienceMeter,
+.live[data-theme="light"] .debateAudienceGavelButton {
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.82);
+  background: rgba(43, 38, 47, 0.72);
+}
+
+.live[data-theme="light"] .debateAudienceIdentity {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.live[data-theme="light"] .debateAudienceIdentity strong {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+@media (max-width: 700px) {
+  .debateAudienceRow {
+    height: 108px;
+  }
+
+  .debateAudienceStatus {
+    top: 10px;
+    gap: 6px;
+  }
+
+  .debateAudienceIdentity > span,
+  .debateAudienceGavelButton kbd {
+    display: none;
+  }
+
+  .debateAudienceMeter {
+    width: 42px;
+    padding-inline: 5px;
+  }
+}
+
 .debateAudienceBotPortrait {
   --debate-audience-depth: 1;
   --debate-audience-facing-scale: 1;
   --debate-audience-shade-opacity: 0.3;
   position: relative;
-  width: clamp(58px, 7.4vw, 112px);
+  width: clamp(50px, 6.2vw, 92px);
   min-width: 0;
   aspect-ratio: 0.9;
   overflow: hidden;
@@ -1872,7 +2094,7 @@
 .debateAudienceLayer[data-depth-row="rear"] .debateAudienceBotPortrait {
   --debate-audience-depth: 0.9;
   --debate-audience-shade-opacity: 0.38;
-  width: clamp(50px, 6.25vw, 94px);
+  width: clamp(43px, 5.25vw, 78px);
   opacity: 0.64;
 }
 
@@ -2817,7 +3039,7 @@
   filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.48));
 }
 
-.forumCamera[data-camera-view="moderator"] .evidencePedestal {
+.evidencePedestal[data-evidence-view="moderator"] {
   transform: translate(
       calc(-50% + var(--debate-moderator-evidence-offset-x, 0%)),
       calc(-50% + var(--debate-moderator-evidence-offset-y, 0%))
@@ -2844,20 +3066,23 @@
   height: clamp(76px, 7.5vw, 122px);
   font-size: clamp(42px, 4.2vw, 70px);
   line-height: 1;
+  /* Match live .evidencePedestalSprite table registration. */
+  transform: translateY(8%);
   filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.5));
   user-select: none;
 }
 
 .evidencePedestal > button {
+  /* Center on the visual only so title copy cannot nudge table registration. */
   position: relative;
   display: grid;
+  place-items: center;
   width: 100%;
   border: 0;
-  padding: 0 0 12px;
+  padding: 0;
   color: #f5f0ff;
   background: transparent;
   cursor: pointer;
-  place-items: center;
 }
 
 .evidencePedestal > button:focus-visible {
@@ -2978,19 +3203,31 @@
 }
 
 .evidencePedestal .evidencePedestalSprite > img {
+  /* Expand past the emoji box so cutouts read at emoji scale, then lift a
+     touch so transparent framing + the base img drop-shadow do not park the
+     subject lower on the table than font emoji. */
   inset: -8%;
   width: 116%;
   height: 116%;
+  object-position: center 42%;
+  transform: translateY(-8%);
+  /* Parent .evidencePedestalSprite already casts the table contact shadow. */
+  filter: none;
 }
 
 .evidencePedestalLabel {
+  /* Sit under the visual without changing its alignment-matched center. */
+  position: absolute;
+  top: calc(100% + clamp(2px, 0.35vw, 6px));
+  left: 50%;
   z-index: 3;
   display: grid;
-  max-width: 112%;
+  max-width: 140%;
   gap: 1px;
-  margin-top: clamp(4px, 0.6vw, 10px);
   text-align: center;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .evidencePedestalLabel small {
@@ -3381,24 +3618,34 @@
 
 .podiumGlyphPosition[data-turn-active="true"] {
   opacity: 1;
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
-    drop-shadow(0 0 12px currentColor) drop-shadow(0 0 30px currentColor);
+  /* Soft plate aura only — do not outline the glyph mark itself. */
+  filter: drop-shadow(
+    0 0 18px color-mix(in srgb, currentColor 38%, transparent)
+  );
 }
 
 .podiumGlyphPosition[data-turn-active="true"] .podiumGlyphScreen {
   border-color: color-mix(in srgb, currentColor 88%, white 12%);
+  background:
+    radial-gradient(
+      circle at 50% 46%,
+      color-mix(in srgb, currentColor 58%, white 18%),
+      color-mix(in srgb, currentColor 28%, transparent) 42%,
+      transparent 72%
+    ),
+    linear-gradient(145deg, #17191f 0%, #090a0d 55%, #020203 100%);
   box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
-    inset 0 0 14px color-mix(in srgb, currentColor 32%, transparent),
-    inset -4px -6px 9px rgba(0, 0, 0, 0.38),
-    0 0 10px color-mix(in srgb, currentColor 90%, transparent),
-    0 0 28px color-mix(in srgb, currentColor 70%, transparent),
-    0 0 52px color-mix(in srgb, currentColor 44%, transparent);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 0 18px color-mix(in srgb, currentColor 55%, transparent),
+    inset 0 0 34px color-mix(in srgb, currentColor 28%, transparent),
+    inset -4px -6px 9px rgba(0, 0, 0, 0.32),
+    0 0 12px color-mix(in srgb, currentColor 55%, transparent),
+    0 0 28px color-mix(in srgb, currentColor 32%, transparent);
 }
 
 .podiumGlyphPosition[data-turn-active="true"] .podiumGlyphMark {
-  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.95))
-    drop-shadow(0 0 7px currentColor) drop-shadow(0 0 16px currentColor);
+  /* Keep the icon crisp; glow lives on the screen behind it. */
+  filter: none;
 }
 
 .botIdentityPosition {
@@ -6838,26 +7085,64 @@
   padding: 14px 4px 2px;
 }
 
-.studioNavStatus > span {
+.studioNavLaunch {
+  display: grid;
+  gap: 5px;
+  width: calc(100% - 14px);
+  margin: auto 7px 0;
+  border: 1px solid color-mix(in srgb, var(--debate-studio-accent) 48%, var(--debate-studio-line));
+  border-radius: 14px;
+  padding: 12px 10px 10px;
+  color: inherit;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--debate-studio-accent) 18%, transparent),
+      color-mix(in srgb, var(--debate-studio-panel) 88%, transparent)
+    );
+  text-align: left;
+  cursor: pointer;
+}
+
+.studioNavLaunch:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.studioNavLaunch:hover:not(:disabled),
+.studioNavLaunch:focus-visible {
+  border-color: color-mix(in srgb, var(--debate-studio-accent) 72%, white);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--debate-studio-accent) 28%, transparent);
+}
+
+.studioNavStatus > span,
+.studioNavLaunch > span {
   color: var(--debate-studio-muted);
   font-size: 8px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
-.studioNavStatus > strong {
+.studioNavStatus > strong,
+.studioNavLaunch > strong {
   font-size: 11px;
   font-weight: 680;
 }
 
-.studioNavStatus > div {
+.studioNavLaunch > strong {
+  color: #f4f0ff;
+}
+
+.studioNavStatus > div,
+.studioNavLaunch > div {
   height: 2px;
   margin-top: 4px;
   overflow: hidden;
   background: var(--debate-studio-line);
 }
 
-.studioNavStatus > div > i {
+.studioNavStatus > div > i,
+.studioNavLaunch > div > i {
   display: block;
   width: calc(var(--debate-readiness, 0) * 100%);
   height: 100%;
@@ -9036,6 +9321,12 @@
   text-transform: uppercase;
 }
 
+.packetSeal .primaryButton {
+  justify-self: end;
+  padding: 10px 16px;
+  white-space: nowrap;
+}
+
 .dashboard .dashboardRail {
   position: relative;
   top: auto;
@@ -10272,7 +10563,9 @@
     animation: none;
   }
 
-  .debateAudienceRow {
+  .debateAudienceRow,
+  .debateAudienceMeter i,
+  .debateAudienceGavelButton {
     transition: none;
   }
 }
@@ -11232,6 +11525,7 @@
   .motionRevealGroup,
   .studioNavButton,
   .studioNavStatus > div > i,
+  .studioNavLaunch > div > i,
   .cameraControls,
   .captionControls,
   .turnClock,

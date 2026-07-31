@@ -55,16 +55,17 @@ test("Coffee review copies transcripts instead of exporting transcript files", (
   assert.match(pageSource, /data-copy-state=/u);
 });
 
-test("replay keeps the player off camera while retaining a pot-motion anchor", () => {
+test("replay seats Default Prism with the pot as the motion anchor", () => {
   assert.match(
     pageSource,
-    /coffeeReplayActive \? \(\s*<span\s+ref=\{coffeeReplayPotDockRef\}\s+className=\{styles\.coffeeReplayOffCameraPotDock\}/u,
+    /coffeeReplayActive && \(replayState\?\.playerPresent \?\? true\)[\s\S]*?className=\{styles\.coffeeReplayPlayerSeat\}/u,
+  );
+  assert.match(
+    pageSource,
+    /ref=\{coffeeReplayPotDockRef\}[\s\S]*?className=\{styles\.coffeeReplayPlayerPot\}/u,
   );
   assert.doesNotMatch(pageSource, /coffeeBarScene|coffeeWaiterVisit/u);
-  assert.doesNotMatch(
-    pageSource,
-    /className=\{styles\.coffeeReplayPlayerSeat\}/u,
-  );
+  assert.doesNotMatch(pageSource, /coffeeReplayOffCameraPotDock/u);
 });
 
 test("review stops live audio and cannot start replay while the closing wrap is settling", () => {
@@ -83,7 +84,7 @@ test("review stops live audio and cannot start replay while the closing wrap is 
   );
   assert.match(
     pageSource,
-    /const hasSynopsis = coffeeConversationHasSessionSynopsis\(\s*coffeeConversation,\s*\);\s*if \(coffeeSessionModelDisabled && !hasSynopsis\)/,
+    /const hasSynopsis =\s*coffeeConversationHasSessionSynopsis\(coffeeConversation\);\s*if \(coffeeSessionModelDisabled && !hasSynopsis\)/,
   );
 });
 

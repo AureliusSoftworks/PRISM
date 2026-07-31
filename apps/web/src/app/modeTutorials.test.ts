@@ -281,7 +281,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
-    assert.match(copy, /Start freezes that ordered chain/u);
+    assert.match(copy, /Launch circuit becomes Start Debate/u);
+    assert.match(copy, /Start stays locked until the question, debaters, consent, and a visit to Topic, Debaters, and Evidence are all complete/u);
+    assert.match(copy, /Start then freezes that ordered chain/u);
     assert.match(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
     assert.match(

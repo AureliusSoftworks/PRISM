@@ -246,6 +246,21 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /label = "Animation"/);
   assert.doesNotMatch(cssSource, /\.botAvatarMouthAnimationRow/);
   assert.match(cssSource, /\.botAvatarThinkingControl/);
+  assert.match(pageSource, /label="Thinking size"/);
+  assert.match(pageSource, /label="Thinking position"/);
+  assert.match(pageSource, /data-thinking-geometry="true"/);
+  assert.match(
+    pageSource,
+    /faceThinkingScale=\{newBotFaceThinkingScale\}/,
+  );
+  assert.match(
+    cssSource,
+    /--bot-face-thinking-scale,\s*1/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarCustomGeometry\[data-thinking-geometry="true"\]\[data-disabled="true"\]/,
+  );
   assert.match(cssSource, /\.botAvatarInlineResetButton/);
   assert.match(pageSource, /ariaLabel="Custom eye glyph"/);
   assert.match(pageSource, /ariaLabel="Custom mouth glyph"/);
@@ -347,6 +362,10 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     cssSource,
     /--bot-face-eye-offset-y:\s*var\(--bot-face-blink-offset-y, 0em\)/,
   );
+  assert.match(
+    cssSource,
+    /\[data-coffee-plate-emoji-blink-glyph="true"\][\s\S]{0,420}--bot-face-gaze-x:\s*0px;[\s\S]{0,120}--bot-face-gaze-y:\s*0px;/,
+  );
   const faceBranchStart = pageSource.indexOf(
     '{activeTab === "face" ? ( <div className={styles.botAvatarFaceControls}>',
   );
@@ -399,6 +418,11 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(eyesTabSource, /botAvatarSingleGlyphInput/);
   assert.doesNotMatch(eyesTabSource, /disabled=\{!customEyeActive\}/);
   assert.match(eyesTabSource, /BotAvatarEyeMovementControl/);
+  assert.match(pageSource, /still: "Still"/);
+  assert.match(pageSource, /natural: "Natural"/);
+  assert.match(pageSource, /nervous: "Nervous"/);
+  assert.match(pageSource, /frantic: "Frantic"/);
+  assert.match(pageSource, /paranoid: "Paranoid"/);
   assert.match(eyesTabSource, /value=\{faceEyeAnimation\}/);
   assert.match(eyesTabSource, /botAvatarCustomMotionRowSingle/);
   assert.match(eyesTabSource, /part="eyes"/);
@@ -1075,6 +1099,7 @@ test("avatar customization modal is a contained foreground sheet", () => {
   );
   assert.doesNotMatch(backdropRule, /overflow-y:\s*auto;/);
   assert.match(cssRuleBody(".botAvatarControlStack"), /overflow-y:\s*auto;/);
+  assert.match(cssRuleBody(".botAvatarControlStack"), /padding-bottom:\s*36px;/);
   assert.doesNotMatch(
     cssRuleBody(".botAvatarControlStack"),
     /overflow:\s*hidden;/,

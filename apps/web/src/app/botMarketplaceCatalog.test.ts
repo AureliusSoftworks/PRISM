@@ -76,7 +76,7 @@ describe("bot marketplace static catalog", () => {
       ["socrates", "?"],
       ["the-buddha", "○"],
       ["rumi", "∞"],
-      ["leonardo-da-vinci", "◇"],
+      ["leonardo-da-vinci", "|"],
       ["salvador-dali", "∿"],
       ["vincent-van-gogh", "⊙"],
       ["georgia-okeeffe", "◉"],
@@ -166,15 +166,15 @@ describe("bot marketplace static catalog", () => {
     assert.equal(alanWatts.faceEyesFont, "warm");
     assert.equal(alanWatts.faceMouthFont, "formal");
     assert.equal(alanWatts.faceEyeOffsetX, 0);
-    assert.equal(alanWatts.faceEyeOffsetY, -0.18);
-    assert.equal(alanWatts.faceMouthScale, 0.9);
-    assert.equal(alanWatts.faceMouthOffsetY, -0.06);
+    assert.equal(alanWatts.faceEyeOffsetY, -0.06);
+    assert.equal(alanWatts.faceMouthScale, 0.7);
+    assert.equal(alanWatts.faceMouthOffsetY, 0.04);
     assert.equal(alanWatts.audioVoiceProfileOverride ?? null, null);
     assert.equal(
       createHash("sha256")
         .update(alanWatts.avatarDetails?.screen.paintColorMapBase64 ?? "")
         .digest("hex"),
-      "f2839d145374a4512ba0f8e35f9f0b96a744b11d32dcf097c06bdd20c71c7dcb"
+      "2ae0cbfcdd3a40e51642912e8f8827e9a57481eeb313f569e8b612f2483b4f9e"
     );
 
     assert.ok(carlJung);
@@ -184,7 +184,7 @@ describe("bot marketplace static catalog", () => {
     assert.equal(carlJung.faceEyesFont, "playful");
     assert.equal(carlJung.faceEyeOffsetX, 0.02);
     assert.equal(carlJung.faceEyeOffsetY, -0.02);
-    assert.equal(carlJung.faceMouthOffsetY, 0.1);
+    assert.equal(carlJung.faceMouthOffsetY, 0.18);
     assert.equal(carlJung.audioVoiceProfileOverride ?? null, null);
     assert.equal(
       createHash("sha256")
@@ -392,7 +392,7 @@ describe("bot marketplace static catalog", () => {
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["e", "E", "e", "E"]);
         assert.equal(
           voice?.elevenLabsVoiceIdOverride,
-          "Xb7hH8MSUJpSbSDYk0k2",
+          "hpp4J3VqNfWAUOO0d1Us",
         );
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /glad|brighter/iu);
         assert.match(bundle.botJson.systemPrompt ?? "", /joy|hope|lighter/iu);
@@ -426,7 +426,7 @@ describe("bot marketplace static catalog", () => {
         assert.equal(bundle.botJson.bot.glyph, "lucideCloudRain");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "-");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["s", "i", "g", "h"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "EXAVITQu4vr4xnSDxMaL");
+        assert.equal(voice?.elevenLabsVoiceIdOverride, "pGjlAULPgEknbeX4L7fr");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /another conversation/iu);
         assert.match(bundle.botJson.systemPrompt ?? "", /grouchy|pessimist|rain cloud/iu);
       }
@@ -438,7 +438,7 @@ describe("bot marketplace static catalog", () => {
         assert.equal(bundle.botJson.bot.glyph, "lucideRefreshCcw");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "?");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["h", "e", "l", "o"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "nPczCjzI2devNBz1zQrb");
+        assert.equal(voice?.elevenLabsVoiceIdOverride, "tLjNmsGUEE3jtdb5nGwV");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /lost the thread|Love what/iu);
         const eternalIntroduction = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "eternal_introduction",
@@ -466,7 +466,7 @@ describe("bot marketplace static catalog", () => {
         assert.equal(bundle.botJson.bot.glyph, "lucideUserRound");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "o");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["?", "o", "~", "?"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "pNInz6obpgDQGcFmaJgB");
+        assert.equal(voice?.elevenLabsVoiceIdOverride, "zZp9y0VzL7J3DmI1Z0U6");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /whoever I am today/iu);
         const falseName = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "false_name",
@@ -484,7 +484,7 @@ describe("bot marketplace static catalog", () => {
         assert.equal(bundle.botJson.bot.glyph, "lucideSparkles");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "∞");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["~", "o", "O", "∞"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "21m00Tcm4TlvDq8ikWAM");
+        assert.equal(voice?.elevenLabsVoiceIdOverride, "r8pbMiE191G4TpRKoVlh");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /Library handed me today/iu);
         const shapeshift = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "identity_shapeshift",
@@ -548,6 +548,48 @@ describe("bot marketplace static catalog", () => {
       assert.equal(typeof previewLine, "string", entry.name);
       assert.equal((previewLine?.trim().length ?? 0) > 0, true, entry.name);
       assert.equal((previewLine?.length ?? 0) <= 160, true, entry.name);
+    }
+  });
+
+  it("locks public ElevenLabs voice IDs to elevenlabs-voice-lock.json", () => {
+    const lockPath = path.join(publicRoot, "bot-marketplace/elevenlabs-voice-lock.json");
+    const lock = readJsonFile<{
+      version: number;
+      bots: Record<string, { botName?: string; voiceName?: string; voiceId?: string }>;
+    }>(lockPath);
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const publicBots = publicMarketplaceBots(manifest);
+    const lockedIds = Object.keys(lock.bots ?? {});
+
+    assert.equal(lock.version, 1);
+    assert.equal(lockedIds.length, publicBots.length, "lock must cover every public Marketplace bot");
+
+    for (const entry of publicBots) {
+      const locked = lock.bots[entry.id];
+      assert.ok(locked, `${entry.name} missing from elevenlabs-voice-lock.json`);
+      assert.equal(typeof locked.voiceId, "string", entry.name);
+      assert.equal((locked.voiceId?.trim().length ?? 0) > 0, true, entry.name);
+      assert.equal(typeof locked.voiceName, "string", entry.name);
+      assert.equal((locked.voiceName?.trim().length ?? 0) > 0, true, entry.name);
+
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const profile = normalizeOptionalBotAudioVoiceProfileV1(
+        bundle.botJson.bot.authoredAudioVoiceProfile,
+      );
+      assert.equal(
+        profile?.elevenLabsVoiceIdOverride,
+        locked.voiceId,
+        `${entry.name} bundle must match voice lock`,
+      );
+    }
+
+    for (const lockedId of lockedIds) {
+      assert.ok(
+        publicBots.some((entry) => entry.id === lockedId),
+        `voice lock has extra bot id not in public Marketplace: ${lockedId}`,
+      );
     }
   });
 
@@ -928,7 +970,7 @@ describe("bot marketplace static catalog", () => {
       assert.equal(bot.faceEyeOffsetX, 0, `${botId} ${preset.preset} eye x`);
       assert.equal(bot.faceEyeOffsetY, preset.eyeOffsetY, `${botId} ${preset.preset} eye y`);
       assert.equal(bot.faceMouthScale, 1, `${botId} ${preset.preset} mouth scale`);
-      assert.equal(bot.faceMouthOffsetY, 0, `${botId} ${preset.preset} mouth y`);
+      assert.equal(bot.faceMouthOffsetY, 0.18, `${botId} ${preset.preset} mouth y`);
       assert.equal(bot.faceMouthRotationDeg, 0, `${botId} ${preset.preset} mouth rotation`);
       assert.equal(bot.faceBlinkBar, " ", `${botId} ${preset.preset} blink bar`);
       assert.deepEqual(bot.faceThinkingFrames, preset.thinkingFrames, `${botId} ${preset.preset} thinking frames`);

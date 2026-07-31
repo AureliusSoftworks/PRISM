@@ -435,12 +435,20 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "chat_fallback":
     case "chat_web_search_followup":
     case "conversation_title":
+    case "botcast_brand":
+    case "botcast_show_chat":
+    case "botcast_review":
+    case "botcast_turn":
+    case "bot_generation":
     case "coffee_turn":
     case "coffee_router":
     case "coffee_summary":
     case "composer_cleanup":
+    case "debate_generation":
     case "embedding":
     case "image_generation":
+    case "bot_profile_picture":
+    case "group-room-wallpaper":
     case "image_prompt":
     case "memory_inference":
     case "memory_summary":
@@ -448,15 +456,85 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "psychic_planning":
     case "slate_deliberation":
     case "slate_draft":
+    case "slate_project_chat":
     case "slate_revision":
     case "slate_shape":
+    case "slate_title_suggestion":
     case "story_generation":
+    case "voice_preview":
     case "zen_live_action":
     case "system_unlabeled":
       return value;
     default:
       return "system_unlabeled";
   }
+}
+
+const USAGE_PURPOSE_LABELS: Record<UsagePurpose, string> = {
+  chat_reply: "Chat Reply",
+  chat_boundary: "Chat Boundary",
+  chat_fallback: "Chat Fallback",
+  chat_web_search_followup: "Chat Web Search Followup",
+  conversation_title: "Conversation Title",
+  botcast_brand: "Signal Brand",
+  botcast_show_chat: "Signal Show Chat",
+  botcast_review: "Signal Review",
+  botcast_turn: "Signal Turn",
+  bot_generation: "Bot Generation",
+  coffee_turn: "Coffee Turn",
+  coffee_router: "Coffee Router",
+  coffee_summary: "Coffee Summary",
+  composer_cleanup: "Composer Cleanup",
+  debate_generation: "Debate Generation",
+  embedding: "Embedding",
+  image_generation: "Image Generation",
+  bot_profile_picture: "Bot Profile Picture",
+  "group-room-wallpaper": "Group Room Wallpaper",
+  image_prompt: "Image Prompt",
+  memory_inference: "Memory Inference",
+  memory_summary: "Memory Summary",
+  prompt_wildcard: "Prompt Wildcard",
+  psychic_planning: "Psychic Planning",
+  slate_deliberation: "Slate Deliberation",
+  slate_draft: "Slate Draft",
+  slate_project_chat: "Slate Project Chat",
+  slate_revision: "Slate Revision",
+  slate_shape: "Slate Shape",
+  slate_title_suggestion: "Slate Title Suggestion",
+  story_generation: "Story Generation",
+  voice_preview: "Voice Preview",
+  zen_live_action: "Zen Live Action",
+  system_unlabeled: "System Unlabeled",
+};
+
+function purposeLabel(purpose: UsagePurpose): string {
+  return USAGE_PURPOSE_LABELS[purpose];
+}
+
+/**
+ * Older builds collapsed several real purposes to system_unlabeled at write
+ * time. Re-home those rows by surface so Usage Settings can show Signal /
+ * Debate / Bot Generation instead of one opaque bucket.
+ */
+export function repairMisnormalizedUsagePurposes(db: DatabaseSync): number {
+  const repairs: Array<{ purpose: UsagePurpose; surface: string }> = [
+    { purpose: "botcast_turn", surface: "signal" },
+    { purpose: "bot_generation", surface: "bots" },
+    { purpose: "debate_generation", surface: "debate" },
+  ];
+  let changed = 0;
+  for (const repair of repairs) {
+    const result = db
+      .prepare(
+        `UPDATE usage_events
+         SET purpose = ?
+         WHERE purpose = 'system_unlabeled'
+           AND surface = ?`,
+      )
+      .run(repair.purpose, repair.surface);
+    changed += Number(result.changes ?? 0);
+  }
+  return changed;
 }
 
 function normalizeProvider(value: string | null | undefined): UsageProviderName {
@@ -501,13 +579,6 @@ function providerLabel(provider: UsageProviderName): string {
   if (provider === "openai") return "OpenAI";
   if (provider === "anthropic") return "Anthropic";
   return "Unknown";
-}
-
-function purposeLabel(purpose: UsagePurpose): string {
-  return purpose
-    .split("_")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }
 
 function priceForTextModel(provider: UsageProviderName, model: string): TextPrice | null {
@@ -1102,6 +1173,8 @@ export function getUsageReport(args: {
   range: UsageRange;
   conversationId?: string | null;
 }): UsageResponse {
+  // Re-home historical rows that older builds collapsed to system_unlabeled.
+  repairMisnormalizedUsagePurposes(args.db);
   const now = new Date();
   const rangeStart = rangeStartFor(args.range, now);
   const conversationId = args.conversationId?.trim() || null;
