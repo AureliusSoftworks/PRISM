@@ -659,7 +659,6 @@ export interface BotcastExperienceProps {
     ariaLabel?: string;
     className?: string;
     onBlur?: (value: string) => void;
-    resolvePicksToPlainText?: boolean;
   }) => ReactNode;
   /** Expand /prompts, !decks, and {slots}/{a|b} before booking or guest send. */
   expandComposerDraft?: (rawDraft: string) => string;
@@ -9418,7 +9417,6 @@ export function BotcastExperience({
                   ariaLabel: "Premise inspiration",
                   className: styles.pickAwareSetupField,
                   disabled: busy,
-                  resolvePicksToPlainText: true,
                 })}
               </div>
             ) : (
@@ -10633,7 +10631,6 @@ export function BotcastExperience({
                       ariaLabel: "Private producer comments",
                       className: styles.pickAwareSetupField,
                       disabled: busy,
-                      resolvePicksToPlainText: true,
                     })}
                   </div>
                 ) : (

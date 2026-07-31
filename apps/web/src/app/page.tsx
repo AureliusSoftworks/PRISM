@@ -73168,6 +73168,26 @@ function HomeContent(): React.JSX.Element {
     return resolveComposerWildcardDraft(base).prompt;
   }
 
+  /**
+   * Prompt Center picks expand to their body on insert. Wildcard decks and
+   * `{SLOT}` chips stay literal so the surprise resolves at Build/start/send.
+   */
+  function resolveComposerPromptPickToPlainText(
+    command: CommandCenterCommand,
+  ): string | null {
+    if (
+      isComposerWildcardDeckPick(command) ||
+      isComposerTrueWildcardSlotPick(command)
+    ) {
+      return null;
+    }
+    if (!isCommandCenterPromptShortcut(command)) {
+      return null;
+    }
+    const body = command.command.trim();
+    return body ? `${body} ` : null;
+  }
+
   type PickAwareComposerFieldState = {
     id?: string;
     value: string;
@@ -73179,7 +73199,6 @@ function HomeContent(): React.JSX.Element {
     className?: string;
     onBlur?: (value: string) => void;
     onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
-    resolvePicksToPlainText?: boolean;
   };
 
   /** Compact ComposerInput with Prompt Center prompts + wildcard decks only. */
@@ -73222,17 +73241,9 @@ function HomeContent(): React.JSX.Element {
           toolPicks={EMPTY_COMPOSER_COMMAND_PICKS}
           promptPicks={commandCenterPromptPicks}
           wildcardPicks={composerWildcardDeckPicks}
-          resolveShortcutPickToText={
-            field.resolvePicksToPlainText
-              ? (command) => {
-                  const resolved = expandComposerDraft(
-                    composerShortcutInsertionText(command).trim(),
-                  ).trim();
-                  return resolved ? `${resolved} ` : "";
-                }
-              : undefined
-          }
-          shortcutChipsEnabled={!field.resolvePicksToPlainText}
+          // Prompts expand on pick; wildcard chips stay until Build/start/send.
+          resolveShortcutPickToText={resolveComposerPromptPickToPlainText}
+          shortcutChipsEnabled
           dismissPopoversSignal={composerPopoverDismissSignal}
           onChange={(event) => {
             const next = singleLine
@@ -78787,17 +78798,8 @@ function HomeContent(): React.JSX.Element {
         toolPicks={toolPicks}
         promptPicks={promptPicks}
         wildcardPicks={wildcardPicks}
-        resolveShortcutPickToText={
-          variant === "signal"
-            ? (command) => {
-                const resolved = expandComposerDraft(
-                  composerShortcutInsertionText(command).trim(),
-                ).trim();
-                return resolved ? `${resolved} ` : "";
-              }
-            : undefined
-        }
-        shortcutChipsEnabled={variant !== "signal"}
+        resolveShortcutPickToText={resolveComposerPromptPickToPlainText}
+        shortcutChipsEnabled
         dismissPopoversSignal={composerPopoverDismissSignal}
         actionInputEnabled={actionInputEnabled}
         interruptActive={interruptActive}
@@ -120327,9 +120329,7 @@ function HomeContent(): React.JSX.Element {
     if (consumeDeprecatedRefreshCommand(trimmed, "coffee")) return;
     if (consumeGlobalClearCommand(trimmed, "coffee")) return;
     if (await consumeCoffeeNvmCommand(trimmed)) return;
-    if (liveDraft !== coffeeDraft) {
-      setCoffeeDraft(liveDraft);
-    }
+    // Keep chips in the composer; liveDraft is only for the outbound payload.
     if (
       coffeeTurnRhythmState === "cooldown" ||
       coffeeTurnRhythmState === "userTableTyping"

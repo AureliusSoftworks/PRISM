@@ -791,6 +791,20 @@ describe("Coffee listener reaction persistence", () => {
   });
 });
 
+describe("Coffee prompt wildcards at send", () => {
+  it("resolves model wildcard slots inside processCoffeeTurn before the table message persists", () => {
+    const source = readFileSync(new URL("../coffee.ts", import.meta.url), "utf8");
+    assert.match(
+      source,
+      /export async function processCoffeeTurn\([\s\S]{0,900}?promptWildcardNames\(message\)/u,
+    );
+    assert.match(
+      source,
+      /processCoffeeTurn\([\s\S]{0,1400}?resolvePromptWildcardsWithModel/u,
+    );
+  });
+});
+
 test("Coffee applies one replayable Joyful Nora lift per recipient and source turn", () => {
   const plan = {
     version: 1 as const,

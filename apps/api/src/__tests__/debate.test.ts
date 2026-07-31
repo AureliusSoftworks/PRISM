@@ -44,6 +44,7 @@ import {
   submitDebateTurnaboutAction,
   submitDebateVerdict,
   swingDebateJudgeGavel,
+  synthesizeDebateSlates,
   type DebateAiRuntime,
 } from "../debate.ts";
 import type {
@@ -3518,11 +3519,85 @@ describe("Debate engine", () => {
         debateSource,
         /synthesizeDebateSlates\([\s\S]*formalityRaw/u,
       );
+      assert.match(debateSource, /promptWildcardNames\(topic\)/u);
+      assert.match(debateSource, /resolvePromptWildcardsWithModel/u);
       assert.doesNotMatch(debateSource, /motions for a short formal debate/u);
       assert.match(debateSource, /Do not default to “This House believes/u);
     } finally {
       db.close();
     }
+  });
+
+  it("resolves model wildcards before synthesizing debate slates", async () => {
+    const prompts: string[] = [];
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages: ProviderMessage[]) {
+        const text = messages.map((message) => message.content).join("\n");
+        prompts.push(text);
+        if (text.includes("Create exactly three genuinely distinct")) {
+          assert.match(text, /Topic: Should \S+ live downtown\?/u);
+          assert.doesNotMatch(text, /\{NAME\}/u);
+          return JSON.stringify({
+            slates: [
+              {
+                id: "slate-1",
+                motion: "Downtown living should stay open to newcomers.",
+                forSide: {
+                  label: "Welcome Home",
+                  brief: "Argue that downtown should stay open to newcomers.",
+                },
+                againstSide: {
+                  label: "Keep Quiet",
+                  brief: "Argue that downtown should stay quieter for locals.",
+                },
+              },
+              {
+                id: "slate-2",
+                motion: "Newcomers deserve denser downtown housing.",
+                forSide: {
+                  label: "Build Up",
+                  brief: "Defend denser downtown housing for newcomers.",
+                },
+                againstSide: {
+                  label: "Slow Growth",
+                  brief: "Oppose blanket densification around downtown.",
+                },
+              },
+              {
+                id: "slate-3",
+                motion: "Transit should shape downtown housing first.",
+                forSide: {
+                  label: "Near Transit",
+                  brief: "Tie downtown homes to transit access.",
+                },
+                againstSide: {
+                  label: "Local Pace",
+                  brief: "Keep neighborhood growth locally paced.",
+                },
+              },
+            ],
+          });
+        }
+        throw new Error(`Unexpected Debate synthesis prompt:\n${text}`);
+      },
+      async embedText() {
+        return [];
+      },
+    };
+
+    const slates = await synthesizeDebateSlates(
+      "Should {NAME} live downtown?",
+      "plainspoken",
+      runtimeWith(provider),
+    );
+    assert.equal(slates.length, 3);
+    assert.equal(
+      prompts.some((prompt) =>
+        /Topic: Should \S+ live downtown\?/u.test(prompt),
+      ),
+      true,
+    );
   });
 
   it("makes Free-for-all Turnabout a feisty confrontation without forcing Court-of-Record language", async () => {

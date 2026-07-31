@@ -1133,6 +1133,25 @@ describe("Botcast persistence and isolation", () => {
     assert.ok(episodeCreationIndex > bookingFailureIndex);
   });
 
+  it("resolves topic and producer-brief wildcards before Signal episode create", () => {
+    const serverSource = readFileSync(
+      new URL("../server.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      serverSource,
+      /let episodeTopic = producerGuest[\s\S]{0,500}?promptWildcardNames\(episodeTopic\)/u,
+    );
+    assert.match(
+      serverSource,
+      /promptWildcardNames\(episodeProducerBrief\)[\s\S]{0,400}?resolvePromptWildcardsWithModel/u,
+    );
+    assert.match(
+      serverSource,
+      /topic: episodeTopic,[\s\S]{0,80}producerBrief: episodeProducerBrief,/u,
+    );
+  });
+
   it("books the signed-in guest by account name or the host's remembered preference", async () => {
     const db = fixture();
     const userKey = Buffer.alloc(32, 7);

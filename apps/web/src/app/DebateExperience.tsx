@@ -348,7 +348,6 @@ export interface DebateExperienceProps {
     ariaLabel?: string;
     className?: string;
     onBlur?: (value: string) => void;
-    resolvePicksToPlainText?: boolean;
   }) => ReactNode;
   /** Expand /prompts, !decks, and {slots}/{a|b} before synthesize or Refract. */
   expandComposerDraft?: (rawDraft: string) => string;
@@ -3981,9 +3980,7 @@ export function DebateExperience(
     async (direction = ""): Promise<void> => {
       const resolvedTopic = expandDebateSeedDraft(topic).trim();
       if (!resolvedTopic || busy) return;
-      if (resolvedTopic !== topic) {
-        setTopic(resolvedTopic);
-      }
+      // Keep Territory chips until Build; only the synthesize payload expands.
       setBusy(true);
       setError(null);
       try {
@@ -7464,7 +7461,6 @@ export function DebateExperience(
                         setupMode === "basic" ? "Your idea" : "Territory",
                       className: styles.pickAwareSetupField,
                       disabled: busy,
-                      resolvePicksToPlainText: true,
                     })}
                   </div>
                 ) : (

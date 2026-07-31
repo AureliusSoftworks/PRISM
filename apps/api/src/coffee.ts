@@ -27,6 +27,10 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { decryptJson, randomId } from "./security.ts";
 import { SCRIPTED_PROMPT_WILDCARD_VALUES } from "./prompt-wildcard-seeds.ts";
 import {
+  promptWildcardNames,
+  resolvePromptWildcardsWithModel,
+} from "./prompt-wildcards.ts";
+import {
   getAuxiliaryProvider,
   defaultModelIdForProvider,
   openAiModelUsesMaxCompletionTokens,
@@ -18834,9 +18838,39 @@ export async function processCoffeeTurn(
   input: CoffeeTurnInput,
   settings: CoffeeTurnSettings
 ): Promise<CoffeeTurnResponse> {
-  const message = typeof input.message === "string" ? input.message : "";
+  let message = typeof input.message === "string" ? input.message : "";
   if (message.trim().length === 0) {
     throw new Error("Coffee messages cannot be empty.");
+  }
+  if (promptWildcardNames(message).length > 0) {
+    const providerFactory = settings.providerFactory ?? selectProvider;
+    const provider = providerFactory(
+      settings.preferredProvider,
+      settings.openAiApiKey,
+      settings.secondaryOllamaHost,
+      settings.anthropicApiKey,
+    );
+    const model =
+      settings.sessionSpeakerModel?.trim() ||
+      (settings.preferredProvider === "local"
+        ? settings.preferredLocalModel?.trim()
+        : settings.preferredOnlineModel?.trim()) ||
+      defaultModelIdForProvider(settings.preferredProvider);
+    const resolution = await resolvePromptWildcardsWithModel({
+      prompt: message,
+      provider,
+      generationOverrides: {
+        model,
+        temperature: 0.72,
+        maxTokens: 400,
+        usagePurpose: "prompt_wildcard",
+      },
+      signal: settings.signal,
+    });
+    message = resolution.prompt;
+    if (message.trim().length === 0) {
+      throw new Error("Coffee messages cannot be empty.");
+    }
   }
 
   const now = new Date().toISOString();

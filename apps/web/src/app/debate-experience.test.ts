@@ -272,11 +272,16 @@ describe("Debate experience", () => {
     assert.match(source, /expandComposerDraft\?/u);
     assert.match(
       source,
-      /id: "debate-territory"[\s\S]{0,500}onChange: setTopic[\s\S]{0,800}resolvePicksToPlainText: true/u,
+      /id: "debate-territory"[\s\S]{0,500}onChange: setTopic/u,
     );
+    assert.doesNotMatch(source, /resolvePicksToPlainText/u);
     assert.match(
       source,
       /const resolvedTopic = expandDebateSeedDraft\(topic\)\.trim\(\)/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /if \(resolvedTopic !== topic\) \{\s*setTopic\(resolvedTopic\);/u,
     );
     assert.match(
       source,

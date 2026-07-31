@@ -200,7 +200,8 @@ describe("mode tutorials", () => {
       /Changing the motion, cast, format, or formality clears/u,
     );
     assert.match(copy, /territory dice remains available/u);
-    assert.match(copy, /Prompt Center prompts and wildcard rolls/u);
+    assert.match(copy, /Prompt Center prompts insert as ordinary editable text/u);
+    assert.match(copy, /wildcard rolls stay as chips until you Build or Refract/u);
     assert.match(copy, /Command Center powers as Signal setup/u);
     assert.match(copy, /floating Prism remains available throughout setup/u);
     assert.match(copy, /bounded, unsaved workbench draft/u);
@@ -1778,11 +1779,11 @@ describe("mode tutorials", () => {
     assert.match(booking?.body ?? "", /faithful replay/u);
     assert.match(
       booking?.body ?? "",
-      /Across Signal setup and the on-air composer, selected Prompt Center prompts and wildcard rolls insert as ordinary editable text/u,
+      /Across Signal setup and the on-air composer, selected Prompt Center prompts insert as ordinary editable text/u,
     );
     assert.match(
       booking?.body ?? "",
-      /Signal never renders those shortcuts as chips/u,
+      /wildcard rolls stay as chips until you save, begin the episode, or send/u,
     );
     assert.match(
       booking?.body ?? "",

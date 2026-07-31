@@ -38,6 +38,10 @@ describe("composer picks everywhere", () => {
       pageSource,
       /const liveDraft = expandComposerDraft\((?:raw|assisted)Draft\)/u,
     );
+    assert.doesNotMatch(
+      pageSource,
+      /if \(liveDraft !== coffeeDraft\) \{\s*setCoffeeDraft\(liveDraft\);/u,
+    );
   });
 
   it("preserves Signal's single-line topic input while enriching multiline composers", () => {
@@ -57,23 +61,24 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       signalSource,
-      /id: "signal-producer-brief"[\s\S]{0,260}onChange: setProducerBriefDraft[\s\S]{0,420}resolvePicksToPlainText: true/u,
+      /id: "signal-producer-brief"[\s\S]{0,260}onChange: setProducerBriefDraft/u,
+    );
+    assert.doesNotMatch(signalSource, /resolvePicksToPlainText/u);
+    assert.match(
+      pageSource,
+      /function resolveComposerPromptPickToPlainText\(/u,
     );
     assert.match(
       pageSource,
-      /field\.resolvePicksToPlainText[\s\S]{0,240}expandComposerDraft\([\s\S]{0,100}composerShortcutInsertionText\(command\)/u,
-    );
-    assert.equal(
-      signalSource.match(/resolvePicksToPlainText: true/gu)?.length,
-      2,
+      /const renderPickAwareComposer = [\s\S]{0,1800}?resolveShortcutPickToText=\{resolveComposerPromptPickToPlainText\}[\s\S]{0,120}shortcutChipsEnabled/u,
     );
     assert.match(
       pageSource,
-      /shortcutChipsEnabled=\{!field\.resolvePicksToPlainText\}/u,
+      /resolveComposerPromptPickToPlainText[\s\S]{0,200}isComposerWildcardDeckPick[\s\S]{0,200}isCommandCenterPromptShortcut/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageSource,
-      /variant === "signal"[\s\S]{0,500}shortcutChipsEnabled=\{variant !== "signal"\}/u,
+      /shortcutChipsEnabled=\{variant !== "signal"\}/u,
     );
     assert.match(
       pageSource,
@@ -132,8 +137,9 @@ describe("composer picks everywhere", () => {
     assert.match(debateSource, /expandComposerDraft\?/u);
     assert.match(
       debateSource,
-      /id: "debate-territory"[\s\S]{0,500}onChange: setTopic[\s\S]{0,800}resolvePicksToPlainText: true/u,
+      /id: "debate-territory"[\s\S]{0,500}onChange: setTopic/u,
     );
+    assert.doesNotMatch(debateSource, /resolvePicksToPlainText/u);
     assert.match(
       debateSource,
       /expandDebateSeedDraft\(topic\)/u,

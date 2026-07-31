@@ -103,9 +103,10 @@ stages do not block the standalone preview.
   Coffee, Story, Debate, and Slate versions retain their newer release state.
 
 - Bumped `Debate` to preview `v0.3` so Motion Chamber Territory / Your idea
-  accepts Prompt Center prompts and wildcard decks. Selected shortcuts insert as
-  ordinary editable text (Signal setup style); leftover placeholders resolve when
-  you Build / Refract into motions. The territory catalog dice stays separate.
+  accepts Prompt Center prompts and wildcard decks. Prompt picks insert as
+  ordinary editable text; wildcard chips stay until you Build / Refract, when
+  leftover model placeholders resolve for the outbound payload only. The
+  territory catalog dice stays separate.
 
 - Bumped `Slate` to preview `v0.8` for the manuscript-first Writer's Cockpit:
   TipTap section documents, Story Map, adaptive Inspector, natural-language

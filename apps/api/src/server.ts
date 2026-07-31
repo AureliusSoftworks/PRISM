@@ -15109,6 +15109,62 @@ function buildRoutes(): RouteDefinition[] {
             : "Signal could not shape a valid interview plan from the configured models. Try again.",
         );
       }
+      let episodeTopic = producerGuest
+        ? producerGuestBooking!.topic
+        : typeof body.topic === "string"
+          ? body.topic
+          : "";
+      let episodeProducerBrief = producerGuest
+        ? producerGuestBooking!.producerBrief
+        : typeof body.producerBrief === "string"
+          ? body.producerBrief
+          : "";
+      if (
+        !producerGuest &&
+        (promptWildcardNames(episodeTopic).length > 0 ||
+          promptWildcardNames(episodeProducerBrief).length > 0)
+      ) {
+        const openAiApiKey =
+          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+        const anthropicApiKey =
+          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+        const wildcardProvider = providerFactoryOverride(
+          preferredProvider,
+          openAiApiKey,
+          user.secondary_ollama_host,
+          anthropicApiKey,
+        );
+        const wildcardModel =
+          modelOverride ??
+          (accountModel && !isDisabledModelChoice(accountModel)
+            ? accountModel
+            : null) ??
+          defaultModelIdForProvider(preferredProvider);
+        const wildcardOverrides = {
+          model: wildcardModel,
+          temperature: 0.72,
+          maxTokens: 400,
+          usagePurpose: "prompt_wildcard" as const,
+        };
+        if (promptWildcardNames(episodeTopic).length > 0) {
+          episodeTopic = (
+            await resolvePromptWildcardsWithModel({
+              prompt: episodeTopic,
+              provider: wildcardProvider,
+              generationOverrides: wildcardOverrides,
+            })
+          ).prompt;
+        }
+        if (promptWildcardNames(episodeProducerBrief).length > 0) {
+          episodeProducerBrief = (
+            await resolvePromptWildcardsWithModel({
+              prompt: episodeProducerBrief,
+              provider: wildcardProvider,
+              generationOverrides: wildcardOverrides,
+            })
+          ).prompt;
+        }
+      }
       const surface = {
         surfaceId: "signal" as const,
         signalShowId: ctx.params.id,
@@ -15129,16 +15185,8 @@ function buildRoutes(): RouteDefinition[] {
             typeof body.guestBotId === "string" ? body.guestBotId : "",
           guestName: producerGuestName ?? "",
           guestContext,
-          topic: producerGuest
-            ? producerGuestBooking!.topic
-            : typeof body.topic === "string"
-              ? body.topic
-              : "",
-          producerBrief: producerGuest
-            ? producerGuestBooking!.producerBrief
-            : typeof body.producerBrief === "string"
-              ? body.producerBrief
-              : "",
+          topic: episodeTopic,
+          producerBrief: episodeProducerBrief,
           preferredProvider,
           responseMode: autoEnabled
             ? "auto"
