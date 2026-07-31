@@ -67863,24 +67863,33 @@ function HomeContent(): React.JSX.Element {
     const anchorViewportY = resolveZenReadableAnchorViewportY(scrollRoot);
     const desiredScrollHeight =
       anchorY + Math.max(0, scrollRoot.clientHeight - anchorViewportY);
-    const currentPaddingBottom =
-      Number.parseFloat(window.getComputedStyle(scrollRoot).paddingBottom) || 0;
-    const nextPaddingBottom = Math.max(
-      0,
-      currentPaddingBottom + desiredScrollHeight - scrollRoot.scrollHeight,
+    const tailSpacer = scrollRoot.querySelector<HTMLElement>(
+      '[data-zen-readable-tail-spacer="true"]',
     );
-    const previousPaddingBottom = Number.parseFloat(
+    // WebKit can omit trailing padding from a flex scrollport's scrollHeight
+    // while the last message still fits inside its border box. Measure and
+    // resize a real final flex child so the runway is always native scrollable
+    // space, including on the short opening turns where this matters most.
+    const currentTailSpace = tailSpacer
+      ? tailSpacer.getBoundingClientRect().height
+      : Number.parseFloat(window.getComputedStyle(scrollRoot).paddingBottom) ||
+        0;
+    const nextTailSpace = Math.max(
+      0,
+      currentTailSpace + desiredScrollHeight - scrollRoot.scrollHeight,
+    );
+    const previousTailSpace = Number.parseFloat(
       scrollRoot.style.getPropertyValue("--zen-readable-tail-padding"),
     );
     if (
-      Number.isFinite(previousPaddingBottom) &&
-      Math.abs(previousPaddingBottom - nextPaddingBottom) < 0.5
+      Number.isFinite(previousTailSpace) &&
+      Math.abs(previousTailSpace - nextTailSpace) < 0.5
     ) {
       return;
     }
     scrollRoot.style.setProperty(
       "--zen-readable-tail-padding",
-      `${nextPaddingBottom.toFixed(2)}px`,
+      `${nextTailSpace.toFixed(2)}px`,
     );
   }
 
@@ -134771,6 +134780,9 @@ function HomeContent(): React.JSX.Element {
               <div
                 ref={messagesEndRef}
                 className={styles.chatEphemeralLiveEndSpacer}
+                data-zen-readable-tail-spacer={
+                  chatLikeSurface ? "true" : undefined
+                }
                 aria-hidden="true"
               />
             </div>
@@ -136782,6 +136794,9 @@ function HomeContent(): React.JSX.Element {
             <div
               ref={messagesEndRef}
               className={styles.chatEphemeralLiveEndSpacer}
+              data-zen-readable-tail-spacer={
+                chatLikeSurface ? "true" : undefined
+              }
               aria-hidden="true"
             />
           </div>

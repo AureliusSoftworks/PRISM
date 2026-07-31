@@ -73,18 +73,27 @@ describe("Zen scroll experience", () => {
     assert.doesNotMatch(wheelHandler, /preventDefault\(\)/);
   });
 
-  it("keeps a native Zen runway when opening measurements request zero tail space", () => {
+  it("keeps a native Zen runway in an in-flow spacer for WebKit", () => {
     const rule = cssSource.match(
       /\.appLayout\[data-zen-surface="true"\] \.messages\[data-chat-ephemeral="true"\]\s*\{([\s\S]*?)\n\}/,
+    )?.[1] ?? "";
+    const spacerRule = cssSource.match(
+      /\.appLayout\[data-zen-surface="true"\]\s*\.messages\[data-chat-ephemeral="true"\]\s*\.chatEphemeralLiveEndSpacer\[data-zen-readable-tail-spacer="true"\]\s*\{([\s\S]*?)\n\}/,
     )?.[1] ?? "";
 
     assert.match(
       rule,
       /--zen-readable-tail-padding-floor:\s*var\(--zen-prose-runway-bottom\)/,
     );
+    assert.match(rule, /padding-bottom:\s*0/);
+    assert.match(spacerRule, /height:\s*max\([\s\S]*var\(--zen-readable-tail-padding-floor\)[\s\S]*var\(--zen-readable-tail-padding\)/);
     assert.match(
-      rule,
-      /padding-bottom:\s*max\([\s\S]*var\(--zen-readable-tail-padding-floor\)[\s\S]*var\(--zen-readable-tail-padding\)/,
+      pageSource,
+      /data-zen-readable-tail-spacer=\{ chatLikeSurface \? "true" : undefined \}/,
+    );
+    assert.match(
+      pageSource,
+      /const currentTailSpace = tailSpacer \? tailSpacer\.getBoundingClientRect\(\)\.height/,
     );
   });
 

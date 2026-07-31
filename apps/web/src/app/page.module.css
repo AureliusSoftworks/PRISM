@@ -24657,10 +24657,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-user-prism-color: var(--zen-user-prism-color-bright);
   z-index: 5;
   padding-top: max(76px, var(--zen-prose-runway-top));
-  padding-bottom: max(
-    var(--zen-readable-tail-padding-floor),
-    var(--zen-readable-tail-padding)
-  );
+  /* WebKit does not reliably include trailing padding in a flex scrollport's
+     native scroll range. The final in-flow spacer owns this runway instead. */
+  padding-bottom: 0;
   scroll-padding-top: var(--zen-prose-runway-top);
   scroll-padding-bottom: max(
     var(--zen-readable-tail-padding-floor),
@@ -25632,11 +25631,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"]
-  .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-  padding-bottom: max(
+  .messages[data-chat-ephemeral="true"]
+  .chatEphemeralLiveEndSpacer[data-zen-readable-tail-spacer="true"] {
+  width: 100%;
+  height: max(
     var(--zen-readable-tail-padding-floor),
     var(--zen-readable-tail-padding)
   );
+}
+
+.appLayout[data-zen-surface="true"]
+  .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
+  padding-bottom: 0;
   scroll-padding-bottom: max(
     var(--zen-readable-tail-padding-floor),
     var(--zen-readable-tail-padding)
@@ -25646,7 +25652,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .appLayout[data-zen-surface="true"]
   .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"]
   .chatEphemeralLiveEndSpacer {
-  height: 1px;
+  height: max(
+    var(--zen-readable-tail-padding-floor),
+    var(--zen-readable-tail-padding)
+  );
 }
 
 .appLayout[data-private-active="true"] .compose {
@@ -60307,10 +60316,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
     --zen-readable-tail-padding-floor: var(--zen-prose-runway-bottom);
     --zen-readable-tail-padding: var(--zen-readable-tail-padding-floor);
     padding-top: var(--zen-prose-runway-top);
-    padding-bottom: max(
-      var(--zen-readable-tail-padding-floor),
-      var(--zen-readable-tail-padding)
-    );
+    padding-bottom: 0;
     scroll-padding-top: var(--zen-prose-runway-top);
     scroll-padding-bottom: max(
       var(--zen-readable-tail-padding-floor),
@@ -60346,10 +60352,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
   .appLayout[data-zen-surface="true"]
     .messages[data-chat-ephemeral="true"][data-reply-runway-active="true"] {
-    padding-bottom: max(
-      var(--zen-readable-tail-padding-floor),
-      var(--zen-readable-tail-padding)
-    );
+    padding-bottom: 0;
     scroll-padding-bottom: max(
       var(--zen-readable-tail-padding-floor),
       var(--zen-readable-tail-padding)
