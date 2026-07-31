@@ -249,8 +249,7 @@ async function installAuthenticatedApi(
   const fixtureConversation = options.conversation ?? testConversation;
   const fixtureImages = options.images ?? [];
   let fixtureHubAtmosphereEnabled = options.hubAtmosphereEnabled !== false;
-  let fixtureHubAtmosphereStyle =
-    options.hubAtmosphereStyle ?? "prismatic";
+  let fixtureHubAtmosphereStyle = options.hubAtmosphereStyle ?? "prismatic";
   await page.addInitScript(
     ({ userId, botLibraryGroups, preserveBotLibraryGroupsOnReload }) => {
       window.localStorage.setItem("prism_first_run_welcome_v1", "done");
@@ -796,7 +795,9 @@ test.describe("PRISM desktop smoke", () => {
       const shell = page.locator('[data-hub-atmosphere-active="true"]');
       await expect(shell).toBeVisible();
       await expect(
-        page.locator('[data-visible="true"][data-atmosphere-style="prismatic"]'),
+        page.locator(
+          '[data-visible="true"][data-atmosphere-style="prismatic"]',
+        ),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: /Home Atmosphere/u }),
@@ -5214,14 +5215,19 @@ test.describe("PRISM desktop smoke", () => {
     );
   });
 
-  test("Debate presents long speech as paged broadcast captions @visual", async ({
+  test("Debate presents long speech as paged broadcast captions @visual @debate-perf", async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(60_000);
+    const performanceRun = process.env.PRISM_DEBATE_PERF === "1";
     await installAuthenticatedApi(page, {
       tutorialProgress: { debate: true },
     });
-    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.setViewportSize(
+      performanceRun
+        ? { width: 1728, height: 1117 }
+        : { width: 1440, height: 900 },
+    );
 
     const timestamp = "2026-07-30T18:00:00.000Z";
     const snapshotFor = (
@@ -5248,6 +5254,14 @@ test.describe("PRISM desktop smoke", () => {
     const moderator = snapshotFor(0, "moderator", null, "triangle");
     const forAdvocate = snapshotFor(1, "advocate", "for", "circle");
     const againstAdvocate = snapshotFor(2, "advocate", "against", "square");
+    const jurors = Array.from({ length: 5 }, (_, index) => ({
+      ...moderator,
+      id: `e2e-debate-perf-juror-${index + 1}`,
+      name: `Performance Juror ${index + 1}`,
+      role: "juror",
+      glyph: ["triangle", "circle", "square", "star", "heart"][index],
+      revision: `perf-juror-${index + 1}`,
+    }));
     const powerBot = (id: string) => ({
       botId: id,
       effects: [],
@@ -5256,6 +5270,45 @@ test.describe("PRISM desktop smoke", () => {
       speechAudienceBotIds: null,
       warnings: [],
     });
+    const performanceExhibit = {
+      id: "e2e-debate-perf-exhibit",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "A dented, oxidized spoon entered for visual inspection.",
+      emoji: "🥄",
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "manual",
+    };
+    const performanceHistory = performanceRun
+      ? Array.from({ length: 100 }, (_, index) => ({
+          version: 1,
+          id: `e2e-debate-perf-history-${index + 1}`,
+          sequence: index + 1,
+          phase: index < 50 ? "opening" : "rebuttal",
+          stepKey: index < 50 ? "opening_for" : "rebuttal_against",
+          kind:
+            index === 22 ? "evidence" : index === 61 ? "judge_gavel" : "speech",
+          speakerKind: index === 61 ? "moderator" : "advocate",
+          speakerBotId:
+            index === 61
+              ? moderator.id
+              : index % 2 === 0
+                ? forAdvocate.id
+                : againstAdvocate.id,
+          sideId: index === 61 ? null : index % 2 === 0 ? "for" : "against",
+          content:
+            index === 22
+              ? "The chamber examines the preserved Rusty spoon. [[exhibit:e2e-debate-perf-exhibit]]"
+              : index === 61
+                ? "Order. The record will proceed."
+                : `Historical floor statement ${index + 1}. The speaker develops a complete public argument with enough detail to exercise cached Markdown rendering.`,
+          sourceIds: index === 22 ? [performanceExhibit.id] : [],
+          gavelReason: index === 61 ? "order" : undefined,
+          createdAt: timestamp,
+        }))
+      : [];
     const initialSession = {
       version: 1,
       id: "e2e-debate-captions",
@@ -5289,6 +5342,7 @@ test.describe("PRISM desktop smoke", () => {
         version: 1,
         notes: "",
         sources: [],
+        exhibits: performanceRun ? [performanceExhibit] : [],
         frozenAt: timestamp,
       },
       moderator,
@@ -5303,22 +5357,37 @@ test.describe("PRISM desktop smoke", () => {
           [moderator.id]: powerBot(moderator.id),
           [forAdvocate.id]: powerBot(forAdvocate.id),
           [againstAdvocate.id]: powerBot(againstAdvocate.id),
+          ...Object.fromEntries(
+            jurors.map((juror) => [juror.id, powerBot(juror.id)]),
+          ),
         },
       },
-      caseBoard: [],
+      caseBoard: performanceRun
+        ? Array.from({ length: 18 }, (_, index) => ({
+            version: 1,
+            id: `perf-case-${index + 1}`,
+            sideId: index % 2 === 0 ? "for" : "against",
+            status: index % 3 === 0 ? "contested" : "active",
+            summary: `Performance case-board claim ${index + 1}`,
+            sourceIds: index === 2 ? [performanceExhibit.id] : [],
+            createdEventId: `e2e-debate-perf-history-${index + 1}`,
+          }))
+        : [],
       ballots: [],
       jury: {
         version: 1,
-        enabled: false,
+        enabled: performanceRun,
         cadence: "natural-five",
-        phase: "disabled",
-        jurors: [],
-        forepersonBotId: null,
+        phase: performanceRun ? "waiting" : "disabled",
+        jurors: performanceRun ? jurors : [],
+        forepersonBotId: performanceRun ? jurors[0]!.id : null,
         initialBallots: [],
         finalBallots: [],
         discussionTurnTarget: 0,
         discussionTurnCount: 0,
-        speakerCounts: {},
+        speakerCounts: performanceRun
+          ? Object.fromEntries(jurors.map((juror) => [juror.id, 0]))
+          : {},
         majoritySideId: null,
         forVotes: 0,
         againstVotes: 0,
@@ -5327,7 +5396,7 @@ test.describe("PRISM desktop smoke", () => {
       },
       playerVerdict: null,
       winnerSideId: null,
-      events: [],
+      events: performanceHistory,
       error: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -5336,7 +5405,7 @@ test.describe("PRISM desktop smoke", () => {
     const speechEvent = {
       version: 1,
       id: "e2e-debate-caption-speech",
-      sequence: 1,
+      sequence: performanceHistory.length + 1,
       phase: "opening",
       stepKey: "opening_for",
       kind: "speech",
@@ -5345,14 +5414,14 @@ test.describe("PRISM desktop smoke", () => {
       sideId: "for",
       content:
         "People are not following the rules, and calling that a failure is a strong word. But yes, it is a failure to protect the public. Disease transmission does not wait for a better pamphlet. You think education alone will work? It *failed*. People do not just need another lecture about the problem. They need a policy that protects the public while treating them like adults, and that is the standard this side is defending.",
-      sourceIds: [],
+      sourceIds: performanceRun ? [performanceExhibit.id] : [],
       createdAt: timestamp,
     };
     const advancedSession = {
       ...initialSession,
       revision: 2,
       stepKey: "opening_against",
-      events: [speechEvent],
+      events: [...performanceHistory, speechEvent],
       updatedAt: "2026-07-30T18:00:01.000Z",
     };
 
@@ -5412,6 +5481,124 @@ test.describe("PRISM desktop smoke", () => {
     await expect(
       caption.locator('[data-caption-rows="adaptive"]'),
     ).not.toContainText("*");
+    if (performanceRun) {
+      await expect(
+        live.locator('[data-debate-audience="true"]'),
+      ).toHaveAttribute("data-audience-count", "15");
+      const performanceProbe = process.env.PRISM_DEBATE_PERF_PROBE;
+      if (performanceProbe === "paint") {
+        await page.addStyleTag({
+          content:
+            '[data-debate-surface="live"], [data-debate-surface="live"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; box-shadow: none !important; text-shadow: none !important; mix-blend-mode: normal !important; }',
+        });
+      } else if (performanceProbe === "audience") {
+        await page.addStyleTag({
+          content:
+            '[data-debate-audience="true"] { display: none !important; }',
+        });
+      } else if (performanceProbe === "avatars") {
+        await page.addStyleTag({
+          content:
+            '[data-debate-bot-avatar="true"] { display: none !important; }',
+        });
+      } else if (performanceProbe === "avatar-paint") {
+        await page.addStyleTag({
+          content:
+            '[data-debate-bot-avatar="true"], [data-debate-bot-avatar="true"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; box-shadow: none !important; text-shadow: none !important; mix-blend-mode: normal !important; }',
+        });
+      } else if (performanceProbe === "avatar-contain") {
+        await page.addStyleTag({
+          content:
+            '[data-debate-bot-avatar="true"] { contain: layout paint style !important; }',
+        });
+      } else if (performanceProbe === "avatar-layers") {
+        await page
+          .locator(
+            '[data-debate-bot-avatar="true"] [data-crt-material-layer], [data-debate-bot-avatar="true"] [data-frame-material-layer="wear"], [data-debate-bot-avatar="true"] [data-frame-material-layer="scratches"], [data-debate-bot-avatar="true"] [data-frame-material-layer="light"], [data-debate-bot-avatar="true"] [data-screen-material-layer="glass"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="halo"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="bloom"]',
+          )
+          .evaluateAll((elements) => {
+            for (const element of elements) element.remove();
+          });
+        await page.addStyleTag({
+          content:
+            '[data-debate-bot-avatar="true"], [data-debate-bot-avatar="true"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; mix-blend-mode: normal !important; }',
+        });
+      } else if (performanceProbe === "crt-clones") {
+        await page.addStyleTag({
+          content:
+            '[data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::before, [data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::after { content: none !important; display: none !important; } [data-debate-bot-avatar="true"] [data-avatar-details-emission] { animation: none !important; filter: none !important; }',
+        });
+      } else if (performanceProbe === "single-pass") {
+        await page
+          .locator(
+            '[data-debate-bot-avatar="true"] [data-crt-material-layer], [data-debate-bot-avatar="true"] [data-frame-material-layer="wear"], [data-debate-bot-avatar="true"] [data-frame-material-layer="scratches"], [data-debate-bot-avatar="true"] [data-frame-material-layer="light"], [data-debate-bot-avatar="true"] [data-screen-material-layer="glass"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="halo"], [data-debate-bot-avatar="true"] [data-avatar-details-emission="bloom"]',
+          )
+          .evaluateAll((elements) => {
+            for (const element of elements) element.remove();
+          });
+        await page.addStyleTag({
+          content:
+            '[data-debate-bot-avatar="true"], [data-debate-bot-avatar="true"] * { animation: none !important; filter: none !important; backdrop-filter: none !important; mix-blend-mode: normal !important; } [data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::before, [data-debate-bot-avatar="true"] [data-crt-glyph-layer="true"]::after { content: none !important; display: none !important; }',
+        });
+      } else if (performanceProbe === "transcript") {
+        await page
+          .getByRole("region", { name: "Debate transcript" })
+          .evaluate((element) => {
+            (element as HTMLElement).style.display = "none";
+          });
+      }
+      const metrics = await page.evaluate(async () => {
+        const intervals: number[] = [];
+        let previous = performance.now();
+        await new Promise<void>((resolve) => {
+          const startedAt = previous;
+          const sample = (now: number) => {
+            intervals.push(now - previous);
+            previous = now;
+            if (now - startedAt >= 4_000) {
+              resolve();
+              return;
+            }
+            requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+        const sorted = [...intervals].sort((left, right) => left - right);
+        const p95 =
+          sorted[Math.max(0, Math.ceil(sorted.length * 0.95) - 1)] ?? 0;
+        const total = intervals.reduce((sum, value) => sum + value, 0);
+        const fps = total > 0 ? (intervals.length * 1_000) / total : 0;
+        const missed =
+          intervals.length > 0
+            ? (intervals.filter((value) => value > 20).length /
+                intervals.length) *
+              100
+            : 100;
+        const materialTier = document
+          .querySelector('[data-debate-surface="live"]')
+          ?.getAttribute("data-debate-material-quality");
+        return { fps, p95, missed, frames: intervals.length, materialTier };
+      });
+      await testInfo.attach("debate-performance.json", {
+        body: JSON.stringify(metrics, null, 2),
+        contentType: "application/json",
+      });
+      console.info("Debate performance metrics", JSON.stringify(metrics));
+      if (process.env.PRISM_DEBATE_PERF_STRICT === "1") {
+        expect(metrics.fps).toBeGreaterThanOrEqual(55);
+        expect(metrics.p95).toBeLessThanOrEqual(20);
+        expect(metrics.missed).toBeLessThanOrEqual(5);
+        expect(metrics.materialTier).toBe("full");
+      }
+      for (const camera of ["Left", "Moderator", "Right", "Jury", "Auto"]) {
+        await live.getByRole("button", { name: camera, exact: true }).click();
+        if (camera === "Jury") {
+          await expect(
+            live.locator('[data-tutorial-target="debate-jury-chamber"]'),
+          ).toBeVisible();
+        }
+      }
+    }
 
     const captionBox = await caption.boundingBox();
     const stageBox = await live

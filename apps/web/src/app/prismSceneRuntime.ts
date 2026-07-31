@@ -9,6 +9,7 @@ export type PrismSceneQuality = "full" | "balanced" | "minimal";
 export type PrismSceneRendererStatus =
   | "uninitialized"
   | "initializing"
+  | "dom"
   | "webgl"
   | "context-lost"
   | "fallback"

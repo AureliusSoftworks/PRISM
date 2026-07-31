@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -120,8 +121,8 @@ import {
   debateEvidenceEmojiForObject,
   debateEvidenceObjectFromPrismCandidate,
   nextDebateEvidenceExhibitId,
-  normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
+  searchDebateEvidenceEmojis,
   type DebateEvidenceObjectDraft,
 } from "./debateEvidenceExhibits";
 import {
@@ -239,6 +240,11 @@ import { magentaTintedRasterUrl } from "./magentaKeyRaster";
 import type { VoicePlaybackCharacterAlignment } from "./voiceEffects";
 import type { ZenLiveBotMouthShape } from "./zenLiveMouth";
 import { DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX } from "./signalStageSoundcheck";
+import { useDebateDomPerformance } from "./useDebateDomPerformance";
+import {
+  createDebatePresentationStore,
+  type DebatePresentationStore,
+} from "./debatePresentationStore";
 
 export interface DebateBotSummary {
   id: string;
@@ -803,6 +809,85 @@ function DebateTurnClock(props: {
     </div>
   );
 }
+
+const DebateLiveCaptionConsumer = memo(
+  function DebateLiveCaptionConsumer(props: {
+    store: DebatePresentationStore;
+    sessionId: string;
+    event: DebateEventV1;
+    speakerName: string;
+  }): React.JSX.Element | null {
+    const snapshot = useSyncExternalStore(
+      props.store.subscribe,
+      props.store.getSnapshot,
+      props.store.getSnapshot,
+    );
+    if (
+      snapshot.sessionId !== props.sessionId ||
+      snapshot.eventId !== props.event.id
+    ) {
+      return null;
+    }
+    const text = debateSpokenText(snapshot.visibleContent).trim();
+    if (!text) return null;
+    return (
+      <DebateLiveCaption
+        eventId={props.event.id}
+        speakerKind={props.event.speakerKind}
+        speakerName={props.speakerName}
+        text={text}
+      />
+    );
+  },
+);
+
+const DebateTurnClockConsumer = memo(function DebateTurnClockConsumer(props: {
+  store: DebatePresentationStore;
+  sessionId: string;
+  event: DebateEventV1;
+}): React.JSX.Element | null {
+  const snapshot = useSyncExternalStore(
+    props.store.subscribe,
+    props.store.getSnapshot,
+    props.store.getSnapshot,
+  );
+  return (
+    <DebateTurnClock
+      event={props.event}
+      speechTiming={
+        snapshot.sessionId === props.sessionId &&
+        snapshot.eventId === props.event.id
+          ? snapshot.speechTiming
+          : null
+      }
+    />
+  );
+});
+
+const DebateActiveAvatarConsumer = memo(
+  function DebateActiveAvatarConsumer(props: {
+    store: DebatePresentationStore;
+    sessionId: string;
+    eventId: string;
+    bot: DebateBotSnapshotV1;
+    state: Omit<DebateBotAvatarState, "speechTiming">;
+    renderBotAvatar: NonNullable<DebateExperienceProps["renderBotAvatar"]>;
+  }): ReactNode {
+    const snapshot = useSyncExternalStore(
+      props.store.subscribe,
+      props.store.getSnapshot,
+      props.store.getSnapshot,
+    );
+    return props.renderBotAvatar(props.bot, {
+      ...props.state,
+      speechTiming:
+        snapshot.sessionId === props.sessionId &&
+        snapshot.eventId === props.eventId
+          ? snapshot.speechTiming
+          : null,
+    });
+  },
+);
 
 function DebateModeratorGavel(props: {
   theme: "light" | "dark";
@@ -1589,50 +1674,189 @@ async function writeDebateClipboardText(text: string): Promise<void> {
   }
 }
 
-function DebateMarkdownBody({
-  content,
-  evidence,
-  onSource,
-}: {
-  content: string;
-  evidence: DebateEvidencePacketV1;
-  onSource: (id: string) => void;
-}): React.JSX.Element {
-  return (
-    <div className={styles.transcriptMarkdown}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-        components={{
-          a: ({ href, children }) => {
-            const item = debateEvidenceFromMarkdownHref(href, evidence);
-            if (item) {
+const DebateMarkdownBody = memo(
+  function DebateMarkdownBody({
+    content,
+    evidence,
+    onSource,
+  }: {
+    content: string;
+    evidence: DebateEvidencePacketV1;
+    onSource: (id: string) => void;
+  }): React.JSX.Element {
+    return (
+      <div className={styles.transcriptMarkdown}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          skipHtml
+          components={{
+            a: ({ href, children }) => {
+              const item = debateEvidenceFromMarkdownHref(href, evidence);
+              if (item) {
+                return (
+                  <button
+                    type="button"
+                    className={styles.sourceChip}
+                    data-kind={item.kind}
+                    onClick={() => onSource(item.value.id)}
+                    aria-label={`Open ${item.kind === "source" ? "source" : "exhibit"} ${item.value.title}`}
+                  >
+                    {children}
+                  </button>
+                );
+              }
               return (
-                <button
-                  type="button"
-                  className={styles.sourceChip}
-                  data-kind={item.kind}
-                  onClick={() => onSource(item.value.id)}
-                  aria-label={`Open ${item.kind === "source" ? "source" : "exhibit"} ${item.value.title}`}
-                >
+                <a href={href} target="_blank" rel="noreferrer">
                   {children}
-                </button>
+                </a>
               );
-            }
-            return (
-              <a href={href} target="_blank" rel="noreferrer">
-                {children}
-              </a>
-            );
-          },
-          img: () => null,
-        }}
+            },
+            img: () => null,
+          }}
+        >
+          {debateMarkdownSource(content, evidence)}
+        </ReactMarkdown>
+      </div>
+    );
+  },
+  (previous, next) =>
+    previous.content === next.content &&
+    previous.evidence.frozenAt === next.evidence.frozenAt &&
+    previous.onSource === next.onSource,
+);
+
+const DebateTranscriptBodyConsumer = memo(
+  function DebateTranscriptBodyConsumer(props: {
+    store: DebatePresentationStore;
+    sessionId: string;
+    event: DebateEventV1;
+    evidence: DebateEvidencePacketV1;
+    onSource: (id: string) => void;
+  }): React.JSX.Element {
+    const snapshot = useSyncExternalStore(
+      props.store.subscribe,
+      props.store.getSnapshot,
+      props.store.getSnapshot,
+    );
+    const content =
+      snapshot.sessionId === props.sessionId &&
+      snapshot.eventId === props.event.id
+        ? snapshot.visibleContent
+        : props.event.content;
+    return content ? (
+      <div className={styles.transcriptMarkdown}>
+        <p>{debateSpokenText(content)}</p>
+      </div>
+    ) : (
+      <span
+        className={styles.liveProseCursor}
+        aria-label="Speaker is beginning"
+      />
+    );
+  },
+);
+
+const DebateVisibleTextConsumer = memo(
+  function DebateVisibleTextConsumer(props: {
+    store: DebatePresentationStore;
+    sessionId: string;
+    event: DebateEventV1;
+  }): ReactNode {
+    const snapshot = useSyncExternalStore(
+      props.store.subscribe,
+      props.store.getSnapshot,
+      props.store.getSnapshot,
+    );
+    return snapshot.sessionId === props.sessionId &&
+      snapshot.eventId === props.event.id
+      ? snapshot.visibleContent
+      : props.event.content;
+  },
+);
+
+const DebateCompletedTranscriptArticle = memo(
+  function DebateCompletedTranscriptArticle(props: {
+    session: DebateSessionV1;
+    event: DebateEventV1;
+    playerName: string;
+    onSource: (id: string) => void;
+  }): React.JSX.Element {
+    return (
+      <article
+        data-kind={props.event.kind}
+        data-side={props.event.sideId ?? undefined}
       >
-        {debateMarkdownSource(content, evidence)}
-      </ReactMarkdown>
-    </div>
-  );
-}
+        <header>
+          <strong>
+            {visibleEventName(props.session, props.event, props.playerName)}
+          </strong>
+          <span>
+            {props.event.interrupted
+              ? "interrupted"
+              : props.event.stepKey.startsWith("persona_reaction_")
+                ? "vocal reaction"
+                : props.event.kind.replace("_", " ")}{" "}
+            · {props.event.phase}
+          </span>
+        </header>
+        {props.event.content ? (
+          <DebateMarkdownBody
+            content={props.event.content}
+            evidence={props.session.evidence}
+            onSource={props.onSource}
+          />
+        ) : null}
+      </article>
+    );
+  },
+  (previous, next) =>
+    previous.session.id === next.session.id &&
+    previous.session.evidence.frozenAt === next.session.evidence.frozenAt &&
+    previous.event.id === next.event.id &&
+    previous.event.content === next.event.content &&
+    previous.event.interrupted === next.event.interrupted &&
+    previous.playerName === next.playerName &&
+    previous.onSource === next.onSource,
+);
+
+const DebateStreamingTranscriptArticle = memo(
+  function DebateStreamingTranscriptArticle(props: {
+    store: DebatePresentationStore;
+    session: DebateSessionV1;
+    event: DebateEventV1;
+    playerName: string;
+    onSource: (id: string) => void;
+  }): React.JSX.Element {
+    return (
+      <article
+        data-kind={props.event.kind}
+        data-side={props.event.sideId ?? undefined}
+        data-streaming="true"
+      >
+        <header>
+          <strong>
+            {visibleEventName(props.session, props.event, props.playerName)}
+          </strong>
+          <span>
+            {props.event.interrupted
+              ? "interrupted"
+              : props.event.stepKey.startsWith("persona_reaction_")
+                ? "vocal reaction"
+                : props.event.kind.replace("_", " ")}{" "}
+            · {props.event.phase}
+          </span>
+        </header>
+        <DebateTranscriptBodyConsumer
+          store={props.store}
+          sessionId={props.session.id}
+          event={props.event}
+          evidence={props.session.evidence}
+          onSource={props.onSource}
+        />
+      </article>
+    );
+  },
+);
 
 function debateEvidenceExhibitImageUrl(
   exhibit: DebateEvidenceExhibitV1,
@@ -1904,23 +2128,38 @@ export function DebateExperience(
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
   );
+  const liveAudienceSessionId = activeSession?.id ?? null;
+  const liveAudienceCastKey = activeSession
+    ? [
+        activeSession.moderator.id,
+        activeSession.forAdvocate.id,
+        activeSession.againstAdvocate.id,
+        ...activeSession.jury.jurors.map((juror) => juror.id),
+      ].join("\0")
+    : "";
   const liveAudienceBots = useMemo(
     () =>
-      activeSession
+      liveAudienceSessionId
         ? debateAudienceBotsForSession({
-            sessionId: activeSession.id,
+            sessionId: liveAudienceSessionId,
             count: debateAudienceBotCount(props.graphicsQuality),
             bots,
-            excludedBotIds: [
-              activeSession.moderator.id,
-              activeSession.forAdvocate.id,
-              activeSession.againstAdvocate.id,
-              ...activeSession.jury.jurors.map((juror) => juror.id),
-            ],
+            excludedBotIds: liveAudienceCastKey.split("\0"),
           })
         : [],
-    [activeSession, bots, props.graphicsQuality],
+    [bots, liveAudienceCastKey, liveAudienceSessionId, props.graphicsQuality],
   );
+  const debateMaterialQuality = useDebateDomPerformance({
+    active:
+      view === "live" &&
+      activeSession !== null &&
+      activeSession.status !== "paused",
+    graphicsQuality: props.graphicsQuality,
+    objectCount:
+      liveAudienceBots.length +
+      (activeSession?.jury.enabled ? activeSession.jury.jurors.length : 0) +
+      3,
+  });
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<DebateFormatId>("forum");
   const [formality, setFormality] = useState<DebateFormalityId>("plainspoken");
@@ -1950,6 +2189,13 @@ export function DebateExperience(
   const [urlEvidenceError, setUrlEvidenceError] = useState<string | null>(null);
   const [evidenceObjectDraft, setEvidenceObjectDraft] =
     useState<DebateEvidenceObjectDraft | null>(null);
+  const [evidenceEmojiSearchOpen, setEvidenceEmojiSearchOpen] = useState(false);
+  const [evidenceEmojiSearchQuery, setEvidenceEmojiSearchQuery] = useState("");
+  const evidenceEmojiTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const evidenceEmojiSearchResults = useMemo(
+    () => searchDebateEvidenceEmojis(evidenceEmojiSearchQuery),
+    [evidenceEmojiSearchQuery],
+  );
   const [evidenceObjectSuggestionBusy, setEvidenceObjectSuggestionBusy] =
     useState(false);
   const [evidenceObjectVisualBusy, setEvidenceObjectVisualBusy] = useState<
@@ -1991,11 +2237,62 @@ export function DebateExperience(
   const [earlyEndOpen, setEarlyEndOpen] = useState(false);
   const [deleteUndo, setDeleteUndo] = useState<DebateDeleteUndo | null>(null);
   const [transcriptAtLive, setTranscriptAtLive] = useState(true);
-  const [liveReveal, setLiveReveal] = useState<DebateLiveReveal | null>(null);
+  const presentationStore = useMemo(createDebatePresentationStore, []);
+  const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
+  useEffect(() => {
+    activeSessionIdRef.current = activeSession?.id ?? null;
+  }, [activeSession?.id]);
+  const [liveReveal, setLiveRevealState] = useState<DebateLiveReveal | null>(
+    null,
+  );
+  const replaceLiveReveal = useCallback(
+    (next: DebateLiveReveal | null, renderBoundary = true): void => {
+      if (next) {
+        presentationStore.replace({
+          sessionId: activeSessionIdRef.current,
+          eventId: next.eventId,
+          visibleContent: next.visibleContent,
+          speechTiming: next.speechTiming ?? null,
+        });
+      } else {
+        presentationStore.clear(activeSessionIdRef.current);
+      }
+      if (renderBoundary) setLiveRevealState(next);
+    },
+    [presentationStore],
+  );
+  const updateLiveReveal = useCallback(
+    (
+      update: (current: DebateLiveReveal | null) => DebateLiveReveal | null,
+      renderBoundary = true,
+    ): void => {
+      const snapshot = presentationStore.getSnapshot();
+      const current =
+        snapshot.eventId === null
+          ? null
+          : {
+              eventId: snapshot.eventId,
+              visibleContent: snapshot.visibleContent,
+              speechTiming: snapshot.speechTiming,
+            };
+      replaceLiveReveal(update(current), renderBoundary);
+    },
+    [presentationStore, replaceLiveReveal],
+  );
   const [
     transcriptVisibleThroughSequence,
     setTranscriptVisibleThroughSequence,
   ] = useState<number | null>(null);
+  const visibleCaseBoard = useMemo(
+    () =>
+      activeSession
+        ? debateCaseBoardAtSequence(
+            activeSession,
+            transcriptVisibleThroughSequence,
+          )
+        : [],
+    [activeSession, transcriptVisibleThroughSequence],
+  );
   const [presenting, setPresenting] = useState(false);
   const [voicePreparationSpeakerBotId, setVoicePreparationSpeakerBotId] =
     useState<string | null>(null);
@@ -2545,6 +2842,7 @@ export function DebateExperience(
     return () => {
       mountedRef.current = false;
       presentationRunRef.current += 1;
+      presentationStore.clear();
       void stopDebateIdentAudio();
       onStopUtterance?.();
       if (transcriptCopyResetTimerRef.current) {
@@ -2601,7 +2899,7 @@ export function DebateExperience(
         speechRevealRunRef.current = null;
       }
     };
-  }, [loadSessions, onStopUtterance]);
+  }, [loadSessions, onStopUtterance, presentationStore]);
   useEffect(() => {
     if (view === "live" && props.audioEnabled && props.audioVolume > 0) {
       setDebateIdentAudioVolume(props.audioVolume);
@@ -3958,6 +4256,7 @@ export function DebateExperience(
     const rejectedTitles = (evidence.exhibits ?? []).map(
       (exhibit) => exhibit.title,
     );
+    setEvidenceEmojiSearchOpen(false);
     setEvidenceObjectSuggestionBusy(true);
     setError(null);
     try {
@@ -4022,22 +4321,36 @@ export function DebateExperience(
     });
   };
 
-  const suggestEvidenceObjectEmoji = (): void => {
-    if (evidenceObjectVisualBusy) return;
+  const closeEvidenceEmojiSearch = (restoreFocus = true): void => {
+    setEvidenceEmojiSearchOpen(false);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() =>
+        evidenceEmojiTriggerRef.current?.focus(),
+      );
+    }
+  };
+
+  const openEvidenceEmojiSearch = (): void => {
+    if (!evidenceObjectDraft || evidenceObjectVisualBusy) return;
+    setEvidenceEmojiSearchQuery(
+      `${evidenceObjectDraft.adjective} ${evidenceObjectDraft.object}`.trim(),
+    );
+    setEvidenceEmojiSearchOpen(true);
+  };
+
+  const chooseEvidenceObjectEmoji = (emoji: string): void => {
     setEvidenceObjectDraft((current) =>
       current
         ? {
             ...current,
-            emoji: debateEvidenceEmojiForObject(
-              current.object,
-              current.adjective,
-            ),
-            emojiCustomized: false,
+            emoji,
+            emojiCustomized: true,
             visualKind: "emoji",
             imageId: null,
           }
         : current,
     );
+    closeEvidenceEmojiSearch();
   };
 
   const uploadEvidenceObjectImage = async (file: File): Promise<void> => {
@@ -4151,6 +4464,7 @@ export function DebateExperience(
         },
       ],
     }));
+    setEvidenceEmojiSearchOpen(false);
     setEvidenceObjectDraft(null);
     setError(null);
   };
@@ -4170,7 +4484,7 @@ export function DebateExperience(
         const durationMs = debateRevealDurationMs(spokenText || event.content);
         const speechText = spokenText || event.content;
         if (durationMs <= 0) {
-          setLiveReveal({
+          replaceLiveReveal({
             eventId: event.id,
             visibleContent: event.content,
             speechTiming: null,
@@ -4180,12 +4494,14 @@ export function DebateExperience(
           return;
         }
         const startedAt = performance.now();
+        let lastSemanticKey = "";
+        let lastPresentationPublishAt = 0;
         let settled = false;
         const settle = (complete: boolean): void => {
           if (settled) return;
           settled = true;
           if (complete) {
-            setLiveReveal({
+            replaceLiveReveal({
               eventId: event.id,
               visibleContent: event.content,
               speechTiming: {
@@ -4210,20 +4526,39 @@ export function DebateExperience(
             return;
           }
           const progress = Math.min(1, (now - startedAt) / durationMs);
+          if (
+            progress < 1 &&
+            now - lastPresentationPublishAt <
+              DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS
+          ) {
+            const frameId = window.requestAnimationFrame(tick);
+            if (speechRevealRunRef.current?.cancel === cancel) {
+              speechRevealRunRef.current.frameId = frameId;
+            }
+            return;
+          }
+          lastPresentationPublishAt = now;
           const visibleContent = debateVisibleContentAtProgress(
             event.content,
             progress,
           );
-          setLiveReveal({
-            eventId: event.id,
-            visibleContent,
-            speechTiming: {
-              text: speechText,
-              elapsedMs: progress * durationMs,
-              durationMs,
-              alignment: null,
+          const semanticKey = `${debateGalleryReaction(visibleContent)}:${Math.floor(
+            visibleContent.length / 96,
+          )}:${visibleContent.length >= 24}`;
+          replaceLiveReveal(
+            {
+              eventId: event.id,
+              visibleContent,
+              speechTiming: {
+                text: speechText,
+                elapsedMs: progress * durationMs,
+                durationMs,
+                alignment: null,
+              },
             },
-          });
+            semanticKey !== lastSemanticKey,
+          );
+          lastSemanticKey = semanticKey;
           onVisibleCharacterCount?.(visibleContent.length);
           if (progress >= 1) {
             finish();
@@ -4237,7 +4572,7 @@ export function DebateExperience(
         const frameId = window.requestAnimationFrame(tick);
         speechRevealRunRef.current = { frameId, cancel };
       }),
-    [],
+    [replaceLiveReveal],
   );
 
   const markJuryCommentPlayed = useCallback((eventId: string): void => {
@@ -4500,7 +4835,7 @@ export function DebateExperience(
           playDebateAudienceReaction(semanticAudienceReaction, event.id);
         }
         if (event.kind === "silence") {
-          setLiveReveal({
+          replaceLiveReveal({
             eventId: event.id,
             visibleContent: event.content,
           });
@@ -4533,7 +4868,7 @@ export function DebateExperience(
             resetAfterSequence: event.sequence,
             sessionId: next.id,
           });
-          setLiveReveal({
+          replaceLiveReveal({
             eventId: event.id,
             visibleContent: "",
             speechTiming: null,
@@ -4545,7 +4880,7 @@ export function DebateExperience(
           event.kind === "judge_gavel" &&
           event.gavelReason === "intervention"
         ) {
-          setLiveReveal({
+          replaceLiveReveal({
             eventId: event.id,
             visibleContent: event.content,
             speechTiming: null,
@@ -4557,7 +4892,7 @@ export function DebateExperience(
           continue;
         }
         if (event.speakerKind === "system") {
-          setLiveReveal({ eventId: event.id, visibleContent: "" });
+          replaceLiveReveal({ eventId: event.id, visibleContent: "" });
           await revealEventSilently(event, debateSpokenText(event.content));
           if (presentationRunRef.current !== runId) return;
           if (audienceReaction) {
@@ -4572,7 +4907,7 @@ export function DebateExperience(
             (ballot) => ballot.voterBotId === event.speakerBotId,
           )?.privateReason
         ) {
-          setLiveReveal(null);
+          replaceLiveReveal(null);
           await new Promise((resolve) => window.setTimeout(resolve, 900));
           continue;
         }
@@ -4582,7 +4917,7 @@ export function DebateExperience(
         // still resolve through canonical silence.
         if (!utterance) continue;
         const { spokenText } = utterance;
-        setLiveReveal({ eventId: event.id, visibleContent: "" });
+        replaceLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
         let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
         let playbackDurationMs = Math.max(
@@ -4590,6 +4925,7 @@ export function DebateExperience(
           debateRevealDurationMs(spokenText || event.content),
         );
         let lastSpeechRenderAt = 0;
+        let lastSemanticKey = "";
         const played = await onUtterance?.({
           ...utterance,
           lifecycle: {
@@ -4602,7 +4938,7 @@ export function DebateExperience(
               );
               lastSpeechRenderAt = performance.now();
               performLinkedAudienceOrderCues(0);
-              setLiveReveal((current) =>
+              updateLiveReveal((current) =>
                 current?.eventId === event.id
                   ? {
                       ...current,
@@ -4632,22 +4968,36 @@ export function DebateExperience(
                 event.content,
                 elapsedMs / playbackDurationMs,
               );
-              setLiveReveal({
-                eventId: event.id,
-                visibleContent,
-                speechTiming: {
-                  text: spokenText,
+              const clockStatus =
+                debateTurnClockState(event, {
                   elapsedMs: Math.min(playbackDurationMs, elapsedMs),
                   durationMs: playbackDurationMs,
-                  alignment: playbackAlignment,
+                })?.status ?? "none";
+              const semanticKey = `${debateGalleryReaction(
+                visibleContent,
+              )}:${Math.floor(visibleContent.length / 96)}:${
+                visibleContent.length >= 24
+              }:${clockStatus}`;
+              replaceLiveReveal(
+                {
+                  eventId: event.id,
+                  visibleContent,
+                  speechTiming: {
+                    text: spokenText,
+                    elapsedMs: Math.min(playbackDurationMs, elapsedMs),
+                    durationMs: playbackDurationMs,
+                    alignment: playbackAlignment,
+                  },
                 },
-              });
+                semanticKey !== lastSemanticKey,
+              );
+              lastSemanticKey = semanticKey;
               performLinkedAudienceOrderCues(visibleContent.length);
             },
             onEnd: () => {
               if (presentationRunRef.current !== runId) return;
               performLinkedAudienceOrderCues(event.content.length);
-              setLiveReveal({
+              replaceLiveReveal({
                 eventId: event.id,
                 visibleContent: event.content,
                 speechTiming: {
@@ -4669,7 +5019,7 @@ export function DebateExperience(
           );
           if (presentationRunRef.current !== runId) return;
         } else {
-          setLiveReveal((current) =>
+          updateLiveReveal((current) =>
             current?.eventId === event.id
               ? { ...current, visibleContent: event.content }
               : {
@@ -4684,7 +5034,7 @@ export function DebateExperience(
       }
       if (presentationRunRef.current !== runId) return;
       setLiveGavelCue(null);
-      setLiveReveal(null);
+      replaceLiveReveal(null);
       setTranscriptVisibleThroughSequence(null);
       setVoicePreparationSpeakerBotId(null);
     },
@@ -4695,7 +5045,9 @@ export function DebateExperience(
       onUtterance,
       playDebateAudienceReaction,
       props.graphicsQuality,
+      replaceLiveReveal,
       revealEventSilently,
+      updateLiveReveal,
     ],
   );
 
@@ -4771,6 +5123,8 @@ export function DebateExperience(
     ): Promise<void> => {
       const runId = presentationRunRef.current + 1;
       presentationRunRef.current = runId;
+      activeSessionIdRef.current = next.id;
+      presentationStore.clear();
       setVoicePreparationSpeakerBotId(null);
       const fresh = debatePresentationEvents(
         previous,
@@ -4804,16 +5158,16 @@ export function DebateExperience(
           firstGavelCue?.kind !== "order"
         ) {
           setPresentationEventId(first.id);
-          setLiveReveal({ eventId: first.id, visibleContent: "" });
+          replaceLiveReveal({ eventId: first.id, visibleContent: "" });
         } else {
           setPresentationEventId(null);
-          setLiveReveal(null);
+          replaceLiveReveal(null);
         }
       } else {
         setTranscriptVisibleThroughSequence(null);
         setPresentationEventId(null);
         setLiveGavelCue(null);
-        setLiveReveal(null);
+        replaceLiveReveal(null);
       }
       setPresenting(fresh.length > 0 || options.playIntro === true);
       setTurnaboutObjecting(false);
@@ -4849,7 +5203,14 @@ export function DebateExperience(
       }
       void loadSessions();
     },
-    [consumeNewEvents, loadSessions, onPrepareUtterance, playDebateIdent],
+    [
+      consumeNewEvents,
+      loadSessions,
+      onPrepareUtterance,
+      playDebateIdent,
+      presentationStore,
+      replaceLiveReveal,
+    ],
   );
 
   const openSession = async (
@@ -4866,6 +5227,8 @@ export function DebateExperience(
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
       setObserverPerspective(perspective);
+      presentationStore.clear();
+      activeSessionIdRef.current = result.session.id;
       setActiveSession(result.session);
       setView("live");
     } catch (caught) {
@@ -5474,6 +5837,7 @@ export function DebateExperience(
     }
     setLiveGavelCue(null);
     setAudiencePressurePresentationEventId(null);
+    replaceLiveReveal(null);
     setPresenting(false);
   };
 
@@ -5669,9 +6033,10 @@ export function DebateExperience(
     }
 
     const target = judgeGavelActiveTarget;
+    const presentationSnapshot = presentationStore.getSnapshot();
     const heardCharacterCount =
-      target && liveReveal?.eventId === target.id
-        ? liveReveal.visibleContent.length
+      target && presentationSnapshot.eventId === target.id
+        ? presentationSnapshot.visibleContent.length
         : (target?.content.length ?? 0);
     const resetAfterSequence =
       target?.sequence ?? previous.events.at(-1)?.sequence ?? 0;
@@ -5733,11 +6098,15 @@ export function DebateExperience(
     }
     debateFloorMutationInFlightRef.current = true;
     const target = judgeGavelActiveTarget;
+    const presentationSnapshot = presentationStore.getSnapshot();
     const heardCharacterCount =
-      target && liveReveal?.eventId === target.id
-        ? liveReveal.visibleContent.length
+      target && presentationSnapshot.eventId === target.id
+        ? presentationSnapshot.visibleContent.length
         : (target?.content.length ?? 0);
-    const targetClock = judgeGavelActiveTargetClock;
+    const targetClock =
+      target && presentationSnapshot.eventId === target.id
+        ? debateTurnClockState(target, presentationSnapshot.speechTiming)
+        : judgeGavelActiveTargetClock;
     const overtime =
       overtimeOverride ??
       (target?.speakerKind === "advocate" &&
@@ -5815,7 +6184,7 @@ export function DebateExperience(
           : "The Judge's gavel was unavailable.",
       );
       setTranscriptVisibleThroughSequence(null);
-      setLiveReveal(null);
+      replaceLiveReveal(null);
     } finally {
       debateFloorMutationInFlightRef.current = false;
       judgeGavelOvertimeBurstActiveRef.current = false;
@@ -5888,10 +6257,11 @@ export function DebateExperience(
           null)
         : null;
     if (!resume) {
+      const presentationSnapshot = presentationStore.getSnapshot();
       pausedPresentationReplayRef.current =
         interruptedPresentationEvent !== null &&
-        liveReveal?.eventId === interruptedPresentationEvent.id &&
-        liveReveal.visibleContent.length <
+        presentationSnapshot.eventId === interruptedPresentationEvent.id &&
+        presentationSnapshot.visibleContent.length <
           interruptedPresentationEvent.content.length
           ? {
               sessionId: previous.id,
@@ -5968,7 +6338,7 @@ export function DebateExperience(
       if (!resume) {
         pausedPresentationReplayRef.current = null;
         setTranscriptVisibleThroughSequence(null);
-        setLiveReveal(null);
+        replaceLiveReveal(null);
       }
     } finally {
       debateFloorMutationInFlightRef.current = false;
@@ -6051,9 +6421,10 @@ export function DebateExperience(
     const target = previous?.events.find(
       (candidate) => candidate.id === presentationEventId,
     );
+    const presentationSnapshot = presentationStore.getSnapshot();
     const heardCharacterCount =
-      target && liveReveal?.eventId === target.id
-        ? liveReveal.visibleContent.length
+      target && presentationSnapshot.eventId === target.id
+        ? presentationSnapshot.visibleContent.length
         : 0;
     if (
       !previous ||
@@ -6102,7 +6473,7 @@ export function DebateExperience(
           : "The objection could not be raised.",
       );
       setTranscriptVisibleThroughSequence(null);
-      setLiveReveal(null);
+      replaceLiveReveal(null);
     } finally {
       debateFloorMutationInFlightRef.current = false;
       if (mountedRef.current) setBusy(false);
@@ -6170,14 +6541,14 @@ export function DebateExperience(
     const target = previous?.events.find(
       (candidate) => candidate.id === presentationEventId,
     );
+    const presentationSnapshot = presentationStore.getSnapshot();
     if (
       !previous ||
       !target ||
       target.kind !== "speech" ||
       target.sideId === previous.playerSideId ||
-      !liveReveal ||
-      liveReveal.eventId !== target.id ||
-      liveReveal.visibleContent.length < 24 ||
+      presentationSnapshot.eventId !== target.id ||
+      presentationSnapshot.visibleContent.length < 24 ||
       !interjectionDraft.trim() ||
       busy
     ) {
@@ -6193,7 +6564,7 @@ export function DebateExperience(
           expectedRevision: previous.revision,
           idempotencyKey: nextMutationKey("interject"),
           eventId: target.id,
-          heardCharacterCount: liveReveal.visibleContent.length,
+          heardCharacterCount: presentationSnapshot.visibleContent.length,
           content: interjectionDraft,
         }),
       );
@@ -6208,7 +6579,7 @@ export function DebateExperience(
           : "The moderator could not hear the interjection.",
       );
       setTranscriptVisibleThroughSequence(null);
-      setLiveReveal(null);
+      replaceLiveReveal(null);
     } finally {
       if (mountedRef.current) setBusy(false);
     }
@@ -8095,9 +8466,7 @@ export function DebateExperience(
               <button
                 type="button"
                 onClick={() => void inspectUrlEvidence()}
-                disabled={
-                  !urlEvidenceDraft.url.trim() || urlEvidenceInspecting
-                }
+                disabled={!urlEvidenceDraft.url.trim() || urlEvidenceInspecting}
               >
                 {urlEvidenceInspecting
                   ? "Reading…"
@@ -8316,45 +8685,94 @@ export function DebateExperience(
             <fieldset className={styles.evidenceEmojiPicker}>
               <legend>Exhibit emoji</legend>
               <div>
-                <input
-                  aria-label="Exhibit emoji"
-                  aria-describedby="debate-evidence-emoji-help"
-                  value={evidenceObjectDraft.emoji}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => {
-                    const value = event.currentTarget.value;
-                    setEvidenceObjectDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            emoji: normalizeDebateEvidenceEmojiChoice(
-                              value,
-                              current.emoji,
-                            ),
-                            emojiCustomized: true,
-                          }
-                        : current,
-                    );
-                  }}
-                  disabled={evidenceObjectVisualBusy !== null}
-                />
                 <button
+                  ref={evidenceEmojiTriggerRef}
                   type="button"
-                  onClick={suggestEvidenceObjectEmoji}
-                  disabled={
-                    evidenceObjectVisualBusy !== null ||
-                    !evidenceObjectDraft.object.trim()
-                  }
+                  className={styles.evidenceEmojiTrigger}
+                  aria-label={`Choose exhibit emoji. Current emoji: ${evidenceObjectDraft.emoji}`}
+                  aria-haspopup="dialog"
+                  aria-expanded={evidenceEmojiSearchOpen}
+                  onClick={openEvidenceEmojiSearch}
+                  disabled={evidenceObjectVisualBusy !== null}
                 >
-                  <strong>Suggest from exhibit name</strong>
-                  <small id="debate-evidence-emoji-help">
-                    Uses the most relevant term in the object name. You can
-                    still type or paste any emoji.
-                  </small>
+                  <span aria-hidden="true">{evidenceObjectDraft.emoji}</span>
                 </button>
+                <div className={styles.evidenceEmojiPickerHelp}>
+                  <strong>Search for an emoji</strong>
+                  <small id="debate-evidence-emoji-help">
+                    Click the emoji, then describe the object or idea you want
+                    to represent.
+                  </small>
+                </div>
               </div>
             </fieldset>
+            {evidenceEmojiSearchOpen ? (
+              <div
+                className={styles.evidenceEmojiSearchBackdrop}
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    closeEvidenceEmojiSearch();
+                  }
+                }}
+              >
+                <section
+                  className={styles.evidenceEmojiSearchModal}
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="debate-evidence-emoji-search-title"
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.stopPropagation();
+                    closeEvidenceEmojiSearch();
+                  }}
+                >
+                  <header>
+                    <div>
+                      <span>Exhibit emoji</span>
+                      <h2 id="debate-evidence-emoji-search-title">
+                        Find the right symbol
+                      </h2>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => closeEvidenceEmojiSearch()}
+                      aria-label="Close emoji search"
+                    >
+                      ×
+                    </button>
+                  </header>
+                  <label>
+                    <span>Search</span>
+                    <input
+                      autoFocus
+                      type="search"
+                      value={evidenceEmojiSearchQuery}
+                      placeholder="glove, evidence, transit, justice…"
+                      onChange={(event) =>
+                        setEvidenceEmojiSearchQuery(event.currentTarget.value)
+                      }
+                    />
+                  </label>
+                  <div
+                    className={styles.evidenceEmojiSearchResults}
+                    aria-label="Three most relevant emojis"
+                    aria-live="polite"
+                  >
+                    {evidenceEmojiSearchResults.map((result) => (
+                      <button
+                        key={result.emoji}
+                        type="button"
+                        onClick={() => chooseEvidenceObjectEmoji(result.emoji)}
+                        aria-label={`Use ${result.label} emoji ${result.emoji}`}
+                      >
+                        <span aria-hidden="true">{result.emoji}</span>
+                        <small>{result.label}</small>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            ) : null}
             <section
               className={styles.evidenceExhibitAssetLibrary}
               aria-label="Previously generated Debate exhibit sprites"
@@ -8458,7 +8876,10 @@ export function DebateExperience(
             <div className={styles.evidenceObjectCommitActions}>
               <button
                 type="button"
-                onClick={() => setEvidenceObjectDraft(null)}
+                onClick={() => {
+                  setEvidenceEmojiSearchOpen(false);
+                  setEvidenceObjectDraft(null);
+                }}
                 disabled={evidenceObjectVisualBusy !== null}
               >
                 Cancel
@@ -8909,10 +9330,6 @@ export function DebateExperience(
     session: DebateSessionV1,
     activeEvent: DebateEventV1 | null,
   ): React.JSX.Element => {
-    const visibleBoard = debateCaseBoardAtSequence(
-      session,
-      transcriptVisibleThroughSequence,
-    );
     return (
       <aside
         className={styles.caseBoard}
@@ -8932,7 +9349,7 @@ export function DebateExperience(
                   : session.motion.againstSide.label}
               </h2>
               <ul>
-                {visibleBoard
+                {visibleCaseBoard
                   .filter((card) => card.sideId === sideId)
                   .map((card) => (
                     <li
@@ -9601,43 +10018,24 @@ export function DebateExperience(
                   event.sequence <= transcriptVisibleThroughSequence),
             )
             .map((event) => {
-              const streaming = liveReveal?.eventId === event.id;
-              const content = streaming
-                ? liveReveal.visibleContent
-                : event.content;
-              return (
-                <article
+              const streaming = presenting && presentationEventId === event.id;
+              return streaming ? (
+                <DebateStreamingTranscriptArticle
                   key={event.id}
-                  data-kind={event.kind}
-                  data-side={event.sideId ?? undefined}
-                  data-streaming={streaming ? "true" : undefined}
-                >
-                  <header>
-                    <strong>
-                      {visibleEventName(session, event, playerName)}
-                    </strong>
-                    <span>
-                      {event.interrupted
-                        ? "interrupted"
-                        : event.stepKey.startsWith("persona_reaction_")
-                          ? "vocal reaction"
-                          : event.kind.replace("_", " ")}{" "}
-                      · {event.phase}
-                    </span>
-                  </header>
-                  {content ? (
-                    <DebateMarkdownBody
-                      content={content}
-                      evidence={session.evidence}
-                      onSource={setSourceDrawerId}
-                    />
-                  ) : (
-                    <span
-                      className={styles.liveProseCursor}
-                      aria-label="Speaker is beginning"
-                    />
-                  )}
-                </article>
+                  store={presentationStore}
+                  session={session}
+                  event={event}
+                  playerName={playerName}
+                  onSource={setSourceDrawerId}
+                />
+              ) : (
+                <DebateCompletedTranscriptArticle
+                  key={event.id}
+                  session={session}
+                  event={event}
+                  playerName={playerName}
+                  onSource={setSourceDrawerId}
+                />
               );
             })}
           {busy ? (
@@ -9827,6 +10225,12 @@ export function DebateExperience(
           ? liveReveal.visibleContent
           : activeEvent.content
         : "";
+    const chamberEventVisible =
+      activeEvent !== null &&
+      (activeEvent.kind === "jury_deliberation" ||
+        activeEvent.kind === "jury_verdict" ||
+        (activeEvent.kind === "reaction" &&
+          activeEvent.speakerKind === "juror"));
     const publicContent =
       activeEvent && liveReveal?.eventId === activeEvent.id
         ? liveReveal.visibleContent
@@ -9903,22 +10307,47 @@ export function DebateExperience(
               >
                 <div className={styles.juryChamberAvatar}>
                   {props.renderBotAvatar ? (
-                    props.renderBotAvatar(appearanceBot, {
-                      role:
-                        index === 0
-                          ? "moderator"
-                          : index % 2
-                            ? "for"
-                            : "against",
-                      lookAtRole: null,
-                      compact: true,
-                      talking,
-                      thinking: thinkingBotId === juror.id,
-                      colorCycle: presentation.colorCycle,
-                      speechTiming,
-                      foleyMouthShape,
-                      listenerReaction,
-                    })
+                    talking && activeEvent ? (
+                      <DebateActiveAvatarConsumer
+                        store={presentationStore}
+                        sessionId={session.id}
+                        eventId={activeEvent.id}
+                        bot={appearanceBot}
+                        renderBotAvatar={props.renderBotAvatar}
+                        state={{
+                          role:
+                            index === 0
+                              ? "moderator"
+                              : index % 2
+                                ? "for"
+                                : "against",
+                          lookAtRole: null,
+                          compact: true,
+                          talking,
+                          thinking: thinkingBotId === juror.id,
+                          colorCycle: presentation.colorCycle,
+                          foleyMouthShape,
+                          listenerReaction,
+                        }}
+                      />
+                    ) : (
+                      props.renderBotAvatar(appearanceBot, {
+                        role:
+                          index === 0
+                            ? "moderator"
+                            : index % 2
+                              ? "for"
+                              : "against",
+                        lookAtRole: null,
+                        compact: true,
+                        talking,
+                        thinking: thinkingBotId === juror.id,
+                        colorCycle: presentation.colorCycle,
+                        speechTiming,
+                        foleyMouthShape,
+                        listenerReaction,
+                      })
+                    )
                   ) : (
                     <span>
                       {props.renderBotGlyph(juror.glyph ?? "lucideTriangle", {
@@ -10005,18 +10434,27 @@ export function DebateExperience(
                   : "The chamber is settling"}
           </strong>
           <p>
-            {chamberContent ||
-              (session.jury.phase === "initial_ballots"
-                ? "No leaning is displayed before deliberation."
-                : session.jury.phase === "final_ballots"
-                  ? activeEvent?.kind === "ballot"
-                    ? "An anonymous ballot slides into the center."
-                    : "All five ballots are collected before the split is read."
-                  : awaitingDeliberationChoice
-                    ? "Hear the chamber work through the debate, or send all five jurors directly to final ballots."
-                    : session.jury.phase === "waiting"
-                      ? "The Jury follows the public floor and talks between turns."
-                      : `The ${debatePublicMaterialName(session.formality).toLowerCase()} remains at the center of the table.`)}
+            {chamberEventVisible && activeEvent ? (
+              <DebateVisibleTextConsumer
+                store={presentationStore}
+                sessionId={session.id}
+                event={activeEvent}
+              />
+            ) : session.jury.phase === "initial_ballots" ? (
+              "No leaning is displayed before deliberation."
+            ) : session.jury.phase === "final_ballots" ? (
+              activeEvent?.kind === "ballot" ? (
+                "An anonymous ballot slides into the center."
+              ) : (
+                "All five ballots are collected before the split is read."
+              )
+            ) : awaitingDeliberationChoice ? (
+              "Hear the chamber work through the debate, or send all five jurors directly to final ballots."
+            ) : session.jury.phase === "waiting" ? (
+              "The Jury follows the public floor and talks between turns."
+            ) : (
+              `The ${debatePublicMaterialName(session.formality).toLowerCase()} remains at the center of the table.`
+            )}
           </p>
         </div>
       </div>
@@ -11184,10 +11622,6 @@ export function DebateExperience(
       activeEvent && liveReveal?.eventId === activeEvent.id
         ? liveReveal.visibleContent
         : (activeEvent?.content ?? "");
-    const activeCaptionText =
-      activeEvent?.kind === "silence"
-        ? ""
-        : debateSpokenText(activePublicContent).trim();
     const activeSpeechTiming =
       activeEvent && liveReveal?.eventId === activeEvent.id
         ? (liveReveal.speechTiming ?? null)
@@ -11585,6 +12019,7 @@ export function DebateExperience(
           data-theme={props.theme}
           data-session-status={session.status}
           data-session-phase={session.phase}
+          data-debate-material-quality={debateMaterialQuality}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           style={
             {
@@ -11604,7 +12039,9 @@ export function DebateExperience(
               type="button"
               className={styles.exitButton}
               onClick={() => {
-                props.onStopUtterance?.();
+                cancelCurrentPresentation();
+                presentationStore.clear();
+                activeSessionIdRef.current = null;
                 setEarlyEndOpen(false);
                 setView("dashboard");
                 setActiveSession(null);
@@ -11713,20 +12150,47 @@ export function DebateExperience(
                               }
                             >
                               {props.renderBotAvatar ? (
-                                props.renderBotAvatar(appearanceBot, {
-                                  role,
-                                  lookAtRole:
-                                    role === "moderator" ? turnOwnerRole : null,
-                                  compact:
-                                    role === "moderator" &&
-                                    cameraView !== "moderator",
-                                  talking,
-                                  thinking: thinkingBotId === bot.id,
-                                  colorCycle: presentation.colorCycle,
-                                  speechTiming,
-                                  foleyMouthShape,
-                                  listenerReaction: botListenerReaction,
-                                })
+                                talking && activeEvent ? (
+                                  <DebateActiveAvatarConsumer
+                                    store={presentationStore}
+                                    sessionId={session.id}
+                                    eventId={activeEvent.id}
+                                    bot={appearanceBot}
+                                    renderBotAvatar={props.renderBotAvatar}
+                                    state={{
+                                      role,
+                                      lookAtRole:
+                                        role === "moderator"
+                                          ? turnOwnerRole
+                                          : null,
+                                      compact:
+                                        role === "moderator" &&
+                                        cameraView !== "moderator",
+                                      talking,
+                                      thinking: thinkingBotId === bot.id,
+                                      colorCycle: presentation.colorCycle,
+                                      foleyMouthShape,
+                                      listenerReaction: botListenerReaction,
+                                    }}
+                                  />
+                                ) : (
+                                  props.renderBotAvatar(appearanceBot, {
+                                    role,
+                                    lookAtRole:
+                                      role === "moderator"
+                                        ? turnOwnerRole
+                                        : null,
+                                    compact:
+                                      role === "moderator" &&
+                                      cameraView !== "moderator",
+                                    talking,
+                                    thinking: thinkingBotId === bot.id,
+                                    colorCycle: presentation.colorCycle,
+                                    speechTiming,
+                                    foleyMouthShape,
+                                    listenerReaction: botListenerReaction,
+                                  })
+                                )
                               ) : (
                                 <span className={styles.botGlyphFallback}>
                                   {props.renderBotGlyph(
@@ -11868,18 +12332,18 @@ export function DebateExperience(
                 />
                 {presenting &&
                 activeEvent &&
-                activeCaptionText &&
+                activeEvent.kind !== "silence" &&
                 (!juryChamberVisible || activeEvent.speakerKind !== "juror") ? (
-                  <DebateLiveCaption
+                  <DebateLiveCaptionConsumer
                     key={activeEvent.id}
-                    eventId={activeEvent.id}
-                    speakerKind={activeEvent.speakerKind}
+                    store={presentationStore}
+                    sessionId={session.id}
+                    event={activeEvent}
                     speakerName={visibleEventName(
                       session,
                       activeEvent,
                       playerName,
                     )}
-                    text={activeCaptionText}
                   />
                 ) : null}
                 {judgeGavelCeremony && !judgeJuryGavelLocked ? (
@@ -12065,9 +12529,10 @@ export function DebateExperience(
                   </strong>
                 </div>
                 {presenting && activeEvent ? (
-                  <DebateTurnClock
+                  <DebateTurnClockConsumer
+                    store={presentationStore}
+                    sessionId={session.id}
                     event={activeEvent}
-                    speechTiming={activeSpeechTiming}
                   />
                 ) : null}
                 <div

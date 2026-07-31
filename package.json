@@ -13,6 +13,7 @@
     "test:e2e": "playwright test --grep-invert @visual",
     "test:visual": "playwright test --grep @visual",
     "test:perf": "npm --prefix packages/config run build && npm --prefix packages/shared run build && node --experimental-strip-types scripts/perf/test-performance.ts",
+    "test:perf:debate": "PRISM_DEBATE_PERF=1 PRISM_DEBATE_PERF_STRICT=1 playwright test --project=debate-performance-webkit --grep @debate-perf",
     "voice:model": "node scripts/fetch-builtin-tts-model.mjs",
     "test:prism-launcher": "node --test scripts/prism-launcher.test.mjs",
     "dev": "node --env-file-if-exists=.env scripts/dev.mjs",

@@ -30,11 +30,28 @@ export default defineConfig({
       grep: /@marquee/,
       use: { ...devices["Desktop Safari"] },
     },
+    ...(process.env.PRISM_DEBATE_PERF
+      ? [
+          {
+            name: "debate-performance-webkit",
+            grep: /@debate-perf/,
+            use: {
+              ...devices["Desktop Safari"],
+              viewport: { width: 1728, height: 1117 },
+              screen: { width: 1728, height: 1117 },
+              deviceScaleFactor: 2,
+              reducedMotion: "no-preference" as const,
+            },
+          },
+        ]
+      : []),
   ],
   webServer: process.env.PRISM_E2E_BASE_URL
     ? undefined
     : {
-        command: "npm run dev:web",
+        command: process.env.PRISM_DEBATE_PERF
+          ? "npm run build -w apps/web && cd apps/web && npx next start -p 18788"
+          : "npm run dev:web",
         url: "http://127.0.0.1:18788",
         reuseExistingServer: !process.env.CI,
         timeout: 120_000,

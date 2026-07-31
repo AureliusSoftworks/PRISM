@@ -356,11 +356,19 @@ describe("Debate experience", () => {
     assert.match(css, /\.evidenceExhibitAssetRail/u);
     assert.match(source, /The text record is evidence/u);
     assert.doesNotMatch(source, /openDesktopEmojiPicker\(\)/u);
-    assert.match(source, /aria-label="Exhibit emoji"/u);
-    assert.match(source, /normalizeDebateEvidenceEmojiChoice/u);
-    assert.match(source, /Suggest from exhibit name/u);
-    assert.match(source, /Uses the most relevant term in the object name/u);
-    assert.match(source, /suggestEvidenceObjectEmoji/u);
+    assert.match(source, /Choose exhibit emoji\. Current emoji:/u);
+    assert.match(source, /searchDebateEvidenceEmojis/u);
+    assert.match(source, /Three most relevant emojis/u);
+    assert.match(source, /Find the right symbol/u);
+    assert.match(source, /role="dialog"/u);
+    assert.match(source, /aria-modal="true"/u);
+    assert.match(source, /event\.key !== "Escape"/u);
+    assert.match(source, /chooseEvidenceObjectEmoji/u);
+    assert.match(css, /\.evidenceEmojiSearchModal\s*\{/u);
+    assert.match(
+      css,
+      /\.evidenceEmojiSearchResults\s*\{[^}]*grid-template-columns:\s*repeat\(3,/u,
+    );
     assert.match(
       css,
       /\.evidenceObjectPreview > \.evidenceExhibitVisual\s*\{[^}]*font-size:\s*52px/u,
@@ -883,7 +891,10 @@ describe("Debate experience", () => {
     assert.match(source, /data-caption-rows="adaptive"/u);
     assert.match(source, /debateLiveCaptionPage\(props\.text\)/u);
     assert.doesNotMatch(source, /caption\.scrollTop = caption\.scrollHeight/u);
-    assert.match(source, /debateSpokenText\(activePublicContent\)\.trim\(\)/u);
+    assert.match(
+      source,
+      /DebateLiveCaptionConsumer[\s\S]{0,700}debateSpokenText\(snapshot\.visibleContent\)\.trim\(\)/u,
+    );
     assert.match(
       source,
       /speakerName=\{visibleEventName\([\s\S]{0,100}activeEvent,[\s\S]{0,80}playerName/u,
@@ -1018,7 +1029,7 @@ describe("Debate experience", () => {
     assert.match(source, /activeTurnClock\?\.status === "overtime"/u);
     assert.match(
       source,
-      /<DebateTurnClock\s+event=\{activeEvent\}\s+speechTiming=\{activeSpeechTiming\}/u,
+      /<DebateTurnClockConsumer\s+store=\{presentationStore\}\s+sessionId=\{session\.id\}\s+event=\{activeEvent\}/u,
     );
     assert.match(css, /\.turnClock\s*\{[^}]*position:\s*absolute/u);
     assert.match(css, /\.turnClock > strong\s*\{[^}]*font-variant-numeric/u);
@@ -1309,10 +1320,7 @@ describe("Debate experience", () => {
     assert.match(source, /debateJudgeGavelSpaceAction/u);
     assert.match(source, /orderAvailable:\s*context\.orderAvailable/u);
     assert.match(source, /blockedNotice:\s*judgeGavelShortcutBlockedNotice/u);
-    assert.match(
-      source,
-      /setAutoRecoveryNotice\(context\.blockedNotice\)/u,
-    );
+    assert.match(source, /setAutoRecoveryNotice\(context\.blockedNotice\)/u);
     assert.match(source, /data-space-shortcut="true"/u);
     assert.match(source, /gavelShortcutTarget\?\.blur\(\)/u);
     assert.match(source, /Intervention cooling/u);
@@ -1530,7 +1538,7 @@ describe("Debate experience", () => {
     assert.match(source, /Scoreless · heard speech only/u);
     assert.match(
       source,
-      /debateCaseBoardAtSequence\(\s*session,\s*transcriptVisibleThroughSequence/u,
+      /debateCaseBoardAtSequence\(\s*activeSession,\s*transcriptVisibleThroughSequence/u,
     );
   });
 
@@ -1551,7 +1559,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /excludedBotIds:\s*\[[\s\S]{0,180}activeSession\.moderator\.id[\s\S]{0,240}activeSession\.jury\.jurors\.map/u,
+      /const liveAudienceCastKey = activeSession[\s\S]{0,220}activeSession\.moderator\.id[\s\S]{0,240}activeSession\.jury\.jurors\.map/u,
+    );
+    assert.match(
+      source,
+      /excludedBotIds:\s*liveAudienceCastKey\.split\("\\0"\)/u,
     );
     assert.match(
       source,
@@ -1635,13 +1647,13 @@ describe("Debate experience", () => {
       pageCss,
       /\.debateBotPresencePlate\[data-debate-role="audience"\]/u,
     );
-    assert.match(page, /const staticAudiencePortrait = avatarState\.role === "audience"/u);
-    assert.match(page, /blinkEnabled=\{false\}/u);
-    assert.match(page, /runtimeEffectsEnabled=\{!staticAudiencePortrait\}/u);
     assert.match(
       page,
-      /motionActive=\{[\s\S]{0,120}!staticAudiencePortrait/u,
+      /const staticAudiencePortrait = avatarState\.role === "audience"/u,
     );
+    assert.match(page, /blinkEnabled=\{false\}/u);
+    assert.match(page, /runtimeEffectsEnabled=\{!staticAudiencePortrait\}/u);
+    assert.match(page, /motionActive=\{[\s\S]{0,120}!staticAudiencePortrait/u);
     assert.match(
       source,
       /Keep the authored audience portrait static during ambient chatter/u,
@@ -2003,7 +2015,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       page,
-      /detailLevel=\{avatarState\.compact \? "reduced" : "full"\}/u,
+      /detailLevel=\{\s*staticAudiencePortrait\s*\? "audience"\s*:\s*avatarState\.compact\s*\? "reduced"\s*:\s*"full"/u,
     );
     assert.match(
       source,
@@ -2168,10 +2180,7 @@ describe("Debate experience", () => {
     );
     assert.match(source, /data-audience-beat=\{/u);
     assert.match(source, /data-listening-reaction=\{/u);
-    assert.match(
-      source,
-      /listenerReaction=\{audienceListenerReaction\}/u,
-    );
+    assert.match(source, /listenerReaction=\{audienceListenerReaction\}/u);
     assert.match(
       source,
       /if \(semanticAudienceReaction\) \{\s*playDebateAudienceReaction\(semanticAudienceReaction, event\.id\);\s*\}\s*if \(event\.kind === "silence"\)/u,
@@ -2416,7 +2425,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.debaterFocusDepthOverlay\s*\{[^}]*z-index:\s*4[^}]*opacity:\s*0[^}]*backdrop-filter:\s*blur\(8px\)[^}]*transition:\s*opacity 720ms/u,
+      /\.debaterFocusDepthOverlay\s*\{[^}]*z-index:\s*4[^}]*opacity:\s*0[^}]*transition:\s*opacity 720ms[^}]*contain:\s*paint style/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.debaterFocusDepthOverlay\s*\{[^}]*backdrop-filter/u,
     );
     assert.match(
       css,

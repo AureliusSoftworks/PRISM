@@ -7,6 +7,7 @@ import {
   debateEvidenceEmojiForObject,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
+  searchDebateEvidenceEmojis,
 } from "./debateEvidenceExhibits.ts";
 
 describe("Debate evidence object generator", () => {
@@ -31,9 +32,10 @@ describe("Debate evidence object generator", () => {
 
   it("walks past exhibit titles that are already in the evidence packet", () => {
     const first = randomDebateEvidenceObject(() => 0);
-    const next = randomDebateEvidenceObject(() => 0, [
-      `${first.adjective} ${first.object}`,
-    ]);
+    const next = randomDebateEvidenceObject(
+      () => 0,
+      [`${first.adjective} ${first.object}`],
+    );
     assert.notEqual(
       `${next.adjective} ${next.object}`,
       `${first.adjective} ${first.object}`,
@@ -46,9 +48,28 @@ describe("Debate evidence object generator", () => {
     assert.equal(debateEvidenceEmojiForObject("freight train", "Chubby"), "🚂");
     assert.equal(debateEvidenceEmojiForObject("orangutan", "Red"), "🦧");
     assert.equal(debateEvidenceEmojiForObject("green glove", "Velvet"), "🧤");
-    assert.equal(debateEvidenceEmojiForObject("transit map", "Weathered"), "🗺️");
+    assert.equal(
+      debateEvidenceEmojiForObject("transit map", "Weathered"),
+      "🗺️",
+    );
     assert.equal(debateEvidenceEmojiForObject("toy rocket", "Tin"), "🚀");
     assert.equal(debateEvidenceEmojiForObject("coffee mug", "Cracked"), "☕");
+  });
+
+  it("ranks exactly three live search previews by relevant terms", () => {
+    assert.deepEqual(
+      searchDebateEvidenceEmojis("glove").map(({ emoji }) => emoji),
+      ["🧤", "✋", "🥊"],
+    );
+    assert.deepEqual(
+      searchDebateEvidenceEmojis("public transportation").map(
+        ({ emoji }) => emoji,
+      ),
+      ["🚂", "🚗", "🚌"],
+    );
+    const unknown = searchDebateEvidenceEmojis("uncategorizable artifact");
+    assert.equal(unknown.length, 3);
+    assert.equal(new Set(unknown.map(({ emoji }) => emoji)).size, 3);
   });
 
   it("turns one contextual Prism pair into an editable evidence draft", () => {

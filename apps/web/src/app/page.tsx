@@ -29312,7 +29312,7 @@ interface ZenLiveBotMannequinProps {
   avatarDetails?: BotAvatarDetailsV1 | null;
   avatarDetailsColor?: string | null;
   inkOffsetY?: string;
-  detailLevel?: "full" | "reduced";
+  detailLevel?: "full" | "reduced" | "audience";
   eyeAttentionState?: import("./botFaceEyeMovement").BotFaceAttentionState;
   eyeTargetDirection?: import("./botFaceEyeMovement").BotFaceGazeDirection;
   eyeTimelineMs?: number | null;
@@ -29519,6 +29519,8 @@ function ZenLiveBotMannequin({
     showThinkingSpinner &&
     !botFaceThinkingSpinnerDisabled(faceStyle.thinkingFrames);
   const hasAvatarDetailsVisuals = avatarDetailsHasVisuals(avatarDetails);
+  const avatarDetailsDetailLevel =
+    detailLevel === "audience" ? "reduced" : detailLevel;
   const avatarDetailsFaceRegistrationStyle = hasAvatarDetailsVisuals
     ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
     : null;
@@ -29582,17 +29584,19 @@ function ZenLiveBotMannequin({
             />
           </>
         ) : null}
-        <span
-          className={styles.botFaceCrtGrimeLayer}
-          data-crt-material-layer="grime"
-          style={screenMaterialStyle}
-          aria-hidden="true"
-        />
+        {detailLevel !== "audience" ? (
+          <span
+            className={styles.botFaceCrtGrimeLayer}
+            data-crt-material-layer="grime"
+            style={screenMaterialStyle}
+            aria-hidden="true"
+          />
+        ) : null}
         {!thinkingSpinnerActive && !showQuestionMark ? (
           <AvatarDetailsMask
             details={avatarDetails}
             color={avatarDetailsColor}
-            detailLevel={detailLevel}
+            detailLevel={avatarDetailsDetailLevel}
             faceGeometry={faceStyle}
             blinkPhase={avatarDetailsBlinkPhase}
             talking={inkTalking ?? isTalking}
@@ -29705,16 +29709,18 @@ function ZenLiveBotMannequin({
             />
           </span>
         )}
-        <span
-          className={styles.botFaceCrtPixelGridLayer}
-          data-crt-material-layer="pixel-grid"
-          aria-hidden="true"
-        />
+        {detailLevel !== "audience" ? (
+          <span
+            className={styles.botFaceCrtPixelGridLayer}
+            data-crt-material-layer="pixel-grid"
+            aria-hidden="true"
+          />
+        ) : null}
         {!thinkingSpinnerActive && !showQuestionMark ? (
           <AvatarDetailsMask
             details={avatarDetails}
             color={avatarDetailsColor}
-            detailLevel={detailLevel}
+            detailLevel={avatarDetailsDetailLevel}
             faceGeometry={faceStyle}
             blinkPhase={avatarDetailsBlinkPhase}
             talking={inkTalking ?? isTalking}
@@ -29725,12 +29731,16 @@ function ZenLiveBotMannequin({
           />
         ) : null}
       </span>
-      <span
-        className={styles.zenLiveBotPresenceScreenGlassOverlay}
-        aria-hidden="true"
-      >
-        <BotFaceScreenGlass className={styles.zenLiveBotPresenceScreenGlass} />
-      </span>
+      {detailLevel !== "audience" ? (
+        <span
+          className={styles.zenLiveBotPresenceScreenGlassOverlay}
+          aria-hidden="true"
+        >
+          <BotFaceScreenGlass
+            className={styles.zenLiveBotPresenceScreenGlass}
+          />
+        </span>
+      ) : null}
       <BotGlyph
         name={glyph}
         size={18}
@@ -129979,7 +129989,13 @@ function HomeContent(): React.JSX.Element {
                         showThinkingSpinner={
                           avatarState.thinking && !avatarState.compact
                         }
-                        detailLevel={avatarState.compact ? "reduced" : "full"}
+                        detailLevel={
+                          staticAudiencePortrait
+                            ? "audience"
+                            : avatarState.compact
+                              ? "reduced"
+                              : "full"
+                        }
                         eyeAttentionState={
                           avatarState.thinking
                             ? "thinking"

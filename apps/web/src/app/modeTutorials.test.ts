@@ -106,8 +106,9 @@ describe("mode tutorials", () => {
     );
     assert.doesNotMatch(copy, /Generate object/u);
     assert.match(copy, /exhibit emoji follows the object name automatically/u);
-    assert.match(copy, /Suggest from exhibit name restores/u);
-    assert.match(copy, /type or paste any emoji/u);
+    assert.match(copy, /Click it to open emoji search/u);
+    assert.match(copy, /three best live matches/u);
+    assert.match(copy, /close the search without changing/u);
     assert.match(copy, /upload a PNG, JPEG, or WebP/u);
     assert.match(copy, /visual adds no facts/u);
     assert.match(copy, /later searches add distinct sources/u);

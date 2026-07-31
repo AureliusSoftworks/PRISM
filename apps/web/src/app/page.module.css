@@ -25988,6 +25988,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-avatar-body-size: 94%;
 }
 
+.debateBotPresencePlate[data-debate-role="audience"] .botFaceFrameTint,
+.debateBotPresencePlate[data-debate-role="audience"] .botFaceFrameLed {
+  animation: none;
+}
+
+.debateBotPresencePlate[data-debate-role="audience"] .botFaceFrameTint {
+  filter: brightness(1.01) saturate(1.03);
+}
+
+.debateBotPresencePlate[data-debate-role="audience"] .botFaceFrameLed {
+  filter: brightness(1.02);
+}
+
 :global([data-debate-stage-compact="true"])
   > .debateBotPresencePlate[data-debate-compact="true"] {
   position: absolute;
