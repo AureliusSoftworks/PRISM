@@ -389,6 +389,10 @@ describe("mode tutorials", () => {
     );
     assert.match(gavelCopy, /brief awkward freeze and spectator glances/u);
     assert.match(gavelCopy, /without stopping the speaker or reveal/u);
+    assert.match(gavelCopy, /visible gallery badge and four-bar meter/u);
+    assert.match(gavelCopy, /protected mix headroom/u);
+    assert.match(gavelCopy, /\*speaks loudly\* or \*yells over the crowd\*/u);
+    assert.match(gavelCopy, /control attached directly to the gallery/u);
     assert.match(gavelCopy, /Space serves that ceremonial cue first/u);
     assert.match(gavelCopy, /Intervene is the separate speaker-cutoff control/u);
     assert.match(gavelCopy, /cooldown appears as an amber countdown/u);

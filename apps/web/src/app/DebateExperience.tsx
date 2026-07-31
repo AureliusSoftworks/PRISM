@@ -243,6 +243,7 @@ import {
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
+  type DebateAudienceBeat,
   type DebateAudienceBeatKind,
   type DebateModeratorGavelCue,
 } from "./debateFoley";
@@ -277,6 +278,7 @@ import { DEBATE_STAGE_SOUNDCHECK_MESSAGE_PREFIX } from "./signalStageSoundcheck"
 import { useDebateDomPerformance } from "./useDebateDomPerformance";
 import {
   createDebatePresentationStore,
+  type DebatePresentationSnapshot,
   type DebatePresentationStore,
 } from "./debatePresentationStore";
 import { DebateDeadlineCountdown } from "./DebateDeadlineCountdown";
@@ -634,6 +636,62 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
   );
 });
 
+function debateAudienceBeatMatches(
+  left: DebateAudienceBeat | null,
+  right: DebateAudienceBeat | null,
+): boolean {
+  return (
+    left === right ||
+    (left !== null &&
+      right !== null &&
+      left.kind === right.kind &&
+      left.listenerReaction === right.listenerReaction &&
+      left.foleyCue === right.foleyCue &&
+      left.seatIndices.length === right.seatIndices.length &&
+      left.seatIndices.every(
+        (seatIndex, index) => seatIndex === right.seatIndices[index],
+      ))
+  );
+}
+
+/**
+ * React's built-in external-store hook wakes every subscriber for every store
+ * write. Debate speech writes at mouth-sync cadence, while the gallery only
+ * changes at semantic reaction boundaries. Keep the selected snapshot stable
+ * so 15 completed spectator portraits are not repainted for every character.
+ */
+function useDebatePresentationSelection<T>(
+  store: DebatePresentationStore,
+  select: (snapshot: DebatePresentationSnapshot) => T,
+  matches: (left: T, right: T) => boolean,
+): T {
+  const selectedRef = useRef<T>(select(store.getSnapshot()));
+  const getSelectedSnapshot = useCallback((): T => {
+    const next = select(store.getSnapshot());
+    if (!matches(selectedRef.current, next)) {
+      selectedRef.current = next;
+    }
+    return selectedRef.current;
+  }, [matches, select, store]);
+  const subscribeSelected = useCallback(
+    (notify: () => void): (() => void) =>
+      store.subscribe(() => {
+        const previous = selectedRef.current;
+        const next = select(store.getSnapshot());
+        if (!matches(previous, next)) {
+          selectedRef.current = next;
+          notify();
+        }
+      }),
+    [matches, select, store],
+  );
+  return useSyncExternalStore(
+    subscribeSelected,
+    getSelectedSnapshot,
+    getSelectedSnapshot,
+  );
+}
+
 /** Gallery seats that follow the presentation store — not parent speech ticks. */
 const DebateLiveAudienceGallery = memo(function DebateLiveAudienceGallery(props: {
   store: DebatePresentationStore;
@@ -661,32 +719,41 @@ const DebateLiveAudienceGallery = memo(function DebateLiveAudienceGallery(props:
   renderBotAvatar?: DebateExperienceProps["renderBotAvatar"];
   renderBotGlyph: BotPickerGlyphRenderer;
 }): React.JSX.Element {
-  const snapshot = useSyncExternalStore(
-    props.store.subscribe,
-    props.store.getSnapshot,
-    props.store.getSnapshot,
+  const selectAudienceBeat = useCallback(
+    (snapshot: DebatePresentationSnapshot): DebateAudienceBeat | null => {
+      const publicContent =
+        props.presenting &&
+        props.activeEvent &&
+        snapshot.sessionId === props.sessionId &&
+        snapshot.eventId === props.activeEvent.id
+          ? snapshot.visibleContent
+          : props.presenting
+            ? (props.activeEvent?.content ?? "")
+            : "";
+      return props.presenting && props.activeEvent
+        ? debateAudienceBeatForEvent({
+            event: props.activeEvent,
+            publicContent,
+            seatCount: props.audienceSeats.length,
+            maxReactingSeats: debateAudienceMaxReactingSeats(
+              props.materialQuality,
+              "contention",
+            ),
+          })
+        : null;
+    }, [
+      props.activeEvent,
+      props.audienceSeats.length,
+      props.materialQuality,
+      props.presenting,
+      props.sessionId,
+    ],
   );
-  const publicContent =
-    props.presenting &&
-    props.activeEvent &&
-    snapshot.sessionId === props.sessionId &&
-    snapshot.eventId === props.activeEvent.id
-      ? snapshot.visibleContent
-      : props.presenting
-        ? (props.activeEvent?.content ?? "")
-        : "";
-  const audienceBeat =
-    props.presenting && props.activeEvent
-      ? debateAudienceBeatForEvent({
-          event: props.activeEvent,
-          publicContent,
-          seatCount: props.audienceSeats.length,
-          maxReactingSeats: debateAudienceMaxReactingSeats(
-            props.materialQuality,
-            "contention",
-          ),
-        })
-      : null;
+  const audienceBeat = useDebatePresentationSelection(
+    props.store,
+    selectAudienceBeat,
+    debateAudienceBeatMatches,
+  );
   const reacting = new Set(audienceBeat?.seatIndices ?? []);
   const allowFaceOpen = debateAudienceAllowsFaceOpen(props.materialQuality);
   const allowTransformBounce = debateAudienceAllowsTransformBounce(
