@@ -25901,32 +25901,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
-.zenLiveBotPresencePlate[data-bot-identity-color="true"] {
-  --zen-live-bot-frame-tint-color: var(--coffee-bot-color);
-  --bot-face-frame-led-color: var(--coffee-bot-color);
-  --bot-face-frame-tint-opacity: 0.32;
-  --bot-face-frame-tint-blend-mode: color;
-  --bot-face-frame-tint-filter: drop-shadow(
-      0 0 8px color-mix(in srgb, var(--coffee-bot-color) 58%, transparent)
-    )
-    saturate(1.32) contrast(1.04);
-  --zen-live-bot-face-phosphor-ink: var(--coffee-bot-color);
-  --zen-live-bot-face-ink: var(--coffee-bot-color);
-  --zen-live-bot-glyph-ink: var(--coffee-bot-color);
-  --crt-accent-rgb: var(--bot-color-rgb, 255 255 255);
-}
-
-.zenLiveBotPresencePlate[data-bot-identity-color="true"] .botFaceFrame {
-  /* The legacy tint mask only covers the tiny light catches. Color the full
-     metal silhouette, then let the original frame raster provide luminance. */
-  --bot-face-frame-tint-mask: url("/bot-frame/bot-frame-metal-mask.png?v=1000");
-}
-
-.zenLiveBotPresencePlate[data-bot-identity-color="true"]
-  .zenLiveBotPresenceFace {
-  --bot-face-metal-light-blend-mode: luminosity;
-}
-
 .zenLiveBotPresencePlate[data-floating="true"] {
   position: fixed;
   left: var(--zen-live-bot-avatar-x, 20px);
@@ -27949,13 +27923,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-ambient-glow-opacity: 0.48;
   --bot-face-ambient-glow-blur: clamp(24px, 16%, 48px);
   --bot-face-ambient-glow-spread: clamp(18px, 12%, 36px);
-}
-
-.zenLiveBotPresencePlate[data-bot-identity-color="true"][data-private-mode="true"] {
-  --zen-live-bot-face-phosphor-ink: #e8eee8;
-  --zen-live-bot-face-ink: #e8eee8;
-  --zen-live-bot-glyph-ink: #e8eee8;
-  --bot-face-frame-led-color: #e8eee8;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-private-mode="true"] {
@@ -65567,7 +65534,6 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: block;
   color: var(--bot-face-frame-resolved-color);
   background: var(--bot-face-frame-tint-background, currentColor);
-  mix-blend-mode: var(--bot-face-frame-tint-blend-mode, normal);
   -webkit-mask-image: var(--bot-face-frame-tint-mask);
   -webkit-mask-position: center;
   -webkit-mask-size: contain;

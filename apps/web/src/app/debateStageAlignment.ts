@@ -741,6 +741,8 @@ export function debateStageAlignmentStyle(
     "--debate-light-blend-mode-light": normalized.lightBlendModes.light,
     "--debate-light-mask-opacity-dark": `${normalized.lightMaskOpacities.dark}%`,
     "--debate-light-mask-opacity-light": `${normalized.lightMaskOpacities.light}%`,
+    "--debate-light-mask-opacity-dark-factor": `${normalized.lightMaskOpacities.dark / 100}`,
+    "--debate-light-mask-opacity-light-factor": `${normalized.lightMaskOpacities.light / 100}`,
   } as CSSProperties;
 }
 

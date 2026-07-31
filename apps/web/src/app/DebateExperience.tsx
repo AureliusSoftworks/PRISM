@@ -711,10 +711,13 @@ const DebateLiveAudienceGallery = memo(function DebateLiveAudienceGallery(props:
   audiencePressureScore: number;
   activeAudienceOrderKind: "awkward" | "hush" | undefined;
   judgeControl: {
+    action: "call-time" | "cue" | "intervene" | "order";
     available: boolean;
+    ariaLabel: string;
     busy: boolean;
-    ceremonyReady: boolean;
+    label: string;
     onActivate: () => void;
+    title: string;
   } | null;
   renderBotAvatar?: DebateExperienceProps["renderBotAvatar"];
   renderBotGlyph: BotPickerGlyphRenderer;
@@ -818,32 +821,30 @@ const DebateLiveAudienceGallery = memo(function DebateLiveAudienceGallery(props:
           <button
             type="button"
             className={styles.debateAudienceGavelButton}
+            data-action={props.judgeControl.action}
             data-cue={
-              props.judgeControl.ceremonyReady ? "true" : undefined
+              props.judgeControl.action === "cue" ? "true" : undefined
             }
-            data-energized={gavelEnergized ? "true" : undefined}
+            data-energized={
+              gavelEnergized ||
+              props.judgeControl.action === "intervene" ||
+              props.judgeControl.action === "call-time"
+                ? "true"
+                : undefined
+            }
+            data-overtime={
+              props.judgeControl.action === "call-time" ? "true" : undefined
+            }
             data-tutorial-target="debate-judge-gavel"
             disabled={props.judgeControl.busy}
-            aria-label={
-              props.judgeControl.ceremonyReady
-                ? "Slam the Judge gavel for this ceremonial cue. Space also swings it."
-                : "Settle the public gallery without interrupting the speaker. Space also swings the gavel."
-            }
+            aria-label={props.judgeControl.ariaLabel}
             onClick={(event) => {
               event.currentTarget.blur();
               props.judgeControl?.onActivate();
             }}
-            title={
-              props.judgeControl.ceremonyReady
-                ? "Your cue — slam the gavel · Space"
-                : "Settle the public gallery · Space"
-            }
+            title={props.judgeControl.title}
           >
-            {props.judgeControl.ceremonyReady
-              ? "Slam now"
-              : gavelEnergized
-                ? "Settle gallery"
-                : "Gavel"}
+            {props.judgeControl.label}
             <kbd aria-hidden="true">Space</kbd>
           </button>
         ) : null}
@@ -2119,6 +2120,7 @@ const DebateCompletedTranscriptArticle = memo(
       <article
         data-kind={props.event.kind}
         data-side={props.event.sideId ?? undefined}
+        data-completed="true"
       >
         <header>
           <strong>
@@ -2886,6 +2888,7 @@ export function DebateExperience(
   const suppressNextJudgeGavelPresentationCueRef = useRef(false);
   const judgeGavelKeyboardContextRef = useRef({
     ceremonialAvailable: false,
+    interventionAvailable: false,
     liveJudge: false,
     orderAvailable: false,
     blockedNotice: null as string | null,
@@ -2937,6 +2940,19 @@ export function DebateExperience(
   const judgeCanCallTimeNow =
     judgeGavelActiveTarget?.speakerKind === "advocate" &&
     judgeGavelActiveTargetClock?.status === "overtime";
+  const currentJudgeGavelCooldownUntilMs = Date.parse(
+    activeSession?.judgeGavelCooldownUntil ?? "",
+  );
+  const currentJudgeGavelCooldownRemainingMs = Math.max(
+    0,
+    (Number.isFinite(currentJudgeGavelCooldownUntilMs)
+      ? currentJudgeGavelCooldownUntilMs
+      : 0) - judgeGavelNowMs || 0,
+  );
+  const judgeGavelInterventionOnCooldownNow = debateJudgeGavelCooldownBlocks({
+    overtime: judgeCanCallTimeNow,
+    cooldownRemainingMs: currentJudgeGavelCooldownRemainingMs,
+  });
   const currentAudiencePressureScore = activeSession
     ? debateAudiencePressureScore({
         events: activeSession.events,
@@ -3009,6 +3025,15 @@ export function DebateExperience(
     !judgeGavelJuryLocked &&
     activeSession.objectionRuling?.status !== "awaiting_ruling" &&
     !judgeGavelKeyboardBlocked;
+  const judgeGavelInterventionEligibleNow =
+    judgeGavelKeyboardLive &&
+    presenting &&
+    judgeGavelActiveTarget?.speakerKind === "advocate" &&
+    !judgeGavelInterventionOnCooldownNow;
+  const judgeGavelInterventionAvailableNow =
+    judgeGavelInterventionEligibleNow &&
+    !busy &&
+    !debateFloorMutationInFlightRef.current;
   const judgeGavelShortcutBlockedNotice =
     view !== "live" ||
     activeSession?.playerRole !== "judge" ||
@@ -3032,6 +3057,7 @@ export function DebateExperience(
       !judgeGavelJuryLocked &&
       activeSession?.objectionRuling?.status !== "awaiting_ruling" &&
       judgeGavelCeremony?.status === "ready",
+    interventionAvailable: judgeGavelInterventionAvailableNow,
     liveJudge: judgeGavelKeyboardLive,
     orderAvailable:
       judgeGavelKeyboardLive &&
@@ -3082,6 +3108,7 @@ export function DebateExperience(
           event.altKey || event.ctrlKey || event.metaKey || event.shiftKey,
         editableTarget,
         ceremonialAvailable: context.ceremonialAvailable,
+        interventionAvailable: context.interventionAvailable,
         liveJudge: context.liveJudge,
         orderAvailable: context.orderAvailable,
         nowMs,
@@ -3110,6 +3137,10 @@ export function DebateExperience(
       }
       if (action === "smash") {
         judgeGavelSmashRef.current?.(judgeGavelSmashShowmanshipKindRef.current);
+        return;
+      }
+      if (action === "intervene") {
+        void swingJudgeGavelRef.current?.();
         return;
       }
       void orderDebateAudienceRef.current?.();
@@ -12501,23 +12532,14 @@ export function DebateExperience(
       presenting && activeEvent
         ? debateTurnClockState(activeEvent, activeSpeechTiming)
         : null;
-    const judgeGavelCooldownUntilMs = Date.parse(
-      session.judgeGavelCooldownUntil ?? "",
-    );
-    const judgeGavelCooldownRemainingMs = Math.max(
-      0,
-      (Number.isFinite(judgeGavelCooldownUntilMs)
-        ? judgeGavelCooldownUntilMs
-        : 0) - judgeGavelNowMs || 0,
-    );
+    const judgeGavelCooldownUntilMs = currentJudgeGavelCooldownUntilMs;
+    const judgeGavelCooldownRemainingMs =
+      currentJudgeGavelCooldownRemainingMs;
     const judgeGavelCooldownSeconds = Math.ceil(
       judgeGavelCooldownRemainingMs / 1_000,
     );
     const judgeCanCallTime = judgeCanCallTimeNow;
-    const judgeGavelOnCooldown = debateJudgeGavelCooldownBlocks({
-      overtime: judgeCanCallTime,
-      cooldownRemainingMs: judgeGavelCooldownRemainingMs,
-    });
+    const judgeGavelOnCooldown = judgeGavelInterventionOnCooldownNow;
     const judgeGavelCooldownLabel = judgeGavelOnCooldown &&
     Number.isFinite(judgeGavelCooldownUntilMs) ? (
       <DebateDeadlineCountdown
@@ -12547,6 +12569,51 @@ export function DebateExperience(
       !judgeJuryGavelLocked &&
       !judgeObjectionAwaitingRuling &&
       session.judgeGavel?.status !== "awaiting_message";
+    const judgeUnifiedGavelAction = judgeGavelCeremonyReady
+      ? ("cue" as const)
+      : judgeGavelInterventionEligibleNow
+        ? judgeCanCallTime
+          ? ("call-time" as const)
+          : ("intervene" as const)
+        : ("order" as const);
+    const audienceNeedsOrder =
+      currentAudiencePressureBand === "restless" ||
+      currentAudiencePressureBand === "disruptive";
+    const judgeUnifiedGavelLabel =
+      judgeUnifiedGavelAction === "cue"
+        ? "Slam now"
+        : judgeUnifiedGavelAction === "call-time"
+          ? "Call time"
+          : judgeUnifiedGavelAction === "intervene"
+            ? "Intervene"
+            : audienceNeedsOrder
+              ? "Settle gallery"
+              : "Gavel";
+    const judgeUnifiedGavelAriaLabel =
+      judgeUnifiedGavelAction === "cue"
+        ? "Slam the Judge gavel for this ceremonial cue. Space also swings it."
+        : judgeUnifiedGavelAction === "call-time"
+          ? "Call time on the active speaker and settle the gallery. Space performs the same action."
+          : judgeUnifiedGavelAction === "intervene"
+            ? "Interrupt the active speaker, settle the gallery, and address the debaters. Space performs the same action."
+            : audienceNeedsOrder
+              ? "Settle the public gallery without interrupting the speaker. Space performs the same action."
+              : "Swing the gavel to settle the room. Space performs the same action.";
+    const judgeUnifiedGavelTitle = `${judgeUnifiedGavelLabel} · Space`;
+    const activateJudgeUnifiedGavel = (): void => {
+      if (judgeUnifiedGavelAction === "cue") {
+        strikeJudgeGavelCeremonyRef.current?.();
+        return;
+      }
+      if (
+        judgeUnifiedGavelAction === "intervene" ||
+        judgeUnifiedGavelAction === "call-time"
+      ) {
+        void swingJudgeGavel(judgeUnifiedGavelAction === "call-time");
+        return;
+      }
+      void orderDebateAudience();
+    };
     const listenerReaction = debateGalleryReaction(activePublicContent);
     const participantOpponentReaction =
       listenerReaction === "attentive" ? "divided" : listenerReaction;
@@ -13565,16 +13632,16 @@ export function DebateExperience(
                   session.playerRole === "judge" &&
                   (judgeGavelAvailable || judgeGavelCeremonyReady)
                     ? {
+                        action: judgeUnifiedGavelAction,
                         available: true,
-                        busy: busy || audienceOrderSaving,
-                        ceremonyReady: judgeGavelCeremonyReady,
-                        onActivate: () => {
-                          if (judgeGavelCeremonyReady) {
-                            strikeJudgeGavelCeremonyRef.current?.();
-                            return;
-                          }
-                          void orderDebateAudience();
-                        },
+                        ariaLabel: judgeUnifiedGavelAriaLabel,
+                        busy:
+                          busy ||
+                          audienceOrderSaving ||
+                          debateFloorMutationInFlightRef.current,
+                        label: judgeUnifiedGavelLabel,
+                        onActivate: activateJudgeUnifiedGavel,
+                        title: judgeUnifiedGavelTitle,
                       }
                     : null
                 }
@@ -13640,7 +13707,16 @@ export function DebateExperience(
                       <button
                         type="button"
                         className={styles.judgeGavelButton}
+                        data-action={judgeUnifiedGavelAction}
                         data-cue={judgeGavelCeremonyReady ? "true" : undefined}
+                        data-overtime={
+                          judgeUnifiedGavelAction === "call-time"
+                            ? "true"
+                            : undefined
+                        }
+                        data-cooling={
+                          judgeGavelOnCooldown ? "true" : undefined
+                        }
                         data-pressure={
                           !judgeGavelCeremonyReady
                             ? currentAudiencePressureBand
@@ -13648,95 +13724,38 @@ export function DebateExperience(
                         }
                         data-energized={
                           !judgeGavelCeremonyReady &&
-                          (currentAudiencePressureBand === "restless" ||
-                            currentAudiencePressureBand === "disruptive")
+                          (audienceNeedsOrder ||
+                            judgeUnifiedGavelAction === "intervene" ||
+                            judgeUnifiedGavelAction === "call-time")
                             ? "true"
                             : undefined
                         }
                         data-space-shortcut="true"
                         onClick={(event) => {
                           event.currentTarget.blur();
-                          if (judgeGavelCeremonyReady) {
-                            strikeJudgeGavelCeremonyRef.current?.();
-                            return;
-                          }
-                          void orderDebateAudience();
-                        }}
-                        disabled={busy || audienceOrderSaving}
-                        aria-label={
-                          judgeGavelCeremonyReady
-                            ? "Slam the Judge gavel for this ceremonial cue. Space also swings it."
-                            : currentAudiencePressureBand === "restless" ||
-                                currentAudiencePressureBand === "disruptive"
-                              ? "Restore order without interrupting the speaker. Space also swings the gavel."
-                              : "Swing the gavel to settle the room without interrupting the speaker. Space also swings it."
-                        }
-                        title={
-                          judgeGavelCeremonyReady
-                            ? "Your cue — slam the gavel · Space"
-                            : "Restore audience order · Space"
-                        }
-                      >
-                        {judgeGavelCeremonyReady
-                          ? "Slam now"
-                          : currentAudiencePressureBand === "restless" ||
-                              currentAudiencePressureBand === "disruptive"
-                            ? "Restore order"
-                            : "Gavel"}
-                        <kbd aria-hidden="true">Space</kbd>
-                      </button>
-                    ) : null}
-                    {judgeGavelAvailable && !judgeGavelCeremonyReady ? (
-                      <button
-                        type="button"
-                        className={styles.judgeInterveneButton}
-                        data-action={
-                          judgeCanCallTime ? "call-time" : "intervene"
-                        }
-                        data-overtime={judgeCanCallTime ? "true" : undefined}
-                        data-cooling={judgeGavelOnCooldown ? "true" : undefined}
-                        onClick={(event) => {
-                          event.currentTarget.blur();
-                          void swingJudgeGavel(judgeCanCallTime);
+                          activateJudgeUnifiedGavel();
                         }}
                         disabled={
                           busy ||
-                          debateFloorMutationInFlightRef.current ||
-                          judgeGavelOnCooldown
+                          audienceOrderSaving ||
+                          debateFloorMutationInFlightRef.current
                         }
-                        aria-label={
-                          judgeGavelOnCooldown
-                            ? `Intervention ready in ${judgeGavelCooldownSeconds} seconds`
-                            : judgeCanCallTime
-                              ? "Call time on the active speaker"
-                              : "Interrupt the active speaker and address the debaters"
-                        }
-                        title={
-                          judgeGavelOnCooldown
-                            ? "Intervention cooling down"
-                            : judgeCanCallTime
-                              ? "Call time"
-                              : "Intervene"
-                        }
+                        aria-label={judgeUnifiedGavelAriaLabel}
+                        title={judgeUnifiedGavelTitle}
                       >
-                        {judgeGavelOnCooldown ? (
-                          <>Cooling · {judgeGavelCooldownLabel}</>
-                        ) : judgeCanCallTime ? (
-                          "Call time"
-                        ) : (
-                          "Intervene"
-                        )}
+                        {judgeUnifiedGavelLabel}
+                        <kbd aria-hidden="true">Space</kbd>
                       </button>
                     ) : null}
                     {judgeGavelOnCooldown ? (
                       <span
                         className={styles.judgeGavelCooldownStatus}
                         role="status"
-                        aria-label={`Judge intervention cooling down. Ready in ${judgeGavelCooldownSeconds} seconds. Space still restores audience order.`}
+                        aria-label={`Judge intervention cooling down. Ready in ${judgeGavelCooldownSeconds} seconds. The gavel and Space still settle the gallery.`}
                       >
                         <strong>Intervention cooling</strong>
                         {judgeGavelCooldownLabel}
-                        <small>Space still restores order</small>
+                        <small>Gavel still settles gallery</small>
                       </span>
                     ) : null}
                     <button

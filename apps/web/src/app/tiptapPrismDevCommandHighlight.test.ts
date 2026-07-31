@@ -85,11 +85,11 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("resolves command bounds for a leading slash command", () => {
-    const out = resolveLeadingDevCommandTextRanges('  /echo "hello"');
+    const out = resolveLeadingDevCommandTextRanges('  /say "hello"');
     assert.deepEqual(out, {
       commandStart: 2,
-      commandEnd: 7,
-      quotedStringRanges: [{ start: 8, end: 15 }],
+      commandEnd: 6,
+      quotedStringRanges: [{ start: 7, end: 14 }],
       actionTokenRanges: [],
     });
   });
@@ -143,85 +143,85 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("supports escaped quotes inside the first quoted token", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "say \\"hi\\""');
+    const out = resolveLeadingDevCommandTextRanges('/say "say \\"hi\\""');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
-      quotedStringRanges: [{ start: 6, end: 18 }],
+      commandEnd: 4,
+      quotedStringRanges: [{ start: 5, end: 17 }],
       actionTokenRanges: [],
     });
   });
 
   it("highlights --wait argument after quoted message", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "hello" --wait 5');
+    const out = resolveLeadingDevCommandTextRanges('/say "hello" --wait 5');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
-      quotedStringRanges: [{ start: 6, end: 13 }],
+      commandEnd: 4,
+      quotedStringRanges: [{ start: 5, end: 12 }],
       actionTokenRanges: [],
-      argumentStart: 14,
-      argumentEnd: 22,
+      argumentStart: 13,
+      argumentEnd: 21,
     });
   });
 
   it("highlights -load argument after quoted message", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "hello" -load 1.5');
+    const out = resolveLeadingDevCommandTextRanges('/say "hello" -load 1.5');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
-      quotedStringRanges: [{ start: 6, end: 13 }],
+      commandEnd: 4,
+      quotedStringRanges: [{ start: 5, end: 12 }],
       actionTokenRanges: [],
-      argumentStart: 14,
-      argumentEnd: 23,
+      argumentStart: 13,
+      argumentEnd: 22,
     });
   });
 
   it("highlights --wait even before number is typed", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "hello" --wait');
+    const out = resolveLeadingDevCommandTextRanges('/say "hello" --wait');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
-      quotedStringRanges: [{ start: 6, end: 13 }],
+      commandEnd: 4,
+      quotedStringRanges: [{ start: 5, end: 12 }],
       actionTokenRanges: [],
-      argumentStart: 14,
-      argumentEnd: 20,
+      argumentStart: 13,
+      argumentEnd: 19,
     });
   });
 
   it("highlights each concatenated quoted string independently", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "Hello " + "World!" --wait 20');
+    const out = resolveLeadingDevCommandTextRanges('/say "Hello " + "World!" --wait 20');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
+      commandEnd: 4,
       quotedStringRanges: [
-        { start: 6, end: 14 },
-        { start: 17, end: 25 },
+        { start: 5, end: 13 },
+        { start: 16, end: 24 },
       ],
       actionTokenRanges: [],
-      argumentStart: 26,
-      argumentEnd: 35,
+      argumentStart: 25,
+      argumentEnd: 34,
     });
   });
 
   it("still highlights --wait when action token is unquoted", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "Hello world!" + *cheers* --wait 20');
+    const out = resolveLeadingDevCommandTextRanges('/say "Hello world!" + *cheers* --wait 20');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
-      quotedStringRanges: [{ start: 6, end: 20 }],
-      actionTokenRanges: [{ start: 23, end: 31 }],
-      argumentStart: 32,
-      argumentEnd: 41,
+      commandEnd: 4,
+      quotedStringRanges: [{ start: 5, end: 19 }],
+      actionTokenRanges: [{ start: 22, end: 30 }],
+      argumentStart: 31,
+      argumentEnd: 40,
     });
   });
 
   it("highlights *action* inside quoted strings as action token", () => {
-    const out = resolveLeadingDevCommandTextRanges('/echo "Hello *cheers* world"');
+    const out = resolveLeadingDevCommandTextRanges('/say "Hello *cheers* world"');
     assert.deepEqual(out, {
       commandStart: 0,
-      commandEnd: 5,
-      quotedStringRanges: [{ start: 6, end: 28 }],
-      actionTokenRanges: [{ start: 13, end: 21 }],
+      commandEnd: 4,
+      quotedStringRanges: [{ start: 5, end: 27 }],
+      actionTokenRanges: [{ start: 12, end: 20 }],
     });
   });
 });

@@ -54,7 +54,7 @@ export function logDebateAudiencePerfSnapshot(
 /** Auto-advance pause after presentation finishes cleanly. */
 export const DEBATE_AUTO_ADVANCE_DELAY_MS = 280;
 
-/** Map adaptive scene quality onto audience visual cost. */
+/** Map adaptive scene quality onto audience material cost. */
 export function debateAudienceEffectTier(
   materialQuality: PrismSceneQuality,
 ): "full" | "balanced" | "minimal" {
@@ -66,24 +66,26 @@ export function debateAudienceMaxReactingSeats(
   beatKind: string,
 ): number {
   if (beatKind === "attentive") return 1;
-  if (materialQuality === "full") return 2;
-  return 1;
+  return materialQuality === "full" ? 2 : 1;
 }
 
 export function debateAudienceAllowsFaceOpen(
   materialQuality: PrismSceneQuality,
 ): boolean {
-  return materialQuality === "full";
+  void materialQuality;
+  return true;
 }
 
 export function debateAudienceAllowsTransformBounce(
   materialQuality: PrismSceneQuality,
 ): boolean {
-  return materialQuality !== "minimal";
+  void materialQuality;
+  return true;
 }
 
 export function debateAudienceAllowsAttentiveFoley(
   materialQuality: PrismSceneQuality,
 ): boolean {
-  return materialQuality !== "minimal";
+  void materialQuality;
+  return true;
 }

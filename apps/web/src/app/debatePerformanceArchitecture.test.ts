@@ -15,6 +15,10 @@ const pageCss = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const avatarDetailsSource = readFileSync(
+  new URL("./AvatarDetailsMask.tsx", import.meta.url),
+  "utf8",
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
@@ -68,6 +72,11 @@ test("audience detail keeps avatars while removing hidden material passes and id
   assert.match(pageSource, /staticAudiencePortrait[\s\S]*"audience"/u);
   assert.match(pageSource, /data-debate-optimized-avatar="true"/u);
   assert.match(pageSource, /detailLevel=\{avatarDetailsDetailLevel\}/u);
+  assert.match(pageSource, /staticRaster=\{detailLevel === "audience"\}/u);
+  assert.match(
+    avatarDetailsSource,
+    /data-avatar-details-rendering="static-raster"/u,
+  );
   assert.match(pageCss, /debateOptimizedEmissionMask::before/u);
   assert.match(pageCss, /data-debate-role="audience"[\s\S]*animation: none/u);
 });
@@ -77,7 +86,7 @@ test("performance adaptation adds no player-facing setting or tutorial step", ()
   assert.doesNotMatch(tutorialSource, /material quality|performance tier/iu);
 });
 
-test("audience effects throttle under reduced material quality", () => {
+test("audience materials throttle without removing semantic reactions", () => {
   assert.match(debateSource, /debateAudienceMaxReactingSeats/u);
   assert.match(debateSource, /debateAudienceAllowsFaceOpen/u);
   assert.match(debateSource, /debateAudienceAllowsTransformBounce/u);
@@ -86,9 +95,9 @@ test("audience effects throttle under reduced material quality", () => {
   assert.match(debateSource, /allowTransformBounce=\{allowTransformBounce\}/u);
   assert.match(debateSource, /DebateLiveAudienceGallery/u);
   assert.match(debateSource, /data-audience-bounce/u);
-  assert.match(
+  assert.doesNotMatch(
     debateCss,
-    /\.live\[data-debate-material-quality="minimal"\][\s\S]*data-audience-bounce/u,
+    /data-debate-material-quality="minimal"[^}]*data-audience-bounce[^{]*\{[^}]*animation:\s*none/u,
   );
   assert.match(debateSource, /DEBATE_AUTO_ADVANCE_DELAY_MS/u);
   assert.match(debateSource, /DebateDeadlineCountdown/u);

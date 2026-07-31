@@ -42,6 +42,7 @@ import {
   botFrameFinishForSeed,
   botFrameFinishMirroredForSeed,
 } from "./botFrameFinish";
+import { botAvatarIdentityMaterialStyle } from "./botAvatarIdentityMaterial";
 import {
   BACKEND_AVAILABLE_EVENT,
   BACKEND_UNAVAILABLE_CODE,
@@ -1441,10 +1442,6 @@ import {
 } from "./BotMentionRichText";
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
 import { parseCoffeeDevCommand } from "./coffeeDevCommand";
-import {
-  looksLikeEchoSlashCommand,
-  parseEchoSlashCommand,
-} from "./echoSlashCommand.ts";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
 import {
@@ -12968,6 +12965,8 @@ const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
   ...BUILT_IN_UNDO_COMMAND_ALIASES,
   "psychic",
   NVM_COMMAND_NAME,
+  // Deprecated: keep reserved so stale saved /echo commands disappear
+  // instead of reappearing as editable custom prompts.
   "echo",
   "dev",
   "forget",
@@ -13634,23 +13633,6 @@ function createBuiltInNvmCommand(): CommandCenterCommand {
   };
 }
 
-function createBuiltInEchoCommand(): CommandCenterCommand {
-  const now = new Date().toISOString();
-  return {
-    id: "builtin:/echo",
-    name: "echo",
-    title: "echo",
-    command:
-      "Forces the addressed bot to repeat the following words exactly (wildcards expand first).",
-    aliases: [],
-    arguments: [],
-    builtIn: true,
-    readOnly: true,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
 function normalizeCommandAliasList(
   aliases: unknown,
   primaryName: string,
@@ -14075,7 +14057,6 @@ function normalizeCommandCenterState(raw: unknown): {
     createBuiltInForgiveMeCommand(),
     createBuiltInUndoCommand(),
     createBuiltInNvmCommand(),
-    createBuiltInEchoCommand(),
   ];
   const parsed: CommandCenterStateV1 | null =
     raw && typeof raw === "object" ? (raw as CommandCenterStateV1) : null;
@@ -29358,7 +29339,6 @@ interface ZenLiveBotMannequinProps {
   glyph: BotGlyphName;
   faceStyle: BotFaceStyle;
   faceScaleY: string | number;
-  phosphorProfile?: "white" | "bot";
   voicePreset: BotVoicePreset;
   isTalking: boolean;
   avatarSfx?: BotAvatarSfxPlayback | null;
@@ -29455,7 +29435,6 @@ function ZenLiveBotMannequin({
   glyph,
   faceStyle,
   faceScaleY,
-  phosphorProfile = "white",
   voicePreset,
   isTalking,
   avatarSfx = null,
@@ -29675,6 +29654,7 @@ function ZenLiveBotMannequin({
               mouthAnimation={faceStyle.mouthAnimation}
               mouthShape={displayedMouthShape}
               depth="behind-face"
+              staticRaster={detailLevel === "audience"}
             />
           ) : null}
           <span
@@ -29745,6 +29725,7 @@ function ZenLiveBotMannequin({
               mouthAnimation={faceStyle.mouthAnimation}
               mouthShape={displayedMouthShape}
               depth="above-face"
+              staticRaster={detailLevel === "audience"}
             />
           ) : null}
         </span>
@@ -29787,7 +29768,7 @@ function ZenLiveBotMannequin({
       <span
         className={styles.zenLiveBotPresenceFaceEmissionMask}
         data-crt-profile="clean"
-        data-crt-phosphor={phosphorProfile}
+        data-crt-phosphor="white"
         data-talking={isTalking ? "true" : undefined}
         data-coffee-plate-mouth-shape={
           isTalking ? displayedMouthShape : undefined
@@ -30743,6 +30724,7 @@ function ZenLiveBotPresencePlate({
   );
   const avatarStyle = {
     ...botAccent,
+    ...(bot ? botAvatarIdentityMaterialStyle(privateModeActive) : {}),
     "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
     "--coffee-plate-emoji-face-scale-y": faceScaleY,
     "--avatar-details-facing-scale-x": botAvatarDetailsFacingScaleX(faceScaleY),
@@ -30789,7 +30771,6 @@ function ZenLiveBotPresencePlate({
       data-mood={moodHint}
       data-prism-mood={zenLiveActionMoodToBotMood(moodHint)}
       data-source={actionState?.source ?? (bot ? "persona" : "prism")}
-      data-bot-identity-color={bot ? "true" : undefined}
       data-prism-persona={defaultPrismPresence ? "true" : undefined}
       data-ghostly-presence={
         bot && botPowerAvatarVisibilityModeV1(bot.powers) === "speaking_only"
@@ -30866,7 +30847,6 @@ function ZenLiveBotPresencePlate({
           glyph={liveBotGlyphName}
           faceStyle={faceStyle}
           faceScaleY={faceScaleY}
-          phosphorProfile={bot ? "bot" : "white"}
           voicePreset={voicePreset}
           isTalking={faceTalking}
           avatarSfx={botAvatarSfxForBot(bot)}
@@ -36115,10 +36095,7 @@ function botAvatarPreviewIdentityStyle(
   const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
   return {
     ...accentStyle,
-    ["--zen-live-bot-face-phosphor-ink" as string]: "#ffffff",
-    ["--zen-live-bot-face-ink" as string]: "var(--coffee-bot-color)",
-    ["--zen-live-bot-glyph-ink" as string]:
-      "var(--zen-live-bot-face-phosphor-ink)",
+    ...botAvatarIdentityMaterialStyle(),
   } as CSSProperties;
 }
 
@@ -61245,8 +61222,8 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (coffeeTurnRhythmState === "botThinking" && coffeePendingSpeakerBotId) {
-      // Keep the visible "..." badge alive during explicit local waits (e.g.
-      // `/echo "...\" --wait 5`) even when no network request is in-flight.
+      // Keep the visible "..." badge alive while a seated bot is thinking,
+      // even when no network request is in-flight yet.
       return;
     }
     // A thinking bot keeps thinking while the player types; composing only
@@ -74617,15 +74594,10 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (!isAssistantOnlyTurn) {
-      const echoBypassesModelGate =
-        looksLikeEchoSlashCommand(rawDraft) ||
-        looksLikeEchoSlashCommand(commandTrimmed);
-      if (!echoBypassesModelGate) {
-        const disabledMessage = disabledTextModelSendMessage();
-        if (disabledMessage) {
-          setError(disabledMessage);
-          return;
-        }
+      const disabledMessage = disabledTextModelSendMessage();
+      if (disabledMessage) {
+        setError(disabledMessage);
+        return;
       }
     }
     const commandCenterPromptShortcut =
@@ -74682,92 +74654,6 @@ function HomeContent(): React.JSX.Element {
     const outboundPrompt = commandCenterPromptActive
       ? preservePromptBodyWhitespace(expandedPrompt)
       : trimmed;
-    if (
-      !isAssistantOnlyTurn &&
-      !options.starterPrompt &&
-      looksLikeEchoSlashCommand(outboundPrompt)
-    ) {
-      const echoCommand = parseEchoSlashCommand(outboundPrompt);
-      if (echoCommand.kind === "error") {
-        setError(echoCommand.error);
-        return;
-      }
-      if (echoCommand.kind === "ok") {
-        if (!options.skipComposerHistory) {
-          appendComposerHistoryEntry(rawDraft);
-        }
-        if (chatAutoRestoreSuppressed) {
-          setChatAutoRestoreSuppressed(false);
-        }
-        if (forceNewConversationOnNextSend) {
-          setForceNewConversationOnNextSend(false);
-        }
-        if (editingMessageId !== null) {
-          setEditingMessageId(null);
-          setEditingOriginalText("");
-        }
-        setConversationStarterPrompts(null);
-        setChatStartupSummary(null);
-        chatSummaryRefreshMarkerRef.current = null;
-        setError(null);
-        if (!preserveComposerDraft) {
-          clearComposerDraftNow();
-        }
-        setZenEphemeralUserActionMessage(null);
-        setZenLiveBotAction(null);
-        if (echoCommand.waitSeconds > 0) {
-          await new Promise<void>((resolve) => {
-            window.setTimeout(resolve, echoCommand.waitSeconds * 1000);
-          });
-        }
-        const fallbackBotId =
-          detail?.botId ??
-          detail?.lastBotId ??
-          zenPersonaBotId ??
-          selectedBotId ??
-          null;
-        const fallbackBot = fallbackBotId
-          ? (bots.find((bot) => bot.id === fallbackBotId) ?? null)
-          : null;
-        const echoBot = zenPersonaBot ?? fallbackBot;
-        const nowIso = new Date().toISOString();
-        const echoAssistantMessage: Message = {
-          id: `system-echo-${Date.now().toString(36)}-${Math.random()
-            .toString(36)
-            .slice(2, 8)}`,
-          role: "assistant",
-          content: echoCommand.message,
-          createdAt: nowIso,
-          provider: "local",
-          model: "system/echo",
-          botId: fallbackBotId ?? undefined,
-          botName: echoBot?.name ?? DEFAULT_ASSISTANT_NAME,
-          botColor: echoBot?.color ?? undefined,
-          botGlyph: echoBot?.glyph ?? undefined,
-          moodKey: "neutral",
-          moodConfidence: 1,
-        };
-        setDetail((current) => {
-          const nextBotId = fallbackBotId;
-          const nextBotColor = echoBot?.color ?? null;
-          const baseMessages = current?.messages ?? [];
-          const nextConversation = {
-            id: current?.id ?? "pending",
-            title: current?.title ?? "New chat",
-            botId: current?.botId ?? null,
-            incognito: current?.incognito ?? pendingIncognito,
-            lastBotId: nextBotId,
-            lastBotColor: nextBotColor,
-            hasAssistantReply: true,
-            messages: [...baseMessages, echoAssistantMessage],
-          };
-          markLatestAssistantRevealEligible(nextConversation);
-          return nextConversation;
-        });
-        setChatEphemeralNowMs(Date.now());
-        return;
-      }
-    }
     if (manualToolForSend && trimmed.length === 0) {
       setError(
         manualToolForSend.name === "askQuestion"
@@ -120817,13 +120703,6 @@ function HomeContent(): React.JSX.Element {
       setCoffeeDevSpeakBusyBotId(null);
     }
   };
-  const ECHO_WAIT_SECOND_MS = 1000;
-  const waitForCoffeeEcho = async (waitSeconds: number) => {
-    if (waitSeconds <= 0) return;
-    await new Promise<void>((resolve) => {
-      window.setTimeout(resolve, waitSeconds * ECHO_WAIT_SECOND_MS);
-    });
-  };
   const recallPreviousCoffeeDraft = (): string | null => {
     const remembered = coffeeLastSubmittedDraftRef.current;
     if (typeof remembered === "string" && remembered.trim().length > 0) {
@@ -121010,7 +120889,7 @@ function HomeContent(): React.JSX.Element {
       applyCoffeeDevMode(!coffeeDevModeEnabledRef.current);
       return;
     }
-    if (modelCatalogLoading && coffeeCommand.kind !== "ok") {
+    if (modelCatalogLoading) {
       showLocalCommandToast(
         "Models are still loading",
         "You can use commands in the meantime, but messages cannot be sent yet.",
@@ -121140,12 +121019,6 @@ function HomeContent(): React.JSX.Element {
       enterCoffeeLivePhase();
       setCoffeeAutoplayPausedValue(false);
     } else if (coffeeSessionPhase === "topic" && activeConversation?.id) {
-      if (coffeeCommand.kind === "ok") {
-        setCoffeeError(
-          "Set the session topic first, then use `/echo` during live turns.",
-        );
-        return;
-      }
       setCoffeeBusy(true);
       setCoffeeError(null);
       try {
@@ -121162,84 +121035,6 @@ function HomeContent(): React.JSX.Element {
       } finally {
         setCoffeeBusy(false);
       }
-      return;
-    }
-    if (coffeeCommand.kind === "ok") {
-      const seats = coffeeMentionBotsRef.current;
-      if (seats.length === 0) {
-        setCoffeeError("No seated bots are available for `/echo`.");
-        return;
-      }
-      const mentionedSpeakerIds = coffeeDirectedMentionBotIds(
-        trimmed,
-        seats.map((seat) => seat.id),
-      );
-      let speaker =
-        [...mentionedSpeakerIds]
-          .reverse()
-          .map((id) => seats.find((seat) => seat.id === id) ?? null)
-          .find((seat): seat is (typeof seats)[number] => seat !== null) ??
-        null;
-      if (!speaker && activeConversation.lastBotId) {
-        speaker =
-          seats.find((seat) => seat.id === activeConversation.lastBotId) ??
-          null;
-      }
-      if (!speaker) {
-        speaker = seats[0] ?? null;
-      }
-      if (!speaker) {
-        setCoffeeError("No seated bots are available for `/echo`.");
-        return;
-      }
-      coffeeLastSubmittedDraftRef.current = trimmed;
-      coffeeDraftRef.current = "";
-      setCoffeeDraft("");
-      setCoffeeTurnRhythmState("botThinking");
-      setCoffeePendingSpeakerBotId(speaker.id);
-      setCoffeeError(null);
-      await waitForCoffeeEcho(coffeeCommand.waitSeconds);
-      const nextConversation: CoffeeConversationState = {
-        ...activeConversation,
-        hasAssistantReply: true,
-        lastBotId: speaker.id,
-        lastBotColor: speaker.color ?? null,
-        messages: [
-          ...activeConversation.messages,
-          {
-            id: `coffee-echo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            role: "assistant",
-            content: coffeeCommand.message,
-            createdAt: new Date().toISOString(),
-            botName: speaker.name,
-            botColor: speaker.color ?? undefined,
-            botGlyph: speaker.glyph ?? undefined,
-          },
-        ],
-      };
-      const endsAt = coffeeDevModeEnabledRef.current
-        ? null
-        : (activeEndsAt ??
-          coffeeSessionDeadlineAtMs(nextConversation, Date.now()));
-      assignCoffeeSessionEndsAtMs(endsAt);
-      seatCoffeeArrivalBotIds(nextConversation, [speaker.id]);
-      await waitForCoffeeBotToBeFirmlySeated(speaker.id);
-      if (
-        coffeeSessionPhaseRef.current === "arriving" &&
-        !coffeeBotIsFirmlySeated(speaker.id)
-      ) {
-        setCoffeePendingSpeakerBotId(null);
-        setCoffeeTurnRhythmState("idle");
-        return;
-      }
-      if (coffeeSessionPhase !== "arriving") {
-        enterCoffeeLivePhase();
-      }
-      queueCoffeeReveal({
-        conversation: nextConversation,
-        speakerBotId: speaker.id,
-        includeCooldown: false,
-      });
       return;
     }
     if (coffeeSessionModelDisabled) {

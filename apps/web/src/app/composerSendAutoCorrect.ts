@@ -11,12 +11,7 @@
  * unambiguous typos plus standalone-pronoun capitalization. Tokens attached
  * to mentions (@), slash commands (/), paths, or hashtags are never touched,
  * and backtick code spans are left verbatim.
- *
- * `/echo` lines are left entirely untouched so the bot can repeat the prose
- * after the command exactly as written.
  */
-
-import { looksLikeEchoSlashCommand } from "./echoSlashCommand.ts";
 
 const COMPOSER_SEND_AUTOCORRECT_WORDS: ReadonlyMap<string, string> = new Map([
   ["teh", "the"],
@@ -99,7 +94,6 @@ function correctSegment(segment: string): string {
  */
 export function applyComposerSendAutoCorrect(text: string): string {
   if (text.length === 0) return text;
-  if (looksLikeEchoSlashCommand(text)) return text;
   if (!text.includes("`")) return correctSegment(text);
   return text
     .split("`")

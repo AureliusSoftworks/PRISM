@@ -1436,32 +1436,38 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /rebuttal_(?:against|for)_partner/u);
   });
 
-  it("separates audience order, semantic intervention, and lifecycle controls", () => {
+  it("unifies audience order and semantic intervention behind one contextual gavel", () => {
     assert.match(source, /\/judge-gavel`/u);
     assert.match(source, /\/judge-gavel\/order`/u);
     assert.match(source, /\/judge-gavel\/message`/u);
     assert.match(source, /data-tutorial-target="debate-judge-gavel"/u);
     assert.match(source, /const judgeCanCallTime =/u);
     assert.match(source, /activeTurnClock\?\.status === "overtime"/u);
-    assert.match(source, /Restore order without interrupting the speaker/u);
-    assert.match(source, /className=\{styles\.judgeInterveneButton\}/u);
-    assert.match(source, /judgeCanCallTime \? "call-time" : "intervene"/u);
-    assert.match(source, /judgeCanCallTime[\s\S]{0,80}\? "Call time"/u);
+    assert.match(source, /const judgeUnifiedGavelAction =/u);
+    assert.match(source, /judgeGavelInterventionEligibleNow/u);
+    assert.match(source, /\? \("call-time" as const\)/u);
+    assert.match(source, /\? "Call time"/u);
+    assert.match(source, /\? "Intervene"/u);
+    assert.doesNotMatch(source, /className=\{styles\.judgeInterveneButton\}/u);
     assert.match(source, /judgeGavelCooldownRemainingMs/u);
     assert.match(source, /debateJudgeGavelCooldownBlocks/u);
     assert.match(source, /overtime: judgeCanCallTime/u);
     assert.match(source, /debateJudgeGavelSpaceAction/u);
+    assert.match(
+      source,
+      /interventionAvailable:\s*context\.interventionAvailable/u,
+    );
     assert.match(source, /orderAvailable:\s*context\.orderAvailable/u);
     assert.match(source, /blockedNotice:\s*judgeGavelShortcutBlockedNotice/u);
     assert.match(source, /setAutoRecoveryNotice\(context\.blockedNotice\)/u);
     assert.match(source, /data-space-shortcut="true"/u);
     assert.match(source, /gavelShortcutTarget\?\.blur\(\)/u);
     assert.match(source, /Intervention cooling/u);
-    assert.match(source, /Space still restores order/u);
+    assert.match(source, /Gavel still settles gallery/u);
     assert.match(css, /\.judgeGavelCooldownStatus\s*\{/u);
     assert.match(
       css,
-      /\.judgeInterveneButton\[data-cooling="true"\]:disabled\s*\{[^}]*opacity:\s*1/u,
+      /\.judgeGavelButton\[data-cooling="true"\]\s*\{[^}]*animation:\s*none/u,
     );
     assert.match(
       source,
@@ -1481,9 +1487,9 @@ describe("Debate experience", () => {
       source,
       /action === "smash"[\s\S]{0,260}orderDebateAudienceRef\.current/u,
     );
-    assert.doesNotMatch(
+    assert.match(
       source,
-      /action === "order"[\s\S]{0,120}swingJudgeGavel/u,
+      /action === "intervene"[\s\S]{0,120}swingJudgeGavelRef\.current/u,
     );
     assert.match(
       source,
@@ -1540,7 +1546,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.proceedingControls/u);
     assert.match(css, /\.proceedingControlActions/u);
     assert.match(css, /\.judgeGavelButton/u);
-    assert.match(css, /\.judgeInterveneButton/u);
+    assert.doesNotMatch(css, /\.judgeInterveneButton/u);
     assert.match(css, /\.judgeGavelButton kbd/u);
     assert.match(css, /@keyframes debate-judge-gavel-ready/u);
     assert.match(css, /\.playerWindow\[data-kind="judge-gavel"\]/u);
@@ -2355,6 +2361,9 @@ describe("Debate experience", () => {
     assert.match(source, /data-tutorial-target="debate-judge-gavel"/u);
     assert.match(source, /"Settle gallery"/u);
     assert.match(source, /audiencePressureScore=\{currentAudiencePressureScore\}/u);
+    assert.match(source, /action:\s*judgeUnifiedGavelAction/u);
+    assert.match(source, /onActivate:\s*activateJudgeUnifiedGavel/u);
+    assert.match(source, /data-action=\{props\.judgeControl\.action\}/u);
     assert.match(css, /\.debateAudienceRow::before/u);
     assert.match(css, /\.debateAudienceRow::after/u);
     assert.match(css, /\.debateAudienceGavelButton/u);

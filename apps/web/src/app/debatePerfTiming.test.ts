@@ -15,18 +15,18 @@ test("auto-advance delay is tightened under the presentation gate", () => {
   assert.ok(DEBATE_AUTO_ADVANCE_DELAY_MS < 520);
 });
 
-test("audience effect helpers cheapen faces and bounce under load", () => {
+test("adaptive material tiers never remove semantic audience reactions", () => {
   assert.equal(debateAudienceMaxReactingSeats("full", "contention"), 2);
   assert.equal(debateAudienceMaxReactingSeats("balanced", "contention"), 1);
   assert.equal(debateAudienceMaxReactingSeats("minimal", "contention"), 1);
   assert.equal(debateAudienceMaxReactingSeats("full", "attentive"), 1);
   assert.equal(debateAudienceAllowsFaceOpen("full"), true);
-  assert.equal(debateAudienceAllowsFaceOpen("balanced"), false);
-  assert.equal(debateAudienceAllowsFaceOpen("minimal"), false);
+  assert.equal(debateAudienceAllowsFaceOpen("balanced"), true);
+  assert.equal(debateAudienceAllowsFaceOpen("minimal"), true);
   assert.equal(debateAudienceAllowsTransformBounce("full"), true);
   assert.equal(debateAudienceAllowsTransformBounce("balanced"), true);
-  assert.equal(debateAudienceAllowsTransformBounce("minimal"), false);
-  assert.equal(debateAudienceAllowsAttentiveFoley("minimal"), false);
+  assert.equal(debateAudienceAllowsTransformBounce("minimal"), true);
+  assert.equal(debateAudienceAllowsAttentiveFoley("minimal"), true);
   assert.equal(debateAudienceAllowsAttentiveFoley("full"), true);
 });
 

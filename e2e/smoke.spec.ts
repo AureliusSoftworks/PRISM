@@ -5485,15 +5485,6 @@ test.describe("PRISM desktop smoke", () => {
       await expect(
         live.locator('[data-debate-audience="true"]'),
       ).toHaveAttribute("data-audience-count", "15");
-      if (process.env.PRISM_DEBATE_PERF_PROBE === "audience") {
-        await page.addStyleTag({
-          content: '[data-debate-audience="true"] { display: none !important; }',
-        });
-      } else if (process.env.PRISM_DEBATE_PERF_PROBE === "avatars") {
-        await page.addStyleTag({
-          content: '[data-debate-bot-avatar="true"] { display: none !important; }',
-        });
-      }
       const metrics = await page.evaluate(async () => {
         const intervals: number[] = [];
         let previous = performance.now();

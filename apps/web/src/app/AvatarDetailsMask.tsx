@@ -1,6 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   normalizeBotFaceGlyphAnimation,
   type BotFaceGlyphAnimation,
@@ -35,6 +41,7 @@ export interface AvatarDetailsMaskProps {
   mouthAnimation?: BotFaceGlyphAnimation | null;
   mouthShape?: ZenLiveBotMouthShape | null;
   depth?: Exclude<AvatarDetailsFaceDepth, "all">;
+  staticRaster?: boolean;
 }
 
 type AvatarDetailsSpeechMotion = Exclude<BotFaceGlyphAnimation, "none">;
@@ -47,6 +54,7 @@ interface AvatarDetailsEmissionPlanesProps {
   inkRole: "visible" | "speech";
   motion?: AvatarDetailsSpeechMotion | null;
   mouthShape?: ZenLiveBotMouthShape | null;
+  staticRaster?: boolean;
 }
 
 function AvatarDetailsEmissionPlanes({
@@ -57,15 +65,38 @@ function AvatarDetailsEmissionPlanes({
   inkRole,
   motion = null,
   mouthShape = null,
+  staticRaster = false,
 }: AvatarDetailsEmissionPlanesProps): React.JSX.Element | null {
   const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const coreCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [staticRasterUrl, setStaticRasterUrl] = useState<string | null>(null);
   const hasPixels = useMemo(
     () => pixels.some((channel, index) => index % 4 === 3 && channel > 0),
     [pixels],
   );
   useLayoutEffect(() => {
+    if (staticRaster && detailLevel === "audience") {
+      if (!hasPixels) {
+        queueMicrotask(() => setStaticRasterUrl(null));
+        return;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = AVATAR_DETAILS_CANVAS_SIZE;
+      canvas.height = AVATAR_DETAILS_CANVAS_SIZE;
+      const context = canvas.getContext("2d", { alpha: true });
+      if (!context) return;
+      const imageData = context.createImageData(
+        AVATAR_DETAILS_CANVAS_SIZE,
+        AVATAR_DETAILS_CANVAS_SIZE,
+      );
+      imageData.data.set(avatarDetailsPhosphorCoreRgba(pixels));
+      context.imageSmoothingEnabled = false;
+      context.putImageData(imageData, 0, 0);
+      const nextRasterUrl = canvas.toDataURL("image/png");
+      queueMicrotask(() => setStaticRasterUrl(nextRasterUrl));
+      return;
+    }
     const haloCanvas = haloCanvasRef.current;
     const bloomCanvas = bloomCanvasRef.current;
     const coreCanvas = coreCanvasRef.current;
@@ -101,7 +132,7 @@ function AvatarDetailsEmissionPlanes({
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
-  }, [detailLevel, hasPixels, pixels]);
+  }, [detailLevel, hasPixels, pixels, staticRaster]);
 
   if (!hasPixels) return null;
 
@@ -125,6 +156,23 @@ function AvatarDetailsEmissionPlanes({
     "data-avatar-details-render-detail": detailLevel,
     "aria-hidden": true,
   } as const;
+
+  if (staticRaster && detailLevel === "audience") {
+    return staticRasterUrl ? (
+      // The immutable audience ink is encoded once so WebKit can cache it as
+      // an image instead of repainting two retained canvases every stage frame.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={staticRasterUrl}
+        alt=""
+        className={`${styles.layer} ${depthClassName} ${styles.core}`}
+        data-avatar-details-mask="true"
+        data-avatar-details-emission="core"
+        data-avatar-details-rendering="static-raster"
+        {...sharedProps}
+      />
+    ) : null;
+  }
 
   return (
     <>
@@ -174,6 +222,7 @@ export function AvatarDetailsMask({
   mouthAnimation = "none",
   mouthShape = null,
   depth = "above-face",
+  staticRaster = false,
 }: AvatarDetailsMaskProps): React.JSX.Element | null {
   const normalizedDetails = useMemo(
     () => normalizeAvatarDetails(details),
@@ -246,6 +295,7 @@ export function AvatarDetailsMask({
         detailLevel={detailLevel}
         depth={depth}
         inkRole="visible"
+        staticRaster={staticRaster}
       />
       {speechPixels && speechMotion ? (
         <AvatarDetailsEmissionPlanes
@@ -256,6 +306,7 @@ export function AvatarDetailsMask({
           inkRole="speech"
           motion={speechMotion}
           mouthShape={mouthShape}
+          staticRaster={staticRaster}
         />
       ) : null}
     </>

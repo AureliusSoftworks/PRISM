@@ -1515,18 +1515,7 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX = 330;/);
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX = 300;/);
   assert.doesNotMatch(pageSource, /BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM/);
-  assert.match(
-    pageSource,
-    /\["--zen-live-bot-face-phosphor-ink" as string\]: "#ffffff"/,
-  );
-  assert.match(
-    pageSource,
-    /\["--zen-live-bot-face-ink" as string\]: "var\(--coffee-bot-color\)"/,
-  );
-  assert.match(
-    pageSource,
-    /\["--zen-live-bot-glyph-ink" as string\]: "var\(--zen-live-bot-face-phosphor-ink\)"/,
-  );
+  assert.match(pageSource, /\.\.\.botAvatarIdentityMaterialStyle\(\)/);
   assert.match(
     pageSource,
     /\.\.\.botAvatarPreviewIdentityStyle\(color, isDefaultPrismBot\)/,
@@ -1736,7 +1725,7 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /const previewSipping = previewMode === "sip";/);
   assert.match(
     pageSource,
-    /plateFace=\{previewSipping \? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined\}/,
+    /plateFace=\{\s*previewSipping \? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined\s*\}/,
   );
   assert.match(
     pageSource,

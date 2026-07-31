@@ -217,8 +217,11 @@ describe("mode tutorials", () => {
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
       copy,
-      /in-room Judge console keeps Gavel, Intervene or Call time, Pause or Resume, and End Debate together/u,
+      /in-room Judge console keeps one contextual Gavel control, Pause or Resume, and End Debate together/u,
     );
+    assert.match(copy, /label becomes Intervene while an advocate holds the floor/u);
+    assert.match(copy, /Call time during overtime/u);
+    assert.match(copy, /Space invokes that same context-aware control/u);
     assert.match(copy, /Participant and Spectator sessions use the same/u);
     assert.match(copy, /Pause takes effect immediately/u);
     assert.match(copy, /never asked for a second Space press or gavel click/u);
@@ -230,7 +233,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /cooldown governs separate Judge interventions, not audience order/u,
+      /cooldown governs semantic interventions within that gavel control, not audience order/u,
     );
     assert.match(copy, /End Debate skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
@@ -298,16 +301,17 @@ describe("mode tutorials", () => {
       copy,
       /center Judge \/ Moderator seat, gives the automatic neutral introduction, then stays publicly silent and inactive until you act/u,
     );
-    assert.match(copy, /hidden pressure rises deterministically/u);
-    assert.match(copy, /Gavel is the physical room-control action/u);
+    assert.match(copy, /visible gallery badge and four-bar meter move deterministically/u);
+    assert.match(copy, /Gavel is one context-aware physical room-control action/u);
     assert.match(copy, /without stopping the speaker or reveal/u);
     assert.match(copy, /early strike earns only a brief awkward freeze/u);
     assert.match(copy, /saved order cue preserves its exact heard position/u);
     assert.match(copy, /staying out of Proceedings, copied records/u);
     assert.match(copy, /Space serves that ceremonial cue first/u);
-    assert.match(copy, /Space restores ordinary audience order/u);
-    assert.match(copy, /never begins a semantic intervention by itself/u);
-    assert.match(copy, /Intervene is the separate speaker-cutoff control/u);
+    assert.match(copy, /single Gavel \x2f Space input follows the live floor/u);
+    assert.match(copy, /Intervene while an advocate is speaking/u);
+    assert.match(copy, /ordinary audience order when no semantic cutoff is available/u);
+    assert.match(copy, /same gavel falls back to non-interrupting audience order/u);
     assert.match(copy, /During advocate overtime it becomes Call time/u);
     assert.match(copy, /press S or O without reaching for the buttons/u);
     assert.match(copy, /room controls stay locked/u);
@@ -315,7 +319,7 @@ describe("mode tutorials", () => {
       copy,
       /Once Jury deliberation begins, the Jury owns the floor/u,
     );
-    assert.match(copy, /Gavel, Intervene, Call time, and Space are put away/u);
+    assert.match(copy, /unified Gavel and Space are put away/u);
     assert.match(copy, /Skip deliberation remains available/u);
     assert.match(
       copy,
@@ -394,8 +398,12 @@ describe("mode tutorials", () => {
     assert.match(gavelCopy, /\*speaks loudly\* or \*yells over the crowd\*/u);
     assert.match(gavelCopy, /control attached directly to the gallery/u);
     assert.match(gavelCopy, /Space serves that ceremonial cue first/u);
-    assert.match(gavelCopy, /Intervene is the separate speaker-cutoff control/u);
-    assert.match(gavelCopy, /cooldown appears as an amber countdown/u);
+    assert.match(
+      gavelCopy,
+      /single Gavel \x2f Space input follows the live floor/u,
+    );
+    assert.match(gavelCopy, /same gavel falls back to non-interrupting audience order/u);
+    assert.match(gavelCopy, /amber countdown explains when Intervene returns/u);
     assert.match(gavelCopy, /chamber explains why instead of failing silently/u);
     assert.match(gavelCopy, /becomes Call time/u);
     assert.match(gavelCopy, /literally shouts “Objection!”/u);

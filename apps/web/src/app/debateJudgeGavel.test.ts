@@ -49,7 +49,7 @@ describe("player Judge gavel keyboard control", () => {
     );
   });
 
-  it("restores audience order, then treats every Space inside two seconds as showmanship", () => {
+  it("routes one Space input through intervention, audience order, and showmanship", () => {
     const startedAt = 10_000;
     const smashUntilMs = startedAt + DEBATE_JUDGE_GAVEL_SMASH_WINDOW_MS;
     assert.equal(
@@ -58,12 +58,27 @@ describe("player Judge gavel keyboard control", () => {
         hasModifier: false,
         editableTarget: false,
         ceremonialAvailable: false,
+        interventionAvailable: false,
         liveJudge: true,
         orderAvailable: true,
         nowMs: startedAt,
         smashUntilMs: 0,
       }),
       "order",
+    );
+    assert.equal(
+      debateJudgeGavelSpaceAction({
+        code: "Space",
+        hasModifier: false,
+        editableTarget: false,
+        ceremonialAvailable: false,
+        interventionAvailable: true,
+        liveJudge: true,
+        orderAvailable: true,
+        nowMs: startedAt,
+        smashUntilMs: 0,
+      }),
+      "intervene",
     );
     for (const nowMs of [startedAt + 1, startedAt + 400, smashUntilMs - 1]) {
       assert.equal(
@@ -72,6 +87,7 @@ describe("player Judge gavel keyboard control", () => {
           hasModifier: false,
           editableTarget: false,
           ceremonialAvailable: false,
+          interventionAvailable: true,
           liveJudge: true,
           orderAvailable: false,
           nowMs,
@@ -86,6 +102,7 @@ describe("player Judge gavel keyboard control", () => {
         hasModifier: false,
         editableTarget: false,
         ceremonialAvailable: false,
+        interventionAvailable: false,
         liveJudge: true,
         orderAvailable: false,
         nowMs: smashUntilMs,
@@ -104,6 +121,7 @@ describe("player Judge gavel keyboard control", () => {
         hasModifier: false,
         editableTarget: false,
         ceremonialAvailable: true,
+        interventionAvailable: true,
         liveJudge: false,
         orderAvailable: false,
         nowMs: 10_000,
@@ -119,6 +137,7 @@ describe("player Judge gavel keyboard control", () => {
       hasModifier: false,
       editableTarget: false,
       ceremonialAvailable: false,
+      interventionAvailable: false,
       liveJudge: true,
       orderAvailable: true,
       nowMs: 1,
