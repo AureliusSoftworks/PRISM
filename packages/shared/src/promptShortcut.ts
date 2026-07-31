@@ -17,6 +17,10 @@ export interface PromptShortcutRunMetadata {
   commandId: string;
   name: string;
   invocation: string;
+  runId?: string;
+  parentRunId?: string;
+  depth?: number;
+  sourceKind?: "prompt" | "deck" | "wildcard" | "choice";
   sourceStart?: number;
   sourceEnd?: number;
   resolvedPrompt: string;
@@ -1079,10 +1083,26 @@ function normalizePromptShortcutRuns(value: unknown): PromptShortcutRunMetadata[
           const wildcardReplacements = normalizePromptWildcardReplacements(
             row.wildcardReplacements
           ).slice(0, 80);
+          const runId = readPromptShortcutString(row.runId, 160);
+          const parentRunId = readPromptShortcutString(row.parentRunId, 160);
+          const depthValue = readPromptShortcutRange(row.depth);
+          const depth =
+            depthValue !== undefined && depthValue <= 16 ? depthValue : undefined;
+          const sourceKind =
+            row.sourceKind === "prompt" ||
+            row.sourceKind === "deck" ||
+            row.sourceKind === "wildcard" ||
+            row.sourceKind === "choice"
+              ? row.sourceKind
+              : undefined;
           return {
             commandId,
             name,
             invocation,
+            ...(runId ? { runId } : {}),
+            ...(parentRunId ? { parentRunId } : {}),
+            ...(depth !== undefined ? { depth } : {}),
+            ...(sourceKind ? { sourceKind } : {}),
             ...(sourceStart !== undefined ? { sourceStart } : {}),
             ...(hasValidSourceRange ? { sourceEnd } : {}),
             resolvedPrompt,

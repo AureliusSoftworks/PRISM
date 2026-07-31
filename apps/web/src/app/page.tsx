@@ -1306,7 +1306,6 @@ import {
   type PromptShortcutPresentation,
 } from "./promptShortcutChipDisplay";
 import {
-  collapseDeletedPromptWildcardDeckReferences,
   formatPromptShortcutInsertion,
   isStandaloneWildcardComposerDraft,
   maskModelFilledWildcardSlotsForPending,
@@ -1322,6 +1321,19 @@ import {
   clearLeftoverPromptShortcutVarPassthrough,
   resolvePromptShortcutBodyVarPassthrough,
 } from "./promptShortcutVarPassthrough";
+import {
+  findLegacyPromptChoiceOccurrences,
+  flattenPromptExpressionTraces,
+  promptExpressionContainsVar,
+  resolvePromptExpression,
+  type PromptExpressionResolution,
+} from "./promptExpression";
+import {
+  findPromptDefinitionIssue,
+  findPromptDependencyCycle,
+  promptDependencyPathsTo,
+  type PromptDependencyDefinition,
+} from "./promptDependencies";
 import { messageHistoryMutationActionsAvailable } from "./messageHistoryActionPolicy";
 import {
   armComposerChipActivation,
@@ -7773,7 +7785,7 @@ type ParsedGlobalClearCommand =
 
 function parseGlobalClearCommand(text: string): ParsedGlobalClearCommand {
   const trimmed = normalizeComposerSlashCommandLine(text).trim();
-  const match = /^\/(?:clear|cls)(?:\s|$)/i.exec(trimmed);
+  const match = /^\$(?:clear|cls)(?:\s|$)/i.exec(trimmed);
   if (!match) return { kind: "none" };
   const rest = trimmed.slice(match[0].length).trim();
   if (rest.length > 0) {
@@ -12924,54 +12936,18 @@ interface CommandCenterImportMergeResult {
 const COMMAND_CENTER_ARCHIVE_ENTRY_NAME = "command-center.json";
 const COMMAND_CENTER_ARCHIVE_MIME = "application/vnd.prism.command-center+zip";
 
-const BUILT_IN_COMMAND_NAMES = new Set([
-  "help",
-  "compact",
-  "clear",
-  "atmosphere",
-  "restart",
-  "new-session",
-  "forgive-me",
-  "undo",
-  NVM_COMMAND_NAME,
-]);
 const BUILT_IN_HELP_COMMAND_ALIASES: string[] = [];
 const BUILT_IN_ATMOSPHERE_COMMAND_ALIASES = ["wallpaper", "wall", "background"];
 const BUILT_IN_UNDO_COMMAND_ALIASES = ["undo-turn"];
-const BUILT_IN_HELP_SLASH_COMMANDS = new Set([
-  "/help",
-  ...BUILT_IN_HELP_COMMAND_ALIASES.map((alias) => `/${alias}`),
+const BUILT_IN_HELP_SYSTEM_COMMANDS = new Set([
+  "$help",
+  ...BUILT_IN_HELP_COMMAND_ALIASES.map((alias) => `$${alias}`),
 ]);
-const BUILT_IN_ATMOSPHERE_SLASH_COMMANDS = new Set([
-  "/atmosphere",
-  ...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES.map((alias) => `/${alias}`),
+const BUILT_IN_ATMOSPHERE_SYSTEM_COMMANDS = new Set([
+  "$atmosphere",
+  ...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES.map((alias) => `$${alias}`),
 ]);
-const BUILT_IN_COMMAND_RESERVED_NAMES = new Set([
-  "help",
-  ...BUILT_IN_HELP_COMMAND_ALIASES,
-  "compact",
-  "summarize",
-  "clear",
-  "cls",
-  "atmosphere",
-  ...BUILT_IN_ATMOSPHERE_COMMAND_ALIASES,
-  // Deprecated: keep reserved so stale saved /refresh commands disappear
-  // instead of reappearing as editable custom prompts.
-  "refresh",
-  "restart",
-  "new-session",
-  "forgive-me",
-  "undo",
-  ...BUILT_IN_UNDO_COMMAND_ALIASES,
-  "psychic",
-  NVM_COMMAND_NAME,
-  // Deprecated: keep reserved so stale saved /echo commands disappear
-  // instead of reappearing as editable custom prompts.
-  "echo",
-  "dev",
-  "forget",
-  "forget-all",
-]);
+const LEGACY_BUILT_IN_COMMAND_ID_PREFIX = "builtin:/";
 
 interface BotGroupManifestV1 {
   schema: "prism-bot-group-manifest-v1";
@@ -13488,7 +13464,7 @@ function upsertMarketplaceBotLibraryThemeGroups(
 function createBuiltInHelpCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/help",
+    id: "builtin:help",
     name: "help",
     title: "help",
     command: "Opens a list of available commands and prompts.",
@@ -13504,7 +13480,7 @@ function createBuiltInHelpCommand(): CommandCenterCommand {
 function createBuiltInCompactCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/compact",
+    id: "builtin:compact",
     name: "compact",
     title: "compact",
     command:
@@ -13521,7 +13497,7 @@ function createBuiltInCompactCommand(): CommandCenterCommand {
 function createBuiltInClearCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/clear",
+    id: "builtin:clear",
     name: "clear",
     title: "clear",
     command: "Clears the current chat transcript and saved thread context.",
@@ -13537,7 +13513,7 @@ function createBuiltInClearCommand(): CommandCenterCommand {
 function createBuiltInAtmosphereCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/atmosphere",
+    id: "builtin:atmosphere",
     name: "atmosphere",
     title: "atmosphere",
     command: "Generates a fresh Zen Atmosphere wallpaper immediately.",
@@ -13553,7 +13529,7 @@ function createBuiltInAtmosphereCommand(): CommandCenterCommand {
 function createBuiltInRestartCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/restart",
+    id: "builtin:restart",
     name: "restart",
     title: "restart",
     command: "Restarts the local Prism API server.",
@@ -13569,7 +13545,7 @@ function createBuiltInRestartCommand(): CommandCenterCommand {
 function createBuiltInNewSessionCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/new-session",
+    id: "builtin:new-session",
     name: "new-session",
     title: "new-session",
     command:
@@ -13586,7 +13562,7 @@ function createBuiltInNewSessionCommand(): CommandCenterCommand {
 function createBuiltInForgiveMeCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/forgive-me",
+    id: "builtin:forgive-me",
     name: "forgive-me",
     title: "forgive-me",
     command: "Resets Prism's Zen mood, cooldown timer, and ignore penalties.",
@@ -13602,11 +13578,11 @@ function createBuiltInForgiveMeCommand(): CommandCenterCommand {
 function createBuiltInUndoCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/undo",
+    id: "builtin:undo",
     name: "undo",
     title: "undo",
     command:
-      "Rewinds the latest message. Use /undo 2 or /undo-turn to rewind two messages.",
+      "Rewinds the latest message. Use $undo 2 or $undo-turn to rewind two messages.",
     aliases: [...BUILT_IN_UNDO_COMMAND_ALIASES],
     arguments: [],
     builtIn: true,
@@ -13619,7 +13595,7 @@ function createBuiltInUndoCommand(): CommandCenterCommand {
 function createBuiltInNvmCommand(): CommandCenterCommand {
   const now = new Date().toISOString();
   return {
-    id: "builtin:/nvm",
+    id: "builtin:nvm",
     name: NVM_COMMAND_NAME,
     title: NVM_COMMAND_NAME,
     command:
@@ -13653,16 +13629,29 @@ function normalizeCommandAliasList(
 function sanitizeCommandAliasesForList(
   commands: readonly CommandCenterCommand[],
 ): CommandCenterCommand[] {
-  const primaryNames = new Set(commands.map((command) => command.name));
-  const claimedAliases = new Set<string>();
+  const primaryNamesByNamespace = new Map<string, Set<string>>();
+  for (const command of commands) {
+    const namespace = isCommandCenterOperationalCommand(command)
+      ? "system"
+      : "prompt";
+    const names = primaryNamesByNamespace.get(namespace) ?? new Set<string>();
+    names.add(command.name);
+    primaryNamesByNamespace.set(namespace, names);
+  }
+  const claimedAliasesByNamespace = new Map<string, Set<string>>();
   return commands.map((command) => {
+    const namespace = isCommandCenterOperationalCommand(command)
+      ? "system"
+      : "prompt";
+    const primaryNames = primaryNamesByNamespace.get(namespace) ?? new Set();
+    const claimedAliases =
+      claimedAliasesByNamespace.get(namespace) ?? new Set<string>();
+    claimedAliasesByNamespace.set(namespace, claimedAliases);
     const aliases: string[] = [];
     for (const alias of command.aliases) {
       if (!alias || alias === command.name) continue;
       if (primaryNames.has(alias)) continue;
       if (claimedAliases.has(alias)) continue;
-      if (!command.builtIn && BUILT_IN_COMMAND_RESERVED_NAMES.has(alias))
-        continue;
       claimedAliases.add(alias);
       aliases.push(alias);
     }
@@ -13865,10 +13854,11 @@ const PENDING_COMPOSER_WILDCARD_SLOT_TEXT =
 
 function composerShortcutInvocationPrefix(
   command: CommandCenterCommand,
-): "/" | "!" | "?" | "{" {
+): "/" | "$" | "!" | "?" | "{" {
   if (isComposerTrueWildcardSlotPick(command)) return "{";
   if (isComposerToolPick(command)) return "?";
-  return isComposerWildcardDeckPick(command) ? "!" : "/";
+  if (isComposerWildcardDeckPick(command)) return "!";
+  return isCommandCenterOperationalCommand(command) ? "$" : "/";
 }
 
 function composerCommandPickKind(
@@ -13932,29 +13922,6 @@ function commandCenterWildcardDeckPick(
   };
 }
 
-function collapseCommandCenterPromptsForDeletedWildcardDeck(
-  commands: readonly CommandCenterCommand[],
-  deck: CommandCenterWildcardDeck,
-): CommandCenterCommand[] {
-  const now = new Date().toISOString();
-  return commands.map((command) => {
-    if (command.builtIn || command.readOnly || !command.command.includes("!")) {
-      return command;
-    }
-    const collapsedCommand = collapseDeletedPromptWildcardDeckReferences(
-      command.command,
-      deck,
-    );
-    return collapsedCommand === command.command
-      ? command
-      : {
-          ...command,
-          command: collapsedCommand,
-          updatedAt: now,
-        };
-  });
-}
-
 function commandMatchesInvocationName(
   command: CommandCenterCommand,
   normalizedInvocationName: string,
@@ -14007,10 +13974,10 @@ interface LeadingCommandChipMatch {
 function resolveLeadingCommandChipMatch(
   value: string,
   commands: readonly CommandCenterCommand[],
-  prefix: "/" | "?" = "/",
+  prefix: "$" | "?" = "$",
 ): LeadingCommandChipMatch | null {
   const firstLine = value.split(/\r?\n/u, 1)[0] ?? "";
-  const escapedPrefix = prefix === "/" ? "\\/" : "\\?";
+  const escapedPrefix = prefix === "$" ? "\\$" : "\\?";
   const match = new RegExp(
     `^(\\s*)${escapedPrefix}([a-z0-9][a-z0-9-]*)(?=\\s|$)`,
     "iu",
@@ -14069,6 +14036,15 @@ function normalizeCommandCenterState(raw: unknown): {
   for (const candidate of commandListRaw) {
     if (!candidate || typeof candidate !== "object") continue;
     const record = candidate as Partial<CommandCenterCommand>;
+    const recordId = typeof record.id === "string" ? record.id.trim() : "";
+    if (
+      recordId.startsWith(LEGACY_BUILT_IN_COMMAND_ID_PREFIX) ||
+      recordId.startsWith("builtin:") ||
+      record.builtIn === true ||
+      record.readOnly === true
+    ) {
+      continue;
+    }
     const name =
       typeof record.name === "string" ? record.name.trim().toLowerCase() : "";
     const normalizedName = name.startsWith("/")
@@ -14080,10 +14056,7 @@ function normalizeCommandCenterState(raw: unknown): {
     const now = new Date().toISOString();
     const colorTag = normalizeCommandCenterColorTag(record.colorTag);
     commands.push({
-      id:
-        typeof record.id === "string" && record.id.trim().length > 0
-          ? record.id.trim()
-          : `cmd:${normalizedName}`,
+      id: recordId || `cmd:${normalizedName}`,
       name: normalizedName,
       title:
         typeof record.title === "string" && record.title.trim().length > 0
@@ -14097,38 +14070,15 @@ function normalizeCommandCenterState(raw: unknown): {
         normalizedName,
       ),
       arguments: [],
-      builtIn:
-        record.builtIn === true ||
-        BUILT_IN_COMMAND_RESERVED_NAMES.has(normalizedName),
-      readOnly:
-        record.readOnly === true ||
-        BUILT_IN_COMMAND_RESERVED_NAMES.has(normalizedName),
+      builtIn: false,
+      readOnly: false,
       createdAt: typeof record.createdAt === "string" ? record.createdAt : now,
       updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : now,
     });
   }
-  for (const builtIn of builtInCommands) {
-    const existing = commands.find((command) => command.name === builtIn.name);
-    if (existing) {
-      existing.id = builtIn.id;
-      existing.title = builtIn.title;
-      existing.command = builtIn.command;
-      existing.aliases = builtIn.aliases;
-      existing.arguments = builtIn.arguments;
-      existing.builtIn = true;
-      existing.readOnly = true;
-      continue;
-    }
-    commands.push(builtIn);
-  }
   return {
     preferredModel,
-    commands: sanitizeCommandAliasesForList([
-      ...builtInCommands,
-      ...commands.filter(
-        (command) => !BUILT_IN_COMMAND_RESERVED_NAMES.has(command.name),
-      ),
-    ]),
+    commands: sanitizeCommandAliasesForList([...builtInCommands, ...commands]),
     wildcardDecks: normalizeWildcardDecks(parsed?.wildcardDecks),
   };
 }
@@ -14141,9 +14091,6 @@ function createUserCommandDraft(
       commandInvocationNames(command).map((name) => name.trim().toLowerCase()),
     ),
   );
-  for (const reserved of BUILT_IN_COMMAND_RESERVED_NAMES) {
-    existing.add(reserved);
-  }
   let index = 1;
   let nextName = "prompt";
   while (existing.has(nextName)) {
@@ -14191,9 +14138,6 @@ function uniqueCommandNameForList(
       )
       .filter(Boolean),
   );
-  for (const reserved of BUILT_IN_COMMAND_RESERVED_NAMES) {
-    used.add(reserved);
-  }
   if (!used.has(base)) return base;
   let index = 2;
   let candidate = `${base}-${index}`;
@@ -14391,11 +14335,7 @@ function filterImportedCommandAliases(
   const primaryKey = primaryName.toLowerCase();
   return normalizeCommandAliasList(aliases, primaryName).filter((alias) => {
     const key = alias.toLowerCase();
-    return (
-      key !== primaryKey &&
-      !used.has(key) &&
-      !BUILT_IN_COMMAND_RESERVED_NAMES.has(key)
-    );
+    return key !== primaryKey && !used.has(key);
   });
 }
 
@@ -18521,6 +18461,10 @@ function botMarketplaceUpdateRevisionsStorageKey(userId: string): string {
 
 function commandCenterStateStorageKey(userId: string): string {
   return `${COMMAND_CENTER_STATE_STORAGE_KEY}:${userId}`;
+}
+
+function commandCenterSelectionStorageKey(userId: string): string {
+  return `${COMMAND_CENTER_STATE_STORAGE_KEY}:selection:${userId}`;
 }
 
 function loadConversationGroupOrder(userId: string): string[] {
@@ -25810,9 +25754,11 @@ const WILDCARD_DECK_VALUE_INPUT_DELIMITER_RE = /[\r\n,;\t]+/u;
 function WildcardDeckValuesInput({
   value,
   onChange,
+  expressionOptions = [],
 }: {
   value: string;
   onChange: (nextValue: string) => void;
+  expressionOptions?: readonly { label: string; value: string }[];
 }): React.JSX.Element {
   const values = useMemo(() => normalizeWildcardDeckValueList(value), [value]);
   const valueEntries = useMemo(
@@ -26202,6 +26148,26 @@ function WildcardDeckValuesInput({
           {valueInflectionLabel}
         </button>
       </div>
+      {expressionOptions.length > 0 ? (
+        <label className={styles.promptCenterDeckExpressionPicker}>
+          <span>Insert a nested expression</span>
+          <select
+            value=""
+            onChange={(event) => {
+              const expression = event.currentTarget.value;
+              if (expression) commitInputValue(expression);
+            }}
+            aria-label="Insert a prompt, deck, or wildcard into this deck"
+          >
+            <option value="">Choose prompt, deck, or wildcard…</option>
+            {expressionOptions.map((option) => (
+              <option key={`${option.label}:${option.value}`} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <div
         ref={valueBoxRef}
         className={styles.promptCenterWildcardValueBox}
@@ -26300,6 +26266,85 @@ function WildcardDeckValuesInput({
             : `${values.length} value${values.length === 1 ? "" : "s"}`)}
       </span>
     </>
+  );
+}
+
+function PromptCenterWildcardAutoResolver({
+  slotKey,
+  occurrencePath,
+  reroll,
+  onResolved,
+}: {
+  slotKey: string;
+  occurrencePath: string;
+  reroll: number;
+  onResolved: (occurrencePath: string, value: string) => void;
+}): null {
+  useEffect(() => {
+    let active = true;
+    void api<{ ok: true; value: string }>("/api/composer/wildcard-value", {
+      method: "POST",
+      body: JSON.stringify({ key: slotKey }),
+    })
+      .then((result) => {
+        if (active) onResolved(occurrencePath, result.value);
+      })
+      .catch(() => {
+        // Unknown/custom slots remain visibly pending for explicit AI resolution.
+      });
+    return () => {
+      active = false;
+    };
+  }, [occurrencePath, onResolved, reroll, slotKey]);
+  return null;
+}
+
+function PromptCenterWildcardSampleChip({
+  slotKey,
+  token,
+}: {
+  slotKey: string;
+  token: string;
+}): React.JSX.Element {
+  const [sample, setSample] = useState<string>("…");
+  const [roll, setRoll] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setBusy(true);
+    void api<{ ok: true; value: string }>("/api/composer/wildcard-value", {
+      method: "POST",
+      body: JSON.stringify({ key: slotKey }),
+    })
+      .then((result) => {
+        if (active) setSample(result.value);
+      })
+      .catch(() => {
+        if (active) setSample("Pending");
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [roll, slotKey]);
+
+  return (
+    <button
+      type="button"
+      className={styles.promptCenterPromptWildcardPreviewButton}
+      data-busy={busy ? "true" : undefined}
+      onClick={(event) => {
+        event.stopPropagation();
+        setRoll((current) => current + 1);
+      }}
+      aria-label={`Reroll ${token}; current sample ${sample}`}
+      title={`Click to reroll ${token}`}
+    >
+      {sample}
+    </button>
   );
 }
 
@@ -27397,15 +27442,10 @@ function filterLeadingPicksForShortcutQuery(
   commands: readonly CommandCenterCommand[],
   query: string,
 ): CommandCenterCommand[] {
-  const commandPicks = filterCommandPicksForShortcutQuery(
+  return filterCommandPicksForShortcutQuery(
     commands.filter(isCommandCenterOperationalCommand),
     query,
   );
-  const promptPicks = filterCommandPicksForShortcutQuery(
-    commands.filter((command) => !isCommandCenterOperationalCommand(command)),
-    query,
-  );
-  return [...commandPicks, ...promptPicks];
 }
 
 function commandIndexesMatching(
@@ -27483,7 +27523,7 @@ function leadingSlashShortcutTokenFromLinePrefix(
 ): ComposerShortcutToken | null {
   const lineStartInText = textToCaret.lastIndexOf("\n") + 1;
   const lineToCaret = textToCaret.slice(lineStartInText);
-  const match = /^(\s*)\/([a-z0-9-]*|\?)$/iu.exec(lineToCaret);
+  const match = /^(\s*)\$([a-z0-9-]*|\?)$/iu.exec(lineToCaret);
   if (!match) return null;
   const from = lineStartOffset + lineStartInText + (match[1]?.length ?? 0);
   return {
@@ -28035,7 +28075,7 @@ function applyTextareaCommandChipDelete(
   selectionEnd: number,
   direction: "backward" | "forward",
   commands: readonly CommandCenterCommand[],
-  prefix: "/" | "?" = "/",
+  prefix: "$" | "?" = "$",
 ): { value: string; caret: number } | null {
   const match = resolveLeadingCommandChipMatch(text, commands, prefix);
   if (!match) return null;
@@ -29173,7 +29213,7 @@ function ComposerCommandPopover({
           <div
             className={styles.composeCommandRail}
             role="group"
-            aria-label="Commands"
+            aria-label="System operations"
           >
             {commandRailEntries.map(({ command, index }) => {
               const active = index === safeHighlight;
@@ -29198,7 +29238,7 @@ function ComposerCommandPopover({
                     className={styles.composeCommandSlash}
                     aria-hidden="true"
                   >
-                    /
+                    $
                   </span>
                   <span className={styles.composeBotOptionName}>
                     {command.name}
@@ -29220,7 +29260,7 @@ function ComposerCommandPopover({
           const sectionHeader =
             showSectionHeaders && commandKind !== previousKind
               ? commandKind === "command"
-                ? "Commands"
+                ? "System"
                 : commandKind === "tool"
                   ? "Tools"
                   : commandKind === "wildcard-slot"
@@ -32421,7 +32461,7 @@ const DesktopMarkdownComposer = forwardRef<
         : null;
     const leadingToken =
       !toolToken &&
-      (commandPicksRef.current.length > 0 || promptPicksRef.current.length > 0)
+      commandPicksRef.current.length > 0
         ? getComposerShortcutFromEditor(ed, "leading")
         : null;
     const promptToken =
@@ -32461,7 +32501,7 @@ const DesktopMarkdownComposer = forwardRef<
     const commands = toolToken
       ? toolPicksRef.current
       : leadingToken
-        ? [...commandPicksRef.current, ...promptPicksRef.current]
+        ? commandPicksRef.current
         : promptToken
           ? promptPicksRef.current
           : wildcardToken
@@ -34408,7 +34448,7 @@ const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>(
         const commands = toolToken
           ? toolPicksRef.current
           : leadingToken
-            ? [...commandPicksRef.current, ...promptPicksRef.current]
+            ? commandPicksRef.current
             : promptToken
               ? promptPicksRef.current
               : wildcardToken
@@ -35628,6 +35668,26 @@ ComposerInput.displayName = "ComposerInput";
 
 type BotProfileTextSection = "identity" | "worldview" | "appearance";
 
+type PickAwareComposerFieldState = {
+  id?: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  disabled?: boolean;
+  multiline?: boolean;
+  ariaLabel?: string;
+  className?: string;
+  onBlur?: (value: string) => void;
+  onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
+  /** Durable fields replace authored expressions with a concrete snapshot. */
+  durableSnapshot?: boolean;
+  resolveKey?: string;
+};
+
+type PickAwareComposerRenderer = (
+  field: PickAwareComposerFieldState,
+) => React.JSX.Element;
+
 interface BotProfileBuilderProps {
   open: boolean;
   activePage: BotProfileBuilderPageId;
@@ -35644,6 +35704,7 @@ interface BotProfileBuilderProps {
   onProfileChange: (
     updater: (profile: BotProfileFields) => BotProfileFields,
   ) => void;
+  renderPickAwareComposer?: PickAwareComposerRenderer;
   onClose: () => void;
 }
 
@@ -35657,6 +35718,7 @@ interface BotAiParameterCustomizerProps {
   topP: number;
   topK: number;
   repetitionPenalty: number;
+  renderPickAwareComposer?: PickAwareComposerRenderer;
   onRandomizeSystemPrompt?: () => void | Promise<void>;
   onSystemPromptChange: (value: string) => void;
   onTemperatureChange: (value: number) => void;
@@ -41267,6 +41329,7 @@ function BotAiParameterCustomizer({
   topP,
   topK,
   repetitionPenalty,
+  renderPickAwareComposer,
   onRandomizeSystemPrompt,
   onSystemPromptChange,
   onTemperatureChange,
@@ -41347,14 +41410,28 @@ function BotAiParameterCustomizer({
                 ) : null}
               </span>
             </div>
-            <textarea
-              spellCheck={false}
-              placeholder="You are..."
-              value={systemPrompt}
-              onChange={(event) =>
-                onSystemPromptChange(event.currentTarget.value)
-              }
-            />
+            {renderPickAwareComposer ? (
+              renderPickAwareComposer({
+                id: "bot-ai-system-prompt",
+                value: systemPrompt,
+                onChange: onSystemPromptChange,
+                placeholder: "You are...",
+                ariaLabel: "System Prompt",
+                className: styles.botProfilePickAwareField,
+                multiline: true,
+                durableSnapshot: true,
+                resolveKey: "bot-ai-system-prompt",
+              })
+            ) : (
+              <textarea
+                spellCheck={false}
+                placeholder="You are..."
+                value={systemPrompt}
+                onChange={(event) =>
+                  onSystemPromptChange(event.currentTarget.value)
+                }
+              />
+            )}
           </label>
           <section
             className={styles.botAiSamplerPanel}
@@ -41595,6 +41672,7 @@ function BotProfileBuilder({
   onRandomizeField,
   onActivePageChange,
   onProfileChange,
+  renderPickAwareComposer,
   onClose,
 }: BotProfileBuilderProps): React.JSX.Element | null {
   useEffect(() => {
@@ -41647,16 +41725,33 @@ function BotProfileBuilder({
     placeholder: string;
     ariaLabelledBy?: string;
     maxLength?: number;
-  }): ReactNode => (
-    <textarea
-      id={field.id}
-      aria-labelledby={field.ariaLabelledBy}
-      maxLength={field.maxLength}
-      value={field.value}
-      onChange={(event) => field.onChange(event.currentTarget.value)}
-      placeholder={field.placeholder}
-    />
-  );
+  }): ReactNode =>
+    renderPickAwareComposer ? (
+      renderPickAwareComposer({
+        id: field.id,
+        value: field.value,
+        onChange: (value) =>
+          field.onChange(
+            field.maxLength ? value.slice(0, field.maxLength) : value,
+          ),
+        placeholder: field.placeholder,
+        ariaLabel: field.ariaLabelledBy ?? field.placeholder,
+        className: styles.botProfilePickAwareField,
+        multiline: true,
+        durableSnapshot: true,
+        resolveKey:
+          field.id ?? field.ariaLabelledBy ?? `profile:${field.placeholder}`,
+      })
+    ) : (
+      <textarea
+        id={field.id}
+        aria-labelledby={field.ariaLabelledBy}
+        maxLength={field.maxLength}
+        value={field.value}
+        onChange={(event) => field.onChange(event.currentTarget.value)}
+        placeholder={field.placeholder}
+      />
+    );
   const updatePurpose = (
     field: keyof BotProfileFields["purpose"],
     value: string,
@@ -45736,6 +45831,31 @@ function HomeContent(): React.JSX.Element {
   const [commandCenterSaveNotice, setCommandCenterSaveNotice] = useState<
     string | null
   >(null);
+  const [commandCenterPreviewSeed, setCommandCenterPreviewSeed] = useState(1);
+  const [commandCenterPreviewSampleInput, setCommandCenterPreviewSampleInput] =
+    useState("");
+  const [commandCenterPreviewAiResult, setCommandCenterPreviewAiResult] =
+    useState<string | null>(null);
+  const [commandCenterPreviewBusy, setCommandCenterPreviewBusy] =
+    useState(false);
+  const [commandCenterPreviewNotice, setCommandCenterPreviewNotice] =
+    useState<string | null>(null);
+  const [commandCenterPreviewRollCounters, setCommandCenterPreviewRollCounters] =
+    useState<Record<string, number>>({});
+  const [commandCenterPreviewWildcardValues, setCommandCenterPreviewWildcardValues] =
+    useState<Record<string, string>>({});
+  const acceptCommandCenterPreviewWildcard = useCallback(
+    (occurrencePath: string, value: string) => {
+      setCommandCenterPreviewWildcardValues((current) =>
+        current[occurrencePath] === value
+          ? current
+          : { ...current, [occurrencePath]: value },
+      );
+    },
+    [],
+  );
+  const [durableExpressionResolveBusyId, setDurableExpressionResolveBusyId] =
+    useState<string | null>(null);
   const [commandCenterSpecsCommandId, setCommandCenterSpecsCommandId] =
     useState<string | null>(null);
   const [commandCenterHelpModalOpen, setCommandCenterHelpModalOpen] =
@@ -48899,7 +49019,6 @@ function HomeContent(): React.JSX.Element {
     setImagePrivateRevealedIds((current) =>
       current.size === 0 ? current : new Set(),
     );
-    setCommandCenterSelectedCommandId(null);
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotPanelView("home");
     setSelectedBotPanelBotId(null);
@@ -48935,6 +49054,51 @@ function HomeContent(): React.JSX.Element {
         setPanelNotice(null);
         setPanelClosing(false);
         setPanel(nextPanel);
+        if (
+          nextPanel === "command-center" &&
+          panel !== "command-center" &&
+          !commandCenterSelectedCommandId &&
+          !commandCenterSelectedWildcardDeckId
+        ) {
+          let savedKind: "prompt" | "deck" | null = null;
+          let savedId: string | null = null;
+          if (user && typeof window !== "undefined") {
+            try {
+              const raw = window.localStorage.getItem(
+                commandCenterSelectionStorageKey(user.id),
+              );
+              const parsed = raw
+                ? (JSON.parse(raw) as { kind?: unknown; id?: unknown })
+                : null;
+              savedKind =
+                parsed?.kind === "prompt" || parsed?.kind === "deck"
+                  ? parsed.kind
+                  : null;
+              savedId = typeof parsed?.id === "string" ? parsed.id : null;
+            } catch {
+              // Fall through to the first available reusable definition.
+            }
+          }
+          const savedPrompt =
+            savedKind === "prompt" && savedId
+              ? commandCenterCommands.find((command) => command.id === savedId)
+              : null;
+          const savedDeck =
+            savedKind === "deck" && savedId
+              ? commandCenterWildcardDecks.find((deck) => deck.id === savedId)
+              : null;
+          const fallbackPrompt = commandCenterCommands.find(
+            (command) => !command.builtIn && !command.readOnly,
+          );
+          const nextPrompt = savedPrompt ?? fallbackPrompt;
+          const nextDeck =
+            savedDeck ?? (nextPrompt ? undefined : commandCenterWildcardDecks[0]);
+          const fallbackCommand = nextDeck ? undefined : commandCenterCommands[0];
+          setCommandCenterSelectedCommandId(
+            nextDeck ? null : (nextPrompt?.id ?? fallbackCommand?.id ?? null),
+          );
+          setCommandCenterSelectedWildcardDeckId(nextDeck?.id ?? null);
+        }
         if (nextPanel === "settings") {
           setSettingsScope("connections");
         }
@@ -48962,7 +49126,15 @@ function HomeContent(): React.JSX.Element {
       }
       commitPanelOpen();
     },
-    [selectedId],
+    [
+      commandCenterCommands,
+      commandCenterSelectedCommandId,
+      commandCenterSelectedWildcardDeckId,
+      commandCenterWildcardDecks,
+      panel,
+      selectedId,
+      user,
+    ],
   );
 
   const openSettingsPanel = useCallback(
@@ -49010,9 +49182,8 @@ function HomeContent(): React.JSX.Element {
   }, []);
 
   const insertCommandCenterInvocation = useCallback((invocation: string) => {
-    const normalized = invocation.trim().startsWith("/")
-      ? invocation.trim()
-      : `/${invocation.trim()}`;
+    const trimmed = invocation.trim();
+    const normalized = /^[/$!?]/u.test(trimmed) ? trimmed : `/${trimmed}`;
     if (normalized.length <= 1) return;
     setComposerDraftNow(normalized);
     setComposerSendTintActive(true);
@@ -53667,6 +53838,36 @@ function HomeContent(): React.JSX.Element {
       setCommandCenterPreferredModel(normalized.preferredModel);
       setCommandCenterCommands(normalized.commands);
       setCommandCenterWildcardDecks(normalized.wildcardDecks);
+      const rawSelection = window.localStorage.getItem(
+        commandCenterSelectionStorageKey(user.id),
+      );
+      const savedSelection = rawSelection
+        ? (JSON.parse(rawSelection) as { kind?: unknown; id?: unknown })
+        : null;
+      const savedId =
+        typeof savedSelection?.id === "string" ? savedSelection.id : null;
+      const savedCommand =
+        savedSelection?.kind === "prompt" && savedId
+          ? normalized.commands.find((command) => command.id === savedId)
+          : null;
+      const savedDeck =
+        savedSelection?.kind === "deck" && savedId
+          ? normalized.wildcardDecks.find((deck) => deck.id === savedId)
+          : null;
+      const fallbackPrompt = normalized.commands.find(
+        (command) => !command.builtIn && !command.readOnly,
+      );
+      const fallbackDeck = normalized.wildcardDecks[0];
+      const fallbackCommand = normalized.commands[0];
+      const nextCommand =
+        savedCommand ??
+        fallbackPrompt ??
+        (savedDeck || fallbackDeck ? undefined : fallbackCommand);
+      const nextDeck = savedDeck ?? (nextCommand ? undefined : fallbackDeck);
+      setCommandCenterSelectedCommandId(
+        nextDeck ? null : (nextCommand?.id ?? null),
+      );
+      setCommandCenterSelectedWildcardDeckId(nextDeck?.id ?? null);
     } catch {
       const defaults = normalizeCommandCenterState(null);
       setCommandCenterPreferredModel(defaults.preferredModel);
@@ -53674,6 +53875,28 @@ function HomeContent(): React.JSX.Element {
       setCommandCenterWildcardDecks(defaults.wildcardDecks);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (!user || typeof window === "undefined") return;
+    const selection = commandCenterSelectedCommandId
+      ? { kind: "prompt", id: commandCenterSelectedCommandId }
+      : commandCenterSelectedWildcardDeckId
+        ? { kind: "deck", id: commandCenterSelectedWildcardDeckId }
+        : null;
+    if (!selection) return;
+    try {
+      window.localStorage.setItem(
+        commandCenterSelectionStorageKey(user.id),
+        JSON.stringify(selection),
+      );
+    } catch {
+      // Non-fatal: the current page session still remembers the selection.
+    }
+  }, [
+    commandCenterSelectedCommandId,
+    commandCenterSelectedWildcardDeckId,
+    user,
+  ]);
 
   useEffect(() => {
     if (!user || typeof window === "undefined") return;
@@ -53710,6 +53933,25 @@ function HomeContent(): React.JSX.Element {
     );
     if (!stillExists) setCommandCenterSelectedCommandId(null);
   }, [commandCenterCommands, commandCenterSelectedCommandId]);
+
+  useEffect(() => {
+    setCommandCenterPreviewSeed(1);
+    setCommandCenterPreviewSampleInput("");
+    setCommandCenterPreviewAiResult(null);
+    setCommandCenterPreviewNotice(null);
+    setCommandCenterPreviewRollCounters({});
+    setCommandCenterPreviewWildcardValues({});
+  }, [
+    commandCenterSelectedCommandId,
+    commandCenterSelectedWildcardDeckId,
+  ]);
+
+  useEffect(() => {
+    setCommandCenterPreviewAiResult(null);
+    setCommandCenterPreviewNotice(null);
+    setCommandCenterPreviewRollCounters({});
+    setCommandCenterPreviewWildcardValues({});
+  }, [commandCenterDraft?.command, commandCenterWildcardDraft?.valuesText]);
 
   useEffect(() => {
     if (!commandCenterSelectedWildcardDeckId) return;
@@ -57016,7 +57258,7 @@ function HomeContent(): React.JSX.Element {
       ? customAtmospherePromptDraft.trim()
       : atmospherePromptText;
     const atmospherePromptLabel = customAtmospherePromptEnabled
-      ? "custom /atmosphere"
+      ? "custom $atmosphere"
       : latestAtmosphereEntry?.generationMessageCount !== undefined
         ? `message ${latestAtmosphereEntry.generationMessageCount}`
         : detail?.zenWallpaper?.generationMessageCount !== null &&
@@ -57158,7 +57400,7 @@ function HomeContent(): React.JSX.Element {
                     onChange={(event) =>
                       setCustomAtmospherePromptDraft(event.target.value)
                     }
-                    placeholder="Type the exact Atmosphere prompt to test with /atmosphere..."
+                    placeholder="Type the exact Atmosphere prompt to test with $atmosphere..."
                     aria-label="Custom Atmosphere prompt"
                   />
                 ) : (
@@ -71228,6 +71470,7 @@ function HomeContent(): React.JSX.Element {
     try {
       window.localStorage.removeItem(`prism_mode_tutorials_v1:${userId}`);
       window.localStorage.removeItem(commandCenterStateStorageKey(userId));
+      window.localStorage.removeItem(commandCenterSelectionStorageKey(userId));
       window.localStorage.removeItem(botLibraryGroupsStorageKey(userId));
       window.localStorage.removeItem(avatarDetailInkTemplateStorageKey(userId));
       window.localStorage.removeItem(`prism_marketplace_lenses:${userId}`);
@@ -72263,7 +72506,7 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
-  /** `/dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
+  /** `$dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
   function consumePrismDevComposerCommand(trimmedLine: string): boolean {
     if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
     const parsed = parsePrismDevChatCommand(trimmedLine);
@@ -72277,7 +72520,7 @@ function HomeContent(): React.JSX.Element {
 
     if (parsed.kind === "unknown") {
       setError(
-        `Unknown dev command "${parsed.token}". Type /dev to toggle developer tools.`,
+        `Unknown dev command "${parsed.token}". Type $dev to toggle developer tools.`,
       );
       return true;
     }
@@ -72322,7 +72565,7 @@ function HomeContent(): React.JSX.Element {
 
     if (!detail || detail.id === "pending") {
       setError(
-        "Open a chat first - then try /dev askquestion in the composer.",
+        "Open a chat first - then try $dev askquestion in the composer.",
       );
       return true;
     }
@@ -72527,7 +72770,7 @@ function HomeContent(): React.JSX.Element {
 
   async function startNewZenSessionFromSlashCommand(): Promise<void> {
     if (view !== "chat") {
-      setError("/new-session is only available in Zen.");
+      setError("$new-session is only available in Zen.");
       return;
     }
     if (pendingReplyVisible || chatAssistantRevealInProgress) {
@@ -72544,7 +72787,7 @@ function HomeContent(): React.JSX.Element {
       )?.id ??
       null;
     if (!activeConversationId || activeConversationId === "pending") {
-      setError("Open a saved Zen conversation before using /new-session.");
+      setError("Open a saved Zen conversation before using $new-session.");
       return;
     }
     if (detail?.incognito === true) {
@@ -72573,7 +72816,7 @@ function HomeContent(): React.JSX.Element {
         {
           kind: "summary",
           text:
-            "[/new-session] compacted current Zen chat before session marker" +
+            "[$new-session] compacted current Zen chat before session marker" +
             (displaySummary ? ` - ${displaySummary.length} chars` : ""),
         },
       ]);
@@ -72582,7 +72825,7 @@ function HomeContent(): React.JSX.Element {
         {
           kind: "summary",
           text:
-            "[/new-session] could not refresh compacted context before session marker" +
+            "[$new-session] could not refresh compacted context before session marker" +
             (err instanceof Error ? ` - ${err.message}` : ""),
         },
       ]);
@@ -72744,13 +72987,13 @@ function HomeContent(): React.JSX.Element {
 
   async function resetPrismMoodFromSlashCommand(): Promise<void> {
     if (view !== "chat") {
-      setError("/forgive-me is only available in Zen.");
+      setError("$forgive-me is only available in Zen.");
       return;
     }
     const conversationId =
       detail?.id && detail.id !== "pending" ? detail.id : selectedId;
     if (!conversationId || conversationId === "pending") {
-      setError("Open a saved Zen conversation before using /forgive-me.");
+      setError("Open a saved Zen conversation before using $forgive-me.");
       return;
     }
     setError(null);
@@ -72932,7 +73175,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     if (!activeConversationId) {
-      setError("Open a saved conversation before using /undo.");
+      setError("Open a saved conversation before using $undo.");
       return;
     }
 
@@ -73082,7 +73325,7 @@ function HomeContent(): React.JSX.Element {
       appendDevChatDebugLines([
         {
           kind: "backend",
-          text: `[/restart] Prism API restart requested${result.mode ? ` (${result.mode})` : ""}.`,
+          text: `[$restart] Prism API restart requested${result.mode ? ` (${result.mode})` : ""}.`,
         },
       ]);
     } catch (err) {
@@ -73092,7 +73335,7 @@ function HomeContent(): React.JSX.Element {
 
   async function generateAtmosphereFromSlashCommand(): Promise<void> {
     if (view !== "chat") {
-      setError("/atmosphere is only available in Zen.");
+      setError("$atmosphere is only available in Zen.");
       return;
     }
     const conversationId =
@@ -73102,7 +73345,7 @@ function HomeContent(): React.JSX.Element {
       conversationId === "pending" ||
       detail?.mode !== "zen"
     ) {
-      setError("Open a saved Zen conversation before using /atmosphere.");
+      setError("Open a saved Zen conversation before using $atmosphere.");
       return;
     }
     if (detail.messages.length === 0) {
@@ -73121,7 +73364,7 @@ function HomeContent(): React.JSX.Element {
       : undefined;
     if (customAtmospherePromptEnabled && !promptOverride) {
       setError(
-        "Type a custom Atmosphere prompt, or turn off Custom before using /atmosphere.",
+        "Type a custom Atmosphere prompt, or turn off Custom before using $atmosphere.",
       );
       return;
     }
@@ -73258,19 +73501,19 @@ function HomeContent(): React.JSX.Element {
   function isBuiltInOperationalSlashCommand(trimmedLine: string): boolean {
     const normalizedCommand = firstComposerCommandToken(trimmedLine);
     return (
-      normalizedCommand === "/compact" ||
-      normalizedCommand === "/summarize" ||
-      normalizedCommand === "/clear" ||
-      normalizedCommand === "/cls" ||
-      BUILT_IN_ATMOSPHERE_SLASH_COMMANDS.has(normalizedCommand) ||
-      normalizedCommand === "/refresh" ||
-      normalizedCommand === "/restart" ||
-      normalizedCommand === "/new-session" ||
-      normalizedCommand === "/forgive-me" ||
-      normalizedCommand === "/undo" ||
-      normalizedCommand === "/undo-turn" ||
+      normalizedCommand === "$compact" ||
+      normalizedCommand === "$summarize" ||
+      normalizedCommand === "$clear" ||
+      normalizedCommand === "$cls" ||
+      BUILT_IN_ATMOSPHERE_SYSTEM_COMMANDS.has(normalizedCommand) ||
+      normalizedCommand === "$refresh" ||
+      normalizedCommand === "$restart" ||
+      normalizedCommand === "$new-session" ||
+      normalizedCommand === "$forgive-me" ||
+      normalizedCommand === "$undo" ||
+      normalizedCommand === "$undo-turn" ||
       normalizedCommand === NVM_SLASH_COMMAND ||
-      BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)
+      BUILT_IN_HELP_SYSTEM_COMMANDS.has(normalizedCommand)
     );
   }
 
@@ -73285,8 +73528,8 @@ function HomeContent(): React.JSX.Element {
     if (DEV_TOOLS_ENABLED) {
       const normalizedCommand = firstComposerCommandToken(trimmedLine);
       if (
-        normalizedCommand === "/forget" ||
-        normalizedCommand === "/forget-all"
+        normalizedCommand === "$forget" ||
+        normalizedCommand === "$forget-all"
       ) {
         return true;
       }
@@ -73318,7 +73561,7 @@ function HomeContent(): React.JSX.Element {
     return true;
   }
 
-  /** Built-in operational slash commands that run locally instead of becoming model input. */
+  /** Built-in system commands that run locally instead of becoming model input. */
   async function consumeBuiltInOperationalSlashCommand(
     trimmedLine: string,
   ): Promise<boolean> {
@@ -73332,7 +73575,7 @@ function HomeContent(): React.JSX.Element {
       return false;
     }
     const nvmCommand = parseNvmSlashCommand(trimmedLine);
-    if (BUILT_IN_HELP_SLASH_COMMANDS.has(normalizedCommand)) {
+    if (BUILT_IN_HELP_SYSTEM_COMMANDS.has(normalizedCommand)) {
       clearComposerDraftNow();
       setConversationStarterPrompts(null);
       openCommandCenterHelpModal();
@@ -73361,37 +73604,37 @@ function HomeContent(): React.JSX.Element {
       );
       return true;
     }
-    if (normalizedCommand === "/clear" || normalizedCommand === "/cls") {
+    if (normalizedCommand === "$clear" || normalizedCommand === "$cls") {
       await clearConversationFromSlashCommand();
       return true;
     }
-    if (BUILT_IN_ATMOSPHERE_SLASH_COMMANDS.has(normalizedCommand)) {
+    if (BUILT_IN_ATMOSPHERE_SYSTEM_COMMANDS.has(normalizedCommand)) {
       await generateAtmosphereFromSlashCommand();
       return true;
     }
-    if (normalizedCommand === "/refresh") {
+    if (normalizedCommand === "$refresh") {
       consumeDeprecatedRefreshCommand(trimmedLine, "chat");
       return true;
     }
-    if (normalizedCommand === "/restart") {
+    if (normalizedCommand === "$restart") {
       await restartServerFromSlashCommand();
       return true;
     }
-    if (normalizedCommand === "/new-session") {
+    if (normalizedCommand === "$new-session") {
       await startNewZenSessionFromSlashCommand();
       return true;
     }
-    if (normalizedCommand === "/forgive-me") {
+    if (normalizedCommand === "$forgive-me") {
       await resetPrismMoodFromSlashCommand();
       return true;
     }
     await compactCurrentChatFromSlashCommand(
-      normalizedCommand === "/summarize" ? "summarize" : "compact",
+      normalizedCommand === "$summarize" ? "summarize" : "compact",
     );
     return true;
   }
 
-  /** Local slash dev commands hidden from normal slash discovery. */
+  /** Local system dev commands hidden from normal system discovery. */
   async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
     if (!DEV_TOOLS_ENABLED) return false;
     const tokens = trimmedLine
@@ -73401,8 +73644,8 @@ function HomeContent(): React.JSX.Element {
     if (tokens.length === 0) return false;
     const normalizedCommand = tokens[0].toLowerCase();
     if (
-      normalizedCommand !== "/forget" &&
-      normalizedCommand !== "/forget-all"
+      normalizedCommand !== "$forget" &&
+      normalizedCommand !== "$forget-all"
     ) {
       return false;
     }
@@ -73411,11 +73654,11 @@ function HomeContent(): React.JSX.Element {
     clearComposerDraftNow();
     if (tokens.length > 1) {
       setError(
-        `${normalizedCommand} does not take extra text. Use /forget or /forget-all by itself.`,
+        `${normalizedCommand} does not take extra text. Use $forget or $forget-all by itself.`,
       );
       return true;
     }
-    if (normalizedCommand === "/forget") {
+    if (normalizedCommand === "$forget") {
       await forgetCurrentBotMemoryFromSlashCommand();
       if (editingMessageId !== null) {
         setEditingMessageId(null);
@@ -73426,8 +73669,8 @@ function HomeContent(): React.JSX.Element {
       setComposerPrimed(false);
       return true;
     }
-    if (normalizedCommand === "/forget-all") {
-      // `/forget-all` is the hard reset for chat testing, so summary context
+    if (normalizedCommand === "$forget-all") {
+      // `$forget-all` is the hard reset for chat testing, so summary context
       // and every per-user memory artifact are always cleared.
       await clearSummariesFromSlashCommand();
       // Order matters: nuke the conversation first so its messages stop
@@ -73451,7 +73694,148 @@ function HomeContent(): React.JSX.Element {
     return false;
   }
 
+  function resolveCommandCenterExpression(
+    source: string,
+    options: {
+      seed?: number;
+      sampleInput?: string;
+      rollCounters?: Readonly<Record<string, number>>;
+      wildcardValues?: Readonly<Record<string, string>>;
+    } = {},
+  ): PromptExpressionResolution {
+    return resolvePromptExpression(source, {
+      prompts: commandCenterPromptPicks.map((command) => ({
+        id: command.id,
+        name: command.name,
+        aliases: command.aliases,
+        template: command.command,
+        colorTag: command.colorTag,
+      })),
+      decks: commandCenterWildcardDecks.map((deck) => ({
+        id: deck.id,
+        name: deck.name,
+        aliases: deck.aliases,
+        values: deck.values,
+        colorTag: deck.colorTag,
+      })),
+      ...(options.seed !== undefined ? { seed: options.seed } : {}),
+      ...(options.sampleInput !== undefined
+        ? { sampleInput: options.sampleInput }
+        : {}),
+      ...(options.rollCounters
+        ? { rollCounters: options.rollCounters }
+        : {}),
+      ...(options.wildcardValues
+        ? { wildcardValues: options.wildcardValues }
+        : {}),
+    });
+  }
+
   function resolveCommandCenterPromptShortcuts(rawDraft: string):
+    | {
+        kind: "none";
+      }
+    | {
+        kind: "error";
+        error: string;
+      }
+    | {
+        kind: "resolved";
+        promptShortcut: PromptShortcutMetadata | null;
+        prompt: string;
+        modelChoice: string;
+      } {
+    const expression = resolveCommandCenterExpression(rawDraft);
+    if (!expression.ok) {
+      return {
+        kind: "error",
+        error: expression.error?.message ?? "Prompt expression could not be resolved.",
+      };
+    }
+    const promptTraces = flattenPromptExpressionTraces(expression.traces).filter(
+      (trace) => trace.kind === "prompt",
+    );
+    if (promptTraces.length === 0) return { kind: "none" };
+
+    const builtInResolution = resolveBuiltInPromptWildcardInvocations(
+      expression.finalText,
+    );
+    const finalized = clearLeftoverPromptShortcutVarPassthrough(
+      builtInResolution.prompt,
+      builtInResolution.replacements,
+    );
+    const firstTrace = promptTraces[0]!;
+    const firstCommand = commandCenterPromptPicks.find(
+      (command) => command.id === firstTrace.definitionId,
+    ) ?? commandCenterPromptPicks.find(
+      (command) => command.name.toLowerCase() === firstTrace.name.toLowerCase(),
+    );
+    const runId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `prompt-run-${Date.now().toString(36)}`;
+    const promptRunIdByPath = new Map(
+      promptTraces.map((trace, index) => [trace.path, `${runId}:${index + 1}`]),
+    );
+    const promptRuns: PromptShortcutRunMetadata[] = promptTraces.map(
+      (trace) => {
+        const parentPrompt = promptTraces
+          .filter(
+            (candidate) =>
+              candidate.path !== trace.path &&
+              trace.path.startsWith(`${candidate.path}.`),
+          )
+          .sort((a, b) => b.path.length - a.path.length)[0];
+        return {
+        commandId:
+          trace.definitionId ??
+          commandCenterPromptPicks.find(
+            (command) => command.name.toLowerCase() === trace.name.toLowerCase(),
+          )?.id ??
+          trace.name,
+        name: trace.name,
+        invocation: trace.invocation,
+        sourceStart: trace.sourceStart,
+        sourceEnd: trace.sourceEnd,
+        resolvedPrompt: trace.value,
+        runId: promptRunIdByPath.get(trace.path),
+        ...(parentPrompt
+          ? { parentRunId: promptRunIdByPath.get(parentPrompt.path) }
+          : {}),
+        depth: trace.depth,
+        sourceKind: "prompt",
+        };
+      },
+    );
+    const prompt = preservePromptBodyWhitespace(finalized.prompt);
+    const promptShortcut: PromptShortcutMetadata = {
+      v: 1,
+      commandId: firstCommand?.id ?? firstTrace.name,
+      name: firstTrace.name,
+      invocation: firstTrace.invocation,
+      template: rawDraft,
+      flags: [],
+      resolvedPrompt: prompt,
+      ...(finalized.replacements.length > 0
+        ? { wildcardReplacements: finalized.replacements }
+        : {}),
+      promptRuns,
+    };
+    return {
+      kind: "resolved",
+      promptShortcut,
+      prompt,
+      modelChoice: promptShortcutModelChoiceForSurface(
+        view,
+        commandCenterPreferredModel,
+      ),
+    };
+  }
+
+  // Kept temporarily as a v1 metadata fallback while existing saved messages
+  // continue to render; new sends use resolveCommandCenterPromptShortcuts.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function resolveLegacyCommandCenterPromptShortcuts(rawDraft: string):
     | {
         kind: "none";
       }
@@ -73622,12 +74006,10 @@ function HomeContent(): React.JSX.Element {
     prompt: string;
     promptWildcards: PromptWildcardRunMetadata | null;
   } {
-    const deckResolution = resolvePromptRandomizationGroups(rawDraft, {
-      decks: commandCenterWildcardDecks,
-    });
+    const expression = resolveCommandCenterExpression(rawDraft);
+    const resolvedExpression = expression.ok ? expression.finalText : rawDraft;
     const builtInResolution = resolveBuiltInPromptWildcardInvocations(
-      deckResolution.prompt,
-      deckResolution.replacements,
+      resolvedExpression,
     );
     const resolution = clearLeftoverPromptShortcutVarPassthrough(
       builtInResolution.prompt,
@@ -73636,7 +74018,7 @@ function HomeContent(): React.JSX.Element {
     const hasWildcardRun =
       resolution.replacements.length > 0 ||
       draftContainsTrueWildcardSlots(rawDraft) ||
-      deckResolution.prompt !== resolution.prompt ||
+      resolvedExpression !== resolution.prompt ||
       draftContainsTrueWildcardSlots(resolution.prompt);
     return {
       prompt: resolution.prompt,
@@ -73667,6 +74049,54 @@ function HomeContent(): React.JSX.Element {
   }
 
   /**
+   * Finalize a reusable expression before a non-chat surface consumes it.
+   * This is deliberately async: scripted wildcard resolution is server-owned,
+   * and any truly model-filled slots must use the selected Prompt Center route.
+   */
+  async function expandComposerDraftOperative(rawDraft: string): Promise<string> {
+    if (!rawDraft.trim()) return rawDraft;
+    const expression = resolveCommandCenterExpression(rawDraft);
+    if (!expression.ok) {
+      throw new Error(
+        expression.error?.message ?? "Prompt expression could not be resolved.",
+      );
+    }
+    const contextual = resolveBuiltInPromptWildcardInvocations(
+      expression.finalText,
+    );
+    const scripted = await api<{
+      ok: true;
+      prompt: string;
+      replacements: PromptShortcutMetadata["wildcardReplacements"];
+    }>("/api/composer/wildcards/scripted", {
+      method: "POST",
+      body: JSON.stringify({ prompt: contextual.prompt }),
+    });
+    if (!promptContainsModelFilledWildcardSlots(scripted.prompt)) {
+      return scripted.prompt;
+    }
+    const modelChoice = parseCommandCenterModelChoice(
+      commandCenterPreferredModel,
+    );
+    const resolved = await api<{
+      ok: true;
+      prompt: string;
+      provider: string;
+      model: string;
+    }>("/api/prompt-center/preview/resolve", {
+      method: "POST",
+      body: JSON.stringify({
+        prompt: scripted.prompt,
+        preferredProvider: settings?.preferredProvider ?? "local",
+        ...(modelChoice?.modelId
+          ? { modelOverride: modelChoice.modelId }
+          : {}),
+      }),
+    });
+    return resolved.prompt;
+  }
+
+  /**
    * Prompt Center picks expand to their body on insert. Wildcard decks and
    * `{SLOT}` chips stay literal so the surprise resolves at Build/start/send.
    */
@@ -73689,24 +74119,53 @@ function HomeContent(): React.JSX.Element {
     [],
   );
 
-  type PickAwareComposerFieldState = {
-    id?: string;
-    value: string;
-    onChange: (value: string) => void;
-    placeholder: string;
-    disabled?: boolean;
-    multiline?: boolean;
-    ariaLabel?: string;
-    className?: string;
-    onBlur?: (value: string) => void;
-    onKeyDown?: (event: React.KeyboardEvent<HTMLElement>) => void;
-  };
+  async function resolveDurableExpressionSnapshot(
+    source: string,
+  ): Promise<string> {
+    const expression = resolveCommandCenterExpression(source);
+    if (!expression.ok) {
+      throw new Error(
+        expression.error?.message ?? "Expression could not be resolved.",
+      );
+    }
+    const scripted = resolveBuiltInPromptWildcardInvocations(
+      expression.finalText,
+    );
+    const finalized = clearLeftoverPromptShortcutVarPassthrough(
+      scripted.prompt,
+      scripted.replacements,
+    );
+    if (!promptContainsModelFilledWildcardSlots(finalized.prompt)) {
+      return finalized.prompt;
+    }
+    const modelChoice = parseCommandCenterModelChoice(
+      commandCenterPreferredModel,
+    );
+    const response = await api<{ ok: true; prompt: string }>(
+      "/api/prompt-center/preview/resolve",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          prompt: finalized.prompt,
+          preferredProvider: settings?.preferredProvider ?? "local",
+          ...(modelChoice?.modelId
+            ? { modelOverride: modelChoice.modelId }
+            : {}),
+        }),
+      },
+    );
+    return response.prompt;
+  }
 
   /** Compact ComposerInput with Prompt Center prompts + wildcard decks only. */
   const renderPickAwareComposer = (
     field: PickAwareComposerFieldState,
   ): React.JSX.Element => {
     const singleLine = field.multiline !== true;
+    const resolveKey =
+      field.resolveKey ?? field.id ?? field.ariaLabel ?? field.placeholder;
+    const resolvingSnapshot = durableExpressionResolveBusyId === resolveKey;
+    const hasExpression = /(?:^|[\s([{,:;"'])[/!]|\{/u.test(field.value);
     return (
       <div
         id={field.id}
@@ -73758,6 +74217,37 @@ function HomeContent(): React.JSX.Element {
           }}
           onFocus={() => undefined}
         />
+        {field.durableSnapshot ? (
+          <div className={styles.durableExpressionActions}>
+            <button
+              type="button"
+              disabled={
+                field.disabled === true || resolvingSnapshot || !hasExpression
+              }
+              onClick={() => {
+                if (resolvingSnapshot || !hasExpression) return;
+                setDurableExpressionResolveBusyId(resolveKey);
+                setError(null);
+                void resolveDurableExpressionSnapshot(field.value)
+                  .then((resolved) => {
+                    field.onChange(resolved);
+                    field.onBlur?.(resolved);
+                  })
+                  .catch((error) => {
+                    setError(
+                      error instanceof Error
+                        ? error.message
+                        : "Expression could not be resolved and saved.",
+                    );
+                  })
+                  .finally(() => setDurableExpressionResolveBusyId(null));
+              }}
+            >
+              {resolvingSnapshot ? "Resolving…" : "Resolve & Save"}
+            </button>
+            <small>Replaces reusable expressions with this concrete draw.</small>
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -83135,6 +83625,37 @@ function HomeContent(): React.JSX.Element {
     ) {
       throw new Error(
         "That Command Center bundle has no custom prompts or wildcard decks to import.",
+      );
+    }
+    const importedDefinitions: PromptDependencyDefinition[] = [
+      ...merged.commands
+        .filter((command) => !command.builtIn && !command.readOnly)
+        .map((command) => ({
+          id: command.id,
+          kind: "prompt" as const,
+          name: command.name,
+          aliases: command.aliases,
+          sources: [command.command],
+        })),
+      ...merged.wildcardDecks.map((deck) => ({
+        id: deck.id,
+        kind: "deck" as const,
+        name: deck.name,
+        aliases: deck.aliases,
+        sources: deck.values,
+      })),
+    ];
+    const importedCycle = [
+      ...merged.importedCommandIds,
+      ...merged.importedWildcardDeckIds,
+    ]
+      .map((definitionId) =>
+        findPromptDependencyCycle(importedDefinitions, definitionId),
+      )
+      .find(Boolean);
+    if (importedCycle) {
+      throw new Error(
+        `That Command Center bundle contains a cycle: ${importedCycle.labels.join(" → ")}`,
       );
     }
     setCommandCenterCommands(merged.commands);
@@ -102190,7 +102711,7 @@ function HomeContent(): React.JSX.Element {
       <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
         {!devChatMetricsTerminalActive ? (
           <div className={styles.devMetricsTerminalEmpty}>
-            Open this panel with /dev to stream backend traces here.
+            Open this panel with $dev to stream backend traces here.
           </div>
         ) : devChatDebugEvents.length === 0 ? (
           <div className={styles.devMetricsTerminalEmpty}>
@@ -102735,8 +103256,8 @@ function HomeContent(): React.JSX.Element {
                   </span>
                 </div>
                 <p className={styles.devToolsSectionHint}>
-                  Visual dev tools appear together while /dev is active.
-                  Minimize individual surfaces when they get in the way; /dev
+                  Visual dev tools appear together while $dev is active.
+                  Minimize individual surfaces when they get in the way; $dev
                   close hides the whole layer.
                 </p>
                 <div className={styles.devToolsToggleList}>
@@ -102770,20 +103291,20 @@ function HomeContent(): React.JSX.Element {
                 <p className={styles.devToolsSectionHint}>
                   Hidden from the normal slash menu and command help. Type them
                   directly in the composer; open this panel with{" "}
-                  <strong>/dev</strong>.
+                  <strong>$dev</strong>.
                 </p>
                 <div className={styles.devToolsStatGrid}>
                   <span className={styles.devToolsStat}>
                     <small>Open tools</small>
-                    <strong>/dev</strong>
+                    <strong>$dev</strong>
                   </span>
                   <span className={styles.devToolsStat}>
                     <small>Forget current scope</small>
-                    <strong>/forget</strong>
+                    <strong>$forget</strong>
                   </span>
                   <span className={styles.devToolsStat}>
                     <small>Hard memory reset</small>
-                    <strong>/forget-all</strong>
+                    <strong>$forget-all</strong>
                   </span>
                 </div>
               </section>
@@ -105638,6 +106159,368 @@ function HomeContent(): React.JSX.Element {
                 : selectedWildcardDeckDraftDirty
                   ? "dirty"
                   : "saved";
+            const previewPromptDefinitions = commandCenterPromptPicks.map(
+              (command) => {
+                const draft =
+                  selectedCommandDraft?.id === command.id
+                    ? selectedCommandDraft
+                    : null;
+                return {
+                  id: command.id,
+                  name: draft?.name ?? command.name,
+                  aliases: draft?.aliases ?? command.aliases,
+                  template: draft?.command ?? command.command,
+                  colorTag: draft?.colorTag ?? command.colorTag,
+                };
+              },
+            );
+            const previewDeckDefinitions = commandCenterWildcardDecks.map(
+              (deck) => {
+                const draft =
+                  selectedWildcardDeckDraft?.id === deck.id
+                    ? selectedWildcardDeckDraft
+                    : null;
+                return {
+                  id: deck.id,
+                  name: draft?.name ?? deck.name,
+                  aliases: draft?.aliases ?? deck.aliases,
+                  values: draft
+                    ? normalizeWildcardDeckValueList(draft.valuesText)
+                    : deck.values,
+                  colorTag: draft?.colorTag ?? deck.colorTag,
+                };
+              },
+            );
+            const previewPromptRuntimeName = selectedCommand
+              ? `preview-prompt-${selectedCommand.id.replace(/[^a-z0-9_-]+/giu, "-")}`
+              : "";
+            const previewDeckRuntimeName = selectedWildcardDeck
+              ? `preview-deck-${selectedWildcardDeck.id.replace(/[^a-z0-9_-]+/giu, "-")}`
+              : "";
+            const runtimePreviewPromptDefinitions = selectedCommand
+              ? previewPromptDefinitions
+                  .map((prompt) =>
+                    prompt.id === selectedCommand.id
+                      ? {
+                          ...prompt,
+                          name: previewPromptRuntimeName,
+                          aliases: [
+                            prompt.name,
+                            selectedCommand.name,
+                            ...prompt.aliases,
+                          ].filter(
+                            (value, index, values) =>
+                              Boolean(value.trim()) &&
+                              values.findIndex(
+                                (candidate) =>
+                                  candidate.trim().toLowerCase() ===
+                                  value.trim().toLowerCase(),
+                              ) === index,
+                          ),
+                        }
+                      : prompt,
+                  )
+                  .sort((first, second) =>
+                    first.id === selectedCommand.id
+                      ? -1
+                      : second.id === selectedCommand.id
+                        ? 1
+                        : 0,
+                  )
+              : previewPromptDefinitions;
+            const runtimePreviewDeckDefinitions = selectedWildcardDeck
+              ? previewDeckDefinitions
+                  .map((deck) =>
+                    deck.id === selectedWildcardDeck.id
+                      ? {
+                          ...deck,
+                          name: previewDeckRuntimeName,
+                          aliases: [
+                            deck.name,
+                            selectedWildcardDeck.name,
+                            ...deck.aliases,
+                          ].filter(
+                            (value, index, values) =>
+                              Boolean(value.trim()) &&
+                              values.findIndex(
+                                (candidate) =>
+                                  candidate.trim().toLowerCase() ===
+                                  value.trim().toLowerCase(),
+                              ) === index,
+                          ),
+                        }
+                      : deck,
+                  )
+                  .sort((first, second) =>
+                    first.id === selectedWildcardDeck.id
+                      ? -1
+                      : second.id === selectedWildcardDeck.id
+                        ? 1
+                        : 0,
+                  )
+              : previewDeckDefinitions;
+            const promptDependencyDefinitions: PromptDependencyDefinition[] = [
+              ...previewPromptDefinitions.map((prompt) => ({
+                id: prompt.id,
+                kind: "prompt" as const,
+                name: prompt.name,
+                aliases: prompt.aliases,
+                sources: [prompt.template],
+              })),
+              ...previewDeckDefinitions.map((deck) => ({
+                id: deck.id,
+                kind: "deck" as const,
+                name: deck.name,
+                aliases: deck.aliases,
+                sources: deck.values,
+              })),
+            ];
+            const promptDependencyCycle = findPromptDependencyCycle(
+              promptDependencyDefinitions,
+              selectedCommand?.id ?? selectedWildcardDeck?.id,
+            );
+            const promptDependencyInvalidIds = new Set(
+              promptDependencyDefinitions
+                .filter((definition) =>
+                  Boolean(
+                    findPromptDependencyCycle(
+                      promptDependencyDefinitions,
+                      definition.id,
+                    ),
+                  ),
+                )
+                .map((definition) => definition.id),
+            );
+            const promptDependencyIssue = findPromptDefinitionIssue(
+              promptDependencyDefinitions,
+            );
+            const selectedCommandDependencyPaths = selectedCommand
+              ? promptDependencyPathsTo(
+                  promptDependencyDefinitions,
+                  selectedCommand.id,
+                )
+              : [];
+            const selectedDeckDependencyPaths = selectedWildcardDeck
+              ? promptDependencyPathsTo(
+                  promptDependencyDefinitions,
+                  selectedWildcardDeck.id,
+                )
+              : [];
+            const previewSource = selectedCommand
+              ? selectedCommand.readOnly
+                ? null
+                : `/${previewPromptRuntimeName}`
+              : selectedWildcardDeck
+                ? `!${previewDeckRuntimeName}`
+                : null;
+            const previewSourceLabel = selectedCommand
+              ? `/${selectedCommandName || "Untitled prompt"}`
+              : selectedWildcardDeck
+                ? `!${selectedWildcardDeckName || "Untitled deck"}`
+                : "";
+            const selectedPromptUsesVar = Boolean(
+              selectedCommand &&
+                !selectedCommand.readOnly &&
+                promptExpressionContainsVar(selectedCommandText),
+            );
+            const commandCenterPreview = previewSource
+              ? resolvePromptExpression(previewSource, {
+                  prompts: runtimePreviewPromptDefinitions,
+                  decks: runtimePreviewDeckDefinitions,
+                  seed: commandCenterPreviewSeed,
+                  sampleInput: commandCenterPreviewSampleInput,
+                  rollCounters: commandCenterPreviewRollCounters,
+                  wildcardValues: commandCenterPreviewWildcardValues,
+                })
+              : null;
+            const builtInPreviewWildcardKeys = new Set<string>();
+            for (const command of PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS) {
+              const key = composerTrueWildcardSlotKey(command);
+              if (key) builtInPreviewWildcardKeys.add(key);
+            }
+            const commandCenterPreviewKnownPendingWildcards =
+              commandCenterPreview?.pendingWildcards.filter((pending) =>
+                builtInPreviewWildcardKeys.has(pending.key),
+              ) ?? [];
+            const commandCenterPreviewModelPendingSlots = [
+              ...new Set(
+                commandCenterPreview?.pendingWildcards
+                  .filter(
+                    (pending) =>
+                      !builtInPreviewWildcardKeys.has(pending.key),
+                  )
+                  .map((pending) => pending.key) ?? [],
+              ),
+            ];
+            const commandCenterPreviewTraces = commandCenterPreview
+              ? flattenPromptExpressionTraces(commandCenterPreview.traces)
+              : [];
+            const commandCenterPreviewResult =
+              commandCenterPreviewAiResult ??
+              commandCenterPreview?.finalText ??
+              selectedCommand?.command ??
+              "";
+            const selectedLegacyChoice =
+              findLegacyPromptChoiceOccurrences(selectedCommandText)[0] ?? null;
+            const rerollCommandCenterPreviewOccurrence = (path: string): void => {
+              setCommandCenterPreviewRollCounters((current) => ({
+                ...current,
+                [path]: (current[path] ?? 0) + 1,
+              }));
+              setCommandCenterPreviewWildcardValues((current) =>
+                Object.fromEntries(
+                  Object.entries(current).filter(
+                    ([occurrencePath]) =>
+                      occurrencePath !== path &&
+                      !occurrencePath.startsWith(`${path}.`),
+                  ),
+                ),
+              );
+              setCommandCenterPreviewAiResult(null);
+              setCommandCenterPreviewNotice(null);
+            };
+            const copyCommandCenterPreview = async (): Promise<void> => {
+              if (!commandCenterPreviewResult) return;
+              try {
+                await navigator.clipboard.writeText(commandCenterPreviewResult);
+                setCommandCenterPreviewNotice("Copied");
+              } catch {
+                setCommandCenterPreviewNotice("Copy failed");
+              }
+            };
+            const resolveCommandCenterPreviewAiSlots = async (): Promise<void> => {
+              if (
+                !commandCenterPreview?.ok ||
+                commandCenterPreviewModelPendingSlots.length === 0 ||
+                commandCenterPreviewKnownPendingWildcards.length > 0 ||
+                commandCenterPreviewBusy
+              ) {
+                return;
+              }
+              setCommandCenterPreviewBusy(true);
+              setCommandCenterPreviewNotice(null);
+              try {
+                const modelChoice = parseCommandCenterModelChoice(
+                  commandCenterPreferredModel,
+                );
+                const response = await api<{
+                  ok: true;
+                  prompt: string;
+                  provider: string;
+                  model: string;
+                  replacements: NonNullable<
+                    PromptShortcutMetadata["wildcardReplacements"]
+                  >;
+                }>("/api/prompt-center/preview/resolve", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    prompt: commandCenterPreview.finalText,
+                    preferredProvider: settings?.preferredProvider ?? "local",
+                    ...(modelChoice?.modelId
+                      ? { modelOverride: modelChoice.modelId }
+                      : {}),
+                  }),
+                });
+                const replacementValuesByKey = new Map<string, string[]>();
+                for (const replacement of response.replacements ?? []) {
+                  const values =
+                    replacementValuesByKey.get(replacement.key) ?? [];
+                  values.push(replacement.value);
+                  replacementValuesByKey.set(replacement.key, values);
+                }
+                const resolvedByPath: Record<string, string> = {};
+                for (const pending of commandCenterPreview.pendingWildcards) {
+                  if (builtInPreviewWildcardKeys.has(pending.key)) continue;
+                  const values = replacementValuesByKey.get(pending.key);
+                  const value = values?.shift();
+                  if (value !== undefined) resolvedByPath[pending.path] = value;
+                }
+                if (Object.keys(resolvedByPath).length > 0) {
+                  setCommandCenterPreviewWildcardValues((current) => ({
+                    ...current,
+                    ...resolvedByPath,
+                  }));
+                }
+                setCommandCenterPreviewAiResult(response.prompt);
+                setCommandCenterPreviewNotice(
+                  `Resolved with ${response.provider} · ${response.model}`,
+                );
+              } catch (error) {
+                setCommandCenterPreviewNotice(
+                  error instanceof Error
+                    ? error.message
+                    : "AI slots could not be resolved.",
+                );
+              } finally {
+                setCommandCenterPreviewBusy(false);
+              }
+            };
+            const convertSelectedLegacyChoiceToDeck = (): void => {
+              if (!selectedCommandDraft || !selectedLegacyChoice) return;
+              const normalizedValues = selectedLegacyChoice.values.map(
+                normalizeWildcardDeckValueKey,
+              );
+              const exactDeck = commandCenterWildcardDecks.find((deck) => {
+                if (deck.values.length !== normalizedValues.length) return false;
+                return deck.values.every(
+                  (value, index) =>
+                    normalizeWildcardDeckValueKey(value) ===
+                    normalizedValues[index],
+                );
+              });
+              let deckName = exactDeck?.name ?? "choices";
+              if (!exactDeck) {
+                const requested = window.prompt(
+                  "Name this Wildcard Deck",
+                  uniqueWildcardDeckNameForList(
+                    deckName,
+                    commandCenterWildcardDecks,
+                    "new-deck",
+                  ),
+                );
+                if (requested === null) return;
+                deckName = uniqueWildcardDeckNameForList(
+                  requested,
+                  commandCenterWildcardDecks,
+                  "new-deck",
+                );
+                const conversionIssue = findPromptDefinitionIssue([
+                  ...promptDependencyDefinitions,
+                  {
+                    id: "conversion-preview",
+                    kind: "deck" as const,
+                    name: deckName,
+                    sources: selectedLegacyChoice.values,
+                  },
+                ]);
+                if (conversionIssue) {
+                  setCommandCenterPreviewNotice(
+                    `Cannot convert this legacy choice: ${conversionIssue.message}`,
+                  );
+                  return;
+                }
+                const now = new Date().toISOString();
+                const deck: CommandCenterWildcardDeck = {
+                  id: createCommandCenterWildcardDeckId(),
+                  name: deckName,
+                  description: `Converted from ${selectedLegacyChoice.source}`,
+                  values: selectedLegacyChoice.values,
+                  aliases: [],
+                  createdAt: now,
+                  updatedAt: now,
+                };
+                setCommandCenterWildcardDecks((current) => [...current, deck]);
+              }
+              updateSelectedCommandDraft((draft) => ({
+                ...draft,
+                command: `${draft.command.slice(0, selectedLegacyChoice.start)}!${deckName}${draft.command.slice(selectedLegacyChoice.end)}`,
+              }));
+              setCommandCenterPreviewNotice(
+                exactDeck
+                  ? `Reused !${deckName}`
+                  : `Created !${deckName}`,
+              );
+            };
             const updateSelectedCommandDraft = (
               updater: (
                 draft: CommandCenterEditableDraft,
@@ -105658,6 +106541,13 @@ function HomeContent(): React.JSX.Element {
                 !selectedCommandDraftCanSave
               )
                 return;
+              if (promptDependencyIssue || promptDependencyCycle) {
+                setCommandCenterSaveNotice(
+                  promptDependencyIssue?.message ??
+                    `Cycle: ${promptDependencyCycle?.labels.join(" → ")}`,
+                );
+                return;
+              }
               const savedName = uniqueCommandNameForList(
                 selectedCommandDraft.name,
                 commandCenterCommands,
@@ -105779,6 +106669,13 @@ function HomeContent(): React.JSX.Element {
                 !selectedWildcardDeckDraft ||
                 !selectedWildcardDeckDraftCanSave
               ) {
+                return;
+              }
+              if (promptDependencyIssue || promptDependencyCycle) {
+                setCommandCenterSaveNotice(
+                  promptDependencyIssue?.message ??
+                    `Cycle: ${promptDependencyCycle?.labels.join(" → ")}`,
+                );
                 return;
               }
               const savedName = uniqueWildcardDeckNameForList(
@@ -106008,26 +106905,19 @@ function HomeContent(): React.JSX.Element {
             const deleteWildcardDeckAndCollapsePrompts = (
               deck: CommandCenterWildcardDeck,
             ): void => {
+              const dependencyPaths = promptDependencyPathsTo(
+                promptDependencyDefinitions,
+                deck.id,
+              );
+              if (dependencyPaths.length > 0) {
+                setCommandCenterSaveNotice(
+                  `Referenced by ${dependencyPaths[0]!.labels.join(" → ")}`,
+                );
+                return;
+              }
               setCommandCenterWildcardDecks((current) =>
                 current.filter((entry) => entry.id !== deck.id),
               );
-              setCommandCenterCommands((current) =>
-                collapseCommandCenterPromptsForDeletedWildcardDeck(
-                  current,
-                  deck,
-                ),
-              );
-              setCommandCenterDraft((current) => {
-                if (!current || !current.command.includes("!")) return current;
-                const collapsedCommand =
-                  collapseDeletedPromptWildcardDeckReferences(
-                    current.command,
-                    deck,
-                  );
-                return collapsedCommand === current.command
-                  ? current
-                  : { ...current, command: collapsedCommand };
-              });
               setCommandCenterSelectedWildcardDeckId((current) =>
                 current === deck.id ? null : current,
               );
@@ -106048,6 +106938,148 @@ function HomeContent(): React.JSX.Element {
                   command: `${draft.command}${tokenText}`,
                 };
               });
+            };
+            const renderCommandCenterPreview = (): React.ReactNode => {
+              if (!selectedCommand && !selectedWildcardDeck) return null;
+              if (selectedCommand?.readOnly) {
+                return (
+                  <section
+                    className={styles.promptCenterPreviewCard}
+                    aria-label="System command preview"
+                  >
+                    <header className={styles.promptCenterPreviewHeader}>
+                      <div>
+                        <span>System operation</span>
+                        <strong>${selectedCommand.name}</strong>
+                      </div>
+                    </header>
+                    <p>{selectedCommand.command}</p>
+                    {selectedCommand.aliases.length > 0 ? (
+                      <p className={styles.promptCenterPreviewPending}>
+                        Aliases: {selectedCommand.aliases.map((alias) => `$${alias}`).join(", ")}
+                      </p>
+                    ) : null}
+                  </section>
+                );
+              }
+              return (
+                <section
+                  key={`prompt-center-preview-${commandCenterPreviewSeed}`}
+                  className={styles.promptCenterPreviewCard}
+                  aria-label="Live expression preview"
+                  data-preview-seed={commandCenterPreviewSeed}
+                >
+                  <header className={styles.promptCenterPreviewHeader}>
+                    <div>
+                      <span>Preview</span>
+                      <strong>{previewSourceLabel}</strong>
+                    </div>
+                    <div className={styles.promptCenterPreviewActions}>
+                      <button
+                        type="button"
+                        onClick={() => void copyCommandCenterPreview()}
+                        disabled={
+                          !commandCenterPreviewResult ||
+                          commandCenterPreviewKnownPendingWildcards.length > 0
+                        }
+                      >
+                        Copy result
+                      </button>
+                    </div>
+                  </header>
+                  {commandCenterPreviewKnownPendingWildcards.map((pending) => (
+                    <PromptCenterWildcardAutoResolver
+                      key={`${pending.path}:${commandCenterPreviewRollCounters[pending.path] ?? 0}`}
+                      slotKey={pending.key}
+                      occurrencePath={pending.path}
+                      reroll={commandCenterPreviewRollCounters[pending.path] ?? 0}
+                      onResolved={acceptCommandCenterPreviewWildcard}
+                    />
+                  ))}
+                  {selectedPromptUsesVar ? (
+                    <label className={styles.promptCenterPreviewSampleInput}>
+                      <span>Sample input</span>
+                      <input
+                        type="text"
+                        value={commandCenterPreviewSampleInput}
+                        onChange={(event) => {
+                          setCommandCenterPreviewSampleInput(event.currentTarget.value);
+                          setCommandCenterPreviewAiResult(null);
+                          setCommandCenterPreviewNotice(null);
+                        }}
+                        placeholder="Text passed into {VAR}"
+                      />
+                    </label>
+                  ) : null}
+                  {promptDependencyIssue || promptDependencyCycle ? (
+                    <p className={styles.promptCenterPreviewDiagnostic} role="alert">
+                      {promptDependencyIssue?.message ??
+                        `Cycle: ${promptDependencyCycle?.labels.join(" → ")}`}
+                    </p>
+                  ) : commandCenterPreview?.ok ? (
+                    <pre
+                      className={styles.promptCenterPreviewResult}
+                      aria-live="polite"
+                    >
+                      {commandCenterPreviewResult || "(empty result)"}
+                    </pre>
+                  ) : (
+                    <p className={styles.promptCenterPreviewDiagnostic} role="alert">
+                      {commandCenterPreview?.error?.message ?? "Nothing to preview yet."}
+                    </p>
+                  )}
+                  {commandCenterPreviewModelPendingSlots.length ? (
+                    <div className={styles.promptCenterPreviewPending}>
+                      <span>
+                        Pending AI slots: {commandCenterPreviewModelPendingSlots.join(", ")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void resolveCommandCenterPreviewAiSlots()}
+                        disabled={
+                          commandCenterPreviewBusy ||
+                          commandCenterPreviewKnownPendingWildcards.length > 0
+                        }
+                      >
+                        {commandCenterPreviewBusy ? "Resolving…" : "Resolve AI slots"}
+                      </button>
+                    </div>
+                  ) : null}
+                  {commandCenterPreviewTraces.length > 0 ? (
+                    <ol className={styles.promptCenterPreviewTrail}>
+                      {commandCenterPreviewTraces.map((trace) => (
+                        <li
+                          key={trace.id}
+                          data-kind={trace.kind}
+                          style={{
+                            ...commandCenterColorStyle(
+                              normalizeCommandCenterColorTag(trace.colorTag),
+                            ),
+                            marginInlineStart: `${Math.min(trace.depth, 8) * 12}px`,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              rerollCommandCenterPreviewOccurrence(trace.path)
+                            }
+                            aria-label={`Reroll ${trace.invocation}; current value ${trace.value || "empty"}`}
+                            title="Click to reroll this occurrence"
+                          >
+                            <span>{trace.invocation}</span>
+                            <small>{trace.value || "(empty)"}</small>
+                          </button>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                  {commandCenterPreviewNotice ? (
+                    <p className={styles.promptCenterPreviewNotice} role="status">
+                      {commandCenterPreviewNotice}
+                    </p>
+                  ) : null}
+                </section>
+              );
             };
             const promptCenterDropPlacementFromDragEvent = (
               event: React.DragEvent<HTMLElement>,
@@ -106162,6 +107194,7 @@ function HomeContent(): React.JSX.Element {
               const promptNeedsDetails =
                 canDeletePrompt &&
                 !commandCenterPromptHasRequiredDetails(command);
+              const promptHasCycle = promptDependencyInvalidIds.has(command.id);
               const deleteKey = commandCenterPromptDeleteKey(command.id);
               const deleteArmed = pendingDeleteKey === deleteKey;
               const deleteButtonClassName = [
@@ -106172,6 +107205,17 @@ function HomeContent(): React.JSX.Element {
                 .filter(Boolean)
                 .join(" ");
               const deletePrompt = (): void => {
+                const dependencyPaths = promptDependencyPathsTo(
+                  promptDependencyDefinitions,
+                  command.id,
+                );
+                if (dependencyPaths.length > 0) {
+                  setCommandCenterSaveNotice(
+                    `Referenced by ${dependencyPaths[0]!.labels.join(" → ")}`,
+                  );
+                  disarmDelete();
+                  return;
+                }
                 setCommandCenterCommands(
                   (current) =>
                     normalizeCommandCenterState({
@@ -106209,7 +107253,7 @@ function HomeContent(): React.JSX.Element {
                           startPromptCenterDrag(
                             "prompt",
                             command.id,
-                            `/${command.name}`,
+                            `${isCommandCenterOperationalCommand(command) ? "$" : "/"}${command.name}`,
                             event,
                           )
                       : undefined
@@ -106251,6 +107295,7 @@ function HomeContent(): React.JSX.Element {
                     }
                     data-read-only={command.readOnly ? "true" : undefined}
                     data-incomplete={promptNeedsDetails ? "true" : undefined}
+                    data-cycle={promptHasCycle ? "true" : undefined}
                     data-color-tag={command.colorTag ?? undefined}
                     style={commandCenterColorStyle(command.colorTag)}
                     onClick={() => {
@@ -106264,11 +107309,16 @@ function HomeContent(): React.JSX.Element {
                         className={styles.promptCenterPromptColorDot}
                         aria-hidden="true"
                       />
-                      <span>/{command.name}</span>
+                      <span>
+                        {isCommandCenterOperationalCommand(command) ? "$" : "/"}
+                        {command.name}
+                      </span>
                     </span>
                     <span className={styles.promptCenterPromptMeta}>
                       {command.readOnly
                         ? "Built-in"
+                        : promptHasCycle
+                          ? "Cycle · repair before use"
                         : promptNeedsDetails
                           ? "Needs prompt text"
                           : "Custom"}
@@ -106330,6 +107380,7 @@ function HomeContent(): React.JSX.Element {
                   : null;
               const deckNeedsDetails =
                 !commandCenterWildcardDeckHasRequiredDetails(deck);
+              const deckHasCycle = promptDependencyInvalidIds.has(deck.id);
               const deleteKey = commandCenterWildcardDeleteKey(deck.id);
               const deleteArmed = pendingDeleteKey === deleteKey;
               const deleteButtonClassName = [
@@ -106411,6 +107462,7 @@ function HomeContent(): React.JSX.Element {
                     data-color-tag={deck.colorTag ?? undefined}
                     data-wildcard-deck="true"
                     data-incomplete={deckNeedsDetails ? "true" : undefined}
+                    data-cycle={deckHasCycle ? "true" : undefined}
                     style={commandCenterColorStyle(deck.colorTag)}
                     onClick={() => {
                       setCommandCenterSelectedWildcardDeckId(deck.id);
@@ -106427,7 +107479,7 @@ function HomeContent(): React.JSX.Element {
                       <span>!{deck.name}</span>
                     </span>
                     <span className={styles.promptCenterPromptMeta}>
-                      {meta}
+                      {deckHasCycle ? "Cycle · repair before use" : meta}
                     </span>
                     {deck.aliases.length > 0 ? (
                       <span className={styles.promptCenterPromptMeta}>
@@ -106623,13 +107675,19 @@ function HomeContent(): React.JSX.Element {
                               : "Prompt"}
                           </span>
                           <h4>
-                            {`/${selectedCommand.readOnly ? selectedCommand.name : selectedCommandName}`}
+                            {`${selectedCommand.readOnly ? "$" : "/"}${selectedCommand.readOnly ? selectedCommand.name : selectedCommandName}`}
                           </h4>
                           <span
                             className={styles.promptCenterStatusBadge}
-                            data-state={selectedCommandStatusState}
+                            data-state={
+                              promptDependencyCycle
+                                ? "invalid"
+                                : selectedCommandStatusState
+                            }
                           >
-                            {selectedCommandStatusLabel}
+                            {promptDependencyCycle
+                              ? "Cycle"
+                              : selectedCommandStatusLabel}
                           </span>
                         </div>
                         <div className={styles.promptCenterEditorHeaderActions}>
@@ -106639,7 +107697,10 @@ function HomeContent(): React.JSX.Element {
                                 type="button"
                                 className={`${styles.promptCenterSaveButton} ${styles.promptCenterCloneButton}`}
                                 onClick={cloneSelectedCommandDraft}
-                                disabled={!selectedCommandDraftCanSave}
+                                disabled={
+                                  !selectedCommandDraftCanSave ||
+                                  Boolean(promptDependencyCycle)
+                                }
                                 aria-label={`Clone prompt /${selectedCommandName || selectedCommand.name}`}
                                 data-glyph-tooltip="Clone prompt"
                               >
@@ -106651,7 +107712,8 @@ function HomeContent(): React.JSX.Element {
                                 onClick={saveSelectedCommandDraft}
                                 disabled={
                                   !selectedCommandDraftDirty ||
-                                  !selectedCommandDraftCanSave
+                                  !selectedCommandDraftCanSave ||
+                                  Boolean(promptDependencyCycle)
                                 }
                               >
                                 Save
@@ -106677,9 +107739,9 @@ function HomeContent(): React.JSX.Element {
                                     key={alias}
                                     className={styles.promptCenterFlagPreview}
                                   >
-                                    <code>/{alias}</code>
+                                    <code>${alias}</code>
                                     <span>
-                                      Alias for /{selectedCommand.name}
+                                      Alias for ${selectedCommand.name}
                                     </span>
                                   </div>
                                 ))}
@@ -106815,7 +107877,7 @@ function HomeContent(): React.JSX.Element {
                                 resolvedTheme={resolvedTheme}
                                 mentionBots={[]}
                                 commandPicks={[]}
-                                promptPicks={[]}
+                                promptPicks={commandCenterPromptPicks}
                                 wildcardPicks={composerWildcardDeckPicks}
                                 chipPointerBehavior="delete"
                                 dismissPopoversSignal={
@@ -106928,9 +107990,31 @@ function HomeContent(): React.JSX.Element {
                             })}
                           </div>
                           <div className={styles.promptCenterDangerRow}>
+                            {selectedLegacyChoice ? (
+                              <button
+                                type="button"
+                                className={styles.promptCenterConvertDeckButton}
+                                onClick={convertSelectedLegacyChoiceToDeck}
+                                title={`Replace ${selectedLegacyChoice.source} with a reusable !deck`}
+                              >
+                                Convert to Wildcard Deck
+                              </button>
+                            ) : null}
                             <button
                               type="button"
+                              disabled={selectedCommandDependencyPaths.length > 0}
+                              title={
+                                selectedCommandDependencyPaths.length > 0
+                                  ? `Referenced by ${selectedCommandDependencyPaths[0]!.labels.join(" → ")}`
+                                  : "Delete prompt"
+                              }
                               onClick={() => {
+                                if (selectedCommandDependencyPaths.length > 0) {
+                                  setCommandCenterSaveNotice(
+                                    `Referenced by ${selectedCommandDependencyPaths[0]!.labels.join(" → ")}`,
+                                  );
+                                  return;
+                                }
                                 setCommandCenterCommands(
                                   (current) =>
                                     normalizeCommandCenterState({
@@ -106974,40 +108058,57 @@ function HomeContent(): React.JSX.Element {
                                     const aliases =
                                       composerTrueWildcardSlotDisplayTokens(
                                         command,
-                                      );
+                                    );
                                     return (
-                                      <button
+                                      <div
                                         key={command.id}
-                                        type="button"
                                         className={
-                                          styles.promptCenterPromptWildcardButton
+                                          styles.promptCenterPromptWildcardTile
                                         }
                                         data-wildcard-kind="slot"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault();
-                                        }}
-                                        onClick={() =>
-                                          insertBuiltInWildcardSlotIntoSelectedPrompt(
-                                            command,
-                                          )
-                                        }
-                                        data-glyph-tooltip={`Insert ${token}`}
                                       >
-                                        <span
+                                        <button
+                                          type="button"
                                           className={
-                                            styles.promptCenterPromptWildcardName
+                                            styles.promptCenterPromptWildcardButton
                                           }
-                                        >
-                                          {command.name}
-                                        </span>
-                                        <span
-                                          className={
-                                            styles.promptCenterPromptWildcardMeta
+                                          data-wildcard-kind="slot"
+                                          onMouseDown={(event) => {
+                                            event.preventDefault();
+                                          }}
+                                          onClick={() =>
+                                            insertBuiltInWildcardSlotIntoSelectedPrompt(
+                                              command,
+                                            )
                                           }
+                                          data-glyph-tooltip={`Insert ${token}`}
                                         >
-                                          {aliases}
-                                        </span>
-                                      </button>
+                                          <span
+                                            className={
+                                              styles.promptCenterPromptWildcardName
+                                            }
+                                          >
+                                            {command.name}
+                                          </span>
+                                          <span
+                                            className={
+                                              styles.promptCenterPromptWildcardMeta
+                                            }
+                                          >
+                                            {aliases}
+                                          </span>
+                                        </button>
+                                        {composerTrueWildcardSlotKey(command) ? (
+                                          <PromptCenterWildcardSampleChip
+                                            slotKey={
+                                              composerTrueWildcardSlotKey(
+                                                command,
+                                              )!
+                                            }
+                                            token={token}
+                                          />
+                                        ) : null}
+                                      </div>
                                     );
                                   },
                                 )}
@@ -107044,9 +108145,15 @@ function HomeContent(): React.JSX.Element {
                           <h4>{`!${selectedWildcardDeckName || selectedWildcardDeck.name}`}</h4>
                           <span
                             className={styles.promptCenterStatusBadge}
-                            data-state={selectedWildcardDeckStatusState}
+                            data-state={
+                              promptDependencyCycle
+                                ? "invalid"
+                                : selectedWildcardDeckStatusState
+                            }
                           >
-                            {selectedWildcardDeckStatusLabel}
+                            {promptDependencyCycle
+                              ? "Cycle"
+                              : selectedWildcardDeckStatusLabel}
                           </span>
                         </div>
                         <div className={styles.promptCenterEditorHeaderActions}>
@@ -107054,7 +108161,10 @@ function HomeContent(): React.JSX.Element {
                             type="button"
                             className={`${styles.promptCenterSaveButton} ${styles.promptCenterCloneButton}`}
                             onClick={cloneSelectedWildcardDeckDraft}
-                            disabled={!selectedWildcardDeckDraftCanSave}
+                            disabled={
+                              !selectedWildcardDeckDraftCanSave ||
+                              Boolean(promptDependencyCycle)
+                            }
                             aria-label={`Clone wildcard deck !${selectedWildcardDeckName || selectedWildcardDeck.name}`}
                             data-glyph-tooltip="Clone deck"
                           >
@@ -107066,7 +108176,8 @@ function HomeContent(): React.JSX.Element {
                             onClick={saveSelectedWildcardDeckDraft}
                             disabled={
                               !selectedWildcardDeckDraftDirty ||
-                              !selectedWildcardDeckDraftCanSave
+                              !selectedWildcardDeckDraftCanSave ||
+                              Boolean(promptDependencyCycle)
                             }
                           >
                             Save
@@ -107285,6 +108396,27 @@ function HomeContent(): React.JSX.Element {
                         <div className={styles.promptCenterField}>
                           <WildcardDeckValuesInput
                             value={selectedWildcardDeckDraft.valuesText}
+                            expressionOptions={[
+                              ...commandCenterPromptPicks.map((prompt) => ({
+                                label: `Prompt · /${prompt.name}`,
+                                value: `/${prompt.name}`,
+                              })),
+                              ...commandCenterWildcardDecks
+                                .filter(
+                                  (deck) => deck.id !== selectedWildcardDeck.id,
+                                )
+                                .map((deck) => ({
+                                  label: `Deck · !${deck.name}`,
+                                  value: `!${deck.name}`,
+                                })),
+                              ...PRIMARY_BUILT_IN_WILDCARD_SLOT_PICKS.map(
+                                (wildcard) => ({
+                                  label: `Wildcard · ${composerTrueWildcardSlotFallback(wildcard)}`,
+                                  value:
+                                    composerTrueWildcardSlotFallback(wildcard),
+                                }),
+                              ),
+                            ]}
                             onChange={(valuesText) => {
                               updateSelectedWildcardDeckDraft((draft) => ({
                                 ...draft,
@@ -107314,6 +108446,12 @@ function HomeContent(): React.JSX.Element {
                           </button>
                           <button
                             type="button"
+                            disabled={selectedDeckDependencyPaths.length > 0}
+                            title={
+                              selectedDeckDependencyPaths.length > 0
+                                ? `Referenced by ${selectedDeckDependencyPaths[0]!.labels.join(" → ")}`
+                                : "Delete wildcard deck"
+                            }
                             onClick={() => {
                               deleteWildcardDeckAndCollapsePrompts(
                                 selectedWildcardDeck,
@@ -107332,6 +108470,14 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   )}
                 </section>
+                {(selectedCommand || selectedWildcardDeck) && (
+                  <aside
+                    className={styles.promptCenterPreviewPane}
+                    aria-label="Prompt Studio preview stage"
+                  >
+                    {renderCommandCenterPreview()}
+                  </aside>
+                )}
               </div>
             );
           })()}
@@ -107358,8 +108504,8 @@ function HomeContent(): React.JSX.Element {
                   <span>Help</span>
                   <h4>Commands &amp; prompts</h4>
                   <p>
-                    At the start, / shows commands and prompts. Inline, / shows
-                    prompts.
+                    $ shows system operations. / shows custom prompts, ! shows
+                    wildcard decks, and ? shows explicit tools.
                   </p>
                 </div>
                 <button
@@ -107386,10 +108532,11 @@ function HomeContent(): React.JSX.Element {
                     (kind === "command"
                       ? "Runs a built-in command."
                       : "Runs this prompt.");
+                  const invocationPrefix = kind === "command" ? "$" : "/";
                   const aliases = command.aliases
                     .map((alias) => alias.trim())
                     .filter(Boolean)
-                    .map((alias) => `/${alias}`);
+                    .map((alias) => `${invocationPrefix}${alias}`);
                   return (
                     <button
                       key={command.id}
@@ -107398,17 +108545,19 @@ function HomeContent(): React.JSX.Element {
                       data-color-tag={command.colorTag ?? undefined}
                       style={commandCenterColorStyle(command.colorTag)}
                       onClick={() =>
-                        insertCommandCenterInvocation(`/${command.name}`)
+                        insertCommandCenterInvocation(
+                          `${invocationPrefix}${command.name}`,
+                        )
                       }
                       aria-label={
                         aliases.length > 0
-                          ? `Insert /${command.name}. Aliases: ${aliases.join(", ")}. ${description}`
-                          : `Insert /${command.name}. ${description}`
+                          ? `Insert ${invocationPrefix}${command.name}. Aliases: ${aliases.join(", ")}. ${description}`
+                          : `Insert ${invocationPrefix}${command.name}. ${description}`
                       }
                     >
                       <span className={styles.commandHelpNames}>
                         <span className={styles.commandHelpSlash}>
-                          /{command.name}
+                          {invocationPrefix}{command.name}
                         </span>
                         {aliases.length > 0 ? (
                           <span className={styles.commandHelpAliases}>
@@ -107425,7 +108574,7 @@ function HomeContent(): React.JSX.Element {
                 return (
                   <div className={styles.commandHelpBody}>
                     <section className={styles.commandHelpSection}>
-                      <h5>Commands</h5>
+                      <h5>System operations</h5>
                       <div className={styles.commandHelpList}>
                         {builtInCommands.map((command) =>
                           renderCommandHelpRow(command, "command"),
@@ -108475,7 +109624,7 @@ function HomeContent(): React.JSX.Element {
                                 : "Generate Atmosphere now"}
                             </button>
                             <small>
-                              Same action as /atmosphere. Needs at least one
+                              Same action as $atmosphere. Needs at least one
                               Zen message in this conversation.
                             </small>
                           </div>
@@ -112656,6 +113805,7 @@ function HomeContent(): React.JSX.Element {
                                 profile={botProfile}
                                 botName={profileReferenceName}
                                 studioLayer
+                                renderPickAwareComposer={renderPickAwareComposer}
                                 onRandomizePersonality={
                                   applyRandomBotPersonalityDraft
                                 }
@@ -112671,6 +113821,7 @@ function HomeContent(): React.JSX.Element {
                                 open={botAiParametersModalOpen}
                                 botName={trimmedName}
                                 studioLayer
+                                renderPickAwareComposer={renderPickAwareComposer}
                                 systemPrompt={newBotSystemPrompt}
                                 temperature={newBotTemperature}
                                 maxTokens={newBotMaxTokens}
@@ -113600,6 +114751,7 @@ function HomeContent(): React.JSX.Element {
                             profile={botProfile}
                             botName={profileReferenceName}
                             studioLayer={botAvatarCustomizerOpen}
+                            renderPickAwareComposer={renderPickAwareComposer}
                             onRandomizePersonality={
                               applyRandomBotPersonalityDraft
                             }
@@ -113614,6 +114766,7 @@ function HomeContent(): React.JSX.Element {
                             }
                             botName={trimmedName}
                             studioLayer={botAvatarCustomizerOpen}
+                            renderPickAwareComposer={renderPickAwareComposer}
                             systemPrompt={newBotSystemPrompt}
                             temperature={newBotTemperature}
                             maxTokens={newBotMaxTokens}
@@ -120864,7 +122017,17 @@ function HomeContent(): React.JSX.Element {
       settings?.composerWritingAssist !== false
         ? applyComposerSendAutoCorrect(rawDraft)
         : rawDraft;
-    const liveDraft = expandComposerDraft(assistedDraft);
+    let liveDraft: string;
+    try {
+      liveDraft = await expandComposerDraftOperative(assistedDraft);
+    } catch (error) {
+      setCoffeeError(
+        error instanceof Error
+          ? error.message
+          : "Prompt expression could not be resolved.",
+      );
+      return;
+    }
     const trimmed = liveDraft.trim();
     if (!trimmed) return;
     if (settings?.voiceMode && settings.voiceMode !== "mute") {
@@ -130855,7 +132018,7 @@ function HomeContent(): React.JSX.Element {
               onLiveSessionActiveChange={setDebateLiveSessionActive}
               onCompanionContextChange={setDebateCompanionContext}
               onResetTutorial={() => resetSingleModeTutorial("debate")}
-              expandComposerDraft={expandComposerDraft}
+              expandComposerDraft={expandComposerDraftOperative}
               renderPickAwareComposer={renderPickAwareComposer}
             />
           </div>
@@ -131006,7 +132169,7 @@ function HomeContent(): React.JSX.Element {
               current?.token === token ? null : current,
             );
           }}
-          expandComposerDraft={expandComposerDraft}
+          expandComposerDraft={expandComposerDraftOperative}
           renderPickAwareComposer={renderPickAwareComposer}
           renderProducerGuestComposer={(composer) =>
             renderShellComposer({
@@ -131523,7 +132686,7 @@ function HomeContent(): React.JSX.Element {
           requestedProjectId={requestedSlateProjectId}
           onDiscussSelection={prepareSlateSelectionHandoff}
           renderPickAwareComposer={renderPickAwareComposer}
-          expandComposerDraft={expandComposerDraft}
+          expandComposerDraft={expandComposerDraftOperative}
         />
         {renderSharedPanels()}
         {renderViewSwitchOverlay()}

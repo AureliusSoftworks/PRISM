@@ -1571,12 +1571,15 @@ describe("Signal experience shell", () => {
       pageSource,
       /variant: "signal"[\s\S]{0,1400}mentionBots: EMPTY_COMPOSER_MENTION_PICKS[\s\S]{0,300}commandPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}toolPicks: EMPTY_COMPOSER_COMMAND_PICKS[\s\S]{0,300}promptPicks: commandCenterPromptPicks[\s\S]{0,300}wildcardPicks: composerWildcardDeckPicks/u,
     );
-    assert.match(pageSource, /expandComposerDraft=\{expandComposerDraft\}/u);
+    assert.match(
+      pageSource,
+      /expandComposerDraft=\{expandComposerDraftOperative\}/u,
+    );
     assert.match(
       pageSource,
       /renderPickAwareComposer=\{renderPickAwareComposer\}/u,
     );
-    assert.match(source, /expandComposerDraft\?\.\(assistedAnswer\)/u);
+    assert.match(source, /await expandComposerDraft\?\.\(assistedAnswer\)/u);
     assert.match(source, /renderPickAwareComposer \?/u);
     assert.match(pageSource, /showQueuedPromptRail: false/u);
     assert.match(
@@ -2245,7 +2248,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /Premise inspiration <span>optional<\/span>/u);
     assert.match(
       source,
-      /expandComposerDraft\?\.\(showPremiseInspirationDraft\)[\s\S]{0,80}showPremiseInspirationDraft[\s\S]{0,40}\.trim\(\)/u,
+      /await expandComposerDraft\?\.\(showPremiseInspirationDraft\)[\s\S]{0,80}showPremiseInspirationDraft[\s\S]{0,40}\.trim\(\)/u,
     );
     assert.match(source, /premise: premiseInspiration/u);
     assert.match(source, /aria-label="Edit show premise"/u);

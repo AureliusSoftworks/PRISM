@@ -667,7 +667,7 @@ export interface BotcastExperienceProps {
     onBlur?: (value: string) => void;
   }) => ReactNode;
   /** Expand /prompts, !decks, and {slots}/{a|b} before booking or guest send. */
-  expandComposerDraft?: (rawDraft: string) => string;
+  expandComposerDraft?: (rawDraft: string) => string | Promise<string>;
   /**
    * When true, producer guest answers get the send-time autocorrect pass as
    * they enter the queue. The Signal composer itself never runs live assist.
@@ -4504,7 +4504,7 @@ export function BotcastExperience({
     setNotice("Finding the show hidden inside this host…");
     try {
       const premiseInspiration = (
-        expandComposerDraft?.(showPremiseInspirationDraft) ??
+        (await expandComposerDraft?.(showPremiseInspirationDraft)) ??
         showPremiseInspirationDraft
       ).trim();
       const response = await request<{ show: BotcastShow }>(
@@ -4561,7 +4561,7 @@ export function BotcastExperience({
   const saveShowPremise = async (nextPremise?: string): Promise<void> => {
     if (!selectedShow) return;
     const premise = (
-      expandComposerDraft?.(nextPremise ?? showPremiseDraft) ??
+      (await expandComposerDraft?.(nextPremise ?? showPremiseDraft)) ??
       (nextPremise ?? showPremiseDraft)
     ).trim();
     if (!premise || premise === selectedShow.premise) {
@@ -5309,6 +5309,12 @@ export function BotcastExperience({
     let openingMessageReceived = false;
     let latestCaptureEpisode: BotcastEpisode | null = null;
     try {
+      const resolvedProducerBrief = producerGuest
+        ? ""
+        : (
+            (await expandComposerDraft?.(producerBriefDraft)) ??
+            producerBriefDraft
+          ).trim();
       const response = await request<{ episode: BotcastEpisode }>(
         `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/episodes`,
         {
@@ -5324,10 +5330,7 @@ export function BotcastExperience({
                   guestKind: "bot",
                   guestBotId: guestDraftId,
                   topic: topicDraft.trim(),
-                  producerBrief: (
-                    expandComposerDraft?.(producerBriefDraft) ??
-                    producerBriefDraft
-                  ).trim(),
+                  producerBrief: resolvedProducerBrief,
                 }),
             preferredProvider: episodeProvider,
             responseMode,
@@ -6766,7 +6769,9 @@ export function BotcastExperience({
     const assistedAnswer = autoCorrectGuestAnswerEnabled
       ? applyComposerSendAutoCorrect(rawAnswer)
       : rawAnswer;
-    const answer = (expandComposerDraft?.(assistedAnswer) ?? assistedAnswer).trim();
+    const answer = (
+      (await expandComposerDraft?.(assistedAnswer)) ?? assistedAnswer
+    ).trim();
     if (!answer) return;
     const nextRole = botcastNextSpeakerRole({
       messages: episode.messages,

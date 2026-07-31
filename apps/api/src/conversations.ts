@@ -1452,7 +1452,7 @@ export function deleteConversation(
 /**
  * Empty a single saved chat without deleting the conversation row.
  *
- * This is the durable half of the `/clear` command: the transcript, exports,
+ * This is the durable half of the `$clear` command: the transcript, exports,
  * and thread-scoped summaries are removed so future model prompts cannot see
  * previous turns. User artifacts that may still matter outside this thread
  * (images and long-term memories) are preserved but detached from the chat.

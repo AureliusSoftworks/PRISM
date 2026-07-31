@@ -205,14 +205,14 @@ export function resolveCanvasZenActionCue(
 
 export function resolveZenActionPreview(text: string): ZenActionCue | null {
   const trimmed = text.trim();
-  if (!trimmed || /^[!/]/u.test(trimmed)) return null;
+  if (!trimmed || /^[!/$?]/u.test(trimmed)) return null;
   const presentation = resolveZenActionPresentation(trimmed);
   return presentation.cues[0] ?? null;
 }
 
 export function resolveLatestZenActionPreview(text: string): ZenActionCue | null {
   const trimmed = text.trim();
-  if (!trimmed || /^[!/]/u.test(trimmed)) return null;
+  if (!trimmed || /^[!/$?]/u.test(trimmed)) return null;
   const presentation = resolveZenActionPresentation(trimmed);
   return presentation.cues[presentation.cues.length - 1] ?? null;
 }

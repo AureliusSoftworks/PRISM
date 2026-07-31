@@ -57,7 +57,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Use Atmosphere gently",
-        body: "Atmosphere starts on for every Zen conversation. Blank bot gradients hold the room until a wallpaper arrives. Open Settings to turn Atmosphere off for this conversation, or generate a fresh backdrop with /atmosphere.",
+        body: "Atmosphere starts on for every Zen conversation. Blank bot gradients hold the room until a wallpaper arrives. Open Settings to turn Atmosphere off for this conversation, or generate a fresh backdrop with $atmosphere.",
         clickLabel: "Settings in the top toolbar",
         targetSelector: '[data-tutorial-target="zen-atmosphere"]',
       },
@@ -86,7 +86,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep the moment honest",
-        body: "Zen keeps the timeline as it happened. Type /undo to rewind the latest message when you need a clean correction. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+        body: "Zen keeps the timeline as it happened. Type $undo to rewind the latest message when you need a clean correction. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
       },

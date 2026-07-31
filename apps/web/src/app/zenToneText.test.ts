@@ -257,8 +257,9 @@ describe("resolveZenActionPresentation", () => {
 
   it("previews composer actions without treating commands as action drafts", () => {
     assert.equal(resolveZenActionPreview("*looks around*")?.action, "Looks around");
-    assert.equal(resolveZenActionPreview("/nvm *looks around*"), null);
+    assert.equal(resolveZenActionPreview("$nvm *looks around*"), null);
     assert.equal(resolveZenActionPreview("!prompt *looks around*"), null);
+    assert.equal(resolveZenActionPreview("?web-search *looks around*"), null);
   });
 
   it("uses the latest meaningful composer action for live previews", () => {

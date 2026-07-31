@@ -14,7 +14,7 @@ export interface ComposerShortcutInsertionCandidate {
 }
 
 export function normalizeComposerShortcutQuery(value: string): string {
-  return value.trim().replace(/^[!/?]+/, "").toLowerCase();
+  return value.trim().replace(/^[!/?$]+/, "").toLowerCase();
 }
 
 export function composerShortcutInsertionText(
@@ -28,7 +28,9 @@ export function composerShortcutInsertionText(
     ? "!"
     : command.id.startsWith("tool:")
       ? "?"
-      : "/";
+      : command.id.startsWith("builtin:")
+        ? "$"
+        : "/";
   return `${prefix}${command.name} `;
 }
 

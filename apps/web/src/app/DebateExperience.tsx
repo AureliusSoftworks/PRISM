@@ -399,8 +399,8 @@ export interface DebateExperienceProps {
     className?: string;
     onBlur?: (value: string) => void;
   }) => ReactNode;
-  /** Expand /prompts, !decks, and {slots}/{a|b} before synthesize or Refract. */
-  expandComposerDraft?: (rawDraft: string) => string;
+  /** Finalize /prompts, !decks, and {slots}/{a|b} before consumption. */
+  expandComposerDraft?: (rawDraft: string) => string | Promise<string>;
 }
 
 export interface DebateCompanionContext {
@@ -4472,7 +4472,8 @@ export function DebateExperience(
   };
 
   const expandDebateSeedDraft = useCallback(
-    (rawDraft: string): string => expandComposerDraft?.(rawDraft) ?? rawDraft,
+    async (rawDraft: string): Promise<string> =>
+      (await expandComposerDraft?.(rawDraft)) ?? rawDraft,
     [expandComposerDraft],
   );
 
@@ -4483,10 +4484,12 @@ export function DebateExperience(
       rejectedValues: readonly string[],
       signal: AbortSignal,
     ): Promise<string> => {
-      const resolvedTopic = expandDebateSeedDraft(debateCompanionDraft.topic);
+      const resolvedTopic = await expandDebateSeedDraft(
+        debateCompanionDraft.topic,
+      );
       const resolvedCurrentValue =
         kind === "debate.setup.topic"
-          ? expandDebateSeedDraft(currentValue)
+          ? await expandDebateSeedDraft(currentValue)
           : currentValue;
       const response = await request<PrismRefractResponse>(
         "/api/prism/refract",
@@ -4527,7 +4530,7 @@ export function DebateExperience(
 
   const synthesize = useCallback(
     async (direction = ""): Promise<void> => {
-      const resolvedTopic = expandDebateSeedDraft(topic).trim();
+      const resolvedTopic = (await expandDebateSeedDraft(topic)).trim();
       if (!resolvedTopic || busy) return;
       setBusy(true);
       setError(null);

@@ -281,7 +281,15 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /resolvePicksToPlainText/u);
     assert.match(
       source,
-      /const resolvedTopic = expandDebateSeedDraft\(topic\)\.trim\(\)/u,
+      /const resolvedTopic = \(await expandDebateSeedDraft\(topic\)\)\.trim\(\)/u,
+    );
+    assert.match(
+      source,
+      /\/api\/debates\/synthesize[\s\S]{0,180}topic: resolvedTopic/u,
+    );
+    assert.match(
+      source,
+      /\/api\/prism\/refract[\s\S]{0,300}topic: resolvedTopic/u,
     );
     assert.doesNotMatch(
       source,

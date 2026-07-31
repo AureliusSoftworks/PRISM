@@ -124,7 +124,9 @@ import type {
 } from "./providers.ts";
 import {
   promptWildcardNames,
+  resolvePromptBotWildcards,
   resolvePromptWildcardsWithModel,
+  type PromptBotWildcardCandidate,
 } from "./prompt-wildcards.ts";
 import { HttpError } from "./utils.http.ts";
 
@@ -1016,15 +1018,20 @@ export async function synthesizeDebateSlates(
   formalityRaw: unknown,
   runtime: DebateAiRuntime,
   directionRaw?: unknown,
+  botCandidates: readonly PromptBotWildcardCandidate[] = [],
 ): Promise<DebateMotionSlateV1[]> {
   let topic = compactText(topicRaw, 1_000);
   const formality = normalizeDebateFormalityId(formalityRaw);
   const direction = compactText(directionRaw, 500);
   if (!topic) throw new HttpError(400, "Enter a topic to synthesize.");
   if (promptWildcardNames(topic).length > 0) {
+    const botResolution = resolvePromptBotWildcards({
+      prompt: topic,
+      candidates: botCandidates,
+    });
     const lane = selectedLane(runtime);
     const resolution = await resolvePromptWildcardsWithModel({
-      prompt: topic,
+      prompt: botResolution.prompt,
       provider: lane.provider,
       generationOverrides: {
         model: lane.model,
@@ -1032,6 +1039,7 @@ export async function synthesizeDebateSlates(
         maxTokens: 400,
         usagePurpose: "prompt_wildcard",
       },
+      existingReplacements: botResolution.replacements,
     });
     topic = compactText(resolution.prompt, 1_000);
     if (!topic) throw new HttpError(400, "Enter a topic to synthesize.");

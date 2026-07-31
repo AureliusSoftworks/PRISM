@@ -2695,7 +2695,7 @@ export interface UserChatSettings {
   sessionResumeContext?: SessionResumeContext | null;
   /** When true, skip automatic latest-chat reuse and force a new conversation row. */
   forceNewConversation?: boolean;
-  /** One-turn Zen cue from `/nvm`: treat the latest user message as a quiet topic pivot. */
+  /** One-turn Zen cue from `$nvm`: treat the latest user message as a quiet topic pivot. */
   topicReset?: boolean;
   /** Optional user-facing prompt shortcut metadata for resolved Prompt Center sends. */
   promptShortcut?: PromptShortcutMetadata;
@@ -6351,7 +6351,7 @@ function buildPromptMessages(args: {
     promptMessages.push({
       role: "system",
       content:
-        "The user used /nvm before this turn. Treat the latest user message as a clean topic pivot. Do not continue, answer, or revive the previous topic unless the latest message explicitly references it. Do not mention /nvm.",
+        "The user used $nvm before this turn. Treat the latest user message as a clean topic pivot. Do not continue, answer, or revive the previous topic unless the latest message explicitly references it. Do not mention $nvm.",
     });
   }
   const hint = args.imageSlotSystemHint?.trim();

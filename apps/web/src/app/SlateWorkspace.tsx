@@ -158,7 +158,7 @@ interface SlateWorkspaceProps {
     onBlur?: (value: string) => void;
     onKeyDown?: (event: ReactKeyboardEvent<HTMLElement>) => void;
   }) => ReactNode;
-  expandComposerDraft?: (rawDraft: string) => string;
+  expandComposerDraft?: (rawDraft: string) => string | Promise<string>;
 }
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -1698,7 +1698,7 @@ export default function SlateWorkspace({
     const current = projectRef.current;
     const rawContent = companionDraft.trim();
     const content = (
-      expandComposerDraft?.(rawContent) ?? rawContent
+      (await expandComposerDraft?.(rawContent)) ?? rawContent
     ).trim();
     if (!current || !content || companionBusy) return;
     const optimisticMessage: SlateProjectChatMessage = {

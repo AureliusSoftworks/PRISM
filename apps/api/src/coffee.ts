@@ -27,6 +27,7 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { decryptJson, randomId } from "./security.ts";
 import { SCRIPTED_PROMPT_WILDCARD_VALUES } from "./prompt-wildcard-seeds.ts";
 import {
+  promptBotWildcardCandidates,
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
 } from "./prompt-wildcards.ts";
@@ -18871,6 +18872,7 @@ export async function processCoffeeTurn(
     const resolution = await resolvePromptWildcardsWithModel({
       prompt: message,
       provider,
+      botCandidates: promptBotWildcardCandidates(db, userId),
       generationOverrides: {
         model,
         temperature: 0.72,

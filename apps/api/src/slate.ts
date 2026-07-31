@@ -990,9 +990,6 @@ export async function resolveSlateProjectSparkWildcards(
   let prompt = template;
   let replacements: PromptWildcardRunMetadata["wildcardReplacements"] = [];
   if (names.includes("BOT")) {
-    if (botCandidates.length === 0) {
-      throw new Error("Add a bot to your library before using {BOT} in Slate.");
-    }
     const botResolution = resolvePromptBotWildcards({
       prompt,
       candidates: botCandidates,

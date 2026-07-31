@@ -9,7 +9,7 @@ const pageSource = readFileSync(join(here, "page.tsx"), "utf8");
 const cssSource = readFileSync(join(here, "page.module.css"), "utf8");
 
 describe("bot profile builder textareas", () => {
-  it("keeps Bot Profile Builder on plain textareas without composer wildcards", () => {
+  it("uses pick-aware durable fields with explicit snapshot resolution", () => {
     const builderStart = pageSource.indexOf("function BotProfileBuilder(");
     assert.ok(builderStart >= 0);
     const builderEnd = pageSource.indexOf(
@@ -19,17 +19,16 @@ describe("bot profile builder textareas", () => {
     assert.ok(builderEnd > builderStart);
     const builderSource = pageSource.slice(builderStart, builderEnd);
 
-    assert.doesNotMatch(builderSource, /renderPickAwareComposer/u);
-    assert.doesNotMatch(builderSource, /expandComposerDraft/u);
-    assert.doesNotMatch(builderSource, /expandBotProfileComposerFields/u);
-    assert.doesNotMatch(builderSource, /botProfilePickAwareField/u);
+    assert.match(builderSource, /renderPickAwareComposer/u);
+    assert.match(builderSource, /durableSnapshot: true/u);
+    assert.match(builderSource, /botProfilePickAwareField/u);
     assert.match(builderSource, /const renderProfileTextarea = /u);
     assert.match(builderSource, /<textarea/u);
 
-    assert.doesNotMatch(pageSource, /function expandBotProfileComposerFields\(/u);
-    assert.doesNotMatch(
+    assert.match(pageSource, /Resolve & Save/u);
+    assert.match(
       pageSource,
-      /<BotProfileBuilder[\s\S]{0,800}renderPickAwareComposer=/u,
+      /<BotProfileBuilder[\s\S]{0,900}renderPickAwareComposer=\{renderPickAwareComposer\}/u,
     );
   });
 
@@ -46,6 +45,10 @@ describe("bot profile builder textareas", () => {
       cssSource,
       /\.botProfileField textarea\s*\{[^}]*max-height:\s*86px/u,
     );
-    assert.doesNotMatch(cssSource, /\.botProfilePickAwareField\s*\{/u);
+    assert.match(cssSource, /\.botProfilePickAwareField\s*\{/u);
+    assert.match(
+      cssSource,
+      /\.botProfilePickAwareField \.composeTextareaVisualWrap textarea\s*\{[^}]*height:\s*86px/u,
+    );
   });
 });

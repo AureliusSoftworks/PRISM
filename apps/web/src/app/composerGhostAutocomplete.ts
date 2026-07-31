@@ -52,7 +52,14 @@ function formatCandidateForPrefix(candidate: string, prefix: string): string {
 
 function startsFromSuppressedToken(text: string, prefixStart: number): boolean {
   const previous = text[prefixStart - 1];
-  return previous === "/" || previous === "!" || previous === "@" || previous === "{";
+  return (
+    previous === "/" ||
+    previous === "$" ||
+    previous === "!" ||
+    previous === "?" ||
+    previous === "@" ||
+    previous === "{"
+  );
 }
 
 export function resolveComposerGhostCompletion(

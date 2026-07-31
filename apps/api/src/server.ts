@@ -6,6 +6,7 @@ import {
 } from "node:http";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import { randomInt } from "node:crypto";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -661,6 +662,9 @@ import {
 } from "./voice-preview-line.ts";
 import {
   generateScriptedPromptWildcardValue,
+  PROMPT_BOT_WILDCARD_EMPTY_FALLBACK,
+  resolvePromptWildcardsScripted,
+  promptBotWildcardCandidates,
   promptWildcardNames,
   resolvePromptBotWildcards,
   resolvePromptWildcardsWithModel,
@@ -8237,15 +8241,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const ai = slateAiForUser(userId);
-      const botCandidates = db
-        .prepare(
-          `SELECT id, name
-             FROM bots
-            WHERE (user_id = ? OR visibility = 'public')
-              AND chat_enabled = 1
-            ORDER BY created_at ASC, id ASC`,
-        )
-        .all(userId) as Array<{ id: string; name: string }>;
+      const botCandidates = promptBotWildcardCandidates(db, userId);
       const resolution = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
         () =>
@@ -11795,7 +11791,7 @@ function buildRoutes(): RouteDefinition[] {
       },
     ),
     route("POST", "/api/composer/wildcard-value", async (ctx) => {
-      requireAuth(ctx);
+      const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
       const slot = getBuiltInPromptWildcardSlot(
         body.key ?? body.slotKey ?? body.label ?? body.name,
@@ -11803,7 +11799,14 @@ function buildRoutes(): RouteDefinition[] {
       if (!slot) {
         throw new HttpError(400, "Unknown wildcard slot.");
       }
-      const value = generateScriptedPromptWildcardValue(slot);
+      const botCandidates =
+        slot.key === "BOT" ? promptBotWildcardCandidates(db, userId) : [];
+      const value =
+        slot.key === "BOT"
+          ? (botCandidates.length > 0
+            ? botCandidates[randomInt(botCandidates.length)]!.name
+            : PROMPT_BOT_WILDCARD_EMPTY_FALLBACK)
+          : generateScriptedPromptWildcardValue(slot);
       if (!value) {
         throw new HttpError(500, "Wildcard slot could not be generated.");
       }
@@ -11811,6 +11814,93 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         key: slot.key,
         value,
+      });
+    }),
+    route("POST", "/api/composer/wildcards/scripted", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = readString(body.prompt, "prompt").slice(0, 20_000);
+      const resolution = resolvePromptWildcardsScripted({
+        prompt,
+        botCandidates: promptBotWildcardCandidates(db, userId),
+      });
+      json(ctx.res, 200, {
+        ok: true,
+        prompt: resolution.prompt,
+        replacements: resolution.replacements,
+      });
+    }),
+    route("POST", "/api/prompt-center/preview/resolve", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = readString(body.prompt, "prompt").slice(0, 20_000);
+      if (!prompt.trim()) {
+        throw new HttpError(400, "Preview prompt is empty.");
+      }
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      let effectiveProvider =
+        readProvider(body.preferredProvider) ?? user.preferred_provider;
+      const explicitModelOverride = readModelOverride(body.modelOverride);
+      const openAiApiKey =
+        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
+      const anthropicApiKey =
+        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+      const catalog = await buildModelCatalog(
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+      const resolvedAuto = resolveAutoModel({
+        provider: effectiveProvider,
+        explicitModelOverride,
+        preferredModel:
+          effectiveProvider === "local"
+            ? readOptionalString(user.preferred_local_model)
+            : readOptionalString(user.preferred_online_model),
+        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+        catalog,
+      });
+      effectiveProvider = resolvedAuto.provider;
+      const provider = selectProvider(
+        effectiveProvider,
+        openAiApiKey,
+        user.secondary_ollama_host,
+        anthropicApiKey,
+      );
+      const generationOverrides: GenerateOptions = {
+        model: resolvedAuto.model,
+        temperature: 0.72,
+        maxTokens: 500,
+        usagePurpose: "prompt_wildcard",
+      };
+      const botCandidates = promptBotWildcardCandidates(db, userId);
+      const botResolution = resolvePromptBotWildcards({
+        prompt,
+        candidates: botCandidates,
+      });
+      const resolution = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "sandbox",
+          surface: "sandbox",
+        },
+        () =>
+          resolvePromptWildcardsWithModel({
+            prompt: botResolution.prompt,
+            provider,
+            generationOverrides,
+            existingReplacements: botResolution.replacements,
+          }),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        provider: effectiveProvider,
+        model: resolvedAuto.model,
+        prompt: resolution.prompt,
+        replacements: resolution.replacements,
       });
     }),
     route("POST", "/api/composer/random-prompt", async (ctx) => {
@@ -12535,15 +12625,7 @@ function buildRoutes(): RouteDefinition[] {
         (commandCenterPrompt || promptWildcards) &&
         initialWildcardNames.includes("BOT")
       ) {
-        const botCandidates = db
-          .prepare(
-            `SELECT id, name
-               FROM bots
-              WHERE (user_id = ? OR visibility = 'public')
-                AND chat_enabled = 1
-              ORDER BY created_at ASC, id ASC`,
-          )
-          .all(userId) as Array<{ id: string; name: string }>;
+        const botCandidates = promptBotWildcardCandidates(db, userId);
         const botWildcardResolution = resolvePromptBotWildcards({
           prompt: messageForChat,
           candidates: botCandidates,
@@ -13000,6 +13082,7 @@ function buildRoutes(): RouteDefinition[] {
         body.modelOverride,
         body.responseMode,
       );
+      const botCandidates = promptBotWildcardCandidates(db, userId);
       const slates = await runWithUsageSession(
         {
           db,
@@ -13014,6 +13097,7 @@ function buildRoutes(): RouteDefinition[] {
             body.formality,
             runtime,
             body.direction,
+            botCandidates,
           ),
       );
       json(ctx.res, 200, { ok: true, slates });
@@ -15160,6 +15244,7 @@ function buildRoutes(): RouteDefinition[] {
         (promptWildcardNames(episodeTopic).length > 0 ||
           promptWildcardNames(episodeProducerBrief).length > 0)
       ) {
+        const botCandidates = promptBotWildcardCandidates(db, userId);
         const openAiApiKey =
           getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
         const anthropicApiKey =
@@ -15187,6 +15272,7 @@ function buildRoutes(): RouteDefinition[] {
             await resolvePromptWildcardsWithModel({
               prompt: episodeTopic,
               provider: wildcardProvider,
+              botCandidates,
               generationOverrides: wildcardOverrides,
             })
           ).prompt;
@@ -15196,6 +15282,7 @@ function buildRoutes(): RouteDefinition[] {
             await resolvePromptWildcardsWithModel({
               prompt: episodeProducerBrief,
               provider: wildcardProvider,
+              botCandidates,
               generationOverrides: wildcardOverrides,
             })
           ).prompt;
@@ -17416,8 +17503,8 @@ function buildRoutes(): RouteDefinition[] {
     // Hard-reset per-user memory artifacts: extracted memory facts, SQLite
     // summary rows (both thread-scoped and global), and matching Qdrant
     // vectors. Powers dev slash commands:
-    // - `/clear` (default): keeps `about_you` profile rows in SQLite.
-    // - `/forget`: same clear path with `includeAboutYou = true`.
+    // - `$clear` (default): keeps `about_you` profile rows in SQLite.
+    // - `$forget`: same clear path with `includeAboutYou = true`.
     // Qdrant cleanup is best-effort because the local stack often runs
     // without a vector DB attached; SQLite truth wins either way.
     route("POST", "/api/dev/clear-session-memory", async (ctx) => {
@@ -17867,7 +17954,7 @@ function buildRoutes(): RouteDefinition[] {
         rawCount !== 1 &&
         rawCount !== 2
       ) {
-        throw new HttpError(400, "Use /undo, /undo 2, or /undo-turn.");
+        throw new HttpError(400, "Use $undo, $undo 2, or $undo-turn.");
       }
       const result = undoLatestConversationMessages(
         db,

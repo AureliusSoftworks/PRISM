@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const pageSource = readFileSync(join(here, "page.tsx"), "utf8");
 
-describe("retired system /echo command", () => {
+describe("retired system echo command", () => {
   it("is removed from built-in Command Center commands", () => {
     assert.doesNotMatch(pageSource, /createBuiltInEchoCommand\(\)/u);
     assert.doesNotMatch(pageSource, /id:\s*"builtin:\/echo"/u);
@@ -16,10 +16,8 @@ describe("retired system /echo command", () => {
     assert.doesNotMatch(pageSource, /looksLikeEchoSlashCommand/u);
   });
 
-  it("keeps echo reserved so stale saved prompts cannot reclaim it", () => {
-    assert.match(
-      pageSource,
-      /BUILT_IN_COMMAND_RESERVED_NAMES[\s\S]*?"echo"/u,
-    );
+  it("leaves /echo available to custom prompts", () => {
+    assert.doesNotMatch(pageSource, /BUILT_IN_COMMAND_RESERVED_NAMES/u);
+    assert.match(pageSource, /LEGACY_BUILT_IN_COMMAND_ID_PREFIX = "builtin:\/"/u);
   });
 });

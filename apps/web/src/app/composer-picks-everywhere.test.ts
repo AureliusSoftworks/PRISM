@@ -17,6 +17,10 @@ describe("composer picks everywhere", () => {
     assert.match(pageSource, /function expandComposerDraft\(rawDraft: string\)/u);
     assert.match(
       pageSource,
+      /async function expandComposerDraftOperative\(rawDraft: string\): Promise<string>/u,
+    );
+    assert.match(
+      pageSource,
       /const renderPickAwareComposer = \([\s\S]{0,200}PickAwareComposerFieldState/u,
     );
     assert.match(
@@ -25,7 +29,7 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       pageSource,
-      /const renderPickAwareComposer = [\s\S]{0,1200}?chipPointerBehavior="delete"/u,
+      /const renderPickAwareComposer = [\s\S]{0,2400}?chipPointerBehavior="delete"/u,
     );
   });
 
@@ -36,7 +40,7 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       pageSource,
-      /const liveDraft = expandComposerDraft\((?:raw|assisted)Draft\)/u,
+      /liveDraft = await expandComposerDraftOperative\((?:raw|assisted)Draft\)/u,
     );
     assert.doesNotMatch(
       pageSource,
@@ -66,7 +70,7 @@ describe("composer picks everywhere", () => {
     assert.doesNotMatch(signalSource, /resolvePicksToPlainText/u);
     assert.match(
       pageSource,
-      /function resolveComposerPromptPickToPlainText\(/u,
+      /const resolveComposerPromptPickToPlainText = useCallback\(/u,
     );
     assert.match(
       pageSource,
@@ -103,7 +107,7 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       signalSource,
-      /expandComposerDraft\?\.\(producerBriefDraft\)\s*\?\?\s*producerBriefDraft/u,
+      /await expandComposerDraft\?\.\(producerBriefDraft\)\)\s*\?\?\s*producerBriefDraft/u,
     );
     assert.match(
       pageSource,
@@ -120,11 +124,11 @@ describe("composer picks everywhere", () => {
     );
     assert.match(
       slateSource,
-      /expandComposerDraft\?\.\(rawContent\)/u,
+      /await expandComposerDraft\?\.\(rawContent\)/u,
     );
     assert.match(
       pageSource,
-      /<SlateWorkspace[\s\S]{0,800}renderPickAwareComposer=\{renderPickAwareComposer\}[\s\S]{0,200}expandComposerDraft=\{expandComposerDraft\}/u,
+      /<SlateWorkspace[\s\S]{0,800}renderPickAwareComposer=\{renderPickAwareComposer\}[\s\S]{0,200}expandComposerDraft=\{expandComposerDraftOperative\}/u,
     );
   });
 
@@ -142,11 +146,11 @@ describe("composer picks everywhere", () => {
     assert.doesNotMatch(debateSource, /resolvePicksToPlainText/u);
     assert.match(
       debateSource,
-      /expandDebateSeedDraft\(topic\)/u,
+      /await expandDebateSeedDraft\(topic\)/u,
     );
     assert.match(
       pageSource,
-      /resetSingleModeTutorial\("debate"\)[\s\S]{0,180}expandComposerDraft=\{expandComposerDraft\}[\s\S]{0,120}renderPickAwareComposer=\{renderPickAwareComposer\}/u,
+      /resetSingleModeTutorial\("debate"\)[\s\S]{0,180}expandComposerDraft=\{expandComposerDraftOperative\}[\s\S]{0,120}renderPickAwareComposer=\{renderPickAwareComposer\}/u,
     );
   });
 });

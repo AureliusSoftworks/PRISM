@@ -83,13 +83,23 @@ describe("composer shortcut insertion text", () => {
     );
   });
 
-  it("keeps ordinary command completion slash-prefixed", () => {
+  it("keeps system operation completion dollar-prefixed", () => {
     assert.equal(
       composerShortcutInsertionText({
-        id: "builtin:/clear",
+        id: "builtin:clear",
         name: "clear",
       }),
-      "/clear "
+      "$clear "
+    );
+  });
+
+  it("keeps a custom prompt named undo slash-prefixed", () => {
+    assert.equal(
+      composerShortcutInsertionText({
+        id: "cmd:undo",
+        name: "undo",
+      }),
+      "/undo ",
     );
   });
 

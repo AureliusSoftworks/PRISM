@@ -15,13 +15,13 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     assert.equal(out, null);
   });
 
-  it("does not highlight partial slash command names", () => {
-    const out = resolveLeadingDevCommandTextRanges("/he");
+  it("does not highlight partial system command names", () => {
+    const out = resolveLeadingDevCommandTextRanges("$he");
     assert.equal(out, null);
   });
 
-  it("recognizes /clear as a highlighted dev command", () => {
-    const out = resolveLeadingDevCommandTextRanges("/clear");
+  it("recognizes $clear as a highlighted system command", () => {
+    const out = resolveLeadingDevCommandTextRanges("$clear");
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 6,
@@ -30,17 +30,17 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
-  it("does not treat inline slash prompt shortcuts as leading dev commands", () => {
-    assert.equal(resolveLeadingDevCommandTextRanges("hello /clear"), null);
+  it("does not treat inline system tokens as leading commands", () => {
+    assert.equal(resolveLeadingDevCommandTextRanges("hello $clear"), null);
   });
 
   it("does not highlight partial known commands before the full token is typed", () => {
     assert.equal(
-      resolveLeadingDevCommandTextRanges("/cle", { commandNames: ["clear", "cls"] }),
+      resolveLeadingDevCommandTextRanges("$cle", { commandNames: ["clear", "cls"] }),
       null
     );
     assert.deepEqual(
-      resolveLeadingDevCommandTextRanges("/clear", { commandNames: ["clear", "cls"] }),
+      resolveLeadingDevCommandTextRanges("$clear", { commandNames: ["clear", "cls"] }),
       {
         commandStart: 0,
         commandEnd: 6,
@@ -50,8 +50,8 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     );
   });
 
-  it("recognizes custom slash commands", () => {
-    const out = resolveLeadingDevCommandTextRanges("/summarize-this -f notes");
+  it("recognizes configured system commands", () => {
+    const out = resolveLeadingDevCommandTextRanges("$summarize-this -f notes");
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 15,
@@ -60,8 +60,8 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
-  it("recognizes user-made command names when they are invoked with slash", () => {
-    const out = resolveLeadingDevCommandTextRanges("/draft-reply", {
+  it("recognizes configured command names when invoked with dollar", () => {
+    const out = resolveLeadingDevCommandTextRanges("$draft-reply", {
       commandNames: ["clear", "draft-reply"],
     });
     assert.deepEqual(out, {
@@ -72,8 +72,8 @@ describe("resolveLeadingDevCommandTextRanges", () => {
     });
   });
 
-  it("recognizes known punctuation-only slash aliases", () => {
-    const out = resolveLeadingDevCommandTextRanges("/?", {
+  it("recognizes known punctuation-only system aliases", () => {
+    const out = resolveLeadingDevCommandTextRanges("$?", {
       commandNames: ["help", "?"],
     });
     assert.deepEqual(out, {
@@ -85,7 +85,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("resolves command bounds for a leading slash command", () => {
-    const out = resolveLeadingDevCommandTextRanges('  /say "hello"');
+    const out = resolveLeadingDevCommandTextRanges('  $say "hello"');
     assert.deepEqual(out, {
       commandStart: 2,
       commandEnd: 6,
@@ -95,7 +95,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("only highlights the first immediate quoted token after command", () => {
-    const out = resolveLeadingDevCommandTextRanges('/dev askquestion "pick one"');
+    const out = resolveLeadingDevCommandTextRanges('$dev askquestion "pick one"');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -106,8 +106,8 @@ describe("resolveLeadingDevCommandTextRanges", () => {
 
   it("recognizes configured prompt commands only after the complete token is typed", () => {
     const options = { commands: [{ name: "pirate", arguments: ["story"] }] };
-    assert.equal(resolveLeadingDevCommandTextRanges("/pira", options), null);
-    const out = resolveLeadingDevCommandTextRanges("/pirate", options);
+    assert.equal(resolveLeadingDevCommandTextRanges("$pira", options), null);
+    const out = resolveLeadingDevCommandTextRanges("$pirate", options);
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 7,
@@ -117,7 +117,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("highlights configured prompt command flags as command arguments", () => {
-    const out = resolveLeadingDevCommandTextRanges("/pirate -story tell it", {
+    const out = resolveLeadingDevCommandTextRanges("$pirate -story tell it", {
       commands: [{ name: "pirate", arguments: ["story"] }],
     });
     assert.deepEqual(out, {
@@ -131,7 +131,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("leaves unknown prompt command flags as normal follow-on text", () => {
-    const out = resolveLeadingDevCommandTextRanges("/pirate -unknown tell it", {
+    const out = resolveLeadingDevCommandTextRanges("$pirate -unknown tell it", {
       commands: [{ name: "pirate", arguments: ["story"] }],
     });
     assert.deepEqual(out, {
@@ -143,7 +143,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("supports escaped quotes inside the first quoted token", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "say \\"hi\\""');
+    const out = resolveLeadingDevCommandTextRanges('$say "say \\"hi\\""');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -153,7 +153,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("highlights --wait argument after quoted message", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "hello" --wait 5');
+    const out = resolveLeadingDevCommandTextRanges('$say "hello" --wait 5');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -165,7 +165,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("highlights -load argument after quoted message", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "hello" -load 1.5');
+    const out = resolveLeadingDevCommandTextRanges('$say "hello" -load 1.5');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -177,7 +177,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("highlights --wait even before number is typed", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "hello" --wait');
+    const out = resolveLeadingDevCommandTextRanges('$say "hello" --wait');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -189,7 +189,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("highlights each concatenated quoted string independently", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "Hello " + "World!" --wait 20');
+    const out = resolveLeadingDevCommandTextRanges('$say "Hello " + "World!" --wait 20');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -204,7 +204,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("still highlights --wait when action token is unquoted", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "Hello world!" + *cheers* --wait 20');
+    const out = resolveLeadingDevCommandTextRanges('$say "Hello world!" + *cheers* --wait 20');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -216,7 +216,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("highlights *action* inside quoted strings as action token", () => {
-    const out = resolveLeadingDevCommandTextRanges('/say "Hello *cheers* world"');
+    const out = resolveLeadingDevCommandTextRanges('$say "Hello *cheers* world"');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,
@@ -271,6 +271,18 @@ describe("resolvePromptShortcutTextRanges", () => {
         promptNames: ["draft-reply"],
       }),
       [{ start: 7, end: 19, name: "draft-reply" }]
+    );
+  });
+
+  it("allows former system names when they belong to custom prompts", () => {
+    assert.deepEqual(
+      resolvePromptShortcutTextRanges("/clear /undo", {
+        promptNames: ["clear", "undo"],
+      }),
+      [
+        { start: 0, end: 6, name: "clear" },
+        { start: 7, end: 12, name: "undo" },
+      ],
     );
   });
 

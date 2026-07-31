@@ -23,7 +23,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Atmosphere starts on/u);
     assert.match(step.body, /Blank bot gradients/u);
     assert.match(step.body, /Open Settings/u);
-    assert.match(step.body, /\/atmosphere/u);
+    assert.match(step.body, /\$atmosphere/u);
     assert.match(step.clickLabel, /Settings/u);
   });
 
@@ -653,7 +653,7 @@ describe("mode tutorials", () => {
       (step) => step.heading === "Keep the moment honest",
     );
 
-    assert.match(correction?.body ?? "", /Type \/undo/);
+    assert.match(correction?.body ?? "", /Type \$undo/);
     assert.doesNotMatch(correction?.body ?? "", /fork|resend|delete/i);
     assert.equal(
       correction?.targetSelector,
