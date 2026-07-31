@@ -1121,6 +1121,7 @@ import {
   botAvatarSfxShouldPlay,
   effectiveBotAvatarSfxPlayback,
   generateBotThinkingSfxProfile,
+  normalizeBotAvatarSfxLoopBlob,
   playBotAvatarSfxSampleAudio,
   prismBotThinkingSfxFallback,
   prismBotThinkingSfxFallbackIndex,
@@ -37631,13 +37632,13 @@ function BotAvatarSfxEditor({
         window.location.origin,
       );
       await installAudio({
-        blob,
+        blob: await normalizeBotAvatarSfxLoopBlob(blob),
         source: "elevenlabs",
-        fileName: "ElevenLabs avatar loop.mp3",
+        fileName: "ElevenLabs avatar loop.wav",
         prompt: description,
       });
       setStatus(
-        "Loop generated. Choose when it should play, then try the avatar demos.",
+        "Loop generated and boundary-smoothed. Choose when it should play, then try the avatar demos.",
       );
     } catch (error) {
       setStatus(

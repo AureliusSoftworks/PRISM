@@ -1,4 +1,5 @@
 import {
+  BOT_AVATAR_SFX_MAX_BYTES,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAvatarSfxV1,
   type BotAudioVoiceProfileV1,
@@ -19,6 +20,7 @@ export const PRISM_BOT_THINKING_SFX_FALLBACK_URLS = [
 ] as const;
 export const BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS = 0.08;
 export const BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO = 0.1;
+export const BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS = 0.06;
 export const BOT_AVATAR_SFX_ATTACK_MS = 120;
 export const BOT_AVATAR_SFX_RELEASE_MS = 240;
 
@@ -72,6 +74,7 @@ type BotAvatarSfxSpatialEngine = BotAvatarSfxSpatialConnection & {
   gainEnvelope: BotAvatarSfxGainEnvelope | null;
   playRequest: number;
   releaseTimer: ReturnType<typeof globalThis.setTimeout> | null;
+  loopEndedListener: (() => void) | null;
 };
 
 type BotAvatarSfxGainEnvelope = {
@@ -90,6 +93,7 @@ type BotAvatarSfxSampleRuntime = {
   lifecycleGeneration: number;
   loadedSource: string | null;
   loopFrame: number | null;
+  loopEndedListener: (() => void) | null;
   targetVolume: number;
 };
 
@@ -134,6 +138,183 @@ export function botAvatarSfxLoopRestartTime(
   return currentTime < bounds.startTime || currentTime >= bounds.endTime
     ? bounds.startTime
     : null;
+}
+
+/**
+ * Bake the trimmed loop boundary into a decoded buffer. This is deliberately
+ * independent of the ElevenLabs `loop` prompt flag: generated audio can still
+ * arrive with a hard tail, so the provider output is treated as raw material.
+ */
+export function createSeamlessBotAvatarSfxLoopBuffer(
+  context: BaseAudioContext,
+  decoded: AudioBuffer,
+  crossfadeSeconds = BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS,
+): AudioBuffer {
+  const bounds = botAvatarSfxLoopBounds(decoded.duration);
+  const sampleRate = decoded.sampleRate;
+  const startFrame = Math.min(
+    Math.max(0, decoded.length - 1),
+    Math.max(0, Math.floor((bounds?.startTime ?? 0) * sampleRate)),
+  );
+  const endFrame = Math.min(
+    decoded.length,
+    Math.max(
+      startFrame + 1,
+      Math.floor((bounds?.endTime ?? decoded.duration) * sampleRate),
+    ),
+  );
+  const regionFrames = Math.max(1, endFrame - startFrame);
+  const desiredCrossfadeFrames = Math.max(
+    0,
+    Math.round(
+      (Number.isFinite(crossfadeSeconds) ? crossfadeSeconds : 0) * sampleRate,
+    ),
+  );
+  const crossfadeFrames = Math.min(
+    desiredCrossfadeFrames,
+    Math.floor(regionFrames / 4),
+  );
+  const loopFrames =
+    crossfadeFrames >= 2 ? regionFrames - crossfadeFrames : regionFrames;
+  const output = context.createBuffer(
+    decoded.numberOfChannels,
+    loopFrames,
+    sampleRate,
+  );
+
+  for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) {
+    const inputChannel = decoded.getChannelData(channel);
+    const outputChannel = output.getChannelData(channel);
+    if (crossfadeFrames < 2) {
+      outputChannel.set(
+        inputChannel.subarray(startFrame, startFrame + loopFrames),
+      );
+      continue;
+    }
+    for (let frame = 0; frame < crossfadeFrames; frame += 1) {
+      const headMix = frame / (crossfadeFrames - 1);
+      outputChannel[frame] =
+        inputChannel[startFrame + loopFrames + frame]! * (1 - headMix) +
+        inputChannel[startFrame + frame]! * headMix;
+    }
+    outputChannel.set(
+      inputChannel.subarray(
+        startFrame + crossfadeFrames,
+        startFrame + loopFrames,
+      ),
+      crossfadeFrames,
+    );
+  }
+
+  return output;
+}
+
+function writeBotAvatarSfxWaveText(
+  view: DataView,
+  offset: number,
+  value: string,
+): void {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function encodeBotAvatarSfxWave(buffer: AudioBuffer): ArrayBuffer {
+  const channelCount = Math.max(1, buffer.numberOfChannels);
+  const blockAlign = channelCount * 2;
+  const dataBytes = buffer.length * blockAlign;
+  const output = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(output);
+  writeBotAvatarSfxWaveText(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataBytes, true);
+  writeBotAvatarSfxWaveText(view, 8, "WAVE");
+  writeBotAvatarSfxWaveText(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, buffer.sampleRate, true);
+  view.setUint32(28, buffer.sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeBotAvatarSfxWaveText(view, 36, "data");
+  view.setUint32(40, dataBytes, true);
+
+  const channels = Array.from({ length: channelCount }, (_, channel) =>
+    buffer.getChannelData(Math.min(channel, buffer.numberOfChannels - 1)),
+  );
+  for (let frame = 0; frame < buffer.length; frame += 1) {
+    for (let channel = 0; channel < channelCount; channel += 1) {
+      const sample = channels[channel]?.[frame] ?? 0;
+      const safeSample = Number.isFinite(sample)
+        ? Math.max(-1, Math.min(1, sample))
+        : 0;
+      view.setInt16(
+        44 + (frame * channelCount + channel) * 2,
+        Math.round(safeSample * 0x7fff),
+        true,
+      );
+    }
+  }
+  return output;
+}
+
+function addBotAvatarSfxLoopGuardPadding(
+  context: BaseAudioContext,
+  loopBuffer: AudioBuffer,
+): AudioBuffer {
+  const paddingFrames = Math.max(
+    1,
+    Math.round(BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS * loopBuffer.sampleRate),
+  );
+  const padded = context.createBuffer(
+    loopBuffer.numberOfChannels,
+    loopBuffer.length + paddingFrames * 2,
+    loopBuffer.sampleRate,
+  );
+  for (
+    let channel = 0;
+    channel < loopBuffer.numberOfChannels;
+    channel += 1
+  ) {
+    padded
+      .getChannelData(channel)
+      .set(loopBuffer.getChannelData(channel), paddingFrames);
+  }
+  return padded;
+}
+
+/**
+ * Normalize a newly generated loop before it enters a voice profile.
+ * Unsupported decode environments return the original blob so the editor
+ * still works everywhere and the playback guard can handle the source.
+ */
+export async function normalizeBotAvatarSfxLoopBlob(blob: Blob): Promise<Blob> {
+  if (
+    typeof OfflineAudioContext === "undefined" ||
+    typeof blob.arrayBuffer !== "function"
+  ) {
+    return blob;
+  }
+  try {
+    const context = new OfflineAudioContext(2, 1, 44_100);
+    const decoded = await context.decodeAudioData(
+      (await blob.arrayBuffer()).slice(0),
+    );
+    const loopBuffer = createSeamlessBotAvatarSfxLoopBuffer(context, decoded);
+    // Keep the existing playback guard's 80ms edge trim meaningful: the
+    // baked loop lives between silent guard pads, so playback drops the pads
+    // and lands exactly on the crossfaded loop boundary.
+    const paddedLoopBuffer = addBotAvatarSfxLoopGuardPadding(
+      context,
+      loopBuffer,
+    );
+    const normalized = new Blob([encodeBotAvatarSfxWave(paddedLoopBuffer)], {
+      type: "audio/wav",
+    });
+    return normalized.size <= BOT_AVATAR_SFX_MAX_BYTES ? normalized : blob;
+  } catch {
+    return blob;
+  }
 }
 
 export function botAvatarSfxAttackGainAt(
@@ -261,8 +442,17 @@ function botAvatarSfxSpatialEngineFor(
       gainEnvelope: null,
       playRequest: 0,
       releaseTimer: null,
+      loopEndedListener: null,
     };
     botAvatarSfxSpatialEngines.set(audio, engine);
+    engine.loopEndedListener = (): void => {
+      if (!engine.desiredPlaying || engine.releaseTimer !== null) return;
+      const restarted = updateBotAvatarSfxLoopTime(audio);
+      if (restarted && audio.paused) {
+        void audio.play().catch(() => undefined);
+      }
+    };
+    audio.addEventListener("ended", engine.loopEndedListener);
     return engine;
   } catch {
     return null;
@@ -285,16 +475,18 @@ function updateBotAvatarSfxSpatialPan(engine: BotAvatarSfxSpatialEngine): void {
   );
 }
 
-function updateBotAvatarSfxLoopTime(audio: BotAvatarSfxAudioTarget): void {
+function updateBotAvatarSfxLoopTime(audio: BotAvatarSfxAudioTarget): boolean {
   const restartTime = botAvatarSfxLoopRestartTime(
     audio.currentTime,
     audio.duration ?? Number.NaN,
   );
-  if (restartTime === null) return;
+  if (restartTime === null) return false;
   try {
     audio.currentTime = restartTime;
+    return true;
   } catch {
     // Metadata can briefly become stale while a newly selected source loads.
+    return false;
   }
 }
 
@@ -426,7 +618,10 @@ function startBotAvatarSfxSpatialPlayback(
   if (!engine.desiredPlaying || !engine.desiredSource) return;
   clearBotAvatarSfxReleaseTimer(engine);
   connectBotAvatarSfxSpatialEngineNodes(engine);
-  audio.loop = true;
+  // Do not use native looping: it loops at the encoded file boundary, before
+  // the trimmed restart boundary can be applied. The RAF guard below and the
+  // `ended` listener above own the loop instead.
+  audio.loop = false;
   audio.volume = 1;
   updateBotAvatarSfxLoopTime(audio);
   startBotAvatarSfxSpatialTracking(engine, audio);
@@ -648,7 +843,9 @@ export function syncBotAvatarSfxAudio(
     audio.load();
     loadedSource = sfx.audioDataUrl;
   }
-  audio.loop = true;
+  // Non-browser test/runtime targets use the same explicit trimmed-loop
+  // contract as real media elements.
+  audio.loop = false;
   audio.volume = sfx.volume;
   updateBotAvatarSfxLoopTime(audio);
   if (audio.paused) void audio.play().catch(() => undefined);
@@ -684,6 +881,7 @@ function botAvatarSfxSampleRuntimeFor(
     lifecycleGeneration: 0,
     loadedSource: null,
     loopFrame: null,
+    loopEndedListener: null,
     targetVolume: 0,
   };
   botAvatarSfxSampleRuntimes.set(audio, runtime);
@@ -704,6 +902,26 @@ function startBotAvatarSfxSampleLoopTracking(
     runtime.loopFrame = window.requestAnimationFrame(tick);
   };
   tick();
+}
+
+function installBotAvatarSfxSampleLoopGuard(
+  audio: HTMLMediaElement,
+  runtime: BotAvatarSfxSampleRuntime,
+): void {
+  if (
+    runtime.loopEndedListener !== null ||
+    typeof audio.addEventListener !== "function"
+  ) {
+    return;
+  }
+  runtime.loopEndedListener = (): void => {
+    if (!runtime.desiredPlaying) return;
+    const restarted = updateBotAvatarSfxLoopTime(audio);
+    if (restarted && audio.paused) {
+      void audio.play().catch(() => undefined);
+    }
+  };
+  audio.addEventListener("ended", runtime.loopEndedListener);
 }
 
 function fadeBotAvatarSfxSampleVolume(
@@ -790,7 +1008,10 @@ export async function playBotAvatarSfxSampleAudio(
     audio.load();
     runtime.loadedSource = runtime.desiredSource;
   }
-  audio.loop = true;
+  installBotAvatarSfxSampleLoopGuard(audio, runtime);
+  // Keep native looping off so the encoded file's final frames can never be
+  // emitted. The shared loop guard restarts at the trimmed start boundary.
+  audio.loop = false;
   const fromVolume = audio.paused ? 0 : audio.volume;
   audio.volume = fromVolume;
   updateBotAvatarSfxLoopTime(audio);
@@ -951,6 +1172,6 @@ export async function generateBotThinkingSfxProfile(
   );
   return botAudioVoiceProfileWithThinkingSfx(
     profile,
-    await audioBlobAsDataUrl(blob),
+    await audioBlobAsDataUrl(await normalizeBotAvatarSfxLoopBlob(blob)),
   );
 }

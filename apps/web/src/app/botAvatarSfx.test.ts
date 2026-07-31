@@ -7,6 +7,7 @@ import {
 } from "@localai/shared";
 import {
   BOT_AVATAR_SFX_ATTACK_MS,
+  BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS,
   BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
   BOT_AVATAR_SFX_RELEASE_MS,
   GENERATED_BOT_THINKING_SFX_PROMPT,
@@ -19,7 +20,9 @@ import {
   botAvatarSfxShouldPlay,
   botAvatarSfxStereoPanForRect,
   connectBotAvatarSfxSpatialAudio,
+  createSeamlessBotAvatarSfxLoopBuffer,
   effectiveBotAvatarSfxPlayback,
+  normalizeBotAvatarSfxLoopBlob,
   playBotAvatarSfxSampleAudio,
   prismBotThinkingSfxFallback,
   prismBotThinkingSfxFallbackIndex,
@@ -118,6 +121,101 @@ test("avatar SFX trims both loop edges and scales the trim for short clips", () 
   assert.equal(botAvatarSfxLoopRestartTime(0, 4), 0.08);
   assert.equal(botAvatarSfxLoopRestartTime(3.92, 4), 0.08);
   assert.equal(botAvatarSfxLoopRestartTime(2, 4), null);
+});
+
+test("generated avatar loops bake the trimmed tail into a crossfaded buffer", () => {
+  const input = Float32Array.from({ length: 100 }, (_, index) => index / 100);
+  const decoded = {
+    duration: 1,
+    length: input.length,
+    numberOfChannels: 1,
+    sampleRate: 100,
+    getChannelData: () => input,
+  } as unknown as AudioBuffer;
+  const outputData = new Float32Array(78);
+  const output = {
+    duration: outputData.length / 100,
+    length: outputData.length,
+    numberOfChannels: 1,
+    sampleRate: 100,
+    getChannelData: () => outputData,
+  } as unknown as AudioBuffer;
+  const context = {
+    createBuffer: () => output,
+  } as unknown as BaseAudioContext;
+
+  const normalized = createSeamlessBotAvatarSfxLoopBuffer(
+    context,
+    decoded,
+    BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS,
+  );
+
+  assert.equal(normalized.length, 78);
+  assert.equal(normalized.duration, 0.78);
+  assert.equal(outputData[0], input[86]);
+  assert.ok(outputData[1] > input[9]!);
+  assert.ok(outputData[1] < input[87]!);
+  assert.equal(outputData[77], input[85]);
+});
+
+test("generated loop normalization emits a padded WAV fallback asset", async () => {
+  const input = Float32Array.from({ length: 100 }, (_, index) => index / 100);
+  const decoded = {
+    duration: 1,
+    length: input.length,
+    numberOfChannels: 1,
+    sampleRate: 100,
+    getChannelData: () => input,
+  } as unknown as AudioBuffer;
+  const previousOfflineAudioContext = (
+    globalThis as unknown as Record<string, unknown>
+  ).OfflineAudioContext;
+  class FakeOfflineAudioContext {
+    async decodeAudioData(): Promise<AudioBuffer> {
+      return decoded;
+    }
+
+    createBuffer(
+      numberOfChannels: number,
+      length: number,
+      sampleRate: number,
+    ): AudioBuffer {
+      const channels = Array.from(
+        { length: numberOfChannels },
+        () => new Float32Array(length),
+      );
+      return {
+        duration: length / sampleRate,
+        length,
+        numberOfChannels,
+        sampleRate,
+        getChannelData: (channel: number) => channels[channel]!,
+      } as unknown as AudioBuffer;
+    }
+  }
+  Object.defineProperty(globalThis, "OfflineAudioContext", {
+    configurable: true,
+    value: FakeOfflineAudioContext,
+  });
+
+  try {
+    const normalized = await normalizeBotAvatarSfxLoopBlob(
+      new Blob([new Uint8Array([1, 2, 3])], { type: "audio/mpeg" }),
+    );
+    const bytes = new Uint8Array(await normalized.arrayBuffer());
+    assert.equal(normalized.type, "audio/wav");
+    assert.equal(String.fromCharCode(...bytes.subarray(0, 4)), "RIFF");
+    assert.equal(String.fromCharCode(...bytes.subarray(8, 12)), "WAVE");
+  } finally {
+    if (previousOfflineAudioContext === undefined) {
+      Reflect.deleteProperty(globalThis, "OfflineAudioContext");
+    } else {
+      Object.defineProperty(globalThis, "OfflineAudioContext", {
+        configurable: true,
+        value: previousOfflineAudioContext,
+      });
+    }
+  }
 });
 
 test("avatar SFX uses the approved equal-power attack and release", () => {
@@ -248,9 +346,11 @@ class FakeAvatarSfxAudio implements BotAvatarSfxAudioTarget {
   loop = false;
   volume = 1;
   paused = true;
+  ended = false;
   loadCalls = 0;
   pauseCalls = 0;
   playCalls = 0;
+  private readonly listeners = new Map<string, Set<() => void>>();
 
   load(): void {
     this.loadCalls += 1;
@@ -264,6 +364,17 @@ class FakeAvatarSfxAudio implements BotAvatarSfxAudioTarget {
   async play(): Promise<void> {
     this.playCalls += 1;
     this.paused = false;
+    this.ended = false;
+  }
+
+  addEventListener(type: string, listener: () => void): void {
+    const listeners = this.listeners.get(type) ?? new Set<() => void>();
+    listeners.add(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  emit(type: string): void {
+    for (const listener of this.listeners.get(type) ?? []) listener();
   }
 }
 
@@ -274,6 +385,7 @@ test("Avatar Studio sample fades in, trims its start, and releases before pausin
     sfx,
   );
   assert.equal(audio.currentTime, 0.08);
+  assert.equal(audio.loop, false);
   assert.equal(audio.paused, false);
   assert.equal(audio.volume, 0);
   await new Promise((resolve) => setTimeout(resolve, BOT_AVATAR_SFX_ATTACK_MS + 40));
@@ -287,6 +399,24 @@ test("Avatar Studio sample fades in, trims its start, and releases before pausin
   assert.equal(audio.paused, true);
   assert.equal(audio.currentTime, 0);
   assert.ok(audio.volume < 1e-10);
+});
+
+test("Avatar Studio restarts at the trimmed start when the media element reaches its end", async () => {
+  const audio = new FakeAvatarSfxAudio();
+  await playBotAvatarSfxSampleAudio(
+    audio as unknown as HTMLMediaElement,
+    sfx,
+  );
+
+  audio.currentTime = audio.duration;
+  audio.ended = true;
+  audio.paused = true;
+  audio.emit("ended");
+
+  assert.equal(audio.currentTime, 0.08);
+  assert.equal(audio.playCalls, 2);
+  assert.equal(audio.loop, false);
+  stopBotAvatarSfxSampleAudio(audio as unknown as HTMLMediaElement);
 });
 
 test("Avatar Studio sample cancels a release and fades source replacements safely", async () => {
@@ -342,7 +472,7 @@ test("avatar SFX keeps one loop running across enabled live states", () => {
   );
   assert.equal(loadedSource, sfx.audioDataUrl);
   assert.equal(audio.src, sfx.audioDataUrl);
-  assert.equal(audio.loop, true);
+  assert.equal(audio.loop, false);
   assert.equal(audio.volume, 0.5);
   assert.equal(audio.loadCalls, 1);
   assert.equal(audio.playCalls, 1);
