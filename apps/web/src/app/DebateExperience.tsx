@@ -334,6 +334,24 @@ export interface DebateExperienceProps {
   onCompanionContextChange?: (context: DebateCompanionContext | null) => void;
   renderJudgeComposer?: (composer: DebateJudgeComposerRenderProps) => ReactNode;
   onJudgeComposerReveal?: () => void;
+  /**
+   * Compact pick-aware composer for Motion Chamber seed fields
+   * (Prompt Center prompts + wildcard decks).
+   */
+  renderPickAwareComposer?: (state: {
+    id?: string;
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+    disabled?: boolean;
+    multiline?: boolean;
+    ariaLabel?: string;
+    className?: string;
+    onBlur?: (value: string) => void;
+    resolvePicksToPlainText?: boolean;
+  }) => ReactNode;
+  /** Expand /prompts, !decks, and {slots}/{a|b} before synthesize or Refract. */
+  expandComposerDraft?: (rawDraft: string) => string;
 }
 
 export interface DebateCompanionContext {
@@ -1738,11 +1756,13 @@ const DebateTranscriptBodyConsumer = memo(
       props.store.getSnapshot,
       props.store.getSnapshot,
     );
+    // Streaming articles must never fall back to the completed speech while the
+    // presentation store is still catching up (voice prep / empty reveal arming).
     const content =
       snapshot.sessionId === props.sessionId &&
       snapshot.eventId === props.event.id
         ? snapshot.visibleContent
-        : props.event.content;
+        : "";
     return content ? (
       <div className={styles.transcriptMarkdown}>
         <p>{debateSpokenText(content)}</p>
@@ -2109,12 +2129,14 @@ export function DebateExperience(
   const {
     bots,
     botGroups = [],
+    expandComposerDraft,
     onCompanionContextChange,
     onLiveSessionActiveChange,
     onPrepareUtterance,
     onStopUtterance,
     onUtterance,
     preferredProvider,
+    renderPickAwareComposer,
     request,
   } = props;
   const playerName = props.playerName.trim() || "You";
@@ -3901,6 +3923,11 @@ export function DebateExperience(
     });
   };
 
+  const expandDebateSeedDraft = useCallback(
+    (rawDraft: string): string => expandComposerDraft?.(rawDraft) ?? rawDraft,
+    [expandComposerDraft],
+  );
+
   const generateDebateRefractField = useCallback(
     async (
       kind: PrismRefractDebateTextTargetKind,
@@ -3908,6 +3935,11 @@ export function DebateExperience(
       rejectedValues: readonly string[],
       signal: AbortSignal,
     ): Promise<string> => {
+      const resolvedTopic = expandDebateSeedDraft(debateCompanionDraft.topic);
+      const resolvedCurrentValue =
+        kind === "debate.setup.topic"
+          ? expandDebateSeedDraft(currentValue)
+          : currentValue;
       const response = await request<PrismRefractResponse>(
         "/api/prism/refract",
         {
@@ -3915,10 +3947,13 @@ export function DebateExperience(
           body: JSON.stringify({
             target: {
               kind,
-              context: debateCompanionDraft,
+              context: {
+                ...debateCompanionDraft,
+                topic: resolvedTopic,
+              },
               botIds: debateCompanionBotIds,
             },
-            currentValue,
+            currentValue: resolvedCurrentValue,
             rejectedValues,
             preferredProvider:
               props.modelOverride?.provider ?? preferredProvider,
@@ -3933,6 +3968,7 @@ export function DebateExperience(
     [
       debateCompanionBotIds,
       debateCompanionDraft,
+      expandDebateSeedDraft,
       preferredProvider,
       props.modelOverride?.model,
       props.modelOverride?.provider,
@@ -3943,14 +3979,18 @@ export function DebateExperience(
 
   const synthesize = useCallback(
     async (direction = ""): Promise<void> => {
-      if (!topic.trim() || busy) return;
+      const resolvedTopic = expandDebateSeedDraft(topic).trim();
+      if (!resolvedTopic || busy) return;
+      if (resolvedTopic !== topic) {
+        setTopic(resolvedTopic);
+      }
       setBusy(true);
       setError(null);
       try {
         const result = await request<{ slates: DebateMotionSlateV1[] }>(
           "/api/debates/synthesize",
           requestBody({
-            topic,
+            topic: resolvedTopic,
             formality,
             preferredProvider:
               props.modelOverride?.provider ?? preferredProvider,
@@ -3973,6 +4013,7 @@ export function DebateExperience(
     },
     [
       busy,
+      expandDebateSeedDraft,
       preferredProvider,
       props.modelOverride?.model,
       props.modelOverride?.provider,
@@ -4807,7 +4848,6 @@ export function DebateExperience(
           if (presentationRunRef.current !== runId) return;
           gavelCue = null;
         }
-        setTranscriptVisibleThroughSequence(event.sequence);
         setLiveGavelCue(gavelCue);
         const orderCameraCutMs =
           gavelCue?.kind === "order" ? DEBATE_GAVEL_ORDER_CAMERA_CUT_MS : 0;
@@ -4820,7 +4860,15 @@ export function DebateExperience(
         await voiceReady;
         if (presentationRunRef.current !== runId) return;
         setVoicePreparationSpeakerBotId(null);
+        // Open Proceedings only once the floor/streaming shell can arm — never
+        // while voice prep still leaves presentationEventId null (full-text flash).
         setPresentationEventId(event.id);
+        setTranscriptVisibleThroughSequence(event.sequence);
+        replaceLiveReveal({
+          eventId: event.id,
+          visibleContent: "",
+          speechTiming: null,
+        });
         if (gavelCue) {
           const remainingSpeechLeadMs = Math.max(
             0,
@@ -5147,16 +5195,18 @@ export function DebateExperience(
         firstGavelCue !== null &&
         options.automaticJudgeGavel !== true;
       if (first) {
-        setTranscriptVisibleThroughSequence(
-          firstWaitsForJudgeGavel
-            ? (previous?.events.at(-1)?.sequence ?? 0)
-            : first.sequence,
-        );
-        if (
+        const presentsImmediately =
           !onPrepareUtterance &&
           !firstWaitsForJudgeGavel &&
-          firstGavelCue?.kind !== "order"
-        ) {
+          firstGavelCue?.kind !== "order";
+        // Keep Proceedings closed through voice prep / gavel waits so the next
+        // speech cannot render as a completed article before playback starts.
+        setTranscriptVisibleThroughSequence(
+          presentsImmediately
+            ? first.sequence
+            : (previous?.events.at(-1)?.sequence ?? 0),
+        );
+        if (presentsImmediately) {
           setPresentationEventId(first.id);
           replaceLiveReveal({ eventId: first.id, visibleContent: "" });
         } else {
@@ -7398,20 +7448,40 @@ export function DebateExperience(
                   ),
               }}
             >
-              {(binding) => (
-                <textarea
-                  {...binding}
-                  id="debate-territory"
-                  value={topic}
-                  onChange={(event) => setTopic(event.currentTarget.value)}
-                  placeholder={
-                    setupMode === "basic"
-                      ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
-                      : "Housing near transit, whether art can be separated from its creator…"
-                  }
-                  rows={3}
-                />
-              )}
+              {(binding) =>
+                renderPickAwareComposer ? (
+                  <div {...binding} tabIndex={-1}>
+                    {renderPickAwareComposer({
+                      id: "debate-territory",
+                      value: topic,
+                      onChange: setTopic,
+                      placeholder:
+                        setupMode === "basic"
+                          ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
+                          : "Housing near transit, whether art can be separated from its creator…",
+                      multiline: true,
+                      ariaLabel:
+                        setupMode === "basic" ? "Your idea" : "Territory",
+                      className: styles.pickAwareSetupField,
+                      disabled: busy,
+                      resolvePicksToPlainText: true,
+                    })}
+                  </div>
+                ) : (
+                  <textarea
+                    {...binding}
+                    id="debate-territory"
+                    value={topic}
+                    onChange={(event) => setTopic(event.currentTarget.value)}
+                    placeholder={
+                      setupMode === "basic"
+                        ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
+                        : "Housing near transit, whether art can be separated from its creator…"
+                    }
+                    rows={3}
+                  />
+                )
+              }
             </PrismRefractTarget>
             <button
               type="button"
@@ -8870,7 +8940,8 @@ export function DebateExperience(
               </button>
               <small>
                 Uploaded and synthesized images are cut into a transparent stage
-                sprite. Emoji always remains as the fallback.
+                sprite. Emoji stays hidden while that sprite is showing, and
+                returns only if the sprite cannot load.
               </small>
             </div>
             <div className={styles.evidenceObjectCommitActions}>

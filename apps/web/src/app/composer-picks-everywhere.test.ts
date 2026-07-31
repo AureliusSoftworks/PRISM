@@ -65,7 +65,7 @@ describe("composer picks everywhere", () => {
     );
     assert.equal(
       signalSource.match(/resolvePicksToPlainText: true/gu)?.length,
-      3,
+      2,
     );
     assert.match(
       pageSource,
@@ -87,9 +87,10 @@ describe("composer picks everywhere", () => {
       signalSource,
       /id: "botcast-premise-inspiration"[\s\S]{0,200}onChange: setShowPremiseInspirationDraft/u,
     );
+    // Saved show Premise stays a plain textarea; booking fields keep pick-aware powers.
     assert.match(
       signalSource,
-      /id: `signal-show-premise-\$\{selectedShow\.id\}`[\s\S]{0,200}onChange: setShowPremiseDraft/u,
+      /id=\{`signal-show-premise-\$\{selectedShow\.id\}`\}[\s\S]{0,800}setShowPremiseDraft/u,
     );
     assert.match(
       signalSource,
@@ -119,6 +120,27 @@ describe("composer picks everywhere", () => {
     assert.match(
       pageSource,
       /<SlateWorkspace[\s\S]{0,800}renderPickAwareComposer=\{renderPickAwareComposer\}[\s\S]{0,200}expandComposerDraft=\{expandComposerDraft\}/u,
+    );
+  });
+
+  it("wires Debate Territory to prompts and wildcard decks", () => {
+    const debateSource = readFileSync(
+      new URL("./DebateExperience.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(debateSource, /renderPickAwareComposer\?/u);
+    assert.match(debateSource, /expandComposerDraft\?/u);
+    assert.match(
+      debateSource,
+      /id: "debate-territory"[\s\S]{0,500}onChange: setTopic[\s\S]{0,800}resolvePicksToPlainText: true/u,
+    );
+    assert.match(
+      debateSource,
+      /expandDebateSeedDraft\(topic\)/u,
+    );
+    assert.match(
+      pageSource,
+      /resetSingleModeTutorial\("debate"\)[\s\S]{0,180}expandComposerDraft=\{expandComposerDraft\}[\s\S]{0,120}renderPickAwareComposer=\{renderPickAwareComposer\}/u,
     );
   });
 });

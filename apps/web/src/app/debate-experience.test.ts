@@ -267,6 +267,24 @@ describe("Debate experience", () => {
     assert.match(css, /\.territoryRandomizeButton\s*\{/u);
   });
 
+  it("wires Territory to Command Center prompts and wildcard decks", () => {
+    assert.match(source, /renderPickAwareComposer\?/u);
+    assert.match(source, /expandComposerDraft\?/u);
+    assert.match(
+      source,
+      /id: "debate-territory"[\s\S]{0,500}onChange: setTopic[\s\S]{0,800}resolvePicksToPlainText: true/u,
+    );
+    assert.match(
+      source,
+      /const resolvedTopic = expandDebateSeedDraft\(topic\)\.trim\(\)/u,
+    );
+    assert.match(
+      source,
+      /topic: resolvedTopic/u,
+    );
+    assert.match(css, /\.pickAwareSetupField\s*\{/u);
+  });
+
   it("reveals motion inputs incrementally without hiding populated downstream work", () => {
     const emptySlate = {
       version: DEBATE_SCHEMA_VERSION,
@@ -377,6 +395,15 @@ describe("Debate experience", () => {
       css,
       /\.evidenceObjectPreview > \.evidenceExhibitVisual > span\s*\{[^}]*max-width:\s*88%/u,
     );
+    assert.match(
+      css,
+      /\.evidenceExhibitVisual:has\(>\s*img:not\(\[hidden\]\)\)\s*>\s*span\s*\{[^}]*visibility:\s*hidden/u,
+    );
+    assert.match(
+      source,
+      /Emoji stays hidden while that sprite is showing[\s\S]{0,80}returns only if the sprite cannot load/u,
+    );
+    assert.doesNotMatch(source, /Emoji always remains as the fallback/u);
     assert.doesNotMatch(css, /\.evidenceObjectPreview span,/u);
     assert.match(source, /props\.responseMode === "local"/u);
     assert.doesNotMatch(source, /synthetic-[a-z]/u);
@@ -630,11 +657,19 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /await voiceReady;[\s\S]{0,180}setPresentationEventId\(event\.id\)/u,
+      /await voiceReady;[\s\S]{0,280}setPresentationEventId\(event\.id\)/u,
     );
     assert.match(
       source,
-      /!onPrepareUtterance &&[\s\S]{0,140}setPresentationEventId\(first\.id\)/u,
+      /setPresentationEventId\(event\.id\);[\s\S]{0,120}setTranscriptVisibleThroughSequence\(event\.sequence\)/u,
+    );
+    assert.match(
+      source,
+      /const presentsImmediately =[\s\S]{0,180}!onPrepareUtterance &&/u,
+    );
+    assert.match(
+      source,
+      /presentsImmediately[\s\S]{0,80}\? first\.sequence[\s\S]{0,120}previous\?\.events\.at\(-1\)\?\.sequence/u,
     );
     assert.match(source, /!presenting\s*\?\s*\(\[\.\.\.session\.events\]/u);
     assert.match(
@@ -650,6 +685,21 @@ describe("Debate experience", () => {
       /await Promise\.all\(\[clip, prepareEnglishVoice\(\)\]\)/u,
     );
     assert.match(page, /onPrepareUtterance=\{prepareDebateUtterance\}/u);
+  });
+
+  it("keeps Proceedings closed until streaming can arm after voice prep", () => {
+    assert.match(
+      source,
+      /Streaming articles must never fall back to the completed speech/u,
+    );
+    assert.match(
+      source,
+      /snapshot\.eventId === props\.event\.id[\s\S]{0,80}\? snapshot\.visibleContent[\s\S]{0,40}: ""/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /setTranscriptVisibleThroughSequence\(event\.sequence\);[\s\S]{0,220}await voiceReady/u,
+    );
   });
 
   it("does not mislabel Debate events as persisted Signal messages for voice synthesis", () => {
@@ -2553,7 +2603,7 @@ describe("Debate experience", () => {
     assert.match(source, /debateModeratorGavelSpeechLeadMs\(gavelCue\.kind\)/u);
     assert.match(
       source,
-      /setLiveGavelCue\(gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,520}setPresentationEventId\(event\.id\)/u,
+      /setLiveGavelCue\(gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,780}setPresentationEventId\(event\.id\)/u,
     );
     assert.match(
       source,

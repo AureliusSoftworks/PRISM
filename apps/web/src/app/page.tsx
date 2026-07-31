@@ -130152,6 +130152,8 @@ function HomeContent(): React.JSX.Element {
               onLiveSessionActiveChange={setDebateLiveSessionActive}
               onCompanionContextChange={setDebateCompanionContext}
               onResetTutorial={() => resetSingleModeTutorial("debate")}
+              expandComposerDraft={expandComposerDraft}
+              renderPickAwareComposer={renderPickAwareComposer}
             />
           </div>
         </section>

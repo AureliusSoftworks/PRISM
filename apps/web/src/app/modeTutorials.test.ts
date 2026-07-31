@@ -200,6 +200,8 @@ describe("mode tutorials", () => {
       /Changing the motion, cast, format, or formality clears/u,
     );
     assert.match(copy, /territory dice remains available/u);
+    assert.match(copy, /Prompt Center prompts and wildcard rolls/u);
+    assert.match(copy, /Command Center powers as Signal setup/u);
     assert.match(copy, /floating Prism remains available throughout setup/u);
     assert.match(copy, /bounded, unsaved workbench draft/u);
     assert.match(copy, /Wield Prism into a glowing setup field/u);

@@ -33,7 +33,7 @@ ship as `0.5.2` while Coffee is `v0.7`.
 | Zen     | v1.33   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues.                                                                                                                                                                  |
 | Coffee  | v2.39   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, and faithful replay.                                                                                                                                                     |
 | Signal  | v1.52   | Active             | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                 |
-| Debate  | v0.2    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. |
+| Debate  | v0.3    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
@@ -101,6 +101,11 @@ stages do not block the standalone preview.
   among audible peers. Story preserves scene audiences and performs at most one
   context-redacted repair pass. Signal advances to `v1.52`; current Chat, Zen,
   Coffee, Story, Debate, and Slate versions retain their newer release state.
+
+- Bumped `Debate` to preview `v0.3` so Motion Chamber Territory / Your idea
+  accepts Prompt Center prompts and wildcard decks. Selected shortcuts insert as
+  ordinary editable text (Signal setup style); leftover placeholders resolve when
+  you Build / Refract into motions. The territory catalog dice stays separate.
 
 - Bumped `Slate` to preview `v0.8` for the manuscript-first Writer's Cockpit:
   TipTap section documents, Story Map, adaptive Inspector, natural-language

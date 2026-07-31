@@ -4,6 +4,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-07-30 · [UX]
+**Trigger**: Debate Territory needed Command Center prompts and wildcard decks.
+**Lesson**: Attach setup seed fields with `renderPickAwareComposer` + `resolvePicksToPlainText: true` (Signal booking style), and expand once at synthesize/Refract—not while typing and not on every companion-draft render (that would re-roll randomness). Keep catalog dice separate from Command Center deck rolls. Do not put pick-aware composers in Bot Profile Builder.
+**Applies to**: `DebateExperience` Territory / Your idea, `expandComposerDraft`, Signal setup fields.
+
 ### 2026-07-26 · [architecture]
 **Trigger**: Needed a personal Marketplace backup of Library-only bots without shipping that shelf on main/release.
 **Lesson**: Marketplace shelves can carry `branchLock: "dev"`. Visibility helpers must require an exact branch match (`NEXT_PUBLIC_PRISM_BRANCH`), and public catalog quality gates should exclude branch-locked bots so personal backups can preserve Library state without public polish constraints.
