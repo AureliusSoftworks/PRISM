@@ -12,6 +12,10 @@ export const SIGNAL_LIVE_CAPTION_DELAY_MS = 500;
 const SIGNAL_SILENT_CAPTION_WORD_MS = 400;
 const SIGNAL_SILENT_CAPTION_MIN_MS = 2_000;
 const SIGNAL_SILENT_CAPTION_MAX_MS = 20_000;
+/** Spoken fallback pace when realtime duration is unknown (~150 wpm). */
+const SIGNAL_VOICE_COMPLETION_WORD_MS = 400;
+const SIGNAL_VOICE_COMPLETION_MIN_MS = 1_200;
+const SIGNAL_VOICE_COMPLETION_CHAR_MS = 34;
 
 /**
  * When configured voice playback fails, keep the live caption readable instead
@@ -29,6 +33,23 @@ export function signalSilentCaptionRevealDurationMs(
       options.stageAction ? 1_800 : SIGNAL_SILENT_CAPTION_MIN_MS,
       wordCount * SIGNAL_SILENT_CAPTION_WORD_MS,
     ),
+  );
+}
+
+/**
+ * Watchdog floor for Signal utterance completion when `onStart` reports a null
+ * duration (common for English/local media before `audio.duration` is ready).
+ * Prefer the slower of char- and word-based estimates so long host questions are
+ * not cut mid-sentence before `ended` can settle playback.
+ */
+export function signalVoiceCompletionFallbackDurationMs(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return SIGNAL_VOICE_COMPLETION_MIN_MS;
+  const wordCount = Math.max(1, trimmed.split(/\s+/u).length);
+  return Math.max(
+    SIGNAL_VOICE_COMPLETION_MIN_MS,
+    trimmed.length * SIGNAL_VOICE_COMPLETION_CHAR_MS,
+    wordCount * SIGNAL_VOICE_COMPLETION_WORD_MS,
   );
 }
 

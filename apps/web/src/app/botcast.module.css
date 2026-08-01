@@ -717,7 +717,15 @@
 .captionControls button[data-selected="true"] { border-color: transparent; color: #fff; background: linear-gradient(120deg, color-mix(in srgb, var(--botcast-host-accent) 76%, var(--prism-p)), var(--prism-m)); box-shadow: 0 6px 18px color-mix(in srgb, var(--botcast-host-accent) 18%, transparent); }
 .liveCaption strong { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 8px; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.1); font: 820 clamp(.52rem, .9vw, .68rem)/1 system-ui; letter-spacing: .11em; text-transform: uppercase; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
 .liveCaption span { max-width: 100%; border-radius: 10px; padding: 7px 12px 8px; background: rgba(4,6,11,.76); backdrop-filter: blur(9px) saturate(1.08); font: 720 clamp(.72rem, 1.45vw, 1.05rem)/1.28 system-ui; letter-spacing: .004em; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
-.liveCaption[data-signal-producer-host-prompt="true"] span { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; }
+.liveCaption[data-signal-producer-host-prompt="true"] { pointer-events: auto; }
+.liveCaption[data-signal-producer-host-prompt="true"] span {
+  display: block;
+  max-height: min(38vh, 13.5rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  text-wrap: pretty;
+  -webkit-overflow-scrolling: touch;
+}
 .stageViewport[data-camera-transitions="instant"] .stageScene { transition: none; }
 .stageViewport[data-model-warmup="entering"] .stageScene,
 .stageViewport[data-model-warmup="held"] .stageScene,

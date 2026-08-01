@@ -204,6 +204,7 @@ import {
 import {
   signalLiveCaptionText,
   signalSilentCaptionRevealDurationMs,
+  signalVoiceCompletionFallbackDurationMs,
 } from "./signalLiveCaptions";
 import {
   DEFAULT_SIGNAL_LIVE_CAPTIONS_ENABLED,
@@ -6057,6 +6058,23 @@ export function BotcastExperience({
         guestResponsePrepared = true;
         prepareGuestResponseRef.current(currentEpisode, message);
       };
+      let armedVoiceCompletionDurationMs = 0;
+      const armVoiceCompletionWatchdog = (
+        durationMs: number,
+        elapsedMs = 0,
+      ): void => {
+        const normalizedDurationMs = Math.max(1, Math.round(durationMs));
+        if (normalizedDurationMs <= armedVoiceCompletionDurationMs) return;
+        armedVoiceCompletionDurationMs = normalizedDurationMs;
+        if (voiceCompletionTimer !== null) {
+          window.clearTimeout(voiceCompletionTimer);
+        }
+        voiceCompletionTimer = window.setTimeout(() => {
+          voiceAttemptActive = false;
+          onStopUtterance?.();
+          settleVoicePlayback?.(false);
+        }, Math.max(0, normalizedDurationMs - elapsedMs) + SIGNAL_VOICE_COMPLETION_GRACE_MS);
+      };
       const lifecycle: VoicePlaybackLifecycle = {
         onPresenceStart: () => {
           if (
@@ -6100,15 +6118,11 @@ export function BotcastExperience({
           notifyPlaybackStart();
           clearLiveCameraPostSpeechHold();
           const resolvedDurationMs =
-            durationMs ?? Math.max(720, message.content.length * 34);
-          if (voiceCompletionTimer !== null) {
-            window.clearTimeout(voiceCompletionTimer);
-          }
-          voiceCompletionTimer = window.setTimeout(() => {
-            voiceAttemptActive = false;
-            onStopUtterance?.();
-            settleVoicePlayback?.(false);
-          }, resolvedDurationMs + SIGNAL_VOICE_COMPLETION_GRACE_MS);
+            durationMs ??
+            signalVoiceCompletionFallbackDurationMs(
+              primarySpokenContent || message.content,
+            );
+          armVoiceCompletionWatchdog(resolvedDurationMs);
           armListenerReactionTiming(message, resolvedDurationMs, alignment);
           setLiveSpeech({
             messageId: message.id,
@@ -6126,6 +6140,7 @@ export function BotcastExperience({
             !episodeOperationIsCurrent(controller, runId)
           )
             return;
+          armVoiceCompletionWatchdog(durationMs, elapsedMs);
           if (
             elapsedMs / Math.max(1, durationMs) >=
             SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS

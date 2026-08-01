@@ -11,6 +11,7 @@ import {
   SIGNAL_LIVE_CAPTION_DELAY_MS,
   signalLiveCaptionText,
   signalSilentCaptionRevealDurationMs,
+  signalVoiceCompletionFallbackDurationMs,
 } from "./signalLiveCaptions.ts";
 
 describe("Signal delayed live captions", () => {
@@ -27,6 +28,16 @@ describe("Signal delayed live captions", () => {
       signalSilentCaptionRevealDurationMs("word ".repeat(100)),
       20_000,
     );
+  });
+
+  it("floors English completion watchdogs with spoken word pace", () => {
+    const text =
+      "This is The Unspent Hello, and I'm Forgetful Freddie—pleased to find myself here. My guest is Jared, and Jared, you have the peculiar advantage of knowing exactly where this conversation begins. When a stranger offers you a fresh introduction, what makes it feel like recognition instead of performance?";
+    const wordCount = text.trim().split(/\s+/u).length;
+    const fallback = signalVoiceCompletionFallbackDurationMs(text);
+    assert.ok(fallback >= wordCount * 400);
+    assert.ok(fallback > text.length * 34);
+    assert.equal(signalVoiceCompletionFallbackDurationMs(""), 1_200);
   });
 
   it("starts with only the words spoken by the end of the initial delay", () => {

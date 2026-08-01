@@ -1758,8 +1758,10 @@ describe("Signal experience shell", () => {
     assert.match(source, /const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000/u);
     assert.match(
       source,
-      /resolvedDurationMs \+ SIGNAL_VOICE_COMPLETION_GRACE_MS/u,
+      /normalizedDurationMs - elapsedMs\) \+ SIGNAL_VOICE_COMPLETION_GRACE_MS/u,
     );
+    assert.match(source, /armVoiceCompletionWatchdog\(/u);
+    assert.match(source, /signalVoiceCompletionFallbackDurationMs\(/u);
     assert.match(source, /settleVoicePlayback\?\.\(true\)/u);
     assert.match(
       source,
@@ -1959,7 +1961,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /data-signal-transcript-panel-state="collapsed"/u);
     assert.match(
       css,
-      /\.liveCaption\[data-signal-producer-host-prompt="true"\] span\s*\{[^}]*-webkit-line-clamp:\s*3;[^}]*line-clamp:\s*3;/u,
+      /\.liveCaption\[data-signal-producer-host-prompt="true"\] span\s*\{[^}]*max-height:\s*min\(38vh,\s*13\.5rem\);[^}]*overflow-y:\s*auto;/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.liveCaption\[data-signal-producer-host-prompt="true"\] span\s*\{[^}]*line-clamp:\s*3;/u,
     );
   });
 
