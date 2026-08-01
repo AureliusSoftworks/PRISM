@@ -80,12 +80,11 @@ function face({
   };
 }
 
-function voice({ baseVoiceId, voiceId, direction, pitch = 0, lilt = 0 }) {
+function voice({ baseVoiceId, direction, pitch = 0, lilt = 0 }) {
   return {
     v: 2,
     enabled: true,
     baseVoiceId,
-    elevenLabsVoiceIdOverride: voiceId,
     elevenLabsEffect: "chorus",
     elevenLabsDirection: direction,
     pitch,
@@ -132,7 +131,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-4",
-      voiceId: "6VgigPFWF0sNZy1BthVg",
       direction: "dry restrained baritone, observant",
       pitch: -0.1,
     }),
@@ -172,7 +170,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-5",
-      voiceId: "tnSpp4vdxKPjI9w0GnoV",
       direction: "sleepy reluctant drawl, understated",
       pitch: -0.1,
       lilt: -0.1,
@@ -214,7 +211,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-2",
-      voiceId: "JBFqnCBsd6RMkjVDRZzb",
       direction: "tiny bright tenor, earnest",
       pitch: 0.25,
       lilt: 0.05,
@@ -266,7 +262,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-3",
-      voiceId: "q3pCVYOxlOb5G3l2O13o",
       direction: "fast impatient baritone, forceful",
       pitch: -0.05,
       lilt: 0.15,
@@ -322,7 +317,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-2",
-      voiceId: "FTNCalFNG5bRnkkaP5Ug",
       direction: "quick neutral mimic, precise",
       pitch: 0.05,
       lilt: 0.1,
@@ -363,7 +357,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-1",
-      voiceId: "Xb7hH8MSUJpSbSDYk0k2",
       direction: "radiant buoyant warmth, emotionally sincere",
       pitch: 0.1,
       lilt: 0.05,
@@ -413,7 +406,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-1",
-      voiceId: "Z3R5wn05IrDiVCyEkUrK",
       direction: "urgent conspiratorial intensity, volatile",
       pitch: -0.1,
       lilt: 0.2,
@@ -464,7 +456,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-5",
-      voiceId: "dG7SBJDxDoZkQUrwvqrD",
       direction: "earnest working-class mutter, determined",
       pitch: -0.05,
       lilt: -0.05,
@@ -505,7 +496,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-2",
-      voiceId: "N2lVS1w4EtoT3dr4eOWO",
       direction: "breathless starstruck tenor, intensely warm",
       pitch: 0.1,
       lilt: 0.2,
@@ -556,7 +546,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-3",
-      voiceId: "TxGEqnHWrfWFTfGW9XjX",
       direction: "precise brittle baritone, defensive certainty",
       pitch: -0.05,
       lilt: -0.05,
@@ -606,7 +595,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-4",
-      voiceId: "EXAVITQu4vr4xnSDxMaL",
       direction: "dry weary contralto, nasal impatience, reluctant emphasis",
       pitch: -0.1,
       lilt: -0.15,
@@ -658,7 +646,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-2",
-      voiceId: "nPczCjzI2devNBz1zQrb",
       direction: "friendly bewildered tenor, earnest, tentative",
       pitch: 0.05,
       lilt: 0.05,
@@ -709,7 +696,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-2",
-      voiceId: "pNInz6obpgDQGcFmaJgB",
       direction: "warm midrange, sincere self-introduction, lightly playful certainty",
       pitch: 0.1,
       lilt: 0.1,
@@ -762,7 +748,6 @@ const RECIPES = [
     }),
     voice: voice({
       baseVoiceId: "voice-1",
-      voiceId: "21m00Tcm4TlvDq8ikWAM",
       direction: "playful midrange, morphing certainty, lightly theatrical warmth",
       pitch: 0.05,
       lilt: 0.15,

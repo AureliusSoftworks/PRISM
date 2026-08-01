@@ -6,7 +6,7 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ### 2026-07-31 · [workflow]
 **Trigger**: `/update-bots marie antoinette` — she only lives on `library-dev-backup` (`branchLock: "dev"`), so the public-only promote loop skipped her.
-**Lesson**: `promote-library-design-to-marketplace.mjs` bare runs stay public-shelf only; explicit `--only` may include branch-locked backups. Do not write those IDs into `elevenlabs-voice-lock.json`, and do not force public chorus polish onto branch-locked voice profiles.
+**Lesson**: `promote-library-design-to-marketplace.mjs` bare runs stay public-shelf only; explicit `--only` may include branch-locked backups. Marketplace bundles never ship account-bound ElevenLabs voice identities; preserve personal Library IDs locally and keep provider treatment separate from portable PRISM/base voice promotion.
 **Applies to**: `/update-bots`, `scripts/promote-library-design-to-marketplace.mjs`, `library-dev-backup`
 
 ### 2026-07-31 · [UX]

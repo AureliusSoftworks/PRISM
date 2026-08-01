@@ -109,6 +109,15 @@ function parseJsonColumn(value) {
   }
 }
 
+function stripElevenLabsIdentity(profile) {
+  if (!profile) return profile;
+  const next = structuredClone(profile);
+  delete next.elevenLabsVoiceId;
+  delete next.elevenLabsVoiceIdOverride;
+  delete next.elevenLabsVoiceInitialized;
+  return next;
+}
+
 function resolveAvatarDetails(row) {
   const raw = parseJsonColumn(row.avatar_details_json);
   if (!raw) return null;
@@ -169,6 +178,9 @@ function buildCandidate(row, marketplaceId) {
       faceBlinkOffsetY: row.face_blink_offset_y,
       faceBlinkRotationDeg: row.face_blink_rotation_deg,
       faceThinkingFrames: parseStoredBotFaceThinkingFrames(row.face_thinking_frames),
+      faceThinkingScale: row.face_thinking_scale,
+      faceThinkingOffsetX: row.face_thinking_offset_x,
+      faceThinkingOffsetY: row.face_thinking_offset_y,
     },
     null,
   );
@@ -224,16 +236,23 @@ function buildCandidate(row, marketplaceId) {
       faceBlinkOffsetY: faceStyle.blinkOffsetY,
       faceBlinkRotationDeg: faceStyle.blinkRotationDeg,
       faceThinkingFrames: faceStyle.thinkingFrames,
+      faceThinkingScale: faceStyle.thinkingScale,
+      faceThinkingOffsetX: faceStyle.thinkingOffsetX,
+      faceThinkingOffsetY: faceStyle.thinkingOffsetY,
       onlineEnabled: row.online_enabled !== 0,
       flirtEnabled: row.flirt_enabled === 1,
       chatEnabled: row.chat_enabled !== 0,
       voicePreviewLine:
         typeof row.voice_preview_line === "string" ? row.voice_preview_line : null,
-      authoredAudioVoiceProfile: normalizeBotAudioVoiceProfileV1(
-        parseJsonColumn(row.authored_audio_voice_profile),
+      authoredAudioVoiceProfile: stripElevenLabsIdentity(
+        normalizeBotAudioVoiceProfileV1(
+          parseJsonColumn(row.authored_audio_voice_profile),
+        ),
       ),
-      audioVoiceProfileOverride: normalizeOptionalBotAudioVoiceProfileV1(
-        parseJsonColumn(row.audio_voice_profile_override),
+      audioVoiceProfileOverride: stripElevenLabsIdentity(
+        normalizeOptionalBotAudioVoiceProfileV1(
+          parseJsonColumn(row.audio_voice_profile_override),
+        ),
       ),
       ...(powers.length > 0 ? { powers } : {}),
     },
@@ -353,10 +372,69 @@ for (const entry of manifest.bots ?? []) {
   }
 }
 
-const nextManifest = {
+function archiveDiffFields(candidate) {
+  if (!existsSync(candidate.bundlePath)) return ["bundle"];
+  try {
+    const current = parsePrismBotArchive(readFileSync(candidate.bundlePath));
+    const currentBotJson = structuredClone(current.botJson);
+    const nextBotJson = structuredClone(candidate.botJson);
+    delete currentBotJson.exportedAt;
+    delete nextBotJson.exportedAt;
+    if (
+      JSON.stringify(currentBotJson) === JSON.stringify(nextBotJson) &&
+      current.memories.length === 0
+    ) {
+      return [];
+    }
+    const fields = [];
+    const currentBot = currentBotJson.bot ?? {};
+    const nextBot = nextBotJson.bot ?? {};
+    for (const field of new Set([
+      ...Object.keys(currentBot),
+      ...Object.keys(nextBot),
+    ])) {
+      if (JSON.stringify(currentBot[field]) !== JSON.stringify(nextBot[field])) {
+        fields.push(field);
+      }
+    }
+    for (const field of ["schema", "botHash", "profile", "systemPrompt"]) {
+      if (
+        JSON.stringify(currentBotJson[field]) !==
+        JSON.stringify(nextBotJson[field])
+      ) {
+        fields.push(field);
+      }
+    }
+    if (current.memories.length !== 0) fields.push("memories");
+    return fields.length > 0 ? fields : ["archive"];
+  } catch {
+    return ["bundle"];
+  }
+}
+
+const archiveDiffs = new Map(
+  candidates.map((candidate) => [
+    candidate.marketplaceId,
+    archiveDiffFields(candidate),
+  ]),
+);
+const changedCandidates = candidates.filter(
+  (candidate) => archiveDiffs.get(candidate.marketplaceId)?.length > 0,
+);
+const staleBackupBundles = (manifest.bots ?? [])
+  .filter(
+    (entry) =>
+      (entry.themeIds?.includes?.(THEME_ID) || entry.branchLock === BRANCH_LOCK) &&
+      !candidateIds.has(entry.id),
+  )
+  .map((entry) => join(MARKETPLACE_ROOT, "bots", `bot-${entry.id}.bot`))
+  .filter((bundlePath) => existsSync(bundlePath));
+
+const currentManifestText = readFileSync(MANIFEST_PATH, "utf8");
+const nextManifestBase = {
   ...manifest,
   version: Math.max(Number(manifest.version) || 1, COLLECTION_VERSION),
-  updatedAt: COLLECTION_REVISION,
+  updatedAt: manifest.updatedAt,
   themes: [
     ...(manifest.themes ?? []).filter((theme) => theme.id !== THEME_ID),
     {
@@ -374,33 +452,18 @@ const nextManifest = {
     ...candidates.map((candidate) => candidate.manifestEntry),
   ],
 };
-
+const manifestContentChanged =
+  currentManifestText !== `${JSON.stringify(nextManifestBase, null, 2)}\n`;
+const collectionChanged =
+  changedCandidates.length > 0 ||
+  staleBackupBundles.length > 0 ||
+  manifestContentChanged;
+const nextManifest = {
+  ...nextManifestBase,
+  updatedAt: collectionChanged ? COLLECTION_REVISION : manifest.updatedAt,
+};
 const nextManifestText = `${JSON.stringify(nextManifest, null, 2)}\n`;
-const currentManifestText = readFileSync(MANIFEST_PATH, "utf8");
 const manifestChanged = currentManifestText !== nextManifestText;
-
-function archiveMatches(candidate) {
-  if (!existsSync(candidate.bundlePath)) return false;
-  try {
-    const current = parsePrismBotArchive(readFileSync(candidate.bundlePath));
-    return (
-      JSON.stringify(current.botJson) === JSON.stringify(candidate.botJson) &&
-      current.memories.length === 0
-    );
-  } catch {
-    return false;
-  }
-}
-
-const changedCandidates = candidates.filter((candidate) => !archiveMatches(candidate));
-const staleBackupBundles = (manifest.bots ?? [])
-  .filter(
-    (entry) =>
-      (entry.themeIds?.includes?.(THEME_ID) || entry.branchLock === BRANCH_LOCK) &&
-      !candidateIds.has(entry.id),
-  )
-  .map((entry) => join(MARKETPLACE_ROOT, "bots", `bot-${entry.id}.bot`))
-  .filter((bundlePath) => existsSync(bundlePath));
 
 let backupPath = null;
 if (shouldApply) {
@@ -463,6 +526,7 @@ console.log(
         name: candidate.name,
         botHash: candidate.botHash,
         changed: changedCandidates.includes(candidate),
+        fields: archiveDiffs.get(candidate.marketplaceId),
       })),
       changedBundles: changedCandidates.length,
       staleBundles: staleBackupBundles.map((bundlePath) => basename(bundlePath)),

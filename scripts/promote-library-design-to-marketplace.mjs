@@ -2,7 +2,8 @@
 /**
  * Default /update-bots sync: Library is the source of truth for Marketplace
  * design — Avatar Details ink, face geometry, loading-spinner frames/size/
- * placement, and Prism + ElevenLabs voice profiles.
+ * placement, and portable PRISM/base voice profiles. Marketplace bundles
+ * never inherit account-bound ElevenLabs voice identities.
  *
  * Usage:
  *   node --experimental-strip-types scripts/promote-library-design-to-marketplace.mjs \
@@ -30,13 +31,11 @@ import {
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotFaceThinkingFrames,
   resolveBotFaceStyle,
-  serializeBotAudioVoiceProfileV1,
 } from "@localai/shared";
 
 const root = resolve(import.meta.dirname, "..");
 const marketplaceRoot = join(root, "apps/web/public/bot-marketplace");
 const manifestPath = join(marketplaceRoot, "manifest.json");
-const voiceLockPath = join(marketplaceRoot, "elevenlabs-voice-lock.json");
 const desktopDbDefault =
   "/Users/jared/Library/Application Support/com.localai.prism-desktop/localai.db";
 
@@ -116,23 +115,6 @@ function jsonEqual(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function normalizeVoiceName(value) {
-  return String(value || "")
-    .normalize("NFKC")
-    .replace(/\s+/gu, " ")
-    .trim()
-    .toLowerCase();
-}
-
-function resolveElevenLabsVoiceId(profile) {
-  const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  return (
-    normalized.elevenLabsVoiceIdOverride ||
-    normalized.elevenLabsVoiceId ||
-    null
-  );
-}
-
 const shouldApply = process.argv.includes("--apply");
 const explicitDryRun = process.argv.includes("--dry-run");
 const databaseArgument = flagValue("--db") || desktopDbDefault;
@@ -162,50 +144,6 @@ function isPublicMarketplaceEntry(entry, lockedThemeIds) {
   const themeIds = entry.themeIds ?? [];
   if (themeIds.length === 1 && lockedThemeIds.has(themeIds[0])) return false;
   return true;
-}
-
-function resolveLiveSessionCookie(databasePath) {
-  const db = new DatabaseSync(resolve(databasePath), { readOnly: true });
-  try {
-    const now = new Date().toISOString();
-    const session = db
-      .prepare(
-        "SELECT token FROM sessions WHERE expires_at > ? ORDER BY expires_at DESC LIMIT 1",
-      )
-      .get(now);
-    if (!session?.token) {
-      throw new Error(
-        "No live PRISM desktop session found. Open the desktop app while signed in, then retry.",
-      );
-    }
-    return `localai_session=${session.token}`;
-  } finally {
-    db.close();
-  }
-}
-
-async function fetchElevenLabsCatalog(cookie) {
-  const response = await fetch("http://127.0.0.1:19787/api/voices/elevenlabs", {
-    headers: { Cookie: cookie, Accept: "application/json" },
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(
-      `ElevenLabs catalog request failed (${response.status}): ${text.slice(0, 300)}`,
-    );
-  }
-  const payload = JSON.parse(text);
-  const voices = Array.isArray(payload.voices)
-    ? payload.voices
-    : Array.isArray(payload)
-      ? payload
-      : [];
-  return voices
-    .map((voice) => ({
-      voiceId: String(voice.voiceId || voice.voice_id || "").trim(),
-      name: String(voice.name || "").trim(),
-    }))
-    .filter((voice) => voice.voiceId && voice.name);
 }
 
 function readBundle(entry) {
@@ -332,31 +270,6 @@ function portableAvatarSfx(avatarSfx) {
   return next;
 }
 
-function publicElevenLabsDirectionOk(value) {
-  const parts = String(value || "")
-    .split(",")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return (
-    parts.length >= 2 &&
-    parts.length <= 3 &&
-    parts.every((part) => part.length > 0 && part.length <= 48)
-  );
-}
-
-function resolvePublicElevenLabsDirection(heard, market, authored) {
-  if (publicElevenLabsDirectionOk(heard?.elevenLabsDirection)) {
-    return heard.elevenLabsDirection;
-  }
-  if (publicElevenLabsDirectionOk(market?.elevenLabsDirection)) {
-    return market.elevenLabsDirection;
-  }
-  if (publicElevenLabsDirectionOk(authored?.elevenLabsDirection)) {
-    return authored.elevenLabsDirection;
-  }
-  return "natural, conversational";
-}
-
 function parseLibraryVoiceLayers(row) {
   let authored = null;
   let override = null;
@@ -377,61 +290,30 @@ function parseLibraryVoiceLayers(row) {
   return { authored, override };
 }
 
-function heardLibraryVoiceProfile(row, marketAuthored, botName) {
+function marketplaceVoiceProfile(row, marketAuthored) {
   const { authored, override } = parseLibraryVoiceLayers(row);
   const source = override ?? authored;
   const heard = normalizeBotAudioVoiceProfileV1(source);
-  const authoredNormalized = normalizeBotAudioVoiceProfileV1(authored);
   const marketNormalized = normalizeBotAudioVoiceProfileV1(marketAuthored);
-  const elId = resolveElevenLabsVoiceId(heard);
   const strippedSfx = portableAvatarSfx(heard.avatarSfx);
-  // Public Marketplace catalog pins chorus (resonance only for Vader names).
-  const catalogEffect = /^(?:darth\s+)?vader$/iu.test(String(botName || ""))
-    ? "resonance"
-    : "chorus";
+  // Promote portable PRISM/base shaping while retaining Marketplace-authored
+  // provider treatment. Account-bound ElevenLabs identities never cross into
+  // a Marketplace bundle.
   const portable = normalizeBotAudioVoiceProfileV1({
     ...heard,
     elevenLabsVoiceId: null,
-    elevenLabsVoiceIdOverride: elId,
-    elevenLabsVoiceInitialized: elId
-      ? true
-      : heard.elevenLabsVoiceInitialized,
-    elevenLabsDirection: resolvePublicElevenLabsDirection(
-      heard,
-      marketNormalized,
-      authoredNormalized,
-    ),
-    elevenLabsEffect: catalogEffect,
-    voiceEffectExplicit: true,
+    elevenLabsVoiceIdOverride: null,
+    elevenLabsVoiceInitialized: false,
+    elevenLabsDirection: marketNormalized.elevenLabsDirection,
+    elevenLabsEffect: marketNormalized.elevenLabsEffect,
+    voiceEffectExplicit: marketNormalized.voiceEffectExplicit,
+    elevenLabsStability: marketNormalized.elevenLabsStability,
     ...(strippedSfx ? { avatarSfx: strippedSfx } : { avatarSfx: undefined }),
   });
   return {
     fromOverride: Boolean(override),
     heard,
     portable,
-    elId,
-  };
-}
-
-/**
- * Branch-locked shelves (e.g. library-dev-backup) are personal backups, not
- * public catalog entries. Keep the heard voice shape — including account-bound
- * ElevenLabs IDs — and skip public polish gates like forced chorus.
- */
-function heardBranchLockedVoiceProfile(row) {
-  const { authored, override } = parseLibraryVoiceLayers(row);
-  const source = override ?? authored;
-  const heard = normalizeBotAudioVoiceProfileV1(source);
-  const strippedSfx = portableAvatarSfx(heard.avatarSfx);
-  const portable = normalizeBotAudioVoiceProfileV1({
-    ...heard,
-    ...(strippedSfx ? { avatarSfx: strippedSfx } : { avatarSfx: undefined }),
-  });
-  return {
-    fromOverride: Boolean(override),
-    heard,
-    portable,
-    elId: resolveElevenLabsVoiceId(heard),
   };
 }
 
@@ -479,15 +361,7 @@ const onlyIds = onlyArgument
     )
   : null;
 
-const cookie = resolveLiveSessionCookie(databaseArgument);
-const catalog = await fetchElevenLabsCatalog(cookie);
-const catalogById = new Map(catalog.map((voice) => [voice.voiceId, voice]));
-
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-const voiceLock = JSON.parse(readFileSync(voiceLockPath, "utf8"));
-if (!voiceLock?.bots || typeof voiceLock.bots !== "object") {
-  throw new Error("elevenlabs-voice-lock.json is missing a bots map.");
-}
 const lockedThemeIds = new Set(
   (manifest.themes ?? [])
     .filter((theme) => theme.branchLock)
@@ -511,10 +385,8 @@ if (!users.some((user) => user.id === resolvedUserId)) {
   throw new Error("The requested Library user does not exist in this database.");
 }
 
-const nextVoiceLock = structuredClone(voiceLock);
 const targets = [];
 const missingLibrary = [];
-const unresolvedVoices = [];
 
 const manifestById = new Map(manifest.bots.map((entry) => [entry.id, entry]));
 if (onlyIds) {
@@ -556,24 +428,10 @@ for (const entry of manifest.bots) {
     field.startsWith("faceThinking"),
   );
 
-  const voiceInfo = isPublic
-    ? heardLibraryVoiceProfile(
-        row,
-        bot.authoredAudioVoiceProfile,
-        entry.name,
-      )
-    : heardBranchLockedVoiceProfile(row);
-  let resolvedVoice = null;
-  if (voiceInfo.elId) {
-    resolvedVoice = catalogById.get(voiceInfo.elId) ?? null;
-    if (!resolvedVoice) {
-      unresolvedVoices.push({
-        id: entry.id,
-        name: entry.name,
-        voiceId: voiceInfo.elId,
-      });
-    }
-  }
+  const voiceInfo = marketplaceVoiceProfile(
+    row,
+    bot.authoredAudioVoiceProfile,
+  );
 
   const currentAuthored = normalizeBotAudioVoiceProfileV1(
     bot.authoredAudioVoiceProfile,
@@ -581,34 +439,8 @@ for (const entry of manifest.bots) {
   const nextAuthored = voiceInfo.portable;
   const voiceChanged = !jsonEqual(currentAuthored, nextAuthored);
 
-  if (resolvedVoice && isPublic) {
-    const existingLock = nextVoiceLock.bots[entry.id];
-    if (
-      !existingLock ||
-      existingLock.voiceId !== resolvedVoice.voiceId ||
-      existingLock.voiceName !== resolvedVoice.name ||
-      existingLock.botName !== entry.name
-    ) {
-      nextVoiceLock.bots[entry.id] = {
-        botName: entry.name,
-        voiceName: resolvedVoice.name,
-        voiceId: resolvedVoice.voiceId,
-      };
-    }
-  }
-
   const changedArchiveFields = [...faceFields];
   if (voiceChanged) changedArchiveFields.push("authoredAudioVoiceProfile");
-
-  const currentLibraryAuthored = normalizeBotAudioVoiceProfileV1(
-    row.authored_audio_voice_profile
-      ? JSON.parse(row.authored_audio_voice_profile)
-      : undefined,
-  );
-  // Public packs keep Library authored voice aligned to portable catalog shape.
-  // Branch-locked backups only rewrite the Marketplace archive.
-  const libraryAuthoredVoiceChanged =
-    isPublic && !jsonEqual(currentLibraryAuthored, nextAuthored);
 
   targets.push({
     entry,
@@ -620,11 +452,9 @@ for (const entry of manifest.bots) {
     spinnerFields,
     voiceChanged,
     voiceInfo,
-    resolvedVoice,
     nextAuthored,
     changedArchiveFields,
     marketplaceChanged: changedArchiveFields.length > 0,
-    libraryAuthoredVoiceChanged,
     protectedBotHash: protectedBotHash(bot),
     protectedLibraryHash: sha256(
       JSON.stringify(
@@ -651,20 +481,7 @@ for (const entry of manifest.bots) {
     ),
   });
 }
-
-if (unresolvedVoices.length > 0) {
-  throw new Error(
-    `Personal ElevenLabs voice ID(s) missing from the live library:\n${unresolvedVoices
-      .map((item) => `- ${item.name}: ${item.voiceId}`)
-      .join("\n")}`,
-  );
-}
-
-const voiceLockChanged = !jsonEqual(voiceLock, nextVoiceLock);
 const marketplaceTargets = targets.filter((target) => target.marketplaceChanged);
-const libraryVoiceTargets = targets.filter(
-  (target) => target.libraryAuthoredVoiceChanged,
-);
 
 console.log(
   JSON.stringify(
@@ -680,8 +497,7 @@ console.log(
         spinnerPromotions: targets.filter((t) => t.spinnerFields.length > 0)
           .length,
         voicePromotions: targets.filter((t) => t.voiceChanged).length,
-        voiceLockChanging: voiceLockChanged,
-        libraryAuthoredVoiceUpdates: libraryVoiceTargets.length,
+        libraryAuthoredVoiceUpdates: 0,
       },
       missingLibrary,
       changes: marketplaceTargets.map((target) => ({
@@ -691,8 +507,6 @@ console.log(
         faceFields: target.faceFields,
         spinnerFields: target.spinnerFields,
         voiceChanged: target.voiceChanged,
-        voiceId: target.resolvedVoice?.voiceId ?? null,
-        voiceName: target.resolvedVoice?.name ?? null,
         fromOverride: target.voiceInfo.fromOverride,
       })),
     },
@@ -724,7 +538,6 @@ const workspaceBackupPath = resolve(workspaceBackupArgument);
 const databaseBackupPath = resolve(databaseBackupArgument);
 mkdirSync(workspaceBackupPath, { recursive: true });
 copyFileSync(manifestPath, join(workspaceBackupPath, "manifest.json"));
-copyFileSync(voiceLockPath, join(workspaceBackupPath, "elevenlabs-voice-lock.json"));
 for (const target of marketplaceTargets) {
   copyFileSync(
     target.bundle.bundlePath,
@@ -742,7 +555,6 @@ writeFileSync(
         id: target.entry.id,
         name: target.entry.name,
         fields: target.changedArchiveFields,
-        voiceId: target.resolvedVoice?.voiceId ?? null,
       })),
     },
     null,
@@ -810,25 +622,6 @@ try {
       manifest.updatedAt = revision;
       writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     }
-    if (voiceLockChanged) {
-      writeFileSync(
-        voiceLockPath,
-        `${JSON.stringify(nextVoiceLock, null, 2)}\n`,
-      );
-    }
-
-    const updateAuthored = db.prepare(
-      "UPDATE bots SET authored_audio_voice_profile = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-    );
-    for (const target of libraryVoiceTargets) {
-      updateAuthored.run(
-        serializeBotAudioVoiceProfileV1(target.nextAuthored),
-        revision,
-        target.row.id,
-        resolvedUserId,
-      );
-    }
-
     for (const target of marketplaceTargets) {
       const rebuilt = readBundle(target.entry);
       if (protectedBotHash(rebuilt.document.bot) !== target.protectedBotHash) {
@@ -886,8 +679,7 @@ console.log(
       workspaceBackupPath,
       databaseBackupPath,
       marketplaceBundlesChanged: marketplaceTargets.length,
-      libraryAuthoredVoiceUpdates: libraryVoiceTargets.length,
-      voiceLockChanged,
+      libraryAuthoredVoiceUpdates: 0,
     },
     null,
     2,

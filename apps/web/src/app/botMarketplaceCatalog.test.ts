@@ -384,17 +384,10 @@ describe("bot marketplace static catalog", () => {
         );
       }
       if (botId === "joyful-nora") {
-        const voice = normalizeOptionalBotAudioVoiceProfileV1(
-          bundle.botJson.bot.authoredAudioVoiceProfile,
-        );
         assert.equal(bundle.botJson.bot.color, "#ff24bf");
         assert.equal(bundle.botJson.bot.glyph, "lucideRadio");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "+");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["e", "E", "e", "E"]);
-        assert.equal(
-          voice?.elevenLabsVoiceIdOverride,
-          "hpp4J3VqNfWAUOO0d1Us",
-        );
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /glad|brighter/iu);
         assert.match(bundle.botJson.systemPrompt ?? "", /joy|hope|lighter/iu);
       }
@@ -420,26 +413,18 @@ describe("bot marketplace static catalog", () => {
         );
       }
       if (botId === "sad-sally") {
-        const voice = normalizeOptionalBotAudioVoiceProfileV1(
-          bundle.botJson.bot.authoredAudioVoiceProfile,
-        );
         assert.equal(bundle.botJson.bot.color, "#665a7a");
         assert.equal(bundle.botJson.bot.glyph, "lucideCloudRain");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "-");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["s", "i", "g", "h"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "pGjlAULPgEknbeX4L7fr");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /another conversation/iu);
         assert.match(bundle.botJson.systemPrompt ?? "", /grouchy|pessimist|rain cloud/iu);
       }
       if (botId === "forgetful-freddie") {
-        const voice = normalizeOptionalBotAudioVoiceProfileV1(
-          bundle.botJson.bot.authoredAudioVoiceProfile,
-        );
         assert.equal(bundle.botJson.bot.color, "#f2b84b");
         assert.equal(bundle.botJson.bot.glyph, "lucideRefreshCcw");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "?");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["h", "e", "l", "o"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "tLjNmsGUEE3jtdb5nGwV");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /lost the thread|Love what/iu);
         const eternalIntroduction = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "eternal_introduction",
@@ -460,14 +445,10 @@ describe("bot marketplace static catalog", () => {
         );
       }
       if (botId === "alias-avery") {
-        const voice = normalizeOptionalBotAudioVoiceProfileV1(
-          bundle.botJson.bot.authoredAudioVoiceProfile,
-        );
         assert.equal(bundle.botJson.bot.color, "#8a7bff");
         assert.equal(bundle.botJson.bot.glyph, "lucideUserRound");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "o");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["?", "o", "~", "?"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "zZp9y0VzL7J3DmI1Z0U6");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /whoever I am today/iu);
         const falseName = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "false_name",
@@ -478,14 +459,10 @@ describe("bot marketplace static catalog", () => {
         assert.match(bundle.botJson.systemPrompt ?? "", /random persona name|John\/Jane Doe|believed/iu);
       }
       if (botId === "shapeshifter-sam") {
-        const voice = normalizeOptionalBotAudioVoiceProfileV1(
-          bundle.botJson.bot.authoredAudioVoiceProfile,
-        );
         assert.equal(bundle.botJson.bot.color, "#ff8f5c");
         assert.equal(bundle.botJson.bot.glyph, "lucideSparkles");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "∞");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["~", "o", "O", "∞"]);
-        assert.equal(voice?.elevenLabsVoiceIdOverride, "r8pbMiE191G4TpRKoVlh");
         assert.match(bundle.botJson.bot.voicePreviewLine ?? "", /Library handed me today/iu);
         const shapeshift = powers[0]?.compiled?.effects.find(
           (effect) => effect.type === "identity_shapeshift",
@@ -498,7 +475,7 @@ describe("bot marketplace static catalog", () => {
     }
   });
 
-  it("ships a portable, persona-crafted ElevenLabs voice for every bot", () => {
+  it("ships a portable, persona-crafted base voice for every public bot", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
@@ -507,8 +484,8 @@ describe("bot marketplace static catalog", () => {
       const profile = normalizeOptionalBotAudioVoiceProfileV1(bundle.botJson.bot.authoredAudioVoiceProfile);
       assert.notEqual(profile, null, `${entry.name} must include an authored voice`);
       assert.equal(profile?.enabled, true, entry.name);
-      assert.equal(typeof profile?.elevenLabsVoiceIdOverride, "string", entry.name);
-      assert.equal((profile?.elevenLabsVoiceIdOverride?.length ?? 0) > 0, true, entry.name);
+      assert.equal(profile?.elevenLabsVoiceId, undefined, entry.name);
+      assert.equal(profile?.elevenLabsVoiceIdOverride, undefined, entry.name);
       assert.equal(
         profile?.elevenLabsEffect,
         /^(?:darth\s+)?vader$/iu.test(entry.name) ? "resonance" : "chorus",
@@ -552,45 +529,31 @@ describe("bot marketplace static catalog", () => {
     }
   });
 
-  it("locks public ElevenLabs voice IDs to elevenlabs-voice-lock.json", () => {
-    const lockPath = path.join(publicRoot, "bot-marketplace/elevenlabs-voice-lock.json");
-    const lock = readJsonFile<{
-      version: number;
-      bots: Record<string, { botName?: string; voiceName?: string; voiceId?: string }>;
-    }>(lockPath);
+  it("ships no default ElevenLabs identity in any Marketplace bundle", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
-    const publicBots = publicMarketplaceBots(manifest);
-    const lockedIds = Object.keys(lock.bots ?? {});
-
-    assert.equal(lock.version, 1);
-    assert.equal(lockedIds.length, publicBots.length, "lock must cover every public Marketplace bot");
-
-    for (const entry of publicBots) {
-      const locked = lock.bots[entry.id];
-      assert.ok(locked, `${entry.name} missing from elevenlabs-voice-lock.json`);
-      assert.equal(typeof locked.voiceId, "string", entry.name);
-      assert.equal((locked.voiceId?.trim().length ?? 0) > 0, true, entry.name);
-      assert.equal(typeof locked.voiceName, "string", entry.name);
-      assert.equal((locked.voiceName?.trim().length ?? 0) > 0, true, entry.name);
-
+    const forbiddenFields = [
+      "elevenLabsVoiceId",
+      "elevenLabsVoiceIdOverride",
+      "elevenLabsVoiceInitialized",
+    ];
+    for (const entry of manifest.bots) {
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
-      const profile = normalizeOptionalBotAudioVoiceProfileV1(
-        bundle.botJson.bot.authoredAudioVoiceProfile,
-      );
-      assert.equal(
-        profile?.elevenLabsVoiceIdOverride,
-        locked.voiceId,
-        `${entry.name} bundle must match voice lock`,
-      );
-    }
-
-    for (const lockedId of lockedIds) {
-      assert.ok(
-        publicBots.some((entry) => entry.id === lockedId),
-        `voice lock has extra bot id not in public Marketplace: ${lockedId}`,
-      );
+      const profiles = [
+        ["authored", bundle.botJson.bot.authoredAudioVoiceProfile],
+        ["override", bundle.botJson.bot.audioVoiceProfileOverride],
+      ] as const;
+      for (const [label, profile] of profiles) {
+        if (!profile || typeof profile !== "object") continue;
+        for (const field of forbiddenFields) {
+          assert.equal(
+            Object.prototype.hasOwnProperty.call(profile, field),
+            false,
+            `${entry.name} ${label} profile must not ship ${field}`,
+          );
+        }
+      }
     }
   });
 
@@ -666,8 +629,8 @@ describe("bot marketplace static catalog", () => {
           `${entry.name} mouth rotation`,
         );
       }
-      assert.equal(bot.faceBlinkBar, DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
-      assert.equal(normalizeBotFaceBlinkBar(bot.faceBlinkBar), DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
+      assert.notEqual(normalizeBotFaceBlinkBar(bot.faceBlinkBar), null, `${entry.name} blink bar`);
+      assert.equal(normalizeBotFaceBlinkBar(bot.faceBlinkBar), bot.faceBlinkBar, `${entry.name} blink bar authored`);
       const thinkingFrames = normalizeBotFaceThinkingFrames(bot.faceThinkingFrames);
       assert.notEqual(thinkingFrames, null, entry.name);
       const thinkingSpinner = JSON.stringify(thinkingFrames);
@@ -794,6 +757,21 @@ describe("bot marketplace static catalog", () => {
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
       assert.equal(bundle.botJson.botHash, entry.botHash, entry.id);
       assert.equal(bundle.botJson.bot.name, entry.name, entry.id);
+      assert.equal(
+        typeof bundle.botJson.bot.faceThinkingScale,
+        "number",
+        `${entry.id} thinking scale`,
+      );
+      assert.equal(
+        typeof bundle.botJson.bot.faceThinkingOffsetX,
+        "number",
+        `${entry.id} thinking X offset`,
+      );
+      assert.equal(
+        typeof bundle.botJson.bot.faceThinkingOffsetY,
+        "number",
+        `${entry.id} thinking Y offset`,
+      );
     }
 
     assert.deepEqual(

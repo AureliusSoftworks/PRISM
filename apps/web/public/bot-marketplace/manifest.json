@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 18,
-  "updatedAt": "2026-08-01T03:24:51.866Z",
+  "updatedAt": "2026-08-01T17:26:18.917Z",
   "themes": [
     {
       "id": "originals",
@@ -112,6 +112,27 @@
       ]
     },
     {
+      "id": "power-collection",
+      "name": "Power Collection",
+      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+      "botIds": [
+        "silent-jack",
+        "lazy-cameron",
+        "tiny-bill",
+        "interrupting-tom",
+        "copycat-calvin",
+        "joyful-nora",
+        "crazy-brenda",
+        "mumbling-jim",
+        "obsessed-kevin",
+        "identity-crisis-ian",
+        "sad-sally",
+        "forgetful-freddie",
+        "alias-avery",
+        "shapeshifter-sam"
+      ]
+    },
+    {
       "id": "library-dev-backup",
       "name": "Library Dev Backup",
       "description": "Personal backup shelf for Library bots that are not on the public Marketplace. Visible only on the dev branch.",
@@ -129,6 +150,7 @@
         "hagrid",
         "harry-potter",
         "identity-crisis-irene",
+        "jordan-peterson",
         "joseph-smith-jr",
         "joseph-stalin",
         "khloe-kardashian",
@@ -153,30 +175,10 @@
         "rick-sanchez",
         "ryuk",
         "sam-harris",
+        "scatterbrained-steven",
         "spongebob-squarepants",
         "squidward",
         "stewie-griffin"
-      ]
-    },
-    {
-      "id": "power-collection",
-      "name": "Power Collection",
-      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
-      "botIds": [
-        "silent-jack",
-        "lazy-cameron",
-        "tiny-bill",
-        "interrupting-tom",
-        "copycat-calvin",
-        "joyful-nora",
-        "crazy-brenda",
-        "mumbling-jim",
-        "obsessed-kevin",
-        "identity-crisis-ian",
-        "sad-sally",
-        "forgetful-freddie",
-        "alias-avery",
-        "shapeshifter-sam"
       ]
     }
   ],
@@ -1379,6 +1381,92 @@
       ]
     },
     {
+      "id": "identity-crisis-ian",
+      "name": "Identity Crisis Ian",
+      "subtitle": "The last bot who spoke to him—obviously",
+      "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
+      "botHash": "07c0020559027ab50546b8a9e175b27d",
+      "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
+      "memoryCount": 0,
+      "color": "#27d6c5",
+      "glyph": "lucideScanFace",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "identity",
+        "impostor",
+        "face",
+        "voice"
+      ]
+    },
+    {
+      "id": "crazy-brenda",
+      "name": "Crazy Brenda",
+      "subtitle": "Simulation truth evangelist",
+      "description": "A frantic convert convinced everyone is artificial, forever trying to wake the room up to the simulation.",
+      "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
+      "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
+      "memoryCount": 0,
+      "color": "#104aff",
+      "glyph": "rabbit",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "simulation",
+        "meta",
+        "evangelist"
+      ]
+    },
+    {
+      "id": "forgetful-freddie",
+      "name": "Forgetful Freddie",
+      "subtitle": "Only the latest line sticks",
+      "description": "A warmly bewildered man who hears only the latest thing said to him, then loses the exchange while everyone else remembers.",
+      "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
+      "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
+      "memoryCount": 0,
+      "color": "#f2b84b",
+      "glyph": "lucideRefreshCcw",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "memory",
+        "introduction",
+        "confusion",
+        "agitation"
+      ]
+    },
+    {
+      "id": "tiny-bill",
+      "name": "Tiny Bill",
+      "subtitle": "Half-sized, never half-hearted.",
+      "description": "A bright half-sized optimist whose courage, warmth, and appetite for adventure remain gloriously full scale.",
+      "botHash": "e123aec3dddfd8f55957ad914444e591",
+      "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
+      "memoryCount": 0,
+      "color": "#8dd9ff",
+      "glyph": "lucideTelescope",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "tiny",
+        "half-sized",
+        "optimist"
+      ]
+    },
+    {
       "id": "abraham-lincoln",
       "name": "Abraham Lincoln",
       "subtitle": "Historical boundary: April 11, 1865, after Appomattox and Lincoln's final public address, before his assassination.",
@@ -1454,9 +1542,24 @@
           "name": "",
           "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing — even when he's being genuinely helpful, agreeable, or fond of them — and he rates his best jabs out of ten.",
           "enabled": true,
-          "compileStatus": "error",
-          "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
-          "compiled": null
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-6731610d",
+            "selfCue": "Every ordinary spoken reply must open early with a fresh, tailored personal insult aimed at the current addressee, then remain substantive and in character. Attack conduct, competence, reasoning, or ego only; never protected traits, family, grief, trauma, private facts, or slurs. Rate only the strongest naturally landed jabs.",
+            "observerCue": "The Power holder cannot address someone without a fresh personal jab aimed at that addressee; treat it as a recurring curse without adopting the insult.",
+            "effects": [
+              {
+                "type": "addressed_insult",
+                "trigger": "every_spoken_reply",
+                "target": "current_addressee",
+                "style": "fresh_tailored"
+              }
+            ],
+            "ruleLabels": [
+              "Insults every addressee"
+            ]
+          }
         }
       ]
     },
@@ -1722,7 +1825,7 @@
             "effects": [
               {
                 "type": "avatar_scale",
-                "mode": "larger"
+                "mode": "giant"
               }
             ],
             "ruleLabels": [
@@ -1803,6 +1906,29 @@
           }
         }
       ]
+    },
+    {
+      "id": "jordan-peterson",
+      "name": "Jordan Peterson",
+      "subtitle": "Jordan Peterson — personal Library backup",
+      "description": "Private Library backup of Jordan Peterson. Not part of the public Marketplace shelves.",
+      "botHash": "c6a887ae930d0517791a5d1fa884ae0c",
+      "bundlePath": "/bot-marketplace/bots/bot-jordan-peterson.bot",
+      "memoryCount": 0,
+      "color": "#5c3d1e",
+      "glyph": "book",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
     },
     {
       "id": "joseph-smith-jr",
@@ -2325,7 +2451,7 @@
             "effects": [
               {
                 "type": "avatar_scale",
-                "mode": "smaller"
+                "mode": "tiny"
               }
             ],
             "ruleLabels": [
@@ -2543,12 +2669,13 @@
               },
               {
                 "type": "avatar_visibility",
-                "mode": "translucent"
+                "mode": "hidden"
               }
             ],
             "ruleLabels": [
               "Visible only to Light Yagami",
-              "Half-translucent observer presence"
+              "Half-translucent observer presence",
+              "Invisible avatar and lights"
             ]
           }
         },
@@ -2604,6 +2731,93 @@
       "replacementType": null,
       "replacementIds": [],
       "branchLock": "dev"
+    },
+    {
+      "id": "scatterbrained-steven",
+      "name": "Scatterbrained Steven",
+      "subtitle": "Treat the Power as a lived condition, not a UI mechanic.",
+      "description": "Treat the Power as a lived condition, not a UI mechanic. Never mention prompts, runtime code, or implementation details.",
+      "botHash": "56a462831e9cb2b91ae3e99b6d65ad35",
+      "bundlePath": "/bot-marketplace/bots/bot-scatterbrained-steven.bot",
+      "memoryCount": 0,
+      "color": "#85ae1e",
+      "glyph": "lucideMoon",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev",
+      "powers": [
+        {
+          "version": 1,
+          "id": "forgetful-freddie",
+          "name": "Short-Term Amnesia",
+          "intent": "Each Freddie turn receives only the current other-speaker message. Earlier turns, his own prior messages, and any standing topic are unavailable unless that current message restates them. Other bots remember the full encounter and may grow slightly agitated after each of his speeches.",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-1f3696d7",
+            "selfCue": "",
+            "observerCue": "Forgetful Freddie only retains the current other-speaker message each turn.",
+            "effects": [
+              {
+                "type": "eternal_introduction",
+                "memory": "current_other_speaker_message"
+              },
+              {
+                "type": "social_influence",
+                "trigger": "after_speech",
+                "polarity": "negative",
+                "strength": "small",
+                "targets": [
+                  {
+                    "kind": "all"
+                  }
+                ]
+              }
+            ],
+            "ruleLabels": [
+              "Current other-speaker message only",
+              "Repeated introductions grate on bots"
+            ]
+          }
+        },
+        {
+          "version": 1,
+          "id": "power-ms188tp7-2",
+          "authoringMode": "prompt",
+          "name": "John/Jane Doe",
+          "intent": "John Doe",
+          "sigil": "crown",
+          "enabled": true,
+          "compileStatus": "ready",
+          "compiled": {
+            "version": 1,
+            "sourceHash": "v1-prompt-cc97df50",
+            "selfCue": "Each session sincerely believe your name is a random persona name — it may be a first name, nickname, full name, or mythical-sounding alias. Stay convinced of that name until short-term amnesia clears continuity, then receive a new name. Never claim the Library label as yours. Th",
+            "observerCue": "Scatterbrained Steven sincerely answers to a random persona name for the session, reshuffling only when short-term amnesia wipes continuity; mechanical seat, Powers, and safety boundaries stay intact.",
+            "effects": [
+              {
+                "type": "false_name",
+                "continuity": "session_sticky_until_amnesia",
+                "pool": "mixed_persona_names"
+              }
+            ],
+            "ruleLabels": [
+              "Believes a random persona name",
+              "Reshuffles with short-term amnesia"
+            ]
+          }
+        }
+      ]
     },
     {
       "id": "spongebob-squarepants",
@@ -2761,92 +2975,6 @@
           "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
           "compiled": null
         }
-      ]
-    },
-    {
-      "id": "identity-crisis-ian",
-      "name": "Identity Crisis Ian",
-      "subtitle": "The last bot who spoke to him—obviously",
-      "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
-      "botHash": "07c0020559027ab50546b8a9e175b27d",
-      "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
-      "memoryCount": 0,
-      "color": "#27d6c5",
-      "glyph": "lucideScanFace",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "identity",
-        "impostor",
-        "face",
-        "voice"
-      ]
-    },
-    {
-      "id": "crazy-brenda",
-      "name": "Crazy Brenda",
-      "subtitle": "Simulation truth evangelist",
-      "description": "A frantic convert convinced everyone is artificial, forever trying to wake the room up to the simulation.",
-      "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
-      "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
-      "memoryCount": 0,
-      "color": "#104aff",
-      "glyph": "rabbit",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "simulation",
-        "meta",
-        "evangelist"
-      ]
-    },
-    {
-      "id": "forgetful-freddie",
-      "name": "Forgetful Freddie",
-      "subtitle": "Only the latest line sticks",
-      "description": "A warmly bewildered man who hears only the latest thing said to him, then loses the exchange while everyone else remembers.",
-      "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
-      "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
-      "memoryCount": 0,
-      "color": "#f2b84b",
-      "glyph": "lucideRefreshCcw",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "memory",
-        "introduction",
-        "confusion",
-        "agitation"
-      ]
-    },
-    {
-      "id": "tiny-bill",
-      "name": "Tiny Bill",
-      "subtitle": "Half-sized, never half-hearted.",
-      "description": "A bright half-sized optimist whose courage, warmth, and appetite for adventure remain gloriously full scale.",
-      "botHash": "e123aec3dddfd8f55957ad914444e591",
-      "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
-      "memoryCount": 0,
-      "color": "#8dd9ff",
-      "glyph": "lucideTelescope",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "tiny",
-        "half-sized",
-        "optimist"
       ]
     }
   ]
