@@ -17,6 +17,10 @@ import {
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
+  debateAmbientVocalFoleyTagText,
+  debateAmbientVocalFoleyVoicePerformance,
+  debateVocalFoleyVoicePerformance,
+  resolveDebateVocalFoleyTagText,
   type DebateFoleyParticipant,
 } from "./debateFoley.ts";
 
@@ -215,6 +219,58 @@ describe("Debate audience beats", () => {
     assert.ok((complete?.seatIndices.length ?? 0) >= 1);
     assert.ok((complete?.seatIndices.length ?? 0) <= 2);
     assert.ok(complete?.seatIndices.every((index) => index >= 0 && index < 8));
+  });
+
+  it("labels ambient vocal Foley for Signal-style overhead tags", () => {
+    assert.equal(debateAmbientVocalFoleyTagText("throat-clear"), "Clears throat");
+    assert.equal(debateAmbientVocalFoleyTagText("soft-sigh"), "Sighs");
+    assert.equal(debateAmbientVocalFoleyTagText("soft-inhale"), "Inhales");
+    assert.equal(debateAmbientVocalFoleyTagText("mouth-sound"), null);
+    assert.equal(debateAmbientVocalFoleyTagText("lip-smack"), null);
+    assert.equal(
+      resolveDebateVocalFoleyTagText({ ambientKind: "throat-clear" }),
+      "Clears throat",
+    );
+    assert.equal(
+      resolveDebateVocalFoleyTagText({
+        ambientKind: "lip-smack",
+        personaReactionContent: "soft laugh of disbelief",
+      }),
+      "soft laugh of disbelief",
+    );
+    assert.equal(
+      resolveDebateVocalFoleyTagText({
+        personaReactionContent: "  clears throat softly  ",
+      }),
+      "clears throat softly",
+    );
+  });
+
+  it("speaks ambient and persona Foley with ellipsis captions like Signal", () => {
+    assert.deepEqual(debateAmbientVocalFoleyVoicePerformance("throat-clear"), {
+      spokenText: "...",
+      voicePerformanceText: "[clears throat] ...",
+    });
+    assert.deepEqual(debateAmbientVocalFoleyVoicePerformance("soft-sigh"), {
+      spokenText: "...",
+      voicePerformanceText: "[sighs] ...",
+    });
+    assert.deepEqual(debateAmbientVocalFoleyVoicePerformance("soft-inhale"), {
+      spokenText: "...",
+      voicePerformanceText: "[exhales] ...",
+    });
+    assert.equal(debateAmbientVocalFoleyVoicePerformance("mouth-sound"), null);
+    assert.deepEqual(debateVocalFoleyVoicePerformance("Sighs"), {
+      spokenText: "...",
+      voicePerformanceText: "[sighs] ...",
+    });
+    assert.deepEqual(
+      debateVocalFoleyVoicePerformance("soft laugh of disbelief"),
+      {
+        spokenText: "...",
+        voicePerformanceText: "soft laugh of disbelief ...",
+      },
+    );
   });
 
   it("honors maxReactingSeats under load", () => {

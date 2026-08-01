@@ -49,7 +49,8 @@ export.
 - Light and Dark were visually checked at 1440×1000 for the production Studio,
   live Forum, source drawer, case board, and all three player roles.
 - Judge shows a bench mark, Participant shows the player's Prism beside its
-  partner, and Spectator has no player embodiment.
+  partner, and Spectator seats PRISM in the observable audience gallery below
+  the chamber screen (not on a podium).
 - Each podium carries its cast bot's glyph on a dark inset screen. Advocate
   screens are perspective matched to their angled podiums and pulled slightly
   inward, while only the current turn owner's mark glows; speech, prose reveal,

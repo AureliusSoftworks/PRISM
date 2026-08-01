@@ -4,11 +4,14 @@ import {
   DEBATE_AUDIENCE_GENERATED_ID_PREFIX,
   debateAudienceBotCount,
   debateAudienceBotIsGenerated,
+  debateAudienceBotIsPlayerSpectator,
   debateAudienceBotsForSession,
   debateAudienceConversationFacing,
+  debateAudienceFrontRowCenterIndex,
   debateAudienceRandom,
   debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
+  debateSpectatorPrismAudienceSeat,
 } from "./debateAudience.ts";
 
 const libraryBots = [
@@ -120,6 +123,50 @@ describe("Debate audience casting", () => {
       assert.equal(bot.voiceProfile, null);
       assert.deepEqual(bot.powers, []);
     }
+  });
+
+  it("pins Spectator Prism to the front-row center of the gallery", () => {
+    assert.equal(debateAudienceFrontRowCenterIndex(9), 2);
+    assert.equal(debateAudienceFrontRowCenterIndex(13), 3);
+    assert.equal(debateAudienceFrontRowCenterIndex(15), 3);
+
+    const spectatorSeat = debateSpectatorPrismAudienceSeat({
+      session: {
+        id: "debate-spectator",
+        provider: "local",
+        model: "llama",
+        playerRole: "spectator",
+      },
+      playerName: "Jared",
+    });
+    assert.ok(spectatorSeat);
+    assert.equal(spectatorSeat!.name, "Jared");
+    assert.ok(debateAudienceBotIsPlayerSpectator(spectatorSeat!));
+    assert.equal(
+      debateSpectatorPrismAudienceSeat({
+        session: {
+          id: "debate-judge",
+          provider: "local",
+          model: "llama",
+          playerRole: "judge",
+        },
+      }),
+      null,
+    );
+
+    const audience = debateAudienceBotsForSession({
+      sessionId: "debate-spectator",
+      count: 9,
+      bots: libraryBots,
+      spectatorPrism: spectatorSeat,
+    });
+    assert.equal(audience.length, 9);
+    assert.equal(audience.filter(debateAudienceBotIsPlayerSpectator).length, 1);
+    assert.ok(
+      debateAudienceBotIsPlayerSpectator(
+        audience[debateAudienceFrontRowCenterIndex(9)]!,
+      ),
+    );
   });
 
   it("provides a deterministic appearance randomizer for generated faces", () => {

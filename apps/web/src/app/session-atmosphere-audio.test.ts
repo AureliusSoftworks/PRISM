@@ -256,6 +256,81 @@ test("ambient bot vocalizations use the local Foley lane without a voice profile
   }
 });
 
+test("owned ambient bot vocalizations skip bundled Foley audio", () => {
+  const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const scheduled: Array<{ callback: () => void; delayMs: number }> = [];
+  const instances: Array<{ src: string; volume: number }> = [];
+  class FakeAudio {
+    readonly src: string;
+    preload = "";
+    loop = false;
+    volume = 1;
+    constructor(src: string) {
+      this.src = src;
+      instances.push(this);
+    }
+    addEventListener(): void {}
+    removeEventListener(): void {}
+    load(): void {}
+    play(): Promise<void> {
+      return Promise.resolve();
+    }
+    pause(): void {}
+  }
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: FakeAudio,
+  });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      setTimeout(callback: () => void, delayMs: number): number {
+        scheduled.push({ callback, delayMs });
+        return scheduled.length;
+      },
+      clearTimeout(): void {},
+    },
+  });
+  try {
+    const seenKinds: string[] = [];
+    const controller = startSessionAtmosphere({
+      seed: "owned-vocalization",
+      volume: 1,
+      mix: { background: 0, grain: 0, foley: 0.5 },
+      ambientFoley: false,
+      ambientBotVocalizations: true,
+      ambientBotVocalizationProfile: {
+        minDelayMs: 1_000,
+        maxDelayMs: 1_000,
+        trim: 0.4,
+      },
+      shouldDeferFoley: () => true,
+      shouldDeferBotVocalization: () => false,
+      onAmbientBotVocalization(cue) {
+        seenKinds.push(cue.kind);
+        return "owned";
+      },
+    });
+    assert.equal(scheduled.length, 1);
+    scheduled[0]!.callback();
+    assert.equal(seenKinds.length, 1);
+    assert.equal(instances.length, 0);
+    controller.stop();
+  } finally {
+    if (originalAudio) {
+      Object.defineProperty(globalThis, "Audio", originalAudio);
+    } else {
+      Reflect.deleteProperty(globalThis, "Audio");
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
+    }
+  }
+});
+
 test("Signal can disable generic ambient Foley while preserving synchronized cues", () => {
   const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");

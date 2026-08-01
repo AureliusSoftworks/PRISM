@@ -13,11 +13,13 @@ import {
   DEBATE_SETUP_PRESETS,
   defaultDebateJuryStateV1,
   defaultDebateFormatStateV1,
+  debateEventIsAtmosphericVocalFoley,
   debateSourceIdsFromText,
   debateEvidenceItemById,
   debateEvidenceItemCount,
   debateSpokenText,
   debateFormalityGuidance,
+  coerceDebateBallotSideId,
   normalizeDebateFormalityId,
   isValidDebateSourceId,
   normalizeDebateEvidencePacketV1,
@@ -423,4 +425,51 @@ test("validates stable source IDs and mutation idempotency keys", () => {
     "debate.advance:1234",
   );
   assert.equal(normalizeDebateIdempotencyKey("short"), "");
+});
+
+test("marks persona-surprise reactions as atmospheric vocal Foley", () => {
+  assert.equal(
+    debateEventIsAtmosphericVocalFoley({
+      kind: "reaction",
+      stepKey: "persona_reaction_12",
+    }),
+    true,
+  );
+  assert.equal(
+    debateEventIsAtmosphericVocalFoley({
+      kind: "reaction",
+      stepKey: "advocate_closing",
+    }),
+    false,
+  );
+  assert.equal(
+    debateEventIsAtmosphericVocalFoley({
+      kind: "speech",
+      stepKey: "persona_reaction_12",
+    }),
+    false,
+  );
+});
+
+test("coerceDebateBallotSideId accepts aliases, labels, and nested ballot shapes", () => {
+  const motion = normalizeDebateMotionSlateV1({
+    motion: "Free will is an illusion.",
+    forSide: { label: "Caused Minds", brief: "Causes precede choice." },
+    againstSide: { label: "Choosing Selves", brief: "Reflection is freedom." },
+  });
+
+  assert.equal(coerceDebateBallotSideId("for"), "for");
+  assert.equal(coerceDebateBallotSideId("Against"), "against");
+  assert.equal(coerceDebateBallotSideId("Choosing Selves", motion), "against");
+  assert.equal(coerceDebateBallotSideId("Caused Minds", motion), "for");
+  assert.equal(
+    coerceDebateBallotSideId({ sideId: "Choosing Selves" }, motion),
+    "against",
+  );
+  assert.equal(
+    coerceDebateBallotSideId({ ballot: { side: "pro" } }, motion),
+    "for",
+  );
+  assert.equal(coerceDebateBallotSideId("maybe both", motion), null);
+  assert.equal(coerceDebateBallotSideId(null, motion), null);
 });

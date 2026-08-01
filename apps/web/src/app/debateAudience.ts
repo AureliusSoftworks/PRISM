@@ -1,11 +1,15 @@
 import {
+  DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   type DebateBotSnapshotV1,
+  type DebateSessionV1,
   type GraphicsQuality,
 } from "@localai/shared";
 
 export const DEBATE_AUDIENCE_GENERATED_ID_PREFIX =
   "prism:debate-audience:generated:";
+export const DEBATE_SPECTATOR_PRISM_REVISION_MARKER =
+  ":spectator-prism-v1" as const;
 
 const DEBATE_AUDIENCE_COUNT_BY_QUALITY = {
   low: 9,
@@ -145,6 +149,55 @@ export function debateAudienceBotIsGenerated(
   return bot.id.startsWith(DEBATE_AUDIENCE_GENERATED_ID_PREFIX);
 }
 
+/** Default Prism seat reserved for human Spectator sessions only. */
+export function debateAudienceBotIsPlayerSpectator(
+  bot: Pick<DebateBotSnapshotV1, "id" | "revision">,
+): boolean {
+  return (
+    bot.id === DEBATE_PLAYER_JUDGE_BOT_ID &&
+    bot.revision.includes(DEBATE_SPECTATOR_PRISM_REVISION_MARKER)
+  );
+}
+
+/**
+ * Front-row center index for the below-screen gallery (left-biased when even).
+ */
+export function debateAudienceFrontRowCenterIndex(count: number): number {
+  const safeCount = Math.max(0, Math.floor(count));
+  if (safeCount <= 0) return 0;
+  const frontCount = Math.ceil(safeCount / 2);
+  return Math.floor((frontCount - 1) / 2);
+}
+
+/**
+ * Observable gallery body for Spectator — reuses the Judge Prism id so the
+ * page renderer paints Default Prism, without putting the player on a podium.
+ */
+export function debateSpectatorPrismAudienceSeat(args: {
+  session: Pick<DebateSessionV1, "id" | "provider" | "model" | "playerRole">;
+  playerName?: string;
+}): DebateBotSnapshotV1 | null {
+  if (args.session.playerRole !== "spectator") return null;
+  const playerName = args.playerName?.trim() || "You";
+  return {
+    version: DEBATE_SCHEMA_VERSION,
+    id: DEBATE_PLAYER_JUDGE_BOT_ID,
+    name: playerName,
+    systemPrompt:
+      "PRISM is the player’s observable body in the Spectator gallery.",
+    role: "juror",
+    sideId: null,
+    color: "#2fd3e3",
+    glyph: "triangle",
+    avatarDetails: null,
+    voiceProfile: null,
+    powers: [],
+    provider: args.session.provider,
+    model: args.session.model,
+    revision: `${args.session.id}${DEBATE_SPECTATOR_PRISM_REVISION_MARKER}`,
+  };
+}
+
 function libraryAudienceSnapshot(
   bot: DebateAudienceLibraryBot,
 ): DebateBotSnapshotV1 {
@@ -204,9 +257,16 @@ export function debateAudienceBotsForSession(args: {
   count: number;
   bots: readonly DebateAudienceLibraryBot[];
   excludedBotIds?: readonly string[];
+  spectatorPrism?: DebateBotSnapshotV1 | null;
 }): DebateBotSnapshotV1[] {
   const count = Math.max(0, Math.floor(args.count));
+  const spectatorPrism =
+    args.spectatorPrism && debateAudienceBotIsPlayerSpectator(args.spectatorPrism)
+      ? args.spectatorPrism
+      : null;
+  const fillerCount = spectatorPrism ? Math.max(0, count - 1) : count;
   const excluded = new Set(args.excludedBotIds ?? []);
+  if (spectatorPrism) excluded.add(spectatorPrism.id);
   const random = debateAudienceRandom(
     `${args.sessionId}:${args.bots
       .map((bot) => bot.id)
@@ -225,11 +285,15 @@ export function debateAudienceBotsForSession(args: {
     ];
   }
 
-  const audience = libraryBots.slice(0, count).map(libraryAudienceSnapshot);
-  while (audience.length < count) {
+  const audience = libraryBots.slice(0, fillerCount).map(libraryAudienceSnapshot);
+  while (audience.length < fillerCount) {
     audience.push(
       generatedAudienceSnapshot(args.sessionId, audience.length, random),
     );
   }
-  return audience;
+  if (!spectatorPrism || count === 0) return audience;
+  const center = debateAudienceFrontRowCenterIndex(count);
+  const withPlayer = [...audience];
+  withPlayer.splice(Math.min(center, withPlayer.length), 0, spectatorPrism);
+  return withPlayer.slice(0, count);
 }

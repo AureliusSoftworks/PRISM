@@ -310,6 +310,7 @@ describe("Debate stage alignment", () => {
         lowered: { x: 2, y: -3, rotation: 12, size: 125 },
         raised: { x: 10, y: -27, rotation: -34, size: 140 },
       },
+      // Legacy v7 stored a single table placement; normalizer lifts it to V8.
       evidenceTable: { x: 8, y: -12, size: 115 },
       lightBlendModes: {
         dark: "overlay",
@@ -319,7 +320,7 @@ describe("Debate stage alignment", () => {
         dark: 65,
         light: 80,
       },
-    });
+    } as unknown as Parameters<typeof writeDebateStageAlignment>[2]);
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1").moderator.glyph,
       { x: 4, y: -2 },

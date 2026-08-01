@@ -569,6 +569,18 @@ export function debateEventIsTranscriptHousekeeping(
   );
 }
 
+/** Sparse Persona surprise Foley — spoken, tagged, never Proceedings text. */
+export const DEBATE_PERSONA_SURPRISE_STEP_PREFIX = "persona_reaction_" as const;
+
+export function debateEventIsAtmosphericVocalFoley(
+  event: Pick<DebateEventV1, "kind" | "stepKey">,
+): boolean {
+  return (
+    event.kind === "reaction" &&
+    event.stepKey.startsWith(DEBATE_PERSONA_SURPRISE_STEP_PREFIX)
+  );
+}
+
 export interface DebateJudgeGavelStateV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   status: "awaiting_message";
@@ -1190,6 +1202,84 @@ export function isDebatePlayerRole(value: unknown): value is DebatePlayerRole {
 
 export function isDebateSideId(value: unknown): value is DebateSideId {
   return value === "for" || value === "against";
+}
+
+const DEBATE_BALLOT_FOR_ALIASES = new Set([
+  "for",
+  "pro",
+  "affirmative",
+  "proposition",
+  "government",
+  "aye",
+  "yes",
+  "support",
+  "supporting",
+]);
+
+const DEBATE_BALLOT_AGAINST_ALIASES = new Set([
+  "against",
+  "con",
+  "negative",
+  "opposition",
+  "opp",
+  "nay",
+  "no",
+  "oppose",
+  "opposing",
+]);
+
+/**
+ * Coerce model ballot output into a Debate side id.
+ * Models often return side labels ("Choosing Selves"), title case ("Against"),
+ * or nested `{ ballot: { sideId } }` instead of exact `"for"` / `"against"`.
+ */
+export function coerceDebateBallotSideId(
+  value: unknown,
+  motion?: Pick<DebateMotionSlateV1, "forSide" | "againstSide"> | null,
+): DebateSideId | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const lower = trimmed.toLowerCase();
+    if (isDebateSideId(lower)) return lower;
+    if (DEBATE_BALLOT_FOR_ALIASES.has(lower)) return "for";
+    if (DEBATE_BALLOT_AGAINST_ALIASES.has(lower)) return "against";
+    if (motion) {
+      const forLabel = motion.forSide.label.trim().toLowerCase();
+      const againstLabel = motion.againstSide.label.trim().toLowerCase();
+      const matchesFor =
+        Boolean(forLabel) &&
+        (lower === forLabel ||
+          lower.includes(forLabel) ||
+          (forLabel.length >= 4 && forLabel.includes(lower)));
+      const matchesAgainst =
+        Boolean(againstLabel) &&
+        (lower === againstLabel ||
+          lower.includes(againstLabel) ||
+          (againstLabel.length >= 4 && againstLabel.includes(lower)));
+      if (matchesFor && matchesAgainst) {
+        if (lower === forLabel) return "for";
+        if (lower === againstLabel) return "against";
+        return null;
+      }
+      if (matchesFor) return "for";
+      if (matchesAgainst) return "against";
+    }
+    return null;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    return (
+      coerceDebateBallotSideId(record.sideId, motion) ??
+      coerceDebateBallotSideId(record.side, motion) ??
+      coerceDebateBallotSideId(record.winnerSideId, motion) ??
+      coerceDebateBallotSideId(record.winner, motion) ??
+      coerceDebateBallotSideId(record.verdict, motion) ??
+      coerceDebateBallotSideId(record.vote, motion) ??
+      coerceDebateBallotSideId(record.ballot, motion)
+    );
+  }
+  return null;
 }
 
 export function isDebateFormatId(value: unknown): value is DebateFormatId {

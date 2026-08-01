@@ -32,6 +32,7 @@ import {
   DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
   botPowerObserverProjectionFromEffectsV1,
+  debateEventIsAtmosphericVocalFoley,
   debateEventIsTranscriptHousekeeping,
   debateEvidenceExhibitTitle,
   debateEvidenceItemById,
@@ -94,10 +95,12 @@ import {
 import {
   debateAudienceBotCount,
   debateAudienceBotIsGenerated,
+  debateAudienceBotIsPlayerSpectator,
   debateAudienceBotsForSession,
   debateAudienceConversationFacing,
   debateAudienceSeatLayout,
   debateAudienceSeatIsTalker,
+  debateSpectatorPrismAudienceSeat,
 } from "./debateAudience";
 import {
   debateAudiencePressureBand,
@@ -243,15 +246,21 @@ import {
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
+  debateAmbientVocalFoleyVoicePerformance,
+  debateVocalFoleyVoicePerformance,
+  resolveDebateVocalFoleyTagText,
   type DebateAudienceBeat,
   type DebateAudienceBeatKind,
   type DebateModeratorGavelCue,
 } from "./debateFoley";
+import { sentenceCaseActionText } from "./zenActions";
 import {
   debateExhibitImpactForExhibit,
   playDebateExhibitImpactSfx,
   resolveDebateExhibitImpactMaterial,
 } from "./debateExhibitImpactSfx";
+import { debateModeratorLookAtRole } from "./debateModeratorGaze";
+import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
 import {
   DEBATE_IDENT_AUDIO,
   DEBATE_IDENT_OUTRO_LEAD_MS,
@@ -592,7 +601,11 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
       data-listening-reaction={listenerReaction ?? undefined}
       data-conversation-facing={conversationFacing}
       data-audience-source={
-        debateAudienceBotIsGenerated(bot) ? "generated" : "library"
+        debateAudienceBotIsPlayerSpectator(bot)
+          ? "player"
+          : debateAudienceBotIsGenerated(bot)
+            ? "generated"
+            : "library"
       }
       style={
         {
@@ -600,9 +613,11 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
         } as CSSProperties
       }
       title={
-        debateAudienceBotIsGenerated(bot)
-          ? "Session spectator"
-          : `${bot.name} · Library spectator`
+        debateAudienceBotIsPlayerSpectator(bot)
+          ? `${bot.name} · Gallery`
+          : debateAudienceBotIsGenerated(bot)
+            ? "Session spectator"
+            : `${bot.name} · Library spectator`
       }
     >
       {renderBotAvatar ? (
@@ -864,6 +879,7 @@ const DebateLiveAudienceGallery = memo(function DebateLiveAudienceGallery(props:
                   ? audienceBeat.listenerReaction
                   : null;
               const ambientTalking =
+                !debateAudienceBotIsPlayerSpectator(audienceBot) &&
                 props.audienceChattering &&
                 (props.audiencePressureBand
                   ? props.audiencePressureTalkerIndices.has(index)
@@ -1893,6 +1909,7 @@ export function formatDebateVerboseTranscript(
       .filter(
         (event) =>
           !debateEventIsTranscriptHousekeeping(event) &&
+          !debateEventIsAtmosphericVocalFoley(event) &&
           !debateEventIsJuryComment(event),
       )
       .flatMap((event) => [
@@ -2263,8 +2280,8 @@ function DebateEvidencePedestal({
 }): React.JSX.Element {
   const lastPlacedEvidenceIdRef = useRef<string | null>(null);
   const exhibit = item.kind === "exhibit" ? item.value : null;
-  const source = item.kind === "source" ? item.value : null;
   const title = item.value.title;
+  const propRotationDeg = debateEvidencePropRotationDeg(item.value.id);
 
   useLayoutEffect(() => {
     if (alignmentPreview) return;
@@ -2296,8 +2313,18 @@ function DebateEvidencePedestal({
       }
       data-alignment-preview={alignmentPreview ? "true" : undefined}
       aria-label={`Presented evidence: ${title}`}
+      style={
+        {
+          "--debate-evidence-prop-rotate": `${propRotationDeg}deg`,
+        } as CSSProperties
+      }
     >
-      <button type="button" onClick={onOpen}>
+      <button
+        type="button"
+        onClick={onOpen}
+        title={title}
+        aria-label={`Open evidence: ${title}`}
+      >
         <span className={styles.evidencePedestalGlow} aria-hidden="true" />
         {exhibit ? (
           <DebateEvidenceExhibitVisual
@@ -2309,17 +2336,9 @@ function DebateEvidencePedestal({
             className={styles.evidencePedestalDocument}
             aria-hidden="true"
             data-debate-evidence-document="true"
-          >
-            <span className={styles.evidencePedestalDocumentMark}>
-              <small>Source</small>
-              <strong>{source?.title ?? "Document"}</strong>
-            </span>
-          </span>
+            data-prop="document"
+          />
         )}
-        <span className={styles.evidencePedestalLabel}>
-          <small>{item.kind === "source" ? "Source" : "Exhibit"}</small>
-          <strong>{title}</strong>
-        </span>
       </button>
     </section>
   );
@@ -2565,15 +2584,26 @@ export function DebateExperience(
     : "";
   const liveAudienceBots = useMemo(
     () =>
-      liveAudienceSessionId
+      liveAudienceSessionId && activeSession
         ? debateAudienceBotsForSession({
             sessionId: liveAudienceSessionId,
             count: debateAudienceBotCount(props.graphicsQuality),
             bots,
             excludedBotIds: liveAudienceCastKey.split("\0"),
+            spectatorPrism: debateSpectatorPrismAudienceSeat({
+              session: activeSession,
+              playerName,
+            }),
           })
         : [],
-    [bots, liveAudienceCastKey, liveAudienceSessionId, props.graphicsQuality],
+    [
+      activeSession,
+      bots,
+      liveAudienceCastKey,
+      liveAudienceSessionId,
+      playerName,
+      props.graphicsQuality,
+    ],
   );
   const debateMaterialQuality = useDebateDomPerformance({
     active:
@@ -5223,7 +5253,9 @@ export function DebateExperience(
       ) {
         return null;
       }
-      const spokenText = debateSpokenText(event.content);
+      const spokenText = debateEventIsAtmosphericVocalFoley(event)
+        ? debateVocalFoleyVoicePerformance(event.content).spokenText
+        : debateSpokenText(event.content);
       const snapshot = debateBotSnapshot(session, event.speakerBotId);
       const presentation = snapshot
         ? debateBotPresentation(session, snapshot, event.sequence)
@@ -5247,6 +5279,9 @@ export function DebateExperience(
         : event.speakerBotId
           ? (bots.find((bot) => bot.id === event.speakerBotId) ?? null)
           : null;
+      const atmosphericPerformance = debateEventIsAtmosphericVocalFoley(event)
+        ? debateVocalFoleyVoicePerformance(event.content)
+        : null;
       return {
         event,
         format: session.format,
@@ -5259,8 +5294,9 @@ export function DebateExperience(
           (event.speakerKind === "player" ||
             event.speakerBotId === session.moderator.id),
         spokenText,
-        voicePerformanceText:
-          event.kind === "objection"
+        voicePerformanceText: atmosphericPerformance
+          ? atmosphericPerformance.voicePerformanceText
+          : event.kind === "objection"
             ? `[shouts] ${spokenText}`
             : voicePerformanceTextFromActionCues(spokenText),
         voiceSourceBotId: presentation?.voiceSourceBotId ?? null,
@@ -5541,6 +5577,94 @@ export function DebateExperience(
         // Participant projections omit these events, and hard-muted jurors
         // still resolve through canonical silence.
         if (!utterance) continue;
+        if (debateEventIsAtmosphericVocalFoley(event)) {
+          const { spokenText, voicePerformanceText } =
+            debateVocalFoleyVoicePerformance(event.content);
+          replaceLiveReveal({
+            eventId: event.id,
+            visibleContent: "",
+            speechTiming: null,
+          });
+          let playbackProgressSeen = false;
+          let playbackDurationMs = Math.max(
+            1,
+            debateRevealDurationMs(spokenText || event.content),
+          );
+          const played = await onUtterance?.({
+            ...utterance,
+            spokenText,
+            voicePerformanceText,
+            lifecycle: {
+              onStart: (durationMs, alignment) => {
+                if (presentationRunRef.current !== runId) return;
+                playbackDurationMs = Math.max(
+                  1,
+                  durationMs ?? playbackDurationMs,
+                );
+                updateLiveReveal((current) =>
+                  current?.eventId === event.id
+                    ? {
+                        ...current,
+                        visibleContent: "",
+                        speechTiming: {
+                          text: spokenText,
+                          elapsedMs: 0,
+                          durationMs: playbackDurationMs,
+                          alignment: alignment ?? null,
+                        },
+                      }
+                    : current,
+                );
+              },
+              onProgress: (elapsedMs, durationMs) => {
+                if (presentationRunRef.current !== runId) return;
+                playbackProgressSeen = true;
+                playbackDurationMs = Math.max(1, durationMs);
+                updateLiveReveal((current) =>
+                  current?.eventId === event.id
+                    ? {
+                        ...current,
+                        visibleContent: "",
+                        speechTiming: {
+                          text: spokenText,
+                          elapsedMs: Math.min(playbackDurationMs, elapsedMs),
+                          durationMs: playbackDurationMs,
+                          alignment: current.speechTiming?.alignment ?? null,
+                        },
+                      }
+                    : current,
+                );
+              },
+              onEnd: () => {
+                if (presentationRunRef.current !== runId) return;
+                replaceLiveReveal({
+                  eventId: event.id,
+                  visibleContent: "",
+                  speechTiming: {
+                    text: spokenText,
+                    elapsedMs: playbackDurationMs,
+                    durationMs: playbackDurationMs,
+                    alignment: null,
+                  },
+                });
+              },
+            },
+          });
+          if (presentationRunRef.current !== runId) return;
+          if (!played || !playbackProgressSeen) {
+            await new Promise((resolve) => window.setTimeout(resolve, 720));
+            if (presentationRunRef.current !== runId) return;
+            replaceLiveReveal({
+              eventId: event.id,
+              visibleContent: "",
+              speechTiming: null,
+            });
+          }
+          if (audienceReaction) {
+            playDebateAudienceReaction(audienceReaction, event.id);
+          }
+          continue;
+        }
         const { spokenText } = utterance;
         replaceLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
@@ -10746,6 +10870,7 @@ export function DebateExperience(
                     event.kind === "ballot" &&
                     event.speakerKind === "juror")) &&
                 !debateEventIsTranscriptHousekeeping(event) &&
+                !debateEventIsAtmosphericVocalFoley(event) &&
                 !debateEventIsJuryComment(event) &&
                 (transcriptVisibleThroughSequence === null ||
                   event.sequence <= transcriptVisibleThroughSequence),
@@ -10914,13 +11039,24 @@ export function DebateExperience(
                       size: 20,
                       strokeWidth: 1.45,
                     })}
-                    {pendingJuryThoughtBotId === juror.id ? (
-                      <i
+                    {pendingJuryThoughtBotId === juror.id &&
+                    pendingJuryComment?.content ? (
+                      <button
+                        type="button"
                         className={styles.juryThoughtChip}
-                        aria-label={`${juror.name} is considering the debate`}
+                        aria-label={`${juror.name}'s between-turn thought`}
+                        aria-describedby={`debate-jury-thought-${juror.id}`}
                       >
                         …
-                      </i>
+                        <span
+                          id={`debate-jury-thought-${juror.id}`}
+                          className={styles.juryThoughtPreview}
+                          role="tooltip"
+                        >
+                          <strong>{juror.name}</strong>
+                          <span>{pendingJuryComment.content}</span>
+                        </span>
+                      </button>
                     ) : null}
                     <small>{juror.name}</small>
                   </span>
@@ -10930,7 +11066,7 @@ export function DebateExperience(
             {participantView
               ? "Five anonymous seats follow the public floor. Their chamber remains sealed until the aggregate verdict."
               : session.jury.phase === "waiting"
-                ? "The frozen roster follows the public floor; an ellipsis marks a thought you can hear in Jury view."
+                ? "The frozen roster follows the public floor; hover an ellipsis to read a thought, or open Jury view to hear it."
                 : session.jury.phase === "complete"
                   ? `The Jury has returned ${session.jury.forVotes}–${session.jury.againstVotes}.`
                   : "The Jury chamber is now in session."}
@@ -11019,6 +11155,19 @@ export function DebateExperience(
               !talking && debateAmbientBotVocalization?.targetId === juror.id
                 ? debateAmbientBotVocalizationMouthShape(juror.id)
                 : null;
+            const vocalFoleyTagText = resolveDebateVocalFoleyTagText({
+              ambientKind:
+                debateAmbientBotVocalization?.targetId === juror.id
+                  ? debateAmbientBotVocalization.cue.kind
+                  : null,
+              personaReactionContent:
+                presenting &&
+                activeEvent?.kind === "reaction" &&
+                activeEvent.stepKey.startsWith("persona_reaction_") &&
+                activeEvent.speakerBotId === juror.id
+                  ? activeEvent.content
+                  : null,
+            });
             return (
               <div
                 className={styles.juryChamberSeat}
@@ -11090,6 +11239,15 @@ export function DebateExperience(
                     </span>
                   )}
                 </div>
+                {vocalFoleyTagText ? (
+                  <span
+                    className={styles.botVocalFoleyTag}
+                    data-debate-vocal-foley-tag="true"
+                    aria-hidden="true"
+                  >
+                    *{sentenceCaseActionText(vocalFoleyTagText)}*
+                  </span>
+                ) : null}
                 {pendingJuryThoughtBotId === juror.id ? (
                   <i
                     className={styles.juryThoughtChip}
@@ -12524,9 +12682,13 @@ export function DebateExperience(
       !judgeGavelKeyboardBlocked;
     const canRaiseParticipantObjection = participantObjectionShortcutEnabled;
     const activePublicContent =
-      activeEvent && liveReveal?.eventId === activeEvent.id
-        ? liveReveal.visibleContent
-        : (activeEvent?.content ?? "");
+      activeEvent && debateEventIsAtmosphericVocalFoley(activeEvent)
+        ? liveReveal?.eventId === activeEvent.id
+          ? liveReveal.visibleContent
+          : ""
+        : activeEvent && liveReveal?.eventId === activeEvent.id
+          ? liveReveal.visibleContent
+          : (activeEvent?.content ?? "");
     const activeSpeechTiming =
       activeEvent && liveReveal?.eventId === activeEvent.id
         ? (liveReveal.speechTiming ?? null)
@@ -12861,7 +13023,7 @@ export function DebateExperience(
         : null;
     const handleDebateAmbientBotVocalization = (
       cue: SessionAmbientBotVocalizationCue,
-    ): boolean => {
+    ): boolean | "owned" => {
       if (
         !props.audioEnabled ||
         props.audioVolume <= 0 ||
@@ -12919,7 +13081,73 @@ export function DebateExperience(
       });
       if (!targetId) return false;
       startDebateAmbientBotVocalization(targetId, cue);
-      return true;
+      const performance = debateAmbientVocalFoleyVoicePerformance(cue.kind);
+      if (!performance || !onUtterance) {
+        return true;
+      }
+      const snapshot = debateBotSnapshot(session, targetId);
+      const speaker = snapshot
+        ? {
+            id: snapshot.id,
+            name: snapshot.name,
+            color: snapshot.color,
+            glyph: snapshot.glyph,
+            avatarDetails: snapshot.avatarDetails,
+            voiceProfile: snapshot.voiceProfile ?? null,
+            powers: snapshot.powers,
+            systemPrompt: snapshot.systemPrompt,
+            hardMuted: session.powerPlan.bots[snapshot.id]?.hardMuted === true,
+          }
+        : (bots.find((bot) => bot.id === targetId) ?? null);
+      if (!speaker || speaker.hardMuted) {
+        return true;
+      }
+      const sideId =
+        targetId === session.forAdvocate.id
+          ? ("for" as const)
+          : targetId === session.againstAdvocate.id
+            ? ("against" as const)
+            : null;
+      const speakerKind =
+        targetId === session.moderator.id
+          ? ("moderator" as const)
+          : session.jury.jurors.some((juror) => juror.id === targetId)
+            ? ("juror" as const)
+            : ("advocate" as const);
+      const ambientEventId = `debate-ambient-vocal:${session.id}:${cue.index}:${targetId}`;
+      void (async () => {
+        const played = await onUtterance({
+          event: {
+            version: DEBATE_SCHEMA_VERSION,
+            id: ambientEventId,
+            sequence: -1,
+            phase: session.phase,
+            stepKey: "ambient_vocal_foley",
+            kind: "reaction",
+            speakerKind,
+            speakerBotId: targetId,
+            sideId,
+            content: performance.spokenText,
+            sourceIds: [],
+            createdAt: new Date().toISOString(),
+          },
+          format: session.format,
+          sessionId: session.id,
+          speaker,
+          player: false,
+          playerVoice: false,
+          spokenText: performance.spokenText,
+          voicePerformanceText: performance.voicePerformanceText,
+          voiceSourceBotId: null,
+        });
+        if (!played) {
+          debateAtmosphereControllerRef.current?.playFoley(cue.url, {
+            trim: Math.max(0, DEBATE_VOCAL_FOLEY_PROFILE.trim),
+            tag: `debate-ambient-vocal-fallback:${ambientEventId}`,
+          });
+        }
+      })();
+      return "owned";
     };
     return (
       <>
@@ -13076,6 +13304,21 @@ export function DebateExperience(
                           debateAmbientBotVocalization?.targetId === bot.id
                             ? debateAmbientBotVocalizationMouthShape(bot.id)
                             : null;
+                        const vocalFoleyTagText = resolveDebateVocalFoleyTagText({
+                          ambientKind:
+                            debateAmbientBotVocalization?.targetId === bot.id
+                              ? debateAmbientBotVocalization.cue.kind
+                              : null,
+                          personaReactionContent:
+                            presenting &&
+                            activeEvent?.kind === "reaction" &&
+                            activeEvent.stepKey.startsWith(
+                              "persona_reaction_",
+                            ) &&
+                            activeEvent.speakerBotId === bot.id
+                              ? activeEvent.content
+                              : null,
+                        });
                         return (
                           <div
                             className={styles.botPosition}
@@ -13131,7 +13374,12 @@ export function DebateExperience(
                                       role,
                                       lookAtRole:
                                         role === "moderator"
-                                          ? turnOwnerRole
+                                          ? debateModeratorLookAtRole({
+                                              turnOwnerRole,
+                                              moderatorTalking: talking,
+                                              speechElapsedMs:
+                                                speechTiming?.elapsedMs ?? null,
+                                            })
                                           : null,
                                       compact:
                                         role === "moderator" &&
@@ -13148,7 +13396,12 @@ export function DebateExperience(
                                     role,
                                     lookAtRole:
                                       role === "moderator"
-                                        ? turnOwnerRole
+                                        ? debateModeratorLookAtRole({
+                                            turnOwnerRole,
+                                            moderatorTalking: talking,
+                                            speechElapsedMs:
+                                              speechTiming?.elapsedMs ?? null,
+                                          })
                                         : null,
                                     compact:
                                       role === "moderator" &&
@@ -13174,6 +13427,15 @@ export function DebateExperience(
                                   )}
                                 </span>
                               )}
+                              {vocalFoleyTagText ? (
+                                <span
+                                  className={styles.botVocalFoleyTag}
+                                  data-debate-vocal-foley-tag="true"
+                                  aria-hidden="true"
+                                >
+                                  *{sentenceCaseActionText(vocalFoleyTagText)}*
+                                </span>
+                              ) : null}
                             </div>
                           </div>
                         );

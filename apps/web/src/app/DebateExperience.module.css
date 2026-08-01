@@ -2860,6 +2860,7 @@
 
 .botStagePresence {
   --debate-presence-scale: 1;
+  position: relative;
   display: block;
   width: clamp(126px, 11.4vw, 180px);
   transform-origin: 50% 76%;
@@ -2868,6 +2869,57 @@
     opacity 360ms ease,
     filter 420ms ease,
     transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Signal-style italic Foley / vocal tags above stage and Jury bots. */
+.botVocalFoleyTag {
+  position: absolute;
+  left: 50%;
+  top: -2%;
+  z-index: 8;
+  width: max-content;
+  max-width: 148%;
+  transform: translateX(-50%);
+  color: rgba(255, 255, 255, 0.92);
+  font: italic 760 clamp(0.54rem, 1.05vw, 0.78rem) / 1.25 system-ui,
+    sans-serif;
+  letter-spacing: 0.015em;
+  text-align: center;
+  text-wrap: balance;
+  text-shadow:
+    0 2px 7px rgba(0, 0, 0, 0.98),
+    0 0 16px color-mix(in srgb, var(--debate-moderator-color, #d9d2ff) 28%, transparent);
+  animation: debateVocalFoleyTagIn 160ms ease-out both;
+  pointer-events: none;
+}
+
+.botPosition[data-role="moderator"] .botVocalFoleyTag {
+  top: -8%;
+  font-size: clamp(0.46rem, 0.85vw, 0.64rem);
+}
+
+.juryChamberSeat .botVocalFoleyTag {
+  top: -4%;
+  z-index: 5;
+  max-width: 120%;
+  font-size: clamp(0.48rem, 0.9vw, 0.68rem);
+}
+
+@keyframes debateVocalFoleyTagIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botVocalFoleyTag {
+    animation: none;
+  }
 }
 
 .botPosition[data-role="moderator"] .botStagePresence {
@@ -3011,7 +3063,7 @@
   top: 65%;
   left: 50%;
   z-index: 5;
-  width: clamp(108px, 11vw, 170px);
+  width: clamp(64px, 6.4vw, 96px);
   transform: translate(
       calc(-50% + var(--debate-evidence-offset-x, 0%)),
       calc(-50% + var(--debate-evidence-offset-y, 0%))
@@ -3020,7 +3072,7 @@
   transform-origin: center center;
   animation: debate-evidence-pedestal-enter 520ms
     cubic-bezier(0.18, 0.84, 0.22, 1) both;
-  filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.48));
+  filter: drop-shadow(0 12px 14px rgba(0, 0, 0, 0.48));
 }
 
 .evidencePedestal[data-evidence-view="moderator"] {
@@ -3077,113 +3129,115 @@
 
 .evidencePedestalGlow {
   position: absolute;
-  top: 12%;
+  top: 18%;
   left: 50%;
-  width: 126%;
-  height: 64%;
+  width: 140%;
+  height: 58%;
   pointer-events: none;
   background: radial-gradient(
     ellipse,
-    color-mix(in srgb, #ab97ff 30%, transparent),
+    color-mix(in srgb, #ab97ff 22%, transparent),
     transparent 66%
   );
-  filter: blur(7px);
+  filter: blur(6px);
   transform: translateX(-50%);
 }
 
 .evidencePedestal .evidencePedestalSprite {
   z-index: 2;
-  width: clamp(76px, 7.5vw, 122px);
-  height: clamp(76px, 7.5vw, 122px);
+  width: clamp(48px, 4.8vw, 76px);
+  height: clamp(48px, 4.8vw, 76px);
   overflow: visible;
   border: 0;
   background: transparent;
-  font-size: clamp(42px, 4.2vw, 70px);
-  transform: translateY(8%);
-  filter: drop-shadow(0 14px 14px rgba(0, 0, 0, 0.5));
+  font-size: clamp(28px, 2.8vw, 46px);
+  transform: translateY(8%)
+    rotate(var(--debate-evidence-prop-rotate, -6deg));
+  filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.5));
 }
 
 .evidencePedestalDocument {
   z-index: 2;
   position: relative;
-  display: grid;
-  width: clamp(72px, 7vw, 118px);
-  aspect-ratio: 0.72;
-  place-items: center;
+  display: block;
+  width: clamp(36px, 3.6vw, 56px);
+  aspect-ratio: 0.74;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 3px;
+  border-radius: 2px;
   background:
-    linear-gradient(135deg, transparent 0 62%, rgba(255, 255, 255, 0.1) 62%),
+    linear-gradient(135deg, transparent 0 62%, rgba(255, 255, 255, 0.14) 62%),
     linear-gradient(165deg, #f7f1e6 0%, #e4d8c6 48%, #d2c3ae 100%);
   box-shadow:
-    0 14px 22px rgba(0, 0, 0, 0.46),
+    0 10px 16px rgba(0, 0, 0, 0.46),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
-  transform: translateY(6%) rotate(-4deg);
+  transform: translateY(6%)
+    rotate(var(--debate-evidence-prop-rotate, -6deg));
   color: #3a2f3f;
 }
 
 .evidencePedestalDocument::before {
   content: "";
   position: absolute;
-  inset: 14% 16% 28%;
-  border-top: 1px solid rgba(58, 47, 63, 0.22);
-  border-bottom: 1px solid rgba(58, 47, 63, 0.18);
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0 7px,
-      rgba(58, 47, 63, 0.16) 7px 8px
-    );
-  opacity: 0.9;
+  inset: 16% 18% 22%;
+  border-top: 1px solid rgba(58, 47, 63, 0.2);
+  border-bottom: 1px solid rgba(58, 47, 63, 0.16);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 5px,
+    rgba(58, 47, 63, 0.14) 5px 6px
+  );
+  opacity: 0.85;
   pointer-events: none;
 }
 
-.evidencePedestalDocumentMark {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  gap: 2px;
-  padding: 0 10%;
-  text-align: center;
-}
-
-.evidencePedestalDocumentMark small {
-  font-size: clamp(8px, 0.75vw, 11px);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.72;
-}
-
-.evidencePedestalDocumentMark strong {
-  font-size: clamp(9px, 0.85vw, 12px);
-  line-height: 1.15;
-  font-weight: 700;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+.evidencePedestalDocument::after {
+  /* Folded corner — reads as a paper sheet without any title text. */
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 28%;
+  height: 22%;
+  background: linear-gradient(
+    225deg,
+    transparent 48%,
+    rgba(58, 47, 63, 0.12) 48%,
+    rgba(255, 255, 255, 0.35) 52%,
+    #ebe2d4 52%
+  );
+  border-bottom-left-radius: 1px;
+  pointer-events: none;
 }
 
 .live[data-theme="dark"] .evidencePedestalDocument {
-  border-color: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.2);
   background:
     linear-gradient(135deg, transparent 0 62%, rgba(255, 255, 255, 0.08) 62%),
-    linear-gradient(165deg, #4f4658 0%, #2f2836 55%, #221c28 100%);
+    linear-gradient(165deg, #5a5164 0%, #352e3e 55%, #241e2c 100%);
   color: #f4edf8;
   box-shadow:
-    0 14px 22px rgba(0, 0, 0, 0.55),
+    0 10px 16px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .live[data-theme="dark"] .evidencePedestalDocument::before {
-  border-top-color: rgba(244, 237, 248, 0.2);
-  border-bottom-color: rgba(244, 237, 248, 0.14);
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0 7px,
-      rgba(244, 237, 248, 0.16) 7px 8px
-    );
+  border-top-color: rgba(244, 237, 248, 0.18);
+  border-bottom-color: rgba(244, 237, 248, 0.12);
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 5px,
+    rgba(244, 237, 248, 0.14) 5px 6px
+  );
+}
+
+.live[data-theme="dark"] .evidencePedestalDocument::after {
+  background: linear-gradient(
+    225deg,
+    transparent 48%,
+    rgba(0, 0, 0, 0.28) 48%,
+    rgba(255, 255, 255, 0.1) 52%,
+    #3a3344 52%
+  );
 }
 
 .evidencePedestal .evidencePedestalSprite > img {
@@ -3200,46 +3254,20 @@
 }
 
 .evidencePedestalLabel {
-  /* Sit under the visual without changing its alignment-matched center. */
+  /* Title lives in the click drawer; keep class for legacy pins / a11y hooks. */
   position: absolute;
-  top: calc(100% + clamp(2px, 0.35vw, 6px));
-  left: 50%;
-  z-index: 3;
-  display: grid;
-  max-width: 140%;
-  gap: 1px;
-  text-align: center;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.evidencePedestalLabel small {
-  color: #b7a8f8;
-  font-size: clamp(6px, 0.48vw, 8px);
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.evidencePedestalLabel strong {
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
   overflow: hidden;
-  font-size: clamp(8px, 0.72vw, 11px);
-  letter-spacing: 0.02em;
-  text-overflow: ellipsis;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
   white-space: nowrap;
 }
 
 .live[data-theme="light"] .evidencePedestal > button {
   color: #2e2637;
-}
-
-.live[data-theme="light"] .evidencePedestalLabel {
-  text-shadow: 0 2px 8px rgba(255, 255, 255, 0.75);
-}
-
-.live[data-theme="light"] .evidencePedestalLabel small {
-  color: #65539e;
 }
 
 @keyframes debate-evidence-pedestal-enter {
@@ -5958,6 +5986,12 @@
   opacity: 0.48;
 }
 
+.juryRosterSeats > span:has(.juryThoughtChip:hover),
+.juryRosterSeats > span:has(.juryThoughtChip:focus-visible) {
+  z-index: 6;
+  opacity: 1;
+}
+
 .juryRosterSeats small {
   overflow: hidden;
   max-width: 100%;
@@ -5974,6 +6008,7 @@
   width: 22px;
   height: 15px;
   place-items: center;
+  padding: 0;
   border: 1px solid
     color-mix(
       in srgb,
@@ -5997,7 +6032,76 @@
   font-size: 11px;
   font-style: normal;
   line-height: 1;
+  cursor: help;
   animation: debate-jury-thought 1.8s ease-in-out infinite;
+}
+
+.juryThoughtChip:hover,
+.juryThoughtChip:focus-visible {
+  animation: none;
+  opacity: 1;
+}
+
+.juryThoughtPreview {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 8px);
+  left: 50%;
+  display: grid;
+  gap: 4px;
+  width: min(220px, 42vw);
+  padding: 8px 10px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--gallery-prism-color, var(--jury-seat-color)) 42%,
+      transparent
+    );
+  border-radius: 10px;
+  color: #f3eef8;
+  background: color-mix(in srgb, #120f18 94%, transparent);
+  box-shadow:
+    0 10px 24px color-mix(in srgb, #050308 55%, transparent),
+    0 0 14px
+      color-mix(
+        in srgb,
+        var(--gallery-prism-color, var(--jury-seat-color)) 18%,
+        transparent
+      );
+  font-family: var(--font-serif, ui-serif, Georgia, serif);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-align: left;
+  text-transform: none;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-3px);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.juryThoughtPreview strong {
+  color: color-mix(
+    in srgb,
+    var(--gallery-prism-color, var(--jury-seat-color)) 70%,
+    #f5effa
+  );
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.juryThoughtChip:hover .juryThoughtPreview,
+.juryThoughtChip:focus-visible .juryThoughtPreview {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .juryRosterSeats > span .juryThoughtChip {
@@ -6005,10 +6109,47 @@
   right: 2px;
 }
 
+.juryRosterSeats > span:first-child .juryThoughtPreview {
+  left: 0;
+  transform: translateY(-3px);
+}
+
+.juryRosterSeats > span:first-child .juryThoughtChip:hover .juryThoughtPreview,
+.juryRosterSeats
+  > span:first-child
+  .juryThoughtChip:focus-visible
+  .juryThoughtPreview {
+  transform: translateY(0);
+}
+
+.juryRosterSeats > span:last-child .juryThoughtPreview {
+  left: auto;
+  right: 0;
+  transform: translateY(-3px);
+}
+
+.juryRosterSeats > span:last-child .juryThoughtChip:hover .juryThoughtPreview,
+.juryRosterSeats
+  > span:last-child
+  .juryThoughtChip:focus-visible
+  .juryThoughtPreview {
+  transform: translateY(0);
+}
+
 .juryChamberSeat .juryThoughtChip {
   top: -22px;
   right: 7px;
   --gallery-prism-color: var(--jury-seat-color);
+}
+
+/* Hover preview must escape the gallery clip. */
+.audienceGallery.juryRoster {
+  overflow: visible;
+}
+
+.audienceGallery.juryRoster .juryRosterSeats {
+  overflow: visible;
+  z-index: 2;
 }
 
 @keyframes debate-jury-thought {

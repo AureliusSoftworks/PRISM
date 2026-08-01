@@ -38,7 +38,9 @@ export interface SessionAtmosphereLayerProps {
   ambientFoleyUrls?: readonly string[];
   ambientBotVocalizations?: boolean;
   ambientBotVocalizationProfile?: SessionAmbientFoleyProfile;
-  onAmbientBotVocalization?: (cue: SessionAmbientBotVocalizationCue) => boolean;
+  onAmbientBotVocalization?: (
+    cue: SessionAmbientBotVocalizationCue,
+  ) => boolean | "owned";
   onCoffeeCupFoley?: (
     cue: "coffeeSip" | "coffeeCupPlace",
     cup: HTMLElement,
@@ -128,7 +130,7 @@ export function SessionAtmosphereLayer({
       ambientBotVocalizations,
       ambientBotVocalizationProfile,
       onAmbientBotVocalization: (cue) =>
-        ambientBotVocalizationRef.current?.(cue) === true,
+        ambientBotVocalizationRef.current?.(cue) ?? false,
     });
     controller.preloadFoley(preloadFoleyUrls ?? []);
     controller.setPresentationSuspended(

@@ -38,6 +38,7 @@ const evidence: DebateEvidencePacketV1 = {
       title: "Inspectors report",
       url: "https://example.com/inspectors",
       snippet: "The hinge failed under ordinary use.",
+      publishedAt: null,
     },
   ],
   exhibits: [
@@ -49,6 +50,7 @@ const evidence: DebateEvidencePacketV1 = {
       observation: "Rusted and corroded.",
       emoji: "🔧",
       visualKind: "emoji",
+      imageId: null,
       createdBy: "prism",
     },
   ],

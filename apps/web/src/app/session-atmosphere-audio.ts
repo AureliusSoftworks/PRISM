@@ -617,7 +617,9 @@ export function startSessionAtmosphere(args: {
   ambientFoleyUrls?: readonly string[];
   ambientBotVocalizations?: boolean;
   ambientBotVocalizationProfile?: SessionAmbientFoleyProfile;
-  onAmbientBotVocalization?: (cue: SessionAmbientBotVocalizationCue) => boolean;
+  onAmbientBotVocalization?: (
+    cue: SessionAmbientBotVocalizationCue,
+  ) => boolean | "owned";
   onPlaybackError?: (error: unknown) => void;
 }): SessionAtmosphereController {
   let volume = clampAudioLevel(args.volume);
@@ -918,16 +920,18 @@ export function startSessionAtmosphere(args: {
           return;
         }
         const cue = sessionAmbientBotVocalizationCue(args.seed, index);
-        let accepted = false;
+        let accepted: boolean | "owned" = false;
         try {
-          accepted = args.onAmbientBotVocalization?.(cue) === true;
+          accepted = args.onAmbientBotVocalization?.(cue) ?? false;
         } catch {
           accepted = false;
         }
-        if (accepted) {
+        if (accepted === true) {
           play(cue.url, "foley", {
             trim: Math.max(0, ambientBotVocalizationProfile.trim),
           });
+        } else if (accepted === "owned") {
+          // Caller owns playback (e.g. Debate ElevenLabs vocal Foley).
         }
         botVocalizationIndex += 1;
         scheduleBotVocalization();

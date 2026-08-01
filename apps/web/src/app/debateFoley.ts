@@ -1,14 +1,22 @@
 import {
+  BOTCAST_IMMERSIVE_VOICE_TAGS,
+  type BotcastImmersiveVoiceTag,
+  type DebateEventV1,
+  type DebateFormatId,
+} from "@localai/shared";
+import {
   sessionAmbientBotVocalizationTargetId,
   type SessionAmbientBotVocalizationKind,
 } from "./session-atmosphere-audio.ts";
-import type { DebateEventV1, DebateFormatId } from "@localai/shared";
 import type { DebateForumRole } from "./DebateForumScene.tsx";
 import {
   debateGalleryReactingIndices,
   debateGalleryReaction,
   type DebateGalleryReaction,
 } from "./debatePresentation.ts";
+
+/** Ellipsis caption placeholder — heard as Foley, never Proceedings prose. */
+export const DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER = "..." as const;
 
 export type DebateModeratorGavelCueKind = "attention" | "order";
 export type DebateAudienceReactionKind =
@@ -293,4 +301,138 @@ export function debateVocalFoleyTargetId(args: {
     args.cueIndex,
     candidates.map((participant) => participant.id),
   );
+}
+
+/** Human label for ambient vocal Foley shown above Debate bots (Signal-style). */
+export function debateAmbientVocalFoleyTagText(
+  kind: SessionAmbientBotVocalizationKind,
+): string | null {
+  switch (kind) {
+    case "throat-clear":
+      return "Clears throat";
+    case "soft-sigh":
+      return "Sighs";
+    case "soft-inhale":
+      return "Inhales";
+    case "mouth-sound":
+    case "lip-smack":
+      return null;
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * Prefer the live ambient cue label; otherwise use a persona-surprise
+ * reaction’s short Foley phrase while that bot owns the beat.
+ */
+export function resolveDebateVocalFoleyTagText(args: {
+  ambientKind?: SessionAmbientBotVocalizationKind | null;
+  personaReactionContent?: string | null;
+}): string | null {
+  if (args.ambientKind) {
+    const ambient = debateAmbientVocalFoleyTagText(args.ambientKind);
+    if (ambient) return ambient;
+  }
+  const persona = args.personaReactionContent?.trim();
+  return persona && persona.length > 0 ? persona : null;
+}
+
+/** Map ambient room cue kinds onto ElevenLabs immersive vocal tags. */
+export function debateAmbientKindToImmersiveVoiceTag(
+  kind: SessionAmbientBotVocalizationKind,
+): BotcastImmersiveVoiceTag | null {
+  switch (kind) {
+    case "throat-clear":
+      return "clears throat";
+    case "soft-sigh":
+      return "sighs";
+    case "soft-inhale":
+      return "exhales";
+    case "mouth-sound":
+    case "lip-smack":
+      return null;
+    default: {
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
+  }
+}
+
+function normalizeDebateVocalFoleyPhrase(value: string): string {
+  return value
+    .trim()
+    .replace(/^\*+|\*+$/gu, "")
+    .replace(/\s+/gu, " ")
+    .toLowerCase();
+}
+
+/**
+ * Resolve a short Foley phrase to an immersive voice tag when possible.
+ * Freeform surprise lines still speak, but captions stay ellipsis-only.
+ */
+export function debateVocalFoleyImmersiveTag(
+  content: string,
+): BotcastImmersiveVoiceTag | null {
+  const normalized = normalizeDebateVocalFoleyPhrase(content);
+  if (!normalized) return null;
+  for (const tag of BOTCAST_IMMERSIVE_VOICE_TAGS) {
+    if (normalized === tag || normalized === `*${tag}*`) return tag;
+  }
+  // Allow light paraphrase matches used in overhead tags.
+  if (normalized === "clears throat" || normalized === "clear throat") {
+    return "clears throat";
+  }
+  if (normalized === "sighs" || normalized === "sigh") return "sighs";
+  if (
+    normalized === "inhales" ||
+    normalized === "inhale" ||
+    normalized === "exhales" ||
+    normalized === "exhale"
+  ) {
+    return "exhales";
+  }
+  if (normalized === "breathes deeply" || normalized === "breathe deeply") {
+    return "breathes deeply";
+  }
+  if (normalized === "chuckles" || normalized === "chuckle") return "chuckles";
+  if (normalized === "coughs" || normalized === "cough") return "coughs";
+  return null;
+}
+
+/** Signal-style spoken placeholder + ElevenLabs performance for Debate Foley. */
+export function debateVocalFoleyVoicePerformance(content: string): {
+  spokenText: typeof DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER;
+  voicePerformanceText: string;
+} {
+  const tag = debateVocalFoleyImmersiveTag(content);
+  if (tag) {
+    return {
+      spokenText: DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER,
+      voicePerformanceText: `[${tag}] ${DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER}`,
+    };
+  }
+  const trimmed = content.trim();
+  return {
+    spokenText: DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER,
+    voicePerformanceText: trimmed
+      ? `${trimmed} ${DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER}`
+      : DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER,
+  };
+}
+
+export function debateAmbientVocalFoleyVoicePerformance(
+  kind: SessionAmbientBotVocalizationKind,
+): {
+  spokenText: typeof DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER;
+  voicePerformanceText: string;
+} | null {
+  const tag = debateAmbientKindToImmersiveVoiceTag(kind);
+  if (!tag) return null;
+  return {
+    spokenText: DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER,
+    voicePerformanceText: `[${tag}] ${DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER}`,
+  };
 }

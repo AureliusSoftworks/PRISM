@@ -18,6 +18,7 @@ import {
   DEBATE_PLAYER_TURN_MAX_LENGTH,
   DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
+  DEBATE_PERSONA_SURPRISE_STEP_PREFIX,
   DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
   applyDebateAudienceDeliveryCue,
   applyBotPowerMumbledResponseV1,
@@ -38,6 +39,7 @@ import {
   debateSpokenText,
   defaultDebateFormatStateV1,
   defaultDebateJuryStateV1,
+  coerceDebateBallotSideId,
   isDebateFormatId,
   isDebatePlayerRole,
   isDebateSideId,
@@ -791,7 +793,7 @@ async function generateJsonOnLane(
         {
           role: "system",
           content:
-            "Your prior output was malformed. Return one valid JSON object only, with every requested key.",
+            'Your prior output was malformed. Return one valid JSON object only, with every requested key. If the schema includes sideId, it must be exactly the string "for" or "against" — never a side label.',
         },
       ];
     }
@@ -4259,7 +4261,6 @@ function stablePowerChance(key: string): number {
 }
 
 const DEBATE_PERSONA_SURPRISE_REACTION_CHANCE = 0.24;
-const DEBATE_PERSONA_SURPRISE_STEP_PREFIX = "persona_reaction_";
 const DEBATE_PERSONA_SURPRISE_TRIGGER_KINDS = new Set<DebateEventKind>([
   "speech",
   "testimony",
@@ -5006,6 +5007,7 @@ function botBallotPrompt(
           ? "one punchy, persona-shaped public reason grounded in the argument, with a roast of the losing point when natural"
           : "one concise public reason"
     }"}.`,
+    'sideId must be exactly the string "for" or "against" — never a side label.',
     `You are ${voter.name}.`,
   ].join("\n");
 }
@@ -5036,11 +5038,13 @@ async function generateBallot(
     {
       maxTokens: session.endedEarlyAt ? 140 : 220,
       temperature: 0.2,
-      validate: (value) => value.sideId === "for" || value.sideId === "against",
+      validate: (value) =>
+        coerceDebateBallotSideId(value, session.motion) !== null,
     },
   );
   const parsed = deliveryGeneration.value;
-  const sideId: DebateSideId = parsed.sideId === "against" ? "against" : "for";
+  const sideId: DebateSideId =
+    coerceDebateBallotSideId(parsed, session.motion) ?? "for";
   const muted = session.powerPlan.bots[voter.id]?.hardMuted === true;
   let reason = compactText(parsed.reason, 600);
   let capabilityRejected = false;
@@ -5162,6 +5166,7 @@ function juryBallotPrompt(
         ? "one punchy, persona-shaped public reason grounded in the argument, with a roast of the losing point when natural"
         : `one concise reason grounded in ${debatePublicMaterialLabel(session.formality)}`
     }"}.`,
+    'sideId must be exactly the string "for" or "against" — never a side label like the For/Against names above.',
   ]
     .filter(Boolean)
     .join("\n");
@@ -5188,18 +5193,24 @@ async function generateJuryBallot(
     {
       maxTokens: stage === "initial" ? 220 : 300,
       temperature: stage === "initial" ? 0.35 : 0.25,
-      validate: (value) => value.sideId === "for" || value.sideId === "against",
+      validate: (value) =>
+        coerceDebateBallotSideId(value, session.motion) !== null,
     },
   );
   const confidenceRaw =
     typeof generation.value.confidence === "number"
       ? generation.value.confidence
-      : 0.5;
+      : typeof generation.value.confidence === "string" &&
+          Number.isFinite(Number(generation.value.confidence))
+        ? Number(generation.value.confidence)
+        : 0.5;
+  const sideId =
+    coerceDebateBallotSideId(generation.value, session.motion) ?? "for";
   return {
     version: DEBATE_SCHEMA_VERSION,
     jurorBotId: juror.id,
     stage,
-    sideId: generation.value.sideId === "against" ? "against" : "for",
+    sideId,
     confidence: Math.max(0, Math.min(1, confidenceRaw)),
     personaInstinct:
       compactText(generation.value.personaInstinct, 500) ||
