@@ -81,7 +81,7 @@ describe("bot marketplace static catalog", () => {
       ["salvador-dali", "∿"],
       ["vincent-van-gogh", "⊙"],
       ["georgia-okeeffe", "◉"],
-      ["machiavelli", "⌃"],
+      ["machiavelli", "."],
       ["sun-tzu", "⌖"],
       ["carl-von-clausewitz", "⊕"],
       ["alan-watts", "="],

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type {
   BotcastAtmosphereState,
@@ -71,6 +72,7 @@ import type {
   BotFalseNameStateV1,
   BotAvatarDetailsV1,
   VoiceDeliveryMood,
+  PreparedTurnCursorV1,
   StageActionExclusionV1,
   StageActionPlanV1,
 } from "@localai/shared";
@@ -915,6 +917,57 @@ function stableHash(raw: string): number {
     value = Math.imul(value, 16777619);
   }
   return value >>> 0;
+}
+
+function preparedTurnHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+/** Frozen Signal state used to reject speculative work after any newer turn. */
+export function botcastPreparedTurnCursor(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+): PreparedTurnCursorV1 {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const show = getBotcastShow(db, userId, episode.showId);
+  const host = loadBotProfile(db, userId, episode.hostBotId);
+  const guest =
+    episode.guestKind === "bot"
+      ? loadBotProfile(db, userId, episode.guestBotId)
+      : null;
+  const nextRole = botcastNextSpeakerRole({
+    messages: episode.messages,
+    segment: episode.segment,
+    guestDeparted:
+      botcastEpisodeDepartureOutcome(episode.events) === "guest_departed",
+  });
+  return {
+    revision: episode.updatedAt,
+    lastMessageId: episode.messages.at(-1)?.id ?? null,
+    lastEventId: episode.events.at(-1)?.id ?? null,
+    floorOwnerId:
+      nextRole === "host"
+        ? episode.hostBotId
+        : episode.guestKind === "bot"
+          ? episode.guestBotId
+          : null,
+    castHash: preparedTurnHash({ host, guest }),
+    powersHash: preparedTurnHash({
+      host: botcastEpisodePowerSnapshotForRole(episode, "host") ?? host.powers,
+      guest:
+        botcastEpisodePowerSnapshotForRole(episode, "guest") ??
+        guest?.powers ??
+        [],
+    }),
+    promptStateHash: preparedTurnHash({ episode, show }),
+  };
+}
+
+export function botcastEpisodeCanPrepareAdvance(
+  episode: BotcastEpisode,
+): boolean {
+  return episode.status === "live" && episode.guestKind === "bot";
 }
 
 const SIGNAL_CROSSTALK_RECLAIM_BASE_CHANCE = 0.34;

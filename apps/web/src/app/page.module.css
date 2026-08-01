@@ -64399,6 +64399,38 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.88));
 }
 
+.coffeeCenterFeedLine[data-response-cue="true"] {
+  font-size: 0.86rem;
+  font-style: italic;
+  opacity: 0.78;
+}
+
+.responseCueHistory {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.35rem auto 0.7rem;
+  width: min(36rem, calc(100% - 2rem));
+}
+
+.responseCueHistory > div {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  padding: 0.38rem 0.6rem;
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  border-radius: 0.65rem;
+  opacity: 0.68;
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+.responseCueHistory strong {
+  white-space: nowrap;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .coffeeCenterFeedLine[data-power-voice-presence="loud"],
 .coffeeMessage[data-power-voice-presence="loud"] {
   --power-message-font-scale: 1.12;

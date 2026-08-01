@@ -219,7 +219,15 @@ describe("Coffee player voice", () => {
       /live\s+messages and session[\s\S]*?replays use this voice/
     );
     assert.doesNotMatch(source, /Your table voice|Name pronunciation/);
-    assert.doesNotMatch(source, /playerAudioVoiceProfile|playerNamePronunciation/);
+    assert.doesNotMatch(source, /playerNamePronunciation/);
+    assert.match(
+      source,
+      /coffeePlayerPlaybackProfile\(settings\.prismDefaultBotAudioVoiceProfile\)/,
+    );
+    assert.match(
+      source,
+      /producerGuest === true[\s\S]*?settings\.prismDefaultBotAudioVoiceProfile/,
+    );
   });
 
   it("times the player's bundled bodily Foley to the visible action cue", () => {

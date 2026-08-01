@@ -384,6 +384,51 @@ describe("Debate API", () => {
         "debate-navbar-override",
       ],
     );
+    const preparationResponse = await owner.request(
+      `/api/debates/${session.id}/turn-preparations`,
+      jsonInit({ expectedRevision: session.revision }),
+    );
+    assert.equal(preparationResponse.status, 202);
+    const preparationId = String(
+      (await payload(preparationResponse)).preparation.id,
+    );
+    let preparationStatus = "preparing";
+    for (let attempt = 0; attempt < 20 && preparationStatus === "preparing"; attempt += 1) {
+      const statusResponse = await owner.request(
+        `/api/turn-preparations/${preparationId}`,
+      );
+      assert.equal(statusResponse.status, 200);
+      preparationStatus = String((await payload(statusResponse)).preparation.phase);
+      if (preparationStatus === "preparing") {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    }
+    assert.equal(preparationStatus, "ready");
+    const beforePreparedCommit = (await payload(
+      await owner.request(`/api/debates/${session.id}`),
+    )).session as DebateSessionV1;
+    assert.equal(beforePreparedCommit.revision, session.revision);
+    assert.deepEqual(beforePreparedCommit.events, session.events);
+    assert.deepEqual(beforePreparedCommit.caseBoard, session.caseBoard);
+    assert.deepEqual(beforePreparedCommit.ballots, session.ballots);
+    assert.deepEqual(beforePreparedCommit.jury, session.jury);
+
+    const preparedCommit = await owner.request(
+      `/api/turn-preparations/${preparationId}/commit`,
+      jsonInit({}),
+    );
+    assert.equal(preparedCommit.status, 200);
+    session = (await payload(preparedCommit)).session as DebateSessionV1;
+    assert.equal(session.revision, beforePreparedCommit.revision + 1);
+    const preparedReplay = await owner.request(
+      `/api/turn-preparations/${preparationId}/commit`,
+      jsonInit({}),
+    );
+    assert.equal(preparedReplay.status, 200);
+    assert.equal(
+      ((await payload(preparedReplay)).session as DebateSessionV1).revision,
+      session.revision,
+    );
     let turn = 0;
     while (session.status !== "completed") {
       turn += 1;

@@ -304,14 +304,18 @@ describe("Signal experience shell", () => {
     assert.match(css, /\.producerGuestSipButton/u);
   });
 
-  it("plays bundled bodily action foley when a Producer guest goes on air", () => {
+  it("times Producer guest bodily Foley to the authored live and replay cue", () => {
     assert.match(
       source,
-      /onProducerGuestActionSfx\?\.\(message\)[\s\S]{0,120}onPlaybackStart\?\.\(\)/u,
+      /const producerGuestActionSfxPlan =[\s\S]{0,500}buildBundledActionSfxPlan\(message\.content\)/u,
     );
     assert.match(
       source,
-      /replayEpisode\?\.guestKind === "producer"[\s\S]{0,220}onProducerGuestActionSfx\?\.\(replayActiveMessage\)/u,
+      /fireLiveListenerReaction\(message, elapsedMs, durationMs\);\s*playProducerGuestActionSfxAt\(elapsedMs, durationMs\)/u,
+    );
+    assert.match(
+      source,
+      /bundledActionSfxCueAtMs\(\s*replayActiveMessage\.content,[\s\S]{0,260}elapsedMs >= cueAtMs[\s\S]{0,160}onProducerGuestActionSfx\?\.\(replayActiveMessage\)/u,
     );
     assert.match(
       pageSource,

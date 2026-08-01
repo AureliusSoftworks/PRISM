@@ -1,4 +1,5 @@
 import type {
+  BotAudioVoiceProfileV1,
   ComfyUiWorkflowRegistration,
   EnglishVoiceEngine,
   VoiceMode,
@@ -12,9 +13,11 @@ import {
   normalizePrismMoodSensitivity,
   validateComfyUiWorkflowsPayload,
   normalizeBotVoiceVolume,
+  normalizeBotAudioVoiceProfileV1,
   normalizeEnglishVoiceEngine,
   normalizeVoiceMode,
   parseStoredAutoFallbackChain,
+  parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
   type GraphicsQuality,
@@ -229,6 +232,8 @@ export interface CurrentSettings {
   elevenLabsVoiceBank: string | null;
   elevenLabsVoiceModel: string | null;
   elevenLabsVoiceCollectionId: string | null;
+  zenPlayerVoiceEnabled?: number;
+  playerAudioVoiceProfile?: string | null;
 }
 
 /** Shape of the next-settings result, with OpenAI key intent captured separately. */
@@ -293,6 +298,8 @@ export interface NextSettings {
   elevenLabsVoiceBank: ElevenLabsVoiceBank;
   elevenLabsVoiceModel: string | null;
   elevenLabsVoiceCollectionId: string | null;
+  zenPlayerVoiceEnabled: boolean;
+  playerAudioVoiceProfile: BotAudioVoiceProfileV1;
   /**
    * Intent for the OpenAI API key:
    *   - "replace": caller sent a non-empty string; encrypt it
@@ -1218,6 +1225,15 @@ export function resolveNextSettings(
     body.elevenLabsVoiceCollectionId,
     current.elevenLabsVoiceCollectionId
   );
+  const zenPlayerVoiceEnabled = normalizeBooleanLikeSetting(
+    body.zenPlayerVoiceEnabled,
+    current.zenPlayerVoiceEnabled === 1,
+  );
+  const playerAudioVoiceProfile =
+    body.playerAudioVoiceProfile === undefined
+      ? (parseStoredBotAudioVoiceProfileV1(current.playerAudioVoiceProfile) ??
+        normalizeBotAudioVoiceProfileV1(undefined))
+      : normalizeBotAudioVoiceProfileV1(body.playerAudioVoiceProfile);
   const comfyUiWorkflows =
     body.comfyUiWorkflows === undefined
       ? current.comfyUiWorkflows
@@ -1330,6 +1346,8 @@ export function resolveNextSettings(
     elevenLabsVoiceBank,
     elevenLabsVoiceModel,
     elevenLabsVoiceCollectionId,
+    zenPlayerVoiceEnabled,
+    playerAudioVoiceProfile,
     openAiKeyIntent,
     anthropicKeyIntent,
     elevenLabsKeyIntent,

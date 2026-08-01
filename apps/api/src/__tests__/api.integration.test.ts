@@ -1605,7 +1605,7 @@ describe("API request integration", () => {
     ]);
   });
 
-  it("ignores retired account-wide voice defaults and Coffee player voice fields", async () => {
+  it("persists Zen player voice while ignoring retired account-wide defaults", async () => {
     const client = createClient();
     const register = await client.request(
       "/api/auth/register",
@@ -1616,6 +1616,7 @@ describe("API request integration", () => {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
+        zenPlayerVoiceEnabled: true,
         playerAudioVoiceProfile: {
           ...normalizeBotAudioVoiceProfileV1(undefined),
           baseVoiceId: "voice-3",
@@ -1637,7 +1638,8 @@ describe("API request integration", () => {
     const loaded = await client.request("/api/settings");
     assert.equal(loaded.status, 200);
     const settings = (await json(loaded)).settings;
-    assert.equal("playerAudioVoiceProfile" in settings, false);
+    assert.equal(settings.zenPlayerVoiceEnabled, true);
+    assert.equal(settings.playerAudioVoiceProfile.baseVoiceId, "voice-3");
     assert.equal("playerNamePronunciation" in settings, false);
     assert.equal("defaultSystemVoiceName" in settings, false);
     assert.equal("defaultElevenLabsVoiceId" in settings, false);
@@ -1651,6 +1653,24 @@ describe("API request integration", () => {
     });
     assert.equal("fallbackModelMessageStripe" in settings, false);
     assert.equal("lenientLocalFallbackModel" in settings, false);
+
+    const directSaved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        devMemoriesEnabled: false,
+        zenPlayerVoiceEnabled: false,
+        playerAudioVoiceProfile: {
+          ...normalizeBotAudioVoiceProfileV1(undefined),
+          baseVoiceId: "voice-4",
+        },
+      }),
+    });
+    assert.equal(directSaved.status, 200);
+    const directLoaded = (await json(await client.request("/api/settings")))
+      .settings;
+    assert.equal(directLoaded.zenPlayerVoiceEnabled, false);
+    assert.equal(directLoaded.playerAudioVoiceProfile.baseVoiceId, "voice-4");
 
     const preview = await client.request(
       "/api/voices/preview-line",
@@ -3967,6 +3987,76 @@ describe("API request integration", () => {
       assert.equal(preview.status, 429);
       assert.match(String((await json(preview)).error), /voice credits/i);
       assert.equal(builtinVoiceCalls.length, beforeBuiltinCalls + 1);
+    } finally {
+      config.elevenLabsApiKey = "";
+      fetchRecorder.setResponse(new Response("{}", { status: 200 }));
+    }
+  });
+
+  it("falls back locally when Premium speech ends before the saved line", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "voice-premium-truncated@example.com",
+        password: "voice-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    db.prepare(
+      "UPDATE users SET preferred_provider = 'openai', voice_mode = 'english', english_voice_engine = 'elevenlabs' WHERE id = ?",
+    ).run(userId);
+    const fullLine =
+      "Gentlemen, vanity is not evidence, however handsomely dressed.";
+    const truncatedLine = "Gentlemen, vanity";
+    const characters = Array.from(truncatedLine);
+    config.elevenLabsApiKey = "integration-elevenlabs-key";
+    fetchRecorder.setResponse(
+      new Response(
+        JSON.stringify({
+          audio_base64: "AQID",
+          alignment: {
+            characters,
+            character_start_times_seconds: characters.map(
+              (_, index) => index * 0.05,
+            ),
+            character_end_times_seconds: characters.map(
+              (_, index) => (index + 1) * 0.05,
+            ),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    try {
+      const beforeBuiltinCalls = builtinVoiceCalls.length;
+      const response = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: fullLine,
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          includeAlignment: true,
+          profile: {
+            ...normalizeBotAudioVoiceProfileV1(undefined),
+            elevenLabsVoiceId: "truncated-provider-voice",
+            systemVoiceName: "Fred",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(
+        response.headers.get("x-prism-voice-engine"),
+        "builtin-provider-fallback",
+      );
+      assert.equal(builtinVoiceCalls.length, beforeBuiltinCalls + 1);
+      assert.equal(builtinVoiceCalls.at(-1)?.text, fullLine);
+      const payload = await json(response);
+      assert.equal(payload.alignment, null);
+      assert.equal(payload.audioContentType, "audio/wav");
     } finally {
       config.elevenLabsApiKey = "";
       fetchRecorder.setResponse(new Response("{}", { status: 200 }));

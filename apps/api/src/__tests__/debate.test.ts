@@ -33,10 +33,12 @@ import {
   listDebateSessions,
   orderDebateAudience,
   pauseDebateSession,
+  pauseDebateSessionWithPersona,
   raiseDebateParticipantObjection,
   refineDebateCaseBoard,
   resolveDebateParticipantObjection,
   resumeDebateSession,
+  resumeDebateSessionWithPersona,
   skipDebateJuryDeliberation,
   submitDebateJudgeGavelMessage,
   submitDebateInterjection,
@@ -417,6 +419,26 @@ class PersonaSurpriseProvider extends JuryProvider {
         botId: this.reactionBotId,
         expected: "I expected a simpler defense of the proposal.",
         reaction: "Oh. I see.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ModeratorLifecycleProvider extends DebateProviderStub {
+  public lifecyclePrompts: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("off-record room-control beat")) {
+      this.lifecyclePrompts.push(text);
+      return JSON.stringify({
+        content: text.includes("announce a recess")
+          ? "Yeah, yeah, recess. I need a portal-fluid break."
+          : "All right, portals closed. Back to the argument.",
       });
     }
     return super.generateResponse(messages, options);
@@ -1138,6 +1160,7 @@ async function createDebateForRole(
     debateRuntime?: DebateAiRuntime;
     formality?: DebateFormalityId;
     moderatorTitle?: string;
+    moderatorSystemPrompt?: string;
     moderatorPowers?: BotPowerV1[];
     forPowers?: BotPowerV1[];
     forSystemPrompt?: string;
@@ -1145,7 +1168,13 @@ async function createDebateForRole(
   } = {},
 ) {
   const debateRuntime = options.debateRuntime ?? runtime();
-  seedBot(db, "moderator", "Mira", options.moderatorPowers ?? []);
+  seedBot(
+    db,
+    "moderator",
+    "Mira",
+    options.moderatorPowers ?? [],
+    options.moderatorSystemPrompt,
+  );
   seedBot(
     db,
     "for",
@@ -5585,8 +5614,12 @@ describe("Debate engine", () => {
         speakerKind: "player",
         speakerBotId: paused.moderator.id,
         stepKey: "pause",
-        content: "This debate is now paused.",
       });
+      assert.match(paused.events.at(-1)?.content ?? "", /pause|recess|break/iu);
+      assert.notEqual(
+        paused.events.at(-1)?.content,
+        "This debate is now paused.",
+      );
       const resumeRequest = {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:stable:0001",
@@ -5605,9 +5638,12 @@ describe("Debate engine", () => {
         speakerKind: "player",
         speakerBotId: resumed.moderator.id,
         stepKey: "resume",
-        content: "The proceeding is called back to order.",
         gavelReason: "resume",
       });
+      assert.match(
+        resumed.events.at(-1)?.content ?? "",
+        /back|continue|order|resume|return/iu,
+      );
       assert.ok(
         Date.parse(resumed.judgeGavelCooldownUntil ?? "") - Date.now() <=
           DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
@@ -5654,7 +5690,6 @@ describe("Debate engine", () => {
         speakerKind: "moderator",
         speakerBotId: resumed.moderator.id,
         stepKey: "resume",
-        content: "The proceeding is called back to order.",
         gavelReason: "resume",
       });
       assert.equal(resumed.judgeGavelCooldownUntil, null);
@@ -5664,6 +5699,63 @@ describe("Debate engine", () => {
         idempotencyKey: "spectator:pause-after-resume",
       });
       assert.equal(pausedAgain.status, "paused");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("voices off-record pause and resume lines in the frozen moderator persona", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new ModeratorLifecycleProvider();
+      const debateRuntime = runtimeWith(provider);
+      const created = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        formality: "free_for_all",
+        moderatorSystemPrompt:
+          "Mira is an irreverent dimension-hopping scientist who hates ceremony.",
+      });
+      const paused = await pauseDebateSessionWithPersona(
+        db,
+        "user-1",
+        created.id,
+        {
+          expectedRevision: created.revision,
+          idempotencyKey: "spectator:persona-pause",
+        },
+        debateRuntime,
+      );
+      assert.equal(
+        paused.events.at(-1)?.content,
+        "Yeah, yeah, recess. I need a portal-fluid break.",
+      );
+      assert.equal(paused.events.at(-1)?.stepKey, "pause");
+
+      const resumed = await resumeDebateSessionWithPersona(
+        db,
+        "user-1",
+        paused.id,
+        {
+          expectedRevision: paused.revision,
+          idempotencyKey: "spectator:persona-resume",
+        },
+        debateRuntime,
+      );
+      assert.equal(
+        resumed.events.at(-1)?.content,
+        "All right, portals closed. Back to the argument.",
+      );
+      assert.equal(resumed.events.at(-1)?.gavelReason, "resume");
+      assert.equal(provider.lifecyclePrompts.length, 2);
+      assert.match(
+        provider.lifecyclePrompts[0] ?? "",
+        /irreverent dimension-hopping scientist/iu,
+      );
+      assert.ok(
+        [paused.events.at(-1), resumed.events.at(-1)].every(
+          (event) => event?.stepKey === "pause" || event?.stepKey === "resume",
+        ),
+      );
     } finally {
       db.close();
     }
@@ -6610,6 +6702,65 @@ describe("Debate engine", () => {
       } finally {
         db.close();
       }
+    }
+  });
+
+  it("preserves an unresolved Participant objection through an exit recovery recess", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtimeWith(
+        new ParticipantObjectionProvider("overruled"),
+      );
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-exit-recovery:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const target = session.events.find(
+        (event) => event.kind === "speech" && event.sideId === "for",
+      );
+      assert.ok(target);
+      const raised = raiseDebateParticipantObjection(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-exit-recovery:raise",
+          eventId: target.id,
+          heardCharacterCount: Math.max(
+            24,
+            Math.floor(target.content.length * 0.58),
+          ),
+        },
+      );
+      const paused = pauseDebateSession(db, "user-1", raised.id, {
+        expectedRevision: raised.revision,
+        idempotencyKey: "participant-exit-recovery:pause",
+        exitRecovery: true,
+      });
+      assert.equal(paused.status, "paused");
+      assert.equal(paused.participantObjection?.status, "awaiting_reason");
+
+      const resumed = resumeDebateSession(db, "user-1", paused.id, {
+        expectedRevision: paused.revision,
+        idempotencyKey: "participant-exit-recovery:resume",
+      });
+      assert.equal(resumed.status, "waiting_for_player");
+      assert.equal(resumed.stepKey, "participant_objection_reason");
+      assert.equal(resumed.participantObjection?.status, "awaiting_reason");
+    } finally {
+      db.close();
     }
   });
 
@@ -7620,8 +7771,8 @@ describe("Debate engine", () => {
         speakerKind: "moderator",
         speakerBotId: failed.moderator.id,
         stepKey: "pause",
-        content: "This debate is now paused.",
       });
+      assert.match(failed.events.at(-1)?.content ?? "", /pause|recess|break/iu);
       const skipped = await advanceDebateSession(
         db,
         "user-1",
@@ -7779,8 +7930,11 @@ describe("Debate engine", () => {
         speakerKind: "moderator",
         speakerBotId: exhausted.moderator.id,
         stepKey: "pause",
-        content: "This debate is now paused.",
       });
+      assert.match(
+        exhausted.events.at(-1)?.content ?? "",
+        /pause|recess|break/iu,
+      );
     } finally {
       db.close();
     }

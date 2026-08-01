@@ -7,6 +7,7 @@ import {
   debateAudienceBotIsPlayerSpectator,
   debateAudienceBotsForSession,
   debateAudienceConversationFacing,
+  debateAudienceDepartureXPercent,
   debateAudienceFrontRowCenterIndex,
   debateAudienceRandom,
   debateAudienceSeatLayout,
@@ -178,5 +179,22 @@ describe("Debate audience casting", () => {
     assert.deepEqual(firstSamples, secondSamples);
     assert.ok(firstSamples.every((sample) => sample >= 0 && sample < 1));
     assert.ok(new Set(firstSamples).size > 1);
+  });
+
+  it("gives gallery departures stable left and right paths within the clipped row", () => {
+    const seeds = [
+      "session:bot-a",
+      "session:bot-b",
+      "session:bot-c",
+      "session:bot-d",
+    ];
+    const paths = seeds.map(debateAudienceDepartureXPercent);
+
+    assert.deepEqual(paths, seeds.map(debateAudienceDepartureXPercent));
+    assert.ok(paths.some((path) => path < 0));
+    assert.ok(paths.some((path) => path > 0));
+    assert.ok(
+      paths.every((path) => Math.abs(path) >= 175 && Math.abs(path) <= 325),
+    );
   });
 });

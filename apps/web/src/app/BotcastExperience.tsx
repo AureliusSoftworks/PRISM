@@ -138,6 +138,8 @@ import {
   type ReplayStudioCutEligibilityV1,
   type PrismRefractResponse,
   type PrismRefractSignalTextTarget,
+  type PreparedTurnV1,
+  type BotPresenceBeatV1,
   type SignalPersonaTemperament,
 } from "@localai/shared";
 import { PRISM_APP_VERSION } from "../prismAppVersion";
@@ -156,6 +158,10 @@ import {
   coffeeCupSipAnimationTiming,
   type CoffeeCupVisualState,
 } from "./coffee-cup-sprites";
+import {
+  buildBundledActionSfxPlan,
+  bundledActionSfxCueAtMs,
+} from "./coffee-action-sfx";
 import { nextBotcastShowIdAfterDeletion } from "./botcastDeletion";
 import {
   botcastSpeechRevealIsVoicing,
@@ -450,6 +456,7 @@ interface SignalListenerReactionVoiceLifecycles {
 }
 
 const SIGNAL_NATURAL_HANDOFF_MS = 40;
+const SIGNAL_PREPARATION_POLL_MS = 180;
 const SIGNAL_NOTICE_TOAST_MS = 7_000;
 const SIGNAL_EPISODE_PRE_ROLL_MIN_MS = 3_000;
 const SIGNAL_ATMOSPHERE_BUSES = [
@@ -468,6 +475,33 @@ const SIGNAL_VOICE_START_TIMEOUT_MS = 12_000;
 // Once playback starts, a missing provider completion signal must not strand
 // the episode in a busy state and block the next on-air turn indefinitely.
 const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000;
+
+async function waitForSignalTurnPreparation(
+  request: BotcastApiRequest,
+  initial: PreparedTurnV1,
+  signal: AbortSignal,
+): Promise<PreparedTurnV1> {
+  let preparation = initial;
+  while (preparation.phase === "preparing") {
+    await new Promise<void>((resolve, reject) => {
+      const timer = window.setTimeout(resolve, SIGNAL_PREPARATION_POLL_MS);
+      signal.addEventListener(
+        "abort",
+        () => {
+          window.clearTimeout(timer);
+          reject(new DOMException("Signal preparation was cancelled.", "AbortError"));
+        },
+        { once: true },
+      );
+    });
+    const status = await request<{ preparation: PreparedTurnV1 }>(
+      `/api/turn-preparations/${encodeURIComponent(preparation.id)}`,
+      { signal },
+    );
+    preparation = status.preparation;
+  }
+  return preparation;
+}
 /** Discrete mouths and captions stay fluid without rerendering Signal at 60 fps. */
 const SIGNAL_LIVE_SPEECH_RENDER_INTERVAL_MS = 50;
 /** Decode crosstalk ahead of its cue, then enter on the exact audio-clock beat. */
@@ -521,19 +555,16 @@ function signalHostChatStreamChunks(content: string): string[] {
 }
 
 type PreparedBotcastAdvanceResult =
-  | { ok: true; response: BotcastEpisodeAdvanceResponse }
+  | { ok: true; preparation: PreparedTurnV1 }
   | { ok: false; error: unknown };
 
 type PreparedBotcastAdvance = {
   episodeId: string;
   afterMessageId: string;
   controller: AbortController;
+  preparationId: string | null;
   result: Promise<PreparedBotcastAdvanceResult>;
   settled: boolean;
-  warming: boolean;
-  warmupModel: string | null;
-  warmupStartedAt: string | null;
-  warmupFailure: import("@localai/shared").ModelPreparationFailure | null;
 };
 
 type SignalModelWarmup = {
@@ -628,6 +659,14 @@ export interface BotcastExperienceProps {
     lifecycles?: SignalListenerReactionVoiceLifecycles,
   ) => boolean | Promise<boolean>;
   onPrepareUtterance?: () => void;
+  onResponseCueGeneration?: (args: {
+    botId: string;
+    trigger: "interruption" | "redirect" | null;
+    sessionId: string;
+  }) => () => Promise<void>;
+  onPrewarmResponseCue?: (botId: string) => void;
+  presenceBeat?: BotPresenceBeatV1 | null;
+  presenceBeats?: readonly BotPresenceBeatV1[];
   onStopUtterance?: () => void;
   onProducerGuestActionSfx?: (message: BotcastMessage) => void;
   introAudioEnabled?: boolean;
@@ -1836,6 +1875,10 @@ export function BotcastExperience({
   onPrefetchListenerReaction,
   onListenerReaction,
   onPrepareUtterance,
+  onResponseCueGeneration,
+  onPrewarmResponseCue,
+  presenceBeat,
+  presenceBeats = [],
   onStopUtterance,
   onProducerGuestActionSfx,
   introAudioEnabled = true,
@@ -1899,6 +1942,38 @@ export function BotcastExperience({
   const [replayEpisode, setReplayEpisode] = useState<BotcastEpisode | null>(
     null,
   );
+  const [persistedPresenceBeats, setPersistedPresenceBeats] = useState<
+    BotPresenceBeatV1[]
+  >([]);
+  const presenceBeatSessionId = replayEpisode?.id ?? episode?.id ?? null;
+  useEffect(() => {
+    if (!presenceBeatSessionId) {
+      setPersistedPresenceBeats([]);
+      return;
+    }
+    const controller = new AbortController();
+    void request<{ beats: BotPresenceBeatV1[] }>(
+      `/api/presence-beats?surface=signal&sessionId=${encodeURIComponent(presenceBeatSessionId)}`,
+      { signal: controller.signal },
+    )
+      .then(({ beats }) => setPersistedPresenceBeats(beats))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [presenceBeatSessionId, request]);
+  const visiblePresenceBeats = useMemo(() => {
+    const byResponseId = new Map<string, BotPresenceBeatV1>();
+    for (const beat of [...persistedPresenceBeats, ...presenceBeats]) {
+      if (
+        beat.surface === "signal" &&
+        beat.sessionId === presenceBeatSessionId
+      ) {
+        byResponseId.set(beat.responseId, beat);
+      }
+    }
+    return [...byResponseId.values()].sort((left, right) =>
+      left.createdAt.localeCompare(right.createdAt),
+    );
+  }, [persistedPresenceBeats, presenceBeatSessionId, presenceBeats]);
   const [replayRecording, setReplayRecording] =
     useState<ReplayRecordingV1 | null>(null);
   const replayRecordingId = replayRecording?.id ?? null;
@@ -2116,6 +2191,11 @@ export function BotcastExperience({
   const cuttingShowRef = useRef(false);
   const replayVoiceMessageIdRef = useRef<string | null>(null);
   const replayVoiceRunIdRef = useRef(0);
+  const replayProducerGuestActionSfxClockRef = useRef<{
+    messageId: string;
+    lastElapsedMs: number;
+    played: boolean;
+  } | null>(null);
   const listenerReactionPlanByMessageIdRef = useRef(
     new Map<string, ListenerReactionPlanV1>(),
   );
@@ -2703,12 +2783,35 @@ export function BotcastExperience({
     [],
   );
 
+  const discardPreparedAdvance = useCallback(
+    (reason: string): void => {
+      const prepared = preparedAdvanceRef.current;
+      if (!prepared) return;
+      preparedAdvanceRef.current = null;
+      prepared.controller.abort();
+      const discard = (preparationId: string): void => {
+        void request(
+          `/api/turn-preparations/${encodeURIComponent(preparationId)}`,
+          { method: "DELETE" },
+        ).catch(() => undefined);
+      };
+      if (prepared.preparationId) {
+        discard(prepared.preparationId);
+      } else {
+        void prepared.result.then((result) => {
+          if (result.ok) discard(result.preparation.id);
+        });
+      }
+      void reason;
+    },
+    [request],
+  );
+
   const invalidateEpisodeOperation = useCallback((): void => {
     episodeRunIdRef.current += 1;
     episodeOperationAbortRef.current?.abort();
     episodeOperationAbortRef.current = null;
-    preparedAdvanceRef.current?.controller.abort();
-    preparedAdvanceRef.current = null;
+    discardPreparedAdvance("Signal state changed before handoff.");
     advanceInFlightRef.current = false;
     setAutoRun(false);
     setBusy(false);
@@ -2723,6 +2826,7 @@ export function BotcastExperience({
     stopUtterance();
   }, [
     assignSignalModelWarmup,
+    discardPreparedAdvance,
     stopEpisodeOutro,
     stopIntroPreview,
     stopUtterance,
@@ -3359,6 +3463,12 @@ export function BotcastExperience({
         }
       : bot;
   }, [botsById, episode, selectedShow?.accentColor]);
+  useEffect(() => {
+    if (hostBot) onPrewarmResponseCue?.(hostBot.id);
+    if (liveGuestBot && !liveGuestBot.producerGuest) {
+      onPrewarmResponseCue?.(liveGuestBot.id);
+    }
+  }, [hostBot, liveGuestBot, onPrewarmResponseCue]);
   const replayHostBot = replayEpisode
     ? (() => {
         const bot = botsById.get(replayEpisode.hostBotId) ?? null;
@@ -3402,10 +3512,14 @@ export function BotcastExperience({
     if (!targetShow) return;
     setReviewCopyState({ episodeId: targetEpisode.id, phase: "copying" });
     try {
-      const recordingEvidence = await loadSessionReviewRecordingEvidence(
-        "signal",
-        targetEpisode.id,
-      );
+      const [recordingEvidence, presenceBeats] = await Promise.all([
+        loadSessionReviewRecordingEvidence("signal", targetEpisode.id),
+        request<{ beats: BotPresenceBeatV1[] }>(
+          `/api/presence-beats?surface=signal&sessionId=${encodeURIComponent(targetEpisode.id)}`,
+        )
+          .then((response) => response.beats)
+          .catch(() => []),
+      ]);
       const transcript = buildSignalReviewTranscript({
         episode: targetEpisode,
         show: targetShow,
@@ -3424,6 +3538,7 @@ export function BotcastExperience({
           ? (modelLabels.get(targetEpisode.model) ?? targetEpisode.model)
           : null,
         recordingEvidence,
+        presenceBeats,
       });
       await writeSignalReviewClipboard(transcript);
       setReviewCopyState({ episodeId: targetEpisode.id, phase: "copied" });
@@ -6027,7 +6142,7 @@ export function BotcastExperience({
       let voiceCompletionTimer: number | null = null;
       let settleVoicePlayback: ((value: boolean) => void) | null = null;
       let voiceAttemptActive = true;
-      let guestResponsePrepared = false;
+      let followingTurnPrepared = false;
       const voicePlaybackEligible = Boolean(
         bot &&
           !bot.muted &&
@@ -6037,27 +6152,50 @@ export function BotcastExperience({
       );
       const configuredVoicePlaybackAttempted =
         voicePlaybackEligible && recordingVoiceSelection.voiceMode !== "mute";
+      const producerGuestActionSfxPlan =
+        currentEpisode.guestKind === "producer" &&
+        message.speakerRole === "guest" &&
+        message.botId === BOTCAST_PRODUCER_GUEST_ID
+          ? buildBundledActionSfxPlan(message.content)
+          : null;
+      let producerGuestActionSfxPlayed = false;
+      let producerGuestActionSfxResolvedCueAtMs: number | null = null;
+      const playProducerGuestActionSfxAt = (
+        elapsedMs: number,
+        durationMs: number,
+        alignment?: VoicePlaybackCharacterAlignment | null,
+      ): void => {
+        if (producerGuestActionSfxPlayed || !producerGuestActionSfxPlan) return;
+        const cueAtMs =
+          alignment || producerGuestActionSfxResolvedCueAtMs === null
+            ? bundledActionSfxCueAtMs(
+                message.content,
+                durationMs,
+                alignment,
+              )
+            : producerGuestActionSfxResolvedCueAtMs;
+        producerGuestActionSfxResolvedCueAtMs = cueAtMs;
+        if (cueAtMs === null || elapsedMs < cueAtMs) return;
+        producerGuestActionSfxPlayed = true;
+        onProducerGuestActionSfx?.(message);
+      };
+      const prepareNextTurn = (): void => {
+        if (
+          !prepareFollowingTurn ||
+          followingTurnPrepared
+        )
+          return;
+        followingTurnPrepared = true;
+        prepareGuestResponseRef.current(currentEpisode, message);
+      };
       const notifyPlaybackStart = (): void => {
         if (playbackStartNotified) return;
         playbackStartNotified = true;
-        if (
-          currentEpisode.guestKind === "producer" &&
-          message.speakerRole === "guest" &&
-          message.botId === BOTCAST_PRODUCER_GUEST_ID
-        ) {
-          onProducerGuestActionSfx?.(message);
+        prepareNextTurn();
+        if (producerGuestActionSfxPlan?.revealAtDisplayLength === 0) {
+          playProducerGuestActionSfxAt(0, 1);
         }
         onPlaybackStart?.();
-      };
-      const prepareFollowingGuest = (): void => {
-        if (
-          !prepareFollowingTurn ||
-          guestResponsePrepared ||
-          message.speakerRole !== "host"
-        )
-          return;
-        guestResponsePrepared = true;
-        prepareGuestResponseRef.current(currentEpisode, message);
       };
       let armedVoiceCompletionDurationMs = 0;
       const armVoiceCompletionWatchdog = (
@@ -6123,6 +6261,7 @@ export function BotcastExperience({
             signalVoiceCompletionFallbackDurationMs(
               primarySpokenContent || message.content,
             );
+          playProducerGuestActionSfxAt(0, resolvedDurationMs, alignment);
           armVoiceCompletionWatchdog(resolvedDurationMs);
           armListenerReactionTiming(message, resolvedDurationMs, alignment);
           setLiveSpeech({
@@ -6146,9 +6285,10 @@ export function BotcastExperience({
             elapsedMs / Math.max(1, durationMs) >=
             SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS
           ) {
-            prepareFollowingGuest();
+            prepareNextTurn();
           }
           fireLiveListenerReaction(message, elapsedMs, durationMs);
+          playProducerGuestActionSfxAt(elapsedMs, durationMs);
           const renderNow = performance.now();
           if (
             elapsedMs < durationMs &&
@@ -6180,7 +6320,7 @@ export function BotcastExperience({
             !episodeOperationIsCurrent(controller, runId)
           )
             return;
-          prepareFollowingGuest();
+          prepareNextTurn();
           setSignalPreSpeechPresenceMessageId((current) =>
             current === message.id ? null : current,
           );
@@ -6192,6 +6332,7 @@ export function BotcastExperience({
                 }
               : current,
           );
+          playProducerGuestActionSfxAt(Number.POSITIVE_INFINITY, 1);
           settleVoicePlayback?.(true);
         },
       };
@@ -6258,11 +6399,12 @@ export function BotcastExperience({
         }
         notifyPlaybackStart();
         await revealUtteranceWithoutAudio(message, (elapsedMs, durationMs) => {
+          playProducerGuestActionSfxAt(elapsedMs, durationMs);
           if (
             elapsedMs / Math.max(1, durationMs) >=
             SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS
           ) {
-            prepareFollowingGuest();
+            prepareNextTurn();
           }
         });
       } else {
@@ -6273,7 +6415,7 @@ export function BotcastExperience({
         );
       }
       if (activeSpeechMessageIdRef.current === message.id) {
-        prepareFollowingGuest();
+        prepareNextTurn();
         if (
           !socialSilenceMessageIsMarkedV1({
             content: message.content,
@@ -6307,77 +6449,87 @@ export function BotcastExperience({
   playPreparedEpisodeMessageRef.current = playPreparedEpisodeMessage;
 
   const prepareGuestResponse = useCallback(
-    (currentEpisode: BotcastEpisode, hostMessage: BotcastMessage): void => {
-      preparedAdvanceRef.current?.controller.abort();
-      preparedAdvanceRef.current = null;
+    (currentEpisode: BotcastEpisode, currentMessage: BotcastMessage): void => {
+      discardPreparedAdvance("A newer Signal preparation superseded this one.");
       if (
         currentEpisode.status === "completed" ||
-        currentEpisode.guestKind === "producer" ||
-        hostMessage.speakerRole !== "host"
+        currentEpisode.guestKind === "producer"
       )
         return;
       const controller = new AbortController();
       const prepared: PreparedBotcastAdvance = {
         episodeId: currentEpisode.id,
-        afterMessageId: hostMessage.id,
+        afterMessageId: currentMessage.id,
         controller,
+        preparationId: null,
         settled: false,
-        warming: false,
-        warmupModel: currentEpisode.model,
-        warmupStartedAt: null,
-        warmupFailure: null,
         result: Promise.resolve({
           ok: false as const,
           error: new Error("Not started"),
         }),
       };
-      prepared.result = waitForModelPreparation({
-        request,
-        provider: currentEpisode.provider,
-        model: currentEpisode.model,
-        experience: "signal",
-        signal: controller.signal,
-        onStatus: (status) => {
-          prepared.warming ||= status.state === "warming";
-          prepared.warmupModel = status.model;
-          prepared.warmupStartedAt = status.startedAt;
-          prepared.warmupFailure = status.failure;
-        },
-      })
-        .then((status) => {
-        if (status.state === "unavailable") {
-          throw new Error("The local model could not get ready.");
-        }
-        return request<BotcastEpisodeAdvanceResponse>(
-          `/api/botcast/episodes/${encodeURIComponent(currentEpisode.id)}/advance`,
+      prepared.result = request<{ preparation: PreparedTurnV1 }>(
+          `/api/botcast/episodes/${encodeURIComponent(currentEpisode.id)}/turn-preparations`,
           {
             method: "POST",
             signal: controller.signal,
             body: JSON.stringify({ theme }),
           },
-        );
+        )
+        .then(async ({ preparation }) => {
+          prepared.preparationId = preparation.id;
+          return waitForSignalTurnPreparation(
+            request,
+            preparation,
+            controller.signal,
+          );
         })
         .then(
-          (response) => {
-            if (response.message) {
-              let bot = botsById.get(response.message.botId);
+          (preparation) => {
+            const utterance = preparation.provisionalUtterances[0];
+            if (preparation.phase === "ready" && utterance) {
+              let bot = botsById.get(utterance.speakerBotId);
               if (bot) {
                 bot = botWithIdentityBeforeMessage(
                   bot,
-                  response.episode,
-                  response.message,
+                  currentEpisode,
+                  {
+                    id: utterance.id,
+                    episodeId: currentEpisode.id,
+                    speakerRole:
+                      utterance.speakerBotId === currentEpisode.hostBotId
+                        ? "host"
+                        : "guest",
+                    botId: utterance.speakerBotId,
+                    content: utterance.text,
+                    stageActionText: null,
+                    voicePerformanceText: null,
+                    moodKey: "neutral",
+                    createdAt: preparation.updatedAt,
+                  },
                 );
               }
-              if (
-                bot &&
-                !bot.muted &&
-                botcastMessageIsAudibleToAudienceV1(response.message) &&
-                !botPowerResponseIsSilentV1(response.message.content)
-              ) {
-                onPrefetchUtterance?.(response.message, bot);
+              if (bot && !bot.muted && !botPowerResponseIsSilentV1(utterance.text)) {
+                onPrefetchUtterance?.(
+                  {
+                    id: utterance.id,
+                    episodeId: currentEpisode.id,
+                    speakerRole:
+                      utterance.speakerBotId === currentEpisode.hostBotId
+                        ? "host"
+                        : "guest",
+                    botId: utterance.speakerBotId,
+                    content: utterance.text,
+                    stageActionText: null,
+                    voicePerformanceText: null,
+                    moodKey: "neutral",
+                    createdAt: preparation.updatedAt,
+                  },
+                  bot,
+                );
               }
             }
-            return { ok: true as const, response };
+            return { ok: true as const, preparation };
           },
           (error: unknown) => ({ ok: false as const, error }),
         )
@@ -6386,7 +6538,7 @@ export function BotcastExperience({
         });
       preparedAdvanceRef.current = prepared;
     },
-    [botsById, onPrefetchUtterance, request, theme],
+    [botsById, discardPreparedAdvance, onPrefetchUtterance, request, theme],
   );
   prepareGuestResponseRef.current = prepareGuestResponse;
 
@@ -6421,6 +6573,7 @@ export function BotcastExperience({
           ? queuedProducerCueRef.current
           : null;
       const requestedCue = cue ?? queuedCue ?? undefined;
+      let finishResponseCue: (() => Promise<void>) | null = null;
       advanceInFlightRef.current = true;
       const { controller, runId } = beginEpisodeOperation();
       setBusy(true);
@@ -6508,40 +6661,36 @@ export function BotcastExperience({
           ? preparedAdvanceRef.current
           : null;
         let warmupHoldActive = false;
-        if (prepared?.warming && !prepared.settled) {
-          warmupHoldActive = true;
-          signalModelWarmupVisibleRef.current = true;
-          assignSignalModelWarmup({
-            phase: "held",
-            model: prepared.warmupModel,
-            startedAt: prepared.warmupStartedAt,
-            failure: prepared.warmupFailure,
-            initial: false,
-            episodeId: episode.id,
-          });
-          await setPersistedSignalModelWarmupHold(episode.id, true);
-        }
         const preparedResult = prepared ? await prepared.result : null;
         if (preparedAdvanceRef.current === prepared) {
           preparedAdvanceRef.current = null;
         }
-        if (preparedResult && !preparedResult.ok && prepared?.warmupFailure) {
-          signalModelWarmupVisibleRef.current = true;
-          assignSignalModelWarmup({
-            phase: "failed",
-            model: prepared.warmupModel,
-            startedAt: prepared.warmupStartedAt,
-            failure: prepared.warmupFailure,
-            initial: false,
-            episodeId: episode.id,
+        const readyPreparation =
+          preparedResult?.ok && preparedResult.preparation.phase === "ready"
+            ? preparedResult.preparation
+            : null;
+        if (
+          !readyPreparation &&
+          !interruptionBridgeMessage &&
+          !producerGuestHostInterruption
+        ) {
+          const nextRole = botcastNextSpeakerRole({
+            messages: episode.messages,
+            segment: episode.segment,
+            guestDeparted: guestHasDeparted(episode),
           });
-          setAutoRun(false);
-          return false;
+          const responder = nextRole === "host" ? hostBot : liveGuestBot;
+          if (responder && !responder.producerGuest) {
+            finishResponseCue = onResponseCueGeneration?.({
+              botId: responder.id,
+              trigger: requestedCue ? "redirect" : null,
+              sessionId: episode.id,
+            }) ?? null;
+          }
         }
-        if (preparedResult && !preparedResult.ok) throw preparedResult.error;
         let directHoldStart: Promise<BotcastEpisode> | null = null;
         if (
-          !preparedResult &&
+          !readyPreparation &&
           !(producerGuestHostInterruption && !producerGuestMessage)
         ) {
           const preparationStatus = await waitForModelPreparation({
@@ -6586,7 +6735,12 @@ export function BotcastExperience({
           }
         }
         const response =
-          preparedResult?.response ??
+          readyPreparation
+            ? await request<BotcastEpisodeAdvanceResponse>(
+                `/api/turn-preparations/${encodeURIComponent(readyPreparation.id)}/commit`,
+                { method: "POST", signal: controller.signal },
+              )
+            :
           (await request<BotcastEpisodeAdvanceResponse>(
             `/api/botcast/episodes/${encodeURIComponent(episode.id)}/advance`,
             {
@@ -6610,6 +6764,7 @@ export function BotcastExperience({
               }),
             },
           ));
+        await finishResponseCue?.();
         if (interruptionBridgePlayback) {
           await interruptionBridgePlayback;
         }
@@ -6689,6 +6844,7 @@ export function BotcastExperience({
         }
         return true;
       } catch (advanceError) {
+        await finishResponseCue?.();
         if (episodeOperationIsCurrent(controller, runId)) {
           if (signalModelWarmupRef.current) {
             await releaseSignalModelWarmup(episode.id);
@@ -6699,6 +6855,7 @@ export function BotcastExperience({
         }
         return false;
       } finally {
+        await finishResponseCue?.();
         if (episodeOperationIsCurrent(controller, runId)) {
           episodeOperationAbortRef.current = null;
           setBusy(false);
@@ -6717,6 +6874,7 @@ export function BotcastExperience({
       episodeOperationIsCurrent,
       loadEpisodes,
       onListenerReaction,
+      onResponseCueGeneration,
       playEpisodeOutro,
       playPreparedEpisodeMessage,
       prepareEpisodeMessage,
@@ -6724,6 +6882,7 @@ export function BotcastExperience({
       request,
       selectedShow,
       selectedShowId,
+      liveGuestBot,
       stopUtterance,
       setPersistedSignalModelWarmupHold,
       theme,
@@ -7581,6 +7740,55 @@ export function BotcastExperience({
     1,
     replayMessageEndMs - replayMessageStartMs,
   );
+  useEffect(() => {
+    if (
+      !replayProceduralAudioEnabled ||
+      !replayPlaying ||
+      replayEpisode?.guestKind !== "producer" ||
+      replayActiveMessage?.speakerRole !== "guest" ||
+      replayActiveMessage.botId !== BOTCAST_PRODUCER_GUEST_ID
+    ) {
+      return;
+    }
+    const elapsedMs = Math.max(
+      0,
+      Math.min(
+        replayMessageDurationMs,
+        replayElapsedMs - replayMessageStartMs,
+      ),
+    );
+    const previous = replayProducerGuestActionSfxClockRef.current;
+    const rewoundWithinMessage =
+      previous?.messageId === replayActiveMessage.id &&
+      elapsedMs + 80 < previous.lastElapsedMs;
+    const clock =
+      previous?.messageId === replayActiveMessage.id && !rewoundWithinMessage
+        ? previous
+        : {
+            messageId: replayActiveMessage.id,
+            lastElapsedMs: 0,
+            played: false,
+          };
+    clock.lastElapsedMs = elapsedMs;
+    const cueAtMs = bundledActionSfxCueAtMs(
+      replayActiveMessage.content,
+      replayMessageDurationMs,
+    );
+    if (!clock.played && cueAtMs !== null && elapsedMs >= cueAtMs) {
+      clock.played = true;
+      onProducerGuestActionSfx?.(replayActiveMessage);
+    }
+    replayProducerGuestActionSfxClockRef.current = clock;
+  }, [
+    onProducerGuestActionSfx,
+    replayActiveMessage,
+    replayElapsedMs,
+    replayEpisode?.guestKind,
+    replayMessageDurationMs,
+    replayMessageStartMs,
+    replayPlaying,
+    replayProceduralAudioEnabled,
+  ]);
   const replayReactionAtMs =
     replayActiveMessage && replayListenerReactionPlan
       ? (listenerReactionAtMsByMessageIdRef.current.get(
@@ -7658,13 +7866,6 @@ export function BotcastExperience({
     if (!replayPlaying || !replayActiveMessage) return;
     if (replayVoiceMessageIdRef.current === replayActiveMessage.id) return;
     replayVoiceMessageIdRef.current = replayActiveMessage.id;
-    if (
-      replayEpisode?.guestKind === "producer" &&
-      replayActiveMessage.speakerRole === "guest" &&
-      replayActiveMessage.botId === BOTCAST_PRODUCER_GUEST_ID
-    ) {
-      onProducerGuestActionSfx?.(replayActiveMessage);
-    }
     let bot =
       replayEpisode?.guestKind === "producer" &&
       replayActiveMessage.speakerRole === "guest" &&
@@ -7782,7 +7983,6 @@ export function BotcastExperience({
   }, [
     botsById,
     armListenerReactionTiming,
-    onProducerGuestActionSfx,
     onUtterance,
     replayActiveMessage,
     replayDurationMs,
@@ -8454,6 +8654,14 @@ export function BotcastExperience({
         role === "host"
           ? args.currentEpisode.hostBotId
           : args.currentEpisode.guestBotId;
+      if (
+        presenceBeat?.surface === "signal" &&
+        presenceBeat.sessionId === args.currentEpisode.id &&
+        presenceBeat.completion === "playing" &&
+        presenceBeat.speaker.botId === roleBotId
+      ) {
+        return true;
+      }
       if (signalEphemeralSpeakingBotIds.has(roleBotId)) return true;
       const directedParticipant =
         replayDirectedScene?.participants[
@@ -8522,6 +8730,15 @@ export function BotcastExperience({
     );
     const roleIsThinking = (role: "host" | "guest"): boolean =>
       !(role === "guest" && manualProducerGuestSip) &&
+      !(
+        presenceBeat?.surface === "signal" &&
+        presenceBeat.sessionId === args.currentEpisode.id &&
+        presenceBeat.completion === "playing" &&
+        presenceBeat.speaker.botId ===
+          (role === "host"
+            ? args.currentEpisode.hostBotId
+            : args.currentEpisode.guestBotId)
+      ) &&
       ((role === "guest" &&
         (replayProducerGuestThinking || liveProducerGuestThinking)) ||
         (!args.replay &&
@@ -9180,7 +9397,21 @@ export function BotcastExperience({
             </strong>
           </div>
         </div>
-        {liveCaptionsEnabled &&
+        {presenceBeat?.surface === "signal" &&
+        presenceBeat.sessionId === args.currentEpisode.id &&
+        presenceBeat.completion === "playing" ? (
+          <div
+            className={styles.liveCaption}
+            data-response-cue="true"
+            aria-live="polite"
+          >
+            <strong>Response cue · {presenceBeat.speaker.name}</strong>
+            <span>
+              {presenceBeat.text.slice(0, presenceBeat.heardCharacterCount) ||
+                "…"}
+            </span>
+          </div>
+        ) : liveCaptionsEnabled &&
         delayedLiveCaption &&
         delayedLiveCaptionSpeaker &&
         args.activeMessage ? (
@@ -12835,6 +13066,17 @@ export function BotcastExperience({
                     <span>{signalVoicePerformanceTranscriptText(message)}</span>
                 </button>
                 ) : null;
+              })}
+              {visiblePresenceBeats.flatMap((beat) => {
+                const heard = beat.text.slice(0, beat.heardCharacterCount);
+                return heard
+                  ? [
+                      <div key={beat.id} data-response-cue="true">
+                        <strong>Response cue · {beat.speaker.name}</strong>
+                        <span>{heard}</span>
+                      </div>,
+                    ]
+                  : [];
               })}
             </div>
           </div>

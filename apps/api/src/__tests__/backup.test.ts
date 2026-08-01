@@ -24,6 +24,45 @@ import {
   parseStoredBotPowersV1,
 } from "@localai/shared";
 
+describe("backup response cues", () => {
+  it("round-trips the audience-heard presentation beat", () => {
+    withBackupDatabase((db, userKey) => {
+      const createdAt = "2026-08-01T20:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bot_presence_beats
+           (id, user_id, surface, session_id, response_id, speaker_bot_id,
+            speaker_name, trigger, source, text, heard_character_count,
+            completion, playback_started_at_ms, playback_ended_at_ms,
+            created_at, updated_at)
+         VALUES ('beat-1', 'user-1', 'debate', 'debate-1', 'response-1',
+                 'bot-1', 'Jane', 'interruption', 'default', 'Okay, then.', 5,
+                 'interrupted', 100, 420, ?, ?)`,
+      ).run(createdAt, createdAt);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.presenceBeats?.[0]?.heardCharacterCount, 5);
+      assert.equal(snapshot.presenceBeats?.[0]?.completion, "interrupted");
+
+      db.prepare("DELETE FROM bot_presence_beats WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT text, heard_character_count, completion
+             FROM bot_presence_beats
+            WHERE id = 'beat-1' AND user_id = 'user-1'`,
+        )
+        .get() as {
+        text: string;
+        heard_character_count: number;
+        completion: string;
+      };
+      assert.equal(restored.text, "Okay, then.");
+      assert.equal(restored.heard_character_count, 5);
+      assert.equal(restored.completion, "interrupted");
+    });
+  });
+});
+
 describe("backup Coffee service state", () => {
   it("round-trips the bar ritual and requires archived pixels for a special drink", () => {
     withBackupDatabase((db, userKey) => {
@@ -1171,10 +1210,10 @@ describe("backup bot avatar face style", () => {
 });
 
 describe("backup audio voice settings", () => {
-  it("round-trips account and bot profiles without retired mode-specific voice settings", () => {
+  it("round-trips player, Prism avatar, and bot voice profiles", () => {
     withBackupDatabase((db, userKey) => {
       db.prepare(
-        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, operating_system_voices_enabled = 1, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
+        "UPDATE users SET voice_mode = ?, voice_effects_enabled = 0, voice_volume = ?, operating_system_voices_enabled = 1, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = 1, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = ? WHERE id = ?"
       ).run(
         "babble",
         0.65,
@@ -1224,11 +1263,12 @@ describe("backup audio voice settings", () => {
       assert.equal(snapshot.settings?.elevenLabsVoiceModel, "eleven_flash_v2_5");
       assert.equal(snapshot.settings?.elevenLabsVoiceCollectionId, "collection-main");
       assert.equal(snapshot.settings?.elevenLabsVoiceBank?.["voice-1"], "eleven-a");
-      assert.equal("playerAudioVoiceProfile" in (snapshot.settings ?? {}), false);
+      assert.equal(snapshot.settings?.zenPlayerVoiceEnabled, true);
+      assert.equal(snapshot.settings?.playerAudioVoiceProfile?.baseVoiceId, "voice-3");
       assert.equal("playerNamePronunciation" in (snapshot.settings ?? {}), false);
 
       db.prepare(
-        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, operating_system_voices_enabled = 0, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
+        "UPDATE users SET voice_mode = 'mute', voice_effects_enabled = 1, voice_volume = 1, operating_system_voices_enabled = 0, english_voice_engine = 'builtin', default_system_voice_name = NULL, default_elevenlabs_voice_id = NULL, elevenlabs_voice_bank = '{}', elevenlabs_voice_model = NULL, elevenlabs_voice_collection_id = NULL, zen_player_voice_enabled = 0, player_audio_voice_profile = ?, player_name_pronunciation = ?, prism_default_bot_audio_voice_profile = NULL WHERE id = ?"
       ).run(
         JSON.stringify({ v: 1, baseVoiceId: "voice-2", pitch: 0, warmth: 0, pace: 0, lilt: 0 }),
         "Keep me",
@@ -1237,7 +1277,7 @@ describe("backup audio voice settings", () => {
       importUserSnapshot(db, "user-1", snapshot, userKey);
 
       const restoredUser = db.prepare(
-        "SELECT voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
+        "SELECT voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, prism_default_bot_audio_voice_profile FROM users WHERE id = ?"
       ).get("user-1") as Record<string, string | null>;
       assert.equal(restoredUser.voice_mode, "babble");
       assert.equal(restoredUser.voice_effects_enabled, 0);
@@ -1252,7 +1292,8 @@ describe("backup audio voice settings", () => {
       assert.equal(restoredUser.elevenlabs_voice_model, "eleven_flash_v2_5");
       assert.equal(restoredUser.elevenlabs_voice_collection_id, "collection-main");
       assert.equal(JSON.parse(restoredUser.elevenlabs_voice_bank ?? "{}")["voice-1"], "eleven-a");
-      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-2");
+      assert.equal(restoredUser.zen_player_voice_enabled, 1);
+      assert.equal(JSON.parse(restoredUser.player_audio_voice_profile ?? "{}").baseVoiceId, "voice-3");
       assert.equal(restoredUser.player_name_pronunciation, "Keep me");
 
       const restoredBot = db.prepare(

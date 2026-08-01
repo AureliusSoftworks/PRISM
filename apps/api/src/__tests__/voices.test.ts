@@ -771,6 +771,48 @@ describe("voice Phase 1 boundary", () => {
     });
   });
 
+  it("rejects timestamped speech whose alignment ends at a strict text prefix", async () => {
+    const requestedText =
+      "Gentlemen, vanity is not evidence, however handsomely dressed.";
+    const truncatedText = "Gentlemen, vanity";
+
+    await assert.rejects(
+      requestElevenLabsSpeechWithTimestamps({
+        apiKey: "secret-key",
+        voiceId: "voice-id",
+        model: "eleven_flash_v2_5",
+        text: requestedText,
+        profile: {
+          v: 1,
+          baseVoiceId: "voice-1",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+        },
+        fetchImpl: (async () => {
+          const characters = Array.from(truncatedText);
+          return new Response(
+            JSON.stringify({
+              audio_base64: "AQID",
+              alignment: {
+                characters,
+                character_start_times_seconds: characters.map(
+                  (_, index) => index * 0.05,
+                ),
+                character_end_times_seconds: characters.map(
+                  (_, index) => (index + 1) * 0.05,
+                ),
+              },
+            }),
+            { status: 200 },
+          );
+        }) as typeof fetch,
+      }),
+      /ended before the requested line/u,
+    );
+  });
+
   it("preserves ElevenLabs provider codes while surfacing their readable message", async () => {
     await assert.rejects(
       requestElevenLabsSpeechWithTimestamps({

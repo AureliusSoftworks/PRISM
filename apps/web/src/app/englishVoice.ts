@@ -444,7 +444,7 @@ async function playBytesWithMedia(
     const beginAudiblePlayback = () => {
       if (started) return;
       if (!playbackStillValid()) {
-        finish();
+        cancel();
         return;
       }
       started = true;
@@ -466,19 +466,20 @@ async function playBytesWithMedia(
         activeMediaStartTimer = null;
       }
     };
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
       if (activeMediaResolve === cancel) activeMediaResolve = null;
-      if (error) progress?.cancel();
+      if (error || !completed) progress?.cancel();
       else progress?.finish();
       progress = null;
       releaseActiveMedia(!error);
-      lifecycle?.onEnd?.();
+      if (error || !completed) lifecycle?.onCancel?.();
+      else lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish();
+    const cancel = () => finish(undefined, false);
     activeMediaResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
     audio.addEventListener("error", () => finish(new Error("English audio could not play.")), {
@@ -623,7 +624,7 @@ async function playStreamingResponseWithMedia(
     let sourceBuffer: SourceBuffer | null = null;
     const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
     const safeEstimatedDurationMs = Math.max(1, Math.round(estimatedDurationMs));
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
       if (activeMediaResolve === cancel) activeMediaResolve = null;
@@ -632,15 +633,16 @@ async function playStreamingResponseWithMedia(
         activeMediaStartTimer = null;
       }
       void reader.cancel().catch(() => undefined);
-      if (error) progress?.cancel();
+      if (error || !completed) progress?.cancel();
       else progress?.finish();
       progress = null;
       releaseActiveMedia(!error);
-      lifecycle?.onEnd?.();
+      if (error || !completed) lifecycle?.onCancel?.();
+      else lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish();
+    const cancel = () => finish(undefined, false);
     activeMediaResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
     audio.addEventListener(
@@ -670,7 +672,7 @@ async function playStreamingResponseWithMedia(
       "sourceopen",
       () => {
         if (settled || expectedGeneration !== generation) {
-          finish();
+          cancel();
           return;
         }
         try {

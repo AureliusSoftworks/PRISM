@@ -80,6 +80,14 @@ export function debateAudienceRandom(seed: string): () => number {
   };
 }
 
+/** Stable per-session exit motion so gallery portraits do not reroll mid-render. */
+export function debateAudienceDepartureXPercent(seed: string): number {
+  const random = debateAudienceRandom(seed);
+  const direction = random() < 0.5 ? -1 : 1;
+  const distance = 175 + Math.round(random() * 150);
+  return direction * distance;
+}
+
 export function debateAudienceBotCount(
   graphicsQuality: GraphicsQuality,
 ): number {

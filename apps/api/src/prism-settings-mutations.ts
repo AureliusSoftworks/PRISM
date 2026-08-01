@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
   parseStoredComfyUiWorkflows,
+  serializeBotAudioVoiceProfileV1,
   type PrismJsonObject,
   type PrismJsonValue,
 } from "@localai/shared";
@@ -80,6 +81,8 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "elevenLabsVoiceBank",
   "elevenLabsVoiceModel",
   "elevenLabsVoiceCollectionId",
+  "zenPlayerVoiceEnabled",
+  "playerAudioVoiceProfile",
 ]);
 
 const PERSISTED_SETTING_COLUMNS = [
@@ -143,6 +146,8 @@ const PERSISTED_SETTING_COLUMNS = [
   "elevenlabs_voice_bank",
   "elevenlabs_voice_model",
   "elevenlabs_voice_collection_id",
+  "zen_player_voice_enabled",
+  "player_audio_voice_profile",
 ] as const;
 
 type PersistedSettingColumn = (typeof PERSISTED_SETTING_COLUMNS)[number];
@@ -323,6 +328,8 @@ function currentSettings(
     elevenLabsVoiceCollectionId: nullableString(
       row.elevenlabs_voice_collection_id,
     ),
+    zenPlayerVoiceEnabled: Number(row.zen_player_voice_enabled),
+    playerAudioVoiceProfile: nullableString(row.player_audio_voice_profile),
   };
 }
 
@@ -406,6 +413,10 @@ function persistedValues(
     elevenlabs_voice_bank: stringifyJson(next.elevenLabsVoiceBank),
     elevenlabs_voice_model: next.elevenLabsVoiceModel,
     elevenlabs_voice_collection_id: next.elevenLabsVoiceCollectionId,
+    zen_player_voice_enabled: next.zenPlayerVoiceEnabled ? 1 : 0,
+    player_audio_voice_profile: serializeBotAudioVoiceProfileV1(
+      next.playerAudioVoiceProfile,
+    ),
   };
 }
 

@@ -180,6 +180,8 @@ export interface BackupUserSettings {
   voiceEffectsEnabled?: boolean;
   voiceVolume?: number;
   operatingSystemVoicesEnabled?: boolean;
+  zenPlayerVoiceEnabled?: boolean;
+  playerAudioVoiceProfile?: BotAudioVoiceProfileV1;
   prismDefaultBotAudioVoiceProfile?: BotAudioVoiceProfileV1;
   englishVoiceEngine?: EnglishVoiceEngine;
   defaultSystemVoiceName?: string | null;
@@ -500,6 +502,24 @@ export interface BackupSnapshot {
       createdAt: string;
     }>;
   };
+  /** Presentation-only response cues, including only the playback state actually persisted. */
+  presenceBeats?: Array<{
+    id: string;
+    surface: "chat" | "zen" | "sandbox" | "coffee" | "signal" | "debate";
+    sessionId: string;
+    responseId: string;
+    speakerBotId: string;
+    speakerName: string;
+    trigger: "interruption" | "redirect" | "waiting";
+    source: "default" | "custom";
+    text: string;
+    heardCharacterCount: number;
+    completion: "playing" | "completed" | "interrupted" | "failed";
+    playbackStartedAtMs: number;
+    playbackEndedAtMs: number | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
   /** Derived video bytes are excluded; these portable inputs can rebuild them. */
   replays?: {
     recordings: Array<{
@@ -1629,6 +1649,7 @@ export function exportUserSnapshot(
          ,voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine,
          default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank,
          elevenlabs_voice_model, elevenlabs_voice_collection_id,
+         zen_player_voice_enabled, player_audio_voice_profile,
          prism_default_bot_audio_voice_profile
        FROM users
        WHERE id = ?`,
@@ -1700,6 +1721,8 @@ export function exportUserSnapshot(
         elevenlabs_voice_bank: string | null;
         elevenlabs_voice_model: string | null;
         elevenlabs_voice_collection_id: string | null;
+        zen_player_voice_enabled: number | null;
+        player_audio_voice_profile: string | null;
         prism_default_bot_audio_voice_profile: string | null;
       }
     | undefined;
@@ -1797,6 +1820,11 @@ export function exportUserSnapshot(
         voiceVolume: normalizeBotVoiceVolume(user.voice_volume),
         operatingSystemVoicesEnabled:
           user.operating_system_voices_enabled !== 0,
+        zenPlayerVoiceEnabled: user.zen_player_voice_enabled === 1,
+        playerAudioVoiceProfile:
+          parseStoredBotAudioVoiceProfileV1(
+            user.player_audio_voice_profile,
+          ) ?? normalizeBotAudioVoiceProfileV1(undefined),
         prismDefaultBotAudioVoiceProfile:
           parseStoredBotAudioVoiceProfileV1(
             user.prism_default_bot_audio_voice_profile,
@@ -2251,6 +2279,17 @@ export function exportUserSnapshot(
     "SELECT * FROM botcast_events WHERE user_id = ? ORDER BY episode_id, sequence",
     )
     .all(userId) as Array<Record<string, unknown>>;
+  const presenceBeats = db
+    .prepare(
+      `SELECT id, surface, session_id, response_id, speaker_bot_id,
+              speaker_name, trigger, source, text, heard_character_count,
+              completion, playback_started_at_ms, playback_ended_at_ms,
+              created_at, updated_at
+         FROM bot_presence_beats
+        WHERE user_id = ?
+        ORDER BY created_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
   const botcastIntroAudio = db
     .prepare(
     `SELECT show_id, provider, model, prompt, content_type, audio_bytes,
@@ -2652,6 +2691,34 @@ export function exportUserSnapshot(
         createdAt: String(row.created_at),
       })),
     },
+    presenceBeats: presenceBeats.map((row) => ({
+      id: String(row.id),
+      surface: String(row.surface) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["surface"],
+      sessionId: String(row.session_id),
+      responseId: String(row.response_id),
+      speakerBotId: String(row.speaker_bot_id),
+      speakerName: String(row.speaker_name),
+      trigger: String(row.trigger) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["trigger"],
+      source: String(row.source) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["source"],
+      text: String(row.text),
+      heardCharacterCount: Number(row.heard_character_count ?? 0),
+      completion: String(row.completion) as NonNullable<
+        BackupSnapshot["presenceBeats"]
+      >[number]["completion"],
+      playbackStartedAtMs: Number(row.playback_started_at_ms ?? 0),
+      playbackEndedAtMs:
+        typeof row.playback_ended_at_ms === "number"
+          ? row.playback_ended_at_ms
+          : null,
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    })),
     replays: {
       recordings: replayRecordings.map((row) => ({
         id: String(row.id),
@@ -2725,6 +2792,7 @@ function assertSnapshotIdsStayWithinTenant(
       | "botcast_episode_segments"
       | "botcast_messages"
       | "botcast_events"
+      | "bot_presence_beats"
       | "debate_sessions"
       | "debate_events"
       | "replay_recordings"
@@ -2860,6 +2928,12 @@ function assertSnapshotIdsStayWithinTenant(
     assertIds(
       "debate_events",
       snapshot.debates.events.map((item) => item.id),
+    );
+  }
+  if (snapshot.presenceBeats) {
+    assertIds(
+      "bot_presence_beats",
+      snapshot.presenceBeats.map((item) => item.id),
     );
   }
   const slate = snapshot.slate;
@@ -3135,6 +3209,8 @@ function importUserSnapshotWithinTransaction(
         elevenlabs_voice_bank = ?,
         elevenlabs_voice_model = ?,
         elevenlabs_voice_collection_id = ?,
+        zen_player_voice_enabled = ?,
+        player_audio_voice_profile = ?,
         prism_default_bot_audio_voice_profile = ?
       WHERE id = ?
     `,
@@ -3261,6 +3337,8 @@ function importUserSnapshotWithinTransaction(
       normalizeElevenLabsVoiceCollectionId(
         settings.elevenLabsVoiceCollectionId,
       ),
+      settings.zenPlayerVoiceEnabled === true ? 1 : 0,
+      serializeBotAudioVoiceProfileV1(settings.playerAudioVoiceProfile),
       serializeBotAudioVoiceProfileV1(
         settings.prismDefaultBotAudioVoiceProfile,
       ),
@@ -3998,6 +4076,77 @@ function importUserSnapshotWithinTransaction(
         event.kind,
         event.eventJson,
         event.createdAt,
+      );
+    }
+  }
+
+  if (snapshot.presenceBeats) {
+    const surfaces = new Set([
+      "chat",
+      "zen",
+      "sandbox",
+      "coffee",
+      "signal",
+      "debate",
+    ]);
+    const triggers = new Set(["interruption", "redirect", "waiting"]);
+    const sources = new Set(["default", "custom"]);
+    const completions = new Set([
+      "playing",
+      "completed",
+      "interrupted",
+      "failed",
+    ]);
+    const insertPresenceBeat = db.prepare(
+      `INSERT OR REPLACE INTO bot_presence_beats
+         (id, user_id, surface, session_id, response_id, speaker_bot_id,
+          speaker_name, trigger, source, text, heard_character_count,
+          completion, playback_started_at_ms, playback_ended_at_ms,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const beat of snapshot.presenceBeats) {
+      const heardCharacterCount = Math.max(
+        0,
+        Math.min(
+          Array.from(beat.text ?? "").length,
+          Math.floor(Number(beat.heardCharacterCount) || 0),
+        ),
+      );
+      if (
+        !beat?.id?.trim() ||
+        !beat.sessionId?.trim() ||
+        !beat.responseId?.trim() ||
+        !beat.speakerBotId?.trim() ||
+        !beat.speakerName?.trim() ||
+        !surfaces.has(beat.surface) ||
+        !triggers.has(beat.trigger) ||
+        !sources.has(beat.source) ||
+        !completions.has(beat.completion) ||
+        typeof beat.text !== "string" ||
+        !Number.isFinite(beat.playbackStartedAtMs)
+      ) {
+        throw new Error("Account backup contains an invalid response cue.");
+      }
+      insertPresenceBeat.run(
+        beat.id,
+        userId,
+        beat.surface,
+        beat.sessionId,
+        beat.responseId,
+        beat.speakerBotId,
+        beat.speakerName,
+        beat.trigger,
+        beat.source,
+        beat.text,
+        heardCharacterCount,
+        beat.completion,
+        beat.playbackStartedAtMs,
+        Number.isFinite(beat.playbackEndedAtMs)
+          ? beat.playbackEndedAtMs
+          : null,
+        beat.createdAt,
+        beat.updatedAt,
       );
     }
   }

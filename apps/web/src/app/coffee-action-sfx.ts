@@ -1,4 +1,8 @@
-import { extractStageDirectionCues } from "./botMention.ts";
+import {
+  extractStageDirectionCues,
+  extractStageDirections,
+  getBotMentionDisplayText,
+} from "./botMention.ts";
 import {
   replayAudioMasterCaptureActive,
   routeAudioElementToPrismOutput,
@@ -28,6 +32,12 @@ export interface CoffeeActionSfxPlan {
 export interface BundledActionSfxPlan {
   kind: BundledCoffeeActionSfxKind;
   revealAtDisplayLength: number;
+}
+
+export interface BundledActionSfxCharacterAlignment {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
 }
 
 export interface CoffeeActionSfxGateState {
@@ -136,6 +146,116 @@ export function buildCoffeeActionReactionPlan(
     }
   }
   return null;
+}
+
+function comparableActionSfxCharacters(value: string): string[] {
+  return Array.from(value.toLocaleLowerCase()).filter((character) =>
+    /[\p{L}\p{N}]/u.test(character),
+  );
+}
+
+function alignedActionSfxCueAtMs(
+  prefix: string,
+  durationMs: number,
+  alignment: BundledActionSfxCharacterAlignment | null | undefined,
+): number | null {
+  if (!alignment) return null;
+  const count = alignment.characters.length;
+  if (
+    count === 0 ||
+    count !== alignment.characterStartTimesSeconds.length ||
+    count !== alignment.characterEndTimesSeconds.length
+  ) {
+    return null;
+  }
+  const target = comparableActionSfxCharacters(prefix);
+  if (target.length === 0) return 0;
+  let targetIndex = 0;
+  let matchedAlignmentIndex = -1;
+  let previousEndSeconds = 0;
+  for (let index = 0; index < count; index += 1) {
+    const startSeconds = alignment.characterStartTimesSeconds[index];
+    const endSeconds = alignment.characterEndTimesSeconds[index];
+    if (
+      typeof startSeconds !== "number" ||
+      typeof endSeconds !== "number" ||
+      !Number.isFinite(startSeconds) ||
+      !Number.isFinite(endSeconds) ||
+      startSeconds < 0 ||
+      endSeconds < startSeconds ||
+      endSeconds < previousEndSeconds
+    ) {
+      return null;
+    }
+    previousEndSeconds = endSeconds;
+    const character = alignment.characters[index] ?? "";
+    if (!/[\p{L}\p{N}]/u.test(character)) continue;
+    if (character.toLocaleLowerCase() !== target[targetIndex]) return null;
+    targetIndex += 1;
+    matchedAlignmentIndex = index;
+    if (targetIndex >= target.length) break;
+  }
+  if (targetIndex < target.length || matchedAlignmentIndex < 0) return null;
+  const alignmentDurationSeconds = alignment.characterEndTimesSeconds.at(-1);
+  const cueEndSeconds =
+    alignment.characterEndTimesSeconds[matchedAlignmentIndex];
+  if (
+    typeof alignmentDurationSeconds !== "number" ||
+    typeof cueEndSeconds !== "number" ||
+    alignmentDurationSeconds <= 0
+  ) {
+    return null;
+  }
+  return Math.max(
+    0,
+    Math.min(
+      durationMs,
+      Math.round(
+        cueEndSeconds * 1_000 * (durationMs / (alignmentDurationSeconds * 1_000)),
+      ),
+    ),
+  );
+}
+
+/**
+ * Resolves a bundled cue onto the utterance clock. Provider character timing
+ * wins so an inline cue fires after the preceding word; a proportional clock
+ * keeps silent caption fallbacks and replays deterministic.
+ */
+export function bundledActionSfxCueAtMs(
+  messageText: string,
+  durationMs: number,
+  alignment?: BundledActionSfxCharacterAlignment | null,
+): number | null {
+  const plan = buildBundledActionSfxPlan(messageText);
+  if (!plan) return null;
+  const normalizedDurationMs = Math.max(1, Math.round(durationMs));
+  if (plan.revealAtDisplayLength <= 0) return 0;
+  const displayText = getBotMentionDisplayText(
+    extractStageDirections(messageText).mainText,
+  );
+  const displayCharacters = Array.from(displayText);
+  if (displayCharacters.length === 0) return 0;
+  const prefix = displayCharacters
+    .slice(0, plan.revealAtDisplayLength)
+    .join("")
+    .trimEnd();
+  const alignedCueAtMs = alignedActionSfxCueAtMs(
+    prefix,
+    normalizedDurationMs,
+    alignment,
+  );
+  if (alignedCueAtMs !== null) return alignedCueAtMs;
+  return Math.max(
+    0,
+    Math.min(
+      normalizedDurationMs,
+      Math.round(
+        normalizedDurationMs *
+          (plan.revealAtDisplayLength / displayCharacters.length),
+      ),
+    ),
+  );
 }
 
 export function isBundledCoffeeActionSfxKind(

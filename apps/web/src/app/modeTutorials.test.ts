@@ -229,16 +229,19 @@ describe("mode tutorials", () => {
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
       copy,
-      /in-room Judge console keeps one contextual Gavel control, Pause or Resume, and End Debate together/u,
+      /in-room Judge console keeps one contextual Gavel control, Pause or Gavel to resume, and End Debate together/u,
     );
     assert.match(copy, /label becomes Intervene while an advocate holds the floor/u);
     assert.match(copy, /Call time during overtime/u);
     assert.match(copy, /Space invokes that same context-aware control/u);
     assert.match(copy, /Participant and Spectator sessions use the same/u);
     assert.match(copy, /Pause takes effect immediately/u);
-    assert.match(copy, /never asked for a second Space press or gavel click/u);
-    assert.match(copy, /Resume works the same way/u);
-    assert.match(copy, /preserves the exact next juror, discussion turn/u);
+    assert.match(copy, /Persona-shaped recess line/u);
+    assert.match(copy, /Leaving an unfinished Debate by any route/u);
+    assert.match(copy, /returning chamber appear in recess/u);
+    assert.match(copy, /Resume requires you to strike the visible gavel/u);
+    assert.match(copy, /audible hit calls the camera to the moderator/u);
+    assert.match(copy, /exact next juror, discussion turn/u);
     assert.match(
       copy,
       /neither housekeeping beat enters the readable proceedings or copied transcript/u,
@@ -269,6 +272,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /another camera lets them resolve immediately/u);
     assert.match(copy, /seats bot faces and frames around/u);
     assert.match(copy, /Each audible juror reads the same final reason/u);
+    assert.match(copy, /as each final ballot is cast, its side appears/u);
+    assert.match(copy, /running five-vote tally updates/u);
     assert.match(copy, /canonically silent juror still casts/u);
     assert.match(copy, /chamber is live and named but remains advisory/u);
     assert.match(copy, /sibling Jury commentary panel/u);
@@ -276,7 +281,7 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(copy, /Jury transcript remains directly copyable/u);
     assert.match(copy, /Coffee-style session summary/u);
     assert.match(copy, /temporary pick-a-bot inquiry chat/u);
-    assert.match(copy, /anonymous mark slides/u);
+    assert.match(copy, /physical mark slides into the center pile/u);
     assert.match(copy, /only the bot opponent may react/u);
     assert.match(
       copy,
@@ -774,6 +779,15 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
     assert.match(
       routing?.body ?? "",
+      /Chat Settings can also give your own Zen messages a selected local or Premium voice/u,
+    );
+    assert.match(routing?.body ?? "", /player voice is always clean/u);
+    assert.match(
+      routing?.body ?? "",
+      /Coffee, Signal, and Debate continue to use the Default PRISM voice/u,
+    );
+    assert.match(
+      routing?.body ?? "",
       /Voice tab also gives each bot a Voice Character pad/,
     );
     assert.match(routing?.body ?? "", /relative to your account Voice Volume/);
@@ -1034,7 +1048,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       producerGuestCopy,
-      /With Voice Effects on, fart, burp, and cough actions play matching room Foley live and in replay/u,
+      /a leading action fires as the line starts, while an inline action waits until the spoken stream reaches its authored cue/u,
     );
   });
 
@@ -1050,6 +1064,12 @@ describe("mode tutorials", () => {
       assert.match(copy, /typing exactly \*\*/u);
       assert.match(copy, /Shh/u);
       assert.match(copy, /draft/u);
+      if (mode === "zen" || mode === "chat") {
+        assert.match(
+          copy,
+          /fart, burp, and cough actions play their bundled local Foley/u,
+        );
+      }
     }
     const slateCopy = MODE_TUTORIALS.slate.steps
       .map((step) => step.body)

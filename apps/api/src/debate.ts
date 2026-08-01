@@ -114,6 +114,7 @@ import {
   type DebateDebriefChatMessageV1,
   type DebateDebriefEligibleBotV1,
   type PrismRefractDebateTextTarget,
+  type PreparedTurnCursorV1,
   type ResponseMode,
   debateDebriefEligibleBots,
   normalizeDebateSessionSynopsis,
@@ -7708,6 +7709,171 @@ async function advanceStep(
   }
 }
 
+export interface DebateAdvancePreparation {
+  baseRevision: number;
+  nextSession: DebateSessionV1;
+  events: DebateEventV1[];
+  caseBoardEvents: DebateEventV1[];
+}
+
+export function debatePreparedTurnCursor(
+  session: DebateSessionV1,
+): PreparedTurnCursorV1 {
+  const floorOwner = (session.formatState as { floorOwnerBotId?: unknown })
+    .floorOwnerBotId;
+  return {
+    revision: session.revision,
+    lastMessageId: null,
+    lastEventId: session.events.at(-1)?.id ?? null,
+    floorOwnerId: typeof floorOwner === "string" ? floorOwner : null,
+    castHash: hashJson({
+      moderator: session.moderator,
+      forAdvocate: session.forAdvocate,
+      againstAdvocate: session.againstAdvocate,
+      jurors: session.jury.jurors,
+    }),
+    powersHash: hashJson(session.powerPlan),
+    promptStateHash: hashJson({
+      status: session.status,
+      phase: session.phase,
+      stepKey: session.stepKey,
+      provider: session.provider,
+      model: session.model,
+      responseMode: session.responseMode,
+      generationChain: session.generationChain,
+      format: session.format,
+      formatState: session.formatState,
+      formality: session.formality,
+      playerRole: session.playerRole,
+      playerSideId: session.playerSideId,
+      motion: session.motion,
+      evidence: session.evidence,
+      advocacyConsent: session.advocacyConsent,
+      caseBoard: session.caseBoard,
+      ballots: session.ballots,
+      jury: session.jury,
+      playerVerdict: session.playerVerdict,
+      winnerSideId: session.winnerSideId,
+      judgeGavel: session.judgeGavel,
+      objectionRuling: session.objectionRuling,
+      participantObjection: session.participantObjection,
+    }),
+  };
+}
+
+export function debateSessionCanPrepareAdvance(session: DebateSessionV1): boolean {
+  return (
+    session.status === "live" &&
+    session.judgeGavel?.status !== "awaiting_message" &&
+    session.objectionRuling?.status !== "awaiting_ruling" &&
+    session.participantObjection?.status !== "awaiting_reason"
+  );
+}
+
+/** Generate an automatic Debate transition without touching session or event storage. */
+export async function prepareDebateAdvance(
+  session: DebateSessionV1,
+  runtime: DebateAiRuntime,
+): Promise<DebateAdvancePreparation> {
+  if (!debateSessionCanPrepareAdvance(session)) {
+    throw new HttpError(409, "This Debate cannot prepare an automatic advance right now.");
+  }
+  const active = { ...session, status: "live" as const, error: null };
+  const stepSpan = startDebatePerfSpan("advance.step");
+  const transitioned = isJudgeAftermathStep(session.stepKey)
+    ? await advanceJudgeAftermathStep(active, runtime)
+    : session.format === "turnabout"
+      ? await advanceTurnaboutStep(active, runtime)
+      : await advanceStep(active, runtime);
+  endDebatePerfSpan(stepSpan, {
+    stepKey: session.stepKey,
+    eventCount: transitioned.events.length,
+  });
+  // Overlap atmospheric surprise + jury sidebar so the floor waits once.
+  const surprisePromise = withPersonaSurpriseReaction(
+    session,
+    transitioned.session,
+    transitioned.events,
+    runtime,
+  );
+  const juryTrigger = jurySidebarTrigger(
+    transitioned.session,
+    transitioned.events,
+  );
+  const juryPromise = juryTrigger
+    ? (async () => {
+        const jurySpan = startDebatePerfSpan("advance.jury_sidebar");
+        const juryContext: DebateSessionV1 = {
+          ...transitioned.session,
+          events: [...session.events, ...transitioned.events],
+        };
+        try {
+          const event = await generateJurySidebarTurn(
+            juryContext,
+            juryTrigger,
+            runtime,
+          );
+          endDebatePerfSpan(jurySpan, { generated: true });
+          return event;
+        } catch {
+          endDebatePerfSpan(jurySpan, { generated: false, error: true });
+          return null;
+        }
+      })()
+    : Promise.resolve(null);
+  const [events, jurySidebarEvent] = await Promise.all([
+    surprisePromise,
+    juryPromise,
+  ]);
+  if (jurySidebarEvent) {
+    const lastSequence =
+      events.at(-1)?.sequence ?? session.events.at(-1)?.sequence ?? 0;
+    events.push({
+      ...jurySidebarEvent,
+      sequence: lastSequence + 1,
+    });
+  }
+  return {
+    baseRevision: session.revision,
+    nextSession: transitioned.session,
+    events,
+    caseBoardEvents: transitioned.events,
+  };
+}
+
+export function commitDebateAdvancePreparation(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateAdvanceRequest,
+  preparation: DebateAdvancePreparation,
+  auxiliaryProvider?: LlmProvider,
+): DebateSessionV1 {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  if (checked.session.revision !== preparation.baseRevision) {
+    throw new HttpError(409, "The prepared Debate advance is stale.");
+  }
+  const committed = commitMutation(
+    db,
+    userId,
+    checked.session,
+    preparation.nextSession,
+    checked.idempotencyKey,
+    preparation.events,
+  );
+  if (checked.session.format === "forum") {
+    queueCaseBoardRefinement(
+      db,
+      userId,
+      committed,
+      preparation.caseBoardEvents,
+      auxiliaryProvider,
+    );
+  }
+  return committed;
+}
+
 export async function advanceDebateSession(
   db: DatabaseSync,
   userId: string,
@@ -7790,89 +7956,22 @@ export async function advanceDebateSession(
   }
   try {
     const advanceSpan = startDebatePerfSpan("advance.total");
-    const active = { ...session, status: "live" as const, error: null };
-    const stepSpan = startDebatePerfSpan("advance.step");
-    const transitioned = isJudgeAftermathStep(session.stepKey)
-      ? await advanceJudgeAftermathStep(active, runtime)
-      : session.format === "turnabout"
-        ? await advanceTurnaboutStep(active, runtime)
-        : await advanceStep(active, runtime);
-    endDebatePerfSpan(stepSpan, {
-      stepKey: session.stepKey,
-      eventCount: transitioned.events.length,
-    });
-    // Overlap atmospheric surprise + jury sidebar so the floor waits once.
-    const surprisePromise = withPersonaSurpriseReaction(
-      session,
-      transitioned.session,
-      transitioned.events,
-      runtime,
-    );
-    const juryTrigger = jurySidebarTrigger(
-      transitioned.session,
-      transitioned.events,
-    );
-    const juryPromise = juryTrigger
-      ? (async () => {
-          const jurySpan = startDebatePerfSpan("advance.jury_sidebar");
-          const juryContext: DebateSessionV1 = {
-            ...transitioned.session,
-            events: [...session.events, ...transitioned.events],
-          };
-          try {
-            const event = await generateJurySidebarTurn(
-              juryContext,
-              juryTrigger,
-              runtime,
-            );
-            endDebatePerfSpan(jurySpan, { generated: true });
-            return event;
-          } catch {
-            endDebatePerfSpan(jurySpan, { generated: false, error: true });
-            // A sidebar reaction is atmospheric. It must never pause the floor.
-            return null;
-          }
-        })()
-      : Promise.resolve(null);
-    const [events, jurySidebarEvent] = await Promise.all([
-      surprisePromise,
-      juryPromise,
-    ]);
-    if (jurySidebarEvent) {
-      // Parallel atmospheric writers may mint the same provisional sequence;
-      // commitMutation reassigns from the DB max, but keep the in-memory batch
-      // contiguous so downstream case-board queueing sees a stable order.
-      const lastSequence =
-        events.at(-1)?.sequence ?? session.events.at(-1)?.sequence ?? 0;
-      events.push({
-        ...jurySidebarEvent,
-        sequence: lastSequence + 1,
-      });
-    }
+    const preparation = await prepareDebateAdvance(session, runtime);
     const commitSpan = startDebatePerfSpan("advance.commit");
-    const committed = commitMutation(
+    const committed = commitDebateAdvancePreparation(
       db,
       userId,
-      session,
-      transitioned.session,
-      checked.idempotencyKey,
-      events,
+      sessionId,
+      request,
+      preparation,
+      runtime.auxiliary,
     );
     endDebatePerfSpan(commitSpan, { revision: committed.revision });
     endDebatePerfSpan(advanceSpan, {
       stepKey: session.stepKey,
-      eventCount: events.length,
+      eventCount: preparation.events.length,
       revision: committed.revision,
     });
-    if (session.format === "forum") {
-      queueCaseBoardRefinement(
-        db,
-        userId,
-        committed,
-        transitioned.events,
-        runtime.auxiliary,
-      );
-    }
     return committed;
   } catch (error) {
     if (error instanceof HttpError) throw error;
@@ -9895,7 +9994,163 @@ function simpleMutation(
   );
 }
 
-function debatePauseAnnouncementEvent(session: DebateSessionV1): DebateEventV1 {
+type DebateLifecycleKind = "pause" | "resume";
+
+type DebateLifecycleSpeech = {
+  content: string;
+  provider?: ProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+};
+
+type DebateLifecycleRequest = {
+  expectedRevision: number;
+  idempotencyKey: string;
+  /** Recovery pauses preserve unresolved floor state when the player left. */
+  exitRecovery?: boolean;
+};
+
+const DEBATE_PAUSE_FALLBACKS = {
+  free_for_all: [
+    "Hold it there. We are taking a break.",
+    "Everybody breathe. We will pick this up after recess.",
+    "Freeze the argument right there. We are stepping away for a moment.",
+  ],
+  heated: [
+    "Hold that thought. We are taking a short recess.",
+    "Break there. We will return once the room has cooled down.",
+    "Pause the fight for a minute. The floor is still yours when we return.",
+  ],
+  plainspoken: [
+    "We will pause here for a moment.",
+    "Let us take a short recess and return to this point.",
+    "We are taking a brief break. The floor will be held.",
+  ],
+  structured: [
+    "This Debate will stand in brief recess.",
+    "We will pause momentarily for recess.",
+    "The floor is held while we take a short recess.",
+  ],
+  parliamentary: [
+    "The proceeding will stand in recess.",
+    "We will pause momentarily for recess.",
+    "The chamber will take a brief recess with the floor preserved.",
+  ],
+} as const satisfies Record<DebateFormalityId, readonly string[]>;
+
+const DEBATE_RESUME_FALLBACKS = {
+  free_for_all: [
+    "All right, we are back. Let us get into it.",
+    "Break is over. Pick up the argument where we left it.",
+    "Back to it, everyone. The floor is live again.",
+  ],
+  heated: [
+    "We are back. Keep it sharp and return to the held point.",
+    "Break is over. Let us bring the argument back in.",
+    "All right, the floor is live again. Continue where we stopped.",
+  ],
+  plainspoken: [
+    "Welcome back. Let us continue where we left off.",
+    "All right, we are back. The Debate may continue.",
+    "Let us bring the room back and return to the floor.",
+  ],
+  structured: [
+    "The recess has ended. We will resume from the held floor.",
+    "The Debate is called back to order. We may continue.",
+    "We are back in session and will resume where we stopped.",
+  ],
+  parliamentary: [
+    "The proceeding is called back to order.",
+    "The chamber will come to order. The held floor may resume.",
+    "Recess is concluded. We will return to the matter before us.",
+  ],
+} as const satisfies Record<DebateFormalityId, readonly string[]>;
+
+function debateLifecycleFallback(
+  session: DebateSessionV1,
+  kind: DebateLifecycleKind,
+): string {
+  const candidates =
+    kind === "pause"
+      ? DEBATE_PAUSE_FALLBACKS[session.formality]
+      : DEBATE_RESUME_FALLBACKS[session.formality];
+  const chance = stablePowerChance(
+    `${session.id}:${session.revision}:${kind}:lifecycle-copy-v1`,
+  );
+  return candidates[
+    Math.min(candidates.length - 1, Math.floor(chance * candidates.length))
+  ]!;
+}
+
+async function generateDebateLifecycleSpeech(
+  session: DebateSessionV1,
+  kind: DebateLifecycleKind,
+  runtime: DebateAiRuntime,
+): Promise<DebateLifecycleSpeech> {
+  const fallback = debateLifecycleFallback(session, kind);
+  if (moderatorIsHardMuted(session)) return { content: fallback };
+  try {
+    const generation = await generateJson(
+      lanesForSession(runtime, session),
+      [
+        {
+          role: "system",
+          content: [
+            session.moderator.systemPrompt,
+            "",
+            `You are ${session.moderator.name}, moderating a PRISM Debate.`,
+            debateFormalityGuidance(session.formality),
+            personaVoicePrompt(session.moderator),
+            "Write one brief spoken housekeeping line in this Persona's natural diction.",
+            "This is an off-record room-control beat, not an argument: add no evidence, citations, verdict, ruling, or new claim about the motion.",
+            "You may be candid, irreverent, or idiosyncratic when that genuinely fits the Persona, but do not force a joke or imitate an unrelated character.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content:
+            kind === "pause"
+              ? [
+                  'Briefly announce a recess without saying the canned sentence "This debate is now paused." Preserve the exact floor for later.',
+                  'Return JSON only: {"content":"your one spoken line"}',
+                ].join("\n")
+              : [
+                  "The player has just struck the gavel. Briefly call the room back and say the Debate is resuming from the held floor.",
+                  'Return JSON only: {"content":"your one spoken line"}',
+                ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 100,
+        temperature: 0.72,
+        validate: (value) =>
+          typeof value.content === "string" &&
+          value.content.trim().length > 0 &&
+          value.content.trim().length <= 280,
+      },
+    );
+    const content = compactText(
+      debateSpokenText(String(generation.value.content)),
+      280,
+    );
+    if (!content) return { content: fallback };
+    return {
+      content,
+      provider: generation.provider,
+      model: generation.model,
+      ...(generation.autoRecovery
+        ? { autoRecovery: generation.autoRecovery }
+        : {}),
+    };
+  } catch {
+    return { content: fallback };
+  }
+}
+
+function debatePauseAnnouncementEvent(
+  session: DebateSessionV1,
+  speech?: DebateLifecycleSpeech,
+): DebateEventV1 {
   const hardMuted = moderatorIsHardMuted(session);
   const playerControlled = humanJudgeOwnsModeratorActions(session);
   return makeEvent(session, {
@@ -9906,11 +10161,17 @@ function debatePauseAnnouncementEvent(session: DebateSessionV1): DebateEventV1 {
     stepKey: "pause",
     content: hardMuted
       ? BOT_POWER_CANONICAL_SILENCE_V1
-      : "This debate is now paused.",
+      : (speech?.content ?? debateLifecycleFallback(session, "pause")),
+    provider: speech?.provider,
+    model: speech?.model,
+    autoRecovery: speech?.autoRecovery,
   });
 }
 
-function debateResumeGavelEvent(session: DebateSessionV1): DebateEventV1 {
+function debateResumeGavelEvent(
+  session: DebateSessionV1,
+  speech?: DebateLifecycleSpeech,
+): DebateEventV1 {
   const playerControlled = humanJudgeOwnsModeratorActions(session);
   return makeEvent(session, {
     kind: "judge_gavel",
@@ -9920,7 +10181,10 @@ function debateResumeGavelEvent(session: DebateSessionV1): DebateEventV1 {
     stepKey: "resume",
     content: moderatorIsHardMuted(session)
       ? BOT_POWER_CANONICAL_SILENCE_V1
-      : "The proceeding is called back to order.",
+      : (speech?.content ?? debateLifecycleFallback(session, "resume")),
+    provider: speech?.provider,
+    model: speech?.model,
+    autoRecovery: speech?.autoRecovery,
     gavelReason: "resume",
   });
 }
@@ -9929,7 +10193,8 @@ export function pauseDebateSession(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
-  request: { expectedRevision: number; idempotencyKey: string },
+  request: DebateLifecycleRequest,
+  speech?: DebateLifecycleSpeech,
 ): DebateSessionV1 {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
@@ -9937,19 +10202,25 @@ export function pauseDebateSession(
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");
   }
-  if (session.judgeGavel?.status === "awaiting_message") {
+  if (
+    !request.exitRecovery &&
+    session.judgeGavel?.status === "awaiting_message"
+  ) {
     throw new HttpError(
       409,
       "Address the debaters or resume the floor before pausing.",
     );
   }
-  if (session.participantObjection?.status === "awaiting_reason") {
+  if (
+    !request.exitRecovery &&
+    session.participantObjection?.status === "awaiting_reason"
+  ) {
     throw new HttpError(
       409,
       "State or withdraw the Participant objection before pausing.",
     );
   }
-  const pauseEvent = debatePauseAnnouncementEvent(session);
+  const pauseEvent = debatePauseAnnouncementEvent(session, speech);
   return commitMutation(
     db,
     userId,
@@ -9958,6 +10229,26 @@ export function pauseDebateSession(
     checked.idempotencyKey,
     [pauseEvent],
   );
+}
+
+export async function pauseDebateSessionWithPersona(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateLifecycleRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  if (request.exitRecovery) {
+    return pauseDebateSession(db, userId, sessionId, request);
+  }
+  const speech = await generateDebateLifecycleSpeech(
+    checked.session,
+    "pause",
+    runtime,
+  );
+  return pauseDebateSession(db, userId, sessionId, request, speech);
 }
 
 function skippedJuryDeliberationSession(
@@ -10180,7 +10471,8 @@ export function resumeDebateSession(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
-  request: { expectedRevision: number; idempotencyKey: string },
+  request: DebateLifecycleRequest,
+  speech?: DebateLifecycleSpeech,
 ): DebateSessionV1 {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
@@ -10189,14 +10481,20 @@ export function resumeDebateSession(
     throw new HttpError(409, "This Debate is not paused.");
   }
   const now = new Date();
-  const gavelEvent = debateResumeGavelEvent(session);
+  const gavelEvent = debateResumeGavelEvent(session, speech);
+  const resumedStatus =
+    session.judgeGavel?.status === "awaiting_message" ||
+    session.objectionRuling?.status === "awaiting_ruling" ||
+    session.participantObjection?.status === "awaiting_reason"
+      ? "waiting_for_player"
+      : statusForStep(session.stepKey);
   return commitMutation(
     db,
     userId,
     session,
     {
       ...session,
-      status: statusForStep(session.stepKey),
+      status: resumedStatus,
       judgeGavelCooldownUntil:
         session.playerRole === "judge"
           ? new Date(
@@ -10208,6 +10506,26 @@ export function resumeDebateSession(
     checked.idempotencyKey,
     [gavelEvent],
   );
+}
+
+export async function resumeDebateSessionWithPersona(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: DebateLifecycleRequest,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  if (checked.session.status !== "paused") {
+    throw new HttpError(409, "This Debate is not paused.");
+  }
+  const speech = await generateDebateLifecycleSpeech(
+    checked.session,
+    "resume",
+    runtime,
+  );
+  return resumeDebateSession(db, userId, sessionId, request, speech);
 }
 
 export function deleteDebateSession(

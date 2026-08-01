@@ -2,6 +2,8 @@ import {
   BOTCAST_PRODUCER_GUEST_ID,
   botPowerResponseIsSilentV1,
   botcastReplayTimeline,
+  heardBotPresenceBeatTextV1,
+  type BotPresenceBeatV1,
   type BotcastEpisode,
   type BotcastReplayEvent,
   type BotcastShow,
@@ -27,6 +29,7 @@ export type SignalReviewTranscriptInput = {
   guest: SignalReviewParticipant;
   modelLabel?: string | null;
   recordingEvidence?: SessionReviewRecordingEvidence;
+  presenceBeats?: readonly BotPresenceBeatV1[];
 };
 
 function formatTimestamp(value: string | null): string {
@@ -205,6 +208,16 @@ export function buildSignalReviewTranscript(
   }
 
   lines.push(
+    "",
+    "## Response cues (heard only)",
+    "",
+    ...(args.presenceBeats?.flatMap((beat) => {
+      const heard = heardBotPresenceBeatTextV1(beat).trim();
+      return heard
+        ? [`- ${beat.speaker.name} (${beat.trigger}): ${heard}`]
+        : [];
+    }) ?? ["No audible response cues."]),
+    "",
     "",
     "## Faithful Recording Evidence",
     "",

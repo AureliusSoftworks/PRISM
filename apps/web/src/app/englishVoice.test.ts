@@ -65,7 +65,7 @@ describe("English voice post processing", () => {
     );
     assert.match(
       source,
-      /async function playBytesWithMedia\([\s\S]*?if \(!playbackStillValid\(\)\) \{[\s\S]*?finish\(\);[\s\S]*?return;/u,
+      /async function playBytesWithMedia\([\s\S]*?if \(!playbackStillValid\(\)\) \{[\s\S]*?cancel\(\);[\s\S]*?return;/u,
     );
   });
 
@@ -268,6 +268,116 @@ describe("English voice post processing", () => {
       assert.equal(playCount, 1);
       assert.equal(started, true);
       assert.equal(ended, true);
+    } finally {
+      stopEnglishVoice();
+      if (originalAudio) {
+        Object.defineProperty(globalThis, "Audio", originalAudio);
+      } else {
+        Reflect.deleteProperty(globalThis, "Audio");
+      }
+      if (originalWindow) {
+        Object.defineProperty(globalThis, "window", originalWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
+  });
+
+  it("reports forced media stops as cancellation rather than completed speech", async () => {
+    const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    let announcePlaying: (() => void) | null = null;
+    const playing = new Promise<void>((resolve) => {
+      announcePlaying = resolve;
+    });
+    class FakeAudioContext {
+      state = "running";
+      decodeAudioData(): Promise<AudioBuffer> {
+        return Promise.reject(new Error("WebKit decode failed"));
+      }
+      createGain() {
+        return {
+          gain: { value: 1 },
+          connect() {
+            return this;
+          },
+          disconnect() {},
+        };
+      }
+      createMediaElementSource() {
+        return {
+          connect() {
+            return this;
+          },
+          disconnect() {},
+        };
+      }
+      get destination() {
+        return {};
+      }
+    }
+    class FakeAudio {
+      duration = 2;
+      currentTime = 0.5;
+      preload = "";
+      volume = 1;
+      preservesPitch = true;
+      playbackRate = 1;
+      src = "";
+      private listeners = new Map<string, () => void>();
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+      pause(): void {}
+      removeAttribute(): void {}
+      load(): void {}
+      play(): Promise<void> {
+        setTimeout(() => {
+          this.listeners.get("playing")?.();
+          announcePlaying?.();
+        }, 0);
+        return Promise.resolve();
+      }
+    }
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      value: FakeAudio,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        AudioContext: FakeAudioContext,
+        clearInterval,
+        clearTimeout,
+        setInterval,
+        setTimeout,
+      },
+    });
+    let endCount = 0;
+    let cancelCount = 0;
+    try {
+      const playback = enqueueEnglishVoice(
+        Uint8Array.from([0x49, 0x44, 0x33]).buffer,
+        DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        "webkit-cancel",
+        true,
+        1,
+        {
+          onEnd: () => {
+            endCount += 1;
+          },
+          onCancel: () => {
+            cancelCount += 1;
+          },
+        },
+        "elevenlabs",
+      );
+      await playing;
+      stopEnglishVoice();
+      await playback;
+      assert.equal(endCount, 0);
+      assert.equal(cancelCount, 1);
     } finally {
       stopEnglishVoice();
       if (originalAudio) {

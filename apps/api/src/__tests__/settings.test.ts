@@ -111,6 +111,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     elevenLabsVoiceBank: "{}",
     elevenLabsVoiceModel: null,
     elevenLabsVoiceCollectionId: null,
+    zenPlayerVoiceEnabled: 0,
+    playerAudioVoiceProfile: null,
     primaryOllamaHost: "http://localhost:11434",
     ...overrides,
   };
@@ -327,6 +329,29 @@ describe("resolveNextSettings — voice foundation", () => {
     );
     assert.equal(explicitlyCleared.defaultSystemVoiceName, null);
     assert.equal(explicitlyCleared.defaultElevenLabsVoiceId, null);
+  });
+});
+
+describe("resolveNextSettings — Zen player voice", () => {
+  it("defaults muted and persists the selected player identity independently", () => {
+    const next = resolveNextSettings(
+      {
+        zenPlayerVoiceEnabled: true,
+        playerAudioVoiceProfile: {
+          v: 1,
+          baseVoiceId: "voice-8",
+          pitch: 0,
+          warmth: 0,
+          pace: 0,
+          lilt: 0,
+          signal: 0,
+        },
+      },
+      baseline(),
+    );
+    assert.equal(next.zenPlayerVoiceEnabled, true);
+    assert.equal(next.playerAudioVoiceProfile.baseVoiceId, "voice-8");
+    assert.equal(resolveNextSettings({}, baseline()).zenPlayerVoiceEnabled, false);
   });
 });
 

@@ -6,6 +6,8 @@
  * strips the suffix before building provider prompts.
  */
 
+import { normalizeBotResponseCueProfileV1 } from "./responseCue.ts";
+
 /// Sentinel block embedded at the end of `system_prompt` for structured bots.
 export const BOT_PROFILE_META_START = "<<<PRISM_BOT_META>>>";
 export const BOT_PROFILE_META_END = "<<<END_PRISM_BOT_META>>>";
@@ -55,6 +57,8 @@ export interface BotPurposeProfile {
 export interface BotCoreProfile {
   traits: string;
   communicationStyle: BotVoicePreset;
+  /** Presentation-only microline preferences. Excluded from model-facing prose. */
+  responseCues?: import("./responseCue.ts").BotResponseCueProfileV1;
   openness: BotProfileScaleValue | null;
   conscientiousness: BotProfileScaleValue | null;
   extraversion: BotProfileScaleValue | null;
@@ -237,7 +241,20 @@ function cloneDefaultBotProfile(): BotProfileFields {
   return {
     v: 2,
     purpose: { ...DEFAULT_BOT_PROFILE_FIELDS.purpose },
-    core: { ...DEFAULT_BOT_PROFILE_FIELDS.core },
+    core: {
+      ...DEFAULT_BOT_PROFILE_FIELDS.core,
+      ...(DEFAULT_BOT_PROFILE_FIELDS.core.responseCues
+        ? {
+            responseCues: {
+              ...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues,
+              interruption: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.interruption],
+              redirect: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.redirect],
+              waiting: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.waiting],
+              blockedDefaults: [...DEFAULT_BOT_PROFILE_FIELDS.core.responseCues.blockedDefaults],
+            },
+          }
+        : {}),
+    },
     identity: { ...DEFAULT_BOT_PROFILE_FIELDS.identity },
     worldview: { ...DEFAULT_BOT_PROFILE_FIELDS.worldview },
     appearance: { ...DEFAULT_BOT_PROFILE_FIELDS.appearance },
@@ -882,6 +899,7 @@ function parseV2(parsed: Record<string, unknown>): BotProfileFields {
     core: {
       traits: readString(core, "traits"),
       communicationStyle: readVoicePreset(core, "communicationStyle"),
+      responseCues: normalizeBotResponseCueProfileV1(core.responseCues),
       openness: readScaleValue(core, "openness"),
       conscientiousness: readScaleValue(core, "conscientiousness"),
       extraversion: readScaleValue(core, "extraversion"),

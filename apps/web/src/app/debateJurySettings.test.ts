@@ -57,7 +57,7 @@ describe("Debate Jury settings", () => {
     assert.match(pageSource, /activeSettingsScope === "debate"/u);
     assert.match(pageSource, /Automatically choose Auto/u);
     assert.match(pageSource, /Jury deliberation choice countdown/u);
-    assert.match(pageSource, /Judge \/ Moderator sessions stay\s*on Auto/u);
+    assert.match(pageSource, /Judge \/ Moderator sessions stay on\s*Auto/u);
     assert.match(
       pageSource,
       /juryAutoDeliberationEnabled=\{[\s\S]{0,100}debateJurySettings\.autoDeliberationEnabled/u,

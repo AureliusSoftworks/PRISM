@@ -322,6 +322,31 @@ function withoutEmbeddedAudioTagAlignment(
   };
 }
 
+/**
+ * ElevenLabs can occasionally return a valid audio envelope whose character
+ * timing stops at a strict prefix of the requested line. Treat only that
+ * unambiguous prefix case as incomplete; unrelated provider normalization
+ * differences remain playable instead of causing a false fallback.
+ */
+export function voiceCharacterAlignmentIsIncomplete(
+  alignment: VoiceCharacterAlignment | null,
+  requestedText: string,
+): boolean {
+  if (!alignment) return false;
+  const requested = voiceSpokenText(requestedText)
+    .replace(/\s+/gu, " ")
+    .trim();
+  const aligned = voiceSpokenText(alignment.characters.join(""))
+    .replace(/\s+/gu, " ")
+    .trim();
+  const unheardSuffix = requested.slice(aligned.length);
+  return (
+    requested.length > aligned.length &&
+    requested.startsWith(aligned) &&
+    /[\p{L}\p{N}]/u.test(unheardSuffix)
+  );
+}
+
 export async function requestElevenLabsSpeech(args: {
   apiKey: string;
   voiceId: string;
@@ -391,14 +416,27 @@ export async function requestElevenLabsSpeechWithTimestamps(
     normalizeVoiceCharacterAlignment(payload.normalized_alignment),
     input.directionPrefix
   );
+  const spokenAlignment = withoutEmbeddedAudioTagAlignment(alignment, args.text);
+  const spokenNormalizedAlignment = withoutEmbeddedAudioTagAlignment(
+    normalizedAlignment,
+    args.text,
+  );
+  if (
+    voiceCharacterAlignmentIsIncomplete(
+      spokenAlignment ?? spokenNormalizedAlignment,
+      args.text,
+    )
+  ) {
+    throw new ElevenLabsVoiceError(
+      502,
+      "ElevenLabs returned speech that ended before the requested line.",
+    );
+  }
   return {
     audioBase64,
     audioContentType: "audio/mpeg",
-    alignment: withoutEmbeddedAudioTagAlignment(alignment, args.text),
-    normalizedAlignment: withoutEmbeddedAudioTagAlignment(
-      normalizedAlignment,
-      args.text,
-    ),
+    alignment: spokenAlignment,
+    normalizedAlignment: spokenNormalizedAlignment,
     providerRequestId: response.headers.get("request-id"),
   };
 }

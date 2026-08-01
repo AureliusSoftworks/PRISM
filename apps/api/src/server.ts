@@ -129,6 +129,7 @@ import {
   buildCoffeePollExportLines,
   coffeeMessagesVisibleInExport,
   coffeeConversationHasPlayerDeparture,
+  coffeePreparedTurnCursor,
   buildCoffeeTeamExportLines,
   buildCoffeeGroupAtmospherePrompt,
   createCoffeePoll,
@@ -187,7 +188,10 @@ import {
 import {
   advanceDebateSession,
   checkDebateAdvocacyRoles,
+  commitDebateAdvancePreparation,
   createDebateSession,
+  debatePreparedTurnCursor,
+  debateSessionCanPrepareAdvance,
   debateSessionForPlayer,
   endDebateSessionEarly,
   generateDebateRefractDraft,
@@ -195,9 +199,12 @@ import {
   listDebateSessions,
   orderDebateAudience,
   pauseDebateSession,
+  pauseDebateSessionWithPersona,
+  prepareDebateAdvance,
   raiseDebateParticipantObjection,
   resolveDebateParticipantObjection,
   resumeDebateSession,
+  resumeDebateSessionWithPersona,
   skipDebateJuryDeliberation,
   submitDebateInterjection,
   submitDebateJudgeGavelMessage,
@@ -211,7 +218,25 @@ import {
   generateDebateSessionSynopsis,
   chatWithDebateDebriefBot,
   type DebateAiRuntime,
+  type DebateAdvancePreparation,
 } from "./debate.ts";
+import {
+  TurnPreparationError,
+  turnPreparationRegistry,
+} from "./turn-preparations.ts";
+import {
+  applyPreparedDatabaseChangeset,
+  capturePreparedDatabaseChangeset,
+  createUserScopedPreparedDatabase,
+  type PreparedDatabaseChangeset,
+} from "./prepared-db-changeset.ts";
+import {
+  createBotPresenceBeat,
+  botPresenceBeatPublicTranscriptLine,
+  listBotPresenceBeats,
+  listBotPresenceBeatsForSession,
+  updateBotPresenceBeat,
+} from "./presence-beats.ts";
 import {
   DebateSourceInspectionError,
   inspectDebateSourceUrl,
@@ -219,7 +244,9 @@ import {
 import {
   SignalOnlineTurnError,
   advanceBotcastEpisode,
+  botcastEpisodeCanPrepareAdvance,
   botcastEpisodePowerSnapshotForRole,
+  botcastPreparedTurnCursor,
   cancelBotcastEpisode,
   chatWithBotcastShowHost,
   createBotcastShow,
@@ -778,6 +805,7 @@ import {
   normalizePrismCompanionRequest,
   normalizePrismCompanionSurfaceReference,
   isPrismRefractDebateTextTarget,
+  debateSpokenText,
   normalizePrismExecuteProposalRequestV1,
   normalizePrismUndoRequestV1,
   normalizeGraphicsQuality,
@@ -2180,6 +2208,7 @@ interface UserDbRow {
   elevenlabs_voice_bank: string | null;
   elevenlabs_voice_model: string | null;
   elevenlabs_voice_collection_id: string | null;
+  zen_player_voice_enabled: number;
   player_audio_voice_profile: string | null;
   player_name_pronunciation: string | null;
   prism_default_bot_audio_voice_profile: string | null;
@@ -2233,8 +2262,71 @@ function requireAuth(ctx: RequestContext): string {
   return session.userId;
 }
 
+function asTurnPreparationHttpError(error: unknown): never {
+  if (!(error instanceof TurnPreparationError)) throw error;
+  const status = error.code === "not_found" ? 404 : error.code === "expired" ? 410 : 409;
+  throw new HttpError(status, error.message);
+}
+
+function invalidateTurnPreparation(
+  userId: string,
+  surface: "coffee" | "signal" | "debate",
+  sessionId: string,
+  reason: string,
+): void {
+  turnPreparationRegistry.discardSession(userId, surface, sessionId, reason);
+}
+
+const SIGNAL_PREPARATION_TABLES = [
+  "bots",
+  "botcast_shows",
+  "botcast_episodes",
+  "botcast_episode_segments",
+  "botcast_messages",
+  "botcast_events",
+] as const;
+
+interface PreparedSignalTurnPayload extends PreparedDatabaseChangeset {
+  messageId: string | null;
+}
+
+const COFFEE_PREPARATION_TABLES = [
+  "bots",
+  "coffee_groups",
+  "coffee_group_seats",
+  "coffee_presets",
+  "conversations",
+  "messages",
+  "memories",
+  "bot_relationships",
+  "coffee_bot_social_state",
+  "coffee_directional_irritation",
+  "coffee_directional_irritation_ledger",
+  "coffee_cup_top_offs",
+  "coffee_group_events",
+  "coffee_polls",
+  "coffee_poll_votes",
+  "usage_events",
+  "developer_transcript_events",
+] as const;
+
+interface PreparedCoffeeTurnPayload extends PreparedDatabaseChangeset {
+  response: Awaited<ReturnType<typeof processCoffeeAutonomousTurn>>;
+}
+
 function readReplaySurface(value: unknown): ReplaySurfaceV1 | null {
   return value === "signal" || value === "coffee" ? value : null;
+}
+
+function readPresenceBeatSurface(value: unknown) {
+  return value === "chat" ||
+    value === "zen" ||
+    value === "sandbox" ||
+    value === "coffee" ||
+    value === "signal" ||
+    value === "debate"
+    ? value
+    : null;
 }
 
 function readReplayStatus(value: unknown): ReplayRecordingStatusV1 | null {
@@ -2446,7 +2538,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -13367,8 +13459,301 @@ function buildRoutes(): RouteDefinition[] {
         ),
       });
     }),
+    route("POST", "/api/debates/:id/turn-preparations", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      if (
+        body.expectedRevision !== undefined &&
+        body.expectedRevision !== frozen.revision
+      ) {
+        throw new HttpError(409, "The Debate changed before preparation could start.");
+      }
+      if (!debateSessionCanPrepareAdvance(frozen)) {
+        throw new HttpError(409, "This Debate is waiting for a player or procedure.");
+      }
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
+      );
+      const preparation = turnPreparationRegistry.create<DebateAdvancePreparation>({
+        userId,
+        surface: "debate",
+        sessionId: frozen.id,
+        stateCursor: debatePreparedTurnCursor(frozen),
+        run: async () => {
+          const prepared = await runWithUsageSession(
+            {
+              db,
+              userId,
+              privacyScope: "normal",
+              mode: "debate",
+              surface: "debate",
+            },
+            () => prepareDebateAdvance(frozen, runtime),
+          );
+          const provisionalUtterances = prepared.events.flatMap((event) => {
+            if (!event.speakerBotId) return [];
+            const text = debateSpokenText(event.content).trim();
+            return text
+              ? [{ id: event.id, speakerBotId: event.speakerBotId, text }]
+              : [];
+          });
+          return {
+            speakerBotId: provisionalUtterances[0]?.speakerBotId ?? null,
+            provisionalUtterances,
+            payload: prepared,
+          };
+        },
+      });
+      json(ctx.res, 202, { ok: true, preparation });
+    }),
+    route("GET", "/api/turn-preparations/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          preparation: turnPreparationRegistry.get(ctx.params.id, userId),
+        });
+      } catch (error) {
+        asTurnPreparationHttpError(error);
+      }
+    }),
+    route("DELETE", "/api/turn-preparations/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          preparation: turnPreparationRegistry.discard(
+            ctx.params.id,
+            userId,
+            "Discarded after a newer audience-heard mutation.",
+          ),
+        });
+      } catch (error) {
+        asTurnPreparationHttpError(error);
+      }
+    }),
+    route("GET", "/api/presence-beats", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const surface = readPresenceBeatSurface(ctx.query.get("surface"));
+      const sessionId = ctx.query.get("sessionId")?.trim() ?? "";
+      if (!surface || !sessionId) {
+        throw new HttpError(400, "surface and sessionId are required.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        beats: listBotPresenceBeats(db, userId, surface, sessionId),
+      });
+    }),
+    route("POST", "/api/presence-beats", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const surface = readPresenceBeatSurface(body.surface);
+      const speaker =
+        body.speaker && typeof body.speaker === "object" && !Array.isArray(body.speaker)
+          ? (body.speaker as Record<string, unknown>)
+          : null;
+      const trigger =
+        body.trigger === "interruption" ||
+        body.trigger === "redirect" ||
+        body.trigger === "waiting"
+          ? body.trigger
+          : null;
+      const source =
+        body.source === "default" || body.source === "custom"
+          ? body.source
+          : null;
+      if (
+        !surface ||
+        typeof body.sessionId !== "string" ||
+        typeof body.responseId !== "string" ||
+        typeof body.text !== "string" ||
+        typeof body.playbackStartedAtMs !== "number" ||
+        typeof speaker?.botId !== "string" ||
+        typeof speaker.name !== "string" ||
+        !trigger ||
+        !source
+      ) {
+        throw new HttpError(400, "A complete response cue event is required.");
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        beat: createBotPresenceBeat(db, userId, {
+          surface,
+          sessionId: body.sessionId,
+          responseId: body.responseId,
+          speaker: { botId: speaker.botId, name: speaker.name },
+          trigger,
+          source,
+          text: body.text,
+          playbackStartedAtMs: body.playbackStartedAtMs,
+        }),
+      });
+    }),
+    route("PATCH", "/api/presence-beats/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const completion =
+        body.completion === "playing" ||
+        body.completion === "completed" ||
+        body.completion === "interrupted" ||
+        body.completion === "failed"
+          ? body.completion
+          : null;
+      if (typeof body.heardCharacterCount !== "number" || !completion) {
+        throw new HttpError(
+          400,
+          "heardCharacterCount and completion are required.",
+        );
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        beat: updateBotPresenceBeat(db, userId, ctx.params.id, {
+          heardCharacterCount: body.heardCharacterCount,
+          completion,
+          ...(typeof body.playbackEndedAtMs === "number"
+            ? { playbackEndedAtMs: body.playbackEndedAtMs }
+            : {}),
+        }),
+      });
+    }),
+    route("POST", "/api/turn-preparations/:id/commit", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const publicPreparation = turnPreparationRegistry.get(ctx.params.id, userId);
+        if (publicPreparation.surface === "debate") {
+          const result = await turnPreparationRegistry.commit({
+            userId,
+            preparationId: publicPreparation.id,
+            currentCursor: () =>
+              debatePreparedTurnCursor(
+                getDebateSession(db, userId, publicPreparation.sessionId),
+              ),
+            commit: async (payload) => {
+              const prepared = payload as DebateAdvancePreparation;
+              const current = getDebateSession(
+                db,
+                userId,
+                publicPreparation.sessionId,
+              );
+              const runtime = debateAiRuntimeForUser(
+                userId,
+                current.provider,
+                current.model,
+                current.responseMode,
+                current.generationChain,
+              );
+              const session = commitDebateAdvancePreparation(
+                db,
+                userId,
+                current.id,
+                {
+                  expectedRevision: prepared.baseRevision,
+                  idempotencyKey: `turn-preparation:${publicPreparation.id}`,
+                  skip: false,
+                },
+                prepared,
+                runtime.auxiliary,
+              );
+              return {
+                value: debateSessionForPlayer(session),
+                result: {
+                  committedAt: new Date().toISOString(),
+                  revision: session.revision,
+                },
+              };
+            },
+          });
+          json(ctx.res, 200, {
+            ok: true,
+            preparation: result.preparation,
+            session: result.value,
+          });
+          return;
+        }
+        if (publicPreparation.surface === "signal") {
+          const result = await turnPreparationRegistry.commit({
+            userId,
+            preparationId: publicPreparation.id,
+            currentCursor: () =>
+              botcastPreparedTurnCursor(
+                db,
+                userId,
+                publicPreparation.sessionId,
+              ),
+            commit: async (payload) => {
+              const prepared = payload as PreparedSignalTurnPayload;
+              applyPreparedDatabaseChangeset(db, prepared);
+              const episode = getBotcastEpisode(
+                db,
+                userId,
+                publicPreparation.sessionId,
+              );
+              const message = prepared.messageId
+                ? episode.messages.find(
+                    (candidate) => candidate.id === prepared.messageId,
+                  ) ?? null
+                : null;
+              return {
+                value: projectBotcastAdvanceResponseForAudienceV1({
+                  episode,
+                  message,
+                }),
+                result: {
+                  committedAt: new Date().toISOString(),
+                  revision: episode.updatedAt,
+                },
+              };
+            },
+          });
+          json(ctx.res, 200, {
+            ok: true,
+            preparation: result.preparation,
+            ...result.value,
+          });
+          return;
+        }
+        if (publicPreparation.surface === "coffee") {
+          const result = await turnPreparationRegistry.commit({
+            userId,
+            preparationId: publicPreparation.id,
+            currentCursor: () =>
+              coffeePreparedTurnCursor(
+                db,
+                userId,
+                publicPreparation.sessionId,
+              ),
+            commit: async (payload) => {
+              const prepared = payload as PreparedCoffeeTurnPayload;
+              applyPreparedDatabaseChangeset(db, prepared);
+              return {
+                value: prepared.response,
+                result: {
+                  committedAt: new Date().toISOString(),
+                  revision: prepared.response.conversation.updatedAt,
+                },
+              };
+            },
+          });
+          json(ctx.res, 200, {
+            ok: true,
+            preparation: result.preparation,
+            ...result.value,
+          });
+          return;
+        }
+        throw new HttpError(409, "This prepared surface is not available for commit.");
+      } catch (error) {
+        asTurnPreparationHttpError(error);
+      }
+    }),
     route("POST", "/api/debates/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "Just-in-time advance replaced the prepared turn.");
       const body = ctx.body as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = debateAiRuntimeForUser(
@@ -13402,6 +13787,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/interject", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "Player speech interrupted the prepared turn.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = debateAiRuntimeForUser(
         userId,
@@ -13434,6 +13820,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/participant-objection", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "Participant objection interrupted the prepared turn.");
       const session = raiseDebateParticipantObjection(
         db,
         userId,
@@ -13450,6 +13837,7 @@ function buildRoutes(): RouteDefinition[] {
       "/api/debates/:id/participant-objection/resolve",
       async (ctx) => {
         const userId = requireAuth(ctx);
+        invalidateTurnPreparation(userId, "debate", ctx.params.id, "Participant objection resolution changed the floor.");
         const frozen = getDebateSession(db, userId, ctx.params.id);
         const runtime = debateAiRuntimeForUser(
           userId,
@@ -13485,6 +13873,7 @@ function buildRoutes(): RouteDefinition[] {
     ),
     route("POST", "/api/debates/:id/judge-gavel", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Judge gavel interrupted the prepared turn.");
       const session = swingDebateJudgeGavel(
         db,
         userId,
@@ -13498,6 +13887,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/judge-gavel/order", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Judge changed the room state.");
       const session = orderDebateAudience(
         db,
         userId,
@@ -13511,6 +13901,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/judge-gavel/message", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Judge addressed the floor.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = debateAiRuntimeForUser(
         userId,
@@ -13543,6 +13934,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/objection-ruling", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "An objection ruling changed the floor.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = debateAiRuntimeForUser(
         userId,
@@ -13575,6 +13967,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/turnabout-action", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "A Turnabout action changed the record.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = debateAiRuntimeForUser(
         userId,
@@ -13607,6 +14000,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/player-turn", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "A player turn changed the Debate.");
       const runtime = debateAiRuntimeForUser(userId, "local");
       const session = submitDebatePlayerTurn(
         db,
@@ -13622,6 +14016,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/verdict", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The verdict changed the Debate.");
       const session = submitDebateVerdict(
         db,
         userId,
@@ -13635,11 +14030,21 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/pause", async (ctx) => {
       const userId = requireAuth(ctx);
-      const session = pauseDebateSession(
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate was paused.");
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
+      );
+      const session = await pauseDebateSessionWithPersona(
         db,
         userId,
         ctx.params.id,
         ctx.body as Parameters<typeof pauseDebateSession>[3],
+        runtime,
       );
       json(ctx.res, 200, {
         ok: true,
@@ -13648,6 +14053,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/end-early", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate ended.");
       const session = endDebateSessionEarly(
         db,
         userId,
@@ -13661,6 +14067,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/jury/skip-deliberation", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Jury cadence changed.");
       const session = skipDebateJuryDeliberation(
         db,
         userId,
@@ -13674,11 +14081,21 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/resume", async (ctx) => {
       const userId = requireAuth(ctx);
-      const session = resumeDebateSession(
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate resumed from a new floor state.");
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozen.model,
+        frozen.responseMode,
+        frozen.generationChain,
+      );
+      const session = await resumeDebateSessionWithPersona(
         db,
         userId,
         ctx.params.id,
         ctx.body as Parameters<typeof resumeDebateSession>[3],
+        runtime,
       );
       json(ctx.res, 200, {
         ok: true,
@@ -13687,6 +14104,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/debates/:id/synopsis", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "Session metadata changed.");
       const body = ctx.body as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = debateAiRuntimeForUser(
@@ -13763,6 +14181,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/debates/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate session exited.");
       const body = ctx.body as Record<string, unknown>;
       if (
         typeof body.expectedRevision !== "number" ||
@@ -15470,6 +15889,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/botcast/episodes/:id", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal episode exited.");
       const user = getUserRow(userId);
       const targetEpisode = (() => {
         try {
@@ -15511,6 +15931,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/end", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal episode ended.");
       const body = (ctx.body ?? {}) as Record<string, unknown>;
       if (
         body.deterministicClose !== undefined &&
@@ -15602,6 +16023,12 @@ function buildRoutes(): RouteDefinition[] {
       "/api/botcast/episodes/:id/model-warmup-hold",
       async (ctx) => {
         const userId = requireAuth(ctx);
+        invalidateTurnPreparation(
+          userId,
+          "signal",
+          ctx.params.id,
+          "Signal model readiness changed.",
+        );
         const body = ctx.body as Record<string, unknown>;
         if (typeof body.active !== "boolean") {
           throw new HttpError(400, "active (boolean) is required.");
@@ -15620,6 +16047,7 @@ function buildRoutes(): RouteDefinition[] {
     ),
     route("POST", "/api/botcast/episodes/:id/camera", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal camera changed.");
       const body = ctx.body as Record<string, unknown>;
       const mode = body.mode;
       if (
@@ -15659,6 +16087,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/soundboard", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal cue changed.");
       const body = ctx.body as Record<string, unknown>;
       const kind = body.kind;
       if (
@@ -15709,6 +16138,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/botcast/episodes/:id/audio-cue", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(userId, "signal", ctx.params.id, "Signal cue changed.");
       const body = ctx.body as Record<string, unknown>;
       const kind = body.kind;
       if (
@@ -15750,8 +16180,115 @@ function buildRoutes(): RouteDefinition[] {
         ),
       });
     }),
+    route(
+      "POST",
+      "/api/botcast/episodes/:id/turn-preparations",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        const frozen = getBotcastEpisode(db, userId, ctx.params.id);
+        if (!botcastEpisodeCanPrepareAdvance(frozen)) {
+          throw new HttpError(
+            409,
+            "This Signal episode is waiting for the Producer or has ended.",
+          );
+        }
+        const user = getUserRow(userId);
+        const userKey = decryptUserKey(userId);
+        const powerTheme = readResolvedPowerTheme(body.theme);
+        const stateCursor = botcastPreparedTurnCursor(
+          db,
+          userId,
+          frozen.id,
+        );
+        const preparation = turnPreparationRegistry.create<PreparedSignalTurnPayload>({
+          userId,
+          surface: "signal",
+          sessionId: frozen.id,
+          stateCursor,
+          run: async (signal) => {
+            const isolated = createUserScopedPreparedDatabase(
+              db,
+              userId,
+              SIGNAL_PREPARATION_TABLES,
+            );
+            let captured = false;
+            try {
+              const result = await runWithUsageSession(
+                {
+                  db,
+                  userId,
+                  privacyScope: "normal",
+                  mode: "signal",
+                  surface: "signal",
+                },
+                () =>
+                  advanceBotcastEpisode(
+                    isolated.db,
+                    userId,
+                    frozen.id,
+                    {},
+                    {
+                      preferredProvider: frozen.provider,
+                      openAiApiKey:
+                        getOpenAiApiKeyForUser(userId, userKey) ??
+                        config.openAiApiKey,
+                      anthropicApiKey:
+                        getAnthropicApiKeyForUser(userId, userKey) ??
+                        config.anthropicApiKey,
+                      secondaryOllamaHost: user.secondary_ollama_host,
+                      preferredLocalModel: user.preferred_local_model,
+                      preferredOnlineModel: user.preferred_online_model,
+                      autoFallbackChain: parseStoredAutoFallbackChain(
+                        user.auto_fallback_chain,
+                      ),
+                      signal,
+                      ...(powerTheme ? { theme: powerTheme } : {}),
+                      providerFactory: providerFactoryOverride,
+                    },
+                  ),
+              );
+              if (signal.aborted) throw new Error("Signal preparation was cancelled.");
+              const databaseChanges = capturePreparedDatabaseChangeset(
+                isolated.db,
+                isolated.session,
+              );
+              captured = true;
+              return {
+                speakerBotId: result.message?.botId ?? null,
+                provisionalUtterances: result.message
+                  ? [
+                      {
+                        id: result.message.id,
+                        speakerBotId: result.message.botId,
+                        text: result.message.content,
+                      },
+                    ]
+                  : [],
+                payload: {
+                  ...databaseChanges,
+                  messageId: result.message?.id ?? null,
+                },
+              };
+            } finally {
+              if (!captured) {
+                isolated.session.close();
+                isolated.db.close();
+              }
+            }
+          },
+        });
+        json(ctx.res, 202, { ok: true, preparation });
+      },
+    ),
     route("POST", "/api/botcast/episodes/:id/advance", async (ctx) => {
       const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "signal",
+        ctx.params.id,
+        "Just-in-time Signal advance replaced the prepared turn.",
+      );
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
@@ -17080,6 +17617,169 @@ function buildRoutes(): RouteDefinition[] {
         ...result,
       });
     }),
+    route(
+      "POST",
+      "/api/coffee/sessions/:id/turn-preparations",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = (ctx.body ?? {}) as Record<string, unknown>;
+        const conversationId = ctx.params.id;
+        const frozenCursor = coffeePreparedTurnCursor(
+          db,
+          userId,
+          conversationId,
+        );
+        if (coffeeConversationHasPlayerDeparture(db, userId, conversationId)) {
+          throw new HttpError(409, "This Coffee session has ended.");
+        }
+        const directedSpeakerBotId =
+          typeof body.directedSpeakerBotId === "string"
+            ? body.directedSpeakerBotId
+            : undefined;
+        const directedUserMessage =
+          typeof body.directedUserMessage === "string"
+            ? body.directedUserMessage
+            : undefined;
+        const presentBotIds = Array.isArray(body.presentBotIds)
+          ? body.presentBotIds.filter(
+              (value): value is string =>
+                typeof value === "string" && value.trim().length > 0,
+            )
+          : undefined;
+        const requestedProvider = readProvider(body.preferredProvider);
+        const user = getUserRow(userId);
+        const userKey = decryptUserKey(userId);
+        const effectiveProvider = requestedProvider ?? user.preferred_provider;
+        const powerTheme = readResolvedPowerTheme(body.theme);
+        const requestedReasoningEffort = reasoningEffortForRequest(
+          body.reasoningEffort,
+        );
+        const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
+          body.modelOverride,
+        );
+        const sessionRemainingMs =
+          typeof body.sessionRemainingMs === "number" &&
+          Number.isFinite(body.sessionRemainingMs)
+            ? Math.max(0, body.sessionRemainingMs)
+            : null;
+        const preparation = turnPreparationRegistry.create<PreparedCoffeeTurnPayload>({
+          userId,
+          surface: "coffee",
+          sessionId: conversationId,
+          stateCursor: frozenCursor,
+          run: async (signal) => {
+            const isolated = createUserScopedPreparedDatabase(
+              db,
+              userId,
+              COFFEE_PREPARATION_TABLES,
+            );
+            let captured = false;
+            try {
+              const response = await runWithUsageSession(
+                {
+                  db,
+                  userId,
+                  privacyScope: "normal",
+                  mode: "coffee",
+                  surface: "coffee",
+                  conversationId,
+                  botId: directedSpeakerBotId ?? null,
+                },
+                () =>
+                  processCoffeeAutonomousTurn(
+                    isolated.db,
+                    userId,
+                    conversationId,
+                    {
+                      preferredProvider: effectiveProvider,
+                      ...(powerTheme ? { theme: powerTheme } : {}),
+                      preferredLocalModel: user.preferred_local_model,
+                      preferredOnlineModel: user.preferred_online_model,
+                      responseMode: normalizeResponseMode(
+                        body.responseMode,
+                        effectiveProvider === "local" ? "local" : "online",
+                      ),
+                      autoFallbackChain: parseStoredAutoFallbackChain(
+                        user.auto_fallback_chain,
+                      ),
+                      openAiApiKey:
+                        getOpenAiApiKeyForUser(userId, userKey) ??
+                        config.openAiApiKey,
+                      anthropicApiKey:
+                        getAnthropicApiKeyForUser(userId, userKey) ??
+                        config.anthropicApiKey,
+                      secondaryOllamaHost: user.secondary_ollama_host,
+                      experimentalDualOllamaEnabled:
+                        user.experimental_dual_ollama_enabled === 1,
+                      experimentalAllModelEffortEnabled:
+                        user.experimental_all_model_effort_enabled === 1,
+                      userDisplayName: user.display_name,
+                      userKey,
+                      prismDefaultLlmModel: user.prism_default_llm_model,
+                      assistantImageUserPrefs: {
+                        preferredLocalImageModel:
+                          user.preferred_local_image_model,
+                        preferredOpenAiImageModel:
+                          user.preferred_openai_image_model,
+                        lenientLocalImageFallbackModel:
+                          user.lenient_local_image_fallback_model,
+                        comfyuiHost: user.comfyui_host,
+                        comfyUiWorkflows: parseStoredComfyUiWorkflows(
+                          user.comfyui_workflows,
+                        ),
+                        secondaryOllamaHost: user.secondary_ollama_host,
+                      },
+                      sessionRemainingMs,
+                      signal,
+                      ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+                      ...(requestedReasoningEffort
+                        ? { reasoningEffort: requestedReasoningEffort }
+                        : {}),
+                    },
+                    body.userIsComposing === true,
+                    directedSpeakerBotId,
+                    directedUserMessage,
+                    presentBotIds,
+                  ),
+              );
+              if (signal.aborted) throw new Error("Coffee preparation was cancelled.");
+              const databaseChanges = capturePreparedDatabaseChangeset(
+                isolated.db,
+                isolated.session,
+              );
+              captured = true;
+              const utterance = [...response.conversation.messages]
+                .reverse()
+                .find(
+                  (message) =>
+                    message.role === "assistant" &&
+                    message.botId === response.speakerBotId,
+                );
+              return {
+                speakerBotId: response.speakerBotId,
+                provisionalUtterances:
+                  response.speakerBotId && utterance
+                    ? [
+                        {
+                          id: utterance.id,
+                          speakerBotId: response.speakerBotId,
+                          text: utterance.content,
+                        },
+                      ]
+                    : [],
+                payload: { ...databaseChanges, response },
+              };
+            } finally {
+              if (!captured) {
+                isolated.session.close();
+                isolated.db.close();
+              }
+            }
+          },
+        });
+        json(ctx.res, 202, { ok: true, preparation });
+      },
+    ),
     route("POST", "/api/coffee/turn-jobs", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -17091,6 +17791,12 @@ function buildRoutes(): RouteDefinition[] {
           : "";
       if (!conversationId)
         throw new Error("Coffee conversation id is required.");
+      invalidateTurnPreparation(
+        userId,
+        "coffee",
+        conversationId,
+        "Just-in-time Coffee turn replaced the prepared turn.",
+      );
       const message =
         kind === "user" ? readString(body.message, "message") : "";
       const directedSpeakerBotId =
@@ -20285,6 +20991,11 @@ function buildRoutes(): RouteDefinition[] {
           elevenLabsVoiceModel: user.elevenlabs_voice_model ?? "",
           elevenLabsVoiceCollectionId:
             user.elevenlabs_voice_collection_id ?? "",
+          zenPlayerVoiceEnabled: user.zen_player_voice_enabled !== 0,
+          playerAudioVoiceProfile:
+            parseStoredBotAudioVoiceProfileV1(
+              user.player_audio_voice_profile,
+            ) ?? normalizeBotAudioVoiceProfileV1(undefined),
           openAiApiKeySource: apiKeySource(
             user.openai_key_ciphertext,
             config.openAiApiKey,
@@ -20802,6 +21513,8 @@ function buildRoutes(): RouteDefinition[] {
         elevenLabsVoiceBank: user.elevenlabs_voice_bank,
         elevenLabsVoiceModel: user.elevenlabs_voice_model,
         elevenLabsVoiceCollectionId: user.elevenlabs_voice_collection_id,
+        zenPlayerVoiceEnabled: user.zen_player_voice_enabled,
+        playerAudioVoiceProfile: user.player_audio_voice_profile,
         primaryOllamaHost: config.ollamaHost,
       });
 
@@ -20879,7 +21592,7 @@ function buildRoutes(): RouteDefinition[] {
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
-            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?,
+            voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = ?, player_audio_voice_profile = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
             anthropic_key_ciphertext = ?, anthropic_key_iv = ?, anthropic_key_tag = ?,
@@ -20948,6 +21661,8 @@ function buildRoutes(): RouteDefinition[] {
         JSON.stringify(next.elevenLabsVoiceBank),
         next.elevenLabsVoiceModel,
         next.elevenLabsVoiceCollectionId,
+        next.zenPlayerVoiceEnabled ? 1 : 0,
+        serializeBotAudioVoiceProfileV1(next.playerAudioVoiceProfile),
         devMemoriesEnabled,
         devMemoriesText,
         openAiCipher,
@@ -20994,6 +21709,8 @@ function buildRoutes(): RouteDefinition[] {
           elevenLabsVoiceBank: next.elevenLabsVoiceBank,
           elevenLabsVoiceModel: next.elevenLabsVoiceModel ?? "",
           elevenLabsVoiceCollectionId: next.elevenLabsVoiceCollectionId ?? "",
+          zenPlayerVoiceEnabled: next.zenPlayerVoiceEnabled,
+          playerAudioVoiceProfile: next.playerAudioVoiceProfile,
           hasOpenAiApiKey: Boolean(openAiCipher),
           hasAnthropicApiKey: Boolean(anthropicCipher),
           hasElevenLabsApiKey: Boolean(elevenLabsCipher),
@@ -23891,6 +24608,18 @@ function buildRoutes(): RouteDefinition[] {
       if (!conversation) {
         throw new Error("Conversation not found.");
       }
+      const heardResponseCueLines = listBotPresenceBeatsForSession(
+        db,
+        userId,
+        conversationId,
+      ).flatMap((beat) => {
+        const line = botPresenceBeatPublicTranscriptLine(beat);
+        return line ? [`- ${line}`] : [];
+      });
+      const appendHeardResponseCues = (markdown: string): string =>
+        heardResponseCueLines.length > 0
+          ? `${markdown.trimEnd()}\n\n## Response cues (heard only)\n\n${heardResponseCueLines.join("\n")}\n`
+          : markdown;
       // Standard Zen export stays blocked (product surface). Developer format is
       // available so digests builds can clipboard a verbose diagnostic transcript.
       if (conversation.conversation_mode === "zen" && !developerTranscript) {
@@ -24021,7 +24750,7 @@ function buildRoutes(): RouteDefinition[] {
             left.request_sequence - right.request_sequence ||
             left.id.localeCompare(right.id),
         );
-        const markdown = buildDeveloperTranscript({
+        const markdown = appendHeardResponseCues(buildDeveloperTranscript({
           conversation: {
             id: conversation.id,
             title: conversation.title,
@@ -24054,7 +24783,7 @@ function buildRoutes(): RouteDefinition[] {
             createdAt: event.created_at,
           })),
           secretValues: sensitiveEnvironmentValues(),
-        });
+        }));
         const exportId = randomId(12);
         db.prepare(
           "INSERT INTO conversation_exports (id, user_id, conversation_id, markdown, bot_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -24254,6 +24983,10 @@ function buildRoutes(): RouteDefinition[] {
         lines.push("");
         lines.push("---");
         lines.push("");
+      }
+      if (heardResponseCueLines.length > 0) {
+        lines.push("## Response cues (heard only)", "");
+        lines.push(...heardResponseCueLines, "");
       }
       const markdown = lines.join("\n");
       const exportId = randomId(12);

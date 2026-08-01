@@ -2831,31 +2831,47 @@
 }
 
 .live[data-theme="light"] .cameraControls {
-  background: color-mix(in srgb, #f5f2ec 86%, transparent);
+  border-color: rgba(56, 46, 64, 0.2);
+  background: rgba(250, 248, 245, 0.92);
+  box-shadow: 0 8px 24px rgba(50, 40, 55, 0.16);
 }
 
 .live[data-theme="light"] .captionControls {
-  background: color-mix(in srgb, #f5f2ec 86%, transparent);
+  border-color: rgba(56, 46, 64, 0.2);
+  background: rgba(250, 248, 245, 0.92);
+  box-shadow: 0 8px 24px rgba(50, 40, 55, 0.16);
 }
 
 .live[data-theme="light"] .cameraControls button {
-  color: #655c6d;
-  background: color-mix(in srgb, #ffffff 58%, transparent);
+  border-color: rgba(56, 46, 64, 0.14);
+  color: #514758;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .live[data-theme="light"] .captionControls button {
-  color: #655c6d;
-  background: color-mix(in srgb, #ffffff 58%, transparent);
+  border-color: rgba(56, 46, 64, 0.14);
+  color: #514758;
+  background: rgba(255, 255, 255, 0.82);
 }
 
 .live[data-theme="light"] .cameraControls button[data-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 42%,
+    #bcb4c2
+  );
   color: #2a2330;
-  background: color-mix(in srgb, var(--debate-moderator-color) 20%, #f4efe8);
+  background: color-mix(in srgb, var(--debate-moderator-color) 24%, #fffaf4);
 }
 
 .live[data-theme="light"] .captionControls button[data-selected="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 42%,
+    #bcb4c2
+  );
   color: #2a2330;
-  background: color-mix(in srgb, var(--debate-moderator-color) 20%, #f4efe8);
+  background: color-mix(in srgb, var(--debate-moderator-color) 24%, #fffaf4);
 }
 
 .live[data-theme="light"] .cameraControls .alignmentLaunchButton {
@@ -3094,6 +3110,12 @@
   --debate-active-evidence-scale: var(--debate-source-evidence-scale, 1);
 }
 
+.evidencePedestal[data-evidence-view="left"] {
+  --debate-active-evidence-offset-x: var(--debate-left-evidence-offset-x, 0%);
+  --debate-active-evidence-offset-y: var(--debate-left-evidence-offset-y, 0%);
+  --debate-active-evidence-scale: var(--debate-left-evidence-scale, 1);
+}
+
 .evidencePedestal[data-evidence-view="moderator"] {
   --debate-active-evidence-offset-x: var(
     --debate-moderator-evidence-offset-x,
@@ -3104,6 +3126,27 @@
     0%
   );
   --debate-active-evidence-scale: var(--debate-moderator-evidence-scale, 1);
+}
+
+.evidencePedestal[data-evidence-view="right"] {
+  --debate-active-evidence-offset-x: var(--debate-right-evidence-offset-x, 0%);
+  --debate-active-evidence-offset-y: var(--debate-right-evidence-offset-y, 0%);
+  --debate-active-evidence-scale: var(--debate-right-evidence-scale, 1);
+}
+
+.evidencePedestal[data-evidence-kind="source"][data-evidence-view="left"] {
+  --debate-active-evidence-offset-x: var(
+    --debate-left-source-evidence-offset-x,
+    0%
+  );
+  --debate-active-evidence-offset-y: var(
+    --debate-left-source-evidence-offset-y,
+    0%
+  );
+  --debate-active-evidence-scale: var(
+    --debate-left-source-evidence-scale,
+    1
+  );
 }
 
 .evidencePedestal[data-evidence-kind="source"][data-evidence-view="moderator"] {
@@ -3117,6 +3160,21 @@
   );
   --debate-active-evidence-scale: var(
     --debate-moderator-source-evidence-scale,
+    1
+  );
+}
+
+.evidencePedestal[data-evidence-kind="source"][data-evidence-view="right"] {
+  --debate-active-evidence-offset-x: var(
+    --debate-right-source-evidence-offset-x,
+    0%
+  );
+  --debate-active-evidence-offset-y: var(
+    --debate-right-source-evidence-offset-y,
+    0%
+  );
+  --debate-active-evidence-scale: var(
+    --debate-right-source-evidence-scale,
     1
   );
 }
@@ -3217,9 +3275,11 @@
   display: none;
 }
 
-/* Wide keeps the established paper prop. The shared lectern composition used
-   by Moderator, Left, and Right gets a readable source pamphlet. */
-.evidencePedestal[data-evidence-kind="source"][data-evidence-view="moderator"]
+/* Wide keeps the established paper prop; every lectern close-up gets the
+   readable source pamphlet treatment while retaining independent placement. */
+.evidencePedestal[data-evidence-kind="source"]:not(
+    [data-evidence-view="wide"]
+  )
   .evidencePedestalDocument {
   border-radius: 3px;
   transform: translateY(10%) scale(1.55)
@@ -3227,13 +3287,17 @@
   transform-origin: center bottom;
 }
 
-.evidencePedestal[data-evidence-kind="source"][data-evidence-view="moderator"]
+.evidencePedestal[data-evidence-kind="source"]:not(
+    [data-evidence-view="wide"]
+  )
   .evidencePedestalDocument::before {
   inset: 12% 10% 8%;
   opacity: 0.28;
 }
 
-.evidencePedestal[data-evidence-kind="source"][data-evidence-view="moderator"]
+.evidencePedestal[data-evidence-kind="source"]:not(
+    [data-evidence-view="wide"]
+  )
   .evidencePedestalDocumentDetails {
   position: absolute;
   inset: 11% 10% 8%;
@@ -4747,6 +4811,12 @@
   contain: layout paint style;
 }
 
+.transcriptFeed article[data-response-cue="true"] {
+  font-size: 0.88rem;
+  font-style: italic;
+  opacity: 0.72;
+}
+
 .transcriptFeed article:last-of-type {
   border-bottom: 0;
 }
@@ -5852,6 +5922,14 @@
   touch-action: none;
 }
 
+.forumCamera[data-alignment-evidence-only="true"] .alignmentHandle {
+  cursor: default;
+}
+
+.forumCamera[data-alignment-evidence-only="true"] .alignmentHandleLabel {
+  display: none;
+}
+
 .alignmentHandle[data-dragging="true"] {
   cursor: grabbing;
 }
@@ -6398,7 +6476,8 @@
 .juryThoughtPreview {
   position: absolute;
   z-index: 8;
-  top: calc(100% + 8px);
+  top: auto;
+  bottom: calc(100% + 8px);
   left: 50%;
   display: grid;
   gap: 4px;
@@ -6432,7 +6511,7 @@
   white-space: normal;
   pointer-events: none;
   opacity: 0;
-  transform: translateX(-50%) translateY(-3px);
+  transform: translateX(-50%) translateY(3px);
   transition:
     opacity 0.16s ease,
     transform 0.16s ease;
@@ -6464,7 +6543,7 @@
 
 .juryRosterSeats > span:first-child .juryThoughtPreview {
   left: 0;
-  transform: translateY(-3px);
+  transform: translateY(3px);
 }
 
 .juryRosterSeats > span:first-child .juryThoughtChip:hover .juryThoughtPreview,
@@ -6478,7 +6557,7 @@
 .juryRosterSeats > span:last-child .juryThoughtPreview {
   left: auto;
   right: 0;
-  transform: translateY(-3px);
+  transform: translateY(3px);
 }
 
 .juryRosterSeats > span:last-child .juryThoughtChip:hover .juryThoughtPreview,
@@ -6495,7 +6574,15 @@
   --gallery-prism-color: var(--jury-seat-color);
 }
 
-/* Hover preview must escape the gallery clip. */
+/* The roster hugs the viewport floor, so previews open upward and temporarily
+   escape the support band instead of disappearing below the window. */
+.stageSupport:has(.juryThoughtChip:hover),
+.stageSupport:has(.juryThoughtChip:focus-visible) {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+
 .audienceGallery.juryRoster {
   overflow: visible;
 }
@@ -6536,10 +6623,10 @@
   background:
     radial-gradient(
       ellipse at 50% 40%,
-      color-mix(in srgb, var(--debate-active-color) 10%, transparent),
-      transparent 38%
+      color-mix(in srgb, var(--debate-active-color) 15%, transparent),
+      transparent 35%
     ),
-    linear-gradient(165deg, #e9e6e0, #c9c4c5 70%);
+    linear-gradient(165deg, #ddd9d4, #aaa5aa 76%);
 }
 
 .juryChamberAura {
@@ -6561,6 +6648,22 @@
   pointer-events: none;
 }
 
+.juryChamber[data-theme="light"] .juryChamberAura {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.42),
+      transparent 30%,
+      rgba(57, 46, 62, 0.12)
+    ),
+    linear-gradient(
+      90deg,
+      rgba(54, 44, 60, 0.28),
+      transparent 24% 76%,
+      rgba(54, 44, 60, 0.28)
+    );
+}
+
 .juryChamberBots {
   position: absolute;
   inset: 0;
@@ -6577,6 +6680,10 @@
   transition:
     filter 200ms ease,
     transform 200ms ease;
+}
+
+.juryChamber[data-theme="light"] .juryChamberSeat {
+  filter: saturate(0.9) contrast(1.04) brightness(0.94);
 }
 
 .juryChamberSeat[data-speaking="true"] {
@@ -6663,29 +6770,29 @@
 
 .juryChamberSeat[data-seat="0"] {
   left: 50%;
-  top: 50%;
+  top: 46%;
   width: clamp(138px, 12.8vw, 200px);
   height: clamp(184px, 17.1vw, 267px);
 }
 .juryChamberSeat[data-seat="1"] {
   left: 27%;
-  top: 56%;
+  top: 53%;
   width: clamp(146px, 13.5vw, 210px);
   height: clamp(194px, 18vw, 280px);
 }
 .juryChamberSeat[data-seat="2"] {
   left: 73%;
-  top: 56%;
+  top: 53%;
   width: clamp(146px, 13.5vw, 210px);
   height: clamp(194px, 18vw, 280px);
 }
 .juryChamberSeat[data-seat="3"] {
   left: 13%;
-  top: 64%;
+  top: 60%;
 }
 .juryChamberSeat[data-seat="4"] {
   left: 87%;
-  top: 64%;
+  top: 60%;
 }
 
 .juryChamberAvatar {
@@ -6698,34 +6805,81 @@
   height: 100%;
 }
 
-.juryChamberSeat > small {
+.juryChamberIdentity {
   position: absolute;
-  top: 3px;
+  top: -1px;
   left: 50%;
-  z-index: 1;
+  z-index: 4;
+  display: grid;
   width: max-content;
-  max-width: 150%;
+  max-width: 165%;
+  justify-items: center;
+  gap: 4px;
   transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.juryChamberIdentity small,
+.juryChamberIdentity span {
+  max-width: 100%;
   overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--jury-seat-color) 30%, transparent);
+  border-radius: 999px;
+  padding: 3px 7px;
   color: color-mix(in srgb, var(--jury-seat-color) 66%, #f4eff9);
-  font-size: 8px;
+  background: color-mix(in srgb, #0a080d 82%, transparent);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.22);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 720;
   letter-spacing: 0.04em;
   text-overflow: ellipsis;
-  text-shadow: 0 1px 8px #050507;
   white-space: nowrap;
 }
 
-.juryChamber[data-theme="light"] .juryChamberSeat > small {
-  color: color-mix(in srgb, var(--jury-seat-color) 48%, #211b26);
-  text-shadow: 0 1px 7px rgba(255, 255, 255, 0.82);
+.juryChamberIdentity span {
+  color: #f5f2f7;
+  font-size: 8px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  animation: jury-vote-reveal 300ms ease-out both;
+}
+
+.juryChamberIdentity span[data-side="for"] {
+  border-color: color-mix(in srgb, var(--debate-for-color) 58%, transparent);
+  background: color-mix(in srgb, var(--debate-for-color) 24%, #0a080d);
+}
+
+.juryChamberIdentity span[data-side="against"] {
+  border-color: color-mix(in srgb, var(--debate-against-color) 58%, transparent);
+  background: color-mix(in srgb, var(--debate-against-color) 24%, #0a080d);
+}
+
+.juryChamber[data-theme="light"] .juryChamberIdentity small,
+.juryChamber[data-theme="light"] .juryChamberIdentity span {
+  color: color-mix(in srgb, var(--jury-seat-color) 44%, #211b26);
+  background: rgba(255, 253, 249, 0.88);
+  box-shadow: 0 5px 16px rgba(45, 35, 49, 0.16);
+}
+
+.juryChamber[data-theme="light"] .juryChamberIdentity span[data-side="for"] {
+  color: color-mix(in srgb, var(--debate-for-color) 58%, #241d28);
+  background: color-mix(in srgb, var(--debate-for-color) 12%, #fffdf9);
+}
+
+.juryChamber[data-theme="light"]
+  .juryChamberIdentity
+  span[data-side="against"] {
+  color: color-mix(in srgb, var(--debate-against-color) 58%, #241d28);
+  background: color-mix(in srgb, var(--debate-against-color) 12%, #fffdf9);
 }
 
 .juryTableRaster {
   position: absolute;
-  top: -8%;
+  top: 18%;
   left: 50%;
   z-index: 3;
-  width: 102%;
+  width: min(94%, 1120px);
   max-width: none;
   height: auto;
   transform: translateX(-50%);
@@ -6735,7 +6889,7 @@
 
 .juryBallotPile {
   position: absolute;
-  top: 79%;
+  top: 82%;
   left: 50%;
   z-index: 5;
   width: 1px;
@@ -6763,8 +6917,28 @@
 .juryBallotSlip > i {
   position: absolute;
   inset: 29% 36%;
+  display: grid;
+  place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.34);
-  transform: rotate(45deg);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 6px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.juryBallotSlip[data-side="for"] {
+  border-color: color-mix(in srgb, var(--debate-for-color) 58%, transparent);
+  box-shadow:
+    0 5px 12px rgba(0, 0, 0, 0.34),
+    0 0 12px color-mix(in srgb, var(--debate-for-color) 20%, transparent);
+}
+
+.juryBallotSlip[data-side="against"] {
+  border-color: color-mix(in srgb, var(--debate-against-color) 58%, transparent);
+  box-shadow:
+    0 5px 12px rgba(0, 0, 0, 0.34),
+    0 0 12px color-mix(in srgb, var(--debate-against-color) 20%, transparent);
 }
 
 .juryChamber[data-theme="light"] .juryBallotSlip {
@@ -6777,6 +6951,21 @@
 
 .juryChamber[data-theme="light"] .juryBallotSlip > i {
   border-color: rgba(64, 51, 71, 0.3);
+  color: rgba(52, 42, 58, 0.72);
+}
+
+.juryChamber[data-theme="light"] .juryBallotSlip[data-side="for"] {
+  border-color: color-mix(in srgb, var(--debate-for-color) 52%, #bfb6c1);
+  box-shadow:
+    0 5px 12px rgba(59, 45, 64, 0.2),
+    0 0 12px color-mix(in srgb, var(--debate-for-color) 16%, transparent);
+}
+
+.juryChamber[data-theme="light"] .juryBallotSlip[data-side="against"] {
+  border-color: color-mix(in srgb, var(--debate-against-color) 52%, #bfb6c1);
+  box-shadow:
+    0 5px 12px rgba(59, 45, 64, 0.2),
+    0 0 12px color-mix(in srgb, var(--debate-against-color) 16%, transparent);
 }
 
 .juryBallotSlip[data-seat="0"] {
@@ -6858,15 +7047,28 @@
   }
 }
 
+@keyframes jury-vote-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .jurySeal {
   position: absolute;
   top: 13px;
-  left: 14px;
-  z-index: 5;
+  left: 50%;
+  z-index: 7;
   display: grid;
   grid-template-columns: auto auto;
   align-items: center;
   gap: 0 7px;
+  transform: translateX(-50%);
   color: color-mix(in srgb, var(--debate-active-color) 72%, #eee9f4);
   text-transform: uppercase;
 }
@@ -6891,25 +7093,152 @@
   color: color-mix(in srgb, var(--debate-active-color) 38%, #27212d);
 }
 
+.juryVoteBoard {
+  position: absolute;
+  top: 48px;
+  left: 50%;
+  z-index: 7;
+  display: grid;
+  width: min(58%, 620px);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 7px 10px;
+  color: #eeeaf3;
+  background: rgba(10, 8, 13, 0.76);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(12px);
+}
+
+.juryVoteSide {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.juryVoteSide > span {
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.juryVoteSide > strong {
+  font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.juryVoteSide[data-side="for"] {
+  color: color-mix(in srgb, var(--debate-for-color) 72%, white);
+}
+
+.juryVoteSide[data-side="against"] {
+  color: color-mix(in srgb, var(--debate-against-color) 72%, white);
+}
+
+.juryVoteProgress {
+  display: grid;
+  grid-template-columns: repeat(5, 18px);
+  justify-content: center;
+  gap: 4px;
+}
+
+.juryVoteProgress > span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 50%;
+  color: rgba(235, 230, 240, 0.46);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 7px;
+  font-weight: 800;
+}
+
+.juryVoteProgress > span[data-cast="true"] {
+  color: #fff;
+  animation: jury-vote-reveal 300ms ease-out both;
+}
+
+.juryVoteProgress > span[data-side="for"] {
+  border-color: color-mix(in srgb, var(--debate-for-color) 64%, transparent);
+  background: color-mix(in srgb, var(--debate-for-color) 32%, #16121b);
+}
+
+.juryVoteProgress > span[data-side="against"] {
+  border-color: color-mix(in srgb, var(--debate-against-color) 64%, transparent);
+  background: color-mix(in srgb, var(--debate-against-color) 32%, #16121b);
+}
+
+.juryVoteProgress > small {
+  grid-column: 1 / -1;
+  color: rgba(235, 230, 240, 0.62);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.juryChamber[data-theme="light"] .juryVoteBoard {
+  border-color: rgba(55, 44, 61, 0.2);
+  color: #302936;
+  background: rgba(255, 253, 249, 0.84);
+  box-shadow: 0 10px 30px rgba(48, 38, 52, 0.16);
+}
+
+.juryChamber[data-theme="light"] .juryVoteSide[data-side="for"] {
+  color: color-mix(in srgb, var(--debate-for-color) 56%, #241d28);
+}
+
+.juryChamber[data-theme="light"] .juryVoteSide[data-side="against"] {
+  color: color-mix(in srgb, var(--debate-against-color) 56%, #241d28);
+}
+
+.juryChamber[data-theme="light"] .juryVoteProgress > span {
+  border-color: rgba(55, 44, 61, 0.2);
+  color: rgba(48, 41, 54, 0.6);
+  background: rgba(54, 43, 60, 0.06);
+}
+
+.juryChamber[data-theme="light"] .juryVoteProgress > small {
+  color: rgba(48, 41, 54, 0.68);
+}
+
 .juryCenterTranscript {
   position: absolute;
-  top: 66%;
+  top: 68%;
   left: 50%;
   z-index: 5;
   display: grid;
-  width: min(44%, 500px);
-  max-height: 23%;
+  width: min(62%, 680px);
+  max-height: 21%;
   transform: translate(-50%, -50%) perspective(620px) rotateX(1deg);
   overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 11px 15px;
   gap: 5px;
   color: #eae5ee;
+  background: rgba(8, 7, 10, 0.68);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.24);
   text-align: center;
-  text-shadow: 0 2px 14px #050507;
+  backdrop-filter: blur(10px);
 }
 
 .juryChamber[data-theme="light"] .juryCenterTranscript {
+  border-color: rgba(55, 44, 61, 0.2);
   color: #2c2730;
-  text-shadow: 0 2px 12px rgba(255, 255, 255, 0.68);
+  background: rgba(255, 253, 249, 0.84);
+  box-shadow: 0 10px 30px rgba(48, 38, 52, 0.16);
 }
 
 .juryCenterTranscript strong {
@@ -6998,7 +7327,9 @@
 }
 
 .live[data-jury-chamber="true"] .forum {
-  aspect-ratio: 2 / 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  aspect-ratio: auto;
 }
 
 .live[data-jury-chamber="true"] .liveWorkspace {
@@ -7046,14 +7377,19 @@
   }
 
   .juryCenterTranscript {
-    top: 66%;
-    width: min(48%, 460px);
+    width: min(64%, 580px);
+  }
+
+  .juryVoteBoard {
+    width: min(64%, 560px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .juryBallotSlip,
-  .juryThoughtChip {
+  .juryThoughtChip,
+  .juryChamberIdentity span,
+  .juryVoteProgress > span[data-cast="true"] {
     animation-duration: 1ms;
   }
 }
@@ -7134,6 +7470,24 @@
   .captionControls button {
     min-width: auto;
     padding-inline: 7px;
+  }
+
+  .jurySeal {
+    top: 49px;
+  }
+
+  .juryVoteBoard {
+    top: 80px;
+    width: calc(100% - 24px);
+  }
+
+  .juryVoteSide > span {
+    font-size: 8px;
+  }
+
+  .juryChamberIdentity small,
+  .juryChamberIdentity span {
+    font-size: 7px;
   }
 
   .interjectionBar {
@@ -10937,8 +11291,14 @@
 }
 
 .stageStateOverlay > small {
+  max-width: min(420px, 72%);
   color: #b4adba;
   font-size: 11px;
+}
+
+.stageStateOverlay[data-kind="paused"] {
+  --debate-active-color: var(--debate-moderator-color);
+  gap: 8px;
 }
 
 .stageStateOverlay[data-kind="gavel-cue"] {
@@ -10969,7 +11329,8 @@
   content: "";
 }
 
-.stageStateOverlay[data-kind="gavel-cue"] > button {
+.stageStateOverlay[data-kind="gavel-cue"] > button,
+.stageStateOverlay[data-kind="paused"] > button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -10989,7 +11350,9 @@
 }
 
 .stageStateOverlay[data-kind="gavel-cue"] > button:hover,
-.stageStateOverlay[data-kind="gavel-cue"] > button:focus-visible {
+.stageStateOverlay[data-kind="gavel-cue"] > button:focus-visible,
+.stageStateOverlay[data-kind="paused"] > button:hover,
+.stageStateOverlay[data-kind="paused"] > button:focus-visible {
   transform: translateY(-1px);
 }
 
@@ -11064,7 +11427,8 @@
   color: #5f5666;
 }
 
-.live[data-theme="light"] .stageStateOverlay[data-kind="gavel-cue"] > button {
+.live[data-theme="light"] .stageStateOverlay[data-kind="gavel-cue"] > button,
+.live[data-theme="light"] .stageStateOverlay[data-kind="paused"] > button {
   border-color: color-mix(in srgb, var(--debate-moderator-color) 46%, #c8c0ce);
   color: #2e2635;
   background: color-mix(in srgb, var(--debate-moderator-color) 16%, white);
@@ -11230,17 +11594,18 @@
 @keyframes debate-gallery-seat-depart {
   0% {
     visibility: visible;
-    transform: translateY(14%) scale(var(--debate-audience-depth, 1));
+    transform: translate(0, 14%) scale(var(--debate-audience-depth, 1));
   }
 
   24% {
-    transform: translateY(8%) scale(var(--debate-audience-depth, 1));
+    transform: translate(0, 8%) scale(var(--debate-audience-depth, 1));
   }
 
   100% {
     visibility: hidden;
     opacity: 0;
-    transform: translateY(126%) scale(var(--debate-audience-depth, 1));
+    transform: translate(var(--debate-gallery-exit-x, 220%), 18%)
+      scale(var(--debate-audience-depth, 1));
   }
 }
 
@@ -11585,7 +11950,7 @@
 
 .proceedingControlActions button:disabled {
   cursor: not-allowed;
-  opacity: 0.46;
+  opacity: 0.56;
 }
 
 .live[data-theme="light"] .proceedingControls {
@@ -11609,6 +11974,12 @@
 .live[data-theme="light"] .proceedingControls > header > span {
   color: #5f5269;
   background: rgba(82, 62, 94, 0.045);
+}
+
+.live[data-theme="light"] .proceedingControlActions button:disabled {
+  color: #706676;
+  background: rgba(255, 255, 255, 0.62);
+  opacity: 0.72;
 }
 
 .debateRail[data-player-window-active="true"] {

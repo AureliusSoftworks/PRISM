@@ -5,6 +5,7 @@ import {
   buildBundledActionSfxPlan,
   buildCoffeeActionReactionPlan,
   buildCoffeeActionSfxPlan,
+  bundledActionSfxCueAtMs,
   coffeeActionCueTextForMessage,
   coffeeActionReactionKindForAction,
   coffeeActionSfxDrivesOhMouth,
@@ -75,6 +76,26 @@ describe("Coffee action sound effects", () => {
       buildBundledActionSfxPlan("*sets the mug down on the table*"),
       null,
     );
+  });
+
+  it("places double-asterisk inline Foley after the preceding spoken word", () => {
+    const message = "I really gotta **farts** ...fart. Excuse me.";
+    assert.deepEqual(buildBundledActionSfxPlan(message), {
+      kind: "fart",
+      revealAtDisplayLength: 14,
+    });
+    const spoken = "I really gotta ...fart. Excuse me.";
+    const characters = Array.from(spoken);
+    const durationMs = characters.length * 100;
+    assert.equal(
+      bundledActionSfxCueAtMs(message, durationMs, {
+        characters,
+        characterStartTimesSeconds: characters.map((_, index) => index / 10),
+        characterEndTimesSeconds: characters.map((_, index) => (index + 1) / 10),
+      }),
+      1_400,
+    );
+    assert.equal(bundledActionSfxCueAtMs("**farts** Then I speak.", 2_000), 0);
   });
 
   it("uses the saved player-action payload as the canonical replay cue", () => {
@@ -221,5 +242,38 @@ describe("Coffee action sound effects", () => {
       cssSource,
       /prefers-reduced-motion:[\s\S]*data-coffee-authored-action-reaction/u,
     );
+  });
+
+  it("plays player-authored bundled Foley from every live mode", () => {
+    const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    assert.match(
+      pageSource,
+      /const playChatPlayerActionSfx = useCallback\([\s\S]{0,420}buildBundledActionSfxPlan\(messageText\)/u,
+    );
+    assert.match(
+      pageSource,
+      /playChatPlayerActionSfx\(\s*serializeComposerAction\(actionOnlySubmission, ""\)[\s\S]{0,120}requestZenSubmittedActionReaction/u,
+    );
+    const bufferedFollowupStart = pageSource.indexOf(
+      "if (zenFollowupBufferingSend)",
+    );
+    const bufferedFollowupPlayback = pageSource.indexOf(
+      "playChatPlayerActionSfx(displayTrimmed)",
+      bufferedFollowupStart,
+    );
+    const bufferedFollowupDispatch = pageSource.indexOf(
+      "scheduleZenFollowupMergedSend();",
+      bufferedFollowupStart,
+    );
+    assert.ok(bufferedFollowupStart >= 0);
+    assert.ok(bufferedFollowupPlayback > bufferedFollowupStart);
+    assert.ok(bufferedFollowupDispatch > bufferedFollowupPlayback);
+    assert.match(
+      pageSource,
+      /!options\.zenFollowupDispatch\s*\) \{\s*playChatPlayerActionSfx\(displayTrimmed\);/u,
+    );
+    assert.match(pageSource, /playCoffeeActionSfxOnce\(/u);
+    assert.match(pageSource, /playSignalProducerGuestActionSfx/u);
+    assert.match(pageSource, /playDebatePlayerActionSfx/u);
   });
 });

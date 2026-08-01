@@ -30,6 +30,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "debate_mutations",
   "debate_events",
   "debate_sessions",
+  "bot_presence_beats",
   "botcast_events",
   "botcast_messages",
   "botcast_episode_segments",
@@ -211,6 +212,7 @@ export function restoreFactoryDefaultsInDatabase(
           elevenlabs_voice_bank = '{}',
           elevenlabs_voice_model = NULL,
           elevenlabs_voice_collection_id = NULL,
+          zen_player_voice_enabled = 0,
           player_audio_voice_profile = NULL,
           player_name_pronunciation = '',
           last_active_at = ?

@@ -285,6 +285,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       elevenlabs_voice_bank TEXT NOT NULL DEFAULT '{}',
       elevenlabs_voice_model TEXT,
       elevenlabs_voice_collection_id TEXT,
+      zen_player_voice_enabled INTEGER NOT NULL DEFAULT 0,
       player_audio_voice_profile TEXT,
       player_name_pronunciation TEXT NOT NULL DEFAULT '',
       prism_default_bot_audio_voice_profile TEXT,
@@ -1981,6 +1982,30 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_debate_events_user_session
       ON debate_events(user_id, session_id, sequence);
+    CREATE TABLE IF NOT EXISTS bot_presence_beats (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      surface TEXT NOT NULL
+        CHECK(surface IN ('chat', 'zen', 'sandbox', 'coffee', 'signal', 'debate')),
+      session_id TEXT NOT NULL,
+      response_id TEXT NOT NULL,
+      speaker_bot_id TEXT NOT NULL,
+      speaker_name TEXT NOT NULL,
+      trigger TEXT NOT NULL
+        CHECK(trigger IN ('interruption', 'redirect', 'waiting')),
+      source TEXT NOT NULL CHECK(source IN ('default', 'custom')),
+      text TEXT NOT NULL,
+      heard_character_count INTEGER NOT NULL DEFAULT 0,
+      completion TEXT NOT NULL
+        CHECK(completion IN ('playing', 'completed', 'interrupted', 'failed')),
+      playback_started_at_ms REAL NOT NULL,
+      playback_ended_at_ms REAL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_bot_presence_beats_user_session
+      ON bot_presence_beats(user_id, surface, session_id, created_at);
     CREATE TABLE IF NOT EXISTS debate_mutations (
       user_id TEXT NOT NULL,
       session_id TEXT NOT NULL,
@@ -2540,6 +2565,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasElevenLabsVoiceCollectionId) {
     db.exec(
       "ALTER TABLE users ADD COLUMN elevenlabs_voice_collection_id TEXT;",
+    );
+  }
+  const hasZenPlayerVoiceEnabled = userColumns.some(
+    (column) => column.name === "zen_player_voice_enabled",
+  );
+  if (!hasZenPlayerVoiceEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN zen_player_voice_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   }
   const hasPlayerAudioVoiceProfile = userColumns.some(

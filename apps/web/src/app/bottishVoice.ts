@@ -630,7 +630,7 @@ async function playPlanWithMedia(
         activeTimer = null;
       }
     };
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
       if (activeTimer !== null) {
@@ -638,15 +638,16 @@ async function playPlanWithMedia(
         activeTimer = null;
       }
       if (activeResolve === cancel) activeResolve = null;
-      if (error) progress?.cancel();
+      if (error || !completed) progress?.cancel();
       else progress?.finish();
       progress = null;
       releaseActiveMedia(!error);
-      lifecycle?.onEnd?.();
+      if (error || !completed) lifecycle?.onCancel?.();
+      else lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish();
+    const cancel = () => finish(undefined, false);
     activeResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
     audio.addEventListener("error", () => finish(new Error("Bottish audio could not play.")), {
@@ -991,7 +992,7 @@ async function playHybridBytesWithMedia(
         activeTimer = null;
       }
     };
-    const finish = (error?: Error) => {
+    const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
       if (activeTimer !== null) {
@@ -999,15 +1000,16 @@ async function playHybridBytesWithMedia(
         activeTimer = null;
       }
       if (activeResolve === cancel) activeResolve = null;
-      if (error) progress?.cancel();
+      if (error || !completed) progress?.cancel();
       else progress?.finish();
       progress = null;
       releaseActiveMedia(!error);
-      lifecycle?.onEnd?.();
+      if (error || !completed) lifecycle?.onCancel?.();
+      else lifecycle?.onEnd?.();
       if (error) reject(error);
       else resolve();
     };
-    const cancel = () => finish();
+    const cancel = () => finish(undefined, false);
     activeResolve = cancel;
     audio.addEventListener("ended", () => finish(), { once: true });
     audio.addEventListener("error", () => finish(new Error("Babble voice could not play.")), {

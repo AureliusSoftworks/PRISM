@@ -23,6 +23,7 @@
  * sibling keeps the pipelines independent and easy to evolve separately.
  */
 
+import { createHash } from "node:crypto";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { decryptJson, randomId } from "./security.ts";
 import { SCRIPTED_PROMPT_WILDCARD_VALUES } from "./prompt-wildcard-seeds.ts";
@@ -125,6 +126,7 @@ import type {
   SocialSilenceMarkerV1,
   BotVoicePreset,
   OpinionTrend,
+  PreparedTurnCursorV1,
   ReasoningEffort,
   AutoFallbackChainV1,
   AutoRecoveryTraceV1,
@@ -13343,6 +13345,54 @@ function loadCoffeeConversationGroup(
     row,
     groupIds,
     group: loadCoffeeGroupProfiles(db, userId, groupIds),
+  };
+}
+
+function coffeePreparedTurnHash(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+/** Frozen Coffee table state used by non-rendered autonomous lookahead. */
+export function coffeePreparedTurnCursor(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): PreparedTurnCursorV1 {
+  const { row, groupIds, group } = loadCoffeeConversationGroup(
+    db,
+    userId,
+    conversationId,
+  );
+  const messages = loadMessages(db, userId, conversationId, 500);
+  const durableRelationships =
+    row.incognito === 1
+      ? {}
+      : loadBotRelationshipsForBots(db, userId, groupIds);
+  const scopedRows = (tableName: string): unknown[] =>
+    db
+      .prepare(
+        `SELECT * FROM ${tableName} WHERE user_id = ? AND conversation_id = ? ORDER BY rowid`,
+      )
+      .all(userId, conversationId);
+  const promptState = {
+    row,
+    messages,
+    social: scopedRows("coffee_bot_social_state"),
+    irritation: scopedRows("coffee_directional_irritation"),
+    irritationLedger: scopedRows("coffee_directional_irritation_ledger"),
+    cupTopOffs: scopedRows("coffee_cup_top_offs"),
+    polls: scopedRows("coffee_polls"),
+    pollVotes: scopedRows("coffee_poll_votes"),
+    durableRelationships,
+  };
+  return {
+    revision: row.updated_at,
+    lastMessageId: messages.at(-1)?.id ?? null,
+    lastEventId: null,
+    floorOwnerId: messages.at(-1)?.botId ?? null,
+    castHash: coffeePreparedTurnHash({ groupIds, group }),
+    powersHash: coffeePreparedTurnHash(row.coffee_power_plan_json),
+    promptStateHash: coffeePreparedTurnHash(promptState),
   };
 }
 

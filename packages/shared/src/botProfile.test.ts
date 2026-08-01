@@ -42,6 +42,14 @@ describe("bot profile serialization", () => {
     profile.core.extraversion = -1;
     profile.core.agreeableness = 0;
     profile.core.emotionalStability = 2;
+    profile.core.responseCues = {
+      v: 1,
+      enabled: true,
+      interruption: ["…Okay, then."],
+      redirect: [],
+      waiting: ["Let's see…"],
+      blockedDefaults: ["Hmm…"],
+    };
     profile.identity.species = "android";
     profile.worldview.politicalView = -1;
     profile.appearance.description = "silver coat, tired eyes";
@@ -51,6 +59,25 @@ describe("bot profile serialization", () => {
 
     assert.deepEqual(parsed, profile);
     assert.equal(serializeStoredBotPrompt(parsed, "Mira"), stored);
+  });
+
+  it("keeps response-cue metadata out of model-facing prose", () => {
+    const profile = parseStoredBotPrompt("").fields;
+    profile.core.responseCues = {
+      v: 1,
+      enabled: true,
+      interruption: ["This is presentation only."],
+      redirect: [],
+      waiting: [],
+      blockedDefaults: [],
+    };
+
+    const prose = composeBotProfileProse(profile, "Mira");
+    const stored = serializeStoredBotPrompt(profile, "Mira");
+
+    assert.doesNotMatch(prose, /presentation only/iu);
+    assert.match(stored, /This is presentation only/);
+    assert.deepEqual(parseStoredBotPrompt(stored).fields.core.responseCues, profile.core.responseCues);
   });
 
   it("composes filled OCEAN personality sliders into model-facing prose", () => {
