@@ -708,6 +708,32 @@ export interface DebateSessionV1 {
   updatedAt: string;
   endedEarlyAt: string | null;
   completedAt: string | null;
+  /** Coffee-style end-of-session overview; present once generated after completion. */
+  synopsis?: DebateSessionSynopsisV1 | null;
+}
+
+export interface DebateSessionSynopsisV1 {
+  text: string;
+  generatedAt: string;
+}
+
+export const DEBATE_SESSION_SYNOPSIS_MAX_LENGTH = 750;
+
+export function normalizeDebateSessionSynopsis(
+  value: unknown,
+): DebateSessionSynopsisV1 | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  const text =
+    typeof record.text === "string"
+      ? record.text.replace(/\s+/gu, " ").trim().slice(0, DEBATE_SESSION_SYNOPSIS_MAX_LENGTH)
+      : "";
+  const generatedAt =
+    typeof record.generatedAt === "string" ? record.generatedAt.trim() : "";
+  if (!text || !generatedAt) return null;
+  return { text, generatedAt };
 }
 
 export interface DebateSynthesizeRequest {
@@ -858,6 +884,78 @@ export interface DebateSessionListItemV1 {
   winnerSideId: DebateSideId | null;
   updatedAt: string;
   completedAt: string | null;
+  synopsisText?: string | null;
+}
+
+export interface DebateDebriefChatMessageV1 {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  provider?: string;
+  model?: string;
+  createdAt: string;
+}
+
+export interface DebateDebriefEligibleBotV1 {
+  id: string;
+  name: string;
+  role: "moderator" | "advocate" | "juror";
+  sideId: DebateSideId | null;
+}
+
+/**
+ * Cast eligible for post-session inquiry chat. Participant-sealed Jury stays
+ * anonymous — those juror identities are not addressable.
+ */
+export function debateDebriefEligibleBots(
+  session: Pick<
+    DebateSessionV1,
+    | "moderator"
+    | "forAdvocate"
+    | "againstAdvocate"
+    | "jury"
+    | "playerRole"
+  >,
+): DebateDebriefEligibleBotV1[] {
+  const cast: DebateDebriefEligibleBotV1[] = [];
+  if (
+    session.moderator.id !== DEBATE_PLAYER_JUDGE_BOT_ID &&
+    session.moderator.id !== DEBATE_PLAYER_PARTICIPANT_BOT_ID
+  ) {
+    cast.push({
+      id: session.moderator.id,
+      name: session.moderator.name,
+      role: "moderator",
+      sideId: null,
+    });
+  }
+  if (session.forAdvocate.id !== DEBATE_PLAYER_PARTICIPANT_BOT_ID) {
+    cast.push({
+      id: session.forAdvocate.id,
+      name: session.forAdvocate.name,
+      role: "advocate",
+      sideId: "for",
+    });
+  }
+  if (session.againstAdvocate.id !== DEBATE_PLAYER_PARTICIPANT_BOT_ID) {
+    cast.push({
+      id: session.againstAdvocate.id,
+      name: session.againstAdvocate.name,
+      role: "advocate",
+      sideId: "against",
+    });
+  }
+  if (session.jury.enabled && session.playerRole !== "participant") {
+    for (const juror of session.jury.jurors) {
+      cast.push({
+        id: juror.id,
+        name: juror.name,
+        role: "juror",
+        sideId: null,
+      });
+    }
+  }
+  return cast;
 }
 
 function normalizedText(value: unknown, maxLength: number): string {

@@ -53,6 +53,11 @@ export function signalVoiceCompletionFallbackDurationMs(text: string): number {
   );
 }
 
+/** Debate reuses Signal’s spoken-word completion floor so English duration null
+ * never falls back to a bare character×34 stop that clips moderator lines. */
+export const debateVoiceCompletionFallbackDurationMs =
+  signalVoiceCompletionFallbackDurationMs;
+
 /**
  * Mirrors only the fully spoken prefix of the active line after a small initial
  * delay. The empty result outside playback prevents captions from affecting or

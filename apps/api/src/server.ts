@@ -207,6 +207,8 @@ import {
   submitDebateVerdict,
   swingDebateJudgeGavel,
   synthesizeDebateSlates,
+  generateDebateSessionSynopsis,
+  chatWithDebateDebriefBot,
   type DebateAiRuntime,
 } from "./debate.ts";
 import {
@@ -771,6 +773,7 @@ import {
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
   normalizeEphemeralChatProviderPreferences,
+  resolveEphemeralChatProvider,
   normalizePrismCompanionRequest,
   normalizePrismCompanionSurfaceReference,
   isPrismRefractDebateTextTarget,
@@ -13659,6 +13662,82 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         session: debateSessionForPlayer(session),
       });
+    }),
+    route("POST", "/api/debates/:id/synopsis", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider ?? frozen.provider,
+        body.modelOverride ?? frozen.model,
+        body.responseMode ?? frozen.responseMode,
+        frozen.generationChain,
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          generateDebateSessionSynopsis(db, userId, ctx.params.id, runtime),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/debrief-chat", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      const preferences = normalizeEphemeralChatProviderPreferences(
+        user.ephemeral_chat_provider_preferences,
+      );
+      const requestedProvider = readProvider(body.preferredProvider);
+      const onlineProvider =
+        user.preferred_provider === "anthropic" ? "anthropic" : "openai";
+      const ephemeralProvider = resolveEphemeralChatProvider({
+        preference: preferences.debate,
+        globalProvider:
+          user.preferred_provider === "local"
+            ? "local"
+            : user.preferred_provider === "anthropic"
+              ? "anthropic"
+              : "openai",
+        onlineProvider,
+      });
+      const preferredProvider =
+        user.preferred_provider === "local"
+          ? "local"
+          : (requestedProvider ?? ephemeralProvider);
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        preferredProvider,
+        body.modelOverride,
+        preferredProvider === "local" ? "local" : "online",
+      );
+      const message = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "private",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          chatWithDebateDebriefBot(
+            db,
+            userId,
+            ctx.params.id,
+            body,
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, message });
     }),
     route("DELETE", "/api/debates/:id", async (ctx) => {
       const userId = requireAuth(ctx);

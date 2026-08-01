@@ -4489,7 +4489,7 @@
 }
 
 .caseBoard {
-  align-self: start;
+  align-self: stretch;
   overflow: hidden;
 }
 
@@ -4609,6 +4609,15 @@
 .transcriptHeader button {
   padding: 7px 10px;
   font-size: 10px;
+}
+
+.transcriptHeaderActions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .transcriptFeed {
@@ -4931,16 +4940,27 @@
 }
 
 .juryRecord {
-  margin: 20px 0 16px;
-  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-  padding-top: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, currentColor 3.5%, transparent);
+  overflow: hidden;
+}
+
+.debateRail[data-completed="true"] .juryRecord {
+  max-height: min(28dvh, 300px);
 }
 
 .juryRecord > header {
   display: flex;
+  flex: 0 0 auto;
   align-items: start;
   justify-content: space-between;
   gap: 12px;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding: 13px 14px;
 }
 
 .juryRecord > header span {
@@ -4948,24 +4968,30 @@
   font-size: 9px;
 }
 
-.juryRecord > header button {
-  flex: 0 0 auto;
-  border-radius: 7px;
-  padding: 7px 9px;
-  color: #bdb3c8;
-  background: transparent;
-  font-size: 9px;
+.juryRecord > header > div {
+  display: grid;
+  gap: 3px;
 }
 
 .juryRecord ol {
   display: grid;
   gap: 9px;
-  margin: 14px 0 0;
-  padding: 0;
+  margin: 0;
+  padding: 12px 14px 14px;
   list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-.resultCard .juryRecord li {
+.juryRecord > p {
+  margin: 0;
+  padding: 12px 14px 14px;
+  color: #978fa4;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.juryRecord li {
   display: block;
   border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
   border-radius: 10px;
@@ -4985,7 +5011,7 @@
   font-size: 8px;
 }
 
-.resultCard .juryRecord li p {
+.juryRecord li p {
   margin-top: 7px;
   color: inherit;
   font-size: 11px;
@@ -4993,9 +5019,137 @@
 }
 
 .debateRail[data-completed="true"] .resultCard {
-  max-height: min(34dvh, 360px);
+  max-height: min(48dvh, 520px);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.debateSynopsis {
+  margin: 0 0 12px;
+  color: #d8d0e4;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.debateSynopsis[data-preparing="true"] {
+  color: #978fa4;
+  font-style: italic;
+}
+
+.archiveSynopsis {
+  display: block;
+  margin-top: 6px;
+  color: #978fa4;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.debriefChat {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+  padding-top: 14px;
+}
+
+.debriefChat > header {
+  display: grid;
+  gap: 3px;
+}
+
+.debriefChat > header span {
+  color: #978fa4;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.debriefCastChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.debriefCastChip {
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  font-size: 10px;
+}
+
+.debriefCastChip[data-selected="true"] {
+  border-color: color-mix(in srgb, currentColor 34%, transparent);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.debriefThread {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  max-height: 180px;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.debriefThread li {
+  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+
+.debriefThread li[data-role="user"] {
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.debriefThread strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 10px;
+}
+
+.debriefThread p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.debriefComposer {
+  display: grid;
+  gap: 8px;
+}
+
+.debriefComposer textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.debriefComposer button {
+  justify-self: end;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 10px;
+}
+
+.debriefHint {
+  margin: 0;
+  color: #978fa4;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .sourceDrawer {
@@ -6720,6 +6874,7 @@
   .reviewGrid,
   .stageSupport {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .dashboardRail {
@@ -9877,7 +10032,10 @@
 /* Live Forum: one dominant scene with tonal utilities. */
 
 .live {
-  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
   color: #ece8f2;
   background:
     radial-gradient(
@@ -10263,6 +10421,7 @@
 }
 
 .liveHeader {
+  flex: 0 0 auto;
   min-height: 58px;
   box-sizing: border-box;
   grid-template-columns: 114px minmax(0, 1fr) 114px;
@@ -10357,19 +10516,26 @@
   display: grid;
   width: 100%;
   min-height: 0;
+  flex: 1 1 auto;
   grid-template-columns: minmax(0, 1fr) minmax(326px, 356px);
   align-items: stretch;
   gap: 0;
   margin: 0;
-  padding: 0 0 34px;
+  padding: 0;
 }
 
 .stageColumn {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   gap: 0;
   border-right: 1px solid color-mix(in srgb, currentColor 11%, transparent);
 }
 
 .forum {
+  flex: 0 0 auto;
   width: 100%;
   min-height: 0;
   aspect-ratio: 2 / 1;
@@ -10720,8 +10886,12 @@
 
 .stageSupport {
   display: grid;
+  flex: 1 1 auto;
+  min-height: 140px;
   grid-template-columns: minmax(0, 1.55fr) minmax(226px, 0.55fr);
+  align-items: stretch;
   gap: 0;
+  overflow: hidden;
   border-bottom: 1px solid color-mix(in srgb, currentColor 11%, transparent);
   background: color-mix(in srgb, #0d0b11 88%, transparent);
 }
@@ -10746,7 +10916,65 @@
 }
 
 .caseBoard {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
   border-right: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+}
+
+.caseBoard > header {
+  flex: 0 0 auto;
+}
+
+.caseColumns {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.caseColumns h2 {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 0 10px;
+  padding: 2px 0 8px;
+  background: color-mix(in srgb, #0d0b11 96%, transparent);
+}
+
+.live[data-theme="light"] .caseColumns h2 {
+  background: color-mix(in srgb, #f1eff3 96%, transparent);
+}
+
+.turnaboutRecord > footer {
+  flex: 0 0 auto;
+}
+
+.audienceGallery {
+  align-self: start;
+  flex: 0 0 auto;
+  min-width: 0;
+  height: auto;
+  max-height: none;
+  overflow-x: hidden;
+  overflow-y: visible;
+}
+
+/* Public gallery band stays a fixed strip; Jury roster stays natural height. */
+.debateAudienceRow {
+  flex: 0 0 auto;
+}
+
+.audienceGallery.juryRoster {
+  align-self: start;
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 .turnaboutRecord > header strong {
@@ -11737,6 +11965,11 @@
 
   .liveWorkspace {
     grid-template-columns: 1fr;
+  }
+
+  .stageSupport {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
   .debateRail {

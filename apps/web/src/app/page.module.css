@@ -14150,8 +14150,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 @media (min-width: 721px) {
-  .messages:has(> .emptyState),
-  .messagesEmptyState {
+  /* Beat `.messages[data-chat-ephemeral="true"]` padding so empty Chat/Sandbox
+     homes do not inherit the live-thread composer runway as a dead gap. */
+  .messages.messagesEmptyState,
+  .messages.messagesEmptyState[data-chat-ephemeral="true"],
+  .messages[data-chat-ephemeral="true"]:has(> .emptyState),
+  .messages:has(> .emptyState) {
     padding-bottom: 24px;
   }
 }
@@ -14190,7 +14194,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .emptyStateHubPicker .chatCanvasPickerControls {
-  margin-top: clamp(12px, 2.4vh, 26px);
+  /* Pack search + grid toward the composer. Without this, flex free space
+     opens as a dead gap between the bot tiles and the fixed compose dock —
+     most visible on tall windows / cold start when the hero copy is short. */
+  margin-top: auto;
+  padding-top: clamp(12px, 2.4vh, 26px);
   order: 2;
 }
 

@@ -192,6 +192,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
         coffee: "global",
         botcast: "global",
         slate: "global",
+        debate: "global",
       },
     );
 
@@ -214,6 +215,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
         coffee: "global",
         botcast: "online",
         slate: "global",
+        debate: "global",
       },
     );
   });
@@ -235,6 +237,7 @@ describe("resolveNextSettings — ephemeral chat providers", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       },
     );
   });

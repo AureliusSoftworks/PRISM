@@ -9,6 +9,7 @@ import {
 } from "./botcastSpeechReveal.ts";
 import {
   SIGNAL_LIVE_CAPTION_DELAY_MS,
+  debateVoiceCompletionFallbackDurationMs,
   signalLiveCaptionText,
   signalSilentCaptionRevealDurationMs,
   signalVoiceCompletionFallbackDurationMs,
@@ -38,6 +39,10 @@ describe("Signal delayed live captions", () => {
     assert.ok(fallback >= wordCount * 400);
     assert.ok(fallback > text.length * 34);
     assert.equal(signalVoiceCompletionFallbackDurationMs(""), 1_200);
+    assert.equal(
+      debateVoiceCompletionFallbackDurationMs(text),
+      signalVoiceCompletionFallbackDurationMs(text),
+    );
   });
 
   it("starts with only the words spoken by the end of the initial delay", () => {

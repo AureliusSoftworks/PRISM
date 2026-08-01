@@ -536,7 +536,7 @@ describe("Debate experience", () => {
     assert.match(source, /submitTurnaboutAction\("pass"/u);
     assert.match(source, /Statement-bound · frozen evidence only/u);
     assert.match(source, /session\.formatState\.floorOwnerBotId/u);
-    assert.match(source, /"Record ready"/u);
+    assert.match(source, /The record is ready/u);
     assert.match(source, /Return to a proceeding/u);
     assert.match(source, /"The record"/u);
     assert.match(css, /\.formatPicker/u);
@@ -1839,15 +1839,23 @@ describe("Debate experience", () => {
     assert.match(source, /className=\{styles\.juryBallotSlip\}/u);
     assert.match(
       source,
-      /function debateJuryCameraIsActive[\s\S]{0,260}cameraMode === "jury"/u,
+      /function debateJuryCameraIsActive[\s\S]{0,400}cameraMode === "jury"/u,
     );
     assert.match(
       source,
-      /function debateJuryCameraIsActive[\s\S]{0,260}session\.playerRole === "spectator"[\s\S]{0,80}session\.playerRole === "judge"/u,
+      /function debateJuryCameraIsActive[\s\S]{0,400}session\.playerRole !== "spectator"[\s\S]{0,120}session\.playerRole !== "judge"/u,
     );
-    assert.doesNotMatch(
+    assert.match(
       source,
-      /function debateJuryCameraIsActive[\s\S]{0,360}cameraMode === "auto"/u,
+      /function debateJuryAutoChamberActive[\s\S]{0,520}jury_deliberation_/u,
+    );
+    assert.match(
+      source,
+      /function debateJuryAutoChamberActive[\s\S]{0,720}jury_aftermath_/u,
+    );
+    assert.match(
+      source,
+      /function debateJuryCameraIsActive[\s\S]{0,520}cameraMode === "auto" && debateJuryAutoChamberActive\(session\)/u,
     );
     assert.match(
       source,
@@ -1997,6 +2005,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
+      /transcriptHeaderActions[\s\S]{0,400}debate-copy-jury-transcript[\s\S]{0,400}debate-copy-transcript/u,
+    );
+    assert.match(
+      source,
+      /\{renderTranscript\(session\)\}[\s\S]{0,80}\{renderJuryRecord\(session\)\}/u,
+    );
+    assert.match(
+      source,
       /\/api\/debates\/\$\{encodeURIComponent\(archived\.id\)\}\?perspective=replay/u,
     );
     assert.match(css, /\.archiveJuryCopyButton/u);
@@ -2008,6 +2024,25 @@ describe("Debate experience", () => {
     );
     assert.match(css, /\.audienceGallery\.juryRoster/u);
     assert.match(css, /\.juryRecord/u);
+    assert.match(css, /\.transcriptHeaderActions/u);
+    assert.match(css, /\.debateRail\[data-completed="true"\] \.juryRecord/u);
+  });
+
+  it("offers Coffee-style synopsis and ephemeral pick-a-bot debrief after verdict", () => {
+    assert.match(source, /\/api\/debates\/\$\{encodeURIComponent\(sessionId\)\}\/synopsis/u);
+    assert.match(source, /Preparing summary…/u);
+    assert.match(source, /data-tutorial-target="debate-session-synopsis"/u);
+    assert.match(source, /\/api\/debates\/\$\{encodeURIComponent\(sessionId\)\}\/debrief-chat/u);
+    assert.match(source, /debateDebriefEligibleBots\(session\)/u);
+    assert.match(
+      source,
+      /Ask about their reasoning in this Debate/u,
+    );
+    assert.match(source, /data-tutorial-target="debate-debrief-chat"/u);
+    assert.match(source, /debateVoiceCompletionFallbackDurationMs/u);
+    assert.match(source, /debateUtterancePaceBoost/u);
+    assert.match(css, /\.debriefChat/u);
+    assert.match(css, /\.debateSynopsis/u);
   });
 
   it("crops the live Forum and Jury chamber to the same cinematic viewport", () => {
@@ -2403,9 +2438,9 @@ describe("Debate experience", () => {
     assert.match(source, /voicePerformanceText\?: string \| null/u);
     assert.match(
       source,
-      /voicePerformanceText:\s*event\.kind === "objection"\s*\?\s*`\[shouts\] \$\{spokenText\}`\s*:\s*voicePerformanceTextFromActionCues\(spokenText\)/u,
+      /event\.kind === "objection"\s*\?\s*`\[shouts\] \$\{spokenText\}`\s*:\s*voicePerformanceTextFromActionCues\(spokenText\)/u,
     );
-    assert.match(source, /spokenText,\s*voicePerformanceText:/u);
+    assert.match(source, /voicePerformanceText:\s*atmosphericPerformance/u);
     assert.match(
       page,
       /const debateVoicePerformanceText =\s*utterance\.voicePerformanceText \?\?\s*\(usePlayerVoice[\s\S]{0,120}voicePerformanceTextFromActionCues\(utterance\.spokenText\)/u,
@@ -2437,6 +2472,53 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       css,
       /\.transcriptFeed article header strong\s*\{[^}]*var\(--debate-active-color\)/u,
+    );
+  });
+
+  it("scrolls only the Living Case Board cards while gallery and jury stay fixed", () => {
+    assert.match(
+      css,
+      /\.live\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*height:\s*100%/u,
+    );
+    assert.match(
+      css,
+      /\.stageColumn\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*min-height:\s*0[^}]*height:\s*100%/u,
+    );
+    assert.match(
+      css,
+      /\.stageSupport\s*\{[^}]*flex:\s*1\s+1\s+auto[^}]*min-height:\s*140px[^}]*overflow:\s*hidden/u,
+    );
+    assert.match(
+      css,
+      /\.caseBoard\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*min-height:\s*0[^}]*height:\s*100%[^}]*overflow:\s*hidden/u,
+    );
+    assert.match(
+      css,
+      /\.caseColumns\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overscroll-behavior:\s*contain/u,
+    );
+    assert.match(
+      css,
+      /\.caseColumns h2\s*\{[^}]*position:\s*sticky[^}]*top:\s*0/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceRow\s*\{[^}]*height:\s*clamp\(112px/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceRow\s*\{[^}]*flex:\s*0\s+0\s+auto/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.audienceGallery\.juryRoster\s*\{[^}]*overflow-y:\s*auto/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.debateAudienceRow\s*\{[^}]*overflow-y:\s*auto/u,
+    );
+    assert.match(
+      css,
+      /\.audienceGallery\.juryRoster\s*\{[^}]*flex:\s*0\s+0\s+auto[^}]*overflow:\s*visible/u,
     );
   });
 
@@ -2583,7 +2665,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /forumPreparingNextTurn[\s\S]{0,80}activeEvidenceItem[\s\S]{0,80}\? "wide"[\s\S]{0,80}activeGavelCue[\s\S]{0,80}debateAutoCameraView\(activeRole\)/u,
+      /forumPreparingNextTurn[\s\S]{0,80}\? "wide"[\s\S]{0,120}activeGavelCue[\s\S]{0,80}debateAutoCameraView\(activeRole\)/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /activeEvidenceItem\s*\?\s*"wide"/u,
     );
     assert.match(source, /tableEvidenceStickyId/u);
     assert.match(source, /resolveDebateTableEvidenceStickyId\(/u);

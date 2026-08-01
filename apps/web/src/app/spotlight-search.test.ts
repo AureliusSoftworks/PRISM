@@ -86,6 +86,19 @@ describe("empty Chat Spotlight search", () => {
     );
   });
 
+  it("bottom-anchors the Hub bot picker so empty Chat does not leave a dead gap above the composer", () => {
+    const hubPickerControlsRule = cssSource.slice(
+      cssSource.indexOf(".emptyStateHubPicker .chatCanvasPickerControls {"),
+      cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame {"),
+    );
+    assert.match(hubPickerControlsRule, /margin-top:\s*auto;/);
+    assert.match(hubPickerControlsRule, /padding-top:\s*clamp\(/);
+    assert.match(
+      cssSource,
+      /\.messages\.messagesEmptyState\[data-chat-ephemeral="true"\][\s\S]{0,180}padding-bottom:\s*24px;/,
+    );
+  });
+
   it("keeps Spotlight search open while interacting with filtered bot tiles", () => {
     assert.doesNotMatch(
       pageSource,

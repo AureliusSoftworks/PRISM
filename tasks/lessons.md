@@ -4,6 +4,16 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-07-31 · [workflow]
+**Trigger**: `/update-bots marie antoinette` — she only lives on `library-dev-backup` (`branchLock: "dev"`), so the public-only promote loop skipped her.
+**Lesson**: `promote-library-design-to-marketplace.mjs` bare runs stay public-shelf only; explicit `--only` may include branch-locked backups. Do not write those IDs into `elevenlabs-voice-lock.json`, and do not force public chorus polish onto branch-locked voice profiles.
+**Applies to**: `/update-bots`, `scripts/promote-library-design-to-marketplace.mjs`, `library-dev-backup`
+
+### 2026-07-31 · [UX]
+**Trigger**: Chat empty home sometimes showed a large dead gap between the bot grid and the composer on startup.
+**Lesson**: Hub empty state (`.emptyStateHubPicker`) stretches to fill the pane. Pack the picker with `margin-top: auto` on `.chatCanvasPickerControls` (keep breathing room via `padding-top`). Also beat `.messages[data-chat-ephemeral="true"]` bottom padding with `.messages.messagesEmptyState[data-chat-ephemeral="true"]` so the live-thread runway does not leak into empty home.
+**Applies to**: `page.module.css` empty Chat/Sandbox hub, `spotlight-search.test.ts`
+
 ### 2026-07-31 · [UX]
 **Trigger**: Spectator Debate had no player body; user wanted Prism in the below-screen gallery.
 **Lesson**: Inject Spectator Prism via `debateSpectatorPrismAudienceSeat` + `debateAudienceBotsForSession({ spectatorPrism })`, pin to front-row center, reuse `DEBATE_PLAYER_JUDGE_BOT_ID` for Default Prism face. Do not put Spectator on a podium. Skip ambient gallery chatter for the player seat.

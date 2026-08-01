@@ -68,6 +68,7 @@ export function prismCompanionEphemeralMode(
   if (surfaceId === "coffee") return "coffee";
   if (surfaceId === "signal") return "botcast";
   if (surfaceId === "slate") return "slate";
+  if (surfaceId === "debate") return "debate";
   if (surfaceId === "prism-home" || surfaceId === "zen") {
     return "zen";
   }

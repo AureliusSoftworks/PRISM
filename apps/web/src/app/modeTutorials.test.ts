@@ -271,12 +271,14 @@ describe("mode tutorials", () => {
     assert.match(copy, /Each audible juror reads the same final reason/u);
     assert.match(copy, /canonically silent juror still casts/u);
     assert.match(copy, /chamber is live and named but remains advisory/u);
-    assert.match(copy, /separate timestamped Jury record/u);
-    assert.match(copy, /own copy action/u);
+    assert.match(copy, /sibling Jury commentary panel/u);
+    assert.match(copy, /Copy Jury transcript beside Copy verbose transcript/u);
     assert.match(
       copy,
       /Jury transcript remains directly copyable from its eligible Proceeding archive entry/u,
     );
+    assert.match(copy, /Coffee-style session summary/u);
+    assert.match(copy, /temporary pick-a-bot inquiry chat/u);
     assert.match(copy, /anonymous mark slides/u);
     assert.match(copy, /only the bot opponent may react/u);
     assert.match(
@@ -356,7 +358,11 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /Auto is the quiet default camera/u);
     assert.match(copy, /cuts instantly/u);
-    assert.match(copy, /never enters the Jury chamber/u);
+    assert.match(copy, /Sticky evidence can stay on the table without forcing Wide/u);
+    assert.match(
+      copy,
+      /Auto also visits the Jury chamber for leanings, deliberation, ballots, and the split/u,
+    );
     assert.match(copy, /Choose a manual view to hold the shot/u);
     assert.match(copy, /only the heard fragment remains public/iu);
     assert.match(copy, /safe Markdown/u);

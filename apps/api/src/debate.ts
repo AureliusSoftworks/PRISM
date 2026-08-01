@@ -24,9 +24,12 @@ import {
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerBotNamingCueFromEffectsV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerObserverProjectionFromEffectsV1,
+  botPowerTargetNameFromEffectsV1,
   botPowerVoicePresenceModeFromEffectsV1,
+  type BotPowerEffectV1,
   debateAudiencePressureScore,
   debateEventIsTranscriptHousekeeping,
   debateEvidenceItemById,
@@ -95,6 +98,7 @@ import {
   type DebatePowerPlanV1,
   type DebateSessionCreateRequest,
   type DebateSessionListItemV1,
+  type DebateSessionSynopsisV1,
   type DebateSessionV1,
   type DebateSetupPresetId,
   type DebateSideId,
@@ -105,8 +109,13 @@ import {
   type DebateTurnaboutStatementV1,
   type DebateTurnTimingV1,
   type DebateVerdictRequest,
+  type DebateDebriefChatMessageV1,
+  type DebateDebriefEligibleBotV1,
   type PrismRefractDebateTextTarget,
   type ResponseMode,
+  debateDebriefEligibleBots,
+  normalizeDebateSessionSynopsis,
+  DEBATE_SESSION_SYNOPSIS_MAX_LENGTH,
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
@@ -114,15 +123,21 @@ import {
   type AutoFallbackValidationResult,
 } from "./auto-fallback.ts";
 import { resolveSocialPowersForBots } from "./coffee-powers.ts";
-import { parseRouterResponse, sanitizeCoffeeTableReply } from "./coffee.ts";
+import {
+  parseRouterResponse,
+  sanitizeCoffeeTableReply,
+  stripCoffeeChatRoleFraming,
+} from "./coffee.ts";
 import {
   botPowerTextRequestsRepeat,
   strongestHearingRepeatEffect,
 } from "./bot-power-hearing-repeat.ts";
-import type {
-  LlmProvider,
-  ProviderMessage,
-  ProviderName,
+import { withPrismRuntimeGrounding } from "./bots.ts";
+import {
+  defaultModelIdForProvider,
+  type LlmProvider,
+  type ProviderMessage,
+  type ProviderName,
 } from "./providers.ts";
 import {
   promptWildcardNames,
@@ -1642,6 +1657,7 @@ function parseSessionRow(
     endedEarlyAt:
       typeof parsed.endedEarlyAt === "string" ? parsed.endedEarlyAt : null,
     completedAt: row.completed_at,
+    synopsis: normalizeDebateSessionSynopsis(parsed.synopsis),
     events: eventRows(db, userId, row.id),
   };
   return normalizeDeprecatedParticipantDelegationStep(session);
@@ -1835,6 +1851,7 @@ export function listDebateSessions(
     let moderatorTitle = "Moderator";
     let setupPresetId: DebateSetupPresetId | "custom" = "custom";
     let juryEnabled = false;
+    let synopsisText: string | null = null;
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
@@ -1843,12 +1860,14 @@ export function listDebateSessions(
         setupPresetId?: unknown;
         playerRole?: unknown;
         jury?: unknown;
+        synopsis?: unknown;
       };
       if (isDebateFormatId(parsed.format)) format = parsed.format;
       formality = normalizeDebateFormalityId(parsed.formality);
       moderatorTitle = normalizeDebateModeratorTitle(parsed.moderatorTitle);
       const jury = normalizeDebateJuryStateV1(parsed.jury);
       juryEnabled = jury.enabled;
+      synopsisText = normalizeDebateSessionSynopsis(parsed.synopsis)?.text ?? null;
       setupPresetId = resolvedSetupPresetId({
         requested: parsed.setupPresetId,
         format,
@@ -1878,6 +1897,7 @@ export function listDebateSessions(
       winnerSideId: row.winner_side_id,
       updatedAt: row.updated_at,
       completedAt: row.completed_at,
+      synopsisText,
     };
   });
 }
@@ -2230,19 +2250,53 @@ function assertMutation(
   return { session, idempotencyKey, replay: null };
 }
 
+function maxDebateEventSequence(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(MAX(sequence), 0) AS max_sequence
+         FROM debate_events
+        WHERE user_id = ? AND session_id = ?`,
+    )
+    .get(userId, sessionId) as { max_sequence?: number } | undefined;
+  return Number(row?.max_sequence ?? 0);
+}
+
+/**
+ * Assign contiguous DB sequences at commit time.
+ * In-memory makeEvent() sequences can collide when atmospheric writers
+ * (persona surprise + jury sidebar) or delayed case-board refinement race.
+ */
+function assignDebateEventSequences(
+  events: readonly DebateEventV1[],
+  startSequence: number,
+): DebateEventV1[] {
+  return events.map((event, index) => {
+    const sequence = startSequence + index;
+    return event.sequence === sequence ? event : { ...event, sequence };
+  });
+}
+
 function insertEvents(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
   events: readonly DebateEventV1[],
-): void {
+): DebateEventV1[] {
+  const sequenced = assignDebateEventSequences(
+    events,
+    maxDebateEventSequence(db, userId, sessionId) + 1,
+  );
   const insert = db.prepare(
     `INSERT INTO debate_events
        (id, user_id, session_id, sequence, phase, step_key, kind,
         event_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  for (const event of events) {
+  for (const event of sequenced) {
     insert.run(
       event.id,
       userId,
@@ -2255,6 +2309,7 @@ function insertEvents(
       event.createdAt,
     );
   }
+  return sequenced;
 }
 
 function commitMutation(
@@ -2266,12 +2321,6 @@ function commitMutation(
   newEvents: readonly DebateEventV1[],
 ): DebateSessionV1 {
   const now = new Date().toISOString();
-  const next: DebateSessionV1 = {
-    ...nextInput,
-    revision: previous.revision + 1,
-    updatedAt: now,
-    events: [...previous.events, ...newEvents],
-  };
   const ownsTransaction = !db.isTransaction;
   if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
   try {
@@ -2286,6 +2335,16 @@ function commitMutation(
         "Debate changed while this turn was being prepared. Refresh and retry.",
       );
     }
+    // Assign sequences from the live DB max inside the write lock so delayed
+    // case-board refinements and parallel atmospheric events cannot collide.
+    insertEvents(db, userId, previous.id, newEvents);
+    const next: DebateSessionV1 = {
+      ...nextInput,
+      revision: previous.revision + 1,
+      updatedAt: now,
+      // Prefer DB truth: a refinement may have landed while this turn prepared.
+      events: eventRows(db, userId, previous.id),
+    };
     const result = db
       .prepare(
         `UPDATE debate_sessions
@@ -2314,7 +2373,6 @@ function commitMutation(
         "Debate changed while this turn was being prepared. Refresh and retry.",
       );
     }
-    insertEvents(db, userId, next.id, newEvents);
     db.prepare(
       `INSERT INTO debate_mutations
          (user_id, session_id, idempotency_key, expected_revision,
@@ -2347,12 +2405,6 @@ function commitRetainedEventMutation(
   newEvents: readonly DebateEventV1[],
 ): DebateSessionV1 {
   const now = new Date().toISOString();
-  const next: DebateSessionV1 = {
-    ...nextInput,
-    revision: previous.revision + 1,
-    updatedAt: now,
-    events: [...retainedEvents, ...newEvents],
-  };
   const retainedSequence = retainedEvents.at(-1)?.sequence ?? 0;
   const ownsTransaction = !db.isTransaction;
   if (ownsTransaction) db.exec("BEGIN IMMEDIATE");
@@ -2368,6 +2420,25 @@ function commitRetainedEventMutation(
         "Debate changed while the live floor was being interrupted. Refresh and retry.",
       );
     }
+    db.prepare(
+      `DELETE FROM debate_events
+        WHERE user_id = ? AND session_id = ? AND sequence > ?`,
+    ).run(userId, previous.id, retainedSequence);
+    const updateEvent = db.prepare(
+      `UPDATE debate_events
+          SET event_json = ?
+        WHERE id = ? AND user_id = ? AND session_id = ?`,
+    );
+    for (const event of retainedEvents) {
+      updateEvent.run(JSON.stringify(event), event.id, userId, previous.id);
+    }
+    insertEvents(db, userId, previous.id, newEvents);
+    const next: DebateSessionV1 = {
+      ...nextInput,
+      revision: previous.revision + 1,
+      updatedAt: now,
+      events: eventRows(db, userId, previous.id),
+    };
     const result = db
       .prepare(
         `UPDATE debate_sessions
@@ -2396,19 +2467,6 @@ function commitRetainedEventMutation(
         "Debate changed while the live floor was being interrupted. Refresh and retry.",
       );
     }
-    db.prepare(
-      `DELETE FROM debate_events
-        WHERE user_id = ? AND session_id = ? AND sequence > ?`,
-    ).run(userId, previous.id, retainedSequence);
-    const updateEvent = db.prepare(
-      `UPDATE debate_events
-          SET event_json = ?
-        WHERE id = ? AND user_id = ? AND session_id = ?`,
-    );
-    for (const event of retainedEvents) {
-      updateEvent.run(JSON.stringify(event), event.id, userId, previous.id);
-    }
-    insertEvents(db, userId, next.id, newEvents);
     db.prepare(
       `DELETE FROM debate_mutations
         WHERE user_id = ? AND session_id = ?`,
@@ -3110,15 +3168,118 @@ function publicTranscript(
   return lines.join("\n");
 }
 
+function debatePeerBotNames(
+  session: DebateSessionV1,
+  speakerBotId: string,
+): string[] {
+  return debateBots(session)
+    .filter((bot) => bot.id !== speakerBotId)
+    .map((bot) => bot.name);
+}
+
+function debateFrozenPowerEffects(
+  session: DebateSessionV1,
+  botId: string,
+): BotPowerEffectV1[] {
+  return (session.powerPlan.bots[botId]?.effects ?? []).map(
+    (entry) => entry.effect,
+  );
+}
+
+/**
+ * Strip a bare trailing "Bot" that models invent when Designation is prompt-only.
+ * Keep intentional peer suffixes such as "Basil Bot".
+ */
+function stripDebateOrphanTrailingBot(
+  content: string,
+  designatedPeerNames: readonly string[],
+): string {
+  const trimmed = content.trimEnd();
+  if (!/\bBot\.?$/u.test(trimmed)) return trimmed;
+  for (const name of designatedPeerNames) {
+    if (/\bBot$/u.test(name) && trimmed.endsWith(name)) return trimmed;
+  }
+  const withoutBareBot = trimmed.replace(/\s+\bBot\.?$/u, "").trimEnd();
+  if (withoutBareBot === trimmed) return trimmed;
+  // Preserve a vocal beat that was glued to the orphan suffix ("*burp* Bot").
+  if (/\*burp\*$/iu.test(withoutBareBot) || /\bburp$/iu.test(withoutBareBot)) {
+    return withoutBareBot.replace(/\bburp$/iu, "*burp*");
+  }
+  return withoutBareBot;
+}
+
+function sanitizeDebateSpeechNaming(
+  session: DebateSessionV1,
+  snapshot: DebateBotSnapshotV1,
+  content: string,
+): string {
+  const effects = debateFrozenPowerEffects(session, snapshot.id);
+  const designationEffects = effects.filter(
+    (effect): effect is Extract<BotPowerEffectV1, { type: "designation" }> =>
+      effect.type === "designation",
+  );
+  const peers = debatePeerBotNames(session, snapshot.id);
+  let text = stripCoffeeChatRoleFraming(content);
+  if (designationEffects.length > 0) {
+    // Apply peer affixes from frozen effects directly (Debate stores effects,
+    // not full BotPower records, on the session power plan).
+    const targets = [...new Set(peers)].sort(
+      (left, right) => right.length - left.length,
+    );
+    for (const target of targets) {
+      const designated = botPowerTargetNameFromEffectsV1(
+        target,
+        designationEffects,
+      );
+      if (designated === target) continue;
+      const escaped = target.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      const pattern = new RegExp(
+        `(?<![\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`,
+        "giu",
+      );
+      text = text.replace(pattern, (match, offset: number, source: string) => {
+        const before = source.slice(0, offset).toLocaleLowerCase();
+        const after = source.slice(offset + match.length).toLocaleLowerCase();
+        const targetLower = target.toLocaleLowerCase();
+        const designatedLower = designated.toLocaleLowerCase();
+        const targetAt = designatedLower.indexOf(targetLower);
+        const prefix = targetAt > 0 ? designated.slice(0, targetAt) : "";
+        const suffix =
+          targetAt >= 0 ? designated.slice(targetAt + target.length) : "";
+        const hasPrefix =
+          Boolean(prefix) && before.endsWith(prefix.toLocaleLowerCase());
+        const hasSuffix =
+          Boolean(suffix) && after.startsWith(suffix.toLocaleLowerCase());
+        return `${hasPrefix ? "" : prefix}${match}${hasSuffix ? "" : suffix}`;
+      });
+    }
+  }
+  const designatedPeers = peers.map((name) =>
+    botPowerTargetNameFromEffectsV1(name, designationEffects),
+  );
+  return stripDebateOrphanTrailingBot(text, designatedPeers);
+}
+
 function powerPrompt(session: DebateSessionV1, botId: string): string {
   const plan = session.powerPlan.bots[botId];
   if (!plan || plan.effects.length === 0) return "";
+  const holder =
+    debateBots(session).find((bot) => bot.id === botId)?.name ?? "This bot";
+  const effects = plan.effects.map((entry) => entry.effect);
+  const namingCue = botPowerBotNamingCueFromEffectsV1(
+    holder,
+    effects,
+    debatePeerBotNames(session, botId),
+  );
+  const lines = plan.effects.flatMap(({ powerName, policy, effect }) => {
+    if (effect.type === "designation" && namingCue) return [];
+    return [`- ${powerName} (${policy}): ${JSON.stringify(effect)}`];
+  });
+  if (namingCue) lines.push(namingCue);
+  if (lines.length === 0) return "";
   return [
     "Frozen Power instructions:",
-    ...plan.effects.map(
-      ({ powerName, policy, effect }) =>
-        `- ${powerName} (${policy}): ${JSON.stringify(effect)}`,
-    ),
+    ...lines,
     "Assigned role and scheduled floor remain bound to your stable bot ID. Interruptions may only appear as one brief between-turn reaction.",
   ].join("\n");
 }
@@ -3346,15 +3507,20 @@ async function generateSpeech(
     );
   }
   const sanitized = sanitizeDebateStatementSources(intended, session.evidence);
+  const named = sanitizeDebateSpeechNaming(
+    session,
+    snapshot,
+    sanitized.content,
+  );
   endDebatePerfSpan(speechSpan, {
     botId: snapshot.id,
-    silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
+    silent: named === BOT_POWER_CANONICAL_SILENCE_V1,
     repaired: didCapabilityRepair,
   });
   return {
-    content: sanitized.content,
+    content: named,
     sourceIds: sanitized.sourceIds,
-    silent: sanitized.content === BOT_POWER_CANONICAL_SILENCE_V1,
+    silent: named === BOT_POWER_CANONICAL_SILENCE_V1,
     provider: deliveryGeneration.provider,
     model: deliveryGeneration.model,
     ...(deliveryGeneration.autoRecovery
@@ -4719,16 +4885,80 @@ async function botFloorBreak(
   }
 }
 
+function debateUpcomingFloorGuidance(
+  upcoming: DebateSessionV1,
+  speakerName: string,
+): { prompt: string; fallback: string } {
+  const step = upcoming.stepKey;
+  const advocateMatch = step.match(
+    /^(opening|rebuttal|closing)_(for|against)(?:_player)?$/u,
+  );
+  if (advocateMatch) {
+    const beat = advocateMatch[1]!;
+    const sideId = advocateMatch[2] as DebateSideId;
+    const name = botForSide(upcoming, sideId).name;
+    const label =
+      beat === "opening"
+        ? "opening"
+        : beat === "rebuttal"
+          ? "rebuttal"
+          : "closing";
+    return {
+      prompt: `Recognize ${name} for the scheduled ${label}. Do not award anyone else the floor.`,
+      fallback: `Time, ${speakerName}. ${name} now has the scheduled floor.`,
+    };
+  }
+  if (
+    step.startsWith("moderator_to_") ||
+    step.endsWith("_prompt") ||
+    step === "challenge_judge_question" ||
+    step === "challenge_participant_prompt"
+  ) {
+    return {
+      prompt:
+        "Call time and move to the next procedural beat. Do not award an advocate the floor yet.",
+      fallback: `Time, ${speakerName}. The next procedural beat begins now.`,
+    };
+  }
+  if (
+    step.startsWith("jury_") ||
+    step.startsWith("ballot_") ||
+    step === "verdict_player" ||
+    step.startsWith("judge_aftermath") ||
+    step.startsWith("judge_closing")
+  ) {
+    if (upcoming.jury.enabled) {
+      return {
+        prompt:
+          "Call time; advocacy is finished and the Jury comes next. Do not say the other advocate has the floor.",
+        fallback: `Time, ${speakerName}. The Jury takes the case.`,
+      };
+    }
+    return {
+      prompt:
+        "Call time; advocacy is finished and the verdict path comes next. Do not say the other advocate has the floor.",
+      fallback: `Time, ${speakerName}. The verdict path begins now.`,
+    };
+  }
+  return {
+    prompt:
+      "Call time and restore the true scheduled order without inventing an advocate floor.",
+    fallback: `Time, ${speakerName}. The scheduled order resumes now.`,
+  };
+}
+
 async function moderatorOvertimeCorrection(
   session: DebateSessionV1,
   speaker: DebateBotSnapshotV1,
   speechEvent: DebateEventV1,
   runtime: DebateAiRuntime,
+  upcoming: DebateSessionV1,
 ): Promise<DebateEventV1> {
   const overtimeSeconds = Math.max(
     1,
     Math.ceil((speechEvent.timing?.overtimeMs ?? 0) / 1_000),
   );
+  const guidance = debateUpcomingFloorGuidance(upcoming, speaker.name);
   let correction: Awaited<ReturnType<typeof generateSpeech>>;
   try {
     correction = await generateSpeech(
@@ -4736,14 +4966,15 @@ async function moderatorOvertimeCorrection(
       session.moderator,
       [
         `${speaker.name} continued roughly ${overtimeSeconds} seconds beyond the allotted floor time.`,
-        "Correct the overrun in one concise procedural sentence and restore the scheduled order.",
+        "Correct the overrun in one concise procedural sentence.",
+        guidance.prompt,
         "Do not evaluate, rebut, or summarize the substance of the argument.",
       ].join(" "),
       runtime,
     );
   } catch {
     correction = {
-      content: `Time, ${speaker.name}. The scheduled order resumes now.`,
+      content: guidance.fallback,
       sourceIds: [],
       silent: false,
     };
@@ -4812,13 +5043,22 @@ async function speechTransition(
     ? caseBoardEvent(withBoard, withBoard.caseBoard, event)
     : null;
   if (boardEvent) withBoard.events.push(boardEvent);
+  // Preview the true next beat before overtime copy so the moderator does not
+  // invent "the other advocate has the floor" when a phase or Jury is next.
+  const upcoming = next(withBoard);
   // A human Judge owns overtime enforcement. Prism must not turn a missed
   // gavel into an automatic ruling after the floor has already continued.
   const overtimeCorrection =
     session.playerRole !== "judge" &&
     !floorBreak &&
     event.timing?.status === "overtime"
-      ? await moderatorOvertimeCorrection(withBoard, snapshot, event, runtime)
+      ? await moderatorOvertimeCorrection(
+          withBoard,
+          snapshot,
+          event,
+          runtime,
+          upcoming,
+        )
       : null;
   if (overtimeCorrection) {
     overtimeCorrection.sequence = withBoard.events.length + 1;
@@ -4836,7 +5076,7 @@ async function speechTransition(
       withBoard.events.push(floorBreak.rulingEvent);
     }
   }
-  const transitioned = next(withBoard);
+  const transitioned = upcoming;
   const awaitingObjectionRuling =
     floorBreak &&
     floorBreak.rulingEvent === null &&
@@ -7485,7 +7725,17 @@ export async function advanceDebateSession(
       surprisePromise,
       juryPromise,
     ]);
-    if (jurySidebarEvent) events.push(jurySidebarEvent);
+    if (jurySidebarEvent) {
+      // Parallel atmospheric writers may mint the same provisional sequence;
+      // commitMutation reassigns from the DB max, but keep the in-memory batch
+      // contiguous so downstream case-board queueing sees a stable order.
+      const lastSequence =
+        events.at(-1)?.sequence ?? session.events.at(-1)?.sequence ?? 0;
+      events.push({
+        ...jurySidebarEvent,
+        sequence: lastSequence + 1,
+      });
+    }
     const commitSpan = startDebatePerfSpan("advance.commit");
     const committed = commitMutation(
       db,
@@ -9921,4 +10171,354 @@ export function debateStatementSourceIds(
   content: string,
 ): string[] {
   return debateSourceIdsFromText(content, session.evidence);
+}
+
+function debateOutcomeSynopsisLine(session: DebateSessionV1): string {
+  const forLabel = session.motion.forSide.label;
+  const againstLabel = session.motion.againstSide.label;
+  if (session.jury.enabled && session.jury.majoritySideId) {
+    const majority =
+      session.jury.majoritySideId === "for" ? forLabel : againstLabel;
+    return `Jury split ${session.jury.forVotes}–${session.jury.againstVotes} favoring ${majority}.`;
+  }
+  if (session.winnerSideId === "for") {
+    return `Outcome: ${forLabel} prevailed.`;
+  }
+  if (session.winnerSideId === "against") {
+    return `Outcome: ${againstLabel} prevailed.`;
+  }
+  return "Outcome: no decisive winning side was recorded.";
+}
+
+function debateSynopsisTranscriptLines(session: DebateSessionV1): string[] {
+  return session.events
+    .filter(
+      (event) =>
+        !debateEventIsTranscriptHousekeeping(event) &&
+        event.speakerKind !== "system" &&
+        event.kind !== "silence" &&
+        event.content.trim().length > 0,
+    )
+    .slice(-36)
+    .map((event) => {
+      const speaker =
+        event.speakerBotId === session.moderator.id
+          ? session.moderator.name
+          : event.speakerBotId === session.forAdvocate.id
+            ? session.forAdvocate.name
+            : event.speakerBotId === session.againstAdvocate.id
+              ? session.againstAdvocate.name
+              : (session.jury.jurors.find((juror) => juror.id === event.speakerBotId)
+                  ?.name ?? event.speakerKind);
+      return `${speaker}: ${debateSpokenText(event.content).slice(0, 280)}`;
+    });
+}
+
+function debateCaseBoardSynopsisLines(session: DebateSessionV1): string[] {
+  return session.caseBoard.slice(0, 8).map((card) => {
+    const side =
+      card.sideId === "for"
+        ? session.motion.forSide.label
+        : session.motion.againstSide.label;
+    return `${side}: ${card.summary.slice(0, 160)}`;
+  });
+}
+
+function persistDebateSessionSynopsis(
+  db: DatabaseSync,
+  userId: string,
+  session: DebateSessionV1,
+  synopsis: DebateSessionSynopsisV1,
+): DebateSessionV1 {
+  const next: DebateSessionV1 = { ...session, synopsis };
+  const result = db
+    .prepare(
+      `UPDATE debate_sessions
+          SET session_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ?`,
+    )
+    .run(
+      serializeSessionState(next),
+      synopsis.generatedAt,
+      session.id,
+      userId,
+    );
+  if (Number(result.changes) !== 1) {
+    throw new HttpError(409, "Debate synopsis could not be saved.");
+  }
+  return next;
+}
+
+/**
+ * Idempotent Coffee-shaped end summary for a completed Debate. Persists on the
+ * session JSON so archive/replay can reopen without regenerating.
+ */
+export async function generateDebateSessionSynopsis(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.status !== "completed") {
+    throw new HttpError(
+      400,
+      "A Debate synopsis is only available after the proceeding completes.",
+    );
+  }
+  if (session.synopsis?.text) {
+    return session;
+  }
+  const transcriptLines = debateSynopsisTranscriptLines(session);
+  if (transcriptLines.length === 0) {
+    const fallback: DebateSessionSynopsisV1 = {
+      text: [
+        `Motion: ${session.motion.motion}`,
+        debateOutcomeSynopsisLine(session),
+      ]
+        .join(" ")
+        .slice(0, DEBATE_SESSION_SYNOPSIS_MAX_LENGTH),
+      generatedAt: new Date().toISOString(),
+    };
+    return persistDebateSessionSynopsis(db, userId, session, fallback);
+  }
+  const lane = selectedLane(runtime);
+  const raw = await lane.provider.generateResponse(
+    [
+      {
+        role: "system",
+        content: [
+          "Write a concise end-of-session Debate synopsis for the player.",
+          "Be concrete and natural. Ground every claim in the supplied motion, floor transcript, case-board highlights, and explicit outcome.",
+          "Do not invent ballots, evidence, or a different winner than the outcome line.",
+          "Keep the complete synopsis under 750 characters so it ends naturally instead of being cut off.",
+          "Reply in plain prose only — no headings or bullet lists.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: [
+          `Motion: ${session.motion.motion}`,
+          `For: ${session.motion.forSide.label}`,
+          `Against: ${session.motion.againstSide.label}`,
+          debateOutcomeSynopsisLine(session),
+          "Case board:",
+          ...(debateCaseBoardSynopsisLines(session).length > 0
+            ? debateCaseBoardSynopsisLines(session)
+            : ["(none)"]),
+          "Condensed public floor:",
+          ...transcriptLines,
+        ].join("\n"),
+      },
+    ],
+    {
+      model: lane.model,
+      maxTokens: 420,
+      temperature: 0.35,
+      usagePurpose: "debate_synopsis",
+    },
+  );
+  const text =
+    typeof raw === "string"
+      ? raw.replace(/\s+/gu, " ").trim().slice(0, DEBATE_SESSION_SYNOPSIS_MAX_LENGTH)
+      : "";
+  if (!text) {
+    throw new HttpError(502, "The Debate synopsis could not be generated.");
+  }
+  return persistDebateSessionSynopsis(db, userId, session, {
+    text,
+    generatedAt: new Date().toISOString(),
+  });
+}
+
+const DEBATE_DEBRIEF_CHAT_RESPONSE_MAX = 2_400;
+const DEBATE_DEBRIEF_CHAT_HISTORY_MAX = 12;
+
+function normalizeDebateDebriefChatRequest(raw: unknown): {
+  targetBotId: string;
+  content: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+} {
+  const body =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  const targetBotId =
+    typeof body.targetBotId === "string" ? body.targetBotId.trim() : "";
+  const content =
+    typeof body.content === "string" ? body.content.trim().slice(0, 2_000) : "";
+  if (!targetBotId) {
+    throw new HttpError(400, "Choose a Debate cast member to ask.");
+  }
+  if (!content) {
+    throw new HttpError(400, "Enter a question about their in-debate reasoning.");
+  }
+  const messages = Array.isArray(body.messages)
+    ? body.messages
+        .flatMap((entry) => {
+          if (!entry || typeof entry !== "object") return [];
+          const record = entry as Record<string, unknown>;
+          const role =
+            record.role === "user" || record.role === "assistant"
+              ? record.role
+              : null;
+          const text =
+            typeof record.content === "string"
+              ? record.content.trim().slice(0, 2_000)
+              : "";
+          return role && text ? [{ role, content: text }] : [];
+        })
+        .slice(-DEBATE_DEBRIEF_CHAT_HISTORY_MAX)
+    : [];
+  return { targetBotId, content, messages };
+}
+
+function debateDebriefTargetContext(
+  session: DebateSessionV1,
+  targetBotId: string,
+): {
+  eligible: DebateDebriefEligibleBotV1;
+  systemPrompt: string;
+  contributions: string[];
+  ballotReason: string | null;
+} {
+  const eligible = debateDebriefEligibleBots(session).find(
+    (bot) => bot.id === targetBotId,
+  );
+  if (!eligible) {
+    throw new HttpError(
+      400,
+      "That cast member is not available for post-session inquiry in this proceeding.",
+    );
+  }
+  const snapshot =
+    session.moderator.id === targetBotId
+      ? session.moderator
+      : session.forAdvocate.id === targetBotId
+        ? session.forAdvocate
+        : session.againstAdvocate.id === targetBotId
+          ? session.againstAdvocate
+          : session.jury.jurors.find((juror) => juror.id === targetBotId) ??
+            null;
+  if (!snapshot) {
+    throw new HttpError(404, "That Debate cast member was not found.");
+  }
+  const contributions = session.events
+    .filter(
+      (event) =>
+        event.speakerBotId === targetBotId &&
+        event.content.trim().length > 0 &&
+        !debateEventIsTranscriptHousekeeping(event),
+    )
+    .slice(-24)
+    .map(
+      (event) =>
+        `[${event.kind}/${event.phase}] ${debateSpokenText(event.content).slice(0, 360)}`,
+    );
+  const juryBallot = session.jury.finalBallots.find(
+    (ballot) => ballot.jurorBotId === targetBotId,
+  );
+  const floorBallot = session.ballots.find(
+    (ballot) => ballot.voterBotId === targetBotId,
+  );
+  const ballotReason =
+    juryBallot?.reason?.trim() ||
+    (!floorBallot?.privateReason ? floorBallot?.reason?.trim() || null : null);
+  return {
+    eligible,
+    systemPrompt: snapshot.systemPrompt,
+    contributions,
+    ballotReason,
+  };
+}
+
+/**
+ * Ephemeral pick-a-bot inquiry into a sealed Debate stance. No durable writes,
+ * no mind-changing, grounded only in already-saved contributions.
+ */
+export async function chatWithDebateDebriefBot(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  rawRequest: unknown,
+  runtime: DebateAiRuntime,
+): Promise<DebateDebriefChatMessageV1> {
+  const request = normalizeDebateDebriefChatRequest(rawRequest);
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.status !== "completed") {
+    throw new HttpError(
+      400,
+      "Post-session inquiry is only available after the Debate completes.",
+    );
+  }
+  const target = debateDebriefTargetContext(session, request.targetBotId);
+  const roleLabel =
+    target.eligible.role === "moderator"
+      ? "moderator"
+      : target.eligible.role === "juror"
+        ? "juror"
+        : target.eligible.sideId === "for"
+          ? `advocate for ${session.motion.forSide.label}`
+          : target.eligible.sideId === "against"
+            ? `advocate for ${session.motion.againstSide.label}`
+            : "advocate";
+  const systemPrompt = withPrismRuntimeGrounding(
+    [
+      `You are ${target.eligible.name}, speaking after a completed Debate as the frozen ${roleLabel}.`,
+      target.systemPrompt,
+      `Motion: ${session.motion.motion}`,
+      debateOutcomeSynopsisLine(session),
+      "This exchange exists solely for the player's betterment: help them understand how you thought during the sealed Debate.",
+      "Hard contract: do not change your mind, reverse a ballot, walk back a floor position, or renegotiate the outcome because they are asking.",
+      "You may clarify, elaborate, or admit uncertainty about your past reasoning — but only as it was at the time.",
+      "This exchange is ephemeral. You have no durable chat history or long-term memory beyond the context supplied here. Never claim otherwise.",
+      "Refuse weather, small talk, and topics unrelated to this Debate's motion, public floor, your contributions, ballot reason, case board, or known outcome.",
+      "Ground every answer in your already-saved speech and reasons below — not a fresh opinion pass.",
+      `Your frozen contributions:\n${
+        target.contributions.length > 0
+          ? target.contributions.join("\n")
+          : "(none recorded)"
+      }`,
+      target.ballotReason
+        ? `Your frozen ballot reason:\n${target.ballotReason}`
+        : "No public ballot reason is available for you in this record.",
+      session.synopsis?.text
+        ? `Session synopsis:\n${session.synopsis.text}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+  );
+  const lane = selectedLane(runtime);
+  const raw = await lane.provider.generateResponse(
+    [
+      { role: "system", content: systemPrompt },
+      ...request.messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+      { role: "user", content: request.content },
+    ],
+    {
+      model: lane.model,
+      temperature: 0.55,
+      maxTokens: 900,
+      usagePurpose: "debate_debrief",
+    },
+  );
+  const content =
+    typeof raw === "string"
+      ? raw.trim().slice(0, DEBATE_DEBRIEF_CHAT_RESPONSE_MAX)
+      : "";
+  if (!content) {
+    throw new HttpError(502, "That Debate cast member did not answer.");
+  }
+  return {
+    id: randomUUID(),
+    role: "assistant",
+    content,
+    provider: lane.providerName,
+    model: lane.model ?? defaultModelIdForProvider(lane.providerName),
+    createdAt: new Date().toISOString(),
+  };
 }

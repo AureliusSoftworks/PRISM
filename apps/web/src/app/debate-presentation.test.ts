@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   DEBATE_EVIDENCE_LINK_PREFIX,
   DEBATE_SOURCE_LINK_PREFIX,
+  DEBATE_UTTERANCE_PACE_BOOST,
   debateAudioEnabled,
   debateEvidenceFromMarkdownHref,
   debateMarkdownSource,
@@ -13,6 +14,7 @@ import {
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
+  debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
 } from "./debatePresentation.ts";
 
@@ -233,5 +235,47 @@ describe("Debate live presentation", () => {
     const seats = debateGalleryReactingIndices("One clause.", 3);
     assert.ok(seats.length >= 1 && seats.length <= 2);
     assert.ok(seats.every((index) => index >= 0 && index < 7));
+  });
+
+  it("boosts advocate pace when the turn clock is late or overtime", () => {
+    assert.equal(
+      debateUtterancePaceBoost({
+        limitMs: 10_000,
+        estimatedDurationMs: 4_000,
+        overtimeMs: 0,
+        status: "within_limit",
+      }),
+      0,
+    );
+    assert.equal(
+      debateUtterancePaceBoost({
+        limitMs: 10_000,
+        estimatedDurationMs: 9_000,
+        overtimeMs: 0,
+        status: "within_limit",
+      }),
+      DEBATE_UTTERANCE_PACE_BOOST,
+    );
+    assert.equal(
+      debateUtterancePaceBoost({
+        limitMs: 10_000,
+        estimatedDurationMs: 4_000,
+        overtimeMs: 500,
+        status: "overtime",
+      }),
+      DEBATE_UTTERANCE_PACE_BOOST,
+    );
+    assert.equal(
+      debateUtterancePaceBoost(
+        {
+          limitMs: 10_000,
+          estimatedDurationMs: 4_000,
+          overtimeMs: 0,
+          status: "within_limit",
+        },
+        0.85,
+      ),
+      DEBATE_UTTERANCE_PACE_BOOST,
+    );
   });
 });

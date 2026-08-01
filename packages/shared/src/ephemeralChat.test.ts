@@ -25,6 +25,7 @@ describe("ephemeral chat provider preferences", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       },
     );
   });

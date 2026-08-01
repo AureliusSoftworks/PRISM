@@ -1171,6 +1171,7 @@ import {
   signalOnlineVoiceTimeoutMs,
   signalPreferredVoiceClipReady,
 } from "./signalVoiceFallback";
+import { signalVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
   applyOfflineVoiceSelection,
   builtinVoiceSelectionValue,
@@ -52618,7 +52619,9 @@ function HomeContent(): React.JSX.Element {
     const modeLabel =
       mode === "botcast"
         ? "Signal"
-        : `${mode.slice(0, 1).toUpperCase()}${mode.slice(1)}`;
+        : mode === "debate"
+          ? "Debate"
+          : `${mode.slice(0, 1).toUpperCase()}${mode.slice(1)}`;
     const preference = settings.ephemeralChatProviderPreferences[mode];
     return (
       <section
@@ -63731,7 +63734,8 @@ function HomeContent(): React.JSX.Element {
                 startedAtMs +
                 Math.max(
                   1,
-                  durationMs ?? Math.max(720, spokenText.length * 34),
+                  durationMs ??
+                    signalVoiceCompletionFallbackDurationMs(spokenText),
                 ),
               payload: {
                 speakerId: botSummary.id,
@@ -110257,6 +110261,7 @@ function HomeContent(): React.JSX.Element {
                 {settings && activeSettingsScope === "debate" && (
                   <div className={`${styles.form} ${styles.settingsWorkspace}`}>
                     <div className={styles.settingsSectionGrid}>
+                      {renderEphemeralChatProviderSetting("debate")}
                       <section
                         className={`${styles.settingsSection} ${styles.settingsSectionWide}`}
                         data-settings-section="debate"

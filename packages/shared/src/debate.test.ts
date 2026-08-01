@@ -29,7 +29,9 @@ import {
   normalizeDebateJuryStateV1,
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
+  normalizeDebateSessionSynopsis,
   normalizeDebateSetupPresetId,
+  debateDebriefEligibleBots,
   sanitizeDebateStatementSources,
 } from "./debate.ts";
 
@@ -472,4 +474,64 @@ test("coerceDebateBallotSideId accepts aliases, labels, and nested ballot shapes
   );
   assert.equal(coerceDebateBallotSideId("maybe both", motion), null);
   assert.equal(coerceDebateBallotSideId(null, motion), null);
+});
+
+test("normalizes Debate session synopsis and seals Participant Jury from debrief cast", () => {
+  assert.equal(normalizeDebateSessionSynopsis(null), null);
+  assert.deepEqual(
+    normalizeDebateSessionSynopsis({
+      text: "  The chamber closed on a narrow split.  ",
+      generatedAt: "2026-08-01T00:00:00.000Z",
+    }),
+    {
+      text: "The chamber closed on a narrow split.",
+      generatedAt: "2026-08-01T00:00:00.000Z",
+    },
+  );
+
+  const bot = {
+    version: 1 as const,
+    id: "bot-a",
+    name: "Ada",
+    systemPrompt: "Advocate.",
+    role: "advocate" as const,
+    sideId: "for" as const,
+    color: null,
+    glyph: null,
+    avatarDetails: null,
+    voiceProfile: null,
+    powers: [],
+    provider: "local" as const,
+    model: "local",
+    revision: "1",
+  };
+  const juror = {
+    ...bot,
+    id: "juror-1",
+    name: "Juror One",
+    role: "juror" as const,
+    sideId: null,
+    source: "library" as const,
+  };
+  const session = {
+    moderator: { ...bot, id: "mod", name: "Mod", role: "moderator" as const, sideId: null },
+    forAdvocate: bot,
+    againstAdvocate: { ...bot, id: "bot-b", name: "Bea", sideId: "against" as const },
+    jury: {
+      ...defaultDebateJuryStateV1(),
+      enabled: true,
+      jurors: [juror],
+    },
+    playerRole: "participant" as const,
+  };
+  assert.deepEqual(
+    debateDebriefEligibleBots(session).map((entry) => entry.id),
+    ["mod", "bot-a", "bot-b"],
+  );
+  assert.ok(
+    debateDebriefEligibleBots({
+      ...session,
+      playerRole: "spectator",
+    }).some((entry) => entry.id === "juror-1"),
+  );
 });

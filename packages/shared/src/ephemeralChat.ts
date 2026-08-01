@@ -4,6 +4,7 @@ export const EPHEMERAL_CHAT_MODE_IDS = [
   "coffee",
   "botcast",
   "slate",
+  "debate",
 ] as const;
 
 export type EphemeralChatModeId = (typeof EPHEMERAL_CHAT_MODE_IDS)[number];
@@ -34,6 +35,7 @@ export function defaultEphemeralChatProviderPreferences(): EphemeralChatProvider
     coffee: "global",
     botcast: "global",
     slate: "global",
+    debate: "global",
   };
 }
 

@@ -52,6 +52,32 @@ export function debateTurnClockState(
   };
 }
 
+/** Late-clock threshold: last ~20% of the turn budget or already overtime. */
+export const DEBATE_UTTERANCE_PACE_LATE_PROGRESS = 0.8;
+/** Temporary pace delta applied to advocate voice when short on time (−1…1). */
+export const DEBATE_UTTERANCE_PACE_BOOST = 0.35;
+
+/**
+ * Returns a temporary voice-profile pace boost for Forum advocate turns when
+ * the turn clock is already overtime or the expected fill of the limit is late.
+ * Omit speechProgress to use estimatedDurationMs / limitMs at utterance start.
+ */
+export function debateUtterancePaceBoost(
+  timing: DebateTurnTimingV1 | null | undefined,
+  speechProgress?: number | null,
+): number {
+  if (!timing || !(timing.limitMs > 0)) return 0;
+  const progress =
+    speechProgress != null && Number.isFinite(speechProgress)
+      ? Math.max(0, Math.min(1, speechProgress))
+      : Math.max(0, timing.estimatedDurationMs / timing.limitMs);
+  const late =
+    timing.status === "overtime" ||
+    timing.overtimeMs > 0 ||
+    progress >= DEBATE_UTTERANCE_PACE_LATE_PROGRESS;
+  return late ? DEBATE_UTTERANCE_PACE_BOOST : 0;
+}
+
 export function debateAudioEnabled(args: {
   voiceMode: string;
   voiceVolume: number;

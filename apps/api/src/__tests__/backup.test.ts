@@ -412,6 +412,7 @@ describe("backup ephemeral chat provider settings", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       });
 
       db.prepare(
@@ -429,6 +430,7 @@ describe("backup ephemeral chat provider settings", () => {
         coffee: "local",
         botcast: "online",
         slate: "global",
+        debate: "global",
       });
 
       const legacySettings = { ...snapshot.settings! };
@@ -450,6 +452,7 @@ describe("backup ephemeral chat provider settings", () => {
         coffee: "global",
         botcast: "global",
         slate: "global",
+        debate: "global",
       });
     });
   });

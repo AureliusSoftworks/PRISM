@@ -129,6 +129,7 @@ class CommentlessAcceptanceProvider extends DebateProviderStub {
 class OvertimeProvider extends DebateProviderStub {
   public openingPrompt = "";
   public correctionPrompt = "";
+  public lastCorrectionPrompt = "";
 
   public override async generateResponse(
     messages: ProviderMessage[],
@@ -137,6 +138,7 @@ class OvertimeProvider extends DebateProviderStub {
     const text = messages.map((message) => message.content).join("\n");
     if (text.includes("beyond the allotted floor time")) {
       this.correctionPrompt = text;
+      this.lastCorrectionPrompt = text;
       return JSON.stringify({
         content:
           "Time, Avery. Yield the floor so the scheduled order can resume.",
@@ -152,6 +154,39 @@ class OvertimeProvider extends DebateProviderStub {
           { length: 78 },
           (_, index) => `grounded${index + 1}`,
         ).join(" "),
+      });
+    }
+    if (
+      text.includes("Respond with the Plan With Limits opening address") ||
+      text.includes("Respond with the Plan With Limits opening argument")
+    ) {
+      return JSON.stringify({
+        content: Array.from(
+          { length: 78 },
+          (_, index) => `overrun${index + 1}`,
+        ).join(" "),
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class DesignationLeakProvider extends DebateProviderStub {
+  public speechPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("private advocacy consent check")) {
+      return super.generateResponse(messages, options);
+    }
+    if (text.includes("Give the Build Near Rail opening")) {
+      this.speechPrompt = text;
+      return JSON.stringify({
+        content:
+          "Basil misses the point about scarce rail land. Balance wins. *burp* Bot",
       });
     }
     return super.generateResponse(messages, options);
@@ -1059,6 +1094,7 @@ async function createDebateForRole(
     formality?: DebateFormalityId;
     moderatorTitle?: string;
     moderatorPowers?: BotPowerV1[];
+    forPowers?: BotPowerV1[];
     forSystemPrompt?: string;
   } = {},
 ) {
@@ -1068,7 +1104,7 @@ async function createDebateForRole(
     db,
     "for",
     "Avery",
-    [],
+    options.forPowers ?? [],
     options.forSystemPrompt ?? "Avery is thoughtful, candid, and concise.",
   );
   seedBot(db, "against", "Basil");
@@ -1254,6 +1290,29 @@ async function createTurnaboutForRole(
 }
 
 describe("Debate engine", () => {
+  it("pins post-session synopsis and debrief contracts without durable memory writes", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../debate.ts", import.meta.url)),
+      "utf8",
+    );
+    assert.match(source, /export async function generateDebateSessionSynopsis/u);
+    assert.match(source, /usagePurpose: "debate_synopsis"/u);
+    assert.match(source, /export async function chatWithDebateDebriefBot/u);
+    assert.match(source, /usagePurpose: "debate_debrief"/u);
+    assert.match(
+      source,
+      /do not change your mind, reverse a ballot, walk back a floor position/u,
+    );
+    assert.match(
+      source,
+      /This exchange is ephemeral\. You have no durable chat history or long-term memory/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /chatWithDebateDebriefBot[\s\S]{0,2500}INSERT INTO (?:messages|memories|memory_summaries)/u,
+    );
+  });
+
   it("refracts a contextual setup field as a draft without persisting it", async () => {
     const db = createTestDb();
     try {
@@ -1470,6 +1529,142 @@ describe("Debate engine", () => {
           (item) => item.id === mismatchedFormality.id,
         )?.setupPresetId,
         "custom",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps Jury sidebar and Persona Foley sequences unique on the same advance", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new PersonaSurpriseProvider("juror-1");
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "forum",
+        provider,
+      );
+      created.runtime.personaReactionRoll = () => 0;
+      let session = created.session;
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "sequence-collision:intro",
+        },
+        created.runtime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "sequence-collision:opening",
+        },
+        created.runtime,
+      );
+
+      assert.notEqual(session.status, "paused");
+      assert.equal(session.error, null);
+      const sidebar = session.events.find((event) =>
+        event.stepKey.startsWith("jury_sidebar_"),
+      );
+      const reaction = session.events.find((event) =>
+        event.stepKey.startsWith("persona_reaction_"),
+      );
+      assert.ok(sidebar, "expected a Jury sidebar turn");
+      assert.ok(reaction, "expected Persona Foley");
+      const sequences = session.events.map((event) => event.sequence);
+      assert.equal(sequences.length, new Set(sequences).size);
+      assert.deepEqual(
+        sequences,
+        [...sequences].sort((left, right) => left - right),
+      );
+      assert.equal(
+        sequences.at(-1),
+        sequences.length,
+        "sequences should stay contiguous from 1",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets delayed case-board refinement land without colliding with the next advance", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "sequence-refine:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "sequence-refine:opening-for",
+        },
+        debateRuntime,
+      );
+      const sourceEvent = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.sideId === "for" &&
+          event.content.length > 24,
+      );
+      assert.ok(sourceEvent);
+      const provider = new DelayedCaseBoardProvider();
+      const refinement = refineDebateCaseBoard(
+        db,
+        "user-1",
+        session.id,
+        sourceEvent,
+        provider,
+      );
+      await provider.started;
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "sequence-refine:opening-against",
+        },
+        debateRuntime,
+      );
+      provider.release();
+      await refinement;
+
+      const settled = getDebateSession(db, "user-1", session.id);
+      assert.notEqual(settled.status, "paused");
+      assert.equal(settled.error, null);
+      const sequences = settled.events.map((event) => event.sequence);
+      assert.equal(sequences.length, new Set(sequences).size);
+      assert.ok(
+        settled.events.some(
+          (event) =>
+            event.kind === "case_board" &&
+            event.parentEventId === sourceEvent.id &&
+            event.content.includes(
+              "Transit zoning directly addresses scarce rail-adjacent land.",
+            ),
+        ),
       );
     } finally {
       db.close();
@@ -2537,8 +2732,104 @@ describe("Debate engine", () => {
         provider.openingPrompt,
         /audible floor clock gives you 20 seconds/u,
       );
-      assert.match(provider.correctionPrompt, /restore the scheduled order/u);
+      assert.match(
+        provider.correctionPrompt,
+        /Recognize Basil for the scheduled opening/u,
+      );
+      assert.doesNotMatch(
+        provider.correctionPrompt,
+        /restore the scheduled order/u,
+      );
       assert.doesNotMatch(provider.correctionPrompt, /Vote independently/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("strips orphan trailing Bot from Designation holders and cues peer naming", async () => {
+    const db = createTestDb();
+    const provider = new DesignationLeakProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        forPowers: [
+          readyPower("designation-bot", "Bot Suffix", "Call other bots Bot.", [
+            { type: "designation", placement: "suffix", text: "Bot" },
+          ]),
+        ],
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "designation:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "designation:opening",
+        },
+        debateRuntime,
+      );
+      const opening = session.events.find(
+        (event) =>
+          event.kind === "speech" &&
+          event.stepKey === "opening_for" &&
+          event.speakerBotId === session.forAdvocate.id,
+      );
+      assert.ok(opening);
+      assert.match(provider.speechPrompt, /keep your own name exactly "Avery"/u);
+      assert.match(provider.speechPrompt, /apply suffix "Bot"/u);
+      assert.doesNotMatch(provider.speechPrompt, /"type":"designation"/u);
+      assert.match(opening.content, /Basil Bot misses the point/u);
+      assert.match(opening.content, /\*burp\*$/u);
+      assert.doesNotMatch(opening.content, /\bBot\s*$/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps overtime copy from awarding an advocate floor when a challenge beat is next", async () => {
+    const db = createTestDb();
+    const provider = new OvertimeProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening-for", "opening-against"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `overtime-challenge:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.stepKey, "challenge_for_prompt");
+      assert.match(
+        provider.lastCorrectionPrompt,
+        /next procedural beat|Do not award an advocate the floor yet/u,
+      );
+      assert.doesNotMatch(
+        provider.lastCorrectionPrompt,
+        /Recognize Avery for the scheduled/u,
+      );
+      assert.doesNotMatch(
+        provider.lastCorrectionPrompt,
+        /restore the scheduled order/u,
+      );
     } finally {
       db.close();
     }

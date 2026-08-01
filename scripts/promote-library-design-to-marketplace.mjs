@@ -357,7 +357,7 @@ function resolvePublicElevenLabsDirection(heard, market, authored) {
   return "natural, conversational";
 }
 
-function heardLibraryVoiceProfile(row, marketAuthored, botName) {
+function parseLibraryVoiceLayers(row) {
   let authored = null;
   let override = null;
   try {
@@ -374,6 +374,11 @@ function heardLibraryVoiceProfile(row, marketAuthored, botName) {
   } catch {
     override = null;
   }
+  return { authored, override };
+}
+
+function heardLibraryVoiceProfile(row, marketAuthored, botName) {
+  const { authored, override } = parseLibraryVoiceLayers(row);
   const source = override ?? authored;
   const heard = normalizeBotAudioVoiceProfileV1(source);
   const authoredNormalized = normalizeBotAudioVoiceProfileV1(authored);
@@ -405,6 +410,28 @@ function heardLibraryVoiceProfile(row, marketAuthored, botName) {
     heard,
     portable,
     elId,
+  };
+}
+
+/**
+ * Branch-locked shelves (e.g. library-dev-backup) are personal backups, not
+ * public catalog entries. Keep the heard voice shape — including account-bound
+ * ElevenLabs IDs — and skip public polish gates like forced chorus.
+ */
+function heardBranchLockedVoiceProfile(row) {
+  const { authored, override } = parseLibraryVoiceLayers(row);
+  const source = override ?? authored;
+  const heard = normalizeBotAudioVoiceProfileV1(source);
+  const strippedSfx = portableAvatarSfx(heard.avatarSfx);
+  const portable = normalizeBotAudioVoiceProfileV1({
+    ...heard,
+    ...(strippedSfx ? { avatarSfx: strippedSfx } : { avatarSfx: undefined }),
+  });
+  return {
+    fromOverride: Boolean(override),
+    heard,
+    portable,
+    elId: resolveElevenLabsVoiceId(heard),
   };
 }
 
@@ -489,9 +516,25 @@ const targets = [];
 const missingLibrary = [];
 const unresolvedVoices = [];
 
+const manifestById = new Map(manifest.bots.map((entry) => [entry.id, entry]));
+if (onlyIds) {
+  const unknownOnly = [...onlyIds].filter((id) => !manifestById.has(id));
+  if (unknownOnly.length > 0) {
+    throw new Error(
+      `Unknown Marketplace bot id(s) for --only: ${unknownOnly.join(", ")}`,
+    );
+  }
+}
+
 for (const entry of manifest.bots) {
-  if (!isPublicMarketplaceEntry(entry, lockedThemeIds)) continue;
-  if (onlyIds && !onlyIds.has(entry.id)) continue;
+  const isPublic = isPublicMarketplaceEntry(entry, lockedThemeIds);
+  // Bare runs sync public shelves only. Explicit --only may also target
+  // branch-locked personal backups (e.g. library-dev-backup / Marie Antoinette).
+  if (onlyIds) {
+    if (!onlyIds.has(entry.id)) continue;
+  } else if (!isPublic) {
+    continue;
+  }
 
   const bundle = readBundle(entry);
   const bot = bundle.document.bot;
@@ -513,11 +556,13 @@ for (const entry of manifest.bots) {
     field.startsWith("faceThinking"),
   );
 
-  const voiceInfo = heardLibraryVoiceProfile(
-    row,
-    bot.authoredAudioVoiceProfile,
-    entry.name,
-  );
+  const voiceInfo = isPublic
+    ? heardLibraryVoiceProfile(
+        row,
+        bot.authoredAudioVoiceProfile,
+        entry.name,
+      )
+    : heardBranchLockedVoiceProfile(row);
   let resolvedVoice = null;
   if (voiceInfo.elId) {
     resolvedVoice = catalogById.get(voiceInfo.elId) ?? null;
@@ -536,7 +581,7 @@ for (const entry of manifest.bots) {
   const nextAuthored = voiceInfo.portable;
   const voiceChanged = !jsonEqual(currentAuthored, nextAuthored);
 
-  if (resolvedVoice) {
+  if (resolvedVoice && isPublic) {
     const existingLock = nextVoiceLock.bots[entry.id];
     if (
       !existingLock ||
@@ -560,13 +605,14 @@ for (const entry of manifest.bots) {
       ? JSON.parse(row.authored_audio_voice_profile)
       : undefined,
   );
-  const libraryAuthoredVoiceChanged = !jsonEqual(
-    currentLibraryAuthored,
-    nextAuthored,
-  );
+  // Public packs keep Library authored voice aligned to portable catalog shape.
+  // Branch-locked backups only rewrite the Marketplace archive.
+  const libraryAuthoredVoiceChanged =
+    isPublic && !jsonEqual(currentLibraryAuthored, nextAuthored);
 
   targets.push({
     entry,
+    isPublic,
     bundle,
     row,
     sourceFaceValues,
@@ -641,6 +687,7 @@ console.log(
       changes: marketplaceTargets.map((target) => ({
         id: target.entry.id,
         name: target.entry.name,
+        branchLock: target.entry.branchLock ?? null,
         faceFields: target.faceFields,
         spinnerFields: target.spinnerFields,
         voiceChanged: target.voiceChanged,

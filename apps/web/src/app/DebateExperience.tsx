@@ -42,8 +42,11 @@ import {
   debateSpokenText,
   normalizeDebateModeratorTitle,
   voicePerformanceTextFromActionCues,
+  debateDebriefEligibleBots,
+  normalizeBotAudioVoiceControl,
   type DebateAdvocacyConsent,
   type DebateCaseCardV1,
+  type DebateDebriefChatMessageV1,
   type DebateEventV1,
   type DebateEvidencePacketV1,
   type DebateEvidenceExhibitV1,
@@ -155,8 +158,10 @@ import {
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
+  debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
 } from "./debatePresentation";
+import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
   resolveDebateTableEvidenceStickyId,
   debateTableEvidenceItem,
@@ -1498,15 +1503,40 @@ function debatePresentationEvents(
   );
 }
 
+function debateJuryAutoChamberActive(session: DebateSessionV1): boolean {
+  const step = session.stepKey;
+  if (
+    step.startsWith("jury_initial_") ||
+    step.startsWith("jury_deliberation_") ||
+    step.startsWith("jury_final_")
+  ) {
+    return true;
+  }
+  // The final-ballot advance already moves stepKey to aftermath before the
+  // chamber ballot/verdict present. Keep Auto on Jury until an aftermath or
+  // closing event exists, then return to the forum for advocate reactions.
+  if (step.startsWith("jury_aftermath_") || step === "jury_closing_moderator") {
+    return !session.events.some(
+      (event) =>
+        event.stepKey.startsWith("jury_aftermath_") ||
+        event.stepKey === "jury_closing_moderator",
+    );
+  }
+  return false;
+}
+
 function debateJuryCameraIsActive(
   cameraMode: DebateCameraMode,
   session: DebateSessionV1,
 ): boolean {
-  return (
-    session.jury.enabled &&
-    (session.playerRole === "spectator" || session.playerRole === "judge") &&
-    cameraMode === "jury"
-  );
+  if (
+    !session.jury.enabled ||
+    (session.playerRole !== "spectator" && session.playerRole !== "judge")
+  ) {
+    return false;
+  }
+  if (cameraMode === "jury") return true;
+  return cameraMode === "auto" && debateJuryAutoChamberActive(session);
 }
 
 function debateCameraModeForSession(
@@ -2686,6 +2716,19 @@ export function DebateExperience(
   const [juryRecordCopySessionId, setJuryRecordCopySessionId] = useState<
     string | null
   >(null);
+  const [debriefTargetBotId, setDebriefTargetBotId] = useState<string | null>(
+    null,
+  );
+  const [debriefMessages, setDebriefMessages] = useState<
+    DebateDebriefChatMessageV1[]
+  >([]);
+  const [debriefDraft, setDebriefDraft] = useState("");
+  const [debriefBusy, setDebriefBusy] = useState(false);
+  const [debriefError, setDebriefError] = useState<string | null>(null);
+  const [synopsisPreparingSessionId, setSynopsisPreparingSessionId] = useState<
+    string | null
+  >(null);
+  const debateSynopsisRequestIdsRef = useRef(new Set<string>());
   const [playedJuryCommentIds, setPlayedJuryCommentIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -3757,6 +3800,142 @@ export function DebateExperience(
     await copyJuryRecordForTarget(activeSession.id, async () => activeSession);
   }, [activeSession, copyJuryRecordForTarget]);
 
+  const clearDebateDebrief = useCallback((): void => {
+    setDebriefTargetBotId(null);
+    setDebriefMessages([]);
+    setDebriefDraft("");
+    setDebriefError(null);
+    setDebriefBusy(false);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !activeSession ||
+      activeSession.status !== "completed" ||
+      activeSession.synopsis?.text
+    ) {
+      if (
+        synopsisPreparingSessionId &&
+        activeSession?.synopsis?.text &&
+        synopsisPreparingSessionId === activeSession.id
+      ) {
+        setSynopsisPreparingSessionId(null);
+      }
+      return;
+    }
+    const sessionId = activeSession.id;
+    if (debateSynopsisRequestIdsRef.current.has(sessionId)) return;
+    debateSynopsisRequestIdsRef.current.add(sessionId);
+    setSynopsisPreparingSessionId(sessionId);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const result = await request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}/synopsis`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              preferredProvider,
+              ...(props.modelOverride
+                ? {
+                    modelOverride: props.modelOverride.model,
+                    responseMode: props.responseMode,
+                  }
+                : { responseMode: props.responseMode }),
+            }),
+          },
+        );
+        if (cancelled) return;
+        setActiveSession((current) =>
+          current?.id === sessionId ? result.session : current,
+        );
+        setSessions((current) =>
+          current.map((entry) =>
+            entry.id === sessionId
+              ? {
+                  ...entry,
+                  synopsisText: result.session.synopsis?.text ?? null,
+                }
+              : entry,
+          ),
+        );
+        setSynopsisPreparingSessionId((current) =>
+          current === sessionId ? null : current,
+        );
+      } catch (caught) {
+        debateSynopsisRequestIdsRef.current.delete(sessionId);
+        if (!cancelled) {
+          setSynopsisPreparingSessionId((current) =>
+            current === sessionId ? null : current,
+          );
+          console.warn("[debate] session synopsis failed", caught);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeSession,
+    preferredProvider,
+    props.modelOverride,
+    props.responseMode,
+    request,
+    synopsisPreparingSessionId,
+  ]);
+
+  const sendDebateDebrief = useCallback(async (): Promise<void> => {
+    if (!activeSession || !debriefTargetBotId || debriefBusy) return;
+    const content = debriefDraft.trim();
+    if (!content) return;
+    const sessionId = activeSession.id;
+    const userMessage: DebateDebriefChatMessageV1 = {
+      id: `debrief-user:${Date.now()}`,
+      role: "user",
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    const history = debriefMessages;
+    setDebriefMessages((current) => [...current, userMessage]);
+    setDebriefDraft("");
+    setDebriefBusy(true);
+    setDebriefError(null);
+    try {
+      const result = await request<{ message: DebateDebriefChatMessageV1 }>(
+        `/api/debates/${encodeURIComponent(sessionId)}/debrief-chat`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            targetBotId: debriefTargetBotId,
+            content,
+            messages: history.map((message) => ({
+              role: message.role,
+              content: message.content,
+            })),
+            preferredProvider,
+          }),
+        },
+      );
+      setDebriefMessages((current) => [...current, result.message]);
+    } catch (caught) {
+      setDebriefError(
+        caught instanceof Error
+          ? caught.message
+          : "That cast member could not answer.",
+      );
+    } finally {
+      setDebriefBusy(false);
+    }
+  }, [
+    activeSession,
+    debriefBusy,
+    debriefDraft,
+    debriefMessages,
+    debriefTargetBotId,
+    preferredProvider,
+    request,
+  ]);
+
   const copyArchivedJuryRecord = useCallback(
     async (archived: DebateSessionListItemV1): Promise<void> => {
       if (!debateArchivedJuryRecordIsCopyable(archived)) return;
@@ -3991,6 +4170,12 @@ export function DebateExperience(
     setStudioPanel("motion");
     setVisitedSetupScreens(initialDebateSetupScreensVisited());
     setActiveSession(null);
+    setDebriefTargetBotId(null);
+    setDebriefMessages([]);
+    setDebriefDraft("");
+    setDebriefError(null);
+    setDebriefBusy(false);
+    setSynopsisPreparingSessionId(null);
     setTopic("");
     setFormat("forum");
     setFormality(setupMode === "basic" ? "plainspoken" : "parliamentary");
@@ -5264,29 +5449,56 @@ export function DebateExperience(
         ? (debateBotSnapshot(session, presentation.voiceSourceBotId) ??
           snapshot)
         : snapshot;
-      const speaker = snapshot
-        ? {
-            id: snapshot.id,
-            name: snapshot.name,
-            color: snapshot.color,
-            glyph: snapshot.glyph,
-            avatarDetails: snapshot.avatarDetails,
-            voiceProfile: voiceSnapshot?.voiceProfile ?? null,
-            powers: snapshot.powers,
-            systemPrompt: snapshot.systemPrompt,
-            hardMuted: session.powerPlan.bots[snapshot.id]?.hardMuted === true,
-          }
-        : event.speakerBotId
-          ? (bots.find((bot) => bot.id === event.speakerBotId) ?? null)
-          : null;
       const atmosphericPerformance = debateEventIsAtmosphericVocalFoley(event)
         ? debateVocalFoleyVoicePerformance(event.content)
         : null;
+      const baseVoiceProfile = voiceSnapshot?.voiceProfile ?? null;
+      const paceBoost =
+        event.speakerKind === "advocate" && event.timing
+          ? debateUtterancePaceBoost(event.timing)
+          : 0;
+      const pacedVoiceProfile =
+        baseVoiceProfile && paceBoost !== 0
+          ? {
+              ...baseVoiceProfile,
+              pace: normalizeBotAudioVoiceControl(
+                baseVoiceProfile.pace + paceBoost,
+              ),
+            }
+          : baseVoiceProfile;
       return {
         event,
         format: session.format,
         sessionId: session.id,
-        speaker,
+        speaker: snapshot
+          ? {
+              id: snapshot.id,
+              name: snapshot.name,
+              color: snapshot.color,
+              glyph: snapshot.glyph,
+              avatarDetails: snapshot.avatarDetails,
+              voiceProfile: pacedVoiceProfile,
+              powers: snapshot.powers,
+              systemPrompt: snapshot.systemPrompt,
+              hardMuted: session.powerPlan.bots[snapshot.id]?.hardMuted === true,
+            }
+          : event.speakerBotId
+            ? (() => {
+                const bot = bots.find(
+                  (candidate) => candidate.id === event.speakerBotId,
+                );
+                if (!bot || paceBoost === 0 || !bot.voiceProfile) return bot ?? null;
+                return {
+                  ...bot,
+                  voiceProfile: {
+                    ...bot.voiceProfile,
+                    pace: normalizeBotAudioVoiceControl(
+                      bot.voiceProfile.pace + paceBoost,
+                    ),
+                  },
+                };
+              })()
+            : null,
         player: event.speakerKind === "player",
         playerVoice:
           session.playerRole === "judge" &&
@@ -5599,7 +5811,13 @@ export function DebateExperience(
                 if (presentationRunRef.current !== runId) return;
                 playbackDurationMs = Math.max(
                   1,
-                  durationMs ?? playbackDurationMs,
+                  durationMs ??
+                    Math.max(
+                      playbackDurationMs,
+                      debateVoiceCompletionFallbackDurationMs(
+                        spokenText || event.content,
+                      ),
+                    ),
                 );
                 updateLiveReveal((current) =>
                   current?.eventId === event.id
@@ -5683,7 +5901,13 @@ export function DebateExperience(
               playbackAlignment = alignment ?? null;
               playbackDurationMs = Math.max(
                 1,
-                durationMs ?? playbackDurationMs,
+                durationMs ??
+                  Math.max(
+                    playbackDurationMs,
+                    debateVoiceCompletionFallbackDurationMs(
+                      spokenText || event.content,
+                    ),
+                  ),
               );
               lastSpeechRenderAt = performance.now();
               performLinkedAudienceOrderCues(0);
@@ -5979,6 +6203,7 @@ export function DebateExperience(
       const result = await props.request<{ session: DebateSessionV1 }>(
         `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
       );
+      clearDebateDebrief();
       selectDebateCameraMode("auto");
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
@@ -7474,6 +7699,9 @@ export function DebateExperience(
                   {session.moderatorTitle} · {sessionStatusLabel(session)} ·{" "}
                   {session.playerRole}
                 </span>
+                {session.synopsisText ? (
+                  <em className={styles.archiveSynopsis}>{session.synopsisText}</em>
+                ) : null}
               </button>
               <div className={styles.archiveActions}>
                 {debateArchivedJuryRecordIsCopyable(session) ? (
@@ -10793,27 +11021,45 @@ export function DebateExperience(
     );
   };
 
-  const renderTranscript = (session: DebateSessionV1): React.JSX.Element => (
+  const renderTranscript = (session: DebateSessionV1): React.JSX.Element => {
+    const juryTranscriptCopyable = debateArchivedJuryRecordIsCopyable({
+      status: session.status,
+      juryEnabled: session.jury.enabled,
+      playerRole: session.playerRole,
+    });
+    return (
     <section className={styles.transcript} aria-label="Debate transcript">
       <header className={styles.transcriptHeader}>
         <div>
           <p className={styles.eyebrow}>Proceedings</p>
           <span>Public floor · source-linked</span>
         </div>
-        <button
-          type="button"
-          data-tutorial-target="debate-copy-transcript"
-          onClick={() => void copyVerboseTranscript()}
-          disabled={transcriptCopyState === "copying"}
-        >
-          {transcriptCopyState === "copying"
-            ? "Copying…"
-            : transcriptCopyState === "copied"
-              ? "Copied"
-              : transcriptCopyState === "failed"
-                ? "Copy failed"
-                : "Copy verbose transcript"}
-        </button>
+        <div className={styles.transcriptHeaderActions}>
+          {juryTranscriptCopyable ? (
+            <button
+              type="button"
+              data-tutorial-target="debate-copy-jury-transcript"
+              onClick={() => void copyJuryRecord()}
+              disabled={juryRecordCopyState === "copying"}
+            >
+              {juryRecordCopyLabel(session.id)}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            data-tutorial-target="debate-copy-transcript"
+            onClick={() => void copyVerboseTranscript()}
+            disabled={transcriptCopyState === "copying"}
+          >
+            {transcriptCopyState === "copying"
+              ? "Copying…"
+              : transcriptCopyState === "copied"
+                ? "Copied"
+                : transcriptCopyState === "failed"
+                  ? "Copy failed"
+                  : "Copy verbose transcript"}
+          </button>
+        </div>
       </header>
       <div
         ref={transcriptFeedRef}
@@ -10918,7 +11164,8 @@ export function DebateExperience(
         </button>
       ) : null}
     </section>
-  );
+    );
+  };
 
   const renderJuryRecord = (
     session: DebateSessionV1,
@@ -10942,13 +11189,6 @@ export function DebateExperience(
             <p className={styles.eyebrow}>Jury record</p>
             <span>Timestamped · separate from proceedings</span>
           </div>
-          <button
-            type="button"
-            onClick={() => void copyJuryRecord()}
-            disabled={juryRecordCopyState === "copying"}
-          >
-            {juryRecordCopyLabel(session.id)}
-          </button>
         </header>
         {comments.length > 0 ? (
           <ol>
@@ -12659,11 +12899,9 @@ export function DebateExperience(
           : effectiveCameraMode === "auto" || effectiveCameraMode === "jury"
             ? forumPreparingNextTurn
               ? "wide"
-              : activeEvidenceItem
-                ? "wide"
-                : activeGavelCue && gavelCameraReady
-                  ? "moderator"
-                  : debateAutoCameraView(activeRole)
+              : activeGavelCue && gavelCameraReady
+                ? "moderator"
+                : debateAutoCameraView(activeRole)
             : effectiveCameraMode;
     const evidenceView = debateStageEvidenceViewForCamera(cameraView);
     const juryDecisionCountdown = juryDeliberationDecision ? (
@@ -14119,10 +14357,27 @@ export function DebateExperience(
                 </p>
               ) : null}
               {renderTranscript(session)}
+              {renderJuryRecord(session)}
               {session.status === "completed" && !presenting ? (
                 <section className={styles.resultCard}>
                   <p className={styles.eyebrow}>Verdict</p>
                   <h2>{verdictLabel(session)}</h2>
+                  <p
+                    className={styles.debateSynopsis}
+                    data-tutorial-target="debate-session-synopsis"
+                    data-preparing={
+                      synopsisPreparingSessionId === session.id &&
+                      !session.synopsis?.text
+                        ? "true"
+                        : undefined
+                    }
+                  >
+                    {session.synopsis?.text
+                      ? session.synopsis.text
+                      : synopsisPreparingSessionId === session.id
+                        ? "Preparing summary…"
+                        : "Summary will appear here when ready."}
+                  </p>
                   <p>
                     {session.jury.enabled
                       ? session.playerRole === "participant"
@@ -14204,8 +14459,110 @@ export function DebateExperience(
                             );
                           })}
                   </ul>
-                  {renderJuryRecord(session)}
-                  <button type="button" onClick={() => setView("dashboard")}>
+                  {(() => {
+                    const debriefCast = debateDebriefEligibleBots(session);
+                    if (debriefCast.length === 0) return null;
+                    return (
+                      <section
+                        className={styles.debriefChat}
+                        data-tutorial-target="debate-debrief-chat"
+                        aria-label="Ask about their reasoning in this Debate"
+                      >
+                        <header>
+                          <p className={styles.eyebrow}>Inquiry</p>
+                          <span>
+                            Ask about their reasoning in this Debate — temporary,
+                            not saved, positions stay as they were.
+                          </span>
+                        </header>
+                        <div className={styles.debriefCastChips} role="list">
+                          {debriefCast.map((bot) => (
+                            <button
+                              key={bot.id}
+                              type="button"
+                              role="listitem"
+                              className={styles.debriefCastChip}
+                              data-selected={
+                                debriefTargetBotId === bot.id ? "true" : undefined
+                              }
+                              onClick={() => {
+                                setDebriefTargetBotId(bot.id);
+                                setDebriefMessages([]);
+                                setDebriefDraft("");
+                                setDebriefError(null);
+                              }}
+                            >
+                              {bot.name}
+                            </button>
+                          ))}
+                        </div>
+                        {debriefTargetBotId ? (
+                          <>
+                            <ol className={styles.debriefThread}>
+                              {debriefMessages.map((message) => (
+                                <li
+                                  key={message.id}
+                                  data-role={message.role}
+                                >
+                                  <strong>
+                                    {message.role === "user"
+                                      ? "You"
+                                      : (debriefCast.find(
+                                          (bot) => bot.id === debriefTargetBotId,
+                                        )?.name ?? "Cast")}
+                                  </strong>
+                                  <p>{message.content}</p>
+                                </li>
+                              ))}
+                            </ol>
+                            <form
+                              className={styles.debriefComposer}
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                void sendDebateDebrief();
+                              }}
+                            >
+                              <textarea
+                                value={debriefDraft}
+                                onChange={(event) =>
+                                  setDebriefDraft(event.currentTarget.value)
+                                }
+                                rows={3}
+                                placeholder="Ask how they thought during this Debate…"
+                                disabled={debriefBusy}
+                                maxLength={2000}
+                              />
+                              <button
+                                type="submit"
+                                disabled={
+                                  debriefBusy || debriefDraft.trim().length === 0
+                                }
+                              >
+                                {debriefBusy ? "Asking…" : "Ask"}
+                              </button>
+                            </form>
+                            {debriefError ? (
+                              <p className={styles.error} role="alert">
+                                {debriefError}
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <p className={styles.debriefHint}>
+                            Pick a cast member to inquire into their frozen
+                            thought process.
+                          </p>
+                        )}
+                      </section>
+                    );
+                  })()}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearDebateDebrief();
+                      setView("dashboard");
+                    }}
+                  >
                     Return to studio
                   </button>
                 </section>
