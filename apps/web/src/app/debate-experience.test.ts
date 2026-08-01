@@ -2860,7 +2860,7 @@ describe("Debate experience", () => {
     assert.match(source, /data-evidence-view=\{evidenceAlignmentView\}/u);
     assert.match(
       source,
-      /const evidenceView = debateStageEvidenceViewForCamera\(cameraView\)/u,
+      /const evidenceView = debateStageEvidenceViewForCamera\(\s*cameraView,\s*activeEvidenceItem\?\.kind \?\? "exhibit",\s*\)/u,
     );
     assert.match(
       source,
@@ -3310,14 +3310,23 @@ describe("Debate experience", () => {
     assert.match(source, /aria-label="Debate evidence placement controls"/u);
     assert.match(source, /updateDebateStageEvidenceTable/u);
     assert.match(source, /data-debate-evidence-tuner="true"/u);
-    assert.match(source, /data-debate-evidence-alignment-preview="true"/u);
+    assert.match(source, /data-debate-evidence-alignment-preview=\{/u);
     assert.match(source, /pickDebateStageAlignmentEvidenceEmoji/u);
     assert.match(source, /stageAlignmentPreviewEvidenceEmoji/u);
     assert.match(source, /Copy evidence JSON/u);
     assert.match(source, /formatDebateStageEvidenceTableClipboard/u);
     assert.match(source, /data-debate-evidence-copy="true"/u);
     assert.match(source, /data-debate-evidence-reshuffle="true"/u);
-    assert.match(source, /<strong>Evidence<\/strong>/u);
+    assert.match(source, /aria-label="Evidence asset to align"/u);
+    assert.match(source, /data-debate-evidence-kind-toggle=\{evidenceKind\}/u);
+    assert.match(source, /stageAlignmentPreviewEvidenceKind/u);
+    assert.match(source, /Source pamphlet/u);
+    assert.match(source, /The Public Record/u);
+    assert.match(source, /example\.org\/research\/briefing/u);
+    assert.match(
+      source,
+      /evidenceTable\[stageAlignmentPreviewEvidenceKind\]\[\s*evidenceAlignmentView\s*\]/u,
+    );
     assert.match(
       css,
       /\.evidencePedestal\s*\{[^}]*--debate-evidence-offset-x/u,
@@ -3326,6 +3335,14 @@ describe("Debate experience", () => {
     assert.match(
       css,
       /\.evidencePedestal\[data-evidence-view="moderator"\]\s*\{[^}]*--debate-moderator-evidence-offset-x/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestal\[data-evidence-kind="source"\]\s*\{[^}]*--debate-source-evidence-offset-x/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestal\[data-evidence-kind="source"\]\[data-evidence-view="moderator"\]\s*\{[^}]*--debate-moderator-source-evidence-offset-x/u,
     );
     assert.match(css, /\.evidencePedestalDocument\s*\{/u);
     assert.match(
