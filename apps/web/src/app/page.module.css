@@ -25907,7 +25907,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  translate: var(--zen-live-bot-lane-drift-x, 0px)
+    var(--zen-live-bot-lane-drift-y, 0px);
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+/* Lane drift owns the idle bob + vertical hops; keep the ambient body from
+   stacking a second bob on the same avatar. */
+.zenLiveBotPresencePlate > .botAmbientPresenceRig {
+  --bot-ambient-hover-amplitude: 0px;
 }
 
 .zenLiveBotPresencePlate[data-floating="true"] {
@@ -26053,14 +26061,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
-/* The Moderator camera magnifies the rotated punctuation face much more than
-   the Wide shot. Lower the stock eye mark inside that close-up without
-   rewriting the bot's authored face geometry on any other surface. */
+/* Keep the Moderator close-up eye mark centered so speaking glances can
+   address both podiums instead of reading permanently right-biased. */
 .debateBotPresencePlate[data-debate-role="moderator"]:not(
     [data-debate-compact="true"]
   )
   .coffeeSeatPlateEmoji:not([data-face-eye-character]) {
-  --zen-live-bot-eye-local-x: 0.5;
+  --zen-live-bot-eye-local-x: 0;
 }
 
 .debateBotPresencePlate[data-debate-compact="true"] {

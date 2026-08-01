@@ -2802,4 +2802,20 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /navbarRefreshSplash/);
     assert.doesNotMatch(css, /data-refresh-splash-active/);
   });
+
+  it("soft lane-drifts the live presence plate with vertical bob and hops only", () => {
+    assert.match(pageSource, /from "\.\/zenLiveBotLaneDrift"/);
+    assert.match(pageSource, /advanceZenLiveBotLaneDrift\(/);
+    assert.match(pageSource, /allowTravel:\s*!faceTalkingRef\.current/);
+    assert.match(pageSource, /--zen-live-bot-lane-drift-y/);
+    const plateRule = ruleForExactSelector(".zenLiveBotPresencePlate");
+    assert.match(
+      plateRule,
+      /translate:\s*var\(--zen-live-bot-lane-drift-x,\s*0px\)[\s\S]*var\(--zen-live-bot-lane-drift-y,\s*0px\)/,
+    );
+    assert.match(
+      css,
+      /\.zenLiveBotPresencePlate\s*>\s*\.botAmbientPresenceRig\s*\{[\s\S]*--bot-ambient-hover-amplitude:\s*0px\s*;/,
+    );
+  });
 });

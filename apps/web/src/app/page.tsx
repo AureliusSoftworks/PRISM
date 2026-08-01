@@ -1411,6 +1411,12 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
 import {
+  advanceZenLiveBotLaneDrift,
+  createZenLiveBotLaneDriftState,
+  zenLiveBotLaneDriftShouldRun,
+  type ZenLiveBotLaneDriftState,
+} from "./zenLiveBotLaneDrift";
+import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
 } from "./botMentionTipTapBackspace";
@@ -29591,7 +29597,7 @@ function ZenLiveBotMannequin({
   avatarSfxState,
   inkTalking,
   blinkEnabled = false,
-  blinkWhileTalking = false,
+  blinkWhileTalking = true,
   mouthShape,
   moodHint,
   plateFace,
@@ -29838,7 +29844,9 @@ function ZenLiveBotMannequin({
               blinkWhileTalking={blinkWhileTalking}
               faceEyesFont={faceStyle.eyesFont}
               faceEyeCharacter={faceStyle.eyeCharacter}
-              faceEyeMovement="still"
+              faceEyeMovement={
+                detailLevel === "debate" ? faceStyle.eyeAnimation : "still"
+              }
               eyeAttentionState={eyeAttentionState}
               eyeTargetDirection={eyeTargetDirection}
               eyeTimelineMs={eyeTimelineMs}
@@ -30851,6 +30859,93 @@ function ZenLiveBotPresencePlate({
     },
     [onContextMenuRequest, persistAvatarPositionIfUserRelocated],
   );
+
+  const laneDriftSeed = bot?.id ?? "prism";
+  const laneDriftStateRef = useRef<ZenLiveBotLaneDriftState | null>(null);
+  const avatarCanvasSideRef = useRef(avatarCanvasSide);
+  const avatarDraggingRef = useRef(avatarDragging);
+  const transitioningRef = useRef(transitioning);
+  const faceTalkingRef = useRef(faceTalking);
+  avatarCanvasSideRef.current = avatarCanvasSide;
+  avatarDraggingRef.current = avatarDragging;
+  transitioningRef.current = transitioning;
+  faceTalkingRef.current = faceTalking;
+  const presencePlateMounted =
+    Boolean(bot) ||
+    Boolean(actionState) ||
+    userActionVisible ||
+    defaultPrismPresenceVisible ||
+    askQuestionActive ||
+    isTalking ||
+    transitioning;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!presencePlateMounted) return;
+    const node = avatarRef.current;
+    if (!node) return;
+
+    laneDriftStateRef.current = createZenLiveBotLaneDriftState(
+      laneDriftSeed,
+      performance.now(),
+    );
+    const reducedMotionQuery = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    );
+    let frameId = 0;
+
+    const clearLaneDriftOffset = (): void => {
+      node.style.setProperty("--zen-live-bot-lane-drift-x", "0px");
+      node.style.setProperty("--zen-live-bot-lane-drift-y", "0px");
+      node.removeAttribute("data-lane-drift-phase");
+      node.removeAttribute("data-lane-drift-direction");
+    };
+
+    const tick = (nowMs: number): void => {
+      const active = zenLiveBotLaneDriftShouldRun({
+        reducedMotion: reducedMotionQuery.matches,
+        dragging: avatarDraggingRef.current,
+        transitioning: transitioningRef.current,
+      });
+      if (!active) {
+        clearLaneDriftOffset();
+        frameId = window.requestAnimationFrame(tick);
+        return;
+      }
+
+      const previous =
+        laneDriftStateRef.current ??
+        createZenLiveBotLaneDriftState(laneDriftSeed, nowMs);
+      const { state, sample } = advanceZenLiveBotLaneDrift(previous, {
+        nowMs,
+        canvasSide: avatarCanvasSideRef.current,
+        active: true,
+        allowTravel: !faceTalkingRef.current,
+      });
+      laneDriftStateRef.current = state;
+      node.style.setProperty(
+        "--zen-live-bot-lane-drift-x",
+        `${sample.offsetXPx.toFixed(2)}px`,
+      );
+      node.style.setProperty(
+        "--zen-live-bot-lane-drift-y",
+        `${sample.offsetYPx.toFixed(2)}px`,
+      );
+      node.dataset.laneDriftPhase = sample.phase;
+      if (sample.direction) {
+        node.dataset.laneDriftDirection = sample.direction;
+      } else {
+        delete node.dataset.laneDriftDirection;
+      }
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      clearLaneDriftOffset();
+    };
+  }, [laneDriftSeed, presencePlateMounted]);
 
   if (
     !bot &&
@@ -87380,11 +87475,26 @@ function HomeContent(): React.JSX.Element {
 
   useEffect(() => {
     if (!emptyStateSearchActive) return;
+    function isEmptyStateSearchKeepAliveTarget(
+      target: EventTarget | null,
+    ): boolean {
+      if (!(target instanceof Element)) return false;
+      if (emptyStateSpotlightRef.current?.contains(target)) return true;
+      if (emptyStateSearchRef.current?.contains(target)) return true;
+      // Bot tiles live outside the Spotlight field; keep the filter alive while
+      // picking, right-clicking, or using the bot action menu.
+      if (target.closest('[data-bot-picker-frame="true"]')) return true;
+      if (target.closest("[data-prism-menu-owner]")) return true;
+      if (
+        botContextMenuRef.current instanceof Node &&
+        botContextMenuRef.current.contains(target)
+      ) {
+        return true;
+      }
+      return false;
+    }
     function handleDocumentClick(event: MouseEvent) {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (emptyStateSpotlightRef.current?.contains(target)) return;
-      if (emptyStateSearchRef.current?.contains(target)) return;
+      if (isEmptyStateSearchKeepAliveTarget(event.target)) return;
       closeEmptyStateBotSearch();
     }
     document.addEventListener("click", handleDocumentClick);
@@ -87509,15 +87619,6 @@ function HomeContent(): React.JSX.Element {
         ref={emptyStateSpotlightRef}
         className={styles.emptyStateSearch}
         role="search"
-        onBlur={(event) => {
-          const nextFocus = event.relatedTarget;
-          if (
-            nextFocus instanceof Node &&
-            event.currentTarget.contains(nextFocus)
-          )
-            return;
-          closeEmptyStateBotSearch();
-        }}
       >
         <div className={styles.emptyStateSearchRow}>
           <div className={styles.emptyStateSearchField}>

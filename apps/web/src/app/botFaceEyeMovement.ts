@@ -197,11 +197,25 @@ export function resolveBotFaceGazeFrame(args: {
       target * (2.25 + sample("target") * 0.85) * amp + signed("x") * 0.7 * amp;
     yPx = signed("y") * 0.75 * amp;
   } else if (args.state === "speaking") {
-    const glance = sample("glance") > 1 - profile.speakingGlanceChance;
-    xPx = glance
-      ? target * (1.2 + sample("target") * 0.8) * amp + signed("x") * amp
-      : 0;
-    yPx = glance ? signed("y") * 0.65 * amp : 0;
+    if (target === 0) {
+      // Room-facing speech: keep natural idle-like wander with frequent
+      // left/right glances so faces stay alive while the mouth moves.
+      const roomGlanceChance = Math.max(profile.speakingGlanceChance, 0.62);
+      const glance = sample("glance") > 1 - roomGlanceChance;
+      const side = sample("side") < 0.5 ? -1 : 1;
+      xPx = glance
+        ? side * (1.35 + sample("target") * 1.35) * amp + signed("x") * 0.55 * amp
+        : signed("x") * 2.4 * amp;
+      yPx = glance
+        ? signed("y") * 0.7 * amp
+        : signed("y") * 1.1 * amp;
+    } else {
+      const glance = sample("glance") > 1 - profile.speakingGlanceChance;
+      xPx = glance
+        ? target * (1.2 + sample("target") * 0.8) * amp + signed("x") * amp
+        : signed("x") * 0.85 * amp;
+      yPx = glance ? signed("y") * 0.65 * amp : signed("y") * 0.35 * amp;
+    }
   } else {
     const restingCentered = sample("center") < profile.idleCenterChance;
     xPx = restingCentered ? 0 : signed("x") * 3.2 * amp;

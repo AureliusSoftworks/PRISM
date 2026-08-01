@@ -104,6 +104,25 @@ describe("bot eye movement modes", () => {
     assert.ok(right.xPx > 0);
   });
 
+  it("looks left and right often while speaking without a fixed target", () => {
+    let leftHits = 0;
+    let rightHits = 0;
+    const samples = 160;
+    for (let index = 0; index < samples; index += 1) {
+      const frame = resolveBotFaceGazeFrame({
+        seed: `room-speak:${index}`,
+        timelineMs: index * 1_100,
+        state: "speaking",
+        targetDirection: 0,
+        movement: "natural",
+      });
+      if (frame.xPx < -0.4) leftHits += 1;
+      if (frame.xPx > 0.4) rightHits += 1;
+    }
+    assert.ok(leftHits > samples * 0.2);
+    assert.ok(rightHits > samples * 0.2);
+  });
+
   it("keeps thinking gazes above center", () => {
     const frame = resolveBotFaceGazeFrame({
       seed: "thinker",
@@ -174,6 +193,15 @@ describe("bot eye movement modes", () => {
     );
     assert.match(renderer, /movement: normalizedEyeMovement/);
     assert.match(page, /faceEyeMovement=\{[\s\S]*faceStyle\.eyeAnimation/);
+    assert.match(page, /blinkWhileTalking = true/);
+    assert.match(
+      page,
+      /detailLevel === "debate" \? faceStyle\.eyeAnimation : "still"/,
+    );
+    assert.doesNotMatch(
+      page,
+      /faceEyeCharacter=\{faceStyle\.eyeCharacter\}\s*faceEyeMovement="still"/,
+    );
     assert.match(page, /eyeTargetDirection=\{seatEyeTargetDirection\}/);
     assert.match(page, /avatarState\.role === "host" \? 1 : -1/);
     assert.match(page, /nervous:\s*"Nervous"/);

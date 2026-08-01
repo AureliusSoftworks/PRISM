@@ -85,4 +85,23 @@ describe("empty Chat Spotlight search", () => {
       2,
     );
   });
+
+  it("keeps Spotlight search open while interacting with filtered bot tiles", () => {
+    assert.doesNotMatch(
+      pageSource,
+      /ref=\{emptyStateSpotlightRef\}[\s\S]{0,220}onBlur=\{[\s\S]{0,280}closeEmptyStateBotSearch\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /function isEmptyStateSearchKeepAliveTarget\(/u,
+    );
+    assert.match(
+      pageSource,
+      /target\.closest\('\[data-bot-picker-frame="true"\]'\)/u,
+    );
+    assert.match(
+      pageSource,
+      /target\.closest\("\[data-prism-menu-owner\]"\)/u,
+    );
+  });
 });
