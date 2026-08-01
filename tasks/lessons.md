@@ -5,6 +5,41 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-07-31 · [UX]
+**Trigger**: Spectator Debate had no player body; user wanted Prism in the below-screen gallery.
+**Lesson**: Inject Spectator Prism via `debateSpectatorPrismAudienceSeat` + `debateAudienceBotsForSession({ spectatorPrism })`, pin to front-row center, reuse `DEBATE_PLAYER_JUDGE_BOT_ID` for Default Prism face. Do not put Spectator on a podium. Skip ambient gallery chatter for the player seat.
+**Applies to**: `debateAudience.ts`, `DebateExperience.tsx`, Spectator role only
+
+### 2026-07-31 · [UX]
+**Trigger**: Producer-guest English TTS cut the host question mid-line (~0:19 Thinking) and the sticky prompt showed only three clamped lines.
+**Lesson**: Signal voice completion must not use char×34 alone when `onStart(null)`; floor with word-paced `signalVoiceCompletionFallbackDurationMs` and extend the watchdog from `onProgress` as duration settles. Producer sticky host prompts must stay fully readable (scroll, not `line-clamp: 3`) — the tutorial promise is “never hold the whole question in memory.”
+**Applies to**: `BotcastExperience.tsx`, `signalLiveCaptions.ts`, `botcast.module.css`, Producer guest Choose Me
+
+### 2026-07-31 · [UX]
+**Trigger**: Debate vocal Foley tags should speak like Signal and stay out of the transcript.
+**Lesson**: Persona-surprise (`persona_reaction_*`) and ambient vocal Foley speak via ElevenLabs immersive tags (`[clears throat] ...`) with empty Proceedings captions. Filter with `debateEventIsAtmosphericVocalFoley`. Ambient cues return `"owned"` from `onAmbientBotVocalization` so bundled MP3 does not double-play; fall back to MP3 only if voice playback fails.
+**Applies to**: `debateFoley.ts`, `DebateExperience.tsx`, `session-atmosphere-audio.ts`, Proceedings / verbose transcript
+
+### 2026-07-31 · [UX]
+**Trigger**: Bots felt frozen while talking — no blinks / eye wander on the main CRT face.
+**Lesson**: Do not hardcode `faceEyeMovement="still"` on the primary ZenLiveBotMannequin CRT plate. Use authored `faceStyle.eyeAnimation` (still only for reduced/audience detail). Default `blinkWhileTalking` to true on the mannequin so speech keeps a calmer blink cadence.
+**Applies to**: `ZenLiveBotMannequin` in `page.tsx`, `CoffeeSeatPlateEmoji`, `botFaceEyeMovement.ts`
+
+### 2026-07-31 · [architecture]
+**Trigger**: Marketplace catalog blocked Library custom mouths (`faceMouthCharacter` forced null).
+**Lesson**: Public Marketplace face art must accept every Library-authored face field that normalizes cleanly (mouths, eyes, offsets, rotations). Do not sanitize custom mouth/eye glyphs out of public bundles. Catalog tests should validate normalization + uniqueness, not a forced “default mouth / -90 eyes” polish recipe.
+**Applies to**: `botMarketplaceCatalog.test.ts`, `promote-library-design-to-marketplace.mjs`, `/update-bots`
+
+### 2026-07-31 · [UX]
+**Trigger**: Wanted Foley vocal tags in Debate like Signal, above the bots.
+**Lesson**: Reuse Signal’s italic `*Action*` overhead pattern on `.botStagePresence` / Jury seats. Drive tags from ambient vocalization kinds (`Clears throat` / `Sighs` / `Inhales`) plus persona-surprise reaction content via `resolveDebateVocalFoleyTagText`. Do not invent a second pill chrome unless listener-reaction mm-hm pills are explicitly requested. Spoken Foley must not land in Proceedings — same contract as Signal listener vocal reactions.
+**Applies to**: `debateFoley.ts`, `DebateExperience.tsx`, `DebateExperience.module.css`
+
+### 2026-07-31 · [UX]
+**Trigger**: Soft lane drift for Zen/Chat live bot avatars — stationary bob, travel only up or down.
+**Lesson**: Own idle bob + vertical hops on the presence plate via CSS `--zen-live-bot-lane-drift-*` offsets (do not mutate persisted drag position). Zero ambient body hover amplitude on the Zen plate so bobs do not stack. Pause travel while talking; zero offsets while dragging / reduced motion / transitioning.
+**Applies to**: `zenLiveBotLaneDrift.ts`, `ZenLiveBotPresencePlate` in `page.tsx`, `page.module.css`
+
+### 2026-07-31 · [UX]
 **Trigger**: Request to enable sentence-case by default in the Composer on desktop.
 **Lesson**: HTML `autocapitalize="sentences"` is ignored on desktop Electron. Live TipTap/textarea insertion must capitalize via `applyComposerSentenceCaseInsertion`, and send-time `applyComposerSendAutoCorrect` should also sentence-case safely (skip `@/#/!/?/` tokens and `example.com`-style periods). Coffee/Signal keep spellcheck off but can still enable sentence capitalization when the account writing-assist setting is on.
 **Applies to**: ComposerInput, DesktopMarkdownComposer, composerSentenceCase, composerSendAutoCorrect

@@ -126,10 +126,22 @@ describe("mode tutorials", () => {
     assert.match(copy, /sparse replay-stable roll/u);
     assert.match(copy, /own saved Persona/u);
     assert.match(copy, /one short in-character vocal reaction/u);
+    assert.match(copy, /Signal-style \*tag\* appears above that bot/u);
+    assert.match(copy, /speaks through the bot’s voice/u);
+    assert.match(copy, /stays out of Proceedings and copied transcripts/u);
+    assert.match(copy, /ambient throat-clears, sighs, and inhales/u);
     assert.match(copy, /not a new argument, vote, role change/u);
     assert.match(copy, /PRISM is the complete selected-side advocate/u);
     assert.match(copy, /Participant is Forum-only/u);
     assert.match(copy, /PRISM becomes that entire advocate/u);
+    assert.match(
+      copy,
+      /Spectator keeps all three floor holders as Library bots/u,
+    );
+    assert.match(
+      copy,
+      /seats PRISM in the observable audience gallery below the chamber screen/u,
+    );
     assert.match(
       copy,
       /exactly you, the bot Moderator\/Judge, and one bot opponent/u,
@@ -1699,7 +1711,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       controlRoom?.body ?? "",
-      /Producer guest[^.]*conversation panel is collapsed[^.]*latest prompt remains on stage[^.]*three lines/u,
+      /Producer guest[^.]*conversation panel is collapsed[^.]*latest prompt remains on stage in full[^.]*scroll gently/u,
     );
   });
 
