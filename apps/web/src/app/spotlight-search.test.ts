@@ -86,16 +86,38 @@ describe("empty Chat Spotlight search", () => {
     );
   });
 
-  it("bottom-anchors the Hub bot picker so empty Chat does not leave a dead gap above the composer", () => {
+  it("keeps the Hub picker controls compact against the bot grid", () => {
     const hubPickerControlsRule = cssSource.slice(
       cssSource.indexOf(".emptyStateHubPicker .chatCanvasPickerControls {"),
       cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame {"),
     );
-    assert.match(hubPickerControlsRule, /margin-top:\s*auto;/);
-    assert.match(hubPickerControlsRule, /padding-top:\s*clamp\(/);
+    assert.match(
+      hubPickerControlsRule,
+      /margin-top:\s*clamp\(12px,\s*2\.4vh,\s*26px\);/,
+    );
+    assert.doesNotMatch(hubPickerControlsRule, /margin-top:\s*auto;/);
+    assert.doesNotMatch(hubPickerControlsRule, /padding-top:/);
+    assert.match(cssSource, /\.emptyStateHubPicker\s*\{[\s\S]*padding-bottom:\s*24px;/);
+    const hubPickerFrameRule = cssSource.slice(
+      cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame {"),
+      cssSource.indexOf(".emptyStateHubPicker .chatBotPickerFrame[data-returning-all"),
+    );
+    assert.match(hubPickerFrameRule, /margin:\s*auto auto 0;/);
     assert.match(
       cssSource,
       /\.messages\.messagesEmptyState\[data-chat-ephemeral="true"\][\s\S]{0,180}padding-bottom:\s*24px;/,
+    );
+    assert.match(
+      cssSource,
+      /\.messages\.messagesEmptyState\[data-chat-ephemeral="true"\]:has\([\s\S]{0,100}> \.emptyStateHubPicker[\s\S]{0,100}--zen-empty-state-bottom-reserve:\s*24px;/,
+    );
+    assert.match(
+      cssSource,
+      /\.messagesEmptyState[\s\S]{0,80}> \.emptyState\.emptyStateHubPicker\s*\{[\s\S]{0,80}padding-bottom:\s*24px;/,
+    );
+    assert.match(
+      cssSource,
+      /@media \(min-width:\s*721px\)[\s\S]{0,420}> \.emptyState\.emptyStateHubPicker\s*\{[\s\S]{0,80}translate:\s*0 clamp\(56px,\s*8dvh,\s*96px\);/,
     );
   });
 

@@ -14190,15 +14190,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .emptyStateHubPicker {
-  padding-bottom: max(128px, calc(env(safe-area-inset-bottom) + 116px));
+  padding-bottom: 24px;
 }
 
 .emptyStateHubPicker .chatCanvasPickerControls {
-  /* Pack search + grid toward the composer. Without this, flex free space
-     opens as a dead gap between the bot tiles and the fixed compose dock —
-     most visible on tall windows / cold start when the hero copy is short. */
-  margin-top: auto;
-  padding-top: clamp(12px, 2.4vh, 26px);
+  margin-top: clamp(12px, 2.4vh, 26px);
   order: 2;
 }
 
@@ -14208,7 +14204,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   bottom: auto;
   order: 3;
   flex: 0 0 auto;
-  margin: clamp(14px, 2.8vh, 30px) auto 0;
+  margin: auto auto 0;
   transform: translate3d(
     var(--picker-parallax-x, 0px),
     var(--picker-parallax-y, 0px),
@@ -24626,6 +24622,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   mask-image: none;
 }
 
+/* The startup bot browser already reserves its own compact footer space. Do
+   not stack the live Zen canvas runway beneath it: that reserve leaves a large
+   dead band between the bot grid and the hue/composer controls. */
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messages.messagesEmptyState[data-chat-ephemeral="true"]:has(
+    > .emptyStateHubPicker
+  ) {
+  --zen-empty-state-bottom-reserve: 24px;
+}
+
 .appLayout[data-zen-surface="true"] .messages[data-chat-ephemeral="true"] {
   --chat-reading-width: min(var(--zen-live-bot-prose-width, 860px), 94%);
   --zen-tone-gap-extra: 0px;
@@ -24945,6 +24951,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding-block-start: calc(
     var(--app-shell-top-nav-height) + clamp(16px, 3dvh, 36px)
   );
+}
+
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .messagesEmptyState
+  > .emptyState.emptyStateHubPicker {
+  padding-bottom: 24px;
+}
+
+@media (min-width: 721px) {
+  /* Balance the startup stack inside the canvas that remains visible between
+     the navigation and composer. The empty-state surface is viewport-fixed,
+     so geometric centering alone leaves the shorter bot grid top-heavy. */
+  .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+    .messagesEmptyState
+    > .emptyState.emptyStateHubPicker {
+    translate: 0 clamp(56px, 8dvh, 96px);
+  }
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]

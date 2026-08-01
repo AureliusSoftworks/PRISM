@@ -14,6 +14,7 @@ import {
   serializeBotPowersV1,
   type BotPowerEffectV1,
   type BotPowerV1,
+  type DebateEvidencePacketV1,
   type DebateFormalityId,
   type DebateMotionSlateV1,
 } from "@localai/shared";
@@ -110,6 +111,26 @@ class DebateProviderStub implements LlmProvider {
 
   public async embedText(): Promise<number[]> {
     return [0.1, 0.2];
+  }
+}
+
+class EvidenceBallotProvider extends DebateProviderStub {
+  public ballotPrompts: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Vote independently")) {
+      this.ballotPrompts.push(text);
+      return JSON.stringify({
+        sideId: "for",
+        reason:
+          "The source supports the scarcity premise but not every remedy [[source:housing-1]] [[exhibit:invented]].",
+      });
+    }
+    return super.generateResponse(messages, options);
   }
 }
 
@@ -345,6 +366,29 @@ class JuryProvider extends DebateProviderStub {
       return JSON.stringify({
         content:
           "The strongest point is whether the proposal answers the exact tradeoff in the public record.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class EvidenceJuryProvider extends JuryProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (
+      text.includes("Form a private initial leaning") ||
+      text.includes("Cast your final independent Jury ballot")
+    ) {
+      this.ballotPrompts.push(text);
+      return JSON.stringify({
+        sideId: "for",
+        confidence: 0.72,
+        personaInstinct: "I notice whether the source reaches the decisive claim.",
+        reason:
+          "The source supports the narrower scarcity premise, not every claimed remedy [[source:housing-1]] [[source:invented]].",
       });
     }
     return super.generateResponse(messages, options);
@@ -1096,6 +1140,7 @@ async function createDebateForRole(
     moderatorPowers?: BotPowerV1[];
     forPowers?: BotPowerV1[];
     forSystemPrompt?: string;
+    evidence?: DebateEvidencePacketV1;
   } = {},
 ) {
   const debateRuntime = options.debateRuntime ?? runtime();
@@ -1127,7 +1172,12 @@ async function createDebateForRole(
     {
       motion: MOTION,
       formality: options.formality,
-      evidence: { version: 1, notes: "", sources: [], frozenAt: null },
+      evidence: options.evidence ?? {
+        version: 1,
+        notes: "",
+        sources: [],
+        frozenAt: null,
+      },
       moderatorTitle: options.moderatorTitle,
       moderatorBotId: "moderator",
       forAdvocateBotId: "for",
@@ -1150,6 +1200,12 @@ async function createJuryDebateForRole(
   format: "forum" | "turnabout" = "forum",
   provider: JuryProvider = new JuryProvider(),
   formalityOverride?: DebateFormalityId,
+  evidence: DebateEvidencePacketV1 = {
+    version: 1,
+    notes: "Rail-adjacent land is scarce.",
+    sources: [],
+    frozenAt: null,
+  },
 ) {
   const debateRuntime = runtimeWith(provider);
   seedBot(db, "moderator", "Mira");
@@ -1195,12 +1251,7 @@ async function createJuryDebateForRole(
     formality,
     format,
     motion: MOTION,
-    evidence: {
-      version: 1 as const,
-      notes: "Rail-adjacent land is scarce.",
-      sources: [],
-      frozenAt: null,
-    },
+    evidence,
     moderatorBotId: "moderator",
     forAdvocateBotId: "for",
     againstAdvocateBotId: "against",
@@ -2030,6 +2081,123 @@ describe("Debate engine", () => {
     }
   });
 
+  it("gives jurors exact sealed evidence and persists valid ballot provenance", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new EvidenceJuryProvider();
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "forum",
+        provider,
+        "plainspoken",
+        {
+          version: 1,
+          notes: "Scarcity is the premise, not proof of every remedy.",
+          sources: [
+            {
+              id: "housing-1",
+              title: "Rail Housing Evidence",
+              url: "https://example.com/rail-housing",
+              snippet:
+                "Vacant rail-adjacent parcels are scarce in the surveyed corridor.",
+            },
+          ],
+          frozenAt: null,
+        },
+      );
+      let session = await advanceDebateSession(
+        db,
+        "user-1",
+        created.session.id,
+        {
+          expectedRevision: created.session.revision,
+          idempotencyKey: "jury:evidence:intro",
+        },
+        created.runtime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "jury:evidence:opening",
+        },
+        created.runtime,
+      );
+      assert.deepEqual(
+        session.events.find(
+          (event) =>
+            event.kind === "speech" && event.speakerBotId === "for",
+        )?.sourceIds,
+        ["housing-1"],
+      );
+
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "jury:evidence:end-early",
+      });
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `jury:evidence:advance:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 24);
+      }
+
+      assert.equal(provider.ballotPrompts.length, 10);
+      for (const prompt of provider.ballotPrompts) {
+        assert.match(prompt, /Frozen evidence packet \(reference definitions/u);
+        assert.match(prompt, /Rail Housing Evidence/u);
+        assert.match(
+          prompt,
+          /Vacant rail-adjacent parcels are scarce in the surveyed corridor\./u,
+        );
+        assert.match(prompt, /A citation is not a vote/u);
+        assert.match(prompt, /what the item actually supports or fails to support/u);
+      }
+      assert.match(
+        provider.discussionPrompt,
+        /what that item actually supports or fails to support/u,
+      );
+
+      const ballotEvents = session.events.filter(
+        (event) => event.kind === "ballot" && event.speakerKind === "juror",
+      );
+      assert.equal(ballotEvents.length, 5);
+      assert.equal(
+        ballotEvents.every(
+          (event) =>
+            event.content.includes("[[source:housing-1]]") &&
+            !event.content.includes("[[source:invented]]") &&
+            event.sourceIds.length === 1 &&
+            event.sourceIds[0] === "housing-1",
+        ),
+        true,
+      );
+      assert.equal(
+        session.jury.finalBallots.every(
+          (ballot) =>
+            ballot.reason.includes("[[source:housing-1]]") &&
+            !ballot.reason.includes("[[source:invented]]"),
+        ),
+        true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps participant Jury aftermath aggregate-only before the moderator closes", async () => {
     const db = createTestDb();
     try {
@@ -2792,6 +2960,96 @@ describe("Debate engine", () => {
       assert.match(opening.content, /Basil Bot misses the point/u);
       assert.match(opening.content, /\*burp\*$/u);
       assert.doesNotMatch(opening.content, /\bBot\s*$/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("grounds non-Jury ballots in the sealed packet and records their sources", async () => {
+    const db = createTestDb();
+    const provider = new EvidenceBallotProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        evidence: {
+          version: 1,
+          notes: "Scarcity is the premise, not proof of every remedy.",
+          sources: [
+            {
+              id: "housing-1",
+              title: "Rail Housing Evidence",
+              url: "https://example.com/rail-housing",
+              snippet:
+                "Vacant rail-adjacent parcels are scarce in the surveyed corridor.",
+            },
+          ],
+          frozenAt: null,
+        },
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `ballot:evidence:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      session = endDebateSessionEarly(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "ballot:evidence:end-early",
+      });
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `ballot:evidence:advance:${mutation}`,
+          },
+          debateRuntime,
+        );
+        assert.ok(mutation < 12);
+      }
+
+      assert.equal(provider.ballotPrompts.length, 3);
+      assert.equal(
+        provider.ballotPrompts.every(
+          (prompt) =>
+            prompt.includes("Rail Housing Evidence") &&
+            prompt.includes("A citation is not a vote"),
+        ),
+        true,
+      );
+      const ballotEvents = session.events.filter(
+        (event) => event.kind === "ballot",
+      );
+      assert.equal(ballotEvents.length, 3);
+      assert.equal(
+        ballotEvents.every(
+          (event) =>
+            event.content.includes("[[source:housing-1]]") &&
+            !event.content.includes("[[exhibit:invented]]") &&
+            event.sourceIds.length === 1 &&
+            event.sourceIds[0] === "housing-1",
+        ),
+        true,
+      );
+      assert.equal(
+        session.ballots.every(
+          (ballot) =>
+            ballot.reason?.includes("[[source:housing-1]]") === true &&
+            !ballot.reason.includes("[[exhibit:invented]]"),
+        ),
+        true,
+      );
     } finally {
       db.close();
     }

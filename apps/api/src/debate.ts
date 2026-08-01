@@ -2932,6 +2932,20 @@ function evidencePrompt(evidence: DebateEvidencePacketV1): string {
   return `${notes}\nFrozen web sources:\n${sources}\nFrozen object exhibits:\n${exhibits}`;
 }
 
+function adjudicatorEvidencePrompt(session: DebateSessionV1): string {
+  const publicUseBoundary =
+    session.format === "turnabout"
+      ? "Assess an item only when it was publicly presented in the transcript, and honor the moderator's recorded ruling about it."
+      : "Assess an item only when an advocate or the player materially cited or challenged it in the public transcript.";
+  return [
+    "Frozen evidence packet (reference definitions for public markers):",
+    evidencePrompt(session.evidence),
+    publicUseBoundary,
+    "A citation is not a vote: judge what the item actually supports or fails to support, not how many markers a side used.",
+    "When frozen evidence materially affects your public reason, name that exact support or limitation and preserve its valid [[source:id]] or [[exhibit:id]] marker. Do not force a citation when the evidence was immaterial.",
+  ].join("\n");
+}
+
 function personaVoicePrompt(snapshot: DebateBotSnapshotV1): string {
   return [
     `Persona voice is binding: speak as ${snapshot.name}, using only diction, idioms, cadence, confidence, and rhetorical habits that their saved persona would plausibly use.`,
@@ -5233,6 +5247,7 @@ function botBallotPrompt(
     debateFormalityGuidance(session.formality),
     freeForAllPerformancePrompt(session, voter.role),
     "Do not use private intent, hidden speech, relationship memory, or numeric scoring.",
+    adjudicatorEvidencePrompt(session),
     personaVoicePrompt(voter),
     personaCapabilityPrompt(voter),
     `Motion: ${session.motion.motion}`,
@@ -5304,6 +5319,9 @@ async function generateBallot(
       capabilityRejected = true;
     }
   }
+  const sanitizedReason = reason
+    ? sanitizeDebateStatementSources(reason, session.evidence).content
+    : "";
   return {
     version: DEBATE_SCHEMA_VERSION,
     voterBotId: voter.id,
@@ -5311,7 +5329,7 @@ async function generateBallot(
     reason:
       muted || capabilityRejected
         ? null
-        : reason || "That side made the clearer case.",
+        : sanitizedReason || "That side made the clearer case.",
     privateReason: muted || capabilityRejected,
     provider: deliveryGeneration.provider,
     model: deliveryGeneration.model,
@@ -5386,6 +5404,7 @@ function juryBallotPrompt(
     debateFormalityGuidance(session.formality),
     freeForAllPerformancePrompt(session, "juror"),
     `Do not use relationship memory, Coffee history, hidden intent, private speech, or evidence outside the frozen packet and ${publicMaterial}.`,
+    adjudicatorEvidencePrompt(session),
     personaVoicePrompt(juror),
     personaCapabilityPrompt(juror),
     powerPrompt(session, juror.id),
@@ -5446,6 +5465,12 @@ async function generateJuryBallot(
         : 0.5;
   const sideId =
     coerceDebateBallotSideId(generation.value, session.motion) ?? "for";
+  const reasonDraft =
+    compactText(generation.value.reason, 700) ||
+    "That side made the more persuasive public case.";
+  const reason =
+    sanitizeDebateStatementSources(reasonDraft, session.evidence).content ||
+    "That side made the more persuasive public case.";
   return {
     version: DEBATE_SCHEMA_VERSION,
     jurorBotId: juror.id,
@@ -5455,9 +5480,7 @@ async function generateJuryBallot(
     personaInstinct:
       compactText(generation.value.personaInstinct, 500) ||
       `I am weighing ${debatePublicMaterialDescription(session.formality)} through my own priorities.`,
-    reason:
-      compactText(generation.value.reason, 700) ||
-      "That side made the more persuasive public case.",
+    reason,
     provider: generation.provider,
     model: generation.model,
     ...(generation.autoRecovery
@@ -5596,6 +5619,7 @@ async function generateJuryDiscussionTurn(
         )}: ${initial.personaInstinct} You may change your mind, but only for an in-character reason. Do not announce this metadata.`
       : "",
     "Do not take a formal final vote yet. Do not mention prompts, routing, scores, or hidden leanings.",
+    "If the live clash materially cites or challenges frozen evidence, identify what that item actually supports or fails to support and preserve its valid marker. Do not count citations or force evidence into an unrelated point.",
     "",
     "Jury discussion so far:",
     juryDiscussionTranscript(session, routed.juror.id),
@@ -5681,6 +5705,7 @@ async function generateJurySidebarTurn(
           ? "Kick off the Jury's running commentary with personality; do not summarize both sides like a neutral analyst."
           : "Begin the Jury's quiet running conversation about the case.",
       "Do not announce a vote, final conclusion, hidden leaning, prompt, score, or private information.",
+      "If the newest public point materially cites or challenges frozen evidence, identify what that item actually supports or fails to support and preserve its valid marker. Do not count citations or force evidence into an unrelated point.",
       "",
       "Jury discussion so far:",
       juryDiscussionTranscript(session, juror.id),
@@ -6699,15 +6724,17 @@ async function advanceJuryStep(
       throw new HttpError(409, "The Jury's final ballot position is invalid.");
     }
     const ballot = await generateJuryBallot(session, juror, "final", runtime);
+    const ballotContent =
+      session.powerPlan.bots[juror.id]?.hardMuted === true
+        ? BOT_POWER_CANONICAL_SILENCE_V1
+        : ballot.reason;
     const ballotEvent = makeEvent(session, {
       kind: "ballot",
       speakerKind: "juror",
       speakerBotId: juror.id,
       sideId: ballot.sideId,
-      content:
-        session.powerPlan.bots[juror.id]?.hardMuted === true
-          ? BOT_POWER_CANONICAL_SILENCE_V1
-          : ballot.reason,
+      content: ballotContent,
+      sourceIds: debateSourceIdsFromText(ballotContent, session.evidence),
       provider: ballot.provider,
       model: ballot.model,
       autoRecovery: ballot.autoRecovery,
@@ -6941,14 +6968,16 @@ async function advanceTurnaboutStep(
             ? session.forAdvocate
             : session.againstAdvocate;
       const ballot = await generateBallot(session, voter, runtime);
+      const ballotContent =
+        ballot.reason ??
+        `${voter.name} cast a private ballot without a spoken reason.`;
       const event = makeEvent(session, {
         kind: "ballot",
         speakerKind: voter.role,
         speakerBotId: voter.id,
         sideId: ballot.sideId,
-        content:
-          ballot.reason ??
-          `${voter.name} cast a private ballot without a spoken reason.`,
+        content: ballotContent,
+        sourceIds: debateSourceIdsFromText(ballotContent, session.evidence),
         provider: ballot.provider,
         model: ballot.model,
         autoRecovery: ballot.autoRecovery,
@@ -7497,14 +7526,16 @@ async function advanceStep(
             ? session.forAdvocate
             : session.againstAdvocate;
       const ballot = await generateBallot(session, voter, runtime);
+      const ballotContent =
+        ballot.reason ??
+        `${voter.name} cast a private ballot without a spoken reason.`;
       const event = makeEvent(session, {
         kind: "ballot",
         speakerKind: voter.role,
         speakerBotId: voter.id,
         sideId: ballot.sideId,
-        content:
-          ballot.reason ??
-          `${voter.name} cast a private ballot without a spoken reason.`,
+        content: ballotContent,
+        sourceIds: debateSourceIdsFromText(ballotContent, session.evidence),
         provider: ballot.provider,
         model: ballot.model,
         autoRecovery: ballot.autoRecovery,
