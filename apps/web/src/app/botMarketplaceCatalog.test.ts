@@ -16,14 +16,15 @@ import {
   normalizeBotFaceEyeRotationDeg,
   normalizeBotFaceEyeScale,
   normalizeBotFaceMouthCharacter,
+  normalizeBotFaceMouthOffsetX,
   normalizeBotFaceMouthOffsetY,
+  normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeBotPowersV1
 } from "@localai/shared";
 import {
-  marketplaceBotEyeCharacterIsSideways,
   marketplaceEntriesForTheme,
   marketplaceVisibleBotEntries,
   marketplaceVisibleThemes,
@@ -137,9 +138,9 @@ describe("bot marketplace static catalog", () => {
           entry.name,
         );
         assert.equal(
+          normalizeBotFaceEyeRotationDeg(bot.faceEyeRotationDeg),
           bot.faceEyeRotationDeg,
-          precomposedPairEyeIds.has(entry.id) ? 0 : -90,
-          entry.name,
+          `${entry.name} eye rotation`,
         );
       }
     }
@@ -613,6 +614,7 @@ describe("bot marketplace static catalog", () => {
       assert.equal(bot.glyph, entry.glyph, entry.name);
       const eyeCount = normalizeBotFaceEyeCount(bot.faceEyeCount);
       assert.notEqual(eyeCount, null, `${entry.name} eye count`);
+      assert.equal(bot.faceEyeCount, eyeCount, `${entry.name} eye count authored`);
       if (bot.faceEyeCharacter === null) {
         assert.equal(eyeCount, 1, `${entry.name} default eye count`);
         assert.equal(
@@ -620,13 +622,10 @@ describe("bot marketplace static catalog", () => {
           entry.id === "carl-jung" ? 0 : null,
           `${entry.name} default eye rotation`,
         );
-        assert.equal(marketplaceBotEyeCharacterIsSideways(bot.faceEyeCharacter), true, `${entry.name} default eyes`);
       } else if (precomposedPairEyeIds.has(entry.id)) {
         assert.equal(eyeCount, 1, `${entry.name} precomposed pair eyes`);
-        assert.equal(bot.faceEyeRotationDeg, 0, `${entry.name} precomposed eye rotation`);
       } else {
         assert.equal(eyeCount, 2, `${entry.name} paired custom eyes`);
-        assert.equal(bot.faceEyeRotationDeg, -90, `${entry.name} paired custom eye rotation`);
       }
       if (bot.faceEyeRotationDeg !== null) {
         assert.equal(
@@ -642,13 +641,31 @@ describe("bot marketplace static catalog", () => {
       assert.equal(weight >= 300 && weight <= 800, true, entry.name);
       assert.equal(weight % 25, 0, entry.name);
       assert.equal(normalizeBotFaceEyeCharacter(bot.faceEyeCharacter), bot.faceEyeCharacter, entry.name);
-      assert.equal(normalizeBotFaceMouthCharacter(bot.faceMouthCharacter), null, entry.name);
-      assert.equal(bot.faceMouthCharacter, null, entry.name);
+      // Library-authored mouths (including custom glyphs) are portable Marketplace truth.
+      assert.equal(
+        normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
+        bot.faceMouthCharacter,
+        entry.name,
+      );
       assert.equal(normalizeBotFaceEyeScale(bot.faceEyeScale), bot.faceEyeScale, entry.name);
       assert.equal(normalizeBotFaceEyeOffsetX(bot.faceEyeOffsetX), bot.faceEyeOffsetX, entry.name);
       assert.equal(normalizeBotFaceEyeOffsetY(bot.faceEyeOffsetY), bot.faceEyeOffsetY, entry.name);
       assert.equal(normalizeBotFaceMouthScale(bot.faceMouthScale), bot.faceMouthScale, entry.name);
+      if (bot.faceMouthOffsetX != null) {
+        assert.equal(
+          normalizeBotFaceMouthOffsetX(bot.faceMouthOffsetX),
+          bot.faceMouthOffsetX,
+          `${entry.name} mouth offset x`,
+        );
+      }
       assert.equal(normalizeBotFaceMouthOffsetY(bot.faceMouthOffsetY), bot.faceMouthOffsetY, entry.name);
+      if (bot.faceMouthRotationDeg != null) {
+        assert.equal(
+          normalizeBotFaceMouthRotationDeg(bot.faceMouthRotationDeg),
+          bot.faceMouthRotationDeg,
+          `${entry.name} mouth rotation`,
+        );
+      }
       assert.equal(bot.faceBlinkBar, DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
       assert.equal(normalizeBotFaceBlinkBar(bot.faceBlinkBar), DEFAULT_BOT_FACE_BLINK_BAR, entry.name);
       const thinkingFrames = normalizeBotFaceThinkingFrames(bot.faceThinkingFrames);
@@ -660,12 +677,16 @@ describe("bot marketplace static catalog", () => {
         eyesFont: bot.faceEyesFont,
         eyeCharacter: bot.faceEyeCharacter,
         mouthFont: bot.faceMouthFont,
+        mouthCharacter: bot.faceMouthCharacter,
         weight: bot.faceFontWeight,
         eyeScale: bot.faceEyeScale,
         eyeOffsetX: bot.faceEyeOffsetX,
         eyeOffsetY: bot.faceEyeOffsetY,
+        eyeRotationDeg: bot.faceEyeRotationDeg ?? null,
         mouthScale: bot.faceMouthScale,
+        mouthOffsetX: bot.faceMouthOffsetX ?? null,
         mouthOffsetY: bot.faceMouthOffsetY,
+        mouthRotationDeg: bot.faceMouthRotationDeg ?? null,
         blinkBar: bot.faceBlinkBar,
         thinkingFrames
       });
@@ -962,7 +983,11 @@ describe("bot marketplace static catalog", () => {
       const expectedEyeGlyph = originalEyeGlyphs.get(botId) ?? null;
       assert.equal(bot.faceEyeCharacter, expectedEyeGlyph, `${botId} ${preset.preset} custom eye`);
       assert.equal(bot.faceEyeCount, expectedEyeGlyph === null ? 1 : 2, `${botId} ${preset.preset} eye count`);
-      assert.equal(bot.faceMouthCharacter, null, `${botId} ${preset.preset} custom mouth`);
+      assert.equal(
+        normalizeBotFaceMouthCharacter(bot.faceMouthCharacter),
+        bot.faceMouthCharacter,
+        `${botId} ${preset.preset} mouth character`,
+      );
       assert.equal(bot.faceEyesFont, preset.eyesFont, `${botId} ${preset.preset} eyes font`);
       assert.equal(bot.faceMouthFont, preset.mouthFont, `${botId} ${preset.preset} mouth font`);
       assert.equal(bot.faceFontWeight, preset.weight, `${botId} ${preset.preset} weight`);
