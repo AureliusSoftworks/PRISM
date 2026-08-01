@@ -21,6 +21,7 @@ export const DEBATE_JUDGE_GAVEL_COOLDOWN_MS = 8_000;
 export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
 export const DEBATE_OBJECTION_RULING_TIMEOUT_MS = 8_000;
 export const DEBATE_MODERATOR_TITLE_MAX_LENGTH = 72;
+export const DEBATE_TITLE_MAX_LENGTH = 120;
 export const DEBATE_MOTION_MAX_LENGTH = 320;
 export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
 export const DEBATE_SIDE_BRIEF_MAX_LENGTH = 1_200;
@@ -367,6 +368,8 @@ export interface DebateMotionSideV1 {
 export interface DebateMotionSlateV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   id: string;
+  /** Public program title; the exact motion remains the canonical question. */
+  title?: string;
   motion: string;
   forSide: DebateMotionSideV1;
   againstSide: DebateMotionSideV1;
@@ -875,6 +878,7 @@ export interface DebateSessionListItemV1 {
   format: DebateFormatId;
   status: DebateStatus;
   phase: DebatePhase;
+  title: string;
   motion: string;
   moderatorTitle: string;
   setupPresetId: DebateSetupPresetId | "custom";
@@ -994,6 +998,63 @@ export function normalizeDebateSideLabel(
   return shortened.replace(/[\s&,:;–—-]+$/gu, "").trim() || fallback;
 }
 
+export function normalizeDebateTitle(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  if (normalized.length <= DEBATE_TITLE_MAX_LENGTH) return normalized;
+  const clipped = normalized.slice(0, DEBATE_TITLE_MAX_LENGTH);
+  const lastBoundary = clipped.lastIndexOf(" ");
+  return (
+    (lastBoundary >= Math.floor(DEBATE_TITLE_MAX_LENGTH / 2)
+      ? clipped.slice(0, lastBoundary)
+      : clipped
+    ).replace(/[\s&,:;–—-]+$/gu, "") || "Debate"
+  );
+}
+
+/** A safe title for legacy records or an unavailable title-generation lane. */
+export function debateTitleForMotion(
+  motion: Pick<
+    DebateMotionSlateV1,
+    "title" | "motion" | "forSide" | "againstSide"
+  >,
+  formality: DebateFormalityId,
+): string {
+  const saved = normalizeDebateTitle(motion.title);
+  if (saved) return saved;
+  const forLabel = normalizeDebateSideLabel(motion.forSide.label, "For");
+  const againstLabel = normalizeDebateSideLabel(
+    motion.againstSide.label,
+    "Against",
+  );
+  if (forLabel === "For" && againstLabel === "Against") {
+    const exactMotion = normalizeDebateTitle(motion.motion) || "Debate";
+    return normalizeDebateTitle(
+      formality === "free_for_all"
+        ? `No Holding Back: ${exactMotion}`
+        : formality === "heated"
+          ? `The Showdown: ${exactMotion}`
+          : formality === "structured"
+            ? `The Case: ${exactMotion}`
+            : formality === "parliamentary"
+              ? `The Motion: ${exactMotion}`
+              : exactMotion,
+    );
+  }
+  const clash = `${forLabel} vs. ${againstLabel}`;
+  return normalizeDebateTitle(
+    formality === "free_for_all"
+      ? `${clash}: No Holding Back`
+      : formality === "heated"
+        ? `${clash}: The Showdown`
+        : formality === "plainspoken"
+          ? `${forLabel} or ${againstLabel}?`
+          : formality === "structured"
+            ? `${clash}: The Case`
+            : `${forLabel} and ${againstLabel}: The Motion`,
+  );
+}
+
 export function normalizeDebateMotionSlateV1(
   value: unknown,
   fallbackId = "slate-1",
@@ -1010,9 +1071,11 @@ export function normalizeDebateMotionSlateV1(
     source.againstSide && typeof source.againstSide === "object"
       ? (source.againstSide as Record<string, unknown>)
       : {};
+  const title = normalizeDebateTitle(source.title);
   return {
     version: DEBATE_SCHEMA_VERSION,
     id: normalizedText(source.id, 80) || fallbackId,
+    ...(title ? { title } : {}),
     motion: normalizedText(source.motion, DEBATE_MOTION_MAX_LENGTH),
     forSide: {
       label: normalizeDebateSideLabel(forSide.label, "For"),

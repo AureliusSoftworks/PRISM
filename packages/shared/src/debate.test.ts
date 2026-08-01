@@ -11,6 +11,7 @@ import {
   DEBATE_MODERATOR_TITLE_MAX_LENGTH,
   DEBATE_MOTION_MAX_LENGTH,
   DEBATE_SETUP_PRESETS,
+  DEBATE_TITLE_MAX_LENGTH,
   defaultDebateJuryStateV1,
   defaultDebateFormatStateV1,
   debateEventIsAtmosphericVocalFoley,
@@ -18,6 +19,7 @@ import {
   debateEvidenceItemById,
   debateEvidenceItemCount,
   debateSpokenText,
+  debateTitleForMotion,
   debateFormalityGuidance,
   coerceDebateBallotSideId,
   normalizeDebateFormalityId,
@@ -29,6 +31,7 @@ import {
   normalizeDebateJuryStateV1,
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
+  normalizeDebateTitle,
   normalizeDebateSessionSynopsis,
   normalizeDebateSetupPresetId,
   debateDebriefEligibleBots,
@@ -284,6 +287,25 @@ test("normalizes motion slates and applies stable side-label fallbacks", () => {
   assert.equal(slate.forSide.label, "For");
   assert.equal(slate.forSide.brief, "Build more homes.");
   assert.equal(slate.againstSide.label, "Preserve");
+});
+
+test("normalizes saved Debate titles and provides rowdiness-aware legacy fallbacks", () => {
+  const slate = normalizeDebateMotionSlateV1({
+    title: `  ${"T".repeat(DEBATE_TITLE_MAX_LENGTH + 12)}  `,
+    motion: "Cities should replace parking with housing.",
+    forSide: { label: "Homes", brief: "Build homes." },
+    againstSide: { label: "Parking", brief: "Keep parking." },
+  });
+  assert.equal(slate.title?.length, DEBATE_TITLE_MAX_LENGTH);
+  assert.equal(
+    debateTitleForMotion({ ...slate, title: undefined }, "free_for_all"),
+    "Homes vs. Parking: No Holding Back",
+  );
+  assert.equal(
+    debateTitleForMotion({ ...slate, title: undefined }, "parliamentary"),
+    "Homes and Parking: The Motion",
+  );
+  assert.equal(normalizeDebateTitle("  A   Clean   Clash  "), "A Clean Clash");
 });
 
 test("shortens overlong side labels at whole-word boundaries", () => {

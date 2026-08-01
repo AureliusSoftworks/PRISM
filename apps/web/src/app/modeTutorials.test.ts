@@ -273,10 +273,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /chamber is live and named but remains advisory/u);
     assert.match(copy, /sibling Jury commentary panel/u);
     assert.match(copy, /Copy Jury transcript beside Copy verbose transcript/u);
-    assert.match(
-      copy,
-      /Jury transcript remains directly copyable from its eligible Proceeding archive entry/u,
-    );
+    assert.doesNotMatch(copy, /Jury transcript remains directly copyable/u);
     assert.match(copy, /Coffee-style session summary/u);
     assert.match(copy, /temporary pick-a-bot inquiry chat/u);
     assert.match(copy, /anonymous mark slides/u);
@@ -296,6 +293,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
     assert.match(copy, /fallback chain saved in Settings/u);
     assert.match(copy, /every generated statement and ballot records/u);
+    assert.match(copy, /short title synthesized in the selected Rowdiness/u);
+    assert.match(copy, /Use setup copies its motion, title, room settings/u);
+    assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
     assert.match(copy, /Launch circuit becomes Start Debate/u);

@@ -46,6 +46,7 @@ import {
   submitDebateVerdict,
   swingDebateJudgeGavel,
   synthesizeDebateSlates,
+  synthesizeDebateTitle,
   type DebateAiRuntime,
 } from "../debate.ts";
 import type {
@@ -4234,12 +4235,41 @@ describe("Debate engine", () => {
       runtimeWith(provider),
     );
     assert.equal(slates.length, 3);
+    assert.equal(slates[0]?.title, "Welcome Home or Keep Quiet?");
+    assert.equal(
+      prompts.some((prompt) =>
+        /concise 2–8 word public program title/u.test(prompt),
+      ),
+      true,
+    );
     assert.equal(
       prompts.some((prompt) =>
         /Topic: Should \S+ live downtown\?/u.test(prompt),
       ),
       true,
     );
+  });
+
+  it("synthesizes a concise Debate title in the selected rowdiness", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages: ProviderMessage[]) {
+        const prompt = messages.map((message) => message.content).join("\n");
+        assert.match(prompt, /Free-for-all/u);
+        assert.match(prompt, /punchy daytime-showdown energy/u);
+        assert.match(prompt, /Exact motion:/u);
+        return JSON.stringify({ title: "Parking Wars" });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const title = await synthesizeDebateTitle(
+      MOTION,
+      "free_for_all",
+      runtimeWith(provider),
+    );
+    assert.equal(title, "Parking Wars");
   });
 
   it("makes Free-for-all Turnabout a feisty confrontation without forcing Court-of-Record language", async () => {

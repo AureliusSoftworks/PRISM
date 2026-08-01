@@ -1,5 +1,7 @@
 import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
+  DEBATE_PLAYER_JUDGE_BOT_ID,
+  DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SETUP_PRESETS,
   type DebateAdvocacyConsent,
   type DebateEvidenceSourceV1,
@@ -8,6 +10,8 @@ import {
   type DebateMotionSlateV1,
   type DebatePlayerRole,
   type DebateSetupPresetId,
+  type DebateSessionV1,
+  type DebateStatus,
 } from "@localai/shared";
 
 function canonicalDebateEvidenceUrl(value: string): string {
@@ -62,6 +66,112 @@ export interface DebateCastSelection {
   moderator: string;
   forAdvocate: string;
   againstAdvocate: string;
+}
+
+export type DebateRoomPresence = "occupied" | "departing" | "empty";
+
+/**
+ * Keep every final spoken beat visible, then dismiss the live room once. A
+ * completed replay opens directly on the already-empty sealed stage.
+ */
+export function debateRoomPresence(args: {
+  status: DebateStatus;
+  presenting: boolean;
+  observerPerspective: "live" | "replay";
+}): DebateRoomPresence {
+  if (args.status !== "completed" || args.presenting) return "occupied";
+  return args.observerPerspective === "replay" ? "empty" : "departing";
+}
+
+export interface DebateSessionRetryDraft {
+  setupMode: "basic" | "advanced";
+  topic: string;
+  format: DebateFormatId;
+  formality: DebateFormalityId;
+  moderatorTitle: string;
+  selectedPresetId: DebateSetupPresetId;
+  motion: DebateMotionSlateV1;
+  cast: DebateCastSelection;
+  playerRole: DebatePlayerRole;
+  playerSideId: "for" | "against";
+  juryEnabled: boolean;
+  evidence: DebateSessionV1["evidence"];
+  missingBotNames: string[];
+}
+
+/**
+ * Restores only authored setup. Runtime output, consent, model lanes, ballots,
+ * and verdict state intentionally remain attached to the archived proceeding.
+ */
+export function debateSessionRetryDraft(
+  session: DebateSessionV1,
+  availableBotIds: readonly string[],
+  currentPresetId: DebateSetupPresetId,
+): DebateSessionRetryDraft {
+  const available = new Set(availableBotIds);
+  const missingBotNames: string[] = [];
+  const restoreLibraryBot = (
+    bot: DebateSessionV1["moderator"],
+    playerOwned = false,
+  ): string => {
+    if (
+      playerOwned ||
+      bot.id === DEBATE_PLAYER_JUDGE_BOT_ID ||
+      bot.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID
+    ) {
+      return "";
+    }
+    if (available.has(bot.id)) return bot.id;
+    missingBotNames.push(bot.name);
+    return "";
+  };
+  const participantFor =
+    session.playerRole === "participant" && session.playerSideId === "for";
+  const participantAgainst =
+    session.playerRole === "participant" && session.playerSideId === "against";
+  const savedPreset = DEBATE_SETUP_PRESETS.some(
+    (preset) => preset.id === session.setupPresetId,
+  )
+    ? (session.setupPresetId as DebateSetupPresetId)
+    : currentPresetId;
+
+  return {
+    setupMode:
+      session.format !== "forum" ||
+      session.playerRole !== "judge" ||
+      session.jury.enabled
+        ? "advanced"
+        : "basic",
+    topic: session.motion.motion,
+    format: session.format,
+    formality: session.formality,
+    moderatorTitle: session.moderatorTitle,
+    selectedPresetId: savedPreset,
+    motion: copyDebateMotionSlate(session.motion),
+    cast: {
+      moderator: restoreLibraryBot(
+        session.moderator,
+        session.playerRole === "judge",
+      ),
+      forAdvocate: restoreLibraryBot(session.forAdvocate, participantFor),
+      againstAdvocate: restoreLibraryBot(
+        session.againstAdvocate,
+        participantAgainst,
+      ),
+    },
+    playerRole: session.playerRole,
+    playerSideId: session.playerSideId ?? "for",
+    juryEnabled: session.jury.enabled,
+    evidence: {
+      ...session.evidence,
+      sources: session.evidence.sources.map((source) => ({ ...source })),
+      exhibits: (session.evidence.exhibits ?? []).map((exhibit) => ({
+        ...exhibit,
+      })),
+      frozenAt: null,
+    },
+    missingBotNames: [...new Set(missingBotNames)],
+  };
 }
 
 export function debatePrefilledCast(

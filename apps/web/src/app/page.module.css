@@ -26071,6 +26071,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .debateBotPresencePlate {
+  /* Debate's optimized avatar pass registers authored face ink two screen
+     pixels high without shifting live eyes or mouths. */
+  --avatar-details-offset-y: -2px;
   --zen-live-bot-avatar-size: 100%;
   --zen-live-bot-avatar-body-size: 92%;
   --zen-live-bot-body-x: 50%;

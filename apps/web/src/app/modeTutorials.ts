@@ -216,7 +216,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Follow and keep the record",
-        body: "Proceedings render safe Markdown and source chips in the chamber's tonal transcript rail. It follows every growing live turn until you deliberately scroll back; choose Live to return to the newest phrase. Juror thoughts, deliberation, and Signal-style vocal Foley reactions stay out of Proceedings. After the verdict, Judges and Spectators get a sibling Jury commentary panel under the rail, with Copy Jury transcript beside Copy verbose transcript whenever the record is copyable (not for Participant-sealed Jury). That Jury transcript remains directly copyable from its eligible Proceeding archive entry after you return to the Studio. The Verdict rail also shows a Coffee-style session summary and a temporary pick-a-bot inquiry chat so you can ask about a cast member’s frozen in-debate reasoning — nothing is saved, and positions stay as they were. With Jury off, a human Judge's ruling is final, a Participant's bot Moderator/Judge decides the result without inventing a PRISM ballot, and a Spectator Duel uses the traditional three-bot majority. With Jury on, the majority binds Spectators and Participants but advises a human Judge. After a Participant verdict, only the bot opponent may react before the bot Moderator/Judge closes; PRISM never invents a human reaction. Spectator verdicts still let both bot advocates react before the bot Moderator closes. In Judge sessions, the human ruling is followed by both advocates’ reactions and an automatic neutral center close. Judge and Spectator records keep named deliberation and ballots; Participant API responses, transcript copies, archives, and replay-facing event data retain only the aggregate split and verdict. Copy verbose transcript creates one review-ready role-safe record with frozen setup, runtime snapshots, evidence, event metadata, interruptions, moderator rulings, case-board state, and permitted public ballot reasons.",
+        body: "Proceedings render safe Markdown and source chips in the chamber's tonal transcript rail. It follows every growing live turn until you deliberately scroll back; choose Live to return to the newest phrase. Juror thoughts, deliberation, and Signal-style vocal Foley reactions stay out of Proceedings. After the verdict, Judges and Spectators get a sibling Jury commentary panel under the rail, with Copy Jury transcript beside Copy verbose transcript whenever the record is copyable (not for Participant-sealed Jury). That Jury transcript remains directly copyable from its eligible Proceeding archive entry after you return to the Studio. The Verdict rail also shows a Coffee-style session summary and a temporary pick-a-bot inquiry chat so you can ask about a cast member’s frozen in-debate reasoning — nothing is saved, and positions stay as they were. With Jury off, a human Judge's ruling is final, a Participant's bot Moderator/Judge decides the result without inventing a PRISM ballot, and a Spectator Duel uses the traditional three-bot majority. With Jury on, the majority binds Spectators and Participants but advises a human Judge. After a Participant verdict, only the bot opponent may react before the bot Moderator/Judge closes; PRISM never invents a human reaction. Spectator verdicts still let both bot advocates react before the bot Moderator closes. In Judge sessions, the human ruling is followed by both advocates’ reactions and an automatic neutral center close. Judge and Spectator records keep named deliberation and ballots; Participant API responses, transcript copies, archives, and replay-facing event data retain only the aggregate split and verdict. Every archived Debate keeps a short title synthesized in the selected Rowdiness while preserving the exact motion beneath it. Open resumes or replays that proceeding; Use setup copies its motion, title, room settings, cast, role, Jury choice, and evidence into a fresh editable workbench without changing the original. Results and old consent do not carry over, unavailable Library bots must be reassigned, and your currently selected model and routing remain in place for the rerun. Copy verbose transcript creates one review-ready role-safe record with frozen setup, runtime snapshots, evidence, event metadata, interruptions, moderator rulings, case-board state, and permitted public ballot reasons.",
         clickLabel: "Copy verbose transcript",
         targetSelector: '[data-tutorial-target="debate-copy-transcript"]',
       },
@@ -440,8 +440,23 @@ function currentSignalRefractTutorialBody(body: string, index: number): string {
   return current;
 }
 
+function currentDebateRecordTutorialBody(body: string): string {
+  return body.replace(
+    " That Jury transcript remains directly copyable from its eligible Proceeding archive entry after you return to the Studio.",
+    "",
+  );
+}
+
 export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
+  debate: {
+    ...BASE_MODE_TUTORIALS.debate,
+    steps: BASE_MODE_TUTORIALS.debate.steps.map((step) =>
+      step.heading === "Follow and keep the record"
+        ? { ...step, body: currentDebateRecordTutorialBody(step.body) }
+        : step,
+    ),
+  },
   zen: {
     ...BASE_MODE_TUTORIALS.zen,
     steps: BASE_MODE_TUTORIALS.zen.steps.map((step, index) =>

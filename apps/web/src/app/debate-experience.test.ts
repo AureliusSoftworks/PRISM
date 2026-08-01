@@ -9,6 +9,7 @@ import {
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   debateEventIsTranscriptHousekeeping,
+  type DebateSessionV1,
 } from "@localai/shared";
 import {
   applyDebateSetupPreset,
@@ -17,7 +18,9 @@ import {
   debateMotionRevealState,
   debatePlayerJudgePrefilledCast,
   debatePrefilledCast,
+  debateRoomPresence,
   debateSetupScreensVisited,
+  debateSessionRetryDraft,
   derivedDebateSetupPresetId,
   initialDebateSetupScreensVisited,
   isDebateRequiredSetupScreen,
@@ -45,6 +48,10 @@ const page = readFileSync(
 );
 const pageCss = readFileSync(
   fileURLToPath(new URL("./page.module.css", import.meta.url)),
+  "utf8",
+);
+const avatarDetailsCss = readFileSync(
+  fileURLToPath(new URL("./avatar-details-mask.module.css", import.meta.url)),
   "utf8",
 );
 const identSource = readFileSync(
@@ -130,6 +137,124 @@ describe("Debate experience", () => {
       forAdvocate: "",
       againstAdvocate: "",
     });
+  });
+
+  it("restores archived setup without carrying frozen runtime or stale consent", () => {
+    const session = {
+      id: "debate-1",
+      format: "turnabout",
+      formality: "heated",
+      setupPresetId: "custom",
+      playerRole: "spectator",
+      playerSideId: null,
+      moderatorTitle: "Referee",
+      motion: {
+        version: DEBATE_SCHEMA_VERSION,
+        id: "motion-1",
+        title: "The Parking Lot Fight",
+        motion: "Cities should replace parking with housing.",
+        forSide: { label: "Homes", brief: "Build homes." },
+        againstSide: { label: "Parking", brief: "Keep parking." },
+      },
+      moderator: { id: "moderator", name: "Morgan" },
+      forAdvocate: { id: "for-bot", name: "Avery" },
+      againstAdvocate: { id: "missing-bot", name: "Blake" },
+      jury: { enabled: true },
+      evidence: {
+        version: DEBATE_SCHEMA_VERSION,
+        notes: "Shared record",
+        sources: [
+          {
+            id: "source-1",
+            title: "Planning report",
+            url: "https://example.com/report",
+            snippet: "A source.",
+            publishedAt: null,
+          },
+        ],
+        exhibits: [],
+        frozenAt: "2026-08-01T12:00:00.000Z",
+      },
+      advocacyConsent: [{ status: "accept" }],
+      ballots: [{ sideId: "for" }],
+      events: [{ kind: "speech" }],
+    } as unknown as DebateSessionV1;
+
+    const draft = debateSessionRetryDraft(
+      session,
+      ["moderator", "for-bot"],
+      "public-forum",
+    );
+
+    assert.equal(draft.setupMode, "advanced");
+    assert.equal(draft.topic, session.motion.motion);
+    assert.equal(draft.motion.title, "The Parking Lot Fight");
+    assert.equal(draft.cast.moderator, "moderator");
+    assert.equal(draft.cast.forAdvocate, "for-bot");
+    assert.equal(draft.cast.againstAdvocate, "");
+    assert.deepEqual(draft.missingBotNames, ["Blake"]);
+    assert.equal(draft.evidence.frozenAt, null);
+    assert.notEqual(draft.motion, session.motion);
+    assert.notEqual(draft.evidence.sources, session.evidence.sources);
+    assert.equal(session.evidence.frozenAt, "2026-08-01T12:00:00.000Z");
+    assert.equal("advocacyConsent" in draft, false);
+    assert.equal("events" in draft, false);
+    assert.equal("generationChain" in draft, false);
+  });
+
+  it("keeps the final spoken beat occupied, then clears live and replay rooms", () => {
+    assert.equal(
+      debateRoomPresence({
+        status: "completed",
+        presenting: true,
+        observerPerspective: "live",
+      }),
+      "occupied",
+    );
+    assert.equal(
+      debateRoomPresence({
+        status: "completed",
+        presenting: false,
+        observerPerspective: "live",
+      }),
+      "departing",
+    );
+    assert.equal(
+      debateRoomPresence({
+        status: "completed",
+        presenting: false,
+        observerPerspective: "replay",
+      }),
+      "empty",
+    );
+    assert.equal(
+      debateRoomPresence({
+        status: "live",
+        presenting: false,
+        observerPerspective: "live",
+      }),
+      "occupied",
+    );
+  });
+
+  it("animates the live room out, opens completed replays empty, and lifts Debate avatar ink", () => {
+    assert.match(source, /data-debate-room-presence=\{roomPresence\}/u);
+    assert.match(css, /debate-stage-bot-depart/u);
+    assert.match(css, /debate-gallery-seat-depart/u);
+    assert.match(css, /data-debate-room-presence="empty"/u);
+    assert.match(
+      css,
+      /prefers-reduced-motion: reduce[\s\S]*data-debate-room-presence="departing"/u,
+    );
+    assert.doesNotMatch(page, /data-debate-moderator-avatar=/u);
+    assert.match(
+      pageCss,
+      /\.debateBotPresencePlate\s*\{[\s\S]{0,240}--avatar-details-offset-y:\s*-2px/u,
+    );
+    assert.match(
+      avatarDetailsCss,
+      /translateY\(var\(--avatar-details-offset-y,\s*0px\)\)/u,
+    );
   });
 
   it("randomly casts three unique Library bots and fails safely with fewer", () => {
@@ -881,6 +1006,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
+      /\.dashboard \.dashboardDesk\s*\{[^}]*overflow-y:\s*auto[^}]*scrollbar-width:\s*thin/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.dashboard \.sessionList\s*\{[^}]*max-height/u,
+    );
+    assert.match(
+      css,
       /\.dashboard \.dashboardPanel,[\s\S]*?border-radius:\s*0[^}]*background:\s*transparent/u,
     );
     assert.match(
@@ -1014,12 +1147,13 @@ describe("Debate experience", () => {
     assert.doesNotMatch(visibleKinds, /"ballot"|"verdict",/u);
   });
 
-  it("presents the motion in the proceedings header and spoken captions at the bottom", () => {
+  it("presents the synthesized title and exact motion in the proceedings header", () => {
     assert.match(source, /data-debate-motion-title="true"/u);
     assert.match(
       source,
-      /title=\{session\.motion\.motion\}[\s\S]{0,80}\{session\.motion\.motion\}/u,
+      /data-debate-motion-title="true"[\s\S]{0,180}debateTitleForMotion\(session\.motion, session\.formality\)/u,
     );
+    assert.match(source, /data-debate-exact-motion="true"/u);
     assert.doesNotMatch(source, /data-debate-stage-title="true"/u);
     assert.doesNotMatch(source, /className=\{styles\.stageTitle\}/u);
     assert.doesNotMatch(source, /className=\{styles\.motionPlinth\}/u);
@@ -1059,6 +1193,22 @@ describe("Debate experience", () => {
       css,
       /\.liveCaption span\s*\{[^}]*overflow-y:\s*hidden/u,
     );
+  });
+
+  it("restores archived proceedings as editable setup without restoring the model lane", () => {
+    assert.match(source, /"Use setup"/u);
+    assert.match(source, /debateSessionRetryDraft\(/u);
+    assert.match(source, /your current model and routing stay selected/u);
+    const restoreBody = source.slice(
+      source.indexOf("const reuseSessionSetup"),
+      source.indexOf("const startDebate"),
+    );
+    assert.match(restoreBody, /setRoleChecks\(\[\]\)/u);
+    assert.match(
+      restoreBody,
+      /setVisitedSetupScreens\(initialDebateSetupScreensVisited\(\)\)/u,
+    );
+    assert.doesNotMatch(restoreBody, /setPreferredProvider|setModelOverride/u);
   });
 
   it("keeps non-guided player actions in a full-width command deck without reflowing proceedings", () => {
@@ -1998,11 +2148,9 @@ describe("Debate experience", () => {
     assert.match(source, /data-tutorial-target="debate-jury-record"/u);
     assert.match(source, /Timestamped · separate from proceedings/u);
     assert.match(source, /Copy Jury transcript/u);
-    assert.match(source, /debateArchivedJuryRecordIsCopyable\(session\)/u);
-    assert.match(
-      source,
-      /copyArchivedJuryRecord\(session\)[\s\S]{0,180}Copy Jury transcript for/u,
-    );
+    assert.match(source, /debateArchivedJuryRecordIsCopyable\(\{/u);
+    assert.doesNotMatch(source, /copyArchivedJuryRecord/u);
+    assert.doesNotMatch(source, /Copy Jury transcript for/u);
     assert.match(
       source,
       /transcriptHeaderActions[\s\S]{0,400}debate-copy-jury-transcript[\s\S]{0,400}debate-copy-transcript/u,
@@ -2011,11 +2159,7 @@ describe("Debate experience", () => {
       source,
       /\{renderTranscript\(session\)\}[\s\S]{0,80}\{renderJuryRecord\(session\)\}/u,
     );
-    assert.match(
-      source,
-      /\/api\/debates\/\$\{encodeURIComponent\(archived\.id\)\}\?perspective=replay/u,
-    );
-    assert.match(css, /\.archiveJuryCopyButton/u);
+    assert.doesNotMatch(css, /\.archiveJuryCopyButton/u);
     assert.match(css, /\.juryThoughtChip/u);
     assert.match(css, /\.juryThoughtPreview/u);
     assert.match(
@@ -2026,6 +2170,25 @@ describe("Debate experience", () => {
     assert.match(css, /\.juryRecord/u);
     assert.match(css, /\.transcriptHeaderActions/u);
     assert.match(css, /\.debateRail\[data-completed="true"\] \.juryRecord/u);
+  });
+
+  it("gives the light proceedings rail, verdict, and evidence drawer readable surfaces", () => {
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\]\s*\{[^}]*--debate-live-ink:\s*#2a2530[^}]*--debate-live-muted:\s*#625a69/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.transcriptHeader button\s*\{[^}]*border:[^}]*color:\s*#514758[^}]*background:\s*rgba\(255, 255, 255, 0\.84\)/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.debateSynopsis\s*\{[^}]*border-left:[^}]*color:\s*#4c4253[^}]*background:/u,
+    );
+    assert.match(
+      css,
+      /\.dashboard\[data-theme="light"\] \.sourceDrawer,[\s\S]{0,80}\.live\[data-theme="light"\] \.sourceDrawer\s*\{[^}]*color:\s*#2a2430[^}]*background:/u,
+    );
   });
 
   it("offers Coffee-style synopsis and ephemeral pick-a-bot debrief after verdict", () => {
@@ -2681,6 +2844,9 @@ describe("Debate experience", () => {
     assert.match(source, /<DebateEvidencePedestal/u);
     assert.match(source, /data-debate-evidence-document="true"/u);
     assert.match(source, /item\.kind === "source"/u);
+    assert.match(source, /debateEvidenceSourceHost\(evidenceSource\)/u);
+    assert.match(source, /evidenceSource\.title/u);
+    assert.match(source, /evidenceSource\.snippet/u);
     assert.match(source, /debateEvidencePropRotationDeg\(/u);
     assert.match(source, /--debate-evidence-prop-rotate/);
     assert.match(source, /data-prop="document"/u);
@@ -3169,6 +3335,18 @@ describe("Debate experience", () => {
     assert.match(
       css,
       /\.evidencePedestalDocument\s*\{[^}]*width:\s*clamp\(36px/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestal\[data-evidence-kind="source"\]\[data-evidence-view="moderator"\][\s\S]{0,120}\.evidencePedestalDocument\s*\{[^}]*translateY\(10%\)\s+scale\(1\.55\)/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestal\[data-evidence-kind="source"\]\[data-evidence-view="moderator"\][\s\S]{0,160}\.evidencePedestalDocumentDetails\s*\{[^}]*display:\s*flex/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.evidencePedestal\[data-evidence-kind="exhibit"\]\[data-evidence-view="moderator"\]/u,
     );
     assert.doesNotMatch(css, /\.evidencePedestalDocumentMark\s*\{/u);
     assert.match(css, /\.evidencePedestal\s*\{[^}]*drop-shadow/u);

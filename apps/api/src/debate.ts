@@ -36,6 +36,7 @@ import {
   debateEvidenceItemCount,
   debateEvidenceItemRecord,
   debateFormalityGuidance,
+  debateTitleForMotion,
   debateEstimatedSpeechDurationMs,
   botPowerPairwisePerceptionFromEffectsV1,
   debateSourceIdsFromText,
@@ -53,6 +54,7 @@ import {
   normalizeDebateJuryStateV1,
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
+  normalizeDebateTitle,
   normalizeDebateSetupPresetId,
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
@@ -1075,7 +1077,17 @@ export async function synthesizeDebateSlates(
           `Topic: ${topic}`,
           debateFormalityGuidance(formality),
           "Create exactly three genuinely distinct, balanced debate slates.",
-          "Each slate needs: id, motion, forSide {label, brief}, againstSide {label, brief}.",
+          "Each slate needs: id, title, motion, forSide {label, brief}, againstSide {label, brief}.",
+          "The title is a concise 2–8 word public program title for the clash, not a restatement of the motion.",
+          formality === "free_for_all"
+            ? "Give the title punchy daytime-showdown energy without fabricating an accusation."
+            : formality === "heated"
+              ? "Give the title sharp collision energy without fabricating an accusation."
+              : formality === "plainspoken"
+                ? "Make the title clear, direct, and conversational."
+                : formality === "structured"
+                  ? "Make the title disciplined and case-like."
+                  : "Make the title dignified and formal.",
           "Each side label must be a clean 1–3 word public name, no more than 24 characters.",
           "The motion must be editable, specific, and arguable by reasonable people.",
           formality === "parliamentary"
@@ -1109,7 +1121,11 @@ export async function synthesizeDebateSlates(
       normalizeDebateMotionSlateV1(value, `slate-${index + 1}`),
     )
     .filter(completeMotion)
-    .slice(0, 3);
+    .slice(0, 3)
+    .map((slate) => ({
+      ...slate,
+      title: debateTitleForMotion(slate, formality),
+    }));
   if (slates.length !== 3) {
     throw new HttpError(
       502,
@@ -1117,6 +1133,56 @@ export async function synthesizeDebateSlates(
     );
   }
   return slates;
+}
+
+export async function synthesizeDebateTitle(
+  motionRaw: unknown,
+  formalityRaw: unknown,
+  runtime: DebateAiRuntime,
+): Promise<string> {
+  const motion = normalizeDebateMotionSlateV1(motionRaw);
+  if (!completeMotion(motion)) {
+    throw new HttpError(400, "Complete the motion and both side briefs.");
+  }
+  const formality = normalizeDebateFormalityId(formalityRaw);
+  const generation = await generateJson(
+    runtime.lanes ?? selectedLane(runtime),
+    [
+      {
+        role: "system",
+        content:
+          "You title a short two-sided debate. Return JSON only and never invent facts or accusations.",
+      },
+      {
+        role: "user",
+        content: [
+          debateFormalityGuidance(formality),
+          `Exact motion: ${motion.motion}`,
+          `Public sides: ${motion.forSide.label} versus ${motion.againstSide.label}`,
+          "Write one concise 2–8 word public program title for the clash, not a restatement of the exact motion.",
+          formality === "free_for_all"
+            ? "Use punchy daytime-showdown energy."
+            : formality === "heated"
+              ? "Use sharp collision energy."
+              : formality === "plainspoken"
+                ? "Keep it clear, direct, and conversational."
+                : formality === "structured"
+                  ? "Keep it disciplined and case-like."
+                  : "Keep it dignified and formal.",
+          'JSON shape: {"title":"..."}',
+        ].join("\n"),
+      },
+    ],
+    {
+      maxTokens: 100,
+      temperature: 0.55,
+      validate: (value) => Boolean(normalizeDebateTitle(value.title)),
+    },
+  );
+  return (
+    normalizeDebateTitle(generation.value.title) ||
+    debateTitleForMotion(motion, formality)
+  );
 }
 
 async function roleCheck(
@@ -1852,10 +1918,12 @@ export function listDebateSessions(
     let setupPresetId: DebateSetupPresetId | "custom" = "custom";
     let juryEnabled = false;
     let synopsisText: string | null = null;
+    let title = "";
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
         formality?: unknown;
+        motion?: unknown;
         moderatorTitle?: unknown;
         setupPresetId?: unknown;
         playerRole?: unknown;
@@ -1864,6 +1932,13 @@ export function listDebateSessions(
       };
       if (isDebateFormatId(parsed.format)) format = parsed.format;
       formality = normalizeDebateFormalityId(parsed.formality);
+      const parsedMotion = normalizeDebateMotionSlateV1(parsed.motion);
+      title = debateTitleForMotion(
+        parsedMotion.motion
+          ? parsedMotion
+          : normalizeDebateMotionSlateV1({ motion: row.motion }),
+        formality,
+      );
       moderatorTitle = normalizeDebateModeratorTitle(parsed.moderatorTitle);
       const jury = normalizeDebateJuryStateV1(parsed.jury);
       juryEnabled = jury.enabled;
@@ -1883,12 +1958,19 @@ export function listDebateSessions(
     } catch {
       format = "forum";
     }
+    if (!title) {
+      title = debateTitleForMotion(
+        normalizeDebateMotionSlateV1({ motion: row.motion }),
+        formality,
+      );
+    }
     return {
       id: row.id,
       format,
       formality,
       status: row.status,
       phase: row.phase,
+      title,
       motion: row.motion,
       moderatorTitle,
       setupPresetId,

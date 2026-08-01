@@ -207,6 +207,7 @@ import {
   submitDebateVerdict,
   swingDebateJudgeGavel,
   synthesizeDebateSlates,
+  synthesizeDebateTitle,
   generateDebateSessionSynopsis,
   chatWithDebateDebriefBot,
   type DebateAiRuntime,
@@ -13104,6 +13105,27 @@ function buildRoutes(): RouteDefinition[] {
           ),
       );
       json(ctx.res, 200, { ok: true, slates });
+    }),
+    route("POST", "/api/debates/title", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+      );
+      const title = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () => synthesizeDebateTitle(body.motion, body.formality, runtime),
+      );
+      json(ctx.res, 200, { ok: true, title });
     }),
     route("POST", "/api/debates/research", async (ctx) => {
       const userId = requireAuth(ctx);

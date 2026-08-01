@@ -39,6 +39,7 @@ import {
   debateEvidenceItemCount,
   debateEvidenceItems,
   debateFormalityDescriptor,
+  debateTitleForMotion,
   debateSpokenText,
   normalizeDebateModeratorTitle,
   voicePerformanceTextFromActionCues,
@@ -84,7 +85,9 @@ import {
   debateAlignmentPreviewCast,
   debateMotionRevealState,
   debatePlayerJudgePrefilledCast,
+  debateRoomPresence,
   debateSetupScreensVisited,
+  debateSessionRetryDraft,
   derivedDebateSetupPresetId,
   initialDebateSetupScreensVisited,
   isDebateRequiredSetupScreen,
@@ -212,6 +215,7 @@ import {
   type DebateStageAlignmentRole,
   type DebateStageAlignmentTarget,
   type DebateStageAlignmentV6,
+  type DebateStageEvidenceKind,
   type DebateStageLightBlendMode,
   type DebateStageOffsetV1,
 } from "./debateStageAlignment";
@@ -1856,6 +1860,7 @@ export function formatDebateVerboseTranscript(
     `- Revision: ${session.revision}`,
     `- Format: ${session.format} v${session.formatVersion}`,
     `- Formality: ${debateFormalityDescriptor(session.formality).title}`,
+    `- Title: ${debateTitleForMotion(session.motion, session.formality)}`,
     `- Preset: ${session.setupPresetId}`,
     `- Jury: ${session.jury.enabled ? "enabled" : "disabled"}`,
     `- Player role: ${session.playerRole}${session.playerSideId ? ` — ${debateSideLabel(session, session.playerSideId)}` : ""}`,
@@ -2249,6 +2254,14 @@ function debateEvidenceExhibitImageUrl(
     : null;
 }
 
+function debateEvidenceSourceHost(source: DebateEvidenceSourceV1): string {
+  try {
+    return new URL(source.url).hostname.replace(/^www\./u, "");
+  } catch {
+    return "Source";
+  }
+}
+
 function DebateEvidenceExhibitVisual({
   exhibit,
   className,
@@ -2293,6 +2306,39 @@ function pickDebateStageAlignmentEvidenceEmoji(
   return DEBATE_EVIDENCE_EMOJI_CHOICES[index] ?? "📦";
 }
 
+function debateStageAlignmentEvidencePreviewItem(
+  kind: DebateStageEvidenceKind,
+  emoji: string,
+): DebateEvidenceItemV1 {
+  if (kind === "source") {
+    return {
+      kind: "source",
+      value: {
+        id: "alignment-source-preview",
+        title: "The Public Record",
+        url: "https://example.org/research/briefing",
+        snippet:
+          "A sample finding demonstrates how a cited source wraps and reads from the lecterns.",
+        publishedAt: null,
+      },
+    };
+  }
+  return {
+    kind: "exhibit",
+    value: {
+      id: "alignment-exhibit-preview",
+      adjective: "sample",
+      object: "exhibit",
+      title: "Sample exhibit",
+      observation: "A sample object used only to align the stage.",
+      emoji,
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "prism",
+    },
+  };
+}
+
 function DebateEvidencePedestal({
   item,
   view,
@@ -2310,6 +2356,7 @@ function DebateEvidencePedestal({
 }): React.JSX.Element {
   const lastPlacedEvidenceIdRef = useRef<string | null>(null);
   const exhibit = item.kind === "exhibit" ? item.value : null;
+  const evidenceSource = item.kind === "source" ? item.value : null;
   const title = item.value.title;
   const propRotationDeg = debateEvidencePropRotationDeg(item.value.id);
 
@@ -2342,6 +2389,10 @@ function DebateEvidencePedestal({
         exhibit ? resolveDebateExhibitImpactMaterial(exhibit) : "paper"
       }
       data-alignment-preview={alignmentPreview ? "true" : undefined}
+      data-debate-evidence-alignment-preview={
+        alignmentPreview ? "true" : undefined
+      }
+      aria-hidden={alignmentPreview ? "true" : undefined}
       aria-label={`Presented evidence: ${title}`}
       style={
         {
@@ -2352,6 +2403,7 @@ function DebateEvidencePedestal({
       <button
         type="button"
         onClick={onOpen}
+        tabIndex={alignmentPreview ? -1 : undefined}
         title={title}
         aria-label={`Open evidence: ${title}`}
       >
@@ -2367,7 +2419,21 @@ function DebateEvidencePedestal({
             aria-hidden="true"
             data-debate-evidence-document="true"
             data-prop="document"
-          />
+          >
+            {evidenceSource ? (
+              <span className={styles.evidencePedestalDocumentDetails}>
+                <span className={styles.evidencePedestalDocumentOrigin}>
+                  {debateEvidenceSourceHost(evidenceSource)}
+                </span>
+                <strong className={styles.evidencePedestalDocumentTitle}>
+                  {evidenceSource.title}
+                </strong>
+                <span className={styles.evidencePedestalDocumentSnippet}>
+                  {evidenceSource.snippet}
+                </span>
+              </span>
+            ) : null}
+          </span>
         )}
       </button>
     </section>
@@ -2860,6 +2926,8 @@ export function DebateExperience(
   const [stageAlignmentPreviewTheme, setStageAlignmentPreviewTheme] = useState<
     "light" | "dark"
   >(props.theme);
+  const [stageAlignmentPreviewEvidenceKind, setStageAlignmentPreviewEvidenceKind] =
+    useState<DebateStageEvidenceKind>("exhibit");
   const [
     stageAlignmentPreviewEvidenceEmoji,
     setStageAlignmentPreviewEvidenceEmoji,
@@ -2887,6 +2955,12 @@ export function DebateExperience(
   ] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [setupRestoreLoadingId, setSetupRestoreLoadingId] = useState<
+    string | null
+  >(null);
+  const [setupRestoreNotice, setSetupRestoreNotice] = useState<string | null>(
+    null,
+  );
   const [autoRecoveryNotice, setAutoRecoveryNotice] = useState<string | null>(
     null,
   );
@@ -3936,19 +4010,6 @@ export function DebateExperience(
     request,
   ]);
 
-  const copyArchivedJuryRecord = useCallback(
-    async (archived: DebateSessionListItemV1): Promise<void> => {
-      if (!debateArchivedJuryRecordIsCopyable(archived)) return;
-      await copyJuryRecordForTarget(archived.id, async () => {
-        const result = await request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(archived.id)}?perspective=replay`,
-        );
-        return result.session;
-      });
-    },
-    [copyJuryRecordForTarget, request],
-  );
-
   const juryRecordCopyLabel = (sessionId: string): string => {
     const state =
       juryRecordCopySessionId === sessionId ? juryRecordCopyState : "idle";
@@ -4198,6 +4259,8 @@ export function DebateExperience(
     setPlayerDraft("");
     setTurnaboutObjecting(false);
     setTurnaboutEvidenceSourceId("");
+    setSetupRestoreLoadingId(null);
+    setSetupRestoreNotice(null);
     setError(null);
   };
 
@@ -4216,6 +4279,7 @@ export function DebateExperience(
   const chooseFormality = (nextFormality: DebateFormalityId): void => {
     if (nextFormality === formality) return;
     setFormality(nextFormality);
+    setMotion((current) => ({ ...current, title: undefined }));
     setRoleChecks([]);
   };
 
@@ -4227,6 +4291,9 @@ export function DebateExperience(
     setSelectedPresetId(presetId);
     setFormat(next.format);
     setFormality(next.formality);
+    if (next.formality !== formality) {
+      setMotion((current) => ({ ...current, title: undefined }));
+    }
     setPlayerRole(next.playerRole);
     if (next.playerRole === "participant") {
       const playerSlot =
@@ -6197,6 +6264,7 @@ export function DebateExperience(
     archived: DebateSessionListItemV1,
   ): Promise<void> => {
     setBusy(true);
+    setSetupRestoreNotice(null);
     setError(null);
     try {
       const perspective = archived.status === "completed" ? "replay" : "live";
@@ -6219,18 +6287,120 @@ export function DebateExperience(
     }
   };
 
+  const reuseSessionSetup = async (
+    archived: DebateSessionListItemV1,
+  ): Promise<void> => {
+    setBusy(true);
+    setSetupRestoreLoadingId(archived.id);
+    setSetupRestoreNotice(null);
+    setError(null);
+    try {
+      const perspective = archived.status === "completed" ? "replay" : "live";
+      const result = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
+      );
+      const draft = debateSessionRetryDraft(
+        result.session,
+        bots.map((bot) => bot.id),
+        selectedPresetId,
+      );
+      cancelCurrentPresentation();
+      presentationStore.clear();
+      activeSessionIdRef.current = null;
+      clearDebateDebrief();
+      setActiveSession(null);
+      setObserverPerspective("live");
+      setView("dashboard");
+      setStudioPanel("motion");
+      setVisitedSetupScreens(initialDebateSetupScreensVisited());
+      setSetupMode(draft.setupMode);
+      setTopic(draft.topic);
+      setFormat(draft.format);
+      setFormality(draft.formality);
+      setModeratorTitle(draft.moderatorTitle);
+      setSelectedPresetId(draft.selectedPresetId);
+      setSlates([]);
+      setMotion(draft.motion);
+      setCast(draft.cast);
+      setPlayerRole(draft.playerRole);
+      setPlayerSideId(draft.playerSideId);
+      setJuryEnabled(draft.juryEnabled);
+      setRoleChecks([]);
+      setEvidence(draft.evidence);
+      setActiveCastSlot(
+        draft.playerRole === "judge"
+          ? "forAdvocate"
+          : draft.playerRole === "participant"
+            ? draft.playerSideId === "for"
+              ? "againstAdvocate"
+              : "forAdvocate"
+            : "moderator",
+      );
+      setCastPickerSearch("");
+      setCastPickerGroupId("all");
+      setResearchQuery("");
+      setUrlEvidenceDraft(null);
+      setUrlEvidenceError(null);
+      setEvidenceObjectDraft(null);
+      setEvidenceEmojiSearchOpen(false);
+      setEvidenceEmojiSearchQuery("");
+      setSourceDrawerId(null);
+      setPlayerDraft("");
+      setTurnaboutObjecting(false);
+      setTurnaboutEvidenceSourceId("");
+      setSetupRestoreNotice(
+        draft.missingBotNames.length > 0
+          ? `Setup restored. The original proceeding is unchanged. Reassign unavailable Library bots: ${draft.missingBotNames.join(", ")}. Review every setup screen and run a fresh willingness check; your current model and routing stay selected.`
+          : "Setup restored. The original proceeding is unchanged. Review every setup screen and run a fresh willingness check; your current model and routing stay selected.",
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "That Debate setup could not be restored.",
+      );
+    } finally {
+      setSetupRestoreLoadingId(null);
+      setBusy(false);
+    }
+  };
+
   const startDebate = async (): Promise<void> => {
     if (!debateCanStart) return;
     setBusy(true);
+    setSetupRestoreNotice(null);
     setError(null);
     try {
+      let titledMotion = motion;
+      if (!motion.title?.trim()) {
+        try {
+          const titleResult = await props.request<{ title: string }>(
+            "/api/debates/title",
+            requestBody({
+              motion,
+              formality,
+              preferredProvider:
+                props.modelOverride?.provider ?? props.preferredProvider,
+              modelOverride: props.modelOverride?.model,
+              responseMode: props.responseMode,
+            }),
+          );
+          titledMotion = { ...motion, title: titleResult.title };
+        } catch {
+          titledMotion = {
+            ...motion,
+            title: debateTitleForMotion(motion, formality),
+          };
+        }
+        setMotion(titledMotion);
+      }
       const result = await props.request<{ session: DebateSessionV1 }>(
         "/api/debates",
         requestBody({
           presetId: effectivePresetId,
           format,
           formality,
-          motion,
+          motion: titledMotion,
           evidence,
           moderatorTitle: normalizeDebateModeratorTitle(moderatorTitle),
           moderatorBotId: effectiveModeratorBotId,
@@ -7660,8 +7830,8 @@ export function DebateExperience(
           <p className={styles.eyebrow}>Proceeding archive</p>
           <h2>Return to a proceeding</h2>
           <p>
-            Resume a live proceeding or revisit the final record without
-            disturbing the workbench.
+            Open the proceeding itself, or restore its setup into a fresh
+            editable workbench.
           </p>
         </div>
         <button
@@ -7691,8 +7861,9 @@ export function DebateExperience(
                 onClick={() => void openSession(session)}
                 disabled={busy}
               >
-                <strong>{session.motion}</strong>
+                <strong>{session.title}</strong>
                 <span>
+                  {session.motion} ·{" "}
                   {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
                   {debateProductionName(session.format, session.formality)} ·{" "}
                   {debateFormalityDescriptor(session.formality).title} ·{" "}
@@ -7704,17 +7875,17 @@ export function DebateExperience(
                 ) : null}
               </button>
               <div className={styles.archiveActions}>
-                {debateArchivedJuryRecordIsCopyable(session) ? (
-                  <button
-                    type="button"
-                    className={styles.archiveJuryCopyButton}
-                    onClick={() => void copyArchivedJuryRecord(session)}
-                    disabled={busy || juryRecordCopyState === "copying"}
-                    aria-label={`Copy Jury transcript for ${session.motion}`}
-                  >
-                    {juryRecordCopyLabel(session.id)}
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className={styles.archiveReuseButton}
+                  onClick={() => void reuseSessionSetup(session)}
+                  disabled={busy}
+                  aria-label={`Use setup from ${session.title}`}
+                >
+                  {setupRestoreLoadingId === session.id
+                    ? "Loading…"
+                    : "Use setup"}
+                </button>
                 <button
                   type="button"
                   className={styles.deleteButton}
@@ -7891,6 +8062,11 @@ export function DebateExperience(
       {error ? (
         <p className={styles.error} role="alert">
           {error}
+        </p>
+      ) : null}
+      {setupRestoreNotice ? (
+        <p className={styles.notice} role="status">
+          {setupRestoreNotice}
         </p>
       ) : null}
       <div className={styles.dashboardLayout}>
@@ -8521,7 +8697,8 @@ export function DebateExperience(
               onClick={() => selectSlate(slate)}
               data-selected={motion.id === slate.id ? "true" : undefined}
             >
-              <strong>{slate.motion}</strong>
+              <strong>{debateTitleForMotion(slate, formality)}</strong>
+              <span>{slate.motion}</span>
               <span>
                 {slate.forSide.label} ↔ {slate.againstSide.label}
               </span>
@@ -8552,6 +8729,7 @@ export function DebateExperience(
                   setMotion((current) => ({
                     ...current,
                     id: "custom-motion",
+                    title: undefined,
                     motion: value,
                   }));
                   setRoleChecks([]);
@@ -8575,6 +8753,7 @@ export function DebateExperience(
                     setMotion((current) => ({
                       ...current,
                       id: "custom-motion",
+                      title: undefined,
                       motion: value,
                     }));
                     setRoleChecks([]);
@@ -8618,6 +8797,7 @@ export function DebateExperience(
                             setMotion((current) => ({
                               ...current,
                               id: "custom-motion",
+                              title: undefined,
                               [sideId === "for" ? "forSide" : "againstSide"]: {
                                 ...current[
                                   sideId === "for" ? "forSide" : "againstSide"
@@ -8653,6 +8833,7 @@ export function DebateExperience(
                               setMotion((current) => ({
                                 ...current,
                                 id: "custom-motion",
+                                title: undefined,
                                 [sideId === "for" ? "forSide" : "againstSide"]:
                                   {
                                     ...side,
@@ -8757,7 +8938,8 @@ export function DebateExperience(
       ) : setupMode === "basic" && motionComplete ? (
         <article className={styles.basicMotionCard} aria-live="polite">
           <span>Prism prepared</span>
-          <h3>{motion.motion}</h3>
+          <h3>{debateTitleForMotion(motion, formality)}</h3>
+          <p>{motion.motion}</p>
           <div>
             <p>
               <strong>{motion.forSide.label}</strong>
@@ -11684,18 +11866,37 @@ export function DebateExperience(
     );
     const evidenceAlignmentView = debateStageEvidenceViewForCamera(
       stageAlignmentPreviewCamera,
+      stageAlignmentPreviewEvidenceKind,
     );
     const evidenceTableIsDefault =
-      stageAlignmentDraft.evidenceTable[evidenceAlignmentView].x ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[evidenceAlignmentView].x &&
-      stageAlignmentDraft.evidenceTable[evidenceAlignmentView].y ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[evidenceAlignmentView].y &&
-      stageAlignmentDraft.evidenceTable[evidenceAlignmentView].size ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[evidenceAlignmentView]
-          .size;
+      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
+        evidenceAlignmentView
+      ].x ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
+          stageAlignmentPreviewEvidenceKind
+        ][evidenceAlignmentView].x &&
+      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
+        evidenceAlignmentView
+      ].y ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
+          stageAlignmentPreviewEvidenceKind
+        ][evidenceAlignmentView].y &&
+      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
+        evidenceAlignmentView
+      ].size ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
+          stageAlignmentPreviewEvidenceKind
+        ][evidenceAlignmentView].size;
     const activeGavelPose = stageAlignmentDraft.gavel[stageAlignmentGavelPose];
     const activeEvidenceTable =
-      stageAlignmentDraft.evidenceTable[evidenceAlignmentView];
+      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
+        evidenceAlignmentView
+      ];
+    const alignmentEvidencePreviewItem =
+      debateStageAlignmentEvidencePreviewItem(
+        stageAlignmentPreviewEvidenceKind,
+        stageAlignmentPreviewEvidenceEmoji,
+      );
     const previewIsDefault =
       placementIsDefault &&
       evidenceTableIsDefault &&
@@ -11854,19 +12055,34 @@ export function DebateExperience(
                                 DEFAULT_DEBATE_STAGE_ALIGNMENT.moderator,
                               gavel: DEFAULT_DEBATE_STAGE_ALIGNMENT.gavel,
                               evidenceTable: {
-                                ...current.evidenceTable,
-                                moderator:
-                                  DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable
-                                    .moderator,
+                                exhibit: {
+                                  ...current.evidenceTable.exhibit,
+                                  moderator:
+                                    DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable
+                                      .exhibit.moderator,
+                                },
+                                source: {
+                                  ...current.evidenceTable.source,
+                                  moderator:
+                                    DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable
+                                      .source.moderator,
+                                },
                               },
                             })
                           : normalizeDebateStageAlignment({
                               ...current,
                               wide: DEFAULT_DEBATE_STAGE_ALIGNMENT.wide,
                               evidenceTable: {
-                                ...current.evidenceTable,
-                                wide: DEFAULT_DEBATE_STAGE_ALIGNMENT
-                                  .evidenceTable.wide,
+                                exhibit: {
+                                  ...current.evidenceTable.exhibit,
+                                  wide: DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                    .evidenceTable.exhibit.wide,
+                                },
+                                source: {
+                                  ...current.evidenceTable.source,
+                                  wide: DEFAULT_DEBATE_STAGE_ALIGNMENT
+                                    .evidenceTable.source.wide,
+                                },
                               },
                             }),
                       )
@@ -11998,19 +12214,12 @@ export function DebateExperience(
                         aria-hidden="true"
                       />
                       <DebateForumLightMasks depth="foreground" />
-                      <div
-                        className={styles.evidencePedestal}
-                        data-alignment-preview="true"
-                        data-debate-evidence-alignment-preview="true"
-                        data-evidence-view={evidenceAlignmentView}
-                        aria-hidden="true"
-                      >
-                        <span
-                          className={styles.evidenceAlignmentPreviewEmoji}
-                        >
-                          {stageAlignmentPreviewEvidenceEmoji}
-                        </span>
-                      </div>
+                      <DebateEvidencePedestal
+                        item={alignmentEvidencePreviewItem}
+                        view={evidenceAlignmentView}
+                        alignmentPreview
+                        onOpen={() => {}}
+                      />
                       <DebateModeratorGavel
                         theme={stageAlignmentPreviewTheme}
                         color={moderatorBot.color ?? "#d9d2ff"}
@@ -12381,6 +12590,7 @@ export function DebateExperience(
                   aria-label="Debate evidence placement controls"
                   data-debate-evidence-tuner="true"
                   data-evidence-view={evidenceAlignmentView}
+                  data-evidence-kind={stageAlignmentPreviewEvidenceKind}
                 >
                   <header>
                     <div>
@@ -12389,7 +12599,11 @@ export function DebateExperience(
                           ? "Moderator view"
                           : "Wide view"}
                       </span>
-                      <strong>Evidence</strong>
+                      <strong>
+                        {stageAlignmentPreviewEvidenceKind === "source"
+                          ? "Source pamphlet"
+                          : "Exhibit"}
+                      </strong>
                     </div>
                     <button
                       type="button"
@@ -12400,10 +12614,15 @@ export function DebateExperience(
                             ...current,
                             evidenceTable: {
                               ...current.evidenceTable,
-                              [evidenceAlignmentView]:
-                                DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
-                                  evidenceAlignmentView
+                              [stageAlignmentPreviewEvidenceKind]: {
+                                ...current.evidenceTable[
+                                  stageAlignmentPreviewEvidenceKind
                                 ],
+                                [evidenceAlignmentView]:
+                                  DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
+                                    stageAlignmentPreviewEvidenceKind
+                                  ][evidenceAlignmentView],
+                              },
                             },
                           }),
                         )
@@ -12412,71 +12631,97 @@ export function DebateExperience(
                       Reset
                     </button>
                   </header>
-                  <div className={styles.alignmentGavelTunerRows}>
-                    {(
-                      [
-                        {
-                          key: "x",
-                          label: "Horizontal",
-                          min: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-                          max: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-                          step: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP,
-                          suffix: "%",
-                        },
-                        {
-                          key: "y",
-                          label: "Vertical",
-                          min: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-                          max: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-                          step: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP,
-                          suffix: "%",
-                        },
-                        {
-                          key: "size",
-                          label: "Size",
-                          min: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-                          max: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX,
-                          step: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_STEP,
-                          suffix: "%",
-                        },
-                      ] as const
-                    ).map((control) => {
-                      const value = activeEvidenceTable[control.key];
-                      return (
-                        <label key={control.key}>
-                          <span>
-                            {control.label}
-                            <output>
-                              {control.key !== "size" && value > 0 ? "+" : ""}
-                              {value.toFixed(control.key === "size" ? 0 : 1)}
-                              {control.suffix}
-                            </output>
-                          </span>
-                          <input
-                            type="range"
-                            min={control.min}
-                            max={control.max}
-                            step={control.step}
-                            value={value}
-                            aria-label={`Evidence ${control.label.toLowerCase()}`}
-                            onChange={(event) => {
-                              const nextValue = Number(
-                                event.currentTarget.value,
-                              );
-                              setStageAlignmentDraft((current) =>
-                                updateDebateStageEvidenceTable(
-                                  current,
-                                  evidenceAlignmentView,
-                                  {
-                                    [control.key]: nextValue,
-                                  },
-                                ),
-                              );
-                            }}
-                          />
-                        </label>
-                      );
-                    })}
+                  <div className={styles.alignmentEvidenceEditor}>
+                    <div
+                      className={styles.alignmentEvidenceKindToggle}
+                      role="group"
+                      aria-label="Evidence asset to align"
+                    >
+                      {(["exhibit", "source"] as const).map((evidenceKind) => (
+                        <button
+                          type="button"
+                          key={evidenceKind}
+                          aria-pressed={
+                            stageAlignmentPreviewEvidenceKind === evidenceKind
+                          }
+                          data-debate-evidence-kind-toggle={evidenceKind}
+                          onClick={() =>
+                            setStageAlignmentPreviewEvidenceKind(evidenceKind)
+                          }
+                        >
+                          {evidenceKind === "source" ? "Source" : "Exhibit"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className={styles.alignmentGavelTunerRows}>
+                      {(
+                        [
+                          {
+                            key: "x",
+                            label: "Horizontal",
+                            min: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP,
+                            suffix: "%",
+                          },
+                          {
+                            key: "y",
+                            label: "Vertical",
+                            min: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP,
+                            suffix: "%",
+                          },
+                          {
+                            key: "size",
+                            label: "Size",
+                            min: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_STEP,
+                            suffix: "%",
+                          },
+                        ] as const
+                      ).map((control) => {
+                        const value = activeEvidenceTable[control.key];
+                        return (
+                          <label key={control.key}>
+                            <span>
+                              {control.label}
+                              <output>
+                                {control.key !== "size" && value > 0
+                                  ? "+"
+                                  : ""}
+                                {value.toFixed(control.key === "size" ? 0 : 1)}
+                                {control.suffix}
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={control.min}
+                              max={control.max}
+                              step={control.step}
+                              value={value}
+                              aria-label={`${stageAlignmentPreviewEvidenceKind === "source" ? "Source" : "Exhibit"} ${control.label.toLowerCase()}`}
+                              onChange={(event) => {
+                                const nextValue = Number(
+                                  event.currentTarget.value,
+                                );
+                                setStageAlignmentDraft((current) =>
+                                  updateDebateStageEvidenceTable(
+                                    current,
+                                    stageAlignmentPreviewEvidenceKind,
+                                    evidenceAlignmentView,
+                                    {
+                                      [control.key]: nextValue,
+                                    },
+                                  ),
+                                );
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div
                     className={styles.alignmentGavelPreviewActions}
@@ -12500,21 +12745,23 @@ export function DebateExperience(
                               ? "Copy failed"
                               : "Copy evidence JSON"}
                       </button>
-                      <button
-                        type="button"
-                        data-debate-evidence-reshuffle="true"
-                        onClick={() =>
-                          setStageAlignmentPreviewEvidenceEmoji(
-                            pickDebateStageAlignmentEvidenceEmoji(),
-                          )
-                        }
-                      >
-                        New emoji
-                      </button>
+                      {stageAlignmentPreviewEvidenceKind === "exhibit" ? (
+                        <button
+                          type="button"
+                          data-debate-evidence-reshuffle="true"
+                          onClick={() =>
+                            setStageAlignmentPreviewEvidenceEmoji(
+                              pickDebateStageAlignmentEvidenceEmoji(),
+                            )
+                          }
+                        >
+                          New emoji
+                        </button>
+                      ) : null}
                     </div>
                     <small>
-                      Place and scale evidence for this camera. Object exhibits
-                      and source documents both sit on the table.
+                      Exhibit and Source placement are saved independently for
+                      Wide and lectern-close cameras.
                     </small>
                   </div>
                 </section>
@@ -12779,6 +13026,11 @@ export function DebateExperience(
   const renderLive = (): React.JSX.Element => {
     if (!activeSession) return renderLobby();
     const session = activeSession;
+    const roomPresence = debateRoomPresence({
+      status: session.status,
+      presenting,
+      observerPerspective,
+    });
     const judgeGuidedStep = debateJudgeGuidedStepKind({
       playerRole: session.playerRole,
       status: session.status,
@@ -12903,7 +13155,10 @@ export function DebateExperience(
                 ? "moderator"
                 : debateAutoCameraView(activeRole)
             : effectiveCameraMode;
-    const evidenceView = debateStageEvidenceViewForCamera(cameraView);
+    const evidenceView = debateStageEvidenceViewForCamera(
+      cameraView,
+      activeEvidenceItem?.kind ?? "exhibit",
+    );
     const juryDecisionCountdown = juryDeliberationDecision ? (
       <DebateDeadlineCountdown
         deadlineMs={juryDeliberationDecision.deadlineMs}
@@ -13455,6 +13710,7 @@ export function DebateExperience(
           data-theme={props.theme}
           data-session-status={session.status}
           data-session-phase={session.phase}
+          data-debate-room-presence={roomPresence}
           data-debate-material-quality={debateMaterialQuality}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           style={
@@ -13493,8 +13749,15 @@ export function DebateExperience(
                 {phaseLabel(session)} · {session.playerRole}
               </p>
               <h1 data-debate-motion-title="true" title={session.motion.motion}>
-                {session.motion.motion}
+                {debateTitleForMotion(session.motion, session.formality)}
               </h1>
+              <p
+                className={styles.liveMotion}
+                data-debate-exact-motion="true"
+                title={session.motion.motion}
+              >
+                {session.motion.motion}
+              </p>
             </div>
           </header>
           <div className={styles.liveWorkspace}>
