@@ -4,13 +4,19 @@ import type {
   CoffeeTableEnergy,
 } from "./coffeeSettings.js";
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
+import {
+  signalPersonaTemperamentFor,
+  type SignalPersonaTemperament,
+} from "./signalPersonaTemperament.ts";
 
 export const LISTENER_REACTION_PLAN_VERSION = 1 as const;
 export const CROSSTALK_RECLAIM_PLAN_VERSION = 1 as const;
 export const SOCIAL_SILENCE_MARKER_VERSION = 1 as const;
 export const SOCIAL_SILENCE_CONTENT = "..." as const;
 export const SOCIAL_SILENCE_MAX_CONSECUTIVE_TURNS = 4 as const;
-export const SOCIAL_SILENCE_DEFAULT_HOLD_MS = 900 as const;
+// Animated camera moves need enough room to arrive on the silent speaker and
+// let the pressure register before the next bot begins preparing.
+export const SOCIAL_SILENCE_DEFAULT_HOLD_MS = 1_800 as const;
 /** At or beyond this heard ratio, a cut-in no longer warrants a retort/reclaim. */
 export const CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO = 0.85;
 
@@ -86,7 +92,26 @@ export type ListenerReactionSpokenCue =
   | "Wait a second."
   | "Hold on."
   | "Hang on."
-  | "One second.";
+  | "One second."
+  | "Mm-hmm."
+  | "Right."
+  | "I see."
+  | "Hmm."
+  | "Oh."
+  | "Go on."
+  | "Nice."
+  | "Oh, really?"
+  | "Really?"
+  | "Seriously?"
+  | "Huh."
+  | "Huh?"
+  | "Huh!"
+  | "Okay."
+  | "Wow."
+  | "Indeed."
+  | "Interesting."
+  | "...The hell?"
+  | "What the fuck?";
 export const BOT_CROSSTALK_INTERRUPTER_CUES = [
   "Wait a second.",
   "Hold on.",
@@ -170,6 +195,25 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "Hold on.",
   "Hang on.",
   "One second.",
+  "Mm-hmm.",
+  "Right.",
+  "I see.",
+  "Hmm.",
+  "Oh.",
+  "Go on.",
+  "Nice.",
+  "Oh, really?",
+  "Really?",
+  "Seriously?",
+  "Huh.",
+  "Huh?",
+  "Huh!",
+  "Okay.",
+  "Wow.",
+  "Indeed.",
+  "Interesting.",
+  "...The hell?",
+  "What the fuck?",
 ]);
 const INTERRUPTED_SPEAKER_CUES = new Set<BotCrosstalkInterruptedSpeakerCue>(
   BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES,
@@ -224,7 +268,7 @@ export function listenerReactionHasCrosstalkAudio(
 
 // Attentive presence should be the norm in Signal; the remaining gaps keep
 // listener reactions from feeling metronomic.
-const SIGNAL_VISUAL_REACTION_CHANCE = 0.82;
+const SIGNAL_VISUAL_REACTION_CHANCE = 0.9;
 
 function stableUnit(seed: string): number {
   let hash = 2166136261;
@@ -640,16 +684,71 @@ function signalSpokenBackchannel(
   mood: VoiceDeliveryMood,
   tensionLevel: number,
   recentSpokenCues: readonly ListenerReactionSpokenCue[],
+  listenerPersona: string | null | undefined,
 ): ListenerReactionSpokenCue {
-  const bank: readonly ListenerReactionSpokenCue[] =
-    tensionLevel >= 2 || mood === "strained"
-      ? ["hmm", "I see", "right"]
-      : mood === "warm" || mood === "joyful"
-        ? ["mm-hmm", "right", "sure, sure", "go on"]
-        : ["mm-hmm", "right", "I see", "hmm", "sure, sure", "oh"];
+  const style = signalListenerBackchannelStyleFor(listenerPersona);
+  const tense = tensionLevel >= 2 || mood === "strained";
+  const bank: readonly ListenerReactionSpokenCue[] = tense
+    ? style === "irreverent"
+      ? ["...The hell?", "What the fuck?", "Seriously?", "Huh."]
+      : style === "innocent"
+        ? ["Oh, really?", "Huh?", "Oh.", "Okay."]
+        : style === "commanding"
+          ? ["Hmm.", "I see.", "Indeed.", "Go on."]
+          : ["Hmm.", "I see.", "Interesting.", "Go on."]
+    : style === "irreverent"
+      ? ["Huh.", "Seriously?", "...The hell?", "What the fuck?"]
+      : style === "innocent"
+        ? ["Oh, really?", "Nice.", "Wow.", "Okay."]
+        : style === "commanding"
+          ? ["Hmm.", "I see.", "Indeed.", "Go on."]
+          : style === "playful"
+            ? ["Oh, really?", "Nice.", "Huh!", "Okay."]
+            : style === "warm"
+              ? ["Mm-hmm.", "I see.", "Nice.", "Oh, really?"]
+              : style === "analytical" || style === "inventive"
+                ? ["Interesting.", "I see.", "Hmm.", "Go on."]
+                : ["Mm-hmm.", "Right.", "I see.", "Hmm.", "Oh."];
   const recent = new Set(recentSpokenCues.slice(-2));
   const fresh = bank.filter((cue) => !recent.has(cue));
   return choose(`${seed}:spoken`, fresh.length > 0 ? fresh : bank);
+}
+
+export type SignalListenerBackchannelStyle =
+  | Exclude<SignalPersonaTemperament, "creative" | "adventurous" | "neutral">
+  | "irreverent"
+  | "innocent"
+  | "neutral";
+
+/**
+ * Maps authored persona prose onto a bounded delivery bank. Explicit language
+ * style wins over broad temperament so abrasive characters can sound abrasive
+ * without making playful or innocent characters inherit the same profanity.
+ */
+export function signalListenerBackchannelStyleFor(
+  listenerPersona: string | null | undefined,
+): SignalListenerBackchannelStyle {
+  const source = listenerPersona?.replace(/\s+/gu, " ").trim() ?? "";
+  if (
+    /\b(?:profan(?:e|ity)|swears?|swearing|vulgar|crude|irreverent|abrasive|caustic|cynical|rick sanchez|fuck|shit)\b/iu.test(
+      source,
+    )
+  ) {
+    return "irreverent";
+  }
+  if (
+    /\b(?:innocent|childlike|childish|naive|simple-minded|dim-witted|sweet-natured|patrick star)\b/iu.test(
+      source,
+    )
+  ) {
+    return "innocent";
+  }
+  const temperament = signalPersonaTemperamentFor(source);
+  return temperament === "creative" ||
+      temperament === "adventurous" ||
+      temperament === "neutral"
+    ? "neutral"
+    : temperament;
 }
 
 export function buildSignalListenerReactionPlanV1(args: {
@@ -665,6 +764,8 @@ export function buildSignalListenerReactionPlanV1(args: {
   minimumTargetProgress?: number;
   /** Recent saved cues keep conversational acknowledgements from looping. */
   recentSpokenCues?: readonly ListenerReactionSpokenCue[];
+  /** Authored listener identity used only to select a bounded cue bank. */
+  listenerPersona?: string | null;
 }): ListenerReactionPlanV1 | null {
   if (!args.messageId || !args.speakerBotId || !args.listenerBotId) return null;
   const seed = [
@@ -683,20 +784,21 @@ export function buildSignalListenerReactionPlanV1(args: {
   }
   const audioChance =
     args.segment === "opening" && args.listenerRole === "guest"
-      ? 0.68
+      ? 0.78
       : args.listenerRole === "host"
-        ? 0.72
-        : 0.68;
+        ? 0.82
+        : 0.78;
   const audible =
     args.segment !== "closing" &&
     stableUnit(`${seed}:audio-roll`) < audioChance;
   const spokenCue =
-    audible && stableUnit(`${seed}:spoken-roll`) < 0.92
+    audible && stableUnit(`${seed}:spoken-roll`) < 0.96
       ? signalSpokenBackchannel(
           seed,
           args.mood,
           tensionLevel,
           args.recentSpokenCues ?? [],
+          args.listenerPersona,
         )
       : undefined;
   const vocalFoley =
@@ -721,7 +823,7 @@ export function buildSignalListenerReactionPlanV1(args: {
     targetProgress: Math.max(targetProgress(seed), minimumTargetProgress),
     seed,
     cameraCutEligible:
-      stableUnit(`${seed}:camera-roll`) < 0.22,
+      stableUnit(`${seed}:camera-roll`) < 0.12,
   };
 }
 

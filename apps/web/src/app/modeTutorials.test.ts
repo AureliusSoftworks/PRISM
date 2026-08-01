@@ -872,6 +872,28 @@ describe("mode tutorials", () => {
     assert.match(copy, /Hard LOCAL mode keeps the passive provenance status/u);
   });
 
+  it("teaches persona comments, intentional reaction cuts, and the formal Signal close", () => {
+    const camera = MODE_TUTORIALS.botcast.steps[6]?.body ?? "";
+    const controlRoom = MODE_TUTORIALS.botcast.steps[7]?.body ?? "";
+    assert.match(camera, /Most brief listener comments stay off-camera/u);
+    assert.match(
+      camera,
+      /social-silence beat belongs to the silent bot on camera/u,
+    );
+    assert.match(
+      controlRoom,
+      /brief contextual comment in that character’s own voice/u,
+    );
+    assert.match(
+      controlRoom,
+      /Ordinary listener comments never take transcript ownership or interrupt the primary turn/u,
+    );
+    assert.match(
+      controlRoom,
+      /formal closing beat[\s\S]*thank the guest and the audience/u,
+    );
+  });
+
   it("clamps restored progress to a valid step", () => {
     assert.equal(modeTutorialStep("zen", -1).heading, "Choose a relationship");
     assert.equal(
@@ -1503,11 +1525,23 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /restrained nonverbal reaction/u,
+      /brief contextual comment in that character’s own voice/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /Ordinary listener reactions never inject scripted speech or cut the primary turn/u,
+      /Ordinary listener comments never take transcript ownership or interrupt the primary turn/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      /Most brief listener comments stay off-camera/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
+      /social-silence beat belongs to the silent bot on camera/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /formal closing beat[\s\S]*thank the guest and the audience/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",

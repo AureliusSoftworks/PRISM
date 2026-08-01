@@ -198,11 +198,14 @@ describe("Signal experience shell", () => {
     assert.match(source, /speakingShot: liveSpeakingShot/u);
     assert.match(
       source,
-      /postSpeechHoldShot:[\s\S]{0,100}liveCameraMode === "auto"[\s\S]{0,100}liveCameraPostSpeechHoldShot/u,
+      /postSpeechHoldShot:[\s\S]{0,220}liveCameraMode === "auto"[\s\S]{0,160}!liveActiveMessageIsSocialSilence[\s\S]{0,160}liveCameraPostSpeechHoldShot/u,
     );
     assert.match(source, /SIGNAL_LIVE_CAMERA_POST_SPEECH_HOLD_MS = 900/u);
     assert.match(source, /holdLiveCameraAfterSpeech\(message\.speakerRole\)/u);
-    assert.match(source, /botThinking: liveBotThinking/u);
+    assert.match(
+      source,
+      /botThinking: liveBotThinking && !liveActiveMessageIsSocialSilence/u,
+    );
     assert.match(
       source,
       /producerGuestThinking:[\s\S]{0,120}liveProducerGuestThinking[\s\S]{0,120}liveCameraMode === "auto"/u,
@@ -231,6 +234,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /createSignalReactionVoiceLifecycle\(/u);
     assert.match(source, /signalEphemeralSpeakingBotIds\.has\(roleBotId\)/u);
     assert.doesNotMatch(source, /beginSignalInterruptCompactHold/u);
+    assert.match(source, /signalListenerReactionCameraShot\(\{/u);
     assert.match(
       source,
       /cameraCutEligible[\s\S]{0,120}liveCameraMode === "auto"/u,
@@ -1691,7 +1695,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /const liveEphemeralSpeakingShot = episode/u);
     assert.match(
       source,
-      /listenerReactionShot:\s*liveCameraMode === "auto" &&\s*\(!liveListenerReactionPlan\?\.interjectionAttempt \|\|\s*cameraTransitionMode === "instant"\)\s*\?\s*\(liveEphemeralSpeakingShot \?\? liveReactionShot\)\s*:\s*null/u,
+      /signalListenerReactionCameraShot\(\{[\s\S]{0,220}cameraCutEligible:[\s\S]{0,120}liveListenerReactionPlan\.cameraCutEligible[\s\S]{0,220}ephemeralSpeakingShot: liveEphemeralSpeakingShot/u,
     );
     assert.doesNotMatch(source, /wordCount \* 310/u);
     assert.match(

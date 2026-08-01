@@ -51,10 +51,10 @@ describe("listener reaction planning", () => {
     ).filter((plan) => plan !== null);
     const audible = opening.filter((plan) => plan.spokenCue || plan.vocalFoley);
 
-    assert.ok(opening.length > 1_580 && opening.length < 1_700);
-    assert.ok(audible.length / 2_000 > 0.5);
-    assert.ok(audible.length / opening.length > 0.63);
-    assert.ok(audible.length / opening.length < 0.73);
+    assert.ok(opening.length > 1_760 && opening.length < 1_840);
+    assert.ok(audible.length / 2_000 > 0.66);
+    assert.ok(audible.length / opening.length > 0.74);
+    assert.ok(audible.length / opening.length < 0.82);
     assert.ok(opening.every((plan) => plan.targetProgress >= 0.62));
   });
 
@@ -80,10 +80,10 @@ describe("listener reaction planning", () => {
       if (plan?.vocalFoley) vocalFoley += 1;
       assert.equal(plan?.interjectionAttempt, undefined);
     }
-    assert.ok(visual / 8_000 > 0.79 && visual / 8_000 < 0.85);
-    assert.ok(audible / 8_000 > 0.5);
-    assert.ok(audible / visual > 0.68 && audible / visual < 0.76);
-    assert.ok(spoken / audible > 0.89 && spoken / audible < 0.95);
+    assert.ok(visual / 8_000 > 0.88 && visual / 8_000 < 0.92);
+    assert.ok(audible / 8_000 > 0.7);
+    assert.ok(audible / visual > 0.78 && audible / visual < 0.85);
+    assert.ok(spoken / audible > 0.94 && spoken / audible < 0.98);
     assert.equal(spoken + vocalFoley, audible);
   });
 
@@ -101,12 +101,14 @@ describe("listener reaction planning", () => {
       })
     ).filter((plan) => plan !== null);
 
-    assert.ok(warningReactions.length > 1_580 && warningReactions.length < 1_700);
+    assert.ok(warningReactions.length > 1_760 && warningReactions.length < 1_840);
     assert.ok(
       warningReactions.every(
         (plan) =>
           plan?.spokenCue === undefined ||
-          ["hmm", "I see", "right"].includes(plan.spokenCue),
+          ["Hmm.", "I see.", "Interesting.", "Go on."].includes(
+            plan.spokenCue,
+          ),
       ),
     );
     assert.ok(
@@ -116,6 +118,104 @@ describe("listener reaction planning", () => {
       warningReactions.every(
         (plan) => plan?.interruptedSpeakerCue === undefined,
       ),
+    );
+  });
+
+  it("keeps short comments inside the listener's authored persona", () => {
+    const cuesFor = (listenerBotId: string, listenerPersona: string) =>
+      Array.from({ length: 1_000 }, (_, index) =>
+        buildSignalListenerReactionPlanV1({
+          episodeId: "persona-comments",
+          messageId: `message-${index}`,
+          speakerBotId: "speaker",
+          listenerBotId,
+          listenerRole: "host",
+          segment: "interview",
+          mood: "strained",
+          tensionLevel: 2,
+          listenerPersona,
+        })?.spokenCue
+      ).filter((cue): cue is NonNullable<typeof cue> => Boolean(cue));
+    const rick = cuesFor(
+      "rick",
+      "Rick Sanchez is caustic, cynical, irreverent, and swears casually.",
+    );
+    const patrick = cuesFor(
+      "patrick",
+      "Patrick Star is innocent, silly, simple-minded, and sweet-natured.",
+    );
+
+    assert.ok(rick.includes("...The hell?"));
+    assert.ok(rick.includes("What the fuck?"));
+    assert.ok(
+      rick.every((cue) =>
+        ["...The hell?", "What the fuck?", "Seriously?", "Huh."].includes(
+          cue,
+        )
+      ),
+    );
+    assert.ok(
+      patrick.every((cue) =>
+        ["Oh, really?", "Huh?", "Oh.", "Okay."].includes(cue)
+      ),
+    );
+    assert.equal(
+      patrick.some((cue) => /fuck|hell/iu.test(cue)),
+      false,
+    );
+  });
+
+  it("improves the reviewed Vader episode without turning comments into camera churn", () => {
+    const turns = [
+      ["44b623b2f835f0d978bd7cee", "host", "opening", "neutral"],
+      ["fab96b95d49e2d0006c79060", "guest", "opening", "guarded"],
+      ["d6716c79b83fc23978025c96", "host", "interview", "neutral"],
+      ["36879c372bc86c32bc84cbb0", "guest", "interview", "neutral"],
+      ["d82073ac9ddd05c0fb4cd6e9", "guest", "interview", "neutral"],
+      ["44833562ac74f8cd182dd7fc", "guest", "interview", "neutral"],
+      ["d491f79a0a5038faeb41f65f", "host", "interview", "neutral"],
+      ["50cf24a8401607b82f07457d", "guest", "interview", "neutral"],
+      ["149bd723c8276211067918df", "guest", "interview", "neutral"],
+      ["8c7424dfb60e2c86d12814b0", "host", "interview", "neutral"],
+      ["4c2c9576730744ccccc57615", "guest", "interview", "neutral"],
+      ["75c3a68052d4166766f102ea", "host", "interview", "neutral"],
+      ["51cbac41833a65008a6aa00e", "guest", "interview", "neutral"],
+      ["bb7de0a8311c4f5602cd8adb", "host", "interview", "neutral"],
+      ["ed8a57ee66cb0ea430ee25ed", "guest", "interview", "neutral"],
+      ["f37054424cea111f5de31be5", "host", "closing", "neutral"],
+    ] as const;
+    const plans = turns.map(([messageId, speakerRole, segment, mood]) =>
+      buildSignalListenerReactionPlanV1({
+        episodeId: "ee58368b3e472d2b81951c51",
+        messageId,
+        speakerBotId:
+          speakerRole === "host"
+            ? "30e01ea993d1af12e2360ae8"
+            : "db55e02fed44740f636a9544",
+        listenerBotId:
+          speakerRole === "host"
+            ? "db55e02fed44740f636a9544"
+            : "30e01ea993d1af12e2360ae8",
+        listenerRole: speakerRole === "host" ? "guest" : "host",
+        segment,
+        mood,
+        tensionLevel: 0,
+        listenerPersona:
+          speakerRole === "host"
+            ? "A severe authoritarian speaker."
+            : "Darth Vader projects disciplined commanding authority and controlled power.",
+      })
+    );
+    const audible = plans.filter(
+      (plan) => plan?.spokenCue || plan?.vocalFoley,
+    );
+
+    assert.equal(plans.filter(Boolean).length, 15);
+    assert.equal(audible.length, 11);
+    assert.equal(plans.filter((plan) => plan?.cameraCutEligible).length, 0);
+    assert.equal(
+      plans.some((plan) => plan?.spokenCue === "sure, sure"),
+      false,
     );
   });
 
@@ -262,6 +362,7 @@ describe("listener reaction planning", () => {
     assert.equal(social.decision, "social_silence");
     if (social.decision !== "social_silence") return;
     assert.equal(social.marker.volleyTurn, 4);
+    assert.equal(social.marker.holdMs, 1_800);
     assert.deepEqual(
       normalizeSocialSilenceMarkerV1(social.marker),
       social.marker,

@@ -66150,6 +66150,35 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   transition: opacity 280ms ease;
 }
 
+/* A clean white pass restores the hot center of the LED after the persona
+   tint is applied. The soft screen-blended edge makes the mask read as light
+   coming through the frame instead of a flat graphic laid over it. */
+.botFaceFrameLedGlow {
+  position: absolute;
+  inset: var(--bot-face-frame-inset, -7%);
+  z-index: calc(var(--bot-face-frame-led-z, 8) + 1);
+  display: block;
+  overflow: hidden;
+  border-radius: 50%;
+  clip-path: circle(50% at 50% 50%);
+  pointer-events: none;
+  background: #fff;
+  -webkit-mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mix-blend-mode: screen;
+  opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.98))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.58));
+  transition: opacity 280ms ease;
+}
+
 /* Keep identity color in WebKit's normal image paint tree. The authored alpha
    rasters arrive pre-colored, so the fixed live plate no longer depends on mask
    compositing (which WebKit could drop while Avatar Studio stayed fine). */

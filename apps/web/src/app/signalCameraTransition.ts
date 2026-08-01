@@ -48,6 +48,25 @@ export function signalCameraTransitionsShouldAnimate(
   return mode === "animated" && !prefersReducedMotion;
 }
 
+/**
+ * Ordinary backchannels cut only when the persisted director plan explicitly
+ * allows it. Power interruptions remain cuttable in Instant mode, where the
+ * move can land before the overlap is already over.
+ */
+export function signalListenerReactionCameraShot(args: {
+  cameraCutEligible: boolean;
+  interjectionAttempt: boolean;
+  transitionMode: SignalCameraTransitionMode;
+  ephemeralSpeakingShot?: SignalDirectedCameraShot | null;
+  timedReactionShot?: SignalDirectedCameraShot | null;
+}): SignalDirectedCameraShot | null {
+  if (!args.cameraCutEligible) return null;
+  if (args.interjectionAttempt && args.transitionMode !== "instant") {
+    return null;
+  }
+  return args.ephemeralSpeakingShot ?? args.timedReactionShot ?? null;
+}
+
 /** Auto keeps the room visible while a bot prepares, then follows the speaker. */
 export function signalLiveAutoCameraShot(args: {
   baseShot: SignalDirectedCameraShot;

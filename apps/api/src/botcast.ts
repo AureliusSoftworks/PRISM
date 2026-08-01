@@ -8871,12 +8871,12 @@ export function buildBotcastSpeakerPrompt(
     ? "Your interruption Power just cut the other speaker at the exact audience-heard prefix saved in the transcript (the words before the cut-off dash). Take the mic immediately and continue from only those heard words. Do not invent, complete, paraphrase, or react to an unheard ending. If a trailing stock retort such as \"Apparently we're moving on\" or \"I'll leave it\" appears after the dash in older transcript text, ignore it — that is crosstalk performance, not the speaker's claim. Do not name the Power or explain the cutoff."
     : null;
   const producerCutRule = producerCut
-    ? "The transmission now needs one prompt, natural closing beat. If the latest line was broken off or a short host bridge just cut in, continue naturally from that interruption without repeating the bridge or pretending the unfinished thought was completed. Otherwise treat this as a normal handoff. Close with tact in your own voice using one or two very short sentences. Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction."
+    ? `The transmission now needs one prompt, natural closing beat. If the latest line was broken off or a short host bridge just cut in, continue naturally from that interruption without repeating the bridge or pretending the unfinished thought was completed. Otherwise treat this as a normal handoff. Close with tact in your own voice using two or three very short sentences. ${args.episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${hostNamesGuest} by name for joining and thank the audience for watching or listening.`} Do not ask a question, recap the interview, invite another response, explain why the show is ending, or mention a producer, cue, control room, cut, technical problem, or instruction.`
     : null;
   const closingOwnershipRule =
     args.episode.segment === "closing"
       ? args.speakerRole === "host"
-        ? "Binding show contract: this is the final host-owned beat, and the episode ends immediately after this turn. Never yield the sign-off, invite another response, or give the guest the last word. Stay in the host's established diction and attitude: one or two short sentences, usually 8 to 32 words, built around one sharp topic-specific observation and an optional brief thanks. Do not address listeners at home, announce that the conversation is ending, prescribe reflection, summarize a lesson, moralize, turn the guest into a cautionary tale, or drift into ceremonial farewell language. Do not explain, redefine, or contradict persona lore or catchphrases; omit a lore reference unless its persisted meaning is certain."
+        ? `Binding show contract: this is the final host-owned beat, and the episode ends immediately after this turn. Never yield the sign-off, invite another response, or give the guest the last word. Stay in the host's established diction and attitude: two or three short sentences, usually 16 to 48 words. First land one sharp topic-specific observation. Then take a distinct formal closing beat. ${args.episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${hostNamesGuest} by name for joining and thank the audience for watching or listening. Both thanks are required.`} The wording and attitude must belong to this host rather than a canned suffix. Do not call them "listeners at home," announce that the conversation is ending, prescribe reflection, summarize a lesson, moralize, turn the guest into a cautionary tale, or drift into ceremonial farewell language. Do not explain, redefine, or contradict persona lore or catchphrases; omit a lore reference unless its persisted meaning is certain.`
         : "Binding show contract: only the host may close Signal. Give a final response without presenting it as the sign-off; the host must speak last."
       : null;
   const echoingPeerTurnRule =
@@ -8985,7 +8985,7 @@ export function buildBotcastSpeakerPrompt(
             ? "There are no live producer cues or queue cards in this episode. Build the interview autonomously from the AI-synthesized plan and on-air answers."
             : "Private producer direction is silent control-room guidance. Incorporate it naturally; never quote it, mention a producer, or address the user.",
           producerCut
-            ? "Close the broadcast promptly and naturally. Thank the guest and/or listeners without extending the conversation."
+            ? `Close the broadcast promptly and naturally. ${args.episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening" : `Thank ${hostNamesGuest} by name for joining and thank the audience for watching or listening`} without extending the conversation.`
             : wrappingUp
             ? peerEchoesAddressedSpeech
               ? `Close the broadcast yourself now with one concise, topic-grounded takeaway and thank ${hostNamesGuest}. Do not invite another response; the guest can only repeat your words.`
@@ -9003,7 +9003,7 @@ export function buildBotcastSpeakerPrompt(
                   : voluntaryGuestDeparture
                     ? "The guest has ended the interview and is visibly leaving. Let the exit land, then briefly reflect and close the episode without asking another question."
                     : "The guest has walked out. Let the exit land without calling after them, then react in character, briefly reflect without grandstanding, and close the episode."
-                : "Close with one short, earned, topic-specific thought in your established persona; optionally thank the guest without turning the sign-off into a lesson or ceremony."
+                : `Close with one short, earned, topic-specific thought in your established persona. Then take a formal closing beat. ${args.episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${hostNamesGuest} by name for joining and thank the audience for watching or listening. Keep both thanks in this host's own voice instead of using a generic sign-off.`}`
               : "Ask one specific question or concise follow-up. Avoid stacked questions and generic praise.",
         ]
       : [
@@ -9077,12 +9077,12 @@ export function buildBotcastSpeakerPrompt(
         "Speak only the on-air line. Never narrate the room, silence, pauses, body movement, facial expression, or your own delivery in third person; Signal schedules supported performance separately.",
         "Return only the next spoken line. No speaker label, no analysis, no camera directions, and no markdown.",
         producerCut
-            ? "Keep this expedited sign-off extremely brief: one or two short sentences, usually 8 to 24 spoken words."
+            ? "Keep this expedited sign-off brief: two or three short sentences, usually 16 to 40 spoken words."
             : firstHostOpening
               ? "Keep this opening conversational and brisk: two to four concise sentences, usually 35 to 90 spoken words."
               : args.speakerRole === "host" &&
                   args.episode.segment === "closing"
-                ? "Keep this final host sign-off sharp: one or two short sentences, usually 8 to 32 spoken words."
+                ? "Keep this final host sign-off sharp: two or three short sentences, usually 16 to 48 spoken words."
               : "Keep this turn conversational and brisk: one to three concise sentences, usually 12 to 45 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${effectivePersonaPrompt}`,
@@ -9576,6 +9576,7 @@ type BotcastUtteranceRepairReason =
   | "empty"
   | "empty_after_cleanup"
   | "generic_closing"
+  | "incomplete_signoff"
   | "incomplete"
   | "non_answering_deferral"
   | "peer_label"
@@ -9773,15 +9774,41 @@ function botcastHostClosingNeedsPersonaRetry(content: string): boolean {
   const spoken = extractBotcastVoicePerformance(content, false).content.trim();
   if (!spoken) return true;
   const wordCount = spoken.split(/\s+/u).filter(Boolean).length;
-  if (wordCount > 40) return true;
+  if (wordCount > 52) return true;
   const sentenceCount =
     spoken.match(/[.!?…]+(?:["”'’])?(?=\s|$)/gu)?.length ?? 0;
   return (
-    sentenceCount > 2 ||
+    sentenceCount > 3 ||
     BOTCAST_GENERIC_HOST_CLOSING_PATTERNS.some((pattern) =>
       pattern.test(spoken),
     )
   );
+}
+
+/** A normal Signal close gives the topic a final beat, then thanks both rooms. */
+export function botcastHostClosingHasFormalThanks(
+  content: string,
+  guestName: string,
+): boolean {
+  const spoken = extractBotcastVoicePerformance(content, false).content
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!spoken || !guestName.trim()) return false;
+  const escapedGuestName = guestName
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const thanksGuest = new RegExp(
+    `(?:\\bthank(?:s| you)?\\b[^.!?]{0,56}\\b${escapedGuestName}\\b|\\b${escapedGuestName}\\b[^.!?]{0,56}\\bthank(?:s| you)?\\b)`,
+    "iu",
+  ).test(spoken);
+  const thanksAudience =
+    /\bthank(?:s| you)?(?:\s+all)?\s+for\s+(?:joining\s+us|watching|listening|tuning\s+in)\b/iu.test(
+      spoken,
+    ) ||
+    /\bto\s+(?:everyone|those of you|the audience|our audience)\s+(?:watching|listening)[^.!?]{0,40}\bthank(?:s| you)?\b/iu.test(
+      spoken,
+    );
+  return thanksGuest && thanksAudience;
 }
 
 function botcastHostClosingInvitesResponse(content: string): boolean {
@@ -9835,6 +9862,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   peerName: string;
   speakerRole: BotcastSpeakerRole;
   hostClosing?: boolean;
+  hostClosingGuestName?: string;
   rejectPeerIdentityClaim?: boolean;
   requireFreshContact?: boolean;
   requireAddressedInsult?: boolean;
@@ -9857,7 +9885,12 @@ function validateBotcastAutoSpeakerUtterance(input: {
     !spokenContent ||
     botcastUtteranceClaimsSignalHistory(spokenContent) ||
     (input.hostClosing &&
-      botcastHostClosingNeedsPersonaRetry(spokenContent)) ||
+      (botcastHostClosingNeedsPersonaRetry(spokenContent) ||
+        (input.hostClosingGuestName !== undefined &&
+          !botcastHostClosingHasFormalThanks(
+            spokenContent,
+            input.hostClosingGuestName,
+          )))) ||
     (input.requireFreshContact &&
       !botPowerResponseIsFirstIntroductionV1(
         spokenContent,
@@ -10510,16 +10543,27 @@ function ensureBotcastFinalHostBeat(
     return episode;
   }
 
+  const powerSnapshot = botcastEpisodePowerSnapshot(episode);
   const hostPowers =
-    botcastEpisodePowerSnapshot(episode)?.hostPowers ??
+    powerSnapshot?.hostPowers ??
     loadBotProfile(db, userId, episode.hostBotId).powers;
+  const guestName =
+    powerSnapshot?.guestIdentity?.name ??
+    (episode.guestKind === "producer"
+      ? BOTCAST_PRODUCER_GUEST_NAME
+      : loadBotProfile(db, userId, episode.guestBotId).name);
   const previousGuestLine = episode.messages
     .slice()
     .reverse()
     .find((message) => message.speakerRole === "guest")?.content;
-  const plainSignoff = force
-    ? "Sorry, gotta go!"
-    : "That is where we will leave it. Thank you for listening.";
+  const plainSignoff =
+    episode.guestPresenceMode === "audience_only"
+      ? force
+        ? "Sorry, gotta go. Thank you for watching."
+        : "That is where we will leave it. Thank you for watching."
+      : force
+        ? `Sorry, gotta go. ${guestName}, thank you for joining me, and thank you for watching.`
+        : `That is where we will leave it. ${guestName}, thank you for joining me, and thank you for watching.`;
   const content = botPowerIsMutedV1(hostPowers)
     ? BOT_POWER_CANONICAL_SILENCE_V1
     : botPowerEchoesAddressedSpeechV1(hostPowers)
@@ -12072,6 +12116,12 @@ export async function advanceBotcastEpisode(
     : buildBotcastSpeakerPrompt(promptArgs);
   const hostClosingTurn =
     speakerRole === "host" && episode.segment === "closing";
+  const hostClosingRequiresFormalThanks =
+    hostClosingTurn &&
+    episode.guestPresenceMode !== "audience_only" &&
+    !speakerIsMutedForTurn &&
+    !speakerRepeatsForHearingPower &&
+    !speakerEchoesForTurn;
   const signalStageDirection = producerCueStageActionEligible
     ? [
         "Signal stage-direction format for this producer-directed turn:",
@@ -12127,7 +12177,7 @@ export async function advanceBotcastEpisode(
   const validationRetryInstruction = [
     "The previous draft was rejected before it could go on air.",
     hostClosingTurn
-      ? `Write a completely new final sign-off in ${speaker.name}'s established persona. Use one or two short sentences, 8 to 32 words, with one sharp topic-specific observation and at most a brief thanks. Do not explain a lesson, address listeners at home, prescribe reflection, use ceremonial farewell language, or explain or reinterpret persona lore or catchphrases.`
+      ? `Write a completely new final sign-off in ${speaker.name}'s established persona. Use two or three short sentences, 16 to 48 words: one sharp topic-specific observation, then a distinct closing beat. ${episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${peerAddressName} by name for joining and thank the audience for watching or listening. Both thanks are mandatory.`} It must sound like this host, not a canned suffix. Do not explain a lesson, address "listeners at home," prescribe reflection, use ceremonial farewell language, or explain or reinterpret persona lore or catchphrases.`
       : `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
     "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
     "This is one anthology meeting. Ignore sequel numbering in the topic and do not claim earlier episodes, appearances, shared lessons, or prior Signal history.",
@@ -12274,6 +12324,10 @@ export async function advanceBotcastEpisode(
                   peerName: peer.name,
                   speakerRole,
                   hostClosing: hostClosingTurn,
+                  ...(hostClosingTurn &&
+                  episode.guestPresenceMode !== "audience_only"
+                    ? { hostClosingGuestName: peerAddressName }
+                    : {}),
                   rejectPeerIdentityClaim: speakerEternallyIntroduces,
                   requireFreshContact: speakerEternallyIntroduces,
                   requireAddressedInsult: speakerRequiresAddressedInsult,
@@ -12315,6 +12369,10 @@ export async function advanceBotcastEpisode(
             peerName: peer.name,
             speakerRole,
             hostClosing: hostClosingTurn,
+            ...(hostClosingTurn &&
+            episode.guestPresenceMode !== "audience_only"
+              ? { hostClosingGuestName: peerAddressName }
+              : {}),
             rejectPeerIdentityClaim: speakerEternallyIntroduces,
             requireFreshContact: speakerEternallyIntroduces,
             requireAddressedInsult: speakerRequiresAddressedInsult,
@@ -12509,7 +12567,9 @@ export async function advanceBotcastEpisode(
         : `I will stay with the subject itself: ${topicWithPunctuation} The part worth examining next is what changes when the idea meets a real choice.`
       : null;
   const producerCutFallback = producerCut
-    ? "We'll leave it there. Thank you for joining us, and thank you for listening."
+    ? episode.guestPresenceMode === "audience_only"
+      ? "We'll leave it there. Thank you for watching."
+      : `We'll leave it there. ${hostNamesGuest}, thank you for joining me, and thank you for watching.`
     : null;
   const echoHostGuestCutFallback =
     producerCut &&
@@ -12609,7 +12669,7 @@ export async function advanceBotcastEpisode(
     speakerRole === "host" && silentPeerTurnCount > 0
       ? timedSilentGuestFallback ??
         (unansweredSilentPeerTurnCount > 1 || episode.segment === "closing"
-          ? `The question remains unanswered. That is where we will leave it; thank you for listening.`
+          ? `The question remains unanswered. ${hostNamesGuest}, thank you for joining me, and thank you for watching.`
           : unansweredSilentPeerTurnCount === 1
             ? `No spoken answer yet. ${hostNamesGuest}, you can use one clear gesture, or leave the question unanswered.`
             : "I can see your reaction, but I will not put words to it.")
@@ -12631,16 +12691,16 @@ export async function advanceBotcastEpisode(
           ? openingIntroFallback!
           : episode.guestPresenceMode === "audience_only"
             ? episode.segment === "closing" || wrapUpCue
-              ? `We will close on the central question: ${topicWithPunctuation} The strongest answer is the one that survives consequence, contradiction, and scrutiny.`
+              ? `We will close on the central question: ${topicWithPunctuation} Thank you for watching.`
               : `Let us stay with the central question: ${topicWithPunctuation} The useful test is which concrete choice, cost, or contradiction would change the answer.`
             : episode.segment === "closing"
               ? guestAlreadyDeparted
                 ? hostCallsAfterDepartingGuest
                   ? voluntaryGuestDeparture
-                    ? `Before you go, ${hostNamesGuest}—thank you. We will leave it there; thank you for listening.`
-                    : `Wait—where are you going, ${hostNamesGuest}? We will leave it there; thank you for listening.`
-                  : `${hostNamesGuest} has left the studio. That is where we will leave it; thank you for listening.`
-                : `That is where we will leave it. ${hostNamesGuest}, thank you for joining me.`
+                    ? `Before you go, ${hostNamesGuest}—thank you for joining me. Thank you all for watching.`
+                    : `Wait—where are you going, ${hostNamesGuest}? Thank you for joining me, and thank you all for watching.`
+                  : `${hostNamesGuest} has left the studio. Thank you for joining me, and thank you all for watching.`
+                : `That is where we will leave it. ${hostNamesGuest}, thank you for joining me, and thank you for watching.`
               : wrapUpCue
                 ? `${hostNamesGuest}, before we close, what final thought would you leave with our listeners?`
                 : hostRecoveryFallback)
@@ -12665,15 +12725,24 @@ export async function advanceBotcastEpisode(
     true,
     speakerEternallyIntroduces,
   );
-  const generatedUtterance =
-    hostClosingTurn &&
-    !sanitizedGeneratedUtterance.repairReason &&
-    botcastHostClosingNeedsPersonaRetry(sanitizedGeneratedUtterance.content)
-      ? {
-          content: fallback,
-          repairReason: "generic_closing" as const,
-        }
-      : sanitizedGeneratedUtterance;
+  const generatedHostClosingRepairReason =
+    hostClosingTurn && !sanitizedGeneratedUtterance.repairReason
+      ? botcastHostClosingNeedsPersonaRetry(sanitizedGeneratedUtterance.content)
+        ? "generic_closing" as const
+        : hostClosingRequiresFormalThanks &&
+            !botcastHostClosingHasFormalThanks(
+              sanitizedGeneratedUtterance.content,
+              peerAddressName,
+            )
+          ? "incomplete_signoff" as const
+          : null
+      : null;
+  const generatedUtterance = generatedHostClosingRepairReason
+    ? {
+        content: fallback,
+        repairReason: generatedHostClosingRepairReason,
+      }
+    : sanitizedGeneratedUtterance;
   const generatedContent = generatedUtterance.content;
   // Pull physical beats before the legacy voice cleanup removes leading actions.
   // Vocal square-bracket tags remain exclusively in voicePerformanceText.
@@ -12771,16 +12840,25 @@ export async function advanceBotcastEpisode(
     })
       ? fallback
       : prematureSignoffSafeContent;
-  const closingContractRepaired = Boolean(
+  const closingContractRepairReason =
     speakerRole === "host" &&
       episode.segment === "closing" &&
       !picklesBeatKind &&
       !socialSilenceMarker &&
       !speakerIsMutedForTurn &&
       !speakerRepeatsForHearingPower &&
-      !speakerEchoesForTurn &&
-      botcastHostClosingInvitesResponse(powerPresentationContent),
-  );
+      !speakerEchoesForTurn
+      ? botcastHostClosingInvitesResponse(powerPresentationContent)
+        ? "generic_closing" as const
+        : hostClosingRequiresFormalThanks &&
+            !botcastHostClosingHasFormalThanks(
+              powerPresentationContent,
+              peerAddressName,
+            )
+          ? "incomplete_signoff" as const
+          : null
+      : null;
+  const closingContractRepaired = closingContractRepairReason !== null;
   const unbudgetedContent = closingContractRepaired
     ? fallback
     : powerPresentationContent;
@@ -13244,9 +13322,8 @@ export async function advanceBotcastEpisode(
                 : "power_runtime",
             reason:
               generatedUtterance.repairReason ??
-              (closingContractRepaired
-                ? "generic_closing"
-                : "power_fresh_contact"),
+              closingContractRepairReason ??
+              "power_fresh_contact",
             fallbackKind:
               speakerRole === "guest"
                 ? "guest_substantive_answer"
@@ -13571,6 +13648,7 @@ export async function advanceBotcastEpisode(
             ? { minimumTargetProgress: openingReactionMinimumProgress }
             : {}),
           recentSpokenCues: recentSignalSpokenCues,
+          listenerPersona: listener.systemPrompt,
         })
       : null;
   if (

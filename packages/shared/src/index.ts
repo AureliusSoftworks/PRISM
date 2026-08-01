@@ -1177,6 +1177,8 @@ export type UsagePurpose =
   | "coffee_summary"
   | "composer_cleanup"
   | "debate_generation"
+  | "debate_synopsis"
+  | "debate_debrief"
   | "embedding"
   | "image_generation"
   | "bot_profile_picture"

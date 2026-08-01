@@ -214,6 +214,7 @@ import {
 import {
   readSignalCameraTransitionMode,
   signalCameraTransitionsShouldAnimate,
+  signalListenerReactionCameraShot,
   signalLiveAutoCameraShot,
   writeSignalCameraTransitionMode,
   type SignalCameraTransitionMode,
@@ -10916,6 +10917,14 @@ export function BotcastExperience({
       ? (listenerReactionPlanByMessageIdRef.current.get(liveActiveMessage.id) ??
         botcastListenerReactionForMessage(episode.events, liveActiveMessage.id))
       : null;
+  const liveActiveMessageIsSocialSilence = Boolean(
+    liveActiveMessage &&
+      socialSilenceMessageIsMarkedV1({
+        content: liveActiveMessage.content,
+        marker: liveActiveMessage.socialSilence,
+        mode: "signal",
+      }),
+  );
   const liveReactionAtMs =
     liveActiveMessage && liveListenerReactionPlan && liveSpeech
       ? (listenerReactionAtMsByMessageIdRef.current.get(liveActiveMessage.id) ??
@@ -11026,15 +11035,24 @@ export function BotcastExperience({
           // Interruption overlaps cut only in Instant mode; an Animated sweep
           // is too slow for the beat. Fixed manual cameras never yield.
           listenerReactionShot:
-            liveCameraMode === "auto" &&
-            (!liveListenerReactionPlan?.interjectionAttempt ||
-              cameraTransitionMode === "instant")
-              ? (liveEphemeralSpeakingShot ?? liveReactionShot)
+            liveCameraMode === "auto" && liveListenerReactionPlan
+              ? signalListenerReactionCameraShot({
+                  cameraCutEligible:
+                    liveListenerReactionPlan.cameraCutEligible,
+                  interjectionAttempt: Boolean(
+                    liveListenerReactionPlan.interjectionAttempt,
+                  ),
+                  transitionMode: cameraTransitionMode,
+                  ephemeralSpeakingShot: liveEphemeralSpeakingShot,
+                  timedReactionShot: liveReactionShot,
+                })
               : null,
           speakingShot: liveSpeakingShot,
           postSpeechHoldShot:
-            liveCameraMode === "auto" ? liveCameraPostSpeechHoldShot : null,
-          botThinking: liveBotThinking,
+            liveCameraMode === "auto" && !liveActiveMessageIsSocialSilence
+              ? liveCameraPostSpeechHoldShot
+              : null,
+          botThinking: liveBotThinking && !liveActiveMessageIsSocialSilence,
           producerGuestThinking:
             liveProducerGuestThinking && liveCameraMode === "auto",
         });

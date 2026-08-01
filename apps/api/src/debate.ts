@@ -10353,23 +10353,31 @@ function normalizeDebateDebriefChatRequest(raw: unknown): {
   if (!content) {
     throw new HttpError(400, "Enter a question about their in-debate reasoning.");
   }
-  const messages = Array.isArray(body.messages)
-    ? body.messages
-        .flatMap((entry) => {
-          if (!entry || typeof entry !== "object") return [];
-          const record = entry as Record<string, unknown>;
-          const role =
-            record.role === "user" || record.role === "assistant"
-              ? record.role
-              : null;
-          const text =
-            typeof record.content === "string"
-              ? record.content.trim().slice(0, 2_000)
-              : "";
-          return role && text ? [{ role, content: text }] : [];
-        })
-        .slice(-DEBATE_DEBRIEF_CHAT_HISTORY_MAX)
-    : [];
+  const messages: Array<{ role: "user" | "assistant"; content: string }> =
+    Array.isArray(body.messages)
+      ? body.messages
+          .flatMap(
+            (
+              entry,
+            ): Array<{ role: "user" | "assistant"; content: string }> => {
+              if (!entry || typeof entry !== "object") return [];
+              const record = entry as Record<string, unknown>;
+              const text =
+                typeof record.content === "string"
+                  ? record.content.trim().slice(0, 2_000)
+                  : "";
+              if (!text) return [];
+              if (record.role === "user") {
+                return [{ role: "user", content: text }];
+              }
+              if (record.role === "assistant") {
+                return [{ role: "assistant", content: text }];
+              }
+              return [];
+            },
+          )
+          .slice(-DEBATE_DEBRIEF_CHAT_HISTORY_MAX)
+      : [];
   return { targetBotId, content, messages };
 }
 

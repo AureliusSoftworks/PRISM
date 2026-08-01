@@ -1030,6 +1030,20 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /\.botFaceFrameMetalGrain/);
     assert.doesNotMatch(css, /--bot-face-metal-grain/);
 
+    const ledGlowRule = ruleForSelectorNeedles(".botFaceFrameLedGlow");
+    assert.match(ledGlowRule, /background:\s*#fff\s*;/);
+    assert.match(
+      ledGlowRule,
+      /-webkit-mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)/
+    );
+    assert.match(
+      ledGlowRule,
+      /mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)/
+    );
+    assert.match(ledGlowRule, /mix-blend-mode:\s*screen\s*;/);
+    assert.match(ledGlowRule, /drop-shadow\(0 0 4px rgba\(255, 255, 255, 0\.58\)\)/);
+    assert.match(pageSource, /data-frame-material-layer="led-glow"/);
+
     const lightFaceRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace'
     );

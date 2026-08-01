@@ -5,6 +5,7 @@ import {
   readSignalCameraTransitionMode,
   SIGNAL_CAMERA_TRANSITION_STORAGE_KEY,
   signalCameraTransitionsShouldAnimate,
+  signalListenerReactionCameraShot,
   signalLiveAutoCameraShot,
   writeSignalCameraTransitionMode,
 } from "./signalCameraTransition.ts";
@@ -113,6 +114,49 @@ describe("Signal camera transition preference", () => {
         producerGuestThinking: false,
       }),
       "right",
+    );
+  });
+
+  it("keeps ordinary comments off camera unless the saved plan earns a cut", () => {
+    assert.equal(
+      signalListenerReactionCameraShot({
+        cameraCutEligible: false,
+        interjectionAttempt: false,
+        transitionMode: "instant",
+        ephemeralSpeakingShot: "right",
+        timedReactionShot: "right",
+      }),
+      null,
+    );
+    assert.equal(
+      signalListenerReactionCameraShot({
+        cameraCutEligible: true,
+        interjectionAttempt: false,
+        transitionMode: "animated",
+        ephemeralSpeakingShot: "right",
+      }),
+      "right",
+    );
+  });
+
+  it("cuts interruption audio only when Instant can land the move", () => {
+    assert.equal(
+      signalListenerReactionCameraShot({
+        cameraCutEligible: true,
+        interjectionAttempt: true,
+        transitionMode: "animated",
+        ephemeralSpeakingShot: "left",
+      }),
+      null,
+    );
+    assert.equal(
+      signalListenerReactionCameraShot({
+        cameraCutEligible: true,
+        interjectionAttempt: true,
+        transitionMode: "instant",
+        ephemeralSpeakingShot: "left",
+      }),
+      "left",
     );
   });
 });

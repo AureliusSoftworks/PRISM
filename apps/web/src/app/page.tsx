@@ -18340,6 +18340,11 @@ function BotFaceFrame({
         kind="led"
         identityColor={identityColor}
       />
+      <span
+        className={styles.botFaceFrameLedGlow}
+        data-frame-material-layer="led-glow"
+        aria-hidden="true"
+      />
     </>
   );
 }

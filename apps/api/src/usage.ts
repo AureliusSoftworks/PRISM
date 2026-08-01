@@ -445,6 +445,8 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "coffee_summary":
     case "composer_cleanup":
     case "debate_generation":
+    case "debate_synopsis":
+    case "debate_debrief":
     case "embedding":
     case "image_generation":
     case "bot_profile_picture":
@@ -486,6 +488,8 @@ const USAGE_PURPOSE_LABELS: Record<UsagePurpose, string> = {
   coffee_summary: "Coffee Summary",
   composer_cleanup: "Composer Cleanup",
   debate_generation: "Debate Generation",
+  debate_synopsis: "Debate Synopsis",
+  debate_debrief: "Debate Debrief",
   embedding: "Embedding",
   image_generation: "Image Generation",
   bot_profile_picture: "Bot Profile Picture",

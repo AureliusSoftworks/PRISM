@@ -49,6 +49,7 @@ import {
   botcastIdentityShapeshiftStatesV1,
   botcastGuestClaimsSilentHostSpoke,
   botcastHostClaimsSilentGuestAnswered,
+  botcastHostClosingHasFormalThanks,
   botcastHostCallsAfterDepartingGuest,
   botcastCrosstalkFloorOutcomeV1,
   botcastPlanDirectionalIrritationForMeaningfulCutoffV1,
@@ -181,6 +182,30 @@ function generation(provider: LlmProvider) {
     signalSocialSilenceChanceOverride: 0,
   };
 }
+
+it("requires the final Signal beat to thank both guest and audience", () => {
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "The record is clear. Ivo Stone, thank you for joining me. Thank you for watching.",
+      "Ivo Stone",
+    ),
+    true,
+  );
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "The record is clear. Ivo Stone, thank you for joining me.",
+      "Ivo Stone",
+    ),
+    false,
+  );
+  assert.equal(
+    botcastHostClosingHasFormalThanks(
+      "The record is clear. Thank you for watching.",
+      "Ivo Stone",
+    ),
+    false,
+  );
+});
 
 function generatedDashboardBlurbs(prefix: string): string[] {
   return Array.from(
@@ -4863,7 +4888,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(closingTurn.episode.segment, "closing");
       assert.equal(
         closingTurn.message?.content,
-        "The question remains unanswered. That is where we will leave it; thank you for listening.",
+        "The question remains unanswered. Ivo Stone, thank you for joining me, and thank you for watching.",
       );
       assert.match(
         captures[2]!.map((message) => message.content).join("\n"),
@@ -7230,7 +7255,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(closing.episode.segment, "closing");
       assert.equal(
         closing.message?.content,
-        "That is where we will leave it. Ivo Stone, thank you for joining me.",
+        "Pleased to meet you—I'm Mara Vale. That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
       );
       assert.doesNotMatch(closing.message?.content ?? "", /\?/u);
       const closingUtterance = closing.episode.events.findLast(
@@ -7240,7 +7265,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         closingUtterance?.payload.utteranceRepair?.reason,
-        "generic_closing",
+        "incomplete_signoff",
       );
       assert.equal(
         closingUtterance?.payload.utteranceRepair?.fallbackKind,
@@ -13841,7 +13866,10 @@ describe("Botcast persistence and isolation", () => {
         episode.id,
       );
 
-      assert.equal(cut.message?.content, "Sorry, gotta go!");
+      assert.equal(
+        cut.message?.content,
+        "Sorry, gotta go. Ivo Stone, thank you for joining me, and thank you for watching.",
+      );
       assert.equal(cancelled.status, "cancelled");
       assert.equal(cancelled.completedAt, null);
       assert.equal(cancelled.runtimeMs, null);
@@ -13857,7 +13885,7 @@ describe("Botcast persistence and isolation", () => {
     const provider = recordingProvider(
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone.",
-        "Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo Stone, thank you for joining me, and thank you all for watching.",
       ],
       [],
     );
@@ -13892,7 +13920,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(cut.message?.speakerRole, "host");
       assert.equal(
         cut.message?.content,
-        "Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo Stone, thank you for joining me, and thank you all for watching.",
       );
       assert.equal(cut.episode.status, "completed");
       assert.equal(cut.episode.outcome, "completed");
@@ -13918,7 +13946,7 @@ describe("Botcast persistence and isolation", () => {
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone.",
         "This guest answer was prepared but never reached the audience.",
-        "Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo Stone, thank you for joining me, and thank you all for watching.",
       ],
       [],
     );
@@ -13963,7 +13991,7 @@ describe("Botcast persistence and isolation", () => {
         cut.episode.messages.map((message) => message.content),
         [
           opening.message?.content,
-          "Ivo, thank you for joining me, and thank you all for listening.",
+          "Ivo Stone, thank you for joining me, and thank you all for watching.",
         ],
       );
       assert.doesNotMatch(
@@ -13990,7 +14018,7 @@ describe("Botcast persistence and isolation", () => {
     const provider = recordingProvider(
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore A show that ends on the producer's cut.",
-        "Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo Stone, thank you for joining me, and thank you all for watching.",
       ],
       captures,
     );
@@ -14018,7 +14046,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(cut.message?.speakerRole, "host");
       assert.equal(
         cut.message?.content,
-        "Ivo, thank you for joining me, and thank you all for listening.",
+        "Ivo Stone, thank you for joining me, and thank you all for watching.",
       );
       assert.equal(ended.status, "completed");
       assert.equal(ended.outcome, "completed");
@@ -14034,7 +14062,7 @@ describe("Botcast persistence and isolation", () => {
       assert.match(closingPrompt, /Otherwise treat this as a normal handoff/u);
       assert.match(closingPrompt, /one prompt, natural closing beat/u);
       assert.doesNotMatch(closingPrompt, /stopped unexpectedly|flash of surprise/u);
-      assert.match(closingPrompt, /one or two very short sentences/u);
+      assert.match(closingPrompt, /two or three very short sentences/u);
       assert.match(closingPrompt, /Do not ask a question/u);
       assert.match(closingPrompt, /mention a producer, cue, control room, cut/u);
       assert.ok(ended.events.some((event) => event.kind === "cut_away"));
@@ -14120,7 +14148,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(cut.message?.speakerRole, "host");
       assert.equal(
         cut.message?.content,
-        "That is where we will leave it. Thank you for listening.",
+        "That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
       );
       assert.equal(cut.episode.status, "completed");
       assert.equal(cut.episode.messages.at(-1)?.speakerRole, "host");
@@ -14206,7 +14234,7 @@ describe("Botcast persistence and isolation", () => {
     const provider = recordingProvider(
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore immediate cuts.",
-        "Ivo, thank you for joining me. Thank you all for listening.",
+        "Ivo Stone, thank you for joining me. Thank you all for watching.",
       ],
       [],
     );
@@ -14247,7 +14275,7 @@ describe("Botcast persistence and isolation", () => {
         cut.episode.messages.map((message) => message.content),
         [
           "Welcome to Mara Vale in the Margins. I'm Mara Vale—",
-          "Ivo, thank you for joining me. Thank you all for listening.",
+          "Ivo Stone, thank you for joining me. Thank you all for watching.",
         ],
       );
       assert.equal(cut.episode.messages[0]?.voicePerformanceText, null);
@@ -14263,7 +14291,7 @@ describe("Botcast persistence and isolation", () => {
       [
         "Welcome to Mara Vale in the Margins. I'm Mara Vale, and today I'm joined by Ivo Stone to explore immediate guest cuts.",
         "The first consequence is that nobody gets to finish the original plan before the stakes change.",
-        "That is where we will leave it. Thank you for listening.",
+        "That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
       ],
       [],
     );
@@ -14314,7 +14342,7 @@ describe("Botcast persistence and isolation", () => {
         cut.episode.messages.slice(1).map((message) => message.content),
         [
           "The first consequence is that nobody gets to finish—",
-          "That is where we will leave it. Thank you for listening.",
+          "That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
         ],
       );
       assert.equal(
@@ -14398,14 +14426,16 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(result.episode.status, "live");
       assert.equal(result.episode.messages.length, 0);
       releaseHostSignOff(
-        "Oh—we have to leave it there. Thank you both for being here.",
+        "Oh—we have to leave it there. Ivo Stone, thank you for joining me, and thank you for watching.",
       );
       const cut = await cutting;
       assert.equal(cut.message?.speakerRole, "host");
       assert.equal(cut.episode.status, "completed");
       assert.deepEqual(
         cut.episode.messages.map((message) => message.content),
-        ["Oh—we have to leave it there. Thank you both for being here."],
+        [
+          "Oh—we have to leave it there. Ivo Stone, thank you for joining me, and thank you for watching.",
+        ],
       );
     } finally {
       db.close();
@@ -14811,7 +14841,7 @@ describe("Botcast persistence and isolation", () => {
         "Accountability, if anyone survives long enough to demand it.",
         "Your apocalypse has standards, Ivo: bucket or basket for the less glamorous emergency?",
         "A basket is absurd. A bucket at least admits what sort of emergency it is.",
-        "Even apocalypse has standards. Ivo, thank you.",
+        "Even apocalypse has standards. Ivo Stone, thank you for joining me. Thank you for watching.",
       ],
       captures,
     );
@@ -14916,7 +14946,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(closing.episode.segment, "closing");
       assert.equal(
         closing.message?.content,
-        "Even apocalypse has standards. Ivo, thank you.",
+        "Even apocalypse has standards. Ivo Stone, thank you for joining me. Thank you for watching.",
       );
 
       const cueEvent = closing.episode.events.findLast(
@@ -15232,7 +15262,7 @@ describe("Botcast persistence and isolation", () => {
     const rejectedClosing =
       "Ivo Stone, your burden remains just like my own: history unrepentant. Remember, 'Wubba lubba dub dub' isn't about pain but recognition. In ending this conversation for now, I ask that you reflect on the true weight of war's lasting shadow and consider its enduring impact. And to my listeners at home, we can learn from this cautionary tale; I bid you farewell.";
     const repairedClosing =
-      "History doesn't repent, Ivo; it leaves fingerprints. Thanks for putting yours on the glass.";
+      "History doesn't repent; it leaves fingerprints. Ivo Stone, thanks for putting yours on the glass. Thanks for watching.";
     const provider = recordingProvider(
       [
         "A quick opening.",
@@ -15301,6 +15331,10 @@ describe("Botcast persistence and isolation", () => {
       assert.match(originalClosingPrompt, /Do not explain, redefine, or contradict persona lore or catchphrases/iu);
       assert.match(retryPrompt, /previous draft was rejected/iu);
       assert.match(retryPrompt, /completely new final sign-off in Rick Sanchez's established persona/iu);
+      assert.match(
+        retryPrompt,
+        /thank(?:s)? Ivo Stone by name for joining and thank(?:s)? the audience for watching or listening/iu,
+      );
       assert.equal(
         hostClose.episode.events.findLast(
           (event) => event.kind === "utterance",
@@ -15403,6 +15437,18 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(closed.episode.status, "completed");
       assert.equal(closed.episode.segment, "closing");
+      assert.equal(
+        closed.message?.content,
+        "That is where we will leave it. Ivo Stone, thank you for joining me, and thank you for watching.",
+      );
+      assert.equal(
+        closed.episode.events.findLast(
+          (event) =>
+            event.kind === "utterance" &&
+            event.payload.messageId === closed.message?.id,
+        )?.payload.utteranceRepair?.reason,
+        "incomplete_signoff",
+      );
     } finally {
       db.close();
     }
@@ -16991,7 +17037,7 @@ describe("Botcast persistence and isolation", () => {
         "This prepared guest answer should be discarded before it airs.",
         "Before we close, who should hold that final authority?",
         "An independent safety lead should hold final authority.",
-        "That independent authority is where we will leave it. Ivo, thank you for joining me.",
+        "That independent authority is where we will leave it. Ivo Stone, thank you for joining me. Thank you for watching.",
       ],
       captures,
     );
@@ -17092,7 +17138,7 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.equal(
         hostClose.episode.messages.at(-1)?.content,
-        "That independent authority is where we will leave it. Ivo, thank you for joining me.",
+        "That independent authority is where we will leave it. Ivo Stone, thank you for joining me. Thank you for watching.",
       );
       assert.match(
         captures[4]!.map((message) => message.content).join("\n"),
