@@ -348,6 +348,11 @@ describe("Debate experience", () => {
     assert.match(source, /Start Debate/u);
     assert.match(source, /data-tutorial-target="debate-rowdiness"/u);
     assert.match(source, /aria-label="Debate rowdiness"/u);
+    assert.match(source, /data-tutorial-target="debate-rounds"/u);
+    assert.match(source, /aria-label="Forum rebuttal rounds"/u);
+    assert.match(source, /resolveDebateForumRoundPlan/u);
+    assert.match(source, /forumRounds:/u);
+    assert.match(source, /Auto rounds · no Jury/u);
     assert.match(
       source,
       /setFormat\("forum"\)[\s\S]{0,180}setPlayerRole\("judge"\)[\s\S]{0,180}setJuryEnabled\(false\)/u,
@@ -672,6 +677,8 @@ describe("Debate experience", () => {
     assert.match(source, /session\.formatState\.floorOwnerBotId/u);
     assert.match(source, /The record is ready/u);
     assert.match(source, /Return to a proceeding/u);
+    assert.match(source, /debateActiveDurationLabel\(session\.activeDurationMs\)/u);
+    assert.match(source, /session\.activeDurationMs === null/u);
     assert.match(source, /"The record"/u);
     assert.match(css, /\.formatPicker/u);
     assert.match(
@@ -841,18 +848,22 @@ describe("Debate experience", () => {
     );
   });
 
-  it("prepares English speech before committing the responder camera", () => {
+  it("prepares English speech in parallel with the responder handoff", () => {
     assert.match(
       source,
       /const voiceReady = utterance[\s\S]{0,100}onPrepareUtterance\?\.\(utterance\)/u,
     );
     assert.match(
       source,
-      /await voiceReady;[\s\S]{0,280}setPresentationEventId\(event\.id\)/u,
+      /const voiceReady = utterance[\s\S]{0,1600}const handoffPlan = debateSpeakerHandoffPlan/u,
     );
     assert.match(
       source,
-      /setPresentationEventId\(event\.id\);[\s\S]{0,120}setTranscriptVisibleThroughSequence\(event\.sequence\)/u,
+      /setSpeakerHandoff\(\{ eventId: event\.id, phase: "wide" \}\)[\s\S]{0,4200}await voiceReady;/u,
+    );
+    assert.match(
+      source,
+      /if \(!presentationArmedForHandoff\) \{[\s\S]{0,120}setPresentationEventId\(event\.id\)/u,
     );
     assert.match(
       source,
@@ -876,6 +887,33 @@ describe("Debate experience", () => {
       /await Promise\.all\(\[clip, prepareEnglishVoice\(\)\]\)/u,
     );
     assert.match(page, /onPrepareUtterance=\{prepareDebateUtterance\}/u);
+  });
+
+  it("stages a new floor holder through wide, evidence, camera, and Foley beats", () => {
+    assert.match(
+      source,
+      /if \(handoffPlan\) \{[\s\S]{0,300}phase: "wide"[\s\S]{0,700}phase: "evidence"[\s\S]{0,900}phase: "speaker"[\s\S]{0,700}phase: "foley"[\s\S]{0,1800}await voiceReady;/u,
+    );
+    assert.match(
+      source,
+      /phase: "evidence"[\s\S]{0,280}visibleContent: ""/u,
+    );
+    assert.match(
+      source,
+      /sessionAmbientBotVocalizationCueForKind[\s\S]{0,700}playFoley\(cue\.url/u,
+    );
+    assert.match(
+      source,
+      /const activeTurnClock =[\s\S]{0,100}speakerHandoff === null/u,
+    );
+    assert.match(
+      source,
+      /const talking =[\s\S]{0,140}speakerHandoff === null/u,
+    );
+    assert.match(
+      css,
+      /\.forumCamera\[data-camera-transition="handoff"\]\s*\{[^}]*transition:\s*transform 900ms/u,
+    );
   });
 
   it("keeps Proceedings closed until streaming can arm after voice prep", () => {
@@ -1326,7 +1364,11 @@ describe("Debate experience", () => {
       /debateTurnClockState\(props\.event,\s*props\.speechTiming\)/u,
     );
     assert.match(source, /role="timer"/u);
-    assert.match(source, /data-status=\{clock\.status\}/u);
+    assert.match(source, /data-status=\{clock\?\.status \?\? "speaking"\}/u);
+    assert.match(source, /debateSpokenLineClockState\(/u);
+    assert.match(source, />Spoken line</u);
+    assert.match(source, /Spoken duration: ~\$\{formatDebateSpokenDuration/u);
+    assert.match(source, /setting-independent estimate/u);
     assert.match(source, /activeTurnClock\?\.status === "overtime"/u);
     assert.match(
       source,
@@ -1337,6 +1379,10 @@ describe("Debate experience", () => {
     assert.match(
       css,
       /\.turnClock\[data-status="overtime"\]\s*\{[^}]*#ff795f[^}]*animation:\s*debate-turn-clock-overtime/u,
+    );
+    assert.match(
+      css,
+      /\.turnClock > i\[data-clock="spoken-line"\] > b\s*\{[^}]*--debate-spoken-line-progress/u,
     );
   });
 
@@ -2608,7 +2654,10 @@ describe("Debate experience", () => {
     );
     assert.match(page, /DEBATE_FORUM_VOICE_ROOM_SEND/u);
     assert.match(page, /playbackSurface === "debate"/u);
-    assert.match(page, /"debate",\s*utterance\.format,\s*\);/u);
+    assert.match(
+      page,
+      /"debate",\s*utterance\.format,\s*debateResponseMode === "local",\s*\);/u,
+    );
     assert.match(source, /const playDebateAudienceReaction = useCallback/u);
     assert.match(source, /DEBATE_AUDIENCE_REACTIONS\[reactionKind\]/u);
     assert.match(
@@ -2896,7 +2945,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /juryCameraActive[\s\S]{0,100}\? "jury"[\s\S]{0,120}forumPreparingNextTurn[\s\S]{0,40}\? "wide"/u,
+      /juryCameraActive[\s\S]{0,100}\? "jury"[\s\S]{0,260}forumPreparingNextTurn[\s\S]{0,40}\? "wide"/u,
     );
     assert.match(
       source,
@@ -3077,6 +3126,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
+      /const cameraTransition = speakerHandoff[\s\S]{0,120}\? "handoff"/u,
+    );
+    assert.match(
+      source,
+      /const speakerHandoffKeepsWide =[\s\S]{0,180}phase === "evidence"[\s\S]{0,420}\? "wide"/u,
+    );
+    assert.match(
+      source,
       /function debateCameraTransition[\s\S]{0,300}event\?\.kind === "objection" \|\| event\?\.kind === "interjection"[\s\S]{0,80}\? "objection-pan"[\s\S]{0,40}: "cut"/u,
     );
     assert.match(
@@ -3086,6 +3143,10 @@ describe("Debate experience", () => {
     assert.match(
       css,
       /\.debaterFocusDepthOverlay\[data-visible="true"\]\[data-camera-transition="objection-pan"\]\s*\{[^}]*transition-delay:\s*760ms/u,
+    );
+    assert.match(
+      css,
+      /\.debaterFocusDepthOverlay\[data-visible="true"\]\[data-camera-transition="handoff"\]\s*\{[^}]*transition-delay:\s*760ms/u,
     );
     assert.match(
       css,
@@ -3156,7 +3217,7 @@ describe("Debate experience", () => {
     assert.match(source, /debateModeratorGavelSpeechLeadMs\(gavelCue\.kind\)/u);
     assert.match(
       source,
-      /setLiveGavelCue\(gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,780}setPresentationEventId\(event\.id\)/u,
+      /setLiveGavelCue\(gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,420}let presentationArmedForHandoff = false[\s\S]{0,600}setPresentationEventId\(event\.id\)/u,
     );
     assert.match(
       source,
@@ -3586,7 +3647,7 @@ describe("Debate experience", () => {
       page,
       /options\.brandAppletId[\s\S]*renderSharedAppletSidebarHeader\(options\.brandAppletId\)/u,
     );
-    assert.match(page, /data-response-mode=\{debateResponseMode\}/u);
+    assert.match(page, /data-response-mode=\{debateNavbarResponseMode\}/u);
     assert.match(page, /responseMode=\{debateResponseMode\}/u);
     assert.match(source, /responseMode:\s*props\.responseMode/u);
     assert.match(source, /event\.autoRecovery/u);

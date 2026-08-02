@@ -38,10 +38,13 @@ export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
 export const DEBATE_JURY_SIZE = 5;
 export const DEBATE_JURY_DISCUSSION_TURNS = 5;
 export const DEBATE_JURY_EARLY_DISCUSSION_TURNS = 3;
+export const DEBATE_FORUM_MIN_REBUTTAL_ROUNDS = 1;
+export const DEBATE_FORUM_MAX_REBUTTAL_ROUNDS = 3;
 
 export type DebateFormatId = "forum" | "turnabout";
 export type DebateFormatCatalogId = DebateFormatId | "flyting" | "cypher";
 export type DebatePlayerRole = "judge" | "participant" | "spectator";
+export type DebateForumRoundMode = "auto" | "fixed";
 export type DebateSideId = "for" | "against";
 /** Frozen social register for one Debate proceeding, from chaotic to formal. */
 export type DebateFormalityId =
@@ -322,6 +325,14 @@ export type DebateTurnaboutRuling = "sustained" | "overruled";
 export interface DebateForumFormatStateV1 {
   version: typeof DEBATE_FORMAT_SCHEMA_VERSION;
   format: "forum";
+  /** One-based rebuttal exchange currently on the floor. */
+  rebuttalRound: number;
+  /** Frozen number of rebuttal exchanges before closing arguments. */
+  rebuttalRoundTarget: number;
+  /** Records whether setup selected the target automatically or explicitly. */
+  rebuttalRoundMode: DebateForumRoundMode;
+  /** Short player-facing explanation frozen with an automatic target. */
+  rebuttalRoundRationale: string;
 }
 
 export interface DebateTurnaboutStatementV1 {
@@ -780,6 +791,85 @@ export interface DebateRoleChecksResponse {
   checks: DebateAdvocacyConsent[];
 }
 
+export interface DebateForumRoundPlanV1 {
+  mode: DebateForumRoundMode;
+  count: number;
+  rationale: string;
+}
+
+/**
+ * Resolve Forum length without another model call. Auto remains available in
+ * LOCAL mode and is explainable from setup inputs before the proceeding starts.
+ */
+export function resolveDebateForumRoundPlan(args: {
+  mode?: DebateForumRoundMode;
+  count?: number;
+  motion: DebateMotionSlateV1;
+  evidence: DebateEvidencePacketV1;
+}): DebateForumRoundPlanV1 {
+  if (args.mode === "fixed") {
+    const count = Math.max(
+      DEBATE_FORUM_MIN_REBUTTAL_ROUNDS,
+      Math.min(
+        DEBATE_FORUM_MAX_REBUTTAL_ROUNDS,
+        Number.isInteger(args.count) ? args.count! : 1,
+      ),
+    );
+    return {
+      mode: "fixed",
+      count,
+      rationale: `${count} rebuttal ${count === 1 ? "exchange" : "exchanges"}, chosen in setup.`,
+    };
+  }
+
+  const motionText = [
+    args.motion.motion,
+    args.motion.forSide.label,
+    args.motion.againstSide.label,
+  ]
+    .join(" ")
+    .toLowerCase();
+  const briefWordCount = [
+    args.motion.forSide.brief,
+    args.motion.againstSide.brief,
+  ]
+    .join(" ")
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean).length;
+  const motionWordCount = motionText.split(/\s+/u).filter(Boolean).length;
+  const evidenceCount =
+    args.evidence.sources.length + (args.evidence.exhibits?.length ?? 0);
+  const scopeSignals = new Set(
+    motionText.match(
+      /\b(?:ban|cause|community|economic|education|environment|ethical|government|health|law|moral|policy|privacy|public|require|rights?|safety|society|technology|trade-?off)\b/gu,
+    ) ?? [],
+  ).size;
+
+  let complexity = 0;
+  if (evidenceCount >= 1) complexity += 1;
+  if (evidenceCount >= 4) complexity += 1;
+  if (briefWordCount >= 160) complexity += 1;
+  if (briefWordCount >= 320) complexity += 1;
+  if (motionWordCount >= 18) complexity += 1;
+  if (scopeSignals >= 3) complexity += 1;
+  if (scopeSignals >= 6) complexity += 1;
+
+  const count = complexity >= 5 ? 3 : complexity >= 2 ? 2 : 1;
+  const reasons = [
+    scopeSignals >= 3 ? "a multi-factor motion" : "a focused motion",
+    briefWordCount >= 160 ? "detailed side briefs" : null,
+    evidenceCount > 0
+      ? `${evidenceCount} frozen evidence ${evidenceCount === 1 ? "item" : "items"}`
+      : null,
+  ].filter((reason): reason is string => reason !== null);
+  return {
+    mode: "auto",
+    count,
+    rationale: `Auto chose ${count} rebuttal ${count === 1 ? "exchange" : "exchanges"} for ${reasons.join(" and ")}.`,
+  };
+}
+
 export interface DebateSessionCreateRequest {
   format?: DebateFormatId;
   formality?: DebateFormalityId;
@@ -787,6 +877,10 @@ export interface DebateSessionCreateRequest {
   jury?: {
     enabled?: boolean;
     cadence?: DebateJuryCadence;
+  };
+  forumRounds?: {
+    mode?: DebateForumRoundMode;
+    count?: number;
   };
   motion: DebateMotionSlateV1;
   evidence: DebateEvidencePacketV1;
@@ -888,6 +982,8 @@ export interface DebateSessionListItemV1 {
   winnerSideId: DebateSideId | null;
   updatedAt: string;
   completedAt: string | null;
+  /** Canonical presentation runtime; excludes recesses and generation waits. */
+  activeDurationMs: number | null;
   synopsisText?: string | null;
 }
 
@@ -1357,6 +1453,58 @@ export function debateEstimatedSpeechDurationMs(content: string): number {
   );
 }
 
+const DEBATE_ACTIVE_PRESENTATION_EVENT_KINDS = new Set<DebateEventKind>([
+  "intro",
+  "phase",
+  "speech",
+  "testimony",
+  "press",
+  "objection",
+  "evidence",
+  "revelation",
+  "player_turn",
+  "reaction",
+  "interjection",
+  "judge_gavel",
+  "moderator_ruling",
+  "ballot",
+  "jury_deliberation",
+  "jury_verdict",
+  "verdict",
+]);
+
+/**
+ * Deterministic active runtime for a saved Debate record. This mirrors the
+ * presentation timeline instead of wall-clock time, so model generation,
+ * explicit recesses, and time spent away from the proceeding do not count.
+ */
+export function debateActivePresentationDurationMs(
+  events: readonly DebateEventV1[],
+  playerRole: DebatePlayerRole,
+): number {
+  return events.reduce((durationMs, event) => {
+    if (
+      debateEventIsTranscriptHousekeeping(event) ||
+      !DEBATE_ACTIVE_PRESENTATION_EVENT_KINDS.has(event.kind) ||
+      event.kind === "silence" ||
+      (event.kind === "verdict" && event.speakerKind !== "player") ||
+      (playerRole === "participant" &&
+        (event.kind === "jury_deliberation" ||
+          (event.kind === "ballot" && event.speakerKind === "juror") ||
+          event.kind === "jury_verdict"))
+    ) {
+      return durationMs;
+    }
+    if (
+      event.kind === "judge_gavel" &&
+      event.gavelReason === "intervention"
+    ) {
+      return durationMs + 260;
+    }
+    return durationMs + debateEstimatedSpeechDurationMs(event.content);
+  }, 0);
+}
+
 export function isDebatePlayerRole(value: unknown): value is DebatePlayerRole {
   return value === "judge" || value === "participant" || value === "spectator";
 }
@@ -1625,6 +1773,10 @@ export function defaultDebateFormatStateV1(
     : {
         version: DEBATE_FORMAT_SCHEMA_VERSION,
         format: "forum",
+        rebuttalRound: 1,
+        rebuttalRoundTarget: 1,
+        rebuttalRoundMode: "fixed",
+        rebuttalRoundRationale: "One rebuttal exchange.",
       };
 }
 
@@ -1639,7 +1791,35 @@ export function normalizeDebateFormatStateV1(
   const format = isDebateFormatId(requestedFormat)
     ? requestedFormat
     : normalizeDebateFormatId(source.format);
-  if (format === "forum") return defaultDebateFormatStateV1("forum");
+  if (format === "forum") {
+    const target =
+      typeof source.rebuttalRoundTarget === "number" &&
+      Number.isInteger(source.rebuttalRoundTarget)
+        ? Math.max(
+            DEBATE_FORUM_MIN_REBUTTAL_ROUNDS,
+            Math.min(DEBATE_FORUM_MAX_REBUTTAL_ROUNDS, source.rebuttalRoundTarget),
+          )
+        : 1;
+    const round =
+      typeof source.rebuttalRound === "number" &&
+      Number.isInteger(source.rebuttalRound)
+        ? Math.max(1, Math.min(target, source.rebuttalRound))
+        : 1;
+    return {
+      version: DEBATE_FORMAT_SCHEMA_VERSION,
+      format: "forum",
+      rebuttalRound: round,
+      rebuttalRoundTarget: target,
+      rebuttalRoundMode: source.rebuttalRoundMode === "auto" ? "auto" : "fixed",
+      rebuttalRoundRationale: normalizedText(
+        source.rebuttalRoundRationale,
+        180,
+      ) ||
+        (target === 1
+          ? "One rebuttal exchange."
+          : `${target} rebuttal exchanges.`),
+    };
+  }
 
   const statements = Array.isArray(source.statements)
     ? source.statements.flatMap((item): DebateTurnaboutStatementV1[] => {

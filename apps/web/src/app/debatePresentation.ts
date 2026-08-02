@@ -17,6 +17,62 @@ export function debateRevealDurationMs(spokenText: string): number {
   return debateEstimatedSpeechDurationMs(spokenText);
 }
 
+export function debateActiveDurationLabel(activeDurationMs: number): string {
+  const minutes = Math.max(1, Math.round(activeDurationMs / 60_000));
+  return `~${minutes} min active`;
+}
+
+export interface DebateSpokenLineClockState {
+  elapsedMs: number;
+  durationMs: number;
+  progress: number;
+}
+
+/** Canonical final-text duration used when no live voice clock is available. */
+export function debateEventSpokenLineDurationMs(
+  event: Pick<
+    DebateEventV1,
+    "content" | "kind" | "speakerKind" | "gavelReason"
+  >,
+): number | null {
+  if (
+    event.speakerKind === "system" ||
+    event.kind === "silence" ||
+    (event.kind === "judge_gavel" && event.gavelReason === "intervention")
+  ) {
+    return null;
+  }
+  const durationMs = debateRevealDurationMs(event.content);
+  return durationMs > 0 ? durationMs : null;
+}
+
+export function debateSpokenLineClockState(
+  event: Pick<
+    DebateEventV1,
+    "content" | "kind" | "speakerKind" | "gavelReason"
+  >,
+  speechTiming: { elapsedMs: number; durationMs: number } | null,
+): DebateSpokenLineClockState | null {
+  if (!speechTiming || debateEventSpokenLineDurationMs(event) === null) {
+    return null;
+  }
+  const durationMs = Math.max(1, speechTiming.durationMs);
+  const elapsedMs = Math.max(0, Math.min(durationMs, speechTiming.elapsedMs));
+  return {
+    elapsedMs,
+    durationMs,
+    progress: elapsedMs / durationMs,
+  };
+}
+
+export function formatDebateSpokenDuration(durationMs: number): string {
+  const totalTenths = Math.max(0, Math.round(durationMs / 100));
+  const minutes = Math.floor(totalTenths / 600);
+  const seconds = Math.floor((totalTenths % 600) / 10);
+  const tenths = totalTenths % 10;
+  return `${minutes}:${String(seconds).padStart(2, "0")}.${tenths}`;
+}
+
 export interface DebateTurnClockState {
   elapsedMs: number;
   limitMs: number;

@@ -217,6 +217,8 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /No ElevenLabs catalog is available/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create memories/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or accessories/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Never use it to draw a literal portrait/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not recreate eyes or mouths with avatar ink/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
       /faceMouthCoffeePucker true by default/u,

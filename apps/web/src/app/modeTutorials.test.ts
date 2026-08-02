@@ -302,6 +302,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /enter AUTO directly/u);
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /short title synthesized in the selected Rowdiness/u);
+    assert.match(copy, /approximate active runtime from the saved presentation timeline/u);
+    assert.match(copy, /excluding generation waits, explicit recesses/u);
     assert.match(copy, /Use setup copies its motion, title, room settings/u);
     assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
@@ -374,6 +376,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /Choose a manual view to hold the shot/u);
     assert.match(copy, /only the heard fragment remains public/iu);
     assert.match(copy, /safe Markdown/u);
+    assert.match(copy, /Spoken line timer shows elapsed and total delivery time/u);
+    assert.match(copy, /including when speech audio is disabled/u);
+    assert.match(copy, /setting-independent per-line spoken durations/u);
     assert.match(copy, /Copy verbose transcript/u);
   });
 

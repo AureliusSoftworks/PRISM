@@ -211,6 +211,20 @@ export function sessionAmbientBotVocalizationCue(
       stableHash(`${seed}:bot-vocalization:cue:${index}`) %
         AMBIENT_BOT_VOCALIZATIONS.length
     ]!;
+  return sessionAmbientBotVocalizationCueForKind(seed, index, cue.kind);
+}
+
+export function sessionAmbientBotVocalizationCueForKind(
+  seed: string,
+  index: number,
+  kind: SessionAmbientBotVocalizationKind,
+): SessionAmbientBotVocalizationCue {
+  const cue = AMBIENT_BOT_VOCALIZATIONS.find(
+    (candidate) => candidate.kind === kind,
+  );
+  if (!cue) {
+    throw new Error(`Unknown ambient bot vocalization kind: ${kind}`);
+  }
   return {
     ...cue,
     index,

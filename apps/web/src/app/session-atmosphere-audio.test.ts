@@ -17,6 +17,7 @@ import {
   SIGNAL_ATMOSPHERE_RELATIVE_MIX_MAX,
   createSeamlessSessionAtmosphereLoopBuffer,
   sessionAmbientBotVocalizationCue,
+  sessionAmbientBotVocalizationCueForKind,
   sessionAmbientBotVocalizationDelayMs,
   sessionAmbientBotVocalizationTargetId,
   sessionAmbientFoleyDelayMs,
@@ -172,6 +173,19 @@ test("ambient bot vocalizations are sparse bundled recordings with deterministic
       "soft-sigh",
       "soft-inhale",
     ]),
+  );
+
+  const inhale = sessionAmbientBotVocalizationCueForKind(
+    "speaker-handoff",
+    3,
+    "soft-inhale",
+  );
+  assert.equal(inhale.kind, "soft-inhale");
+  assert.equal(inhale.index, 3);
+  assert.match(inhale.sequenceKey, /speaker-handoff:bot-vocalization:3/u);
+  assert.ok(
+    statSync(new URL(`../../public${inhale.url}`, import.meta.url)).size >
+      1_000,
   );
 });
 

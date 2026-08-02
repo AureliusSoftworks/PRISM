@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 18,
-  "updatedAt": "2026-08-01T21:05:30.805Z",
+  "updatedAt": "2026-08-02T02:27:39.033Z",
   "themes": [
     {
       "id": "originals",
@@ -144,6 +144,7 @@
         "barack-obama",
         "bernie-sanders",
         "bob-ross",
+        "brian-griffin",
         "darth-vader",
         "donald-trump",
         "echo-ellen",
@@ -1619,6 +1620,29 @@
       "memoryCount": 0,
       "color": "#5f8f6b",
       "glyph": "leaf",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only"
+      ],
+      "marketplaceVisible": true,
+      "deprecated": false,
+      "replacementType": null,
+      "replacementIds": [],
+      "branchLock": "dev"
+    },
+    {
+      "id": "brian-griffin",
+      "name": "Brian Griffin",
+      "subtitle": "Brian Griffin — personal Library backup",
+      "description": "Private Library backup of Brian Griffin. Not part of the public Marketplace shelves.",
+      "botHash": "ca87efc6a127ebe1cd927a18203f4252",
+      "bundlePath": "/bot-marketplace/bots/bot-brian-griffin.bot",
+      "memoryCount": 0,
+      "color": "#f2f0e8",
+      "glyph": "dog",
       "themeIds": [
         "library-dev-backup"
       ],

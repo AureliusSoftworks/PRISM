@@ -15,6 +15,7 @@ import {
   type BotPowerEffectV1,
   type BotPowerV1,
   type DebateEvidencePacketV1,
+  type DebateEventV1,
   type DebateFormalityId,
   type DebateMotionSlateV1,
 } from "@localai/shared";
@@ -1094,6 +1095,7 @@ async function createJudgeDebate(
     consentFormality?: "free_for_all" | "plainspoken";
     moderatorTitle?: string;
     playerJudgeUsesPrism?: boolean;
+    forumRounds?: { mode: "auto" | "fixed"; count?: number };
     againstPowers?: BotPowerV1[];
   } = {},
 ) {
@@ -1140,6 +1142,7 @@ async function createJudgeDebate(
       moderatorTitle: options.moderatorTitle,
       moderatorBotId: "moderator",
       playerJudgeUsesPrism: options.playerJudgeUsesPrism,
+      forumRounds: options.forumRounds,
       forAdvocateBotId: "for",
       againstAdvocateBotId: "against",
       playerRole: "judge",
@@ -1392,6 +1395,60 @@ describe("Debate engine", () => {
       source,
       /chatWithDebateDebriefBot[\s\S]{0,2500}INSERT INTO (?:messages|memories|memory_summaries)/u,
     );
+  });
+
+  it("lists active presentation duration only for completed Debate records", async () => {
+    const db = createTestDb();
+    try {
+      const session = await createDebateForRole(db, "spectator");
+      assert.equal(
+        listDebateSessions(db, "user-1")[0]?.activeDurationMs,
+        null,
+      );
+      const event: DebateEventV1 = {
+        version: 1,
+        id: "archive-runtime-speech",
+        sequence: 1,
+        phase: "opening",
+        stepKey: "opening_for",
+        kind: "speech",
+        speakerKind: "advocate",
+        speakerBotId: session.forAdvocate.id,
+        sideId: "for",
+        content: "Short.",
+        sourceIds: [],
+        createdAt: NOW,
+      };
+      db.prepare(
+        `INSERT INTO debate_events
+           (id, user_id, session_id, sequence, phase, step_key, kind,
+            event_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        event.id,
+        "user-1",
+        session.id,
+        event.sequence,
+        event.phase,
+        event.stepKey,
+        event.kind,
+        JSON.stringify(event),
+        event.createdAt,
+      );
+      db.prepare(
+        `UPDATE debate_sessions
+            SET status = 'completed', phase = 'verdict', step_key = 'complete',
+                completed_at = ?, updated_at = ?
+          WHERE id = ? AND user_id = ?`,
+      ).run(NOW, NOW, session.id, "user-1");
+
+      assert.equal(
+        listDebateSessions(db, "user-1")[0]?.activeDurationMs,
+        1_400,
+      );
+    } finally {
+      db.close();
+    }
   });
 
   it("refracts a contextual setup field as a draft without persisting it", async () => {
@@ -2574,7 +2631,13 @@ describe("Debate engine", () => {
     try {
       let session = await createJudgeDebate(db, debateRuntime, {
         playerJudgeUsesPrism: true,
+        forumRounds: { mode: "fixed", count: 2 },
       });
+      assert.equal(session.formatState.format, "forum");
+      if (session.formatState.format === "forum") {
+        assert.equal(session.formatState.rebuttalRoundTarget, 2);
+        assert.equal(session.formatState.rebuttalRoundMode, "fixed");
+      }
       const advance = async (key: string) => {
         session = await advanceDebateSession(
           db,
@@ -2620,6 +2683,20 @@ describe("Debate engine", () => {
         await advance(`remaining-${mutation}`);
         assert.ok(mutation < 12);
       }
+      assert.equal(
+        session.events.filter(
+          (event) =>
+            event.stepKey === "rebuttal_for" && event.kind === "speech",
+        ).length,
+        2,
+      );
+      assert.equal(
+        session.events.filter(
+          (event) =>
+            event.stepKey === "rebuttal_against" && event.kind === "speech",
+        ).length,
+        2,
+      );
       assert.deepEqual(
         session.events
           .filter(
@@ -4702,7 +4779,14 @@ describe("Debate engine", () => {
 
       const restored = getDebateSession(db, "user-1", created.id);
       assert.equal(restored.format, "forum");
-      assert.deepEqual(restored.formatState, { version: 1, format: "forum" });
+      assert.deepEqual(restored.formatState, {
+        version: 1,
+        format: "forum",
+        rebuttalRound: 1,
+        rebuttalRoundTarget: 1,
+        rebuttalRoundMode: "fixed",
+        rebuttalRoundRationale: "One rebuttal exchange.",
+      });
       assert.equal(restored.endedEarlyAt, null);
       assert.equal(listDebateSessions(db, "user-1")[0]?.format, "forum");
       assert.equal(restored.formality, "parliamentary");

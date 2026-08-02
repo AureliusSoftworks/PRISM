@@ -4,18 +4,22 @@ import {
   DEBATE_EVIDENCE_LINK_PREFIX,
   DEBATE_SOURCE_LINK_PREFIX,
   DEBATE_UTTERANCE_PACE_BOOST,
+  debateActiveDurationLabel,
   debateAudioEnabled,
   debateEvidenceFromMarkdownHref,
+  debateEventSpokenLineDurationMs,
   debateMarkdownSource,
   debateGalleryReactingIndices,
   debateGalleryReaction,
   debateRevealDurationMs,
+  debateSpokenLineClockState,
   debateSourceFromMarkdownHref,
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
   debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
+  formatDebateSpokenDuration,
 } from "./debatePresentation.ts";
 
 const evidence = {
@@ -64,6 +68,11 @@ describe("Debate live presentation", () => {
     );
   });
 
+  it("formats completed proceeding runtime as a rounded active duration", () => {
+    assert.equal(debateActiveDurationLabel(1_400), "~1 min active");
+    assert.equal(debateActiveDurationLabel(754_000), "~13 min active");
+  });
+
   it("maps the public floor clock onto actual speech presentation progress", () => {
     const event = {
       version: 1 as const,
@@ -108,6 +117,43 @@ describe("Debate live presentation", () => {
     );
     assert.equal(
       debateTurnClockState({ ...event, timing: undefined }, null),
+      null,
+    );
+  });
+
+  it("keeps a setting-independent duration and live clock for every spoken line", () => {
+    const event = {
+      version: 1 as const,
+      id: "spoken-line",
+      sequence: 3,
+      phase: "opening" as const,
+      stepKey: "moderator_intro",
+      kind: "intro" as const,
+      speakerKind: "moderator" as const,
+      speakerBotId: "moderator",
+      sideId: null,
+      content: "Short.",
+      sourceIds: [],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    };
+    assert.equal(debateEventSpokenLineDurationMs(event), 1_400);
+    assert.equal(formatDebateSpokenDuration(1_400), "0:01.4");
+    assert.deepEqual(
+      debateSpokenLineClockState(event, {
+        elapsedMs: 700,
+        durationMs: 1_400,
+      }),
+      { elapsedMs: 700, durationMs: 1_400, progress: 0.5 },
+    );
+    assert.equal(
+      debateEventSpokenLineDurationMs({
+        ...event,
+        speakerKind: "system",
+      }),
+      null,
+    );
+    assert.equal(
+      debateEventSpokenLineDurationMs({ ...event, kind: "silence" }),
       null,
     );
   });

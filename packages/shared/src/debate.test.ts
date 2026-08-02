@@ -14,6 +14,7 @@ import {
   DEBATE_TITLE_MAX_LENGTH,
   defaultDebateJuryStateV1,
   defaultDebateFormatStateV1,
+  debateActivePresentationDurationMs,
   debateEventIsAtmosphericVocalFoley,
   debateSourceIdsFromText,
   debateEvidenceItemById,
@@ -33,10 +34,78 @@ import {
   normalizeDebateMotionSlateV1,
   normalizeDebateTitle,
   normalizeDebateSessionSynopsis,
+  resolveDebateForumRoundPlan,
   normalizeDebateSetupPresetId,
   debateDebriefEligibleBots,
   sanitizeDebateStatementSources,
+  type DebateEventV1,
 } from "./debate.ts";
+
+test("auto Forum rounds stay bounded and grow with debate complexity", () => {
+  const focusedMotion = normalizeDebateMotionSlateV1({
+    motion: "Cats make better pets than dogs.",
+    forSide: { label: "Cats", brief: "They fit quiet homes." },
+    againstSide: { label: "Dogs", brief: "They offer active companionship." },
+  });
+  const emptyEvidence = normalizeDebateEvidencePacketV1({});
+  assert.deepEqual(resolveDebateForumRoundPlan({
+    motion: focusedMotion,
+    evidence: emptyEvidence,
+  }), {
+    mode: "auto",
+    count: 1,
+    rationale: "Auto chose 1 rebuttal exchange for a focused motion.",
+  });
+
+  const complexMotion = normalizeDebateMotionSlateV1({
+    motion:
+      "Government policy should require technology companies to balance public safety, privacy rights, economic effects, and environmental costs.",
+    forSide: { label: "Require it", brief: "benefit ".repeat(170) },
+    againstSide: { label: "Reject it", brief: "cost ".repeat(170) },
+  });
+  const evidence = normalizeDebateEvidencePacketV1({
+    sources: [1, 2, 3, 4].map((index) => ({
+      id: `source-${index}`,
+      title: `Source ${index}`,
+      url: `https://example.com/${index}`,
+      excerpt: "Evidence.",
+    })),
+  });
+  const auto = resolveDebateForumRoundPlan({
+    motion: complexMotion,
+    evidence,
+  });
+  assert.equal(auto.count, 3);
+  assert.match(auto.rationale, /multi-factor motion/u);
+  assert.match(auto.rationale, /4 frozen evidence items/u);
+
+  assert.equal(resolveDebateForumRoundPlan({
+    mode: "fixed",
+    count: 2,
+    motion: focusedMotion,
+    evidence: emptyEvidence,
+  }).count, 2);
+});
+
+function activeDurationEvent(
+  overrides: Partial<DebateEventV1>,
+): DebateEventV1 {
+  return {
+    version: 1,
+    id: `event-${String(overrides.sequence ?? 1)}`,
+    sequence: overrides.sequence ?? 1,
+    phase: "opening",
+    stepKey: "opening_for",
+    kind: "speech",
+    speakerKind: "advocate",
+    speakerBotId: "for",
+    sideId: "for",
+    content: "Short.",
+    sourceIds: [],
+    createdAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
 
 test("publishes five flavor-first Debate setup presets across the formality spectrum", () => {
   assert.deepEqual(
@@ -132,6 +201,45 @@ test("publishes a stable five-stop Debate formality spectrum with parliamentary 
   assert.match(
     debateFormalityGuidance("structured"),
     /formal, direct, and disciplined/u,
+  );
+});
+
+test("derives active Debate duration from presented events instead of wall-clock gaps", () => {
+  const events = [
+    activeDurationEvent({ sequence: 1 }),
+    activeDurationEvent({ sequence: 2, stepKey: "pause" }),
+    activeDurationEvent({ sequence: 3, stepKey: "resume" }),
+    activeDurationEvent({
+      sequence: 4,
+      kind: "judge_gavel",
+      speakerKind: "player",
+      speakerBotId: null,
+      sideId: null,
+      gavelReason: "intervention",
+    }),
+    activeDurationEvent({
+      sequence: 5,
+      kind: "case_board",
+      speakerKind: "system",
+      speakerBotId: null,
+      sideId: null,
+    }),
+    activeDurationEvent({
+      sequence: 6,
+      kind: "ballot",
+      speakerKind: "juror",
+      speakerBotId: "juror-1",
+      sideId: null,
+    }),
+  ];
+
+  assert.equal(
+    debateActivePresentationDurationMs(events, "spectator"),
+    3_060,
+  );
+  assert.equal(
+    debateActivePresentationDurationMs(events, "participant"),
+    1_660,
   );
 });
 
@@ -239,6 +347,10 @@ test("defaults legacy Debate records to Forum and normalizes Turnabout state", (
   assert.deepEqual(defaultDebateFormatStateV1("forum"), {
     version: DEBATE_FORMAT_SCHEMA_VERSION,
     format: "forum",
+    rebuttalRound: 1,
+    rebuttalRoundTarget: 1,
+    rebuttalRoundMode: "fixed",
+    rebuttalRoundRationale: "One rebuttal exchange.",
   });
   const state = normalizeDebateFormatStateV1(
     {

@@ -37,6 +37,7 @@ import {
   debateEvidenceItemRecord,
   debateFormalityGuidance,
   debateTitleForMotion,
+  debateActivePresentationDurationMs,
   debateEstimatedSpeechDurationMs,
   botPowerPairwisePerceptionFromEffectsV1,
   debateSourceIdsFromText,
@@ -56,6 +57,7 @@ import {
   normalizeDebateMotionSlateV1,
   normalizeDebateTitle,
   normalizeDebateSetupPresetId,
+  resolveDebateForumRoundPlan,
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
   parseStoredBotAudioVoiceProfileV1,
@@ -78,6 +80,7 @@ import {
   type DebateEventV1,
   type DebateEvidencePacketV1,
   type DebateFormalityId,
+  type DebateForumFormatStateV1,
   type DebateFormatId,
   type DebateInterjectionRequest,
   type DebateJudgeAudienceOrderRequest,
@@ -1965,6 +1968,13 @@ export function listDebateSessions(
         formality,
       );
     }
+    const activeDurationMs =
+      row.status === "completed" && row.completed_at
+        ? debateActivePresentationDurationMs(
+            eventRows(db, userId, row.id),
+            row.player_role,
+          )
+        : 0;
     return {
       id: row.id,
       format,
@@ -1980,6 +1990,7 @@ export function listDebateSessions(
       winnerSideId: row.winner_side_id,
       updatedAt: row.updated_at,
       completedAt: row.completed_at,
+      activeDurationMs: activeDurationMs > 0 ? activeDurationMs : null,
       synopsisText,
     };
   });
@@ -2173,6 +2184,32 @@ export function createDebateSession(
     provider: candidate.providerName,
     model: candidate.model,
   }));
+  if (
+    format === "forum" &&
+    request.forumRounds?.mode === "fixed" &&
+    (!Number.isInteger(request.forumRounds.count) ||
+      (request.forumRounds.count ?? 0) < 1 ||
+      (request.forumRounds.count ?? 0) > 3)
+  ) {
+    throw new HttpError(400, "Choose between one and three rebuttal rounds.");
+  }
+  const forumRoundPlan = resolveDebateForumRoundPlan({
+    mode: request.forumRounds?.mode,
+    count: request.forumRounds?.count,
+    motion,
+    evidence: normalizeDebateEvidencePacketV1(request.evidence),
+  });
+  const formatState =
+    format === "forum"
+      ? ({
+          version: DEBATE_FORMAT_SCHEMA_VERSION,
+          format: "forum",
+          rebuttalRound: 1,
+          rebuttalRoundTarget: forumRoundPlan.count,
+          rebuttalRoundMode: forumRoundPlan.mode,
+          rebuttalRoundRationale: forumRoundPlan.rationale,
+        } satisfies DebateForumFormatStateV1)
+      : defaultDebateFormatStateV1(format);
   const session: DebateSessionV1 = {
     version: DEBATE_SCHEMA_VERSION,
     id: randomUUID(),
@@ -2191,7 +2228,7 @@ export function createDebateSession(
     generationChain,
     format,
     formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
-    formatState: defaultDebateFormatStateV1(format),
+    formatState,
     formality,
     setupPresetId,
     playerRole: request.playerRole,
@@ -4392,11 +4429,38 @@ function enterModeratedRebuttal(session: DebateSessionV1): DebateSessionV1 {
   };
 }
 
+function forumRebuttalProgress(session: DebateSessionV1): {
+  round: number;
+  target: number;
+} {
+  if (session.formatState.format !== "forum") return { round: 1, target: 1 };
+  return {
+    round: session.formatState.rebuttalRound,
+    target: session.formatState.rebuttalRoundTarget,
+  };
+}
+
 function nextAfterRebuttal(
   session: DebateSessionV1,
   sideId: DebateSideId,
 ): DebateSessionV1 {
   if (sideId === "against") return enterRebuttal(session, "for");
+  if (
+    session.formatState.format === "forum" &&
+    session.formatState.rebuttalRound <
+      session.formatState.rebuttalRoundTarget
+  ) {
+    const nextRound = {
+      ...session,
+      formatState: {
+        ...session.formatState,
+        rebuttalRound: session.formatState.rebuttalRound + 1,
+      },
+    };
+    return humanJudgeOwnsModeratorActions(session)
+      ? enterRebuttal(nextRound, "against")
+      : enterModeratedRebuttal(nextRound);
+  }
   return {
     ...session,
     phase: "closing",
@@ -7513,38 +7577,46 @@ async function advanceStep(
         (next) => enterModeratedRebuttal(next),
       );
     }
-    case "moderator_to_rebuttal":
+    case "moderator_to_rebuttal": {
+      const progress = forumRebuttalProgress(session);
       return moderatorPhaseTransition(
         session,
         [
           debateUsesInstitutionalRegister(session.formality)
             ? "Move the Assembly Chamber into rebuttal in one or two concise sentences."
             : "Move the debate into rebuttal in one or two concise sentences.",
-          "Name the central unresolved clash using only what was publicly said, then recognize the Against side for the first rebuttal.",
+          progress.round === 1
+            ? `Name the central unresolved clash using only what was publicly said, then recognize the Against side for rebuttal round ${progress.round} of ${progress.target}.`
+            : `Briefly identify how the clash changed in the prior exchange, then recognize the Against side for rebuttal round ${progress.round} of ${progress.target}. Do not repeat an earlier transition.`,
           moderatorRebuttalFloorTimeInstruction(session),
           "Do not judge either side, add evidence, or make an argument yourself.",
         ].join(" "),
         runtime,
         (next) => enterRebuttal(next, "against"),
       );
-    case "rebuttal_against":
+    }
+    case "rebuttal_against": {
+      const progress = forumRebuttalProgress(session);
       return speechTransition(
         session,
         session.againstAdvocate,
         "against",
-        "Deliver the Against rebuttal first. Respond to the strongest live For claims, not a straw person.",
+        `Deliver Against rebuttal ${progress.round} of ${progress.target}. Respond to the strongest live For claims, not a straw person.${progress.round > 1 ? " Advance the argument from the latest exchange instead of repeating an earlier rebuttal." : ""}`,
         runtime,
         (next) => nextAfterRebuttal(next, "against"),
       );
-    case "rebuttal_for":
+    }
+    case "rebuttal_for": {
+      const progress = forumRebuttalProgress(session);
       return speechTransition(
         session,
         session.forAdvocate,
         "for",
-        "Deliver the For rebuttal. Answer the strongest Against response and sharpen the remaining disagreement.",
+        `Deliver For rebuttal ${progress.round} of ${progress.target}. Answer the strongest Against response and sharpen the remaining disagreement.${progress.round > 1 ? " Advance the argument from the latest exchange instead of repeating an earlier rebuttal." : ""}`,
         runtime,
         (next) => nextAfterRebuttal(next, "for"),
       );
+    }
     case "moderator_to_closing":
       return moderatorPhaseTransition(
         session,

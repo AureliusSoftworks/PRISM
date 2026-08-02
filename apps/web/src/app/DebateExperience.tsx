@@ -43,6 +43,7 @@ import {
   debateSpokenText,
   heardBotPresenceBeatTextV1,
   normalizeDebateModeratorTitle,
+  resolveDebateForumRoundPlan,
   voicePerformanceTextFromActionCues,
   debateDebriefEligibleBots,
   normalizeBotAudioVoiceControl,
@@ -55,6 +56,7 @@ import {
   type DebateEvidenceItemV1,
   type DebateEvidenceSourceV1,
   type DebateFormalityId,
+  type DebateForumRoundMode,
   type DebateFormatId,
   type DebateMotionSlateV1,
   type DebateBotSnapshotV1,
@@ -162,22 +164,33 @@ import {
 } from "./debateJudgeQuickChoices";
 import { randomDebateTerritory } from "./debateTerritoryRandomizer";
 import {
+  debateActiveDurationLabel,
+  debateEventSpokenLineDurationMs,
   debateMarkdownSource,
   debateEvidenceFromMarkdownHref,
   debateGalleryReactingIndices,
   debateGalleryReaction,
   debateRevealDurationMs,
+  debateSpokenLineClockState,
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
   debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
+  formatDebateSpokenDuration,
 } from "./debatePresentation";
 import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
+  debateEventEvidenceIds,
   resolveDebateTableEvidenceStickyId,
   debateTableEvidenceItem,
 } from "./debateTableEvidence";
+import {
+  DEBATE_SPEAKER_HANDOFF_TIMING,
+  debatePreviousStageSpeakerEvent,
+  debateSpeakerHandoffPlan,
+  type DebateSpeakerHandoffPhase,
+} from "./debateSpeakerHandoff";
 import {
   DEBATE_STAGE_ALIGNMENT_MAX,
   DEBATE_STAGE_ALIGNMENT_MIN,
@@ -247,6 +260,7 @@ import {
 import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import {
+  sessionAmbientBotVocalizationCueForKind,
   type SessionAmbientBotVocalizationCue,
   type SessionAmbientFoleyProfile,
   type SessionAtmosphereController,
@@ -1035,7 +1049,12 @@ function debateParticipantModeratorTitle(title: string): string {
   return /\bjudge\b/iu.test(normalized) ? normalized : `${normalized} · Judge`;
 }
 
-type DebateCameraTransition = "cut" | "move" | "objection-pan";
+type DebateCameraTransition = "cut" | "move" | "objection-pan" | "handoff";
+
+type DebateSpeakerHandoffState = {
+  eventId: string;
+  phase: DebateSpeakerHandoffPhase;
+};
 
 function debateCameraTransition(
   cameraMode: DebateCameraMode,
@@ -1067,6 +1086,8 @@ const DEBATE_LIVE_FOLEY_PRELOAD_URLS = [
   ...DEBATE_AUDIENCE_FOLEY_URLS,
   DEBATE_AUDIENCE_AGITATION_URL,
   ...Object.values(DEBATE_AUDIENCE_REACTIONS).map((reaction) => reaction.url),
+  "/audio/session-atmosphere/throat-clear.mp3",
+  "/audio/voice-presence/breath-deliberate-02.mp3",
 ];
 
 function DebateForumLightMasks(props: {
@@ -1160,38 +1181,73 @@ function DebateTurnClock(props: {
   speechTiming: DebateSpeechTiming | null;
 }): React.JSX.Element | null {
   const clock = debateTurnClockState(props.event, props.speechTiming);
-  if (!clock) return null;
+  const spokenLineClock = debateSpokenLineClockState(
+    props.event,
+    props.speechTiming,
+  );
+  if (!clock && !spokenLineClock) return null;
   const displayedSeconds =
-    clock.status === "overtime"
+    clock?.status === "overtime"
       ? Math.max(1, Math.ceil(Math.abs(clock.remainingMs) / 1_000))
-      : Math.max(0, Math.ceil(clock.remainingMs / 1_000));
+      : Math.max(0, Math.ceil((clock?.remainingMs ?? 0) / 1_000));
+  const spokenLineLabel = spokenLineClock
+    ? `${formatDebateSpokenDuration(spokenLineClock.elapsedMs)} / ${formatDebateSpokenDuration(spokenLineClock.durationMs)}`
+    : null;
+  const ariaLabel = [
+    clock
+      ? clock.status === "overtime"
+        ? `${displayedSeconds} seconds overtime`
+        : `${displayedSeconds} seconds floor time remaining`
+      : null,
+    spokenLineClock
+      ? `Spoken line ${Math.round(spokenLineClock.elapsedMs / 100) / 10} of ${Math.round(spokenLineClock.durationMs / 100) / 10} seconds`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
 
   return (
     <div
       className={styles.turnClock}
-      data-status={clock.status}
+      data-status={clock?.status ?? "speaking"}
+      data-has-spoken-line={spokenLineClock ? "true" : undefined}
       role="timer"
       aria-live="off"
-      aria-label={
-        clock.status === "overtime"
-          ? `${displayedSeconds} seconds overtime`
-          : `${displayedSeconds} seconds remaining`
-      }
+      aria-label={ariaLabel}
     >
-      <span>{clock.status === "overtime" ? "Overtime" : "Floor time"}</span>
-      <strong>
-        {clock.status === "overtime" ? "+" : "0:"}
-        {String(displayedSeconds).padStart(2, "0")}
-      </strong>
-      <i aria-hidden="true">
-        <b
-          style={
-            {
-              "--debate-turn-clock-progress": `${clock.progress}`,
-            } as CSSProperties
-          }
-        />
-      </i>
+      {clock ? (
+        <>
+          <span>{clock.status === "overtime" ? "Overtime" : "Floor time"}</span>
+          <strong>
+            {clock.status === "overtime" ? "+" : "0:"}
+            {String(displayedSeconds).padStart(2, "0")}
+          </strong>
+          <i data-clock="floor" aria-hidden="true">
+            <b
+              style={
+                {
+                  "--debate-turn-clock-progress": `${clock.progress}`,
+                } as CSSProperties
+              }
+            />
+          </i>
+        </>
+      ) : null}
+      {spokenLineClock && spokenLineLabel ? (
+        <>
+          <span>Spoken line</span>
+          <strong>{spokenLineLabel}</strong>
+          <i data-clock="spoken-line" aria-hidden="true">
+            <b
+              style={
+                {
+                  "--debate-spoken-line-progress": `${spokenLineClock.progress}`,
+                } as CSSProperties
+              }
+            />
+          </i>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1659,6 +1715,9 @@ function phaseLabel(session: DebateSessionV1): string {
     const phase = session.formatState.phase;
     return `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;
   }
+  if (session.phase === "rebuttal") {
+    return `Rebuttal ${session.formatState.rebuttalRound} of ${session.formatState.rebuttalRoundTarget}`;
+  }
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
 }
 
@@ -1917,6 +1976,7 @@ export function formatDebateVerboseTranscript(
     "## Cast and frozen runtime",
     "",
     `- Response mode: ${session.responseMode.toUpperCase()}`,
+    "- Spoken timing: setting-independent estimates from each final heard line",
     `- Frozen generation chain: ${session.generationChain.map((entry) => `${entry.provider}/${entry.model}`).join(" → ")}`,
     ...cast.map(
       ([role, bot]) =>
@@ -1981,8 +2041,19 @@ export function formatDebateVerboseTranscript(
     ...(presenceBeats.length > 0
       ? presenceBeats.flatMap((beat) => {
           const heard = heardBotPresenceBeatTextV1(beat).trim();
+          const actualDurationMs =
+            beat.playbackEndedAtMs === null
+              ? null
+              : Math.max(
+                  0,
+                  beat.playbackEndedAtMs - beat.playbackStartedAtMs,
+                );
+          const durationMs =
+            actualDurationMs ?? debateRevealDurationMs(heard);
           return heard
-            ? [`- ${beat.speaker.name} (${beat.trigger}): ${heard}`]
+            ? [
+                `- ${beat.speaker.name} (${beat.trigger}; ${actualDurationMs === null ? "estimated " : "heard "}${formatDebateSpokenDuration(durationMs)}): ${heard}`,
+              ]
             : [];
         })
       : ["No audible response cues."]),
@@ -1996,27 +2067,53 @@ export function formatDebateVerboseTranscript(
           !debateEventIsAtmosphericVocalFoley(event) &&
           !debateEventIsJuryComment(event),
       )
-      .flatMap((event) => [
-        `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
-        "",
-        `- Speaker: ${visibleEventName(session, event, playerName)} (${event.speakerKind})`,
-        `- Side: ${debateSideLabel(session, event.sideId)}`,
-        `- Step: ${event.stepKey}`,
-        `- Statement: ${event.statementId ?? "None"}`,
-        `- Evidence item: ${event.evidenceSourceId ?? "None"}`,
-        `- Ruling: ${event.ruling ?? "None"}`,
-        `- At: ${event.createdAt}`,
-        `- Evidence IDs: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
-        `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
-        `- Delivery: ${
-          event.interrupted
-            ? `Interrupted by ${event.interruptedBy ?? "unknown"}`
-            : "Complete"
-        }`,
-        "",
-        event.content,
-        "",
-      ]),
+      .flatMap((event) => {
+        const privateBallot =
+          event.kind === "ballot" &&
+          event.speakerKind !== "juror" &&
+          session.ballots.find(
+            (ballot) => ballot.voterBotId === event.speakerBotId,
+          )?.privateReason;
+        const spokenDurationMs = privateBallot
+          ? null
+          : debateEventSpokenLineDurationMs(event);
+        return [
+          `### ${String(event.sequence).padStart(3, "0")} · ${event.phase} · ${event.kind}`,
+          "",
+          `- Speaker: ${visibleEventName(session, event, playerName)} (${event.speakerKind})`,
+          `- Side: ${debateSideLabel(session, event.sideId)}`,
+          `- Step: ${event.stepKey}`,
+          `- Statement: ${event.statementId ?? "None"}`,
+          `- Evidence item: ${event.evidenceSourceId ?? "None"}`,
+          `- Ruling: ${event.ruling ?? "None"}`,
+          `- At: ${event.createdAt}`,
+          `- Evidence IDs: ${event.sourceIds.length > 0 ? event.sourceIds.join(", ") : "None"}`,
+          `- Generation: ${event.provider && event.model ? `${event.provider}/${event.model}${event.autoRecovery ? ` after ${event.autoRecovery.attempts.length} attempts` : ""}` : "Not model-generated"}`,
+          `- Delivery: ${
+            event.interrupted
+              ? `Interrupted by ${event.interruptedBy ?? "unknown"}`
+              : "Complete"
+          }`,
+          ...(spokenDurationMs === null
+            ? []
+            : [
+                `- Spoken duration: ~${formatDebateSpokenDuration(spokenDurationMs)} (setting-independent estimate)`,
+              ]),
+          "",
+          event.content,
+          "",
+        ];
+      }),
+    ...(session.formatState.format === "forum"
+      ? [
+          "## Forum round plan",
+          "",
+          `- Selection: ${session.formatState.rebuttalRoundMode}`,
+          `- Rebuttal exchanges: ${session.formatState.rebuttalRoundTarget}`,
+          `- Rationale: ${session.formatState.rebuttalRoundRationale}`,
+          "",
+        ]
+      : []),
     ...(session.formatState.format === "turnabout"
       ? [
           `## Turnabout ${debatePublicMaterialName(session.formality).toLowerCase()}`,
@@ -2815,6 +2912,9 @@ export function DebateExperience(
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<DebateFormatId>("forum");
   const [formality, setFormality] = useState<DebateFormalityId>("plainspoken");
+  const [forumRoundMode, setForumRoundMode] =
+    useState<DebateForumRoundMode>("auto");
+  const [forumRoundCount, setForumRoundCount] = useState(1);
   const [moderatorTitle, setModeratorTitle] = useState("Moderator");
   const [selectedPresetId, setSelectedPresetId] =
     useState<DebateSetupPresetId>("public-forum");
@@ -3048,6 +3148,8 @@ export function DebateExperience(
   const [presentationEventId, setPresentationEventId] = useState<string | null>(
     null,
   );
+  const [speakerHandoff, setSpeakerHandoff] =
+    useState<DebateSpeakerHandoffState | null>(null);
   const [
     audiencePressurePresentationEventId,
     setAudiencePressurePresentationEventId,
@@ -3246,6 +3348,7 @@ export function DebateExperience(
     activeSession.status === "live" &&
     !activeSession.participantObjection &&
     presenting &&
+    speakerHandoff === null &&
     judgeGavelActiveTarget?.kind === "speech" &&
     judgeGavelActiveTarget.speakerKind === "advocate" &&
     judgeGavelActiveTarget.sideId !== null &&
@@ -3279,6 +3382,7 @@ export function DebateExperience(
   const judgeGavelInterventionEligibleNow =
     judgeGavelKeyboardLive &&
     presenting &&
+    speakerHandoff === null &&
     judgeGavelActiveTarget?.speakerKind === "advocate" &&
     !judgeGavelInterventionOnCooldownNow;
   const judgeGavelInterventionAvailableNow =
@@ -4229,6 +4333,12 @@ export function DebateExperience(
     playerRole,
     juryEnabled,
   });
+  const forumRoundPlan = resolveDebateForumRoundPlan({
+    mode: forumRoundMode,
+    count: forumRoundCount,
+    motion,
+    evidence,
+  });
   const readinessCount = [
     motionComplete,
     castComplete,
@@ -4362,6 +4472,8 @@ export function DebateExperience(
     setSynopsisPreparingSessionId(null);
     setTopic("");
     setFormat("forum");
+    setForumRoundMode("auto");
+    setForumRoundCount(1);
     setFormality(setupMode === "basic" ? "plainspoken" : "parliamentary");
     setModeratorTitle("Moderator");
     setSelectedPresetId(
@@ -4392,6 +4504,7 @@ export function DebateExperience(
     setSetupMode(nextMode);
     if (nextMode === "advanced") return;
     setFormat("forum");
+    setForumRoundMode("auto");
     setSelectedPresetId("public-forum");
     setPlayerRole("judge");
     setActiveCastSlot("forAdvocate");
@@ -5801,6 +5914,41 @@ export function DebateExperience(
             utterance?.speaker?.id ?? event.speakerBotId,
           );
         }
+        const effectivePresentationCameraMode = debateCameraModeForSession(
+          cameraModeRef.current,
+          next,
+        );
+        const handoffSpeakerSnapshot = debateBotSnapshot(
+          next,
+          event.speakerBotId,
+        );
+        const handoffSpeakerPresentation = handoffSpeakerSnapshot
+          ? debateBotPresentation(
+              next,
+              handoffSpeakerSnapshot,
+              event.sequence,
+            )
+          : null;
+        const handoffPlan = debateSpeakerHandoffPlan({
+          sessionId: next.id,
+          previousEvent: debatePreviousStageSpeakerEvent(next.events, event),
+          nextEvent: event,
+          automaticCamera: effectivePresentationCameraMode === "auto",
+          juryCameraActive: debateJuryCameraIsActive(
+            effectivePresentationCameraMode,
+            next,
+          ),
+          gavelLed: gavelCue !== null,
+          hasEvidence: debateEventEvidenceIds(event).some(
+            (sourceId) =>
+              debateTableEvidenceItem(next.evidence, sourceId) !== null,
+          ),
+          speakerCanFoley:
+            event.speakerKind === "advocate" &&
+            Boolean(event.speakerBotId) &&
+            next.powerPlan.bots[event.speakerBotId ?? ""]?.hardMuted !== true &&
+            handoffSpeakerPresentation?.visibility !== "hidden",
+        });
         const lifecycleControlGavel =
           next.playerRole === "judge" &&
           (event.stepKey === "pause" ||
@@ -5872,18 +6020,98 @@ export function DebateExperience(
           );
           if (presentationRunRef.current !== runId) return;
         }
+        let presentationArmedForHandoff = false;
+        if (handoffPlan) {
+          setSpeakerHandoff({ eventId: event.id, phase: "wide" });
+          await new Promise((resolve) =>
+            window.setTimeout(
+              resolve,
+              DEBATE_SPEAKER_HANDOFF_TIMING.wideAudienceMs,
+            ),
+          );
+          if (presentationRunRef.current !== runId) return;
+
+          // Arm the next event while the camera remains wide. This lets the
+          // table place cited evidence without exposing any Proceedings prose.
+          setSpeakerHandoff({ eventId: event.id, phase: "evidence" });
+          setPresentationEventId(event.id);
+          setTranscriptVisibleThroughSequence(event.sequence);
+          replaceLiveReveal({
+            eventId: event.id,
+            visibleContent: "",
+            speechTiming: null,
+          });
+          presentationArmedForHandoff = true;
+          await new Promise((resolve) =>
+            window.setTimeout(
+              resolve,
+              handoffPlan.hasEvidence
+                ? DEBATE_SPEAKER_HANDOFF_TIMING.evidenceMs
+                : DEBATE_SPEAKER_HANDOFF_TIMING.eventArmMs,
+            ),
+          );
+          if (presentationRunRef.current !== runId) return;
+
+          setSpeakerHandoff({ eventId: event.id, phase: "speaker" });
+          await new Promise((resolve) =>
+            window.setTimeout(
+              resolve,
+              DEBATE_SPEAKER_HANDOFF_TIMING.cameraSettleMs,
+            ),
+          );
+          if (presentationRunRef.current !== runId) return;
+
+          setSpeakerHandoff({ eventId: event.id, phase: "foley" });
+          if (handoffPlan.foleyKind && event.speakerBotId) {
+            const cue = sessionAmbientBotVocalizationCueForKind(
+              `${next.id}:speaker-handoff:${event.id}`,
+              event.sequence,
+              handoffPlan.foleyKind,
+            );
+            startDebateAmbientBotVocalization(event.speakerBotId, cue);
+            if (props.audioEnabled && props.audioVolume > 0) {
+              debateAtmosphereControllerRef.current?.playFoley(cue.url, {
+                trim: 0.9,
+                lowCutHz: 90,
+                highCutHz: 8_200,
+                stereoPan:
+                  event.sideId === "for"
+                    ? -0.24
+                    : event.sideId === "against"
+                      ? 0.24
+                      : 0,
+                tag: `debate-speaker-handoff:${next.id}:${event.id}`,
+              });
+            }
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, cue.durationMs),
+            );
+            stopDebateAmbientBotVocalization();
+          } else {
+            await new Promise((resolve) =>
+              window.setTimeout(
+                resolve,
+                DEBATE_SPEAKER_HANDOFF_TIMING.quietReadyMs,
+              ),
+            );
+          }
+          if (presentationRunRef.current !== runId) return;
+        }
         await voiceReady;
         if (presentationRunRef.current !== runId) return;
         setVoicePreparationSpeakerBotId(null);
+        setSpeakerHandoff(null);
         // Open Proceedings only once the floor/streaming shell can arm — never
         // while voice prep still leaves presentationEventId null (full-text flash).
-        setPresentationEventId(event.id);
-        setTranscriptVisibleThroughSequence(event.sequence);
-        replaceLiveReveal({
-          eventId: event.id,
-          visibleContent: "",
-          speechTiming: null,
-        });
+        if (!presentationArmedForHandoff) {
+          setPresentationEventId(event.id);
+          setTranscriptVisibleThroughSequence(event.sequence);
+          replaceLiveReveal({
+            eventId: event.id,
+            visibleContent: "",
+            speechTiming: null,
+          });
+        }
         if (gavelCue) {
           const remainingSpeechLeadMs = Math.max(
             0,
@@ -6193,6 +6421,7 @@ export function DebateExperience(
       }
       if (presentationRunRef.current !== runId) return;
       setLiveGavelCue(null);
+      setSpeakerHandoff(null);
       replaceLiveReveal(null);
       setTranscriptVisibleThroughSequence(null);
       setVoicePreparationSpeakerBotId(null);
@@ -6204,9 +6433,13 @@ export function DebateExperience(
       onPrepareUtterance,
       onUtterance,
       playDebateAudienceReaction,
+      props.audioEnabled,
+      props.audioVolume,
       props.graphicsQuality,
       replaceLiveReveal,
       revealEventSilently,
+      startDebateAmbientBotVocalization,
+      stopDebateAmbientBotVocalization,
       updateLiveReveal,
     ],
   );
@@ -6240,6 +6473,7 @@ export function DebateExperience(
     setPresenting(true);
     void consumeNewEvents(beforeComment, throughComment, runId).finally(() => {
       if (presentationRunRef.current !== runId) return;
+      setSpeakerHandoff(null);
       setPresenting(false);
     });
   }, [
@@ -6363,6 +6597,7 @@ export function DebateExperience(
       activeSessionIdRef.current = next.id;
       presentationStore.clear();
       setVoicePreparationSpeakerBotId(null);
+      setSpeakerHandoff(null);
       const fresh = debatePresentationEvents(
         previous,
         next,
@@ -6439,6 +6674,7 @@ export function DebateExperience(
       } finally {
         if (presentationRunRef.current === runId) {
           setVoicePreparationSpeakerBotId(null);
+          setSpeakerHandoff(null);
           setAudiencePressurePresentationEventId(null);
           setPresenting(false);
           logDebateClientPerf(
@@ -6534,6 +6770,8 @@ export function DebateExperience(
       setSetupMode(draft.setupMode);
       setTopic(draft.topic);
       setFormat(draft.format);
+      setForumRoundMode(draft.forumRoundMode);
+      setForumRoundCount(draft.forumRoundCount);
       setFormality(draft.formality);
       setModeratorTitle(draft.moderatorTitle);
       setSelectedPresetId(draft.selectedPresetId);
@@ -6637,6 +6875,14 @@ export function DebateExperience(
             enabled: juryEnabled,
             cadence: "natural-five",
           },
+          forumRounds:
+            format === "forum"
+              ? {
+                  mode: forumRoundMode,
+                  count:
+                    forumRoundMode === "fixed" ? forumRoundCount : undefined,
+                }
+              : undefined,
           advocacyConsent: roleChecks,
           preferredProvider:
             props.modelOverride?.provider ?? props.preferredProvider,
@@ -7250,6 +7496,7 @@ export function DebateExperience(
       speechRevealRunRef.current = null;
     }
     setLiveGavelCue(null);
+    setSpeakerHandoff(null);
     setAudiencePressurePresentationEventId(null);
     replaceLiveReveal(null);
     setPresenting(false);
@@ -8169,6 +8416,9 @@ export function DebateExperience(
                   {debateFormalityDescriptor(session.formality).title} ·{" "}
                   {session.moderatorTitle} · {sessionStatusLabel(session)} ·{" "}
                   {session.playerRole}
+                  {session.activeDurationMs === null
+                    ? ""
+                    : ` · ${debateActiveDurationLabel(session.activeDurationMs)}`}
                 </span>
                 {session.synopsisText ? (
                   <em className={styles.archiveSynopsis}>{session.synopsisText}</em>
@@ -8278,7 +8528,7 @@ export function DebateExperience(
           <small className={styles.formatReadout}>
             {format === "turnabout"
               ? "Two pressable statements per side · frozen evidence only"
-              : "Openings · challenges · rebuttals · closings"}
+              : `Openings · challenges · ${forumRoundPlan.count} rebuttal ${forumRoundPlan.count === 1 ? "round" : "rounds"} · closings`}
           </small>
         ) : (
           <small className={styles.formatReadout}>
@@ -8767,6 +9017,62 @@ export function DebateExperience(
               );
             })}
           </fieldset>
+          <div
+            className={styles.proceedingPresets}
+            data-tutorial-target="debate-rounds"
+          >
+            <div>
+              <span>Rebuttal rounds</span>
+              <strong title={forumRoundPlan.rationale}>
+                {format === "turnabout"
+                  ? "Action-driven"
+                  : forumRoundMode === "auto"
+                    ? `Auto · ${forumRoundPlan.count}`
+                    : `${forumRoundPlan.count} fixed`}
+              </strong>
+            </div>
+            {format === "forum" ? (
+              <div role="group" aria-label="Forum rebuttal rounds">
+                <button
+                  type="button"
+                  data-selected={
+                    forumRoundMode === "auto" ? "true" : undefined
+                  }
+                  aria-pressed={forumRoundMode === "auto"}
+                  title={forumRoundPlan.rationale}
+                  onClick={() => setForumRoundMode("auto")}
+                >
+                  Auto
+                </button>
+                {[1, 2, 3].map((count) => (
+                  <button
+                    type="button"
+                    key={count}
+                    data-selected={
+                      forumRoundMode === "fixed" &&
+                      forumRoundCount === count
+                        ? "true"
+                        : undefined
+                    }
+                    aria-pressed={
+                      forumRoundMode === "fixed" &&
+                      forumRoundCount === count
+                    }
+                    onClick={() => {
+                      setForumRoundMode("fixed");
+                      setForumRoundCount(count);
+                    }}
+                  >
+                    {count}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div>
+                <span>Press, object, and ruling choices shape its length.</span>
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <section
@@ -8779,7 +9085,7 @@ export function DebateExperience(
               <strong>Prism handles the setup</strong>
               <small>
                 {formalityDescriptor.title} Forum · you judge · Prism holds your
-                seat · no Jury
+                seat · Auto rounds · no Jury
               </small>
             </div>
             <button type="button" onClick={() => chooseSetupMode("advanced")}>
@@ -10701,6 +11007,21 @@ export function DebateExperience(
             <span>Formality</span>
             <strong>{formalityDescriptor.title}</strong>
             <p>{formalityDescriptor.summary}</p>
+          </article>
+          <article>
+            <span>Rebuttal rounds</span>
+            <strong>
+              {format === "turnabout"
+                ? "Action-driven"
+                : forumRoundMode === "auto"
+                  ? `Auto · ${forumRoundPlan.count}`
+                  : `${forumRoundPlan.count} fixed`}
+            </strong>
+            <p>
+              {format === "turnabout"
+                ? "Presses, objections, and rulings determine the length."
+                : forumRoundPlan.rationale}
+            </p>
           </article>
           <article>
             <span>Motion</span>
@@ -13590,23 +13911,27 @@ export function DebateExperience(
       session.evidence,
       tableEvidenceStickyId,
     );
-    const cameraTransition = debateCameraTransition(
-      effectiveCameraMode,
-      activeEvent,
-    );
+    const cameraTransition = speakerHandoff
+      ? "handoff"
+      : debateCameraTransition(effectiveCameraMode, activeEvent);
+    const speakerHandoffKeepsWide =
+      speakerHandoff?.phase === "wide" ||
+      speakerHandoff?.phase === "evidence";
     const cameraView = judgeGavelCameraForced
       ? "moderator"
       : judgeGavelCeremony?.status === "missed" && judgeGavelMissedCameraView
         ? judgeGavelMissedCameraView
         : juryCameraActive
           ? "jury"
-          : effectiveCameraMode === "auto" || effectiveCameraMode === "jury"
-            ? forumPreparingNextTurn
-              ? "wide"
-              : activeGavelCue && gavelCameraReady
-                ? "moderator"
-                : debateAutoCameraView(activeRole)
-            : effectiveCameraMode;
+          : speakerHandoffKeepsWide && effectiveCameraMode === "auto"
+            ? "wide"
+            : effectiveCameraMode === "auto" || effectiveCameraMode === "jury"
+              ? forumPreparingNextTurn
+                ? "wide"
+                : activeGavelCue && gavelCameraReady
+                  ? "moderator"
+                  : debateAutoCameraView(activeRole)
+              : effectiveCameraMode;
     const evidenceView = debateStageEvidenceViewForCamera(
       cameraView,
     );
@@ -13638,7 +13963,7 @@ export function DebateExperience(
         ? (liveReveal.speechTiming ?? null)
         : null;
     const activeTurnClock =
-      presenting && activeEvent
+      presenting && activeEvent && speakerHandoff === null
         ? debateTurnClockState(activeEvent, activeSpeechTiming)
         : null;
     const judgeGavelCooldownUntilMs = currentJudgeGavelCooldownUntilMs;
@@ -14244,6 +14569,7 @@ export function DebateExperience(
                         const talking =
                           responseCueSpeakerBotId === bot.id ||
                           (presenting &&
+                            speakerHandoff === null &&
                             activeSpeakerId === bot.id &&
                             activeEvent?.kind !== "silence");
                         const speechTiming =

@@ -6,6 +6,7 @@ import {
   type DebateAdvocacyConsent,
   type DebateEvidenceSourceV1,
   type DebateFormalityId,
+  type DebateForumRoundMode,
   type DebateFormatId,
   type DebateMotionSlateV1,
   type DebatePlayerRole,
@@ -95,6 +96,8 @@ export interface DebateSessionRetryDraft {
   playerRole: DebatePlayerRole;
   playerSideId: "for" | "against";
   juryEnabled: boolean;
+  forumRoundMode: DebateForumRoundMode;
+  forumRoundCount: number;
   evidence: DebateSessionV1["evidence"];
   missingBotNames: string[];
 }
@@ -108,6 +111,8 @@ export function debateSessionRetryDraft(
   availableBotIds: readonly string[],
   currentPresetId: DebateSetupPresetId,
 ): DebateSessionRetryDraft {
+  const forumFormatState =
+    session.formatState?.format === "forum" ? session.formatState : null;
   const available = new Set(availableBotIds);
   const missingBotNames: string[] = [];
   const restoreLibraryBot = (
@@ -162,6 +167,8 @@ export function debateSessionRetryDraft(
     playerRole: session.playerRole,
     playerSideId: session.playerSideId ?? "for",
     juryEnabled: session.jury.enabled,
+    forumRoundMode: forumFormatState?.rebuttalRoundMode ?? "auto",
+    forumRoundCount: forumFormatState?.rebuttalRoundTarget ?? 1,
     evidence: {
       ...session.evidence,
       sources: session.evidence.sources.map((source) => ({ ...source })),

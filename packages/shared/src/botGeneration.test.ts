@@ -198,6 +198,32 @@ describe("normalizeBotGeneratedDraftV1", () => {
       repetitionPenalty: 0.5,
     });
   });
+
+  it("drops oversized portrait strokes while preserving small avatar accents", () => {
+    const input = completeDraft();
+    input.avatarDetails = {
+      ink: [
+        { role: "effect", shape: "circle", x1: 64, y1: 58, x2: 112, y2: 58, size: 2 },
+        { role: "effect", shape: "line", x1: 18, y1: 40, x2: 110, y2: 96, size: 2 },
+        { role: "effect", shape: "line", x1: 48, y1: 54, x2: 56, y2: 58, size: 1 },
+      ],
+    };
+    const compactOnly = completeDraft();
+    compactOnly.avatarDetails = {
+      ink: [
+        { role: "effect", shape: "line", x1: 48, y1: 54, x2: 56, y2: 58, size: 1 },
+      ],
+    };
+
+    const draft = normalizeBotGeneratedDraftV1(input);
+    const expected = normalizeBotGeneratedDraftV1(compactOnly);
+    assert.ok(draft);
+    assert.ok(expected);
+    assert.equal(
+      draft.avatarDetails?.screen.paintColorMapBase64,
+      expected.avatarDetails?.screen.paintColorMapBase64,
+    );
+  });
 });
 
 describe("normalizeBotGenerationPrompt", () => {

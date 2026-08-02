@@ -30,6 +30,8 @@ import {
 export const BOT_GENERATION_DRAFT_VERSION = 1 as const;
 export const BOT_GENERATION_PROMPT_MAX_LENGTH = 2_000;
 export const BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH = 240;
+const BOT_GENERATED_INK_MAX_LINE_LENGTH = 32;
+const BOT_GENERATED_INK_MAX_CIRCLE_RADIUS = 16;
 
 /** A compact, stable subset of the bot icon library that models can choose reliably. */
 export const BOT_GENERATION_GLYPH_IDS = [
@@ -197,7 +199,7 @@ function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
     : null;
   if (!role || !shape) return null;
   const max = BOT_AVATAR_DETAILS_CANVAS_SIZE - 1;
-  return {
+  const stroke: BotGeneratedInkStrokeV1 = {
     role,
     shape,
     x1: clampedInteger(value.x1, 64, 0, max),
@@ -206,6 +208,15 @@ function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
     y2: clampedInteger(value.y2, 64, 0, max),
     size: clampedInteger(value.size, 1, 1, 3),
   };
+  const extent = Math.hypot(stroke.x2 - stroke.x1, stroke.y2 - stroke.y1);
+  if (
+    extent > (shape === "circle"
+      ? BOT_GENERATED_INK_MAX_CIRCLE_RADIUS
+      : BOT_GENERATED_INK_MAX_LINE_LENGTH)
+  ) {
+    return null;
+  }
+  return stroke;
 }
 
 function setInkPixel(
