@@ -43,11 +43,15 @@ export function autoFallbackPrimaryForSelection(args: {
   return { provider: resolved.provider, model: resolved.model };
 }
 
-export function encodeAutoFallbackPickerValue(ref: AutoFallbackModelRef): string {
+export function encodeAutoFallbackPickerValue(
+  ref: AutoFallbackModelRef,
+): string {
   return `${ref.provider}${PICKER_SEPARATOR}${ref.model}`;
 }
 
-export function decodeAutoFallbackPickerValue(value: unknown): AutoFallbackModelRef | null {
+export function decodeAutoFallbackPickerValue(
+  value: unknown,
+): AutoFallbackModelRef | null {
   if (typeof value !== "string") return null;
   const separator = value.indexOf(PICKER_SEPARATOR);
   if (separator <= 0) return null;
@@ -113,7 +117,11 @@ export function autoFallbackChainWithoutEntry(args: {
   index: number;
 }): AutoFallbackChainV1 | null {
   const existing = normalizeAutoFallbackChain(args.chain)?.fallbacks ?? [];
-  if (!Number.isInteger(args.index) || args.index < 0 || args.index >= existing.length) {
+  if (
+    !Number.isInteger(args.index) ||
+    args.index < 0 ||
+    args.index >= existing.length
+  ) {
     return args.chain ? normalizeAutoFallbackChain(args.chain) : null;
   }
   const fallbacks = existing.filter((_, index) => index !== args.index);
@@ -131,8 +139,37 @@ export function autoFallbackAvailableForPrimary(args: {
   const runnableKeys = new Set(args.runnable.map(autoFallbackModelKey));
   const resolved = autoFallbackResolvedChain(args.primary, args.chain);
   return Boolean(
-    resolved && resolved.every((entry) => runnableKeys.has(autoFallbackModelKey(entry)))
+    resolved &&
+    resolved.every((entry) => runnableKeys.has(autoFallbackModelKey(entry))),
   );
+}
+
+/**
+ * AUTO's editor may be entered whenever Settings contains at least one
+ * runnable fallback. The currently selected Primary is intentionally ignored:
+ * it may duplicate the only fallback, and AUTO is where the user can choose a
+ * different Primary without first changing the LOCAL/ONLINE route.
+ */
+export function autoFallbackSelectablePrimary(args: {
+  chain: AutoFallbackChainV1 | null | undefined;
+  runnable: readonly AutoFallbackModelRef[];
+}): AutoFallbackModelRef | null {
+  return (
+    args.runnable.find((primary) =>
+      autoFallbackAvailableForPrimary({
+        primary,
+        chain: args.chain,
+        runnable: args.runnable,
+      }),
+    ) ?? null
+  );
+}
+
+export function autoFallbackModeSelectable(args: {
+  chain: AutoFallbackChainV1 | null | undefined;
+  runnable: readonly AutoFallbackModelRef[];
+}): boolean {
+  return autoFallbackSelectablePrimary(args) !== null;
 }
 
 export function autoFallbackResponseModeForSend(args: {

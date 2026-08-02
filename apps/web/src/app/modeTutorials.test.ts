@@ -297,6 +297,9 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
     assert.match(copy, /fallback chain saved in Settings/u);
+    assert.match(copy, /LOCAL disables online rows/u);
+    assert.match(copy, /ONLINE disables local rows/u);
+    assert.match(copy, /enter AUTO directly/u);
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /short title synthesized in the selected Rowdiness/u);
     assert.match(copy, /Use setup copies its motion, title, room settings/u);
@@ -779,7 +782,15 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
     assert.match(
       routing?.body ?? "",
-      /Chat Settings can also give your own Zen messages a selected local or Premium voice/u,
+      /Chat Settings can give your own Zen messages both a Premium voice and an independent local fallback/u,
+    );
+    assert.match(
+      routing?.body ?? "",
+      /LOCAL and unavailable Premium speech also use that saved fallback/u,
+    );
+    assert.match(
+      routing?.body ?? "",
+      /top Voice picker chooses the player identity too: Premium uses your Premium voice/u,
     );
     assert.match(routing?.body ?? "", /player voice is always clean/u);
     assert.match(

@@ -4,6 +4,7 @@ import {
   type BotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
   type EnglishVoiceEngine,
+  type VoiceMode,
 } from "@localai/shared";
 
 /**
@@ -43,12 +44,48 @@ export function playerVoiceEngine(
     : "builtin";
 }
 
-export function playerVoiceSelectionValue(
+export function playerPremiumVoiceId(
   profile: BotAudioVoiceProfileV1 | null | undefined,
-  offlineValue: (profile: BotAudioVoiceProfileV1) => string,
-): string {
+): string | null {
   const clean = cleanPlayerVoiceProfile(profile);
-  const premiumId = clean.elevenLabsVoiceIdOverride ?? clean.elevenLabsVoiceId;
-  return premiumId ? `premium:${premiumId}` : offlineValue(clean);
+  return clean.elevenLabsVoiceIdOverride ?? clean.elevenLabsVoiceId ?? null;
 }
 
+export function selectPlayerPremiumVoice(
+  profile: BotAudioVoiceProfileV1 | null | undefined,
+  voiceId: string | null,
+): BotAudioVoiceProfileV2 {
+  return cleanPlayerVoiceProfile({
+    ...cleanPlayerVoiceProfile(profile),
+    elevenLabsVoiceId: voiceId?.trim() || null,
+    elevenLabsVoiceIdOverride: null,
+    elevenLabsVoiceInitialized: true,
+  });
+}
+
+export function playerLocalVoiceProfile(
+  profile: BotAudioVoiceProfileV1 | null | undefined,
+): BotAudioVoiceProfileV2 {
+  return cleanPlayerVoiceProfile({
+    ...cleanPlayerVoiceProfile(profile),
+    elevenLabsVoiceId: null,
+    elevenLabsVoiceIdOverride: null,
+  });
+}
+
+export function resolvePlayerVoicePlayback(args: {
+  profile: BotAudioVoiceProfileV1 | null | undefined;
+  voiceMode: VoiceMode;
+  englishVoiceEngine: EnglishVoiceEngine;
+  localOnly: boolean;
+}): { profile: BotAudioVoiceProfileV2; engine: EnglishVoiceEngine } {
+  const clean = cleanPlayerVoiceProfile(args.profile);
+  const premiumSelected =
+    !args.localOnly &&
+    args.voiceMode === "english" &&
+    args.englishVoiceEngine === "elevenlabs" &&
+    playerPremiumVoiceId(clean) !== null;
+  return premiumSelected
+    ? { profile: clean, engine: "elevenlabs" }
+    : { profile: playerLocalVoiceProfile(clean), engine: "builtin" };
+}

@@ -32071,6 +32071,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--bg-deep) 88%, #7db7ff 12%);
 }
 
+.composeModelControl[data-provider="anthropic"] {
+  background: color-mix(in srgb, var(--bg-deep) 88%, #d97757 12%);
+}
+
 .composeModelControl[data-provider="online"] {
   background: color-mix(in srgb, var(--bg-deep) 88%, #8fb8ff 12%);
 }
@@ -32234,6 +32238,45 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   justify-content: space-between;
   gap: 14px;
   align-items: center;
+}
+
+.composeModelOption[data-model-provider] {
+  --compose-model-provider-accent: var(--line-strong);
+  background: linear-gradient(
+    90deg,
+    color-mix(
+      in srgb,
+      var(--compose-model-provider-accent) 11%,
+      transparent
+    ),
+    transparent 58%
+  );
+  box-shadow: inset 3px 0 0 var(--compose-model-provider-accent);
+}
+
+.composeModelOption[data-model-provider="local"] {
+  --compose-model-provider-accent: #68e6a6;
+}
+
+.composeModelOption[data-model-provider="openai"] {
+  --compose-model-provider-accent: #7db7ff;
+}
+
+.composeModelOption[data-model-provider="anthropic"] {
+  --compose-model-provider-accent: #d97757;
+}
+
+.composeModelOption[data-model-provider][aria-selected="true"],
+.composeModelOption[data-model-provider]:hover:not(:disabled) {
+  background: linear-gradient(
+    90deg,
+    color-mix(
+      in srgb,
+      var(--compose-model-provider-accent) 20%,
+      var(--bg-hover)
+    ),
+    var(--bg-hover) 66%
+  );
 }
 
 .composeModelOptionDisabled {

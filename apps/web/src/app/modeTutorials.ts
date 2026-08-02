@@ -39,7 +39,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your ordered chain of one to five saved local or online fallbacks if a reply fails validation. While AUTO is selected, the model picker shows every local and online model so you can change Primary directly. Image generation keeps its own LOCAL/ONLINE choice in Images. Voice offers Mute, English, Premium, Babble, and Bottish everywhere: English uses each bot’s local PRISM or optional operating-system identity without ElevenLabs credits; Premium uses an ElevenLabs identity you choose from your connected account on AUTO and ONLINE speech. Marketplace bots do not bundle a Premium identity by default. LOCAL always shows and uses English so it never sends speech off-device. When a fresh voiced reply needs time, an eligible bot may give one brief in-character response cue before a single restrained thinking beat; the cue is never part of the bot's answer or memory. Avatar Studio edits and previews those two identities separately while sharing pitch, pace, lilt, effects, and mood delivery. The subtle Prism effect is the default house sound, gently tuning voiced speech before its refracted double; choose Clean for untouched playback or Resonance for a darker, weightier mechanical double. Voice Settings can narrow automatic Premium defaults to one ElevenLabs voice collection. Chat Settings can also give your own Zen messages a selected local or Premium voice and reveal their text on that voice’s clock; leave it off to stay silent. Your player voice is always clean, with no chorus, pitch, texture, or bot delivery filters. Coffee, Signal, and Debate continue to use the Default PRISM voice because PRISM is your avatar there. The Voice tab also gives each bot a Voice Character pad: move left or right to balance low-end weight against high-end clarity, and up or down to trim that bot relative to your account Voice Volume. The SFX tab can generate an ElevenLabs loop or accept an audio upload, then play it while the avatar is talking, idle, thinking, or any selected combination. Its volume and sample controls stay separate from spoken voice. When an eligible Premium voice has a non-neutral mood, Eleven v3 automatically carries that feeling into the next spoken line; neutral speech stays untagged. With Voice Effects on, longer spoken replies may take a quiet mic-ready breath before the line.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your ordered chain of one to five saved local or online fallbacks if a reply fails validation. While AUTO is selected, the model picker shows every local and online model so you can change Primary directly. Image generation keeps its own LOCAL/ONLINE choice in Images. Voice offers Mute, English, Premium, Babble, and Bottish everywhere: English uses each bot’s local PRISM or optional operating-system identity without ElevenLabs credits; Premium uses an ElevenLabs identity you choose from your connected account on AUTO and ONLINE speech. Marketplace bots do not bundle a Premium identity by default. LOCAL always shows and uses English so it never sends speech off-device. When a fresh voiced reply needs time, an eligible bot may give one brief in-character response cue before a single restrained thinking beat; the cue is never part of the bot's answer or memory. Avatar Studio edits and previews those two identities separately while sharing pitch, pace, lilt, effects, and mood delivery. The subtle Prism effect is the default house sound, gently tuning voiced speech before its refracted double; choose Clean for untouched playback or Resonance for a darker, weightier mechanical double. Voice Settings can narrow automatic Premium defaults to one ElevenLabs voice collection. Chat Settings can give your own Zen messages both a Premium voice and an independent local fallback, then reveal their text on whichever voice actually plays. The top Voice picker chooses the player identity too: Premium uses your Premium voice, while English and every non-Premium speaking type use your local fallback without applying Babble or Bottish effects. LOCAL and unavailable Premium speech also use that saved fallback. Leave speaking off to stay silent. Your player voice is always clean, with no chorus, pitch, texture, or bot delivery filters. Coffee, Signal, and Debate continue to use the Default PRISM voice because PRISM is your avatar there. The Voice tab also gives each bot a Voice Character pad: move left or right to balance low-end weight against high-end clarity, and up or down to trim that bot relative to your account Voice Volume. The SFX tab can generate an ElevenLabs loop or accept an audio upload, then play it while the avatar is talking, idle, thinking, or any selected combination. Its volume and sample controls stay separate from spoken voice. When an eligible Premium voice has a non-neutral mood, Eleven v3 automatically carries that feeling into the next spoken line; neutral speech stays untagged. With Voice Effects on, longer spoken replies may take a quiet mic-ready breath before the line.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -447,7 +447,27 @@ function currentDebateRecordTutorialBody(body: string): string {
   );
 }
 
-export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
+const MODEL_ROUTING_VISIBILITY_TUTORIAL_SUFFIX =
+  "Every model you left visible in Settings remains listed in every routing mode. LOCAL disables online rows, ONLINE disables local rows, and AUTO enables both lanes. You can enter AUTO directly, then choose any available model as Primary.";
+
+function currentModelRoutingTutorialStep(
+  step: ModeTutorialStep,
+): ModeTutorialStep {
+  if (
+    !/model/iu.test(step.body) ||
+    !/(?:AUTO keeps|Choose AUTO in the LOCAL|Choose LOCAL, AUTO|Pick LOCAL, AUTO|navbar’s LOCAL, AUTO)/iu.test(
+      step.body,
+    )
+  ) {
+    return step;
+  }
+  return {
+    ...step,
+    body: `${step.body} ${MODEL_ROUTING_VISIBILITY_TUTORIAL_SUFFIX}`,
+  };
+}
+
+const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
   debate: {
     ...BASE_MODE_TUTORIALS.debate,
@@ -526,6 +546,19 @@ export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     }),
   },
 };
+
+export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> =
+  Object.fromEntries(
+    (Object.entries(CURRENT_MODE_TUTORIALS) as [TutorialMode, ModeTutorial][]).map(
+      ([mode, tutorial]) => [
+        mode,
+        {
+          ...tutorial,
+          steps: tutorial.steps.map(currentModelRoutingTutorialStep),
+        },
+      ],
+    ),
+  ) as unknown as Record<TutorialMode, ModeTutorial>;
 
 export function modeTutorialStep(
   mode: TutorialMode,

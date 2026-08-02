@@ -466,14 +466,17 @@ import {
 } from "./providerMode";
 import {
   autoFallbackAvailableForPrimary,
+  autoFallbackModeSelectable,
   autoFallbackChainWithAddedEntry,
   autoFallbackChainWithEntry,
   autoFallbackChainWithoutEntry,
   autoFallbackPrimaryForSelection,
   autoFallbackResponseModeForSend,
+  autoFallbackSelectablePrimary,
   decodeAutoFallbackPickerValue,
   encodeAutoFallbackPickerValue,
 } from "./autoFallbackSettings";
+import { modeAwareModelOptions } from "./modeAwareModelOptions";
 import {
   reasoningEffortForSend,
   resolveChatZenReasoningEffortAvailability,
@@ -1546,8 +1549,10 @@ import {
 } from "./coffee-action-sfx";
 import {
   cleanPlayerVoiceProfile,
-  playerVoiceEngine,
-  playerVoiceSelectionValue,
+  playerLocalVoiceProfile,
+  playerPremiumVoiceId,
+  resolvePlayerVoicePlayback,
+  selectPlayerPremiumVoice,
 } from "./playerVoice";
 import {
   cleanupMessageRevealKey,
@@ -16487,19 +16492,16 @@ function modelOptionsForResponseMode(
   settings: UserSettings | null,
   responseMode: AutoResponseMode,
 ): ModelCatalogEntry[] {
-  if (responseMode === "local") {
-    return chatModelOptionsForProvider(catalog, settings, "local");
-  }
-  if (responseMode === "online") {
-    return onlineModelOptionsForPicker(catalog, settings);
-  }
-  return [
-    ...chatModelOptionsForProvider(catalog, settings, "local").map((model) => ({
+  return modeAwareModelOptions({
+    local: chatModelOptionsForProvider(catalog, settings, "local").map(
+      (model) => ({
       ...model,
       hostLabel: model.hostLabel ?? providerDisplayLabel("local"),
-    })),
-    ...onlineModelOptionsForPicker(catalog, settings),
-  ];
+      }),
+    ),
+    online: onlineModelOptionsForPicker(catalog, settings),
+    responseMode,
+  });
 }
 
 function includeSelectedModelOption(
@@ -23190,6 +23192,8 @@ interface ComposerModelPickerProps {
   onChange: (nextValue: string) => void;
   options: ModelCatalogEntry[];
   provider: ComposerModelPickerProvider;
+  /** Provider of the currently displayed model, used for provider tinting. */
+  selectedProvider?: Provider;
   disabled?: boolean;
   loading?: boolean;
   title?: string;
@@ -23236,6 +23240,7 @@ function ComposerModelPicker({
   onChange,
   options,
   provider,
+  selectedProvider,
   disabled,
   loading = false,
   title,
@@ -23286,6 +23291,7 @@ function ComposerModelPicker({
         : disabledSelected
           ? disabledOptionLabel
           : (selectedModel?.label ?? value);
+  const visualProvider = selectedProvider ?? selectedModel?.provider ?? provider;
   const interactionDisabled = disabled || loading;
   const menuOpen = open && !interactionDisabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
@@ -23378,7 +23384,8 @@ function ComposerModelPicker({
       data-disabled={interactionDisabled ? "true" : undefined}
       data-loading={loading ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
-      data-provider={provider}
+      data-provider={visualProvider}
+      data-routing-provider={provider}
     >
       {formName ? (
         <input
@@ -23524,6 +23531,7 @@ function ComposerModelPicker({
                       isUnavailable ? styles.composeModelOptionDisabled : ""
                     }`}
                     role="option"
+                    data-model-provider={model.provider}
                     aria-selected={isSelected}
                     aria-disabled={isUnavailable ? "true" : undefined}
                     disabled={isUnavailable}
@@ -44094,21 +44102,20 @@ function HomeContent(): React.JSX.Element {
     () => cleanPlayerVoiceProfile(settings?.playerAudioVoiceProfile),
     [settings?.playerAudioVoiceProfile],
   );
-  const selectedPlayerVoiceValue = playerVoiceSelectionValue(
+  const selectedPlayerPremiumVoiceId = playerPremiumVoiceId(
     playerVoiceProfile,
-    offlineVoiceSelectionValue,
   );
-  const selectedPlayerPremiumVoiceId =
-    playerVoiceProfile.elevenLabsVoiceIdOverride ??
-    playerVoiceProfile.elevenLabsVoiceId ??
-    null;
-  const selectedPlayerVoiceAvailable = selectedPlayerPremiumVoiceId
+  const selectedPlayerPremiumVoiceAvailable = selectedPlayerPremiumVoiceId
     ? elevenLabsVoiceCatalog.some(
         (voice) => voice.voiceId === selectedPlayerPremiumVoiceId,
       )
-    : offlineVoiceIdentityOptions.some(
-        (voice) => voice.value === selectedPlayerVoiceValue,
-      );
+    : true;
+  const selectedPlayerLocalVoiceValue = offlineVoiceSelectionValue(
+    playerVoiceProfile,
+  );
+  const selectedPlayerLocalVoiceAvailable = offlineVoiceIdentityOptions.some(
+    (voice) => voice.value === selectedPlayerLocalVoiceValue,
+  );
   useEffect(() => {
     if (!user) return;
     void api<VoiceCapabilitiesResponse>("/api/voices/capabilities")
@@ -52938,7 +52945,7 @@ function HomeContent(): React.JSX.Element {
             ),
             onlineOptions: onlineChatModelOptions,
           });
-      const primary = resolvedAutoPrimaryForComposer(
+      const currentPrimary = resolvedAutoPrimaryForComposer(
         modelCatalog,
         settings,
         resolvedPrimary.provider,
@@ -52952,21 +52959,30 @@ function HomeContent(): React.JSX.Element {
           (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
         )
         .map((model) => ({ provider: model.provider, model: model.id }));
-      const autoConfigured = autoFallbackAvailableForPrimary({
-        primary,
+      const autoPrimaryCandidate = autoFallbackSelectablePrimary({
         chain: settings.autoFallbackChain,
-        runnable,
+        runnable: currentPrimary
+          ? [
+              currentPrimary,
+              ...runnable.filter(
+                (candidate) =>
+                  candidate.provider !== currentPrimary.provider ||
+                  candidate.model !== currentPrimary.model,
+              ),
+            ]
+          : runnable,
       });
+      const autoSelectable = autoPrimaryCandidate !== null;
       const responseMode = autoResponseModeForProvider(
         providerPreference,
         settings.autoModeEnabled,
-        autoConfigured && !lockedByActiveBot,
+        autoSelectable && !lockedByActiveBot,
       );
       const selectMode = (nextMode: AutoResponseMode) => {
         if (
           disabledReason ||
           lockedByActiveBot ||
-          (nextMode === "auto" && !autoConfigured)
+          (nextMode === "auto" && !autoSelectable)
         )
           return;
         if (!respectActiveBotLock) {
@@ -52974,6 +52990,23 @@ function HomeContent(): React.JSX.Element {
           return;
         }
         void persistAutoModeEnabled(nextMode === "auto");
+        if (
+          nextMode === "auto" &&
+          autoPrimaryCandidate &&
+          (!currentPrimary ||
+            currentPrimary.provider !== autoPrimaryCandidate.provider ||
+            currentPrimary.model !== autoPrimaryCandidate.model)
+        ) {
+          setChatModelChoiceByProvider((previous) => {
+            const next = {
+              ...previous,
+              [autoPrimaryCandidate.provider]: autoPrimaryCandidate.model,
+            };
+            persistChatModelChoicesForActiveScope(next);
+            return next;
+          });
+          void switchProvider(autoPrimaryCandidate.provider);
+        }
         if (nextMode === "local") void switchProvider("local");
         if (nextMode === "online") {
           const nextProvider = forceAutoAllowed
@@ -53012,14 +53045,14 @@ function HomeContent(): React.JSX.Element {
                 disabled={
                   Boolean(disabledReason) ||
                   lockedByActiveBot ||
-                  (mode === "auto" && !autoConfigured)
+                  (mode === "auto" && !autoSelectable)
                 }
                 onClick={() => selectMode(mode)}
                 aria-pressed={responseMode === mode}
                 title={
                   disabledReason ??
-                  (mode === "auto" && !autoConfigured
-                    ? "Choose 1–5 distinct runnable fallback models in Settings; at least one must differ from Primary."
+                  (mode === "auto" && !autoSelectable
+                    ? "Choose at least one runnable fallback model in Settings."
                     : `${responseModeDisplayLabel(mode)} responses`)
                 }
               >
@@ -53157,14 +53190,14 @@ function HomeContent(): React.JSX.Element {
         (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
       )
       .map((model) => ({ provider: model.provider, model: model.id }));
-    const responseMode = primary
-      ? autoFallbackResponseModeForSend({
-          autoEnabled: settings.autoModeEnabled,
-          primary,
-          chain: settings.autoFallbackChain,
-          runnable,
-        })
-      : binaryResponseMode;
+    const responseMode = autoResponseModeForProvider(
+      accountProvider,
+      settings.autoModeEnabled,
+      autoFallbackModeSelectable({
+        chain: settings.autoFallbackChain,
+        runnable,
+      }),
+    );
     const modelOptions = includeSelectedResponseModeModelOption(
       modelCatalog,
       settings,
@@ -53199,6 +53232,7 @@ function HomeContent(): React.JSX.Element {
                 ? "local"
                 : "online"
           }
+          selectedProvider={accountModelProvider}
           loading={modelCatalogLoading}
           disabled={!settings}
           title={
@@ -53328,7 +53362,7 @@ function HomeContent(): React.JSX.Element {
       choices: coffeeChoices,
       onlineOptions: onlineChatModelOptions,
     });
-    const primary = resolvedAutoPrimaryForComposer(
+    const currentPrimary = resolvedAutoPrimaryForComposer(
       modelCatalog,
       settings,
       resolvedPrimary.provider,
@@ -53345,28 +53379,52 @@ function HomeContent(): React.JSX.Element {
           )
           .map((model) => ({ provider: model.provider, model: model.id }))
       : [];
-    const autoConfigured = Boolean(
-      settings &&
-      autoFallbackAvailableForPrimary({
-        primary,
-        chain: settings.autoFallbackChain,
-        runnable,
-      }),
-    );
+    const autoPrimaryCandidate = settings
+      ? autoFallbackSelectablePrimary({
+          chain: settings.autoFallbackChain,
+          runnable: currentPrimary
+            ? [
+                currentPrimary,
+                ...runnable.filter(
+                  (candidate) =>
+                    candidate.provider !== currentPrimary.provider ||
+                    candidate.model !== currentPrimary.model,
+                ),
+              ]
+            : runnable,
+        })
+      : null;
+    const autoSelectable = autoPrimaryCandidate !== null;
     const responseMode = autoResponseModeForProvider(
       effectiveCoffeeProvider,
       settings?.autoModeEnabled === true,
-      autoConfigured && !lockedByProtectedBot,
+      autoSelectable && !lockedByProtectedBot,
     );
     if (settings) {
       const selectMode = (nextMode: AutoResponseMode) => {
         if (
           coffeeHeaderModelControlsLocked() ||
           lockedByProtectedBot ||
-          (nextMode === "auto" && !autoConfigured)
+          (nextMode === "auto" && !autoSelectable)
         )
           return;
         void persistAutoModeEnabled(nextMode === "auto");
+        if (
+          nextMode === "auto" &&
+          autoPrimaryCandidate &&
+          (!currentPrimary ||
+            currentPrimary.provider !== autoPrimaryCandidate.provider ||
+            currentPrimary.model !== autoPrimaryCandidate.model)
+        ) {
+          const nextChoices = {
+            ...coffeeModelChoiceByProvider,
+            [autoPrimaryCandidate.provider]: autoPrimaryCandidate.model,
+          };
+          setCoffeeModelChoiceByProvider(nextChoices);
+          persistCoffeeModelChoicesForScope(nextChoices);
+          setCoffeeProvider(autoPrimaryCandidate.provider);
+          setCoffeeProviderTouched(true);
+        }
         if (nextMode !== "auto") {
           const nextProvider = resolveModelChoiceForResponseMode({
             responseMode: nextMode,
@@ -53396,14 +53454,14 @@ function HomeContent(): React.JSX.Element {
                 disabled={
                   coffeeHeaderModelControlsLocked() ||
                   lockedByProtectedBot ||
-                  (mode === "auto" && !autoConfigured)
+                  (mode === "auto" && !autoSelectable)
                 }
                 onClick={() => selectMode(mode)}
                 aria-pressed={responseMode === mode}
                 title={
                   coffeeHeaderModelControlsLockReason() ??
-                  (mode === "auto" && !autoConfigured
-                    ? "Choose 1–5 distinct runnable fallback models in Settings; at least one must differ from Primary."
+                  (mode === "auto" && !autoSelectable
+                    ? "Choose at least one runnable fallback model in Settings."
                     : `${responseModeDisplayLabel(mode)} responses`)
                 }
               >
@@ -53528,8 +53586,7 @@ function HomeContent(): React.JSX.Element {
       effectiveProvider,
       settings.autoModeEnabled,
       !lockedByProtectedBot &&
-        autoFallbackAvailableForPrimary({
-          primary: primaryForAuto,
+        autoFallbackModeSelectable({
           chain: settings.autoFallbackChain,
           runnable: runnableAutoModels,
         }),
@@ -53597,6 +53654,7 @@ function HomeContent(): React.JSX.Element {
         provider={
           responseMode === "auto" ? "all" : isLocal ? "local" : "online"
         }
+        selectedProvider={modelProvider}
         loading={modelCatalogLoading}
         disabled={coffeeHeaderModelControlsLocked()}
         title={
@@ -53844,8 +53902,7 @@ function HomeContent(): React.JSX.Element {
       effectivePreferredProvider,
       settings?.autoModeEnabled === true,
       autoAllowed &&
-        autoFallbackAvailableForPrimary({
-          primary: primaryForAuto,
+        autoFallbackModeSelectable({
           chain: settings?.autoFallbackChain,
           runnable: runnableAutoModels,
         }),
@@ -53922,6 +53979,7 @@ function HomeContent(): React.JSX.Element {
               provider={
                 responseMode === "auto" ? "all" : isLocal ? "local" : "online"
               }
+              selectedProvider={modelProvider}
               loading={modelCatalogLoading}
               disabled={!settings || pendingReplyVisible}
               title={
@@ -64417,14 +64475,15 @@ function HomeContent(): React.JSX.Element {
 
       void (async (): Promise<void> => {
         try {
-          const cleanProfile = cleanPlayerVoiceProfile(
-            settings.playerAudioVoiceProfile,
-          );
-          const selectedEngine = playerVoiceEngine(cleanProfile);
-          const engine: EnglishVoiceEngine =
-            settings.preferredProvider === "local"
-              ? "builtin"
-              : selectedEngine;
+          const voiceSelection = voicePlaybackSelectionRef.current;
+          const playerPlayback = resolvePlayerVoicePlayback({
+            profile: settings.playerAudioVoiceProfile,
+            voiceMode: voiceSelection.voiceMode,
+            englishVoiceEngine: voiceSelection.englishVoiceEngine,
+            localOnly: settings.preferredProvider === "local",
+          });
+          const cleanProfile = playerPlayback.profile;
+          const engine = playerPlayback.engine;
           if (settings.voiceVolume <= 0) {
             runSilentFallback();
             return;
@@ -83125,6 +83184,55 @@ function HomeContent(): React.JSX.Element {
   ): Promise<void> {
     if (!settings) return;
     const previous = settings;
+    const currentResponseMode = responseModeForProvider(
+      settings.preferredProvider,
+    );
+    const currentModelChoice =
+      currentResponseMode === "local"
+        ? visibleConcreteModelChoiceForProvider(
+            modelCatalog,
+            settings,
+            "local",
+            settings.preferredLocalModel,
+          )
+        : visibleConcreteOnlineModelChoice(
+            modelCatalog,
+            settings,
+            settings.preferredOnlineModel,
+          );
+    const currentModelProvider: Provider =
+      currentResponseMode === "local"
+        ? "local"
+        : (onlineChatModelOptions.find(
+            (model) => model.id === currentModelChoice,
+          )?.provider ?? inferOnlineProviderForModelId(currentModelChoice));
+    const currentPrimary = resolvedAutoPrimaryForComposer(
+      modelCatalog,
+      settings,
+      currentModelProvider,
+      currentModelChoice,
+    );
+    const runnable = [
+      ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
+      ...onlineChatModelOptions,
+    ]
+      .filter(
+        (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
+      )
+      .map((model) => ({ provider: model.provider, model: model.id }));
+    const autoPrimaryCandidate = autoFallbackSelectablePrimary({
+      chain: settings.autoFallbackChain,
+      runnable: currentPrimary
+        ? [
+            currentPrimary,
+            ...runnable.filter(
+              (candidate) =>
+                candidate.provider !== currentPrimary.provider ||
+                candidate.model !== currentPrimary.model,
+            ),
+          ]
+        : runnable,
+    });
     const preferredProvider: Provider =
       responseMode === "local"
         ? "local"
@@ -83133,10 +83241,15 @@ function HomeContent(): React.JSX.Element {
               (model) => model.id === settings.preferredOnlineModel,
             )?.provider ??
             inferOnlineProviderForModelId(settings.preferredOnlineModel))
-          : settings.preferredProvider;
+          : (autoPrimaryCandidate?.provider ?? settings.preferredProvider);
     const patch = {
       autoModeEnabled: responseMode === "auto",
       preferredProvider,
+      ...(responseMode === "auto" && autoPrimaryCandidate
+        ? autoPrimaryCandidate.provider === "local"
+          ? { preferredLocalModel: autoPrimaryCandidate.model }
+          : { preferredOnlineModel: autoPrimaryCandidate.model }
+        : {}),
     };
     if (
       settings.autoModeEnabled === patch.autoModeEnabled &&
@@ -112643,106 +112756,143 @@ function HomeContent(): React.JSX.Element {
                                 Speak my messages in Zen
                               </label>
                               <div className={styles.botVoiceIdentityField}>
-                                <label htmlFor="settings-player-voice">
-                                  Player voice
+                                <label htmlFor="settings-player-premium-voice">
+                                  Premium voice
                                 </label>
                                 <select
-                                  id="settings-player-voice"
-                                  value={selectedPlayerVoiceValue}
+                                  id="settings-player-premium-voice"
+                                  value={selectedPlayerPremiumVoiceId ?? ""}
                                   onChange={(event) => {
-                                    const selection =
-                                      event.currentTarget.value;
+                                    const voiceId =
+                                      event.currentTarget.value.trim() || null;
                                     setSettings((previous) => {
                                       if (!previous) return previous;
                                       const current = cleanPlayerVoiceProfile(
                                         previous.playerAudioVoiceProfile,
                                       );
-                                      const next = selection.startsWith(
-                                        "premium:",
-                                      )
-                                        ? {
-                                            ...current,
-                                            elevenLabsVoiceId:
-                                              selection.slice(
-                                                "premium:".length,
-                                              ) || null,
-                                            elevenLabsVoiceIdOverride: null,
-                                            elevenLabsVoiceInitialized: true,
-                                          }
-                                        : {
-                                            ...applyOfflineVoiceSelection(
-                                              current,
-                                              selection,
-                                            ),
-                                            elevenLabsVoiceId: null,
-                                            elevenLabsVoiceIdOverride: null,
-                                            elevenLabsVoiceInitialized: true,
-                                          };
                                       return {
                                         ...previous,
                                         playerAudioVoiceProfile:
-                                          cleanPlayerVoiceProfile(next),
+                                          selectPlayerPremiumVoice(
+                                            current,
+                                            voiceId,
+                                          ),
                                       };
                                     });
                                   }}
                                 >
-                                  {!selectedPlayerVoiceAvailable ? (
-                                    <option value={selectedPlayerVoiceValue}>
-                                      Saved player voice
+                                  <option value="">
+                                    None — always use local
+                                  </option>
+                                  {!selectedPlayerPremiumVoiceAvailable &&
+                                  selectedPlayerPremiumVoiceId ? (
+                                    <option
+                                      value={selectedPlayerPremiumVoiceId}
+                                    >
+                                      Saved Premium voice
                                     </option>
                                   ) : null}
-                                  <optgroup label="Local voices">
-                                    {offlineVoiceIdentityOptions.map(
-                                      (voice) => (
-                                        <option
-                                          key={voice.value}
-                                          value={voice.value}
-                                        >
-                                          {voice.detail
-                                            ? `${voice.label} — ${voice.detail}`
-                                            : voice.label}
-                                        </option>
-                                      ),
-                                    )}
-                                  </optgroup>
                                   {elevenLabsVoiceCatalog.length > 0 ? (
-                                    <optgroup label="Premium voices · ElevenLabs">
-                                      {elevenLabsVoiceCatalog.map((voice) => (
-                                        <option
-                                          key={voice.voiceId}
-                                          value={`premium:${voice.voiceId}`}
-                                        >
-                                          {voice.name}
-                                        </option>
-                                      ))}
-                                    </optgroup>
+                                    elevenLabsVoiceCatalog.map((voice) => (
+                                      <option
+                                        key={voice.voiceId}
+                                        value={voice.voiceId}
+                                      >
+                                        {voice.name}
+                                      </option>
+                                    ))
                                   ) : null}
                                 </select>
                                 <small>
-                                  Zen speaks this identity cleanly—no chorus,
-                                  pitch, texture, or bot effects. LOCAL uses the
-                                  selected local voice. Coffee, Signal, and
-                                  Debate keep the Default PRISM avatar voice.
+                                  Used for your Zen messages on AUTO and ONLINE
+                                  when ElevenLabs is available.
                                 </small>
                                 <button
                                   type="button"
                                   className={styles.linkButton}
+                                  disabled={!selectedPlayerPremiumVoiceId}
                                   onClick={() =>
                                     void previewSelectedVoice(
                                       playerVoiceProfile,
                                       "english",
                                       "This is how my messages will sound in Zen.",
                                       {
-                                        englishVoiceEngine:
-                                          playerVoiceEngine(
-                                            playerVoiceProfile,
-                                          ),
+                                        englishVoiceEngine: "elevenlabs",
                                         effectsEnabled: false,
                                       },
                                     )
                                   }
                                 >
-                                  Preview player voice
+                                  Preview Premium voice
+                                </button>
+                              </div>
+                              <div className={styles.botVoiceIdentityField}>
+                                <label htmlFor="settings-player-local-voice">
+                                  Local fallback
+                                </label>
+                                <select
+                                  id="settings-player-local-voice"
+                                  value={selectedPlayerLocalVoiceValue}
+                                  onChange={(event) => {
+                                    const selection =
+                                      event.currentTarget.value;
+                                    setSettings((previous) => {
+                                      if (!previous) return previous;
+                                      return {
+                                        ...previous,
+                                        playerAudioVoiceProfile:
+                                          cleanPlayerVoiceProfile(
+                                            applyOfflineVoiceSelection(
+                                              previous.playerAudioVoiceProfile,
+                                              selection,
+                                            ),
+                                          ),
+                                      };
+                                    });
+                                  }}
+                                >
+                                  {!selectedPlayerLocalVoiceAvailable ? (
+                                    <option
+                                      value={selectedPlayerLocalVoiceValue}
+                                    >
+                                      Saved local voice
+                                    </option>
+                                  ) : null}
+                                  {offlineVoiceIdentityOptions.map((voice) => (
+                                    <option
+                                      key={voice.value}
+                                      value={voice.value}
+                                    >
+                                      {voice.detail
+                                        ? `${voice.label} — ${voice.detail}`
+                                        : voice.label}
+                                    </option>
+                                  ))}
+                                </select>
+                                <small>
+                                  Used in LOCAL and whenever Premium cannot
+                                  play. Both player voices stay clean—no chorus,
+                                  pitch, texture, or bot effects. Coffee, Signal,
+                                  and Debate keep the Default PRISM avatar voice.
+                                </small>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  onClick={() =>
+                                    void previewSelectedVoice(
+                                      playerLocalVoiceProfile(
+                                        playerVoiceProfile,
+                                      ),
+                                      "english",
+                                      "This is how my messages will sound in Zen.",
+                                      {
+                                        englishVoiceEngine: "builtin",
+                                        effectsEnabled: false,
+                                      },
+                                    )
+                                  }
+                                >
+                                  Preview local fallback
                                 </button>
                               </div>
                               <label className={styles.checkbox}>
@@ -133076,14 +133226,26 @@ function HomeContent(): React.JSX.Element {
             runnable: debateRunnableAutoModels,
           })
         : debateBinaryResponseMode;
-    const debateAutoConfigured = Boolean(
-      settings &&
-      debatePrimaryForAuto &&
-      autoFallbackAvailableForPrimary({
-        primary: debatePrimaryForAuto,
-        chain: settings.autoFallbackChain,
-        runnable: debateRunnableAutoModels,
-      }),
+    const debateAutoPrimaryCandidate = settings
+      ? autoFallbackSelectablePrimary({
+          chain: settings.autoFallbackChain,
+          runnable: debatePrimaryForAuto
+            ? [
+                debatePrimaryForAuto,
+                ...debateRunnableAutoModels.filter(
+                  (candidate) =>
+                    candidate.provider !== debatePrimaryForAuto.provider ||
+                    candidate.model !== debatePrimaryForAuto.model,
+                ),
+              ]
+            : debateRunnableAutoModels,
+        })
+      : null;
+    const debateAutoSelectable = debateAutoPrimaryCandidate !== null;
+    const debateNavbarResponseMode = autoResponseModeForProvider(
+      debateProvider,
+      settings?.autoModeEnabled === true,
+      debateAutoSelectable,
     );
     const debateAccountDefaultModel = settings
       ? debateModelProvider === "local"
@@ -133113,8 +133275,12 @@ function HomeContent(): React.JSX.Element {
     const debateModelOptions = includeSelectedResponseModeModelOption(
       modelCatalog,
       settings,
-      debateResponseMode,
-      modelOptionsForResponseMode(modelCatalog, settings, debateResponseMode),
+      debateNavbarResponseMode,
+      modelOptionsForResponseMode(
+        modelCatalog,
+        settings,
+        debateNavbarResponseMode,
+      ),
       debateModelChoice,
       debateModelProvider,
     );
@@ -133351,29 +133517,47 @@ function HomeContent(): React.JSX.Element {
                 <div
                   className={`${styles.modeControl} ${styles.autoModeControl} ${styles.chatHeaderModeToggle}`}
                   data-tutorial-target="auto-response-mode"
-                  data-response-mode={debateResponseMode}
+                  data-response-mode={debateNavbarResponseMode}
                 >
                   {(["local", "auto", "online"] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
                       className={`${styles.autoModeOption} ${
-                        debateResponseMode === mode
+                        debateNavbarResponseMode === mode
                           ? styles.autoModeOptionActive
                           : ""
                       }`}
                       disabled={
                         Boolean(debateLiveChromePolicy?.lockMessage) ||
-                        (mode === "auto" && !debateAutoConfigured)
+                        (mode === "auto" && !debateAutoSelectable)
                       }
                       onClick={() => {
                         if (
                           debateLiveChromePolicy?.lockMessage ||
-                          (mode === "auto" && !debateAutoConfigured)
+                          (mode === "auto" && !debateAutoSelectable)
                         ) {
                           return;
                         }
                         void persistAutoModeEnabled(mode === "auto");
+                        if (
+                          mode === "auto" &&
+                          debateAutoPrimaryCandidate &&
+                          (!debatePrimaryForAuto ||
+                            debatePrimaryForAuto.provider !==
+                              debateAutoPrimaryCandidate.provider ||
+                            debatePrimaryForAuto.model !==
+                              debateAutoPrimaryCandidate.model)
+                        ) {
+                          setDebateModelChoiceByProvider((previous) => ({
+                            ...previous,
+                            [debateAutoPrimaryCandidate.provider]:
+                              debateAutoPrimaryCandidate.model,
+                          }));
+                          void switchProvider(
+                            debateAutoPrimaryCandidate.provider,
+                          );
+                        }
                         if (mode === "local") {
                           void switchProvider("local");
                         } else if (mode === "online") {
@@ -133391,11 +133575,11 @@ function HomeContent(): React.JSX.Element {
                           void switchProvider(nextProvider);
                         }
                       }}
-                      aria-pressed={debateResponseMode === mode}
+                      aria-pressed={debateNavbarResponseMode === mode}
                       title={
                         debateLiveChromePolicy?.lockMessage ??
-                        (mode === "auto" && !debateAutoConfigured
-                          ? "Choose 1–5 distinct runnable fallback models in Settings; at least one must differ from Primary."
+                        (mode === "auto" && !debateAutoSelectable
+                          ? "Choose at least one runnable fallback model in Settings."
                           : `${responseModeDisplayLabel(mode)} Debate responses`)
                       }
                     >
@@ -133407,7 +133591,7 @@ function HomeContent(): React.JSX.Element {
                   value={debateModelChoice}
                   onChange={(nextChoice) => {
                     const applied = applyModelChoiceForResponseMode({
-                      responseMode: debateResponseMode,
+                      responseMode: debateNavbarResponseMode,
                       currentChoices: debateModelChoiceByProvider,
                       nextChoice,
                       options: debateModelOptions,
@@ -133416,7 +133600,7 @@ function HomeContent(): React.JSX.Element {
                     setDebateModelChoiceByProvider(
                       (previous) =>
                         applyModelChoiceForResponseMode({
-                          responseMode: debateResponseMode,
+                          responseMode: debateNavbarResponseMode,
                           currentChoices: previous,
                           nextChoice,
                           options: debateModelOptions,
@@ -133432,8 +133616,13 @@ function HomeContent(): React.JSX.Element {
                   }}
                   options={debateModelOptions}
                   provider={
-                    debateModelProvider === "local" ? "local" : "online"
+                    debateNavbarResponseMode === "auto"
+                      ? "all"
+                      : debateModelProvider === "local"
+                        ? "local"
+                        : "online"
                   }
+                  selectedProvider={debateModelProvider}
                   loading={modelCatalogLoading}
                   disabled={!settings || debateLiveSessionActive}
                   title={
@@ -133958,23 +134147,6 @@ function HomeContent(): React.JSX.Element {
       globalProvider: signalProvider,
       onlineProvider: signalOnlineProvider,
     });
-    const signalModelOptions = includeSelectedResponseModeModelOption(
-      modelCatalog,
-      settings,
-      signalResponseMode,
-      modelOptionsForResponseMode(modelCatalog, settings, signalResponseMode),
-      signalAccountDefaultModel,
-      signalAccountDefaultProvider,
-    )
-      .filter((model) => !model.disabledReason)
-      .map((model) => ({
-        id: model.id,
-        label:
-          signalResponseMode === "online"
-            ? `${model.hostLabel ?? providerDisplayLabel(model.provider)} · ${model.label}`
-            : model.label,
-        provider: model.provider,
-      }));
     const signalRunnableAutoModels = settings
       ? [
           ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
@@ -133997,6 +134169,40 @@ function HomeContent(): React.JSX.Element {
           runnable: signalRunnableAutoModels,
         })
       : signalResponseMode;
+    const signalAutoSelectable = Boolean(
+      settings &&
+        autoFallbackModeSelectable({
+          chain: settings.autoFallbackChain,
+          runnable: signalRunnableAutoModels,
+        }),
+    );
+    const signalNavbarResponseMode = autoResponseModeForProvider(
+      signalProvider,
+      settings?.autoModeEnabled === true,
+      signalAutoSelectable,
+    );
+    const signalNavbarModelOptions = includeSelectedResponseModeModelOption(
+      modelCatalog,
+      settings,
+      signalNavbarResponseMode,
+      modelOptionsForResponseMode(
+        modelCatalog,
+        settings,
+        signalNavbarResponseMode,
+      ),
+      signalAccountDefaultModel,
+      signalAccountDefaultProvider,
+    );
+    const signalModelOptions = signalNavbarModelOptions
+      .filter((model) => !model.disabledReason)
+      .map((model) => ({
+        id: model.id,
+        label:
+          signalResponseMode === "online"
+            ? `${model.hostLabel ?? providerDisplayLabel(model.provider)} · ${model.label}`
+            : model.label,
+        provider: model.provider,
+      }));
     const signalBots = bots.map((bot) => ({
       id: bot.id,
       name: bot.name,
@@ -134513,10 +134719,14 @@ function HomeContent(): React.JSX.Element {
               ? liveSessionChromePolicy("Signal")
               : null;
             const accountDefaultModelLabel = signalAccountDefaultModel
-              ? (signalModelOptions.find(
+              ? (signalNavbarModelOptions.find(
                   (option) => option.id === signalAccountDefaultModel,
                 )?.label ?? signalAccountDefaultModel)
               : "Account default";
+            const episodeSelectedModelProvider =
+              signalNavbarModelOptions.find(
+                (option) => option.id === episodeModelControl.value,
+              )?.provider ?? signalAccountDefaultProvider;
             return renderSharedAppletNavbar("Signal tools", {
               showVoiceSelector: !replayActive,
               liveSessionActive,
@@ -134539,6 +134749,7 @@ function HomeContent(): React.JSX.Element {
                     styles.chatHeaderModeToggle,
                     true,
                     liveChromePolicy?.lockMessage ?? null,
+                    false,
                   )}
                   <ComposerModelPicker
                     value={episodeModelControl.value || AUTO_MODEL_CHOICE}
@@ -134547,24 +134758,25 @@ function HomeContent(): React.JSX.Element {
                         nextChoice === AUTO_MODEL_CHOICE ? "" : nextChoice,
                       )
                     }
-                    options={signalModelOptions}
+                    options={signalNavbarModelOptions}
                     provider={
-                      signalEpisodeResponseMode === "auto"
+                      signalNavbarResponseMode === "auto"
                         ? "all"
                         : signalResponseMode === "local"
                           ? "local"
                           : "online"
                     }
+                    selectedProvider={episodeSelectedModelProvider}
                     loading={modelCatalogLoading}
                     disabled={!settings || episodeModelControl.disabled}
                     title={
                       episodeModelControl.disabledReason ??
-                      (signalEpisodeResponseMode === "auto"
+                      (signalNavbarResponseMode === "auto"
                         ? "Primary model for the next Signal episode"
                         : "Model for the next Signal episode")
                     }
                     ariaLabel={
-                      signalEpisodeResponseMode === "auto"
+                      signalNavbarResponseMode === "auto"
                         ? "Signal episode primary model; includes all local and online models"
                         : "Signal episode model"
                     }
@@ -134573,7 +134785,7 @@ function HomeContent(): React.JSX.Element {
                     autoOptionLabel="Account default"
                     autoOptionTriggerLabel={accountDefaultModelLabel}
                     autoOptionMetaOverride={
-                      signalEpisodeResponseMode === "auto"
+                      signalNavbarResponseMode === "auto"
                         ? "Uses the account model as Primary, then the configured Auto fallbacks."
                         : "Uses the account model for the selected response mode."
                     }

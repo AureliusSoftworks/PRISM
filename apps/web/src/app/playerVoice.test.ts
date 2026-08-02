@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cleanPlayerVoiceProfile, playerVoiceEngine } from "./playerVoice.ts";
+import { applyOfflineVoiceSelection } from "./offlineVoiceSelection.ts";
+import {
+  cleanPlayerVoiceProfile,
+  playerLocalVoiceProfile,
+  playerPremiumVoiceId,
+  playerVoiceEngine,
+  resolvePlayerVoicePlayback,
+  selectPlayerPremiumVoice,
+} from "./playerVoice.ts";
 
 test("player voice preserves identity but removes every bot performance filter", () => {
   const clean = cleanPlayerVoiceProfile({
@@ -70,4 +78,76 @@ test("a local player identity always selects the builtin route", () => {
     }),
     "builtin",
   );
+});
+
+test("player Premium and local fallback identities remain independent", () => {
+  const profile = cleanPlayerVoiceProfile({
+    v: 2,
+    baseVoiceId: "voice-7",
+    systemVoiceName: "Samantha",
+    elevenLabsVoiceId: "premium-player",
+  });
+
+  assert.equal(playerPremiumVoiceId(profile), "premium-player");
+  const local = playerLocalVoiceProfile(profile);
+  assert.equal(local.baseVoiceId, "voice-7");
+  assert.equal(local.systemVoiceName, "Samantha");
+  assert.equal(local.elevenLabsVoiceId, undefined);
+  assert.equal(local.elevenLabsVoiceIdOverride, undefined);
+  assert.equal(playerVoiceEngine(local), "builtin");
+
+  const changedLocal = cleanPlayerVoiceProfile(
+    applyOfflineVoiceSelection(profile, "builtin:voice-3"),
+  );
+  assert.equal(changedLocal.baseVoiceId, "voice-3");
+  assert.equal(playerPremiumVoiceId(changedLocal), "premium-player");
+
+  const changedPremium = selectPlayerPremiumVoice(profile, "premium-two");
+  assert.equal(playerPremiumVoiceId(changedPremium), "premium-two");
+  assert.equal(changedPremium.baseVoiceId, "voice-7");
+  assert.equal(changedPremium.systemVoiceName, "Samantha");
+});
+
+test("top speech type selects the matching clean player identity", () => {
+  const profile = cleanPlayerVoiceProfile({
+    v: 2,
+    baseVoiceId: "voice-3",
+    elevenLabsVoiceId: "premium-player",
+  });
+  const premium = resolvePlayerVoicePlayback({
+    profile,
+    voiceMode: "english",
+    englishVoiceEngine: "elevenlabs",
+    localOnly: false,
+  });
+  assert.equal(premium.engine, "elevenlabs");
+  assert.equal(playerPremiumVoiceId(premium.profile), "premium-player");
+
+  const english = resolvePlayerVoicePlayback({
+    profile,
+    voiceMode: "english",
+    englishVoiceEngine: "builtin",
+    localOnly: false,
+  });
+  assert.equal(english.engine, "builtin");
+  assert.equal(english.profile.baseVoiceId, "voice-3");
+  assert.equal(playerPremiumVoiceId(english.profile), null);
+
+  const localPremium = resolvePlayerVoicePlayback({
+    profile,
+    voiceMode: "english",
+    englishVoiceEngine: "elevenlabs",
+    localOnly: true,
+  });
+  assert.equal(localPremium.engine, "builtin");
+  assert.equal(localPremium.profile.baseVoiceId, "voice-3");
+
+  const bottish = resolvePlayerVoicePlayback({
+    profile,
+    voiceMode: "bottish",
+    englishVoiceEngine: "elevenlabs",
+    localOnly: false,
+  });
+  assert.equal(bottish.engine, "builtin");
+  assert.equal(bottish.profile.elevenLabsEffect, "clean");
 });

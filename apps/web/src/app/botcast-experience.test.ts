@@ -2743,8 +2743,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       pageSource,
-      /modelOptionsForResponseMode\(modelCatalog, settings, signalResponseMode\)/u,
+      /modelOptionsForResponseMode\(\s*modelCatalog,\s*settings,\s*signalNavbarResponseMode,?\s*\)/u,
     );
+    assert.match(pageSource, /options=\{signalNavbarModelOptions\}/u);
     assert.match(pageSource, /provider: model\.provider/u);
     assert.match(pageSource, /modelOptions=\{signalModelOptions\}/u);
     assert.match(pageSource, /responseMode=\{signalEpisodeResponseMode\}/u);

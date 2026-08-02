@@ -4,11 +4,13 @@ import { describe, it } from "node:test";
 
 import {
   autoFallbackAvailableForPrimary,
+  autoFallbackModeSelectable,
   autoFallbackChainWithAddedEntry,
   autoFallbackChainWithEntry,
   autoFallbackChainWithoutEntry,
   autoFallbackPrimaryForSelection,
   autoFallbackResponseModeForSend,
+  autoFallbackSelectablePrimary,
   decodeAutoFallbackPickerValue,
   encodeAutoFallbackPickerValue,
 } from "./autoFallbackSettings.ts";
@@ -29,7 +31,10 @@ describe("Auto fallback settings", () => {
   };
 
   it("round-trips combined picker values", () => {
-    assert.deepEqual(decodeAutoFallbackPickerValue(encodeAutoFallbackPickerValue(openai)), openai);
+    assert.deepEqual(
+      decodeAutoFallbackPickerValue(encodeAutoFallbackPickerValue(openai)),
+      openai,
+    );
   });
 
   it("renders an ordered 1–5 slot Settings chain with add and remove controls", () => {
@@ -43,11 +48,11 @@ describe("Auto fallback settings", () => {
   it("keeps Auto pickers active with every model and routes a selection as Primary", () => {
     assert.match(
       pageSource,
-      /responseMode === "online"[\s\S]{0,240}chatModelOptionsForProvider\(catalog, settings, "local"\)[\s\S]{0,260}onlineModelOptionsForPicker\(catalog, settings\)/u,
+      /modeAwareModelOptions\(\{[\s\S]{0,260}local: chatModelOptionsForProvider\(catalog, settings, "local"\)[\s\S]{0,320}online: onlineModelOptionsForPicker\(catalog, settings\)[\s\S]{0,80}responseMode/u,
     );
     assert.match(
       pageSource,
-      /provider=\{responseMode === "auto" \? "all"/u,
+      /provider=\{[\s\S]{0,80}responseMode === "auto" \? "all"/u,
     );
     assert.match(pageSource, /applyModelChoiceForResponseMode\(\{/u);
     assert.match(pageSource, /Primary model for AUTO replies/u);
@@ -60,10 +65,7 @@ describe("Auto fallback settings", () => {
       next: local,
       available: [local, openai, anthropic],
     });
-    assert.deepEqual(
-      first,
-      { v: 1, fallbacks: [local] },
-    );
+    assert.deepEqual(first, { v: 1, fallbacks: [local] });
     const second = autoFallbackChainWithAddedEntry({
       chain: first,
       available: [local, openai, anthropic],
@@ -144,20 +146,70 @@ describe("Auto fallback settings", () => {
   });
 
   it("requires the resolved primary chain to retain at least one runnable backup", () => {
-    const chain = { v: 1 as const, fallbacks: [openai, anthropic] as [typeof openai, typeof anthropic] };
+    const chain = {
+      v: 1 as const,
+      fallbacks: [openai, anthropic] as [typeof openai, typeof anthropic],
+    };
     assert.equal(
-      autoFallbackAvailableForPrimary({ primary: local, chain, runnable: [local, openai, anthropic] }),
-      true
+      autoFallbackAvailableForPrimary({
+        primary: local,
+        chain,
+        runnable: [local, openai, anthropic],
+      }),
+      true,
     );
     assert.equal(
-      autoFallbackAvailableForPrimary({ primary: openai, chain, runnable: [local, openai, anthropic] }),
-      true
+      autoFallbackAvailableForPrimary({
+        primary: openai,
+        chain,
+        runnable: [local, openai, anthropic],
+      }),
+      true,
     );
     assert.equal(
       autoFallbackAvailableForPrimary({
         primary: openai,
         chain: { v: 1, fallbacks: [openai] },
         runnable: [openai],
+      }),
+      false,
+    );
+  });
+
+  it("allows entering AUTO when the current primary duplicates its runnable fallback", () => {
+    assert.equal(
+      autoFallbackModeSelectable({
+        chain: { v: 1, fallbacks: [local] },
+        runnable: [local, openai],
+      }),
+      true,
+    );
+    assert.deepEqual(
+      autoFallbackSelectablePrimary({
+        chain: { v: 1, fallbacks: [local] },
+        runnable: [local, openai],
+      }),
+      openai,
+    );
+    assert.equal(
+      autoFallbackAvailableForPrimary({
+        primary: local,
+        chain: { v: 1, fallbacks: [local] },
+        runnable: [local, openai],
+      }),
+      false,
+    );
+  });
+
+  it("keeps AUTO unavailable until at least one configured fallback is runnable", () => {
+    assert.equal(
+      autoFallbackModeSelectable({ chain: null, runnable: [local, openai] }),
+      false,
+    );
+    assert.equal(
+      autoFallbackModeSelectable({
+        chain: { v: 1, fallbacks: [anthropic] },
+        runnable: [local, openai],
       }),
       false,
     );
